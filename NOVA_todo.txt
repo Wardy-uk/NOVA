@@ -14,22 +14,18 @@ COMPLETED
 [DONE] reduce ask nova button size by 20%
 [DONE] Jira automations from NOVA - JQL search, create issue, preset queries
 [DONE] daily stats/KPIs in own Stats page - overdue, due today/week, completion rate, avg age, SLA, by source/status
+[DONE] create mock up page for "delivery sheet" - reads from local xlsx, cached, with limit param
+[DONE] Split Daily Stats and KPIs - 2 separate pages
+[DONE] preload delivery sheet mock up - max 5 latest from each tab (?limit=N param)
+[DONE] Daily Stats as home page
 
 TO DO NEXT (easiest first)
 --------------------------
-1. create mock up page for "delivery sheet" - stored locally on pc path = "C:\Users\NickW\Downloads\Delivery sheet Master.xlsx"
-2. add task/to dos from NOVA
-3. add tasks from Dynamics CRM - list of business reviews, RAG customers to prioritise contact
-4. login
-5. multi-user
-6. sales pipeline - replace onboarding spreadsheet, add order form creates task,
+1. add task/to dos from NOVA
+2. add tasks from Dynamics CRM - list of business reviews, RAG customers to prioritise contact
+3. login
+4. multi-user
+5. sales pipeline - replace onboarding spreadsheet, add order form creates task,
    - create tickets from NOVA
    - launch onboarding tool from NOVA
    - add "welcome pack" to NOVA
-
-
-Split Daily Stats and KPIs - 2 separate pages
-
-preload delivery sheet mock up - max 5 latest from each tab
-
-

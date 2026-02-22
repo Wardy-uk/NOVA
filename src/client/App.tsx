@@ -40,7 +40,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 export function App() {
-  const [view, setView] = useState<View>('tasks');
+  const [view, setView] = useState<View>('daily');
   const { tasks, loading, error, syncing, syncTasks, updateTask } = useTasks();
   const health = useHealth();
   const { theme, setTheme } = useTheme();
