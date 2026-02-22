@@ -9,13 +9,12 @@ export function createActionRoutes(
   const router = Router();
 
   const resolveApiKey = (): string | null => {
+    // DB is the source of truth (seeded from env on startup)
     const fromDb = settingsQueries.get('openai_api_key');
-    if (fromDb && fromDb.trim()) return fromDb.trim();
+    if (fromDb?.trim()) return fromDb.trim();
+    // Read-only fallback to env vars — no side-effect writes
     const fromEnv = process.env.OPENAI_API_KEY ?? process.env.OPENAI_KEY ?? null;
-    if (fromEnv && fromEnv.trim()) {
-      settingsQueries.set('openai_api_key', fromEnv.trim());
-      return fromEnv.trim();
-    }
+    if (fromEnv?.trim()) return fromEnv.trim();
     return null;
   };
 

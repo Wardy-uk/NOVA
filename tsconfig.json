@@ -13,6 +13,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "baseUrl": ".",
+    "types": ["vite/client"],
     "paths": {
       "@server/*": ["src/server/*"],
       "@client/*": ["src/client/*"],

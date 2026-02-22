@@ -216,46 +216,47 @@ export class OneDriveWatcher {
       }
 
       // Normalize raw items to our task shape
-      tasks = tasks.map(t => this.normalizeRawItem(t as Record<string, unknown>, source));
+      const normalized = tasks.map(t => this.normalizeRawItem(t as Record<string, unknown>, source));
 
       // Upsert tasks
       const freshIds: string[] = [];
-      for (const task of tasks) {
-        if (!task.source_id || !task.title) continue;
-        task.source = source; // Ensure source matches
+      for (const task of normalized) {
+        const t = task as Record<string, unknown>;
+        if (!t.source_id || !t.title) continue;
+        t.source = source; // Ensure source matches
 
         // Normalize status — handle Planner (percentComplete) and To-Do (text) formats
-        if (task.status !== undefined) {
-          const s = String(task.status).toLowerCase();
+        if (t.status !== undefined) {
+          const s = String(t.status).toLowerCase();
           if (s === '100' || s === 'completed') { continue; } // Skip completed
-          if (s === '0' || s === '' || s === 'notstarted') { task.status = 'open'; }
-          else if (s === 'inprogress' || (/^\d+$/.test(s) && parseInt(s) > 0)) { task.status = 'in_progress'; }
-          else if (s === 'waitingonothers' || s === 'deferred') { task.status = 'open'; }
+          if (s === '0' || s === '' || s === 'notstarted') { t.status = 'open'; }
+          else if (s === 'inprogress' || (/^\d+$/.test(s) && parseInt(s) > 0)) { t.status = 'in_progress'; }
+          else if (s === 'waitingonothers' || s === 'deferred') { t.status = 'open'; }
         }
 
         // Normalize priority — PA may send empty string or raw number string
-        if (task.priority === '' || task.priority === undefined || task.priority === null) {
-          task.priority = 50;
-        } else if (typeof task.priority === 'string') {
-          const p = parseInt(task.priority);
-          task.priority = isNaN(p) ? 50 : p;
+        if (t.priority === '' || t.priority === undefined || t.priority === null) {
+          t.priority = 50;
+        } else if (typeof t.priority === 'string') {
+          const p = parseInt(t.priority);
+          t.priority = isNaN(p) ? 50 : p;
         }
 
         // Construct source URL if not provided
-        if (!task.source_url) {
-          task.source_url = buildSourceUrl(source, task.source_id);
+        if (!t.source_url) {
+          t.source_url = buildSourceUrl(source, t.source_id as string);
         }
 
-        this.taskQueries.upsertFromSource(task, { deferSave: true });
-        freshIds.push(`${source}:${task.source_id}`);
+        this.taskQueries.upsertFromSource(t as { source: string; source_id: string; title: string; [key: string]: unknown }, { deferSave: true });
+        freshIds.push(`${source}:${t.source_id}`);
       }
 
       // Clean up stale tasks for this source
-      const removed = tasks.length > 0
+      const removed = normalized.length > 0
         ? this.taskQueries.deleteStaleBySource(source, freshIds, { deferSave: true })
         : 0;
 
-      if (tasks.length > 0 || removed > 0) {
+      if (normalized.length > 0 || removed > 0) {
         saveDb();
       }
 
@@ -265,7 +266,7 @@ export class OneDriveWatcher {
       this.lastError = null;
 
       console.log(
-        `[OneDrive] ${fileName}: ${tasks.length} tasks ingested, ${removed} stale removed`
+        `[OneDrive] ${fileName}: ${normalized.length} tasks ingested, ${removed} stale removed`
       );
 
       // Delete file after successful processing so PA flow can re-create it

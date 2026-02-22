@@ -2,11 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { getDb, initializeSchema } from './db/schema.js';
-import { TaskQueries, SettingsQueries } from './db/queries.js';
+import { TaskQueries, SettingsQueries, RitualQueries } from './db/queries.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
 import { createTaskRoutes } from './routes/tasks.js';
@@ -16,6 +15,7 @@ import { createIntegrationRoutes } from './routes/integrations.js';
 import { createIngestRoutes } from './routes/ingest.js';
 import { createActionRoutes } from './routes/actions.js';
 import { createJiraRoutes } from './routes/jira.js';
+import { createStandupRoutes } from './routes/standups.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
 import { OneDriveWatcher } from './services/onedrive-watcher.js';
 
@@ -33,6 +33,7 @@ async function main() {
 
   const taskQueries = new TaskQueries(db);
   const settingsQueries = new SettingsQueries(db);
+  const ritualQueries = new RitualQueries(db);
 
   // 2. MCP Client Manager
   console.log('[N.O.V.A] Setting up MCP servers...');
@@ -64,6 +65,15 @@ async function main() {
       settingsQueries.set('monday_enabled', 'true');
       settingsQueries.set('monday_token', process.env.MONDAY_API_TOKEN);
       settingsQueries.set('monday_board_ids', process.env.MONDAY_BOARD_IDS ?? '');
+    }
+  }
+
+  // Seed OpenAI API key from env if not already in DB
+  if (!settingsQueries.get('openai_api_key')?.trim()) {
+    const envKey = process.env.OPENAI_API_KEY ?? process.env.OPENAI_KEY;
+    if (envKey?.trim()) {
+      settingsQueries.set('openai_api_key', envKey.trim());
+      console.log('[N.O.V.A] Seeded OpenAI API key from environment');
     }
   }
 
@@ -104,6 +114,7 @@ async function main() {
   app.use('/api/ingest', createIngestRoutes(taskQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries));
   app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
+  app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries));
 
   // 6. OneDrive file watcher (Power Automate bridge)
   const watcher = new OneDriveWatcher(taskQueries);
@@ -130,9 +141,48 @@ async function main() {
     }
   });
 
+  // 7. Auto-sync: initial sync after a short delay, then on interval
+  let autoSyncTimer: ReturnType<typeof setInterval> | null = null;
+  let lastAutoSync: string | null = null;
+
+  const runAutoSync = async () => {
+    try {
+      const results = await aggregator.syncAll();
+      lastAutoSync = new Date().toISOString();
+      const total = results.reduce((s, r) => s + r.count, 0);
+      const errors = results.filter((r) => r.error);
+      console.log(
+        `[AutoSync] Synced ${total} tasks from ${results.length} sources` +
+          (errors.length > 0 ? ` (${errors.length} errors)` : '')
+      );
+    } catch (err) {
+      console.error('[AutoSync] Failed:', err instanceof Error ? err.message : err);
+    }
+  };
+
+  const startAutoSync = () => {
+    const minutes = parseInt(settingsQueries.get('refresh_interval_minutes') ?? '5', 10) || 5;
+    if (autoSyncTimer) clearInterval(autoSyncTimer);
+    autoSyncTimer = setInterval(runAutoSync, minutes * 60 * 1000);
+    console.log(`[N.O.V.A] Auto-sync every ${minutes} minutes`);
+  };
+
+  // Initial sync 5s after startup (let MCP connections establish)
+  setTimeout(() => {
+    runAutoSync();
+    startAutoSync();
+  }, 5000);
+
+  // Expose last sync time
+  app.get('/api/sync/status', (_req, res) => {
+    const minutes = parseInt(settingsQueries.get('refresh_interval_minutes') ?? '5', 10) || 5;
+    res.json({ ok: true, data: { lastAutoSync, intervalMinutes: minutes } });
+  });
+
   // Graceful shutdown
   const shutdown = async () => {
     console.log('[N.O.V.A] Shutting down...');
+    if (autoSyncTimer) clearInterval(autoSyncTimer);
     watcher.stop();
     await mcpManager.disconnectAll();
     process.exit(0);

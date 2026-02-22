@@ -59,6 +59,9 @@ export function useTasks() {
 
   useEffect(() => {
     fetchTasks();
+    // Poll for task updates every 30s (picks up auto-sync changes)
+    const interval = setInterval(fetchTasks, 30_000);
+    return () => clearInterval(interval);
   }, [fetchTasks]);
 
   return { tasks, loading, error, syncing, fetchTasks, syncTasks, updateTask };

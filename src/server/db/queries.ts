@@ -202,6 +202,135 @@ export class TaskQueries {
   }
 }
 
+// ---------- Rituals ----------
+
+export interface Ritual {
+  id: number;
+  type: string;
+  date: string;
+  conversation: string | null;
+  summary_md: string | null;
+  planned_items: string | null;
+  completed_items: string | null;
+  blockers: string | null;
+  openai_response_id: string | null;
+  created_at: string;
+}
+
+export class RitualQueries {
+  constructor(private db: Database) {}
+
+  create(ritual: {
+    type: string;
+    date: string;
+    summary_md?: string;
+    planned_items?: string;
+    completed_items?: string;
+    blockers?: string;
+    openai_response_id?: string;
+  }): number {
+    this.db.run(
+      `INSERT INTO rituals (type, date, summary_md, planned_items, completed_items, blockers, openai_response_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        ritual.type,
+        ritual.date,
+        ritual.summary_md ?? null,
+        ritual.planned_items ?? null,
+        ritual.completed_items ?? null,
+        ritual.blockers ?? null,
+        ritual.openai_response_id ?? null,
+      ]
+    );
+    saveDb();
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    return (result[0]?.values[0]?.[0] as number) ?? 0;
+  }
+
+  getByDate(date: string, type?: string): Ritual[] {
+    let sql = `SELECT * FROM rituals WHERE date = ?`;
+    const params: string[] = [date];
+    if (type) {
+      sql += ` AND type = ?`;
+      params.push(type);
+    }
+    sql += ` ORDER BY created_at DESC`;
+
+    const stmt = this.db.prepare(sql);
+    if (params.length > 0) stmt.bind(params);
+
+    const rituals: Ritual[] = [];
+    while (stmt.step()) {
+      rituals.push(this.rowToRitual(stmt.getAsObject() as Record<string, unknown>));
+    }
+    stmt.free();
+    return rituals;
+  }
+
+  getRecent(limit: number = 10): Ritual[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM rituals ORDER BY date DESC, created_at DESC LIMIT ?`
+    );
+    stmt.bind([limit]);
+
+    const rituals: Ritual[] = [];
+    while (stmt.step()) {
+      rituals.push(this.rowToRitual(stmt.getAsObject() as Record<string, unknown>));
+    }
+    stmt.free();
+    return rituals;
+  }
+
+  getById(id: number): Ritual | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM rituals WHERE id = ?`);
+    stmt.bind([id]);
+    if (stmt.step()) {
+      const ritual = this.rowToRitual(stmt.getAsObject() as Record<string, unknown>);
+      stmt.free();
+      return ritual;
+    }
+    stmt.free();
+    return undefined;
+  }
+
+  update(id: number, updates: {
+    summary_md?: string;
+    planned_items?: string;
+    completed_items?: string;
+    blockers?: string;
+  }): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+
+    if (updates.summary_md !== undefined) { fields.push('summary_md = ?'); params.push(updates.summary_md); }
+    if (updates.planned_items !== undefined) { fields.push('planned_items = ?'); params.push(updates.planned_items); }
+    if (updates.completed_items !== undefined) { fields.push('completed_items = ?'); params.push(updates.completed_items); }
+    if (updates.blockers !== undefined) { fields.push('blockers = ?'); params.push(updates.blockers); }
+
+    if (fields.length === 0) return false;
+
+    params.push(id);
+    this.db.run(`UPDATE rituals SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return true;
+  }
+
+  private rowToRitual(row: Record<string, unknown>): Ritual {
+    return {
+      id: row.id as number,
+      type: row.type as string,
+      date: row.date as string,
+      conversation: (row.conversation as string) ?? null,
+      summary_md: (row.summary_md as string) ?? null,
+      planned_items: (row.planned_items as string) ?? null,
+      completed_items: (row.completed_items as string) ?? null,
+      blockers: (row.blockers as string) ?? null,
+      openai_response_id: (row.openai_response_id as string) ?? null,
+      created_at: row.created_at as string,
+    };
+  }
+}
+
 export class SettingsQueries {
   constructor(private db: Database) {}
 

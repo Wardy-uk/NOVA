@@ -1,13 +1,14 @@
-import { useState, useEffect, Component, type ReactNode } from 'react';
+import { useState, useEffect, useRef, Component, type ReactNode } from 'react';
 import { TaskList } from './components/TaskList.js';
 import { SettingsView } from './components/SettingsView.js';
+import { StandupView } from './components/StandupView.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 
-type View = 'tasks' | 'settings' | 'debug';
+type View = 'tasks' | 'settings' | 'standup' | 'debug';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
-  state = { error: null };
+  state: { error: Error | null } = { error: null };
 
   static getDerivedStateFromError(error: Error) {
     return { error };
@@ -40,6 +41,21 @@ export function App() {
   const health = useHealth();
   const [apiDebug, setApiDebug] = useState<Array<{ ts: string; text: string }>>([]);
   const [lastSuggest, setLastSuggest] = useState<string>('');
+  const standupChecked = useRef(false);
+
+  // Auto-trigger standup on first visit if no morning ritual today
+  useEffect(() => {
+    if (standupChecked.current) return;
+    standupChecked.current = true;
+    fetch('/api/standups/today')
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.ok && !json.data.hasMorning) {
+          setView('standup');
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (view !== 'debug') return;
@@ -93,6 +109,16 @@ export function App() {
               Tasks
             </button>
             <button
+              onClick={() => setView('standup')}
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                view === 'standup'
+                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
+              }`}
+            >
+              Standup
+            </button>
+            <button
               onClick={() => setView('settings')}
               className={`px-3 py-1.5 text-xs rounded transition-colors ${
                 view === 'settings'
@@ -111,16 +137,18 @@ export function App() {
                 {syncing ? 'Syncing...' : 'Sync Now'}
               </button>
             )}
-            <button
-              onClick={() => setView('debug')}
-              className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                view === 'debug'
-                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
-                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
-              }`}
-            >
-              Debug
-            </button>
+            {import.meta.env.DEV && (
+              <button
+                onClick={() => setView('debug')}
+                className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                  view === 'debug'
+                    ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                    : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
+                }`}
+              >
+                Debug
+              </button>
+            )}
           </div>
         </header>
 
@@ -139,6 +167,11 @@ export function App() {
                 onUpdateTask={updateTask}
               />
             </>
+          ) : view === 'standup' ? (
+            <StandupView
+              onUpdateTask={updateTask}
+              onNavigate={(v) => setView(v as View)}
+            />
           ) : view === 'settings' ? (
             <SettingsView />
           ) : (

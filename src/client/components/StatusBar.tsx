@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { HealthResponse } from '../../shared/types.js';
 
+interface SyncStatus {
+  lastAutoSync: string | null;
+  intervalMinutes: number;
+}
+
 interface Props {
   health: HealthResponse | null;
 }
@@ -22,15 +27,19 @@ export function StatusBar({ health }: Props) {
     lastIngestSource: string | null;
     lastError: string | null;
   } | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
 
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await fetch('/api/onedrive/status');
-        const json = await res.json();
-        if (json.ok && json.data) {
-          setOneDrive(json.data);
-        }
+        const [odRes, syncRes] = await Promise.all([
+          fetch('/api/onedrive/status'),
+          fetch('/api/sync/status'),
+        ]);
+        const odJson = await odRes.json();
+        if (odJson.ok && odJson.data) setOneDrive(odJson.data);
+        const syncJson = await syncRes.json();
+        if (syncJson.ok && syncJson.data) setSyncStatus(syncJson.data);
       } catch {
         /* ignore */
       }
@@ -94,11 +103,15 @@ export function StatusBar({ health }: Props) {
           </div>
         )}
       </div>
-      <div>
+      <div className="flex items-center gap-4">
+        {syncStatus && (
+          <span>
+            Synced: {formatSince(syncStatus.lastAutoSync)} | Every {syncStatus.intervalMinutes}m
+          </span>
+        )}
         {health && (
           <span>
-            Uptime: {Math.floor(health.uptime / 60)}m | Status:{' '}
-            {health.status}
+            Uptime: {Math.floor(health.uptime / 60)}m | {health.status}
           </span>
         )}
       </div>

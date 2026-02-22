@@ -5,3 +5,9 @@ persist filter selection
 daily stats/KPIs individual and team
 add task/to dos from NOVA
 auto run Ask Nova when session first loads
+sales pipeline - replace onboarding spreadsheet, add order form creates task, 
+   - create tickets from NOVA
+   - launch onboarding tool from NOVAS
+   - add "!welcome pack" to NOVA
+pre load AI tasks - esp the stand ups - they take too long in the UI
+add omment history to jira side drawer
