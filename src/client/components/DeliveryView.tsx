@@ -17,7 +17,7 @@ interface DeliveryRow {
 
 interface SheetData {
   rows: DeliveryRow[];
-  totals: { count: number; mrr: number; wip: number; complete: number };
+  totals: { count: number; mrr: number; wip: number; complete: number; dead: number };
 }
 
 interface Summary {
