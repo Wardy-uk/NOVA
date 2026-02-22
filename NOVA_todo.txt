@@ -10,4 +10,4 @@ sales pipeline - replace onboarding spreadsheet, add order form creates task,
    - launch onboarding tool from NOVAS
    - add "!welcome pack" to NOVA
 pre load AI tasks - esp the stand ups - they take too long in the UI
-add omment history to jira side drawer
+add comment history to jira side drawer
