@@ -20,13 +20,14 @@ export function createActionRoutes(
 
   router.post('/suggest', async (req, res) => {
     try {
-      const source = (req.query.source as string | undefined) ?? 'all';
+      const sourceParam = (req.query.source as string | undefined) ?? 'all';
+      const sources = sourceParam === 'all' ? null : sourceParam.split(',').filter(Boolean);
       const provider = settingsQueries.get('ai_provider') ?? 'openai';
-      const taskCount = source === 'all'
+      const taskCount = !sources
         ? taskQueries.getAll().length
-        : taskQueries.getAll({ source }).length;
+        : taskQueries.getAll().filter((t) => sources.includes(t.source)).length;
       recordAiActionsDebug(
-        `[request] source=${source} provider=${provider} taskCount=${taskCount}`
+        `[request] source=${sourceParam} provider=${provider} taskCount=${taskCount}`
       );
 
       if (provider !== 'openai') {
@@ -51,9 +52,9 @@ export function createActionRoutes(
       const countStr = settingsQueries.get('ai_action_count') ?? '10';
       const count = parseInt(countStr, 10) || 5;
 
-      const tasks = source === 'all'
+      const tasks = !sources
         ? taskQueries.getAll()
-        : taskQueries.getAll({ source });
+        : taskQueries.getAll().filter((t) => sources.includes(t.source));
       if (tasks.length === 0) {
         recordAiActionsDebug('[info] no tasks for requested source');
         res.json({ ok: true, data: { suggestions: [] } });

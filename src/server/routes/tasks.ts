@@ -19,6 +19,75 @@ export function createTaskRoutes(
     res.json({ ok: true, data: tasks });
   });
 
+  // GET /api/tasks/stats — must be before /:id
+  router.get('/stats', (_req, res) => {
+    const allTasks = taskQueries.getAllIncludingDone();
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const byStatus: Record<string, number> = {};
+    const bySource: Record<string, number> = {};
+    const byCategory: Record<string, number> = {};
+    let overdue = 0;
+    let dueToday = 0;
+    let dueThisWeek = 0;
+    let completedToday = 0;
+    let completedThisWeek = 0;
+    let totalAgeMs = 0;
+    let activeCount = 0;
+    let highPriorityOpen = 0;
+    let slaBreach = 0;
+
+    for (const t of allTasks) {
+      byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
+      bySource[t.source] = (bySource[t.source] ?? 0) + 1;
+      if (t.category) byCategory[t.category] = (byCategory[t.category] ?? 0) + 1;
+
+      const isActive = !['done', 'dismissed'].includes(t.status);
+
+      if (isActive) {
+        activeCount++;
+        totalAgeMs += now.getTime() - new Date(t.created_at).getTime();
+        if (t.priority > 75) highPriorityOpen++;
+
+        if (t.due_date) {
+          const dueDate = t.due_date.split('T')[0];
+          if (dueDate < todayStr) overdue++;
+          else if (dueDate === todayStr) dueToday++;
+          else {
+            const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            if (dueDate <= weekFromNow) dueThisWeek++;
+          }
+        }
+
+        if (t.sla_breach_at && new Date(t.sla_breach_at).getTime() < now.getTime()) {
+          slaBreach++;
+        }
+      }
+
+      if (t.status === 'done') {
+        const updatedDate = t.updated_at.split('T')[0];
+        if (updatedDate === todayStr) completedToday++;
+        if (t.updated_at >= weekAgo) completedThisWeek++;
+      }
+    }
+
+    const total = allTasks.length;
+    const done = byStatus['done'] ?? 0;
+    const avgAgeDays = activeCount > 0 ? Math.round(totalAgeMs / activeCount / 86400000) : 0;
+
+    res.json({
+      ok: true,
+      data: {
+        total, active: activeCount, byStatus, bySource, byCategory,
+        overdue, dueToday, dueThisWeek, completedToday, completedThisWeek,
+        completionRate: total > 0 ? Math.round((done / total) * 100) : 0,
+        avgAgeDays, highPriorityOpen, slaBreach,
+      },
+    });
+  });
+
   // GET /api/tasks/:id — Get single task
   router.get('/:id', (req, res) => {
     const task = taskQueries.getById(req.params.id);

@@ -2,10 +2,13 @@ import { useState, useEffect, useRef, Component, type ReactNode } from 'react';
 import { TaskList } from './components/TaskList.js';
 import { SettingsView } from './components/SettingsView.js';
 import { StandupView } from './components/StandupView.js';
+import { StatsView } from './components/StatsView.js';
+import { DeliveryView } from './components/DeliveryView.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
+import { useTheme, type Theme } from './hooks/useTheme.js';
 
-type View = 'tasks' | 'settings' | 'standup' | 'debug';
+type View = 'tasks' | 'settings' | 'standup' | 'stats' | 'delivery' | 'debug';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -39,6 +42,7 @@ export function App() {
   const [view, setView] = useState<View>('tasks');
   const { tasks, loading, error, syncing, syncTasks, updateTask } = useTasks();
   const health = useHealth();
+  const { theme, setTheme } = useTheme();
   const [apiDebug, setApiDebug] = useState<Array<{ ts: string; text: string }>>([]);
   const [lastSuggest, setLastSuggest] = useState<string>('');
   const standupChecked = useRef(false);
@@ -119,6 +123,26 @@ export function App() {
               Standup
             </button>
             <button
+              onClick={() => setView('stats')}
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                view === 'stats'
+                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
+              }`}
+            >
+              Stats
+            </button>
+            <button
+              onClick={() => setView('delivery')}
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                view === 'delivery'
+                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
+              }`}
+            >
+              Delivery
+            </button>
+            <button
               onClick={() => setView('settings')}
               className={`px-3 py-1.5 text-xs rounded transition-colors ${
                 view === 'settings'
@@ -137,6 +161,27 @@ export function App() {
                 {syncing ? 'Syncing...' : 'Sync Now'}
               </button>
             )}
+            {/* Theme toggle */}
+            <div className="flex items-center bg-[#2f353d] rounded border border-[#3a424d] ml-2">
+              {([
+                { value: 'light' as Theme, label: '\u2600' },
+                { value: 'dark' as Theme, label: '\u263E' },
+                { value: 'system' as Theme, label: '\u2699' },
+              ]).map((t) => (
+                <button
+                  key={t.value}
+                  onClick={() => setTheme(t.value)}
+                  title={t.value.charAt(0).toUpperCase() + t.value.slice(1)}
+                  className={`px-2 py-1.5 text-xs transition-colors ${
+                    theme === t.value
+                      ? 'bg-[#5ec1ca] text-[#272C33]'
+                      : 'text-neutral-400 hover:text-neutral-200'
+                  } ${t.value === 'light' ? 'rounded-l' : t.value === 'system' ? 'rounded-r' : ''}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
             {import.meta.env.DEV && (
               <button
                 onClick={() => setView('debug')}
@@ -172,6 +217,10 @@ export function App() {
               onUpdateTask={updateTask}
               onNavigate={(v) => setView(v as View)}
             />
+          ) : view === 'stats' ? (
+            <StatsView tasks={tasks} />
+          ) : view === 'delivery' ? (
+            <DeliveryView />
           ) : view === 'settings' ? (
             <SettingsView />
           ) : (

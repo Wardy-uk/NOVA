@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TaskCard } from './TaskCard.js';
-import { Dashboard } from './Dashboard.js';
 import { NextActions } from './NextActions.js';
+import { JiraActions } from './JiraActions.js';
 
 interface Props {
   tasks: Task[];
@@ -174,8 +174,8 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
 
   return (
     <div>
-      <Dashboard tasks={tasks} />
       <NextActions onUpdateTask={onUpdateTask} />
+      <JiraActions />
 
       {/* Filter / Sort toolbar */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">

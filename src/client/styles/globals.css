@@ -18,6 +18,34 @@
   --color-sla-warning: #F59E0B;
 }
 
+/* Light mode overrides */
+html.light {
+  --color-surface: #f5f7f9;
+  --color-surface-raised: #ffffff;
+  --color-surface-overlay: #edf0f3;
+  --color-border: #d4d9e0;
+}
+
+html.light body {
+  background-color: var(--color-surface);
+  color: #1a1f26;
+}
+
+/* Tailwind utility overrides for light mode */
+html.light .bg-\[\#272C33\] { background-color: var(--color-surface); }
+html.light .bg-\[\#2f353d\] { background-color: var(--color-surface-raised); }
+html.light .bg-\[\#363d47\] { background-color: var(--color-surface-overlay); }
+html.light .border-\[\#3a424d\] { border-color: var(--color-border); }
+html.light .text-neutral-100 { color: #1a1f26; }
+html.light .text-neutral-200 { color: #2d3440; }
+html.light .text-neutral-300 { color: #4a5568; }
+html.light .text-neutral-400 { color: #6b7280; }
+html.light .text-neutral-500 { color: #9ca3af; }
+html.light .text-neutral-600 { color: #b0b8c4; }
+html.light .hover\:bg-\[\#363d47\]:hover { background-color: var(--color-surface-overlay); }
+html.light .hover\:text-neutral-200:hover { color: #2d3440; }
+html.light .hover\:text-neutral-300:hover { color: #4a5568; }
+
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;

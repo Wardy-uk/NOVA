@@ -33,6 +33,16 @@ export class TaskQueries {
     return tasks;
   }
 
+  getAllIncludingDone(): Task[] {
+    const stmt = this.db.prepare(`SELECT * FROM tasks ORDER BY updated_at DESC`);
+    const tasks: Task[] = [];
+    while (stmt.step()) {
+      tasks.push(this.rowToTask(stmt.getAsObject() as Record<string, unknown>));
+    }
+    stmt.free();
+    return tasks;
+  }
+
   getById(id: string): Task | undefined {
     const stmt = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`);
     stmt.bind([id]);

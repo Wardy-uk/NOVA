@@ -30,25 +30,47 @@ const SOURCE_LABELS: Record<string, string> = {
   calendar: 'CAL',
 };
 
+const SOURCES = [
+  { value: 'jira', label: 'Jira' },
+  { value: 'planner', label: 'Planner' },
+  { value: 'todo', label: 'To-Do' },
+  { value: 'monday', label: 'Monday' },
+  { value: 'email', label: 'Email' },
+  { value: 'calendar', label: 'Calendar' },
+];
+
+const ALL_SOURCE_VALUES = new Set(SOURCES.map((s) => s.value));
+
+function loadSavedSources(): Set<string> {
+  if (typeof window === 'undefined') return new Set(ALL_SOURCE_VALUES);
+  const saved = window.localStorage.getItem('nova_source_filter');
+  if (!saved || saved === 'all') return new Set(ALL_SOURCE_VALUES);
+  try {
+    const arr = JSON.parse(saved) as string[];
+    if (Array.isArray(arr) && arr.length > 0) return new Set(arr);
+  } catch { /* migrate old single-value format */ }
+  if (ALL_SOURCE_VALUES.has(saved)) return new Set([saved]);
+  return new Set(ALL_SOURCE_VALUES);
+}
+
 export function NextActions({ onUpdateTask }: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const [sourceFilter, setSourceFilter] = useState<string>(() => {
-    if (typeof window === 'undefined') return 'all';
-    return window.localStorage.getItem('nova_source_filter') ?? 'all';
-  });
+  const [sourceFilter, setSourceFilter] = useState<Set<string>>(loadSavedSources);
+
+  const isAllSelected = sourceFilter.size === ALL_SOURCE_VALUES.size;
 
   const suggest = async () => {
     setLoading(true);
     setError(null);
     setDismissed(false);
     try {
-      const query = sourceFilter !== 'all'
-        ? `?source=${encodeURIComponent(sourceFilter)}`
-        : '';
+      const query = isAllSelected
+        ? ''
+        : `?source=${encodeURIComponent([...sourceFilter].join(','))}`;
       const res = await fetch(`/api/actions/suggest${query}`, { method: 'POST' });
       const json = await res.json();
       if (typeof window !== 'undefined') {
@@ -56,7 +78,7 @@ export function NextActions({ onUpdateTask }: Props) {
           'nova_last_suggest',
           JSON.stringify({
             ts: new Date().toISOString(),
-            source: sourceFilter,
+            source: isAllSelected ? 'all' : [...sourceFilter].join(','),
             ok: json.ok,
             error: json.error ?? null,
             count: json.data?.suggestions?.length ?? 0,
@@ -81,15 +103,24 @@ export function NextActions({ onUpdateTask }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSourceChange = (value: string) => {
-    setSourceFilter(value);
+  const handleSourceToggle = (value: string) => {
+    setSourceFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) {
+        next.delete(value);
+        if (next.size === 0) return new Set(ALL_SOURCE_VALUES); // can't deselect all
+      } else {
+        next.add(value);
+      }
+      return next;
+    });
     setSuggestions([]);
     setActiveIndex(null);
   };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem('nova_source_filter', sourceFilter);
+    window.localStorage.setItem('nova_source_filter', JSON.stringify([...sourceFilter]));
   }, [sourceFilter]);
 
   const handleAction = (id: string, updates: Record<string, unknown>) => {
@@ -113,41 +144,34 @@ export function NextActions({ onUpdateTask }: Props) {
 
   return (
     <div className="mb-6">
-      <div className="mb-3 border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d]">
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-[11px] text-neutral-500 uppercase tracking-widest">
+      <div className="mb-3 border border-[#3a424d] rounded-lg bg-[#2f353d] flex items-stretch gap-3 p-3">
+        {/* Sources (left) */}
+        <div className="flex-1">
+          <div className="text-[11px] text-neutral-500 uppercase tracking-widest mb-2">
             Recommendation Sources
           </div>
-          <button
-            onClick={suggest}
-            className="px-3 py-1 text-[11px] bg-[#2f353d] hover:bg-[#363d47] text-neutral-300 hover:text-[#5ec1ca] rounded border border-[#3a424d] transition-colors"
-          >
-            Ask N.O.V.A
-          </button>
+          <div className="flex flex-wrap gap-3 text-[11px] text-neutral-300">
+            {SOURCES.map((opt) => (
+              <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sourceFilter.has(opt.value)}
+                  onChange={() => handleSourceToggle(opt.value)}
+                  className="accent-[#5ec1ca]"
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-3 text-[11px] text-neutral-300">
-          {[
-            { value: 'all', label: 'All' },
-            { value: 'jira', label: 'Jira' },
-            { value: 'planner', label: 'Planner' },
-            { value: 'todo', label: 'To-Do' },
-            { value: 'monday', label: 'Monday' },
-            { value: 'email', label: 'Email' },
-            { value: 'calendar', label: 'Calendar' },
-          ].map((opt) => (
-            <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="nova-source"
-                value={opt.value}
-                checked={sourceFilter === opt.value}
-                onChange={(e) => handleSourceChange(e.target.value)}
-                className="accent-[#5ec1ca]"
-              />
-              <span>{opt.label}</span>
-            </label>
-          ))}
-        </div>
+        {/* Ask NOVA button (right, centered, bordered) */}
+        <button
+          onClick={suggest}
+          disabled={loading}
+          className="px-8 py-3 text-sm font-bold bg-[#5ec1ca] hover:bg-[#4db0b9] text-[#272C33] rounded-lg border-2 border-[#4ba8b0] transition-colors disabled:opacity-50 shrink-0 self-center"
+        >
+          Ask N.O.V.A
+        </button>
       </div>
 
       {loading && (

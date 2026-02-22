@@ -16,6 +16,7 @@ import { createIngestRoutes } from './routes/ingest.js';
 import { createActionRoutes } from './routes/actions.js';
 import { createJiraRoutes } from './routes/jira.js';
 import { createStandupRoutes } from './routes/standups.js';
+import { createDeliveryRoutes } from './routes/delivery.js';
 import { generateMorningBriefing } from './services/ai-standup.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
 import { OneDriveWatcher } from './services/onedrive-watcher.js';
@@ -116,6 +117,7 @@ async function main() {
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries));
   app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries));
+  app.use('/api/delivery', createDeliveryRoutes());
 
   // 6. OneDrive file watcher (Power Automate bridge)
   const watcher = new OneDriveWatcher(taskQueries);

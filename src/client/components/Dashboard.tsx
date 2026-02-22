@@ -1,4 +1,21 @@
+import { useState, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
+
+interface Stats {
+  total: number;
+  active: number;
+  byStatus: Record<string, number>;
+  bySource: Record<string, number>;
+  overdue: number;
+  dueToday: number;
+  dueThisWeek: number;
+  completedToday: number;
+  completedThisWeek: number;
+  completionRate: number;
+  avgAgeDays: number;
+  highPriorityOpen: number;
+  slaBreach: number;
+}
 
 interface Props {
   tasks: Task[];
@@ -14,6 +31,15 @@ const SOURCE_META: Record<string, { label: string; color: string }> = {
 };
 
 export function Dashboard({ tasks }: Props) {
+  const [stats, setStats] = useState<Stats | null>(null);
+
+  useEffect(() => {
+    fetch('/api/tasks/stats')
+      .then((r) => r.json())
+      .then((j) => { if (j.ok) setStats(j.data); })
+      .catch(() => {});
+  }, [tasks.length]);
+
   const now = new Date();
   const thirtyMinutesMs = 30 * 60 * 1000;
 
@@ -237,48 +263,41 @@ export function Dashboard({ tasks }: Props) {
 
   if (sources.length === 0 && total === 0) return null;
 
+  const KpiCard = ({ value, label, color = 'text-neutral-100' }: { value: number | string; label: string; color?: string }) => (
+    <div className="border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d]">
+      <div className={`text-2xl font-bold font-[var(--font-heading)] ${color}`}>
+        {value}
+      </div>
+      <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-0.5">
+        {label}
+      </div>
+    </div>
+  );
+
   return (
-    <div className="mb-6">
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        {/* Total card */}
-        <div className="border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d]">
-          <div className="text-2xl font-bold font-[var(--font-heading)] text-neutral-100">
-            {total}
-          </div>
-          <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-0.5">
-            Total Tasks
-          </div>
-        </div>
+    <div className="mb-6 space-y-3">
+      {/* Row 1: Core KPIs */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+        <KpiCard value={total} label="Total Tasks" />
+        <KpiCard value={stats?.active ?? total} label="Active" color="text-[#5ec1ca]" />
+        <KpiCard value={stats?.overdue ?? 0} label="Overdue" color={stats?.overdue ? 'text-red-400' : 'text-neutral-100'} />
+        <KpiCard value={stats?.dueToday ?? 0} label="Due Today" color={stats?.dueToday ? 'text-amber-400' : 'text-neutral-100'} />
+        <KpiCard value={stats?.completedToday ?? 0} label="Done Today" color="text-green-400" />
+        <KpiCard value={`${stats?.completionRate ?? 0}%`} label="Completion Rate" color="text-[#5ec1ca]" />
+      </div>
 
-        {/* Jira SLA/Update cards */}
-        <div className="border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d]">
-          <div className="text-2xl font-bold font-[var(--font-heading)] text-amber-400">
-            {needingUpdates}
-          </div>
-          <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-0.5">
-            Tickets Needing Updates
-          </div>
-        </div>
+      {/* Row 2: Jira SLA + deeper stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+        <KpiCard value={needingUpdates} label="Needing Updates" color={needingUpdates > 0 ? 'text-amber-400' : 'text-neutral-100'} />
+        <KpiCard value={breached} label="SLA Breached" color={breached > 0 ? 'text-red-400' : 'text-neutral-100'} />
+        <KpiCard value={breachingNext} label="Breaching Next" color={breachingNext > 0 ? 'text-orange-300' : 'text-neutral-100'} />
+        <KpiCard value={stats?.highPriorityOpen ?? 0} label="High Priority" color={stats?.highPriorityOpen ? 'text-red-400' : 'text-neutral-100'} />
+        <KpiCard value={stats?.dueThisWeek ?? 0} label="Due This Week" color={stats?.dueThisWeek ? 'text-amber-300' : 'text-neutral-100'} />
+        <KpiCard value={`${stats?.avgAgeDays ?? 0}d`} label="Avg Age" />
+      </div>
 
-        <div className="border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d]">
-          <div className="text-2xl font-bold font-[var(--font-heading)] text-red-400">
-            {breached}
-          </div>
-          <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-0.5">
-            Breached Tickets
-          </div>
-        </div>
-
-        <div className="border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d]">
-          <div className="text-2xl font-bold font-[var(--font-heading)] text-orange-300">
-            {breachingNext}
-          </div>
-          <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-0.5">
-            Ticket Breaching Next
-          </div>
-        </div>
-
-        {/* Per-source cards */}
+      {/* Row 3: Per-source cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
         {sources.map((source) => {
           const meta = SOURCE_META[source];
           const count = counts[source] ?? 0;
