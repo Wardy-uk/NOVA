@@ -85,7 +85,7 @@ export function DailyStatsView({ tasks }: { tasks: Task[] }) {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">Daily Stats</h2>
+        <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">Command Centre</h2>
         <p className="text-[11px] text-neutral-500 mt-0.5">{today}</p>
       </div>
 

@@ -104,6 +104,16 @@ export function App() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setView('daily')}
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                view === 'daily'
+                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
+              }`}
+            >
+              Command Centre
+            </button>
+            <button
               onClick={() => setView('tasks')}
               className={`px-3 py-1.5 text-xs rounded transition-colors ${
                 view === 'tasks'
@@ -122,16 +132,6 @@ export function App() {
               }`}
             >
               Standup
-            </button>
-            <button
-              onClick={() => setView('daily')}
-              className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                view === 'daily'
-                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
-                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
-              }`}
-            >
-              Daily
             </button>
             <button
               onClick={() => setView('kpis')}
