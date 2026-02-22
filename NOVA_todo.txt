@@ -1,13 +1,21 @@
 multi-user
 login
-persist settings
-persist filter selection
+[DONE] persist settings
+[DONE] persist filter selection
 daily stats/KPIs individual and team
 add task/to dos from NOVA
-auto run Ask Nova when session first loads
-sales pipeline - replace onboarding spreadsheet, add order form creates task, 
+[DONE] auto run Ask Nova when session first loads
+sales pipeline - replace onboarding spreadsheet, add order form creates task,
    - create tickets from NOVA
    - launch onboarding tool from NOVAS
    - add "!welcome pack" to NOVA
-pre load AI tasks - esp the stand ups - they take too long in the UI
-add comment history to jira side drawer
+[DONE] pre load AI tasks - esp the stand ups - they take too long in the UI
+[DONE] add comment history to jira side drawer
+add tasks from Dynamics CRM - list of buisnes reviews, RAG customers to prioritise contact
+
+fixes
+
+Mornign Standup - if already run, past results should persist (same for re-plan and end of day) with the option to re-start.  these should reset at midnight local time
+
+can we run Jira automations from the NOVA?
+
