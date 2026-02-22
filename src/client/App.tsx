@@ -2,13 +2,14 @@ import { useState, useEffect, useRef, Component, type ReactNode } from 'react';
 import { TaskList } from './components/TaskList.js';
 import { SettingsView } from './components/SettingsView.js';
 import { StandupView } from './components/StandupView.js';
-import { StatsView } from './components/StatsView.js';
+import { DailyStatsView } from './components/DailyStatsView.js';
+import { KpisView } from './components/KpisView.js';
 import { DeliveryView } from './components/DeliveryView.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 
-type View = 'tasks' | 'settings' | 'standup' | 'stats' | 'delivery' | 'debug';
+type View = 'tasks' | 'settings' | 'standup' | 'daily' | 'kpis' | 'delivery' | 'debug';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -123,14 +124,24 @@ export function App() {
               Standup
             </button>
             <button
-              onClick={() => setView('stats')}
+              onClick={() => setView('daily')}
               className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                view === 'stats'
+                view === 'daily'
                   ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
                   : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
               }`}
             >
-              Stats
+              Daily
+            </button>
+            <button
+              onClick={() => setView('kpis')}
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                view === 'kpis'
+                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
+              }`}
+            >
+              KPIs
             </button>
             <button
               onClick={() => setView('delivery')}
@@ -217,8 +228,10 @@ export function App() {
               onUpdateTask={updateTask}
               onNavigate={(v) => setView(v as View)}
             />
-          ) : view === 'stats' ? (
-            <StatsView tasks={tasks} />
+          ) : view === 'daily' ? (
+            <DailyStatsView tasks={tasks} />
+          ) : view === 'kpis' ? (
+            <KpisView tasks={tasks} />
           ) : view === 'delivery' ? (
             <DeliveryView />
           ) : view === 'settings' ? (
