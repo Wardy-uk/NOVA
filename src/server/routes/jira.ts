@@ -84,6 +84,7 @@ export function createJiraRoutes(
 
     try {
       const result = await callWithFallback(mcpManager, toolName, [
+        { issue_key: key },
         { issueKey: key },
         { key },
         { id: key },
@@ -113,6 +114,7 @@ export function createJiraRoutes(
 
     try {
       const result = await callWithFallback(mcpManager, toolName, [
+        { issue_key: key },
         { issueKey: key },
         { key },
         { id: key },
@@ -154,31 +156,31 @@ export function createJiraRoutes(
     try {
       if (fields && updateTool) {
         const result = await callWithFallback(mcpManager, updateTool, [
+          { issue_key: key, fields },
           { issueKey: key, fields },
           { key, fields },
           { issueIdOrKey: key, fields },
-          { id: key, fields },
         ]);
         results.update = parseToolResult(result);
       }
 
       if (comment && commentTool) {
         const result = await callWithFallback(mcpManager, commentTool, [
+          { issue_key: key, body: comment },
           { issueKey: key, body: comment },
           { key, body: comment },
-          { issueIdOrKey: key, body: comment },
+          { issue_key: key, comment },
           { issueKey: key, comment },
-          { key, comment },
         ]);
         results.comment = parseToolResult(result);
       }
 
       if (transition && transitionTool) {
         const result = await callWithFallback(mcpManager, transitionTool, [
+          { issue_key: key, transition_id: transition },
           { issueKey: key, transitionId: transition },
           { key, transitionId: transition },
           { issueKey: key, transition: transition },
-          { key, transition: transition },
           { issueIdOrKey: key, transitionId: transition },
         ]);
         results.transition = parseToolResult(result);

@@ -16,6 +16,7 @@ import { createIngestRoutes } from './routes/ingest.js';
 import { createActionRoutes } from './routes/actions.js';
 import { createJiraRoutes } from './routes/jira.js';
 import { createStandupRoutes } from './routes/standups.js';
+import { generateMorningBriefing } from './services/ai-standup.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
 import { OneDriveWatcher } from './services/onedrive-watcher.js';
 
@@ -145,6 +146,42 @@ async function main() {
   let autoSyncTimer: ReturnType<typeof setInterval> | null = null;
   let lastAutoSync: string | null = null;
 
+  const preloadMorningBriefing = async () => {
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const existing = ritualQueries.getByDate(todayStr, 'morning');
+      if (existing.length > 0) return; // already generated
+
+      const apiKey = settingsQueries.get('openai_api_key')?.trim()
+        ?? process.env.OPENAI_API_KEY?.trim()
+        ?? process.env.OPENAI_KEY?.trim();
+      if (!apiKey) return;
+
+      const tasks = taskQueries.getAll();
+      if (tasks.length === 0) return;
+
+      // Get yesterday's ritual for rollover context
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayRituals = ritualQueries.getByDate(
+        yesterday.toISOString().split('T')[0], 'morning'
+      );
+
+      console.log('[PreLoad] Generating morning briefing in background...');
+      const briefing = await generateMorningBriefing(tasks, apiKey, yesterdayRituals[0] ?? null);
+      const plannedIds = briefing.top_priorities.map((p) => p.task_id);
+      ritualQueries.create({
+        type: 'morning',
+        date: todayStr,
+        summary_md: briefing.summary,
+        planned_items: JSON.stringify(plannedIds),
+      });
+      console.log('[PreLoad] Morning briefing cached');
+    } catch (err) {
+      console.error('[PreLoad] Failed:', err instanceof Error ? err.message : err);
+    }
+  };
+
   const runAutoSync = async () => {
     try {
       const results = await aggregator.syncAll();
@@ -155,6 +192,8 @@ async function main() {
         `[AutoSync] Synced ${total} tasks from ${results.length} sources` +
           (errors.length > 0 ? ` (${errors.length} errors)` : '')
       );
+      // Pre-load morning briefing after sync if not already cached
+      preloadMorningBriefing();
     } catch (err) {
       console.error('[AutoSync] Failed:', err instanceof Error ? err.message : err);
     }

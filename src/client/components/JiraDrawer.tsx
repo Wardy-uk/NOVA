@@ -7,6 +7,14 @@ interface Transition {
   to?: { name?: string };
 }
 
+interface JiraComment {
+  id: string;
+  body: string;
+  author: { display_name?: string; name?: string; email?: string };
+  created: string;
+  updated?: string;
+}
+
 interface Props {
   task: Task;
   index: number;
@@ -26,6 +34,7 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
   const [error, setError] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [transition, setTransition] = useState('');
+  const [comments, setComments] = useState<JiraComment[]>([]);
 
   const fields = useMemo(() => {
     const fieldsObj = (issue?.fields as Record<string, unknown> | undefined) ?? {};
@@ -72,6 +81,14 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
           throw new Error(issueJson.error ?? 'Failed to load Jira issue');
         }
         setIssue(issueJson.data ?? null);
+
+        // Extract comments from MCP response (flat: data.comments) or Jira API (nested: data.fields.comment.comments)
+        const issueData = issueJson.data;
+        const rawComments: JiraComment[] =
+          issueData?.comments ??
+          issueData?.fields?.comment?.comments ??
+          [];
+        setComments(rawComments);
 
         const transitionsRes = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}/transitions`);
         const transitionsJson = await transitionsRes.json();
@@ -126,7 +143,11 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
       setTransition('');
       const refresh = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}`);
       const refreshJson = await refresh.json();
-      if (refreshJson.ok) setIssue(refreshJson.data ?? null);
+      if (refreshJson.ok) {
+        setIssue(refreshJson.data ?? null);
+        const refreshed = refreshJson.data;
+        setComments(refreshed?.comments ?? refreshed?.fields?.comment?.comments ?? []);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update Jira issue');
     } finally {
@@ -260,6 +281,34 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
               ))}
             </select>
           </div>
+
+          {/* Comment history */}
+          {comments.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-widest mb-2 text-neutral-400">
+                Comments ({comments.length})
+              </div>
+              <div className="space-y-2 max-h-60 overflow-auto">
+                {[...comments].reverse().map((c) => (
+                  <div key={c.id} className="px-3 py-2 rounded bg-[#272C33] border border-[#3a424d]">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs text-[#5ec1ca] font-medium">
+                        {c.author?.display_name ?? c.author?.name ?? 'Unknown'}
+                      </span>
+                      <span className="text-[10px] text-neutral-600">
+                        {new Date(c.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {' '}
+                        {new Date(c.created).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div className="text-xs text-neutral-300 whitespace-pre-wrap break-words">
+                      {c.body}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div>
             <div className="text-[10px] uppercase tracking-widest mb-1 text-neutral-400">Add Comment</div>

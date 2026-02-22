@@ -26,9 +26,18 @@ type SortField = 'priority' | 'due_date' | 'updated_at';
 
 export function TaskList({ tasks, loading, onUpdateTask }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<SortField>('priority');
-  const [showOverdueOnly, setShowOverdueOnly] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return window.localStorage.getItem('nova_task_source') || null;
+  });
+  const [sortBy, setSortBy] = useState<SortField>(() => {
+    if (typeof window === 'undefined') return 'priority';
+    return (window.localStorage.getItem('nova_task_sort') as SortField) || 'priority';
+  });
+  const [showOverdueOnly, setShowOverdueOnly] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('nova_task_overdue') === 'true';
+  });
   const [pinnedCollapsed, setPinnedCollapsed] = useState(true);
 
   // Available sources (only those with tasks)
@@ -39,6 +48,22 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
     );
   }, [tasks]);
   
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (sourceFilter) window.localStorage.setItem('nova_task_source', sourceFilter);
+    else window.localStorage.removeItem('nova_task_source');
+  }, [sourceFilter]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('nova_task_sort', sortBy);
+  }, [sortBy]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('nova_task_overdue', String(showOverdueOnly));
+  }, [showOverdueOnly]);
+
   useEffect(() => {
     setCollapsed((prev) => {
       const next = { ...prev };

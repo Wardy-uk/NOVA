@@ -75,6 +75,12 @@ export function NextActions({ onUpdateTask }: Props) {
     }
   };
 
+  // Auto-run on first load
+  useEffect(() => {
+    suggest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleSourceChange = (value: string) => {
     setSourceFilter(value);
     setSuggestions([]);
