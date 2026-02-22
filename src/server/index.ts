@@ -175,6 +175,7 @@ async function main() {
         date: todayStr,
         summary_md: briefing.summary,
         planned_items: JSON.stringify(plannedIds),
+        conversation: JSON.stringify(briefing),
       });
       console.log('[PreLoad] Morning briefing cached');
     } catch (err) {

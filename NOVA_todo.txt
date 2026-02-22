@@ -19,3 +19,12 @@ Mornign Standup - if already run, past results should persist (same for re-plan 
 
 can we run Jira automations from the NOVA?
 
+lightmode/dark mode/system preferenc toggle
+
+allow multi select of sources for ask nova
+
+make ask nova button x2 height, and central top/bottom in the panal
+
+
+
+

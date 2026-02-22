@@ -23,6 +23,7 @@ interface MorningData {
 interface ReplanData {
   summary: string;
   adjusted_priorities: TaskRef[];
+  ritual_id?: number;
 }
 
 interface EodData {
@@ -49,6 +50,7 @@ interface Props {
 export function StandupView({ onUpdateTask, onNavigate }: Props) {
   const [mode, setMode] = useState<Mode>('morning');
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Morning state
@@ -69,19 +71,49 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
   const [history, setHistory] = useState<Ritual[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  // Check if morning already exists today
+  // Track what exists today
   const [hasMorning, setHasMorning] = useState(false);
+  const [hasReplan, setHasReplan] = useState(false);
+  const [hasEod, setHasEod] = useState(false);
 
+  // Load cached rituals on mount
   useEffect(() => {
-    fetch('/api/standups/today')
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.ok) {
-          setHasMorning(json.data.hasMorning);
-          if (json.data.hasMorning) setMode('replan');
+    const loadCached = async () => {
+      try {
+        // Check what exists
+        const todayRes = await fetch('/api/standups/today');
+        const todayJson = await todayRes.json();
+        if (todayJson.ok) {
+          setHasMorning(todayJson.data.hasMorning);
+          setHasReplan(todayJson.data.hasReplan ?? false);
+          setHasEod(todayJson.data.hasEod ?? false);
         }
-      })
-      .catch(() => {});
+
+        // Load cached data
+        const cachedRes = await fetch('/api/standups/cached');
+        const cachedJson = await cachedRes.json();
+        if (cachedJson.ok && cachedJson.data) {
+          if (cachedJson.data.morning) {
+            setMorning(cachedJson.data.morning);
+          }
+          if (cachedJson.data.replan) {
+            setReplan(cachedJson.data.replan);
+          }
+          if (cachedJson.data.eod) {
+            setEod(cachedJson.data.eod);
+          }
+        }
+
+        // Pick the right tab based on what exists
+        if (todayJson.ok) {
+          if (todayJson.data.hasEod) setMode('eod');
+          else if (todayJson.data.hasReplan) setMode('replan');
+          else if (todayJson.data.hasMorning) setMode('morning');
+        }
+      } catch { /* ignore */ }
+      setInitialLoading(false);
+    };
+    loadCached();
   }, []);
 
   const runMorning = async () => {
@@ -96,6 +128,7 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
       }
       setMorning(json.data);
       setHasMorning(true);
+      setMorningChecked(new Set());
     } catch {
       setError('Could not reach server');
     } finally {
@@ -114,6 +147,7 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
         return;
       }
       setReplan(json.data);
+      setHasReplan(true);
     } catch {
       setError('Could not reach server');
     } finally {
@@ -132,6 +166,7 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
         return;
       }
       setEod(json.data);
+      setHasEod(true);
     } catch {
       setError('Could not reach server');
     } finally {
@@ -150,11 +185,9 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
 
   const saveMorning = async () => {
     if (!morning) return;
-    // Mark checked tasks as done
     for (const id of morningChecked) {
       onUpdateTask(id, { status: 'done' });
     }
-    // Update ritual with blockers/notes
     if (blockers || notes) {
       await fetch(`/api/standups/${morning.ritual_id}`, {
         method: 'PATCH',
@@ -233,10 +266,18 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
   };
 
   const modeButtons = [
-    { key: 'morning' as Mode, label: 'Morning', icon: '09:00' },
-    { key: 'replan' as Mode, label: 'Re-Plan', icon: '13:00' },
-    { key: 'eod' as Mode, label: 'End of Day', icon: '17:00' },
+    { key: 'morning' as Mode, label: 'Morning', has: hasMorning },
+    { key: 'replan' as Mode, label: 'Re-Plan', has: hasReplan },
+    { key: 'eod' as Mode, label: 'End of Day', has: hasEod },
   ];
+
+  if (initialLoading) {
+    return (
+      <div className="flex items-center justify-center py-20 text-neutral-500">
+        Loading standups...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -246,13 +287,16 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
           <button
             key={m.key}
             onClick={() => { setMode(m.key); setError(null); }}
-            className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+            className={`px-4 py-2 text-sm rounded-lg border transition-colors relative ${
               mode === m.key
                 ? 'bg-[#5ec1ca] text-[#272C33] border-[#5ec1ca] font-semibold'
                 : 'bg-[#2f353d] text-neutral-400 border-[#3a424d] hover:bg-[#363d47] hover:text-neutral-200'
             }`}
           >
             {m.label}
+            {m.has && mode !== m.key && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-[#5ec1ca] rounded-full" />
+            )}
           </button>
         ))}
       </div>
@@ -283,9 +327,7 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
             <div className="border border-[#3a424d] rounded-lg px-5 py-8 bg-[#2f353d] text-center">
               <h2 className="text-lg font-semibold text-neutral-100 mb-2">Morning Standup</h2>
               <p className="text-sm text-neutral-400 mb-4">
-                {hasMorning
-                  ? "You've already run today's morning standup. Run again to refresh."
-                  : 'N.O.V.A will analyse your tasks and prepare a briefing.'}
+                N.O.V.A will analyse your tasks and prepare a briefing.
               </p>
               <button
                 onClick={runMorning}
@@ -298,9 +340,17 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
             <div className="space-y-5">
               {/* Summary */}
               <div className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
-                <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold mb-2">
-                  N.O.V.A Briefing
-                </h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold">
+                    N.O.V.A Briefing
+                  </h3>
+                  <button
+                    onClick={runMorning}
+                    className="text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors"
+                  >
+                    Re-run
+                  </button>
+                </div>
                 <p className="text-sm text-neutral-200 leading-relaxed">{morning.summary}</p>
               </div>
 
@@ -401,9 +451,17 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
           ) : (
             <div className="space-y-5">
               <div className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
-                <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold mb-2">
-                  N.O.V.A Re-Assessment
-                </h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold">
+                    N.O.V.A Re-Assessment
+                  </h3>
+                  <button
+                    onClick={() => { setReplan(null); runReplan(); }}
+                    className="text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors"
+                  >
+                    Re-run
+                  </button>
+                </div>
                 <p className="text-sm text-neutral-200 leading-relaxed">{replan.summary}</p>
               </div>
 
@@ -414,13 +472,7 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
                 {renderTaskList(replan.adjusted_priorities, { numbered: true })}
               </section>
 
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setReplan(null)}
-                  className="px-4 py-2 text-sm bg-[#2f353d] text-neutral-400 hover:text-neutral-200 rounded-lg border border-[#3a424d] transition-colors"
-                >
-                  Re-run
-                </button>
+              <div className="flex justify-end">
                 <button
                   onClick={() => onNavigate('tasks')}
                   className="px-5 py-2.5 bg-[#5ec1ca] text-[#272C33] font-semibold rounded-lg hover:bg-[#4db0b9] transition-colors text-sm"
@@ -452,9 +504,17 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
           ) : (
             <div className="space-y-5">
               <div className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
-                <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold mb-2">
-                  N.O.V.A Day Review
-                </h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold">
+                    N.O.V.A Day Review
+                  </h3>
+                  <button
+                    onClick={() => { setEod(null); runEod(); }}
+                    className="text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors"
+                  >
+                    Re-run
+                  </button>
+                </div>
                 <p className="text-sm text-neutral-200 leading-relaxed">{eod.summary}</p>
               </div>
 
@@ -542,9 +602,9 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
                 className="flex items-start gap-3 px-4 py-3 rounded-md bg-[#2f353d] border border-[#3a424d]"
               >
                 <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded text-white shrink-0 ${
-                  r.type === 'morning' ? 'bg-amber-600' : 'bg-indigo-600'
+                  r.type === 'morning' ? 'bg-amber-600' : r.type === 'replan' ? 'bg-blue-600' : 'bg-indigo-600'
                 }`}>
-                  {r.type === 'morning' ? 'AM' : 'EOD'}
+                  {r.type === 'morning' ? 'AM' : r.type === 'replan' ? 'MID' : 'EOD'}
                 </span>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-neutral-500">{r.date}</div>

@@ -12,20 +12,71 @@ export function createStandupRoutes(
   const today = () => new Date().toISOString().split('T')[0];
 
   const requireApiKey = (): string | null => {
-    // DB is the source of truth (seeded from env on startup)
     const fromDb = settingsQueries.get('openai_api_key');
     if (fromDb?.trim()) return fromDb.trim();
-    // Read-only fallback to env vars
     const fromEnv = process.env.OPENAI_API_KEY ?? process.env.OPENAI_KEY ?? null;
     if (fromEnv?.trim()) return fromEnv.trim();
     return null;
   };
 
-  // Check if morning standup exists today
+  // Re-enrich task references from stored AI response
+  const enrichTask = (item: { task_id: string }) => {
+    const task = taskQueries.getById(item.task_id);
+    return { ...item, task: task ?? null };
+  };
+
+  const enrichMorning = (raw: Record<string, unknown>, ritualId: number) => ({
+    summary: raw.summary as string,
+    overdue: ((raw.overdue as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
+    due_today: ((raw.due_today as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
+    top_priorities: ((raw.top_priorities as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
+    rolled_over: ((raw.rolled_over as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
+    ritual_id: ritualId,
+  });
+
+  const enrichReplan = (raw: Record<string, unknown>, ritualId: number) => ({
+    summary: raw.summary as string,
+    adjusted_priorities: ((raw.adjusted_priorities as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
+    ritual_id: ritualId,
+  });
+
+  const enrichEod = (raw: Record<string, unknown>, ritualId: number) => ({
+    summary: raw.summary as string,
+    accomplished: (raw.accomplished as string[]) ?? [],
+    rolling_over: ((raw.rolling_over as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
+    insights: (raw.insights as string) ?? '',
+    ritual_id: ritualId,
+  });
+
+  // Check what exists today
   router.get('/today', (_req, res) => {
     const rituals = ritualQueries.getByDate(today());
     const hasMorning = rituals.some((r) => r.type === 'morning');
-    res.json({ ok: true, data: { rituals, hasMorning, date: today() } });
+    const hasReplan = rituals.some((r) => r.type === 'replan');
+    const hasEod = rituals.some((r) => r.type === 'eod');
+    res.json({ ok: true, data: { rituals, hasMorning, hasReplan, hasEod, date: today() } });
+  });
+
+  // Load cached rituals for today, re-enriched with current task data
+  router.get('/cached', (_req, res) => {
+    const rituals = ritualQueries.getByDate(today());
+    const result: Record<string, unknown> = {};
+
+    for (const ritual of rituals) {
+      if (!ritual.conversation) continue;
+      try {
+        const raw = JSON.parse(ritual.conversation) as Record<string, unknown>;
+        if (ritual.type === 'morning' && !result.morning) {
+          result.morning = enrichMorning(raw, ritual.id);
+        } else if (ritual.type === 'replan' && !result.replan) {
+          result.replan = enrichReplan(raw, ritual.id);
+        } else if (ritual.type === 'eod' && !result.eod) {
+          result.eod = enrichEod(raw, ritual.id);
+        }
+      } catch { /* skip corrupt data */ }
+    }
+
+    res.json({ ok: true, data: result });
   });
 
   // Morning standup
@@ -39,39 +90,22 @@ export function createStandupRoutes(
 
       const tasks = taskQueries.getAll();
 
-      // Get yesterday's latest ritual for rollover context
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
-      const yesterdayRituals = ritualQueries.getByDate(yesterdayStr, 'morning');
-      const previousRitual = yesterdayRituals[0] ?? null;
+      const yesterdayRituals = ritualQueries.getByDate(yesterday.toISOString().split('T')[0], 'morning');
 
-      const briefing = await generateMorningBriefing(tasks, apiKey, previousRitual);
+      const briefing = await generateMorningBriefing(tasks, apiKey, yesterdayRituals[0] ?? null);
 
-      // Enrich task references with full task data
-      const enrichTask = (item: { task_id: string }) => {
-        const task = taskQueries.getById(item.task_id);
-        return { ...item, task: task ?? null };
-      };
-
-      const enriched = {
-        summary: briefing.summary,
-        overdue: briefing.overdue.map(enrichTask).filter((i) => i.task),
-        due_today: briefing.due_today.map(enrichTask).filter((i) => i.task),
-        top_priorities: briefing.top_priorities.map(enrichTask).filter((i) => i.task),
-        rolled_over: briefing.rolled_over.map(enrichTask).filter((i) => i.task),
-      };
-
-      // Save ritual
-      const plannedIds = enriched.top_priorities.map((p) => p.task_id);
       const ritualId = ritualQueries.create({
         type: 'morning',
         date: today(),
         summary_md: briefing.summary,
-        planned_items: JSON.stringify(plannedIds),
+        planned_items: JSON.stringify(briefing.top_priorities.map((p) => p.task_id)),
+        conversation: JSON.stringify(briefing),
       });
 
-      res.json({ ok: true, data: { ...enriched, ritual_id: ritualId } });
+      const enriched = enrichMorning(briefing as unknown as Record<string, unknown>, ritualId);
+      res.json({ ok: true, data: enriched });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       res.status(500).json({ ok: false, error: `Morning briefing failed: ${message}` });
@@ -89,20 +123,17 @@ export function createStandupRoutes(
 
       const tasks = taskQueries.getAll();
       const todayRituals = ritualQueries.getByDate(today(), 'morning');
-      const morningRitual = todayRituals[0] ?? null;
 
-      const replan = await generateReplan(tasks, apiKey, morningRitual);
+      const replan = await generateReplan(tasks, apiKey, todayRituals[0] ?? null);
 
-      const enrichTask = (item: { task_id: string }) => {
-        const task = taskQueries.getById(item.task_id);
-        return { ...item, task: task ?? null };
-      };
+      const ritualId = ritualQueries.create({
+        type: 'replan',
+        date: today(),
+        summary_md: replan.summary,
+        conversation: JSON.stringify(replan),
+      });
 
-      const enriched = {
-        summary: replan.summary,
-        adjusted_priorities: replan.adjusted_priorities.map(enrichTask).filter((i) => i.task),
-      };
-
+      const enriched = enrichReplan(replan as unknown as Record<string, unknown>, ritualId);
       res.json({ ok: true, data: enriched });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -121,31 +152,19 @@ export function createStandupRoutes(
 
       const tasks = taskQueries.getAll();
       const todayRituals = ritualQueries.getByDate(today(), 'morning');
-      const morningRitual = todayRituals[0] ?? null;
 
-      const review = await generateEndOfDay(tasks, apiKey, morningRitual);
+      const review = await generateEndOfDay(tasks, apiKey, todayRituals[0] ?? null);
 
-      const enrichTask = (item: { task_id: string }) => {
-        const task = taskQueries.getById(item.task_id);
-        return { ...item, task: task ?? null };
-      };
-
-      const enriched = {
-        summary: review.summary,
-        accomplished: review.accomplished,
-        rolling_over: review.rolling_over.map(enrichTask).filter((i) => i.task),
-        insights: review.insights,
-      };
-
-      // Save ritual
       const ritualId = ritualQueries.create({
         type: 'eod',
         date: today(),
         summary_md: review.summary,
         completed_items: JSON.stringify(review.accomplished),
+        conversation: JSON.stringify(review),
       });
 
-      res.json({ ok: true, data: { ...enriched, ritual_id: ritualId } });
+      const enriched = enrichEod(review as unknown as Record<string, unknown>, ritualId);
+      res.json({ ok: true, data: enriched });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       res.status(500).json({ ok: false, error: `End-of-day review failed: ${message}` });

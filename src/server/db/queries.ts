@@ -228,10 +228,11 @@ export class RitualQueries {
     completed_items?: string;
     blockers?: string;
     openai_response_id?: string;
+    conversation?: string;
   }): number {
     this.db.run(
-      `INSERT INTO rituals (type, date, summary_md, planned_items, completed_items, blockers, openai_response_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO rituals (type, date, summary_md, planned_items, completed_items, blockers, openai_response_id, conversation)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         ritual.type,
         ritual.date,
@@ -240,6 +241,7 @@ export class RitualQueries {
         ritual.completed_items ?? null,
         ritual.blockers ?? null,
         ritual.openai_response_id ?? null,
+        ritual.conversation ?? null,
       ]
     );
     saveDb();
