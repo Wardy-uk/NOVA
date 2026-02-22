@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Task } from '../../shared/types.js';
 
 interface Transition {
-  id?: string;
+  id?: number | string;
   name?: string;
   to?: { name?: string };
 }
@@ -13,6 +13,22 @@ interface JiraComment {
   author: { display_name?: string; name?: string; email?: string };
   created: string;
   updated?: string;
+}
+
+// Allowed transitions and their comment requirements
+const ALLOWED_TRANSITIONS: Record<string, { commentRequired: boolean; commentTypes?: ('internal' | 'public')[] }> = {
+  'Waiting on Assignee': { commentRequired: true, commentTypes: ['internal'] },
+  'Waiting On Partner': { commentRequired: true, commentTypes: ['public', 'internal'] },
+  'Waiting On Requestor': { commentRequired: true, commentTypes: ['public', 'internal'] },
+  'Work in progress': { commentRequired: false },
+};
+
+// Normalise transition name for lookup (case-insensitive match)
+function findAllowedTransition(name: string): { commentRequired: boolean; commentTypes?: ('internal' | 'public')[] } | null {
+  for (const [key, config] of Object.entries(ALLOWED_TRANSITIONS)) {
+    if (key.toLowerCase() === name.toLowerCase()) return config;
+  }
+  return null;
 }
 
 interface Props {
@@ -35,6 +51,14 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
   const [comment, setComment] = useState('');
   const [transition, setTransition] = useState('');
   const [comments, setComments] = useState<JiraComment[]>([]);
+
+  // Transition comment modal
+  const [transitionModal, setTransitionModal] = useState<{
+    transition: Transition;
+    commentTypes: ('internal' | 'public')[];
+  } | null>(null);
+  const [transitionComment, setTransitionComment] = useState('');
+  const [transitionCommentType, setTransitionCommentType] = useState<'internal' | 'public'>('internal');
 
   const fields = useMemo(() => {
     const fieldsObj = (issue?.fields as Record<string, unknown> | undefined) ?? {};
@@ -109,6 +133,44 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
   const canUpdate = tools.some((t) => t.includes('jira_update_issue'));
   const canComment = tools.some((t) => t.includes('jira_add_comment') || t.includes('jira_create_comment'));
   const canTransition = tools.some((t) => t.includes('jira_transition_issue') || t.includes('jira_do_transition'));
+
+  // Filter to only allowed transitions
+  const allowedTransitions = transitions.filter((t) => t.name && findAllowedTransition(t.name));
+
+  const handleTransitionClick = (t: Transition) => {
+    const config = t.name ? findAllowedTransition(t.name) : null;
+    if (!config) return;
+
+    if (config.commentRequired && config.commentTypes) {
+      // Open modal
+      setTransitionComment('');
+      setTransitionCommentType(config.commentTypes[0]);
+      setTransitionModal({ transition: t, commentTypes: config.commentTypes });
+    } else {
+      // Immediate transition (e.g. Work in Progress)
+      setTransition(String(t.id ?? t.name ?? ''));
+      // Auto-save
+      setTimeout(() => {
+        const btn = document.getElementById('jira-save-btn');
+        btn?.click();
+      }, 50);
+    }
+  };
+
+  const handleTransitionConfirm = () => {
+    if (!transitionModal) return;
+    setTransition(String(transitionModal.transition.id ?? transitionModal.transition.name ?? ''));
+    if (transitionComment.trim()) {
+      const prefix = transitionCommentType === 'internal' ? '[Internal] ' : '';
+      setComment(prefix + transitionComment.trim());
+    }
+    setTransitionModal(null);
+    // Auto-save after state updates
+    setTimeout(() => {
+      const btn = document.getElementById('jira-save-btn');
+      btn?.click();
+    }, 50);
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -265,22 +327,31 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
             />
           </div>
 
-          <div>
-            <div className="text-[10px] uppercase tracking-widest mb-1 text-neutral-400">Transition</div>
-            <select
-              value={transition}
-              onChange={(e) => setTransition(e.target.value)}
-              disabled={!canTransition || transitions.length === 0}
-              className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-2 border border-[#3a424d] disabled:opacity-50"
-            >
-              <option value="">Select transition</option>
-              {transitions.map((t, idx) => (
-                <option key={`${t.id ?? t.name ?? 'transition'}-${idx}`} value={t.id ?? t.name ?? ''}>
-                  {t.name ?? t.to?.name ?? t.id ?? `Transition ${idx + 1}`}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Transition buttons */}
+          {canTransition && allowedTransitions.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-widest mb-2 text-neutral-400">Transition</div>
+              <div className="flex flex-wrap gap-2">
+                {allowedTransitions.map((t) => {
+                  const isWIP = t.name?.toLowerCase() === 'work in progress';
+                  return (
+                    <button
+                      key={String(t.id ?? t.name)}
+                      onClick={() => handleTransitionClick(t)}
+                      disabled={saving}
+                      className={`px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50 ${
+                        isWIP
+                          ? 'bg-blue-900/40 border-blue-800 text-blue-300 hover:bg-blue-900/60'
+                          : 'bg-[#2f353d] border-[#3a424d] text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100'
+                      }`}
+                    >
+                      {t.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Comment history */}
           {comments.length > 0 && (
@@ -324,6 +395,7 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
 
         <div className="px-5 py-4 border-t border-[#3a424d] flex items-center gap-3">
           <button
+            id="jira-save-btn"
             onClick={handleSave}
             disabled={saving || (!canUpdate && !canComment && !canTransition)}
             className="px-4 py-2 text-sm bg-[#5ec1ca] text-[#272C33] rounded font-semibold disabled:opacity-50"
@@ -335,6 +407,78 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
           </span>
         </div>
       </div>
+
+      {/* Transition comment modal */}
+      {transitionModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setTransitionModal(null)} />
+          <div className="relative bg-[#1f242b] border border-[#3a424d] rounded-lg shadow-2xl w-full max-w-md mx-4 p-5">
+            <h3 className="text-sm font-semibold text-neutral-100 mb-1">
+              {transitionModal.transition.name}
+            </h3>
+            <p className="text-xs text-neutral-500 mb-4">
+              Add a comment before transitioning this ticket.
+            </p>
+
+            {transitionModal.commentTypes.length > 1 && (
+              <div className="flex gap-2 mb-3">
+                {transitionModal.commentTypes.map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setTransitionCommentType(type)}
+                    className={`px-3 py-1 text-xs rounded-lg border transition-colors ${
+                      transitionCommentType === type
+                        ? type === 'internal'
+                          ? 'bg-amber-900/50 border-amber-700 text-amber-300 font-semibold'
+                          : 'bg-blue-900/50 border-blue-700 text-blue-300 font-semibold'
+                        : 'bg-[#2f353d] border-[#3a424d] text-neutral-400 hover:text-neutral-200'
+                    }`}
+                  >
+                    {type === 'internal' ? 'Internal' : 'Public'}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {transitionModal.commentTypes.length === 1 && (
+              <div className="mb-3">
+                <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${
+                  transitionModal.commentTypes[0] === 'internal'
+                    ? 'bg-amber-900/50 text-amber-400'
+                    : 'bg-blue-900/50 text-blue-400'
+                }`}>
+                  {transitionModal.commentTypes[0] === 'internal' ? 'Internal comment' : 'Public comment'}
+                </span>
+              </div>
+            )}
+
+            <textarea
+              value={transitionComment}
+              onChange={(e) => setTransitionComment(e.target.value)}
+              placeholder="Enter your comment..."
+              autoFocus
+              rows={4}
+              className="w-full bg-[#272C33] border border-[#3a424d] rounded-lg px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-600 focus:border-[#5ec1ca] focus:outline-none resize-none mb-4"
+            />
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setTransitionModal(null)}
+                className="px-4 py-2 text-xs bg-[#2f353d] text-neutral-400 hover:text-neutral-200 rounded-lg border border-[#3a424d] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleTransitionConfirm}
+                disabled={!transitionComment.trim()}
+                className="px-4 py-2 text-xs bg-[#5ec1ca] text-[#272C33] font-semibold rounded-lg hover:bg-[#4db0b9] transition-colors disabled:opacity-40"
+              >
+                Transition
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
