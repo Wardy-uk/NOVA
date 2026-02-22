@@ -1,0 +1,117 @@
+import initSqlJs, { type Database } from 'sql.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_PATH = path.resolve(__dirname, '../../../daypilot.db');
+
+let db: Database | null = null;
+
+export async function getDb(): Promise<Database> {
+  if (db) return db;
+
+  const SQL = await initSqlJs();
+
+  // Load existing database file if it exists
+  if (fs.existsSync(DB_PATH)) {
+    const buffer = fs.readFileSync(DB_PATH);
+    db = new SQL.Database(buffer);
+  } else {
+    db = new SQL.Database();
+  }
+
+  return db;
+}
+
+export function saveDb(): void {
+  if (!db) return;
+  const data = db.export();
+  const buffer = Buffer.from(data);
+  fs.writeFileSync(DB_PATH, buffer);
+}
+
+export function initializeSchema(database: Database): void {
+  database.run(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      source_id TEXT,
+      source_url TEXT,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT DEFAULT 'open',
+      priority INTEGER DEFAULT 50,
+      due_date TEXT,
+      sla_breach_at TEXT,
+      category TEXT,
+      is_pinned INTEGER DEFAULT 0,
+      snoozed_until TEXT,
+      last_synced TEXT,
+      raw_data TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS rituals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      date TEXT NOT NULL,
+      conversation TEXT,
+      summary_md TEXT,
+      planned_items TEXT,
+      completed_items TEXT,
+      blockers TEXT,
+      openai_response_id TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Indexes
+  database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority DESC)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_sla_breach ON tasks(sla_breach_at)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_rituals_type_date ON rituals(type, date)`);
+
+  // Seed default settings
+  const defaults: [string, string][] = [
+    ['source_weight_jira', '90'],
+    ['source_weight_planner', '60'],
+    ['source_weight_todo', '50'],
+    ['source_weight_monday', '55'],
+    ['source_weight_email', '40'],
+    ['source_weight_calendar', '70'],
+    ['refresh_interval_minutes', '5'],
+  ];
+
+  for (const [key, value] of defaults) {
+    database.run(
+      `INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING`,
+      [key, value]
+    );
+  }
+
+  saveDb();
+}
+
+// Allow standalone execution for db:reset
+const isMain = process.argv[1] &&
+  fileURLToPath(import.meta.url).replace(/\\/g, '/') === process.argv[1].replace(/\\/g, '/');
+
+if (isMain) {
+  const database = await getDb();
+  initializeSchema(database);
+  console.log('Database initialized at', DB_PATH);
+}

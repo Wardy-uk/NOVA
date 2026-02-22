@@ -1,0 +1,7 @@
+node_modules/
+dist/
+daypilot.db
+.env
+standups/
+reflections/
+*.log
