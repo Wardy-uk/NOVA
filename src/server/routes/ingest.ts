@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { TaskQueries } from '../db/queries.js';
+import { saveDb } from '../db/schema.js';
 
 const M365_SOURCES = ['planner', 'todo', 'calendar', 'email'] as const;
 
@@ -35,6 +36,7 @@ export function createIngestRoutes(taskQueries: TaskQueries): Router {
     }
 
     const { source, tasks } = parsed.data;
+    const prune = String(req.query.prune ?? 'false').toLowerCase() === 'true';
 
     const mismatch = tasks.find(t => t.source !== source);
     if (mismatch) {
@@ -47,11 +49,20 @@ export function createIngestRoutes(taskQueries: TaskQueries): Router {
 
     const freshIds: string[] = [];
     for (const task of tasks) {
-      taskQueries.upsertFromSource(task);
+      taskQueries.upsertFromSource(task, { deferSave: true });
       freshIds.push(`${task.source}:${task.source_id}`);
     }
 
-    const removed = taskQueries.deleteStaleBySource(source, freshIds);
+    const removed = (tasks.length > 0 || prune)
+      ? taskQueries.deleteStaleBySource(source, freshIds, {
+          allowEmpty: prune,
+          deferSave: true,
+        })
+      : 0;
+
+    if (tasks.length > 0 || removed > 0) {
+      saveDb();
+    }
 
     console.log(
       `[Ingest] ${source}: Received ${tasks.length} tasks, removed ${removed} stale`

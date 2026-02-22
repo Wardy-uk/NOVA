@@ -21,6 +21,10 @@ export function createSettingsRoutes(settingsQueries: SettingsQueries): Router {
       res.status(400).json({ ok: false, error: parsed.error.message });
       return;
     }
+    if (req.params.key === 'openai_api_key' && !parsed.data.value.trim()) {
+      res.status(400).json({ ok: false, error: 'OpenAI API key cannot be empty.' });
+      return;
+    }
     settingsQueries.set(req.params.key, parsed.data.value);
     res.json({ ok: true });
   });

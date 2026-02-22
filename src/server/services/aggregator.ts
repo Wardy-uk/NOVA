@@ -1,5 +1,6 @@
 import type { McpClientManager } from './mcp-client.js';
 import type { TaskQueries, SettingsQueries } from '../db/queries.js';
+import { saveDb } from '../db/schema.js';
 
 interface NormalizedTask {
   source: string;
@@ -15,10 +16,21 @@ interface NormalizedTask {
   raw_data?: unknown;
 }
 
+interface FetchResult {
+  tasks: NormalizedTask[];
+  ok: boolean;
+}
+
 interface SourceAdapter {
   source: string;
   serverName: string;
-  fetch(mcp: McpClientManager): Promise<NormalizedTask[]>;
+  fetch(mcp: McpClientManager): Promise<FetchResult>;
+}
+
+let lastJiraSearchText: string | null = null;
+
+export function getLastJiraSearchText(): string | null {
+  return lastJiraSearchText;
 }
 
 // ---------- Jira Adapter ----------
@@ -27,18 +39,21 @@ function createJiraAdapter(jiraBaseUrl?: string): SourceAdapter {
     source: 'jira',
     serverName: 'jira',
 
-    async fetch(mcp: McpClientManager): Promise<NormalizedTask[]> {
-      if (!mcp.isConnected('jira')) return [];
+    async fetch(mcp: McpClientManager): Promise<FetchResult> {
+      if (!mcp.isConnected('jira')) return { tasks: [], ok: false };
 
       const result = (await mcp.callTool('jira', 'jira_search', {
         jql: 'assignee = currentUser() AND status NOT IN (Done, Closed, Resolved) ORDER BY priority DESC, updated DESC',
         limit: 50,
+        fields: 'summary,status,priority,description,assignee,created,duedate,requestType,queue,"Agent Next Update","Last Agent Public Comment"',
+        expand: 'sla',
       })) as { content?: Array<{ text?: string }> };
 
       const text = result?.content?.[0]?.text;
-      if (!text) return [];
+      if (!text) return { tasks: [], ok: false };
+      lastJiraSearchText = text;
 
-      return parseJiraSearchResults(text, jiraBaseUrl);
+      return { tasks: parseJiraSearchResults(text, jiraBaseUrl), ok: true };
     },
   };
 }
@@ -166,21 +181,22 @@ const plannerAdapter: SourceAdapter = {
   source: 'planner',
   serverName: 'msgraph',
 
-  async fetch(mcp: McpClientManager): Promise<NormalizedTask[]> {
-    if (!mcp.isConnected('msgraph')) return [];
+  async fetch(mcp: McpClientManager): Promise<FetchResult> {
+    if (!mcp.isConnected('msgraph')) return { tasks: [], ok: false };
 
     const result = (await mcp.callTool('msgraph', 'list-planner-tasks', {})) as {
       content?: Array<{ text?: string }>;
     };
 
     const text = result?.content?.[0]?.text;
-    if (!text) return [];
+    if (!text) return { tasks: [], ok: false };
 
-    return parsePlannerTasks(text);
+    const tasks = parsePlannerTasks(text);
+    return { tasks: tasks ?? [], ok: tasks !== null };
   },
 };
 
-function parsePlannerTasks(text: string): NormalizedTask[] {
+function parsePlannerTasks(text: string): NormalizedTask[] | null {
   try {
     const data = JSON.parse(text);
     const tasks = Array.isArray(data) ? data : data.value ?? data.tasks ?? [];
@@ -199,7 +215,7 @@ function parsePlannerTasks(text: string): NormalizedTask[] {
       }));
   } catch {
     console.warn('[plannerAdapter] Could not parse response');
-    return [];
+    return null;
   }
 }
 
@@ -224,8 +240,8 @@ const todoAdapter: SourceAdapter = {
   source: 'todo',
   serverName: 'msgraph',
 
-  async fetch(mcp: McpClientManager): Promise<NormalizedTask[]> {
-    if (!mcp.isConnected('msgraph')) return [];
+  async fetch(mcp: McpClientManager): Promise<FetchResult> {
+    if (!mcp.isConnected('msgraph')) return { tasks: [], ok: false };
 
     // Get all task lists
     const listsResult = (await mcp.callTool('msgraph', 'list-todo-task-lists', {})) as {
@@ -233,18 +249,20 @@ const todoAdapter: SourceAdapter = {
     };
 
     const listsText = listsResult?.content?.[0]?.text;
-    if (!listsText) return [];
+    if (!listsText) return { tasks: [], ok: false };
 
     let lists: Array<Record<string, unknown>>;
     try {
       const parsed = JSON.parse(listsText);
       lists = Array.isArray(parsed) ? parsed : parsed.value ?? [];
     } catch {
-      return [];
+      return { tasks: [], ok: false };
     }
 
     // Fetch tasks from each list
     const allTasks: NormalizedTask[] = [];
+    let hadAnyFetch = false;
+    let hadError = false;
     for (const list of lists) {
       try {
         const tasksResult = (await mcp.callTool('msgraph', 'list-todo-tasks', {
@@ -256,6 +274,7 @@ const todoAdapter: SourceAdapter = {
 
         const parsed = JSON.parse(tasksText);
         const tasks = Array.isArray(parsed) ? parsed : parsed.value ?? [];
+        hadAnyFetch = true;
 
         for (const t of tasks) {
           if ((t.status as string) === 'completed') continue;
@@ -272,11 +291,12 @@ const todoAdapter: SourceAdapter = {
           });
         }
       } catch (err) {
+        hadError = true;
         console.warn(`[todoAdapter] Error fetching list ${list.displayName}:`, err);
       }
     }
 
-    return allTasks;
+    return { tasks: allTasks, ok: hadAnyFetch && !hadError };
   },
 };
 
@@ -300,8 +320,8 @@ const calendarAdapter: SourceAdapter = {
   source: 'calendar',
   serverName: 'msgraph',
 
-  async fetch(mcp: McpClientManager): Promise<NormalizedTask[]> {
-    if (!mcp.isConnected('msgraph')) return [];
+  async fetch(mcp: McpClientManager): Promise<FetchResult> {
+    if (!mcp.isConnected('msgraph')) return { tasks: [], ok: false };
 
     const now = new Date();
     const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -312,13 +332,14 @@ const calendarAdapter: SourceAdapter = {
     })) as { content?: Array<{ text?: string }> };
 
     const text = result?.content?.[0]?.text;
-    if (!text) return [];
+    if (!text) return { tasks: [], ok: false };
 
-    return parseCalendarEvents(text);
+    const tasks = parseCalendarEvents(text);
+    return { tasks: tasks ?? [], ok: tasks !== null };
   },
 };
 
-function parseCalendarEvents(text: string): NormalizedTask[] {
+function parseCalendarEvents(text: string): NormalizedTask[] | null {
   try {
     const data = JSON.parse(text);
     const events = Array.isArray(data) ? data : data.value ?? [];
@@ -340,7 +361,7 @@ function parseCalendarEvents(text: string): NormalizedTask[] {
     });
   } catch {
     console.warn('[calendarAdapter] Could not parse response');
-    return [];
+    return null;
   }
 }
 
@@ -349,8 +370,8 @@ const emailAdapter: SourceAdapter = {
   source: 'email',
   serverName: 'msgraph',
 
-  async fetch(mcp: McpClientManager): Promise<NormalizedTask[]> {
-    if (!mcp.isConnected('msgraph')) return [];
+  async fetch(mcp: McpClientManager): Promise<FetchResult> {
+    if (!mcp.isConnected('msgraph')) return { tasks: [], ok: false };
 
     const result = (await mcp.callTool('msgraph', 'list-mail-messages', {
       filter: "flag/flagStatus eq 'flagged'",
@@ -358,13 +379,14 @@ const emailAdapter: SourceAdapter = {
     })) as { content?: Array<{ text?: string }> };
 
     const text = result?.content?.[0]?.text;
-    if (!text) return [];
+    if (!text) return { tasks: [], ok: false };
 
-    return parseFlaggedEmails(text);
+    const tasks = parseFlaggedEmails(text);
+    return { tasks: tasks ?? [], ok: tasks !== null };
   },
 };
 
-function parseFlaggedEmails(text: string): NormalizedTask[] {
+function parseFlaggedEmails(text: string): NormalizedTask[] | null {
   try {
     const data = JSON.parse(text);
     const messages = Array.isArray(data) ? data : data.value ?? [];
@@ -389,7 +411,7 @@ function parseFlaggedEmails(text: string): NormalizedTask[] {
     });
   } catch {
     console.warn('[emailAdapter] Could not parse response');
-    return [];
+    return null;
   }
 }
 
@@ -398,8 +420,8 @@ const mondayAdapter: SourceAdapter = {
   source: 'monday',
   serverName: 'monday',
 
-  async fetch(mcp: McpClientManager): Promise<NormalizedTask[]> {
-    if (!mcp.isConnected('monday')) return [];
+  async fetch(mcp: McpClientManager): Promise<FetchResult> {
+    if (!mcp.isConnected('monday')) return { tasks: [], ok: false };
 
     // 1. Get boards (optionally filtered by env var)
     const boardIdsEnv = process.env.MONDAY_BOARD_IDS;
@@ -417,19 +439,21 @@ const mondayAdapter: SourceAdapter = {
         content?: Array<{ text?: string }>;
       };
       const boardsText = boardsResult?.content?.[0]?.text;
-      if (!boardsText) return [];
+      if (!boardsText) return { tasks: [], ok: false };
 
       try {
         const parsed = JSON.parse(boardsText);
         boards = Array.isArray(parsed) ? parsed : parsed.boards ?? parsed.data?.boards ?? [];
       } catch {
         console.warn('[mondayAdapter] Could not parse boards response');
-        return [];
+        return { tasks: [], ok: false };
       }
     }
 
     // 2. For each board, get groups and items
     const allTasks: NormalizedTask[] = [];
+    let hadAnyFetch = false;
+    let hadError = false;
 
     for (const board of boards) {
       const boardId = String(board.id);
@@ -442,13 +466,17 @@ const mondayAdapter: SourceAdapter = {
         })) as { content?: Array<{ text?: string }> };
 
         const groupsText = groupsResult?.content?.[0]?.text;
-        if (!groupsText) continue;
+        if (!groupsText) {
+          hadError = true;
+          continue;
+        }
 
         let groups: Array<Record<string, unknown>>;
         try {
           const parsed = JSON.parse(groupsText);
           groups = Array.isArray(parsed) ? parsed : parsed.groups ?? parsed.data?.groups ?? [];
         } catch {
+          hadError = true;
           continue;
         }
 
@@ -469,16 +497,21 @@ const mondayAdapter: SourceAdapter = {
         })) as { content?: Array<{ text?: string }> };
 
         const itemsText = itemsResult?.content?.[0]?.text;
-        if (!itemsText) continue;
+        if (!itemsText) {
+          hadError = true;
+          continue;
+        }
 
         let items: Array<Record<string, unknown>>;
         try {
           const parsed = JSON.parse(itemsText);
           items = Array.isArray(parsed) ? parsed : parsed.items ?? parsed.data?.items ?? [];
         } catch {
+          hadError = true;
           continue;
         }
 
+        hadAnyFetch = true;
         for (const item of items) {
           const columnValues = (item.column_values as Array<Record<string, unknown>>) ?? [];
           allTasks.push({
@@ -495,11 +528,12 @@ const mondayAdapter: SourceAdapter = {
           });
         }
       } catch (err) {
+        hadError = true;
         console.warn(`[mondayAdapter] Error fetching board ${boardId}:`, err);
       }
     }
 
-    return allTasks;
+    return { tasks: allTasks, ok: hadAnyFetch && !hadError };
   },
 };
 
@@ -577,16 +611,27 @@ export class TaskAggregator {
 
     for (const adapter of this.adapters) {
       try {
-        const tasks = await adapter.fetch(this.mcp);
-
+        const { tasks, ok } = await adapter.fetch(this.mcp);
+        let didChange = false;
         const freshIds: string[] = [];
         for (const task of tasks) {
-          this.taskQueries.upsertFromSource(task);
+          this.taskQueries.upsertFromSource(task, { deferSave: true });
           freshIds.push(`${task.source}:${task.source_id}`);
+          didChange = true;
         }
 
         // Remove tasks that are no longer in the source
-        const removed = this.taskQueries.deleteStaleBySource(adapter.source, freshIds);
+        const removed = ok
+          ? this.taskQueries.deleteStaleBySource(adapter.source, freshIds, {
+              allowEmpty: true,
+              deferSave: true,
+            })
+          : 0;
+        if (removed > 0) didChange = true;
+
+        if (didChange) {
+          saveDb();
+        }
 
         results.push({ source: adapter.source, count: tasks.length });
         console.log(

@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 
 export function AISettingsCard() {
   const [apiKey, setApiKey] = useState('');
-  const [actionCount, setActionCount] = useState('5');
+  const [actionCount, setActionCount] = useState('10');
+  const [provider, setProvider] = useState<'openai' | 'claude'>('openai');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -13,6 +14,7 @@ export function AISettingsCard() {
         if (json.ok && json.data) {
           if (json.data.openai_api_key) setApiKey(json.data.openai_api_key);
           if (json.data.ai_action_count) setActionCount(json.data.ai_action_count);
+          if (json.data.ai_provider) setProvider(json.data.ai_provider);
         }
       })
       .catch(() => {});
@@ -22,18 +24,25 @@ export function AISettingsCard() {
     setSaving(true);
     setSaved(false);
     try {
-      await Promise.all([
-        fetch('/api/settings/openai_api_key', {
+      const requests: Promise<Response>[] = [];
+      if (apiKey.trim()) {
+        requests.push(fetch('/api/settings/openai_api_key', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ value: apiKey }),
-        }),
-        fetch('/api/settings/ai_action_count', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ value: actionCount }),
-        }),
-      ]);
+        }));
+      }
+      requests.push(fetch('/api/settings/ai_provider', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: provider }),
+      }));
+      requests.push(fetch('/api/settings/ai_action_count', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: actionCount }),
+      }));
+      await Promise.all(requests);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
@@ -59,6 +68,36 @@ export function AISettingsCard() {
 
         <div>
           <label className="block text-xs text-neutral-400 mb-1.5">
+            AI Provider
+          </label>
+          <div className="flex items-center gap-3 text-sm text-neutral-300">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="ai-provider"
+                value="openai"
+                checked={provider === 'openai'}
+                onChange={() => setProvider('openai')}
+                className="accent-[#5ec1ca]"
+              />
+              ChatGPT (OpenAI)
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="ai-provider"
+                value="claude"
+                checked={provider === 'claude'}
+                onChange={() => setProvider('claude')}
+                className="accent-[#5ec1ca]"
+              />
+              Claude (Anthropic)
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs text-neutral-400 mb-1.5">
             Number of suggestions
           </label>
           <select
@@ -69,6 +108,7 @@ export function AISettingsCard() {
             <option value="3">3</option>
             <option value="5">5</option>
             <option value="10">10</option>
+            <option value="20">20</option>
           </select>
         </div>
 

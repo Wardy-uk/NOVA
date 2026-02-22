@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
+import { JiraDrawer } from './JiraDrawer.js';
 
 interface Suggestion {
   task_id: string;
@@ -34,14 +35,34 @@ export function NextActions({ onUpdateTask }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'all';
+    return window.localStorage.getItem('nova_source_filter') ?? 'all';
+  });
 
   const suggest = async () => {
     setLoading(true);
     setError(null);
     setDismissed(false);
     try {
-      const res = await fetch('/api/actions/suggest', { method: 'POST' });
+      const query = sourceFilter !== 'all'
+        ? `?source=${encodeURIComponent(sourceFilter)}`
+        : '';
+      const res = await fetch(`/api/actions/suggest${query}`, { method: 'POST' });
       const json = await res.json();
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(
+          'nova_last_suggest',
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            source: sourceFilter,
+            ok: json.ok,
+            error: json.error ?? null,
+            count: json.data?.suggestions?.length ?? 0,
+          })
+        );
+      }
       if (!json.ok) {
         setError(json.error ?? 'Failed to get suggestions');
         return;
@@ -54,24 +75,76 @@ export function NextActions({ onUpdateTask }: Props) {
     }
   };
 
+  const handleSourceChange = (value: string) => {
+    setSourceFilter(value);
+    setSuggestions([]);
+    setActiveIndex(null);
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('nova_source_filter', sourceFilter);
+  }, [sourceFilter]);
+
   const handleAction = (id: string, updates: Record<string, unknown>) => {
     onUpdateTask(id, updates);
     // Remove from suggestions list
     setSuggestions((prev) => prev.filter((s) => s.task_id !== id));
   };
 
+  const openDrawer = (index: number) => {
+    if (suggestions[index]?.task.source !== 'jira') return;
+    setActiveIndex(index);
+  };
+
+  const closeDrawer = () => {
+    setActiveIndex(null);
+  };
+
+  const activeSuggestion = activeIndex !== null ? suggestions[activeIndex] : null;
+
   if (dismissed) return null;
 
   return (
     <div className="mb-6">
-      {suggestions.length === 0 && !loading && !error && (
-        <button
-          onClick={suggest}
-          className="px-4 py-2 text-sm bg-[#2f353d] hover:bg-[#363d47] text-neutral-300 hover:text-[#5ec1ca] rounded-lg border border-[#3a424d] transition-colors"
-        >
-          Ask N.O.V.A
-        </button>
-      )}
+      <div className="mb-3 border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d]">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[11px] text-neutral-500 uppercase tracking-widest">
+            Recommendation Sources
+          </div>
+          <button
+            onClick={suggest}
+            className="px-3 py-1 text-[11px] bg-[#2f353d] hover:bg-[#363d47] text-neutral-300 hover:text-[#5ec1ca] rounded border border-[#3a424d] transition-colors"
+          >
+            Ask N.O.V.A
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-3 text-[11px] text-neutral-300">
+          {[
+            { value: 'all', label: 'All' },
+            { value: 'jira', label: 'Jira' },
+            { value: 'planner', label: 'Planner' },
+            { value: 'todo', label: 'To-Do' },
+            { value: 'monday', label: 'Monday' },
+            { value: 'email', label: 'Email' },
+            { value: 'calendar', label: 'Calendar' },
+          ].map((opt) => (
+            <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="nova-source"
+                value={opt.value}
+                checked={sourceFilter === opt.value}
+                onChange={(e) => handleSourceChange(e.target.value)}
+                className="accent-[#5ec1ca]"
+              />
+              <span>{opt.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {suggestions.length === 0 && !loading && !error && null}
 
       {loading && (
         <div className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
@@ -108,6 +181,16 @@ export function NextActions({ onUpdateTask }: Props) {
                 Refresh
               </button>
               <button
+                onClick={() => {
+                  const firstJira = suggestions.findIndex((s) => s.task.source === 'jira');
+                  if (firstJira >= 0) openDrawer(firstJira);
+                }}
+                className="text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors"
+                disabled={suggestions.every((s) => s.task.source !== 'jira')}
+              >
+                Open Focus
+              </button>
+              <button
                 onClick={() => setDismissed(true)}
                 className="text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors"
               >
@@ -141,6 +224,14 @@ export function NextActions({ onUpdateTask }: Props) {
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
+                  {s.task.source === 'jira' && (
+                    <button
+                      onClick={() => openDrawer(i)}
+                      className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-[#5ec1ca] transition-colors text-xs"
+                    >
+                      Edit
+                    </button>
+                  )}
                   {s.task.source_url && (
                     <a
                       href={s.task.source_url}
@@ -148,7 +239,7 @@ export function NextActions({ onUpdateTask }: Props) {
                       rel="noopener noreferrer"
                       className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-[#5ec1ca] transition-colors text-xs"
                     >
-                      Open
+                      Open in Jira
                     </a>
                   )}
                   <button
@@ -168,6 +259,17 @@ export function NextActions({ onUpdateTask }: Props) {
             ))}
           </div>
         </div>
+      )}
+
+      {activeSuggestion && activeSuggestion.task.source === 'jira' && (
+        <JiraDrawer
+          task={activeSuggestion.task}
+          index={activeIndex ?? 0}
+          total={suggestions.length}
+          onClose={closeDrawer}
+          onPrev={() => setActiveIndex((prev) => (prev && prev > 0 ? prev - 1 : 0))}
+          onNext={() => setActiveIndex((prev) => (prev !== null && prev < suggestions.length - 1 ? prev + 1 : prev))}
+        />
       )}
     </div>
   );

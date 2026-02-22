@@ -10,12 +10,13 @@ Temporary bridge to push Microsoft 365 data into DayPilot while MS365 MCP admin 
 
 ## How It Works
 
-PA Desktop flows fetch data from M365 using your logged-in credentials, transform it to JSON, and POST it to `http://localhost:3001/api/ingest`. DayPilot upserts the tasks and cleans up any stale ones.
+PA Desktop flows fetch data from M365 using your logged-in credentials, transform it to JSON, and POST it to `http://localhost:3001/api/ingest`. DayPilot upserts the tasks and can clean up stale ones when the ingest is authoritative.
 
 ## API Endpoint
 
 ```
 POST http://localhost:3001/api/ingest
+POST http://localhost:3001/api/ingest?prune=true   # authoritative sync: remove tasks not in payload
 Content-Type: application/json
 
 {
@@ -90,7 +91,7 @@ $body = @{
 } | ConvertTo-Json -Depth 5
 
 # POST to DayPilot
-Invoke-RestMethod -Uri "http://localhost:3001/api/ingest" -Method POST -ContentType "application/json" -Body $body
+Invoke-RestMethod -Uri "http://localhost:3001/api/ingest?prune=true" -Method POST -ContentType "application/json" -Body $body
 ```
 
 ## Flow 2: To-Do Items
@@ -132,7 +133,7 @@ $body = @{
     tasks  = $output
 } | ConvertTo-Json -Depth 5
 
-Invoke-RestMethod -Uri "http://localhost:3001/api/ingest" -Method POST -ContentType "application/json" -Body $body
+Invoke-RestMethod -Uri "http://localhost:3001/api/ingest?prune=true" -Method POST -ContentType "application/json" -Body $body
 ```
 
 ## Flow 3: Calendar Events (Next 7 Days)
@@ -161,7 +162,7 @@ $body = @{
     tasks  = $output
 } | ConvertTo-Json -Depth 5
 
-Invoke-RestMethod -Uri "http://localhost:3001/api/ingest" -Method POST -ContentType "application/json" -Body $body
+Invoke-RestMethod -Uri "http://localhost:3001/api/ingest?prune=true" -Method POST -ContentType "application/json" -Body $body
 ```
 
 ## Flow 4: Flagged Emails
@@ -193,7 +194,7 @@ $body = @{
     tasks  = $output
 } | ConvertTo-Json -Depth 5
 
-Invoke-RestMethod -Uri "http://localhost:3001/api/ingest" -Method POST -ContentType "application/json" -Body $body
+Invoke-RestMethod -Uri "http://localhost:3001/api/ingest?prune=true" -Method POST -ContentType "application/json" -Body $body
 ```
 
 ## All-In-One Approach
@@ -233,8 +234,8 @@ try {
 | "Connection refused" | DayPilot server not running. Start with `npm run dev` |
 | 400 error | Check JSON format matches the schema above |
 | Tasks not appearing | Check the `source` field matches: planner, todo, calendar, email |
-| Stale tasks not cleared | Each POST replaces ALL tasks for that source. Send the full list each time. |
-| Empty POST clears all | Sending `{ "source": "planner", "tasks": [] }` deletes all planner tasks. This is intentional. |
+| Stale tasks not cleared | Add `?prune=true` to the POST URL and send the full list each time. |
+| Empty POST clears all | Only when `?prune=true` is used. Without `prune`, empty payloads do nothing. |
 
 ## Priority Scale Reference
 

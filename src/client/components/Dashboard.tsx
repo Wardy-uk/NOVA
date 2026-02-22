@@ -14,6 +14,216 @@ const SOURCE_META: Record<string, { label: string; color: string }> = {
 };
 
 export function Dashboard({ tasks }: Props) {
+  const now = new Date();
+  const thirtyMinutesMs = 30 * 60 * 1000;
+
+  const parseDate = (value: unknown): Date | null => {
+    if (!value) return null;
+    if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+    if (typeof value === 'string') {
+      const parsed = new Date(value);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value === 'number') {
+      const parsed = new Date(value);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      const dt = obj.dateTime ?? obj.value ?? obj.startedTime ?? obj.displayValue;
+      if (typeof dt === 'string') {
+        const parsed = new Date(dt);
+        return isNaN(parsed.getTime()) ? null : parsed;
+      }
+    }
+    return null;
+  };
+
+  const getJiraStatusName = (issue: Record<string, unknown>): string | null => {
+    const direct = issue.status;
+    if (typeof direct === 'string') return direct;
+    if (direct && typeof direct === 'object') {
+      const name = (direct as Record<string, unknown>).name;
+      if (typeof name === 'string') return name;
+    }
+    const fields = issue.fields as Record<string, unknown> | undefined;
+    const fieldStatus = fields?.status;
+    if (typeof fieldStatus === 'string') return fieldStatus;
+    if (fieldStatus && typeof fieldStatus === 'object') {
+      const name = (fieldStatus as Record<string, unknown>).name;
+      if (typeof name === 'string') return name;
+    }
+    return null;
+  };
+
+  const getJiraFieldValue = (
+    issue: Record<string, unknown>,
+    names: string[]
+  ): unknown => {
+    const lower = names.map((n) => n.toLowerCase());
+
+    for (const [key, value] of Object.entries(issue)) {
+      if (lower.includes(key.toLowerCase())) return value;
+    }
+
+    const fields = issue.fields as Record<string, unknown> | undefined;
+    if (fields && typeof fields === 'object') {
+      for (const [key, value] of Object.entries(fields)) {
+        if (lower.includes(key.toLowerCase())) return value;
+      }
+    }
+
+    const fieldsArray = issue.fields as Array<Record<string, unknown>> | undefined;
+    if (Array.isArray(fieldsArray)) {
+      for (const field of fieldsArray) {
+        const name = field.name ?? field.key ?? field.label;
+        if (typeof name === 'string' && lower.includes(name.toLowerCase())) {
+          return field.value ?? field.displayValue ?? field;
+        }
+      }
+    }
+
+    return undefined;
+  };
+
+  const findSlaObject = (issue: Record<string, unknown>): Record<string, unknown> | null => {
+    const fields = issue.fields as Record<string, unknown> | undefined;
+    if (!fields || typeof fields !== 'object') return null;
+
+    const checkValue = (value: unknown): Record<string, unknown> | null => {
+      if (!value || typeof value !== 'object') return null;
+      const obj = value as Record<string, unknown>;
+      if (
+        obj.ongoingCycle &&
+        typeof obj.ongoingCycle === 'object' &&
+        ('breached' in (obj.ongoingCycle as Record<string, unknown>) ||
+          'remainingTime' in (obj.ongoingCycle as Record<string, unknown>))
+      ) {
+        return obj;
+      }
+      if (
+        obj.remainingTime &&
+        typeof obj.remainingTime === 'object' &&
+        'millis' in (obj.remainingTime as Record<string, unknown>)
+      ) {
+        return obj;
+      }
+      return null;
+    };
+
+    for (const value of Object.values(fields)) {
+      const found = checkValue(value);
+      if (found) return found;
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          const foundItem = checkValue(item);
+          if (foundItem) return foundItem;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const getRemainingTimeMs = (issue: Record<string, unknown>): number | null => {
+    const direct = getJiraFieldValue(issue, ['remainingTime', 'Remaining Time']);
+    if (direct && typeof direct === 'object') {
+      const millis = (direct as Record<string, unknown>).millis;
+      if (typeof millis === 'number') return millis;
+      if (typeof millis === 'string') {
+        const parsed = parseInt(millis, 10);
+        return isNaN(parsed) ? null : parsed;
+      }
+    }
+
+    const sla = findSlaObject(issue);
+    if (!sla) return null;
+    const remaining = sla.remainingTime as Record<string, unknown> | undefined;
+    const millis = remaining?.millis;
+    if (typeof millis === 'number') return millis;
+    if (typeof millis === 'string') {
+      const parsed = parseInt(millis, 10);
+      return isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  };
+
+  const isBreached = (issue: Record<string, unknown>): boolean => {
+    const direct = getJiraFieldValue(issue, ['ongoingCycle', 'Ongoing Cycle']);
+    if (direct && typeof direct === 'object') {
+      const breached = (direct as Record<string, unknown>).breached;
+      if (typeof breached === 'boolean') return breached;
+    }
+
+    const sla = findSlaObject(issue);
+    if (sla?.ongoingCycle && typeof sla.ongoingCycle === 'object') {
+      const breached = (sla.ongoingCycle as Record<string, unknown>).breached;
+      if (typeof breached === 'boolean') return breached;
+    }
+
+    const remainingMs = getRemainingTimeMs(issue);
+    return remainingMs !== null && remainingMs < 0;
+  };
+
+  const isBreachingNext = (issue: Record<string, unknown>): boolean => {
+    const remainingMs = getRemainingTimeMs(issue);
+    return remainingMs !== null && remainingMs >= 0 && remainingMs <= thirtyMinutesMs;
+  };
+
+  const isNeedingUpdate = (issue: Record<string, unknown>): boolean => {
+    const status = (getJiraStatusName(issue) ?? '').toLowerCase();
+    if (!status) return false;
+    if (['resolved', 'closed'].includes(status)) return false;
+    if (['waiting on requestor', 'waiting on partner'].includes(status)) return false;
+
+    const queueValue = getJiraFieldValue(issue, ['queue', 'Queue']);
+    const queueName = typeof queueValue === 'string'
+      ? queueValue
+      : (queueValue as Record<string, unknown> | undefined)?.name;
+    if (typeof queueName === 'string' && queueName.toLowerCase() === 'development') {
+      return false;
+    }
+
+    const requestTypeValue = getJiraFieldValue(issue, ['request type', 'Request Type', 'requestType']);
+    const requestTypeName = typeof requestTypeValue === 'string'
+      ? requestTypeValue
+      : (requestTypeValue as Record<string, unknown> | undefined)?.name;
+    if (typeof requestTypeName === 'string' && requestTypeName.toLowerCase() === 'onboarding') {
+      return false;
+    }
+
+    const nextUpdateRaw = getJiraFieldValue(issue, ['agent next update', 'Agent Next Update']);
+    const nextUpdate = parseDate(nextUpdateRaw);
+    const lastCommentRaw = getJiraFieldValue(issue, ['last agent public comment', 'Last Agent Public Comment']);
+    const lastComment = parseDate(lastCommentRaw);
+
+    const needsUpdateByDue = nextUpdate ? nextUpdate.getTime() < now.getTime() : false;
+    const needsUpdateBySilence = lastComment
+      ? now.getTime() - lastComment.getTime() > 4 * 60 * 60 * 1000
+      : false;
+
+    return needsUpdateByDue || needsUpdateBySilence;
+  };
+
+  const jiraTasks = tasks.filter((t) => t.source === 'jira');
+  const needingUpdates = jiraTasks.filter((t) => {
+    const issue = t.raw_data;
+    if (!issue || typeof issue !== 'object') return false;
+    return isNeedingUpdate(issue as Record<string, unknown>);
+  }).length;
+  const breached = jiraTasks.filter((t) => {
+    const issue = t.raw_data;
+    if (!issue || typeof issue !== 'object') return false;
+    return isBreached(issue as Record<string, unknown>);
+  }).length;
+  const breachingNext = jiraTasks.filter((t) => {
+    const issue = t.raw_data;
+    if (!issue || typeof issue !== 'object') return false;
+    return isBreachingNext(issue as Record<string, unknown>);
+  }).length;
+
+  const total = tasks.length;
+
   // Count tasks per source
   const counts: Record<string, number> = {};
   for (const t of tasks) {
@@ -25,9 +235,7 @@ export function Dashboard({ tasks }: Props) {
     (s) => (counts[s] ?? 0) > 0
   );
 
-  if (sources.length === 0) return null;
-
-  const total = tasks.length;
+  if (sources.length === 0 && total === 0) return null;
 
   return (
     <div className="mb-6">
@@ -39,6 +247,34 @@ export function Dashboard({ tasks }: Props) {
           </div>
           <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-0.5">
             Total Tasks
+          </div>
+        </div>
+
+        {/* Jira SLA/Update cards */}
+        <div className="border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d]">
+          <div className="text-2xl font-bold font-[var(--font-heading)] text-amber-400">
+            {needingUpdates}
+          </div>
+          <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-0.5">
+            Tickets Needing Updates
+          </div>
+        </div>
+
+        <div className="border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d]">
+          <div className="text-2xl font-bold font-[var(--font-heading)] text-red-400">
+            {breached}
+          </div>
+          <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-0.5">
+            Breached Tickets
+          </div>
+        </div>
+
+        <div className="border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d]">
+          <div className="text-2xl font-bold font-[var(--font-heading)] text-orange-300">
+            {breachingNext}
+          </div>
+          <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-0.5">
+            Ticket Breaching Next
           </div>
         </div>
 

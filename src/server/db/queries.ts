@@ -58,7 +58,7 @@ export class TaskQueries {
     sla_breach_at?: string;
     category?: string;
     raw_data?: unknown;
-  }): void {
+  }, options?: { deferSave?: boolean }): void {
     const id = `${task.source}:${task.source_id}`;
     this.db.run(
       `INSERT INTO tasks (id, source, source_id, source_url, title, description,
@@ -91,29 +91,57 @@ export class TaskQueries {
         task.raw_data ? JSON.stringify(task.raw_data) : null,
       ]
     );
-    saveDb();
+    if (!options?.deferSave) {
+      saveDb();
+    }
   }
 
-  deleteStaleBySource(source: string, freshIds: string[]): number {
+  deleteStaleBySource(
+    source: string,
+    freshIds: string[],
+    options?: { allowEmpty?: boolean; deferSave?: boolean }
+  ): number {
     if (freshIds.length === 0) {
+      if (!options?.allowEmpty) {
+        return 0;
+      }
+
       // No fresh tasks — delete all for this source
-      const before = this.db.exec(`SELECT COUNT(*) as c FROM tasks WHERE source = '${source}'`);
+      const countStmt = this.db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE source = ?`);
+      countStmt.bind([source]);
+      let count = 0;
+      if (countStmt.step()) {
+        const row = countStmt.getAsObject() as Record<string, unknown>;
+        count = (row.c as number) ?? 0;
+      }
+      countStmt.free();
+
       this.db.run(`DELETE FROM tasks WHERE source = ?`, [source]);
-      saveDb();
-      return (before[0]?.values[0]?.[0] as number) ?? 0;
+      if (!options?.deferSave) {
+        saveDb();
+      }
+      return count;
     }
     const placeholders = freshIds.map(() => '?').join(',');
-    const countResult = this.db.exec(
-      `SELECT COUNT(*) as c FROM tasks WHERE source = '${source}' AND id NOT IN (${placeholders})`,
-      freshIds
+    const countStmt = this.db.prepare(
+      `SELECT COUNT(*) as c FROM tasks WHERE source = ? AND id NOT IN (${placeholders})`
     );
-    const count = (countResult[0]?.values[0]?.[0] as number) ?? 0;
+    countStmt.bind([source, ...freshIds]);
+    let count = 0;
+    if (countStmt.step()) {
+      const row = countStmt.getAsObject() as Record<string, unknown>;
+      count = (row.c as number) ?? 0;
+    }
+    countStmt.free();
+
     if (count > 0) {
       this.db.run(
         `DELETE FROM tasks WHERE source = ? AND id NOT IN (${placeholders})`,
         [source, ...freshIds]
       );
-      saveDb();
+      if (!options?.deferSave) {
+        saveDb();
+      }
     }
     return count;
   }

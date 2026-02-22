@@ -15,6 +15,7 @@ import { createSettingsRoutes } from './routes/settings.js';
 import { createIntegrationRoutes } from './routes/integrations.js';
 import { createIngestRoutes } from './routes/ingest.js';
 import { createActionRoutes } from './routes/actions.js';
+import { createJiraRoutes } from './routes/jira.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
 import { OneDriveWatcher } from './services/onedrive-watcher.js';
 
@@ -102,10 +103,15 @@ async function main() {
   app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, uvxCommand));
   app.use('/api/ingest', createIngestRoutes(taskQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries));
+  app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
 
   // 6. OneDrive file watcher (Power Automate bridge)
   const watcher = new OneDriveWatcher(taskQueries);
   watcher.start();
+
+  app.get('/api/onedrive/status', (_req, res) => {
+    res.json({ ok: true, data: watcher.getStatus() });
+  });
 
   // Production: serve built Vite frontend
   if (isProduction) {

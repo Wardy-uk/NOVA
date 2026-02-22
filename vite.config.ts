@@ -6,6 +6,7 @@ import path from 'path';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   root: 'src/client',
+  publicDir: '../../public',
   build: {
     outDir: '../../dist/client',
     emptyOutDir: true,

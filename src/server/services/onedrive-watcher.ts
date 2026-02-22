@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { TaskQueries } from '../db/queries.js';
+import { saveDb } from '../db/schema.js';
 
 const VALID_SOURCES = ['planner', 'todo', 'calendar', 'email'];
 const POLL_INTERVAL = 30_000; // 30 seconds
@@ -20,6 +21,11 @@ export class OneDriveWatcher {
   private watchDir: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastModified = new Map<string, number>();
+  private lastScanAt: string | null = null;
+  private lastIngestAt: string | null = null;
+  private lastIngestFile: string | null = null;
+  private lastIngestSource: string | null = null;
+  private lastError: string | null = null;
 
   constructor(
     private taskQueries: TaskQueries,
@@ -37,6 +43,7 @@ export class OneDriveWatcher {
         fs.mkdirSync(this.watchDir, { recursive: true });
         console.log(`[OneDrive] Created watch folder: ${this.watchDir}`);
       } catch (err) {
+        this.lastError = `Cannot create watch folder: ${this.watchDir}`;
         console.warn(`[OneDrive] Cannot create watch folder: ${this.watchDir}`, err);
         return;
       }
@@ -58,11 +65,31 @@ export class OneDriveWatcher {
     }
   }
 
+  getStatus(): {
+    watchDir: string;
+    lastScanAt: string | null;
+    lastIngestAt: string | null;
+    lastIngestFile: string | null;
+    lastIngestSource: string | null;
+    lastError: string | null;
+  } {
+    return {
+      watchDir: this.watchDir,
+      lastScanAt: this.lastScanAt,
+      lastIngestAt: this.lastIngestAt,
+      lastIngestFile: this.lastIngestFile,
+      lastIngestSource: this.lastIngestSource,
+      lastError: this.lastError,
+    };
+  }
+
   private scanFolder(): void {
+    this.lastScanAt = new Date().toISOString();
     let files: string[];
     try {
       files = fs.readdirSync(this.watchDir).filter(f => f.endsWith('.json'));
     } catch {
+      this.lastError = `Cannot read watch folder: ${this.watchDir}`;
       return; // Folder may not exist yet
     }
 
@@ -219,12 +246,23 @@ export class OneDriveWatcher {
           task.source_url = buildSourceUrl(source, task.source_id);
         }
 
-        this.taskQueries.upsertFromSource(task);
+        this.taskQueries.upsertFromSource(task, { deferSave: true });
         freshIds.push(`${source}:${task.source_id}`);
       }
 
       // Clean up stale tasks for this source
-      const removed = this.taskQueries.deleteStaleBySource(source, freshIds);
+      const removed = tasks.length > 0
+        ? this.taskQueries.deleteStaleBySource(source, freshIds, { deferSave: true })
+        : 0;
+
+      if (tasks.length > 0 || removed > 0) {
+        saveDb();
+      }
+
+      this.lastIngestAt = new Date().toISOString();
+      this.lastIngestFile = fileName;
+      this.lastIngestSource = source;
+      this.lastError = null;
 
       console.log(
         `[OneDrive] ${fileName}: ${tasks.length} tasks ingested, ${removed} stale removed`
@@ -239,6 +277,7 @@ export class OneDriveWatcher {
         console.warn(`[OneDrive] ${fileName}: Could not delete (may be locked by OneDrive)`);
       }
     } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
       console.warn(`[OneDrive] ${fileName}: Parse error —`, err);
     }
   }

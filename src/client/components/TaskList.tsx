@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TaskCard } from './TaskCard.js';
 import { Dashboard } from './Dashboard.js';
@@ -29,6 +29,7 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortField>('priority');
   const [showOverdueOnly, setShowOverdueOnly] = useState(false);
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(true);
 
   // Available sources (only those with tasks)
   const activeSources = useMemo(() => {
@@ -37,6 +38,16 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
       [...set].filter((s) => !SOURCE_ORDER.includes(s))
     );
   }, [tasks]);
+  
+  useEffect(() => {
+    setCollapsed((prev) => {
+      const next = { ...prev };
+      for (const source of activeSources) {
+        if (next[source] === undefined) next[source] = true;
+      }
+      return next;
+    });
+  }, [activeSources]);
 
   // Filter + sort tasks
   const filtered = useMemo(() => {
@@ -76,27 +87,8 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
     });
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-neutral-500">
-        Loading tasks...
-      </div>
-    );
-  }
-
-  if (tasks.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-neutral-500">
-        <p className="text-lg mb-2">No tasks</p>
-        <p className="text-sm">
-          Connect a source and sync to see your tasks here.
-        </p>
-      </div>
-    );
-  }
-
-  const pinned = filtered.filter((t) => t.is_pinned);
-  const unpinned = filtered.filter((t) => !t.is_pinned);
+  const pinned = useMemo(() => filtered.filter((t) => t.is_pinned), [filtered]);
+  const unpinned = useMemo(() => filtered.filter((t) => !t.is_pinned), [filtered]);
 
   // Group unpinned tasks by source
   const grouped: Record<string, Task[]> = {};
@@ -119,6 +111,32 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
   const toggleGroup = (source: string) => {
     setCollapsed((prev) => ({ ...prev, [source]: !prev[source] }));
   };
+
+  useEffect(() => {
+    if (pinned.length === 0) return;
+    if (sourceFilter === 'pinned') {
+      setPinnedCollapsed(false);
+    }
+  }, [pinned.length, sourceFilter]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20 text-neutral-500">
+        Loading tasks...
+      </div>
+    );
+  }
+
+  if (tasks.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-neutral-500">
+        <p className="text-lg mb-2">No tasks</p>
+        <p className="text-sm">
+          Connect a source and sync to see your tasks here.
+        </p>
+      </div>
+    );
+  }
 
   // Count overdue tasks
   const now = new Date();
@@ -216,14 +234,28 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
       {/* Pinned section */}
       {pinned.length > 0 && (
         <div className="mb-4">
-          <h2 className="text-xs text-neutral-500 uppercase tracking-widest mb-2">
-            Pinned
-          </h2>
-          <div className="space-y-1">
-            {pinned.map((task) => (
-              <TaskCard key={task.id} task={task} onUpdate={onUpdateTask} />
-            ))}
-          </div>
+          <button
+            onClick={() => setPinnedCollapsed((prev) => !prev)}
+            className="w-full flex items-center gap-2 py-2 px-1 group text-left"
+          >
+            <div className="w-2 h-2 rounded-full shrink-0 bg-[#5ec1ca]" />
+            <span className="text-xs text-neutral-500 uppercase tracking-widest">
+              Pinned
+            </span>
+            <span className="text-xs text-neutral-600">
+              ({pinned.length})
+            </span>
+            <span className="text-[10px] text-neutral-600 ml-auto group-hover:text-neutral-400 transition-colors">
+              {pinnedCollapsed ? '+ Show' : '- Hide'}
+            </span>
+          </button>
+          {!pinnedCollapsed && (
+            <div className="space-y-1">
+              {pinned.map((task) => (
+                <TaskCard key={task.id} task={task} onUpdate={onUpdateTask} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -234,7 +266,9 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
           label: source,
           color: '#6b7280',
         };
-        const isCollapsed = collapsed[source] ?? false;
+        const isCollapsed = sourceFilter === source
+          ? false
+          : (collapsed[source] ?? true);
 
         return (
           <div key={source} className="mb-2">

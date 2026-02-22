@@ -1,0 +1,7 @@
+multi-user
+login
+persist settings
+persist filter selection
+daily stats/KPIs individual and team
+add task/to dos from NOVA
+auto run Ask Nova when session first loads

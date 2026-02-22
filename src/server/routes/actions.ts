@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { TaskQueries, SettingsQueries } from '../db/queries.js';
-import { getNextActions } from '../services/ai-actions.js';
+import { getNextActions, getAiActionsDebugLog, recordAiActionsDebug } from '../services/ai-actions.js';
 
 export function createActionRoutes(
   taskQueries: TaskQueries,
@@ -8,10 +8,40 @@ export function createActionRoutes(
 ) {
   const router = Router();
 
-  router.post('/suggest', async (_req, res) => {
+  const resolveApiKey = (): string | null => {
+    const fromDb = settingsQueries.get('openai_api_key');
+    if (fromDb && fromDb.trim()) return fromDb.trim();
+    const fromEnv = process.env.OPENAI_API_KEY ?? process.env.OPENAI_KEY ?? null;
+    if (fromEnv && fromEnv.trim()) {
+      settingsQueries.set('openai_api_key', fromEnv.trim());
+      return fromEnv.trim();
+    }
+    return null;
+  };
+
+  router.post('/suggest', async (req, res) => {
     try {
-      const apiKey = settingsQueries.get('openai_api_key');
+      const source = (req.query.source as string | undefined) ?? 'all';
+      const provider = settingsQueries.get('ai_provider') ?? 'openai';
+      const taskCount = source === 'all'
+        ? taskQueries.getAll().length
+        : taskQueries.getAll({ source }).length;
+      recordAiActionsDebug(
+        `[request] source=${source} provider=${provider} taskCount=${taskCount}`
+      );
+
+      if (provider !== 'openai') {
+        recordAiActionsDebug(`[error] provider "${provider}" not supported`);
+        res.status(400).json({
+          ok: false,
+          error: `AI provider "${provider}" is not configured on the server yet.`,
+        });
+        return;
+      }
+
+      const apiKey = resolveApiKey();
       if (!apiKey) {
+        recordAiActionsDebug('[error] missing OpenAI API key');
         res.status(400).json({
           ok: false,
           error: 'OpenAI API key not configured. Add it in Settings → AI Assistant.',
@@ -19,11 +49,14 @@ export function createActionRoutes(
         return;
       }
 
-      const countStr = settingsQueries.get('ai_action_count') ?? '5';
+      const countStr = settingsQueries.get('ai_action_count') ?? '10';
       const count = parseInt(countStr, 10) || 5;
 
-      const tasks = taskQueries.getAll();
+      const tasks = source === 'all'
+        ? taskQueries.getAll()
+        : taskQueries.getAll({ source });
       if (tasks.length === 0) {
+        recordAiActionsDebug('[info] no tasks for requested source');
         res.json({ ok: true, data: { suggestions: [] } });
         return;
       }
@@ -41,6 +74,10 @@ export function createActionRoutes(
       const message = err instanceof Error ? err.message : 'Unknown error';
       res.status(500).json({ ok: false, error: `AI suggestion failed: ${message}` });
     }
+  });
+
+  router.get('/debug-log', (_req, res) => {
+    res.json({ ok: true, data: getAiActionsDebugLog() });
   });
 
   return router;
