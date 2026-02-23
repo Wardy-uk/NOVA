@@ -654,6 +654,93 @@ export class CrmQueries {
   }
 }
 
+// ---------- Users ----------
+
+export interface User {
+  id: number;
+  username: string;
+  display_name: string | null;
+  email: string | null;
+  password_hash: string;
+  role: string;
+  auth_provider: string;
+  provider_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export class UserQueries {
+  constructor(private db: Database) {}
+
+  getByUsername(username: string): User | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM users WHERE username = ?`);
+    stmt.bind([username]);
+    if (stmt.step()) { const u = stmt.getAsObject() as unknown as User; stmt.free(); return u; }
+    stmt.free();
+    return undefined;
+  }
+
+  getById(id: number): User | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM users WHERE id = ?`);
+    stmt.bind([id]);
+    if (stmt.step()) { const u = stmt.getAsObject() as unknown as User; stmt.free(); return u; }
+    stmt.free();
+    return undefined;
+  }
+
+  getByProviderId(provider: string, providerId: string): User | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM users WHERE auth_provider = ? AND provider_id = ?`);
+    stmt.bind([provider, providerId]);
+    if (stmt.step()) { const u = stmt.getAsObject() as unknown as User; stmt.free(); return u; }
+    stmt.free();
+    return undefined;
+  }
+
+  create(user: { username: string; display_name?: string; email?: string; password_hash: string; role?: string; auth_provider?: string; provider_id?: string }): number {
+    this.db.run(
+      `INSERT INTO users (username, display_name, email, password_hash, role, auth_provider, provider_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [user.username, user.display_name ?? null, user.email ?? null, user.password_hash,
+       user.role ?? 'user', user.auth_provider ?? 'local', user.provider_id ?? null]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  update(id: number, updates: Partial<Omit<User, 'id' | 'created_at'>>): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [key, val] of Object.entries(updates)) {
+      fields.push(`${key} = ?`);
+      params.push(val ?? null);
+    }
+    if (fields.length === 0) return false;
+    fields.push(`updated_at = datetime('now')`);
+    params.push(id);
+    this.db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return this.getById(id) !== undefined;
+  }
+
+  count(): number {
+    const stmt = this.db.prepare(`SELECT COUNT(*) as c FROM users`);
+    let count = 0;
+    if (stmt.step()) { count = (stmt.getAsObject() as Record<string, unknown>).c as number; }
+    stmt.free();
+    return count;
+  }
+
+  getAll(): Omit<User, 'password_hash'>[] {
+    const stmt = this.db.prepare(`SELECT id, username, display_name, email, role, auth_provider, provider_id, created_at, updated_at FROM users ORDER BY created_at`);
+    const users: Omit<User, 'password_hash'>[] = [];
+    while (stmt.step()) { users.push(stmt.getAsObject() as unknown as Omit<User, 'password_hash'>); }
+    stmt.free();
+    return users;
+  }
+}
+
 export class SettingsQueries {
   constructor(private db: Database) {}
 

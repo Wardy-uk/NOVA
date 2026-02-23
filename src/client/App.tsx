@@ -6,9 +6,11 @@ import { DailyStatsView } from './components/DailyStatsView.js';
 import { KpisView } from './components/KpisView.js';
 import { DeliveryView } from './components/DeliveryView.js';
 import { CrmView } from './components/CrmView.js';
+import { LoginView } from './components/LoginView.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
+import { useAuth } from './hooks/useAuth.js';
 
 type View = 'tasks' | 'settings' | 'standup' | 'daily' | 'kpis' | 'delivery' | 'crm' | 'debug';
 
@@ -42,6 +44,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 
 export function App() {
   const [view, setView] = useState<View>('daily');
+  const auth = useAuth();
   const { tasks, loading, error, syncing, syncTasks, updateTask } = useTasks();
   const health = useHealth();
   const { theme, setTheme } = useTheme();
@@ -51,7 +54,7 @@ export function App() {
 
   // Auto-trigger standup on first visit if no morning ritual today
   useEffect(() => {
-    if (standupChecked.current) return;
+    if (!auth.isAuthenticated || standupChecked.current) return;
     standupChecked.current = true;
     fetch('/api/standups/today')
       .then((r) => r.json())
@@ -61,7 +64,7 @@ export function App() {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [auth.isAuthenticated]);
 
   useEffect(() => {
     if (view !== 'debug') return;
@@ -89,6 +92,28 @@ export function App() {
       clearInterval(interval);
     };
   }, [view]);
+
+  // Auth gate
+  if (auth.loading) {
+    return (
+      <div className="min-h-screen bg-[#272C33] flex items-center justify-center">
+        <div className="text-neutral-500 text-sm">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!auth.isAuthenticated) {
+    return (
+      <ErrorBoundary>
+        <LoginView
+          onLogin={auth.login}
+          onRegister={auth.register}
+          error={auth.error}
+          loading={auth.loading}
+        />
+      </ErrorBoundary>
+    );
+  }
 
   return (
     <ErrorBoundary>
@@ -216,6 +241,18 @@ export function App() {
                 Debug
               </button>
             )}
+            {/* User / Logout */}
+            <div className="flex items-center gap-2 ml-2 pl-2 border-l border-[#3a424d]">
+              <span className="text-[10px] text-neutral-500">
+                {auth.user?.display_name || auth.user?.username}
+              </span>
+              <button
+                onClick={auth.logout}
+                className="px-2 py-1 text-[10px] text-neutral-400 hover:text-red-400 rounded transition-colors"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </header>
 

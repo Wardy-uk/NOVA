@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { getDb, initializeSchema } from './db/schema.js';
-import { TaskQueries, SettingsQueries, RitualQueries, DeliveryQueries, CrmQueries } from './db/queries.js';
+import { TaskQueries, SettingsQueries, RitualQueries, DeliveryQueries, CrmQueries, UserQueries } from './db/queries.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
 import { createTaskRoutes } from './routes/tasks.js';
@@ -18,6 +18,9 @@ import { createJiraRoutes } from './routes/jira.js';
 import { createStandupRoutes } from './routes/standups.js';
 import { createDeliveryRoutes } from './routes/delivery.js';
 import { createCrmRoutes } from './routes/crm.js';
+import { createAuthRoutes } from './routes/auth.js';
+import { authMiddleware } from './middleware/auth.js';
+import crypto from 'crypto';
 import { generateMorningBriefing } from './services/ai-standup.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
 import { OneDriveWatcher } from './services/onedrive-watcher.js';
@@ -39,6 +42,15 @@ async function main() {
   const ritualQueries = new RitualQueries(db);
   const deliveryQueries = new DeliveryQueries(db);
   const crmQueries = new CrmQueries(db);
+  const userQueries = new UserQueries(db);
+
+  // JWT secret — use env, or persist a random one in settings
+  let jwtSecret = process.env.JWT_SECRET ?? settingsQueries.get('jwt_secret');
+  if (!jwtSecret) {
+    jwtSecret = crypto.randomBytes(32).toString('hex');
+    settingsQueries.set('jwt_secret', jwtSecret);
+    console.log('[N.O.V.A] Generated and saved JWT secret');
+  }
 
   // 2. MCP Client Manager
   console.log('[N.O.V.A] Setting up MCP servers...');
@@ -111,7 +123,11 @@ async function main() {
   app.use(cors());
   app.use(express.json());
 
-  // API routes
+  // Public API routes (no auth required)
+  app.use('/api/auth', createAuthRoutes(userQueries, jwtSecret));
+
+  // Protected API routes
+  app.use('/api', authMiddleware(jwtSecret));
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries));

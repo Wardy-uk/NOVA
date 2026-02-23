@@ -131,6 +131,21 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  database.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      display_name TEXT,
+      email TEXT,
+      password_hash TEXT NOT NULL,
+      role TEXT DEFAULT 'user',
+      auth_provider TEXT DEFAULT 'local',
+      provider_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   // Indexes
   database.run(`CREATE INDEX IF NOT EXISTS idx_delivery_product ON delivery_entries(product)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source)`);
@@ -143,6 +158,7 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_crm_customers_next_review ON crm_customers(next_review_date)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_crm_reviews_customer ON crm_reviews(customer_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_crm_reviews_date ON crm_reviews(review_date DESC)`);
+  database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)`);
 
   // Seed default settings
   const defaults: [string, string][] = [
