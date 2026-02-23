@@ -93,6 +93,12 @@ export function createAuthRoutes(userQueries: UserQueries, jwtSecret: string): R
     res.json({ ok: true, data: { token, user: safeUser(user), firstUser: userCount === 0 } });
   });
 
+  // GET /api/auth/status — public, check if any users exist (for first-run UX)
+  router.get('/status', (_req, res) => {
+    const count = userQueries.count();
+    res.json({ ok: true, data: { hasUsers: count > 0 } });
+  });
+
   // GET /api/auth/me — requires valid token
   router.get('/me', authMiddleware(jwtSecret), (req, res) => {
     const user = userQueries.getById(req.user!.id);

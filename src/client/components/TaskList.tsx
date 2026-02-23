@@ -1,8 +1,9 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TaskCard } from './TaskCard.js';
+import { TaskDrawer } from './TaskDrawer.js';
+import { CreateTaskForm } from './CreateTaskForm.js';
 import { NextActions } from './NextActions.js';
-import { JiraActions } from './JiraActions.js';
 
 interface Props {
   tasks: Task[];
@@ -39,6 +40,7 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
     return window.localStorage.getItem('nova_task_overdue') === 'true';
   });
   const [pinnedCollapsed, setPinnedCollapsed] = useState(true);
+  const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
 
   // Available sources (only those with tasks)
   const activeSources = useMemo(() => {
@@ -133,6 +135,31 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
     if (!orderedSources.includes(s)) orderedSources.push(s);
   }
 
+  // Flat list of all visible tasks for drawer navigation
+  const flatTasks = useMemo(() => {
+    const result: Task[] = [...sortTasks(pinned)];
+    for (const source of orderedSources) {
+      result.push(...(grouped[source] ?? []));
+    }
+    return result;
+  }, [pinned, orderedSources, grouped]);
+
+  const drawerIndex = useMemo(() => {
+    if (!drawerTaskId) return -1;
+    return flatTasks.findIndex(t => t.id === drawerTaskId);
+  }, [drawerTaskId, flatTasks]);
+
+  const drawerTask = drawerIndex >= 0 ? flatTasks[drawerIndex] : null;
+
+  const openDrawer = useCallback((taskId: string) => setDrawerTaskId(taskId), []);
+  const closeDrawer = useCallback(() => setDrawerTaskId(null), []);
+  const prevDrawer = useCallback(() => {
+    if (drawerIndex > 0) setDrawerTaskId(flatTasks[drawerIndex - 1].id);
+  }, [drawerIndex, flatTasks]);
+  const nextDrawer = useCallback(() => {
+    if (drawerIndex < flatTasks.length - 1) setDrawerTaskId(flatTasks[drawerIndex + 1].id);
+  }, [drawerIndex, flatTasks]);
+
   const toggleGroup = (source: string) => {
     setCollapsed((prev) => ({ ...prev, [source]: !prev[source] }));
   };
@@ -175,7 +202,7 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
   return (
     <div>
       <NextActions onUpdateTask={onUpdateTask} />
-      <JiraActions />
+      <CreateTaskForm />
 
       {/* Filter / Sort toolbar */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -265,7 +292,7 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
           >
             <div className="w-2 h-2 rounded-full shrink-0 bg-[#5ec1ca]" />
             <span className="text-xs text-neutral-500 uppercase tracking-widest">
-              Pinned
+              My Focus
             </span>
             <span className="text-xs text-neutral-600">
               ({pinned.length})
@@ -277,7 +304,7 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
           {!pinnedCollapsed && (
             <div className="space-y-1">
               {pinned.map((task) => (
-                <TaskCard key={task.id} task={task} onUpdate={onUpdateTask} />
+                <TaskCard key={task.id} task={task} onUpdate={onUpdateTask} onClick={() => openDrawer(task.id)} />
               ))}
             </div>
           )}
@@ -322,6 +349,7 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
                     key={task.id}
                     task={task}
                     onUpdate={onUpdateTask}
+                    onClick={() => openDrawer(task.id)}
                   />
                 ))}
               </div>
@@ -329,6 +357,22 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
           </div>
         );
       })}
+
+      {/* Universal task drawer */}
+      {drawerTask && (
+        <TaskDrawer
+          task={drawerTask}
+          index={drawerIndex}
+          total={flatTasks.length}
+          onClose={closeDrawer}
+          onPrev={prevDrawer}
+          onNext={nextDrawer}
+          onTaskUpdated={() => {
+            // Trigger a re-sync after drawer edits
+            onUpdateTask(drawerTask.id, {});
+          }}
+        />
+      )}
     </div>
   );
 }

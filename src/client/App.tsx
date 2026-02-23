@@ -6,13 +6,14 @@ import { DailyStatsView } from './components/DailyStatsView.js';
 import { KpisView } from './components/KpisView.js';
 import { DeliveryView } from './components/DeliveryView.js';
 import { CrmView } from './components/CrmView.js';
+import { MyFocusView } from './components/MyFocusView.js';
 import { LoginView } from './components/LoginView.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
 
-type View = 'tasks' | 'settings' | 'standup' | 'daily' | 'kpis' | 'delivery' | 'crm' | 'debug';
+type View = 'tasks' | 'focus' | 'settings' | 'standup' | 'daily' | 'kpis' | 'delivery' | 'crm' | 'debug';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -140,6 +141,16 @@ export function App() {
               Command Centre
             </button>
             <button
+              onClick={() => setView('focus')}
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                view === 'focus'
+                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
+              }`}
+            >
+              My Focus
+            </button>
+            <button
               onClick={() => setView('tasks')}
               className={`px-3 py-1.5 text-xs rounded transition-colors ${
                 view === 'tasks'
@@ -257,7 +268,7 @@ export function App() {
         </header>
 
         {/* Main content */}
-        <main className="flex-1 px-6 py-6 max-w-4xl mx-auto w-full">
+        <main className={`flex-1 px-6 py-6 mx-auto w-full ${view === 'delivery' ? 'max-w-7xl' : 'max-w-4xl'}`}>
           {view === 'tasks' ? (
             <>
               {error && (
@@ -271,13 +282,15 @@ export function App() {
                 onUpdateTask={updateTask}
               />
             </>
+          ) : view === 'focus' ? (
+            <MyFocusView tasks={tasks} onUpdateTask={updateTask} />
           ) : view === 'standup' ? (
             <StandupView
               onUpdateTask={updateTask}
               onNavigate={(v) => setView(v as View)}
             />
           ) : view === 'daily' ? (
-            <DailyStatsView tasks={tasks} />
+            <DailyStatsView tasks={tasks} onNavigate={(v) => setView(v as View)} />
           ) : view === 'kpis' ? (
             <KpisView tasks={tasks} />
           ) : view === 'delivery' ? (

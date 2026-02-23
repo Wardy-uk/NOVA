@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { DeliveryDrawer } from './DeliveryDrawer.js';
 
 interface DeliveryRow {
   orderDate: string | null;
@@ -44,10 +45,12 @@ interface DbEntry {
   order_date: string | null;
   go_live_date: string | null;
   predicted_delivery: string | null;
+  training_date: string | null;
   branches: number | null;
   mrr: number | null;
   incremental: number | null;
   licence_fee: number | null;
+  is_starred: number;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -78,7 +81,7 @@ function KpiCard({ label, value, sub }: { label: string; value: string | number;
   return (
     <div className="bg-[#2f353d] rounded-lg border border-[#3a424d] p-3 flex flex-col">
       <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">{label}</div>
-      <div className="text-xl font-bold text-neutral-100">{value}</div>
+      <div className="text-xl font-bold text-neutral-100 truncate min-w-0">{value}</div>
       {sub && <div className="text-[10px] text-neutral-500 mt-0.5">{sub}</div>}
     </div>
   );
@@ -97,16 +100,6 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ---- Form field helpers ----
-const inputCls = 'bg-[#272C33] text-neutral-200 text-[11px] rounded px-2.5 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-full placeholder:text-neutral-600';
-const labelCls = 'text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block';
-
-const emptyForm = {
-  product: '', account: '', status: 'Not Started', onboarder: '',
-  order_date: '', go_live_date: '', predicted_delivery: '',
-  branches: '', mrr: '', incremental: '', licence_fee: '', notes: '',
-};
-
 export function DeliveryView() {
   const [data, setData] = useState<DeliveryData | null>(null);
   const [dbEntries, setDbEntries] = useState<DbEntry[]>([]);
@@ -115,10 +108,8 @@ export function DeliveryView() {
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(emptyForm);
-  const [saving, setSaving] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [drawerEntryId, setDrawerEntryId] = useState<number | null>(null);
+  const [drawerIsNew, setDrawerIsNew] = useState(false);
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -143,64 +134,10 @@ export function DeliveryView() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const handleSave = async () => {
-    if (!form.product.trim() || !form.account.trim()) return;
-    setSaving(true);
-    try {
-      const body = {
-        product: form.product.trim(),
-        account: form.account.trim(),
-        status: form.status,
-        onboarder: form.onboarder.trim() || null,
-        order_date: form.order_date || null,
-        go_live_date: form.go_live_date || null,
-        predicted_delivery: form.predicted_delivery || null,
-        branches: form.branches ? parseInt(form.branches, 10) : null,
-        mrr: form.mrr ? parseFloat(form.mrr) : null,
-        incremental: form.incremental ? parseFloat(form.incremental) : null,
-        licence_fee: form.licence_fee ? parseFloat(form.licence_fee) : null,
-        notes: form.notes.trim() || null,
-      };
-
-      const url = editingId ? `/api/delivery/entries/${editingId}` : '/api/delivery/entries';
-      const method = editingId ? 'PUT' : 'POST';
-      const resp = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const json = await resp.json();
-      if (json.ok) {
-        setForm(emptyForm);
-        setShowForm(false);
-        setEditingId(null);
-        // Refresh DB entries
-        const dbResp = await fetch('/api/delivery/entries');
-        const dbJson = await dbResp.json();
-        if (dbJson.ok) setDbEntries(dbJson.data);
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleEdit = (entry: DbEntry) => {
-    setForm({
-      product: entry.product,
-      account: entry.account,
-      status: entry.status || 'Not Started',
-      onboarder: entry.onboarder ?? '',
-      order_date: entry.order_date ?? '',
-      go_live_date: entry.go_live_date ?? '',
-      predicted_delivery: entry.predicted_delivery ?? '',
-      branches: entry.branches?.toString() ?? '',
-      mrr: entry.mrr?.toString() ?? '',
-      incremental: entry.incremental?.toString() ?? '',
-      licence_fee: entry.licence_fee?.toString() ?? '',
-      notes: entry.notes ?? '',
-    });
-    setEditingId(entry.id);
-    setShowForm(true);
+  const refreshDbEntries = async () => {
+    const dbResp = await fetch('/api/delivery/entries');
+    const dbJson = await dbResp.json();
+    if (dbJson.ok) setDbEntries(dbJson.data);
   };
 
   const handleDelete = async (id: number) => {
@@ -208,7 +145,15 @@ export function DeliveryView() {
     setDbEntries((prev) => prev.filter((e) => e.id !== id));
   };
 
-  const setField = (key: string, val: string) => setForm((f) => ({ ...f, [key]: val }));
+  const handleToggleStar = async (id: number) => {
+    const resp = await fetch(`/api/delivery/entries/${id}/star`, { method: 'PATCH' });
+    const json = await resp.json();
+    if (json.ok && json.data) {
+      setDbEntries((prev) => prev.map((e) => e.id === id ? json.data : e));
+    }
+  };
+
+  const drawerEntry = drawerEntryId != null ? dbEntries.find((e) => e.id === drawerEntryId) ?? null : null;
 
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-neutral-500">Loading delivery sheet...</div>;
@@ -245,6 +190,8 @@ export function DeliveryView() {
   const dbForTab = activeTab ? dbEntries.filter((e) => e.product === activeTab) : [];
   // DB entries for products not in xlsx
   const dbExtraProducts = [...new Set(dbEntries.map((e) => e.product))].filter((p) => !summary.products.includes(p));
+  // Starred entries across all products
+  const starredEntries = dbEntries.filter((e) => e.is_starred);
 
   const allProducts = [...summary.products, ...dbExtraProducts];
   const lastMod = new Date(summary.lastModified);
@@ -260,95 +207,12 @@ export function DeliveryView() {
           </div>
         </div>
         <button
-          onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ ...emptyForm, product: activeTab ?? '' }); }}
+          onClick={() => { setDrawerEntryId(null); setDrawerIsNew(true); }}
           className="px-4 py-2 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors"
         >
-          {showForm ? 'Cancel' : '+ Add Entry'}
+          + Add Entry
         </button>
       </div>
-
-      {/* Add/Edit form */}
-      {showForm && (
-        <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4 mb-6">
-          <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold mb-3">
-            {editingId ? 'Edit Entry' : 'New Delivery Entry'}
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            <div>
-              <label className={labelCls}>Product *</label>
-              <select value={form.product} onChange={(e) => setField('product', e.target.value)} className={inputCls}>
-                <option value="">Select...</option>
-                {allProducts.map((p) => <option key={p} value={p}>{p}</option>)}
-                <option value="__custom">Other...</option>
-              </select>
-              {form.product === '__custom' && (
-                <input className={`${inputCls} mt-1`} placeholder="Product name" value="" onChange={(e) => setField('product', e.target.value)} />
-              )}
-            </div>
-            <div>
-              <label className={labelCls}>Account *</label>
-              <input className={inputCls} value={form.account} onChange={(e) => setField('account', e.target.value)} placeholder="Customer name" />
-            </div>
-            <div>
-              <label className={labelCls}>Status</label>
-              <select value={form.status} onChange={(e) => setField('status', e.target.value)} className={inputCls}>
-                {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Onboarder</label>
-              <input className={inputCls} value={form.onboarder} onChange={(e) => setField('onboarder', e.target.value)} placeholder="Name" />
-            </div>
-            <div>
-              <label className={labelCls}>Order Date</label>
-              <input type="date" className={inputCls} value={form.order_date} onChange={(e) => setField('order_date', e.target.value)} />
-            </div>
-            <div>
-              <label className={labelCls}>Go Live Date</label>
-              <input type="date" className={inputCls} value={form.go_live_date} onChange={(e) => setField('go_live_date', e.target.value)} />
-            </div>
-            <div>
-              <label className={labelCls}>Predicted Delivery</label>
-              <input type="date" className={inputCls} value={form.predicted_delivery} onChange={(e) => setField('predicted_delivery', e.target.value)} />
-            </div>
-            <div>
-              <label className={labelCls}>Branches</label>
-              <input type="number" className={inputCls} value={form.branches} onChange={(e) => setField('branches', e.target.value)} placeholder="0" />
-            </div>
-            <div>
-              <label className={labelCls}>MRR (£)</label>
-              <input type="number" step="0.01" className={inputCls} value={form.mrr} onChange={(e) => setField('mrr', e.target.value)} placeholder="0.00" />
-            </div>
-            <div>
-              <label className={labelCls}>Incremental (£)</label>
-              <input type="number" step="0.01" className={inputCls} value={form.incremental} onChange={(e) => setField('incremental', e.target.value)} placeholder="0.00" />
-            </div>
-            <div>
-              <label className={labelCls}>Licence Fee (£)</label>
-              <input type="number" step="0.01" className={inputCls} value={form.licence_fee} onChange={(e) => setField('licence_fee', e.target.value)} placeholder="0.00" />
-            </div>
-            <div className="col-span-2 sm:col-span-3 md:col-span-1">
-              <label className={labelCls}>Notes</label>
-              <input className={inputCls} value={form.notes} onChange={(e) => setField('notes', e.target.value)} placeholder="Details..." />
-            </div>
-          </div>
-          <div className="flex items-center gap-2 mt-4">
-            <button
-              onClick={handleSave}
-              disabled={saving || !form.product.trim() || !form.account.trim()}
-              className="px-4 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors disabled:opacity-50"
-            >
-              {saving ? 'Saving...' : editingId ? 'Update' : 'Save'}
-            </button>
-            <button
-              onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); }}
-              className="px-4 py-1.5 text-xs rounded bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] border border-[#3a424d] transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Summary KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
@@ -384,6 +248,48 @@ export function DeliveryView() {
           );
         })}
       </div>
+
+      {/* Starred panel */}
+      {starredEntries.length > 0 && (
+        <div className="mb-5 border border-amber-400/30 rounded-lg bg-amber-400/5 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-amber-400 text-sm">{'\u2605'}</span>
+            <span className="text-xs text-amber-400 uppercase tracking-widest font-semibold">
+              Starred Deliveries
+            </span>
+            <span className="text-[10px] text-neutral-500">{starredEntries.length}</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {starredEntries.map((entry) => (
+              <div
+                key={`star-${entry.id}`}
+                className="flex items-center gap-3 bg-[#2f353d] rounded px-3 py-2 border border-[#3a424d] cursor-pointer hover:border-amber-400/50 transition-colors"
+                onClick={() => { setActiveTab(entry.product); }}
+              >
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleToggleStar(entry.id); }}
+                  className="text-amber-400 text-sm shrink-0"
+                >
+                  {'\u2605'}
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] text-neutral-200 font-medium truncate">{entry.account}</div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[9px] text-neutral-500">{entry.product}</span>
+                    <StatusBadge status={entry.status} />
+                    {entry.training_date && (
+                      <span className="text-[9px] text-neutral-500">Train: {entry.training_date}</span>
+                    )}
+                  </div>
+                </div>
+                {entry.mrr != null && (
+                  <div className="text-[10px] text-neutral-400 font-medium shrink-0">{formatCurrency(entry.mrr)}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Sheet content */}
       {activeTab && (
@@ -443,12 +349,14 @@ export function DeliveryView() {
             <table className="w-full text-[11px]">
               <thead>
                 <tr className="bg-[#2f353d] text-neutral-500 uppercase tracking-wider text-left">
+                  <th className="px-3 py-2 font-medium w-8"></th>
                   <th className="px-3 py-2 font-medium">Account</th>
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium">Onboarder</th>
                   <th className="px-3 py-2 font-medium">Order Date</th>
                   <th className="px-3 py-2 font-medium">Go Live</th>
                   <th className="px-3 py-2 font-medium">Predicted</th>
+                  <th className="px-3 py-2 font-medium">Training</th>
                   <th className="px-3 py-2 font-medium text-right">Branches</th>
                   <th className="px-3 py-2 font-medium text-right">MRR</th>
                   <th className="px-3 py-2 font-medium text-right">Incr.</th>
@@ -459,7 +367,20 @@ export function DeliveryView() {
               <tbody className="divide-y divide-[#3a424d]">
                 {/* DB entries for this tab (shown first, highlighted) */}
                 {dbForTab.map((entry) => (
-                  <tr key={`db-${entry.id}`} className="hover:bg-[#363d47]/50 transition-colors bg-[#5ec1ca]/5">
+                  <tr
+                    key={`db-${entry.id}`}
+                    className="hover:bg-[#363d47]/50 transition-colors bg-[#5ec1ca]/5 cursor-pointer"
+                    onClick={() => { setDrawerEntryId(entry.id); setDrawerIsNew(false); }}
+                  >
+                    <td className="px-3 py-2 text-center">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleToggleStar(entry.id); }}
+                        className={`text-sm transition-colors ${entry.is_starred ? 'text-amber-400' : 'text-neutral-600 hover:text-amber-400'}`}
+                        title={entry.is_starred ? 'Unstar' : 'Star'}
+                      >
+                        {entry.is_starred ? '\u2605' : '\u2606'}
+                      </button>
+                    </td>
                     <td className="px-3 py-2 text-neutral-200 font-medium whitespace-nowrap">
                       {entry.account}
                       <span className="ml-1.5 text-[9px] text-[#5ec1ca] uppercase">nova</span>
@@ -469,27 +390,27 @@ export function DeliveryView() {
                     <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{entry.order_date ?? '-'}</td>
                     <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{entry.go_live_date ?? '-'}</td>
                     <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{entry.predicted_delivery ?? '-'}</td>
+                    <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{entry.training_date ?? '-'}</td>
                     <td className="px-3 py-2 text-neutral-400 text-right">{entry.branches ?? '-'}</td>
                     <td className="px-3 py-2 text-neutral-200 text-right font-medium">{formatCurrency(entry.mrr)}</td>
                     <td className="px-3 py-2 text-neutral-400 text-right">{formatCurrency(entry.incremental)}</td>
                     <td className="px-3 py-2 text-neutral-500 max-w-[200px] truncate" title={entry.notes ?? ''}>{entry.notes ?? '-'}</td>
                     <td className="px-3 py-2">
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => handleEdit(entry)} className="text-[10px] text-[#5ec1ca] hover:text-[#4db0b9]">Edit</button>
-                        <button onClick={() => handleDelete(entry.id)} className="text-[10px] text-red-400 hover:text-red-300">Del</button>
-                      </div>
+                      <span className="text-[10px] text-[#5ec1ca]">Edit</span>
                     </td>
                   </tr>
                 ))}
                 {/* xlsx rows */}
                 {filteredRows.map((row, i) => (
                   <tr key={`xlsx-${row.account}-${i}`} className="hover:bg-[#363d47]/50 transition-colors">
+                    <td className="px-3 py-2"></td>
                     <td className="px-3 py-2 text-neutral-200 font-medium whitespace-nowrap">{row.account}</td>
                     <td className="px-3 py-2"><StatusBadge status={row.status} /></td>
                     <td className="px-3 py-2 text-neutral-400">{row.onboarder ?? '-'}</td>
                     <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{row.orderDate ?? '-'}</td>
                     <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{row.goLiveDate ?? '-'}</td>
                     <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{row.predictedDelivery ?? '-'}</td>
+                    <td className="px-3 py-2 text-neutral-400">-</td>
                     <td className="px-3 py-2 text-neutral-400 text-right">{row.branches ?? '-'}</td>
                     <td className="px-3 py-2 text-neutral-200 text-right font-medium">{formatCurrency(row.mrr)}</td>
                     <td className="px-3 py-2 text-neutral-400 text-right">{formatCurrency(row.incremental)}</td>
@@ -499,7 +420,7 @@ export function DeliveryView() {
                 ))}
                 {filteredRows.length === 0 && dbForTab.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="px-3 py-8 text-center text-neutral-600">
+                    <td colSpan={13} className="px-3 py-8 text-center text-neutral-600">
                       No rows match your filters
                     </td>
                   </tr>
@@ -508,6 +429,24 @@ export function DeliveryView() {
             </table>
           </div>
         </>
+      )}
+
+      {/* Delivery Drawer */}
+      {(drawerIsNew || drawerEntry) && (
+        <DeliveryDrawer
+          entry={drawerEntry}
+          isNew={drawerIsNew}
+          products={allProducts}
+          defaultProduct={activeTab ?? ''}
+          onClose={() => { setDrawerEntryId(null); setDrawerIsNew(false); }}
+          onSaved={() => refreshDbEntries()}
+          onDeleted={(id) => {
+            setDbEntries((prev) => prev.filter((e) => e.id !== id));
+            setDrawerEntryId(null);
+            setDrawerIsNew(false);
+          }}
+          onStarToggled={(id) => handleToggleStar(id)}
+        />
       )}
     </div>
   );

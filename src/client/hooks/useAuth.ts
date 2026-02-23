@@ -18,13 +18,38 @@ interface AuthState {
 }
 
 const TOKEN_KEY = 'nova_auth_token';
+const REMEMBER_KEY = 'nova_remember_me';
+
+function getTokenStorage(): Storage {
+  return localStorage.getItem(REMEMBER_KEY) === 'false' ? sessionStorage : localStorage;
+}
+
+function getStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY);
+}
+
+function storeToken(token: string, rememberMe: boolean) {
+  localStorage.setItem(REMEMBER_KEY, rememberMe ? 'true' : 'false');
+  if (rememberMe) {
+    localStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.removeItem(TOKEN_KEY);
+  } else {
+    sessionStorage.setItem(TOKEN_KEY, token);
+    localStorage.removeItem(TOKEN_KEY);
+  }
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+}
 
 // Install fetch interceptor that injects Authorization header for /api/ calls
 // and triggers logout on 401 responses
 let currentToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;
 
-const originalFetch = window.fetch;
+const originalFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 
@@ -50,7 +75,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
 export function useAuth() {
   const [state, setState] = useState<AuthState>({
     user: null,
-    token: localStorage.getItem(TOKEN_KEY),
+    token: getStoredToken(),
     initializing: true,
     busy: false,
     error: null,
@@ -64,7 +89,7 @@ export function useAuth() {
   // Register unauthorized handler
   useEffect(() => {
     onUnauthorized = () => {
-      localStorage.removeItem(TOKEN_KEY);
+      clearToken();
       currentToken = null;
       setState({ user: null, token: null, initializing: false, busy: false, error: null });
     };
@@ -73,7 +98,7 @@ export function useAuth() {
 
   // Validate token on mount
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getStoredToken();
     if (!token) {
       setState({ user: null, token: null, initializing: false, busy: false, error: null });
       return;
@@ -87,17 +112,17 @@ export function useAuth() {
         if (json.ok && json.data?.user) {
           setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
         } else {
-          localStorage.removeItem(TOKEN_KEY);
+          clearToken();
           setState({ user: null, token: null, initializing: false, busy: false, error: null });
         }
       })
       .catch(() => {
-        localStorage.removeItem(TOKEN_KEY);
+        clearToken();
         setState({ user: null, token: null, initializing: false, busy: false, error: null });
       });
   }, []);
 
-  const login = useCallback(async (username: string, password: string): Promise<boolean> => {
+  const login = useCallback(async (username: string, password: string, rememberMe = true): Promise<boolean> => {
     setState(s => ({ ...s, error: null, busy: true }));
     try {
       const res = await originalFetch('/api/auth/login', {
@@ -107,7 +132,8 @@ export function useAuth() {
       });
       const json = await res.json();
       if (json.ok && json.data) {
-        localStorage.setItem(TOKEN_KEY, json.data.token);
+        storeToken(json.data.token, rememberMe);
+        currentToken = json.data.token; // sync immediately — useEffect runs too late
         setState({ user: json.data.user, token: json.data.token, initializing: false, busy: false, error: null });
         return true;
       }
@@ -129,7 +155,8 @@ export function useAuth() {
       });
       const json = await res.json();
       if (json.ok && json.data) {
-        localStorage.setItem(TOKEN_KEY, json.data.token);
+        storeToken(json.data.token, true); // always remember on register
+        currentToken = json.data.token; // sync immediately — useEffect runs too late
         setState({ user: json.data.user, token: json.data.token, initializing: false, busy: false, error: null });
         return true;
       }
@@ -142,7 +169,7 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
+    clearToken();
     currentToken = null;
     setState({ user: null, token: null, initializing: false, busy: false, error: null });
   }, []);

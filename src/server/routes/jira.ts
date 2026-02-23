@@ -12,6 +12,7 @@ const JIRA_TOOL_CANDIDATES = {
   createIssue: ['jira_create_issue', 'jira_create'],
   searchIssues: ['jira_search', 'jira_search_issues', 'searchJiraIssuesUsingJql'],
   getProjects: ['jira_get_projects', 'getVisibleJiraProjects', 'getVisibleJiraProjectsList'],
+  searchUsers: ['jira_search_users', 'jira_find_users', 'jira_get_users', 'jira_user_search'],
 };
 
 type ToolKey = keyof typeof JIRA_TOOL_CANDIDATES;
@@ -281,6 +282,37 @@ export function createJiraRoutes(
       res.status(500).json({
         ok: false,
         error: err instanceof Error ? err.message : 'Failed to create issue',
+      });
+    }
+  });
+
+  // Search users (for assignee picker)
+  router.get('/users/search', async (req, res) => {
+    const query = (req.query.query as string ?? '').trim();
+    if (!query) {
+      res.status(400).json({ ok: false, error: 'query parameter is required' });
+      return;
+    }
+
+    const tools = mcpManager.getServerTools('jira');
+    const toolName = pickTool(tools, 'searchUsers');
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'Jira user search tool not available', tools });
+      return;
+    }
+
+    try {
+      const result = await callWithFallback(mcpManager, toolName, [
+        { query },
+        { query, maxResults: 10 },
+        { username: query },
+        { search: query },
+      ]);
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'User search failed',
       });
     }
   });

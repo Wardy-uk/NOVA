@@ -354,10 +354,12 @@ export interface DeliveryEntry {
   order_date: string | null;
   go_live_date: string | null;
   predicted_delivery: string | null;
+  training_date: string | null;
   branches: number | null;
   mrr: number | null;
   incremental: number | null;
   licence_fee: number | null;
+  is_starred: number;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -373,7 +375,7 @@ export class DeliveryQueries {
       sql += ` WHERE product = ?`;
       params.push(product);
     }
-    sql += ` ORDER BY created_at DESC`;
+    sql += ` ORDER BY is_starred DESC, created_at DESC`;
 
     const stmt = this.db.prepare(sql);
     if (params.length > 0) stmt.bind(params);
@@ -401,14 +403,15 @@ export class DeliveryQueries {
   create(entry: Omit<DeliveryEntry, 'id' | 'created_at' | 'updated_at'>): number {
     this.db.run(
       `INSERT INTO delivery_entries (product, account, status, onboarder, order_date, go_live_date,
-        predicted_delivery, branches, mrr, incremental, licence_fee, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, is_starred, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         entry.product, entry.account, entry.status ?? '',
         entry.onboarder ?? null, entry.order_date ?? null, entry.go_live_date ?? null,
-        entry.predicted_delivery ?? null, entry.branches ?? null,
+        entry.predicted_delivery ?? null, entry.training_date ?? null,
+        entry.branches ?? null,
         entry.mrr ?? null, entry.incremental ?? null, entry.licence_fee ?? null,
-        entry.notes ?? null,
+        entry.is_starred ?? 0, entry.notes ?? null,
       ]
     );
     const result = this.db.exec('SELECT last_insert_rowid() as id');
@@ -436,6 +439,15 @@ export class DeliveryQueries {
     const exists = this.getById(id);
     if (!exists) return false;
     this.db.run(`DELETE FROM delivery_entries WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+
+  toggleStar(id: number): boolean {
+    const entry = this.getById(id);
+    if (!entry) return false;
+    const newVal = entry.is_starred ? 0 : 1;
+    this.db.run(`UPDATE delivery_entries SET is_starred = ?, updated_at = datetime('now') WHERE id = ?`, [newVal, id]);
     saveDb();
     return true;
   }

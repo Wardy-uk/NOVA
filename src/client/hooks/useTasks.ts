@@ -74,8 +74,9 @@ export function useHealth() {
     const fetchHealth = async () => {
       try {
         const res = await fetch('/api/health');
+        if (!res.ok) return; // 401 or other error — don't overwrite valid state
         const json = await res.json();
-        setHealth(json);
+        if (json.servers) setHealth(json); // only set if valid health shape
       } catch {
         /* server unreachable */
       }

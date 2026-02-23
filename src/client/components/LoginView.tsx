@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface LoginViewProps {
-  onLogin: (username: string, password: string) => Promise<boolean>;
+  onLogin: (username: string, password: string, rememberMe?: boolean) => Promise<boolean>;
   onRegister: (username: string, password: string, displayName?: string) => Promise<boolean>;
   error: string | null;
   loading: boolean;
@@ -11,10 +11,25 @@ const inputCls = 'bg-[#272C33] text-neutral-200 text-sm rounded-lg px-4 py-2.5 b
 
 export function LoginView({ onLogin, onRegister, error, loading }: LoginViewProps) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [firstRun, setFirstRun] = useState(false);
+
+  // Check if any users exist — if not, default to register mode
+  useEffect(() => {
+    fetch('/api/auth/status')
+      .then(r => r.json())
+      .then(json => {
+        if (json.ok && !json.data.hasUsers) {
+          setMode('register');
+          setFirstRun(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [localError, setLocalError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -37,7 +52,7 @@ export function LoginView({ onLogin, onRegister, error, loading }: LoginViewProp
       }
       await onRegister(username.trim(), password, displayName.trim() || undefined);
     } else {
-      await onLogin(username.trim(), password);
+      await onLogin(username.trim(), password, rememberMe);
     }
   };
 
@@ -61,6 +76,12 @@ export function LoginView({ onLogin, onRegister, error, loading }: LoginViewProp
           <h2 className="text-sm font-semibold text-neutral-200 mb-4">
             {mode === 'login' ? 'Sign in' : 'Create account'}
           </h2>
+
+          {firstRun && mode === 'register' && (
+            <div className="mb-4 px-3 py-2 bg-[#5ec1ca]/10 border border-[#5ec1ca]/30 rounded-lg text-[#5ec1ca] text-xs">
+              Welcome! Create your admin account to get started.
+            </div>
+          )}
 
           {displayError && (
             <div className="mb-4 px-3 py-2 bg-red-950/50 border border-red-900/50 rounded-lg text-red-400 text-xs">
@@ -118,6 +139,18 @@ export function LoginView({ onLogin, onRegister, error, loading }: LoginViewProp
                   autoComplete="new-password"
                 />
               </div>
+            )}
+
+            {mode === 'login' && (
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded border-[#3a424d] bg-[#272C33] accent-[#5ec1ca]"
+                />
+                <span className="text-xs text-neutral-400">Remember me</span>
+              </label>
             )}
 
             <button

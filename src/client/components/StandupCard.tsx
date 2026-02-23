@@ -80,6 +80,12 @@ export function StandupCard({ task, reason, note, checked, onToggle, onUpdate }:
           </a>
         )}
         <button
+          onClick={() => onUpdate(task.id, { is_pinned: !task.is_pinned })}
+          className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-amber-400 transition-colors text-xs"
+        >
+          {task.is_pinned ? 'Unfocus' : 'Focus'}
+        </button>
+        <button
           onClick={() => onUpdate(task.id, { status: 'done' })}
           className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-green-400 transition-colors text-xs"
         >

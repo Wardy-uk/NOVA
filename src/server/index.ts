@@ -19,6 +19,7 @@ import { createStandupRoutes } from './routes/standups.js';
 import { createDeliveryRoutes } from './routes/delivery.js';
 import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
+import { createO365Routes } from './routes/o365.js';
 import { authMiddleware } from './middleware/auth.js';
 import crypto from 'crypto';
 import { generateMorningBriefing } from './services/ai-standup.js';
@@ -130,17 +131,21 @@ async function main() {
   app.use('/api', authMiddleware(jwtSecret));
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator));
   app.use('/api/health', createHealthRoutes(mcpManager));
-  app.use('/api/settings', createSettingsRoutes(settingsQueries));
+  app.use('/api/settings', createSettingsRoutes(settingsQueries, (key) => {
+    // Restart sync timers when interval settings change
+    if (key.includes('interval_minutes')) restartSyncTimers();
+  }));
   app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, uvxCommand));
-  app.use('/api/ingest', createIngestRoutes(taskQueries));
+  app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries));
   app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries));
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries));
   app.use('/api/crm', createCrmRoutes(crmQueries));
+  app.use('/api/o365', createO365Routes(mcpManager));
 
   // 6. OneDrive file watcher (Power Automate bridge)
-  const watcher = new OneDriveWatcher(taskQueries);
+  const watcher = new OneDriveWatcher(taskQueries, settingsQueries);
   watcher.start();
 
   app.get('/api/onedrive/status', (_req, res) => {
@@ -164,9 +169,10 @@ async function main() {
     }
   });
 
-  // 7. Auto-sync: initial sync after a short delay, then on interval
-  let autoSyncTimer: ReturnType<typeof setInterval> | null = null;
+  // 7. Auto-sync: per-source timers with individual intervals
+  const syncTimers = new Map<string, ReturnType<typeof setInterval>>();
   let lastAutoSync: string | null = null;
+  const lastSourceSync: Record<string, string> = {};
 
   const preloadMorningBriefing = async () => {
     try {
@@ -205,10 +211,12 @@ async function main() {
     }
   };
 
-  const runAutoSync = async () => {
+  const runFullSync = async () => {
     try {
       const results = await aggregator.syncAll();
-      lastAutoSync = new Date().toISOString();
+      const now = new Date().toISOString();
+      lastAutoSync = now;
+      for (const r of results) lastSourceSync[r.source] = now;
       const total = results.reduce((s, r) => s + r.count, 0);
       const errors = results.filter((r) => r.error);
       console.log(
@@ -222,29 +230,75 @@ async function main() {
     }
   };
 
-  const startAutoSync = () => {
-    const minutes = parseInt(settingsQueries.get('refresh_interval_minutes') ?? '5', 10) || 5;
-    if (autoSyncTimer) clearInterval(autoSyncTimer);
-    autoSyncTimer = setInterval(runAutoSync, minutes * 60 * 1000);
-    console.log(`[N.O.V.A] Auto-sync every ${minutes} minutes`);
+  /** Get the sync interval for a specific source, falling back to global default */
+  const getSourceInterval = (source: string): number => {
+    const perSource = parseInt(settingsQueries.get(`sync_${source}_interval_minutes`) ?? '', 10);
+    if (perSource > 0) return perSource;
+    return parseInt(settingsQueries.get('refresh_interval_minutes') ?? '5', 10) || 5;
   };
 
-  // Initial sync 5s after startup (let MCP connections establish)
+  /** Start (or restart) per-source sync timers */
+  const startSyncTimers = () => {
+    // Clear all existing timers
+    for (const timer of syncTimers.values()) clearInterval(timer);
+    syncTimers.clear();
+
+    for (const source of aggregator.sourceNames) {
+      const minutes = getSourceInterval(source);
+      syncTimers.set(
+        source,
+        setInterval(async () => {
+          try {
+            const result = await aggregator.syncSource(source);
+            const now = new Date().toISOString();
+            lastAutoSync = now;
+            lastSourceSync[source] = now;
+            if (result.count > 0 || result.error) {
+              console.log(
+                `[AutoSync:${source}] ${result.error ? 'Error: ' + result.error : 'Synced ' + result.count + ' tasks'}`
+              );
+            }
+          } catch (err) {
+            console.error(`[AutoSync:${source}] Failed:`, err instanceof Error ? err.message : err);
+          }
+        }, minutes * 60 * 1000)
+      );
+      console.log(`[N.O.V.A] Auto-sync ${source}: every ${minutes} min`);
+    }
+  };
+
+  /** Restart timers — called when sync interval settings change */
+  const restartSyncTimers = () => {
+    console.log('[N.O.V.A] Restarting sync timers...');
+    startSyncTimers();
+  };
+
+  // Initial full sync 5s after startup (let MCP connections establish), then start per-source timers
   setTimeout(() => {
-    runAutoSync();
-    startAutoSync();
+    runFullSync();
+    startSyncTimers();
   }, 5000);
 
-  // Expose last sync time
+  // Expose last sync time + per-source intervals
   app.get('/api/sync/status', (_req, res) => {
-    const minutes = parseInt(settingsQueries.get('refresh_interval_minutes') ?? '5', 10) || 5;
-    res.json({ ok: true, data: { lastAutoSync, intervalMinutes: minutes } });
+    const globalMinutes = parseInt(settingsQueries.get('refresh_interval_minutes') ?? '5', 10) || 5;
+    const perSource: Record<string, { intervalMinutes: number; lastSync: string | null }> = {};
+    for (const source of aggregator.sourceNames) {
+      perSource[source] = {
+        intervalMinutes: getSourceInterval(source),
+        lastSync: lastSourceSync[source] ?? null,
+      };
+    }
+    res.json({
+      ok: true,
+      data: { lastAutoSync, globalIntervalMinutes: globalMinutes, sources: perSource },
+    });
   });
 
   // Graceful shutdown
   const shutdown = async () => {
     console.log('[N.O.V.A] Shutting down...');
-    if (autoSyncTimer) clearInterval(autoSyncTimer);
+    for (const timer of syncTimers.values()) clearInterval(timer);
     watcher.stop();
     await mcpManager.disconnectAll();
     process.exit(0);

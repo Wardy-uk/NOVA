@@ -4,6 +4,7 @@ import { SLATimer } from './SLATimer.js';
 interface Props {
   task: Task;
   onUpdate: (id: string, updates: Record<string, unknown>) => void;
+  onClick?: () => void;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -96,12 +97,15 @@ function getDueDateInfo(dateStr: string): { label: string; className: string } {
   return { label: `Due: ${formatted}`, className: 'text-neutral-600' };
 }
 
-export function TaskCard({ task, onUpdate }: Props) {
+export function TaskCard({ task, onUpdate, onClick }: Props) {
   const meta = parseDescMeta(task.description);
   const descText = getDescriptionText(task.description);
 
   return (
-    <div className="group flex items-start gap-3 px-3 py-2.5 rounded-md hover:bg-[#2f353d] border border-transparent hover:border-[#3a424d] transition-colors">
+    <div
+      onClick={onClick}
+      className={`group flex items-start gap-3 px-3 py-2.5 rounded-md hover:bg-[#2f353d] border border-transparent hover:border-[#3a424d] transition-colors ${onClick ? 'cursor-pointer' : ''}`}
+    >
       {/* Source badge */}
       <span
         className={`mt-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded ${SOURCE_COLORS[task.source] ?? 'bg-neutral-700'} text-white shrink-0`}
@@ -112,27 +116,16 @@ export function TaskCard({ task, onUpdate }: Props) {
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          {task.source_url ? (
-            <a
-              href={task.source_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm font-medium text-neutral-100 hover:text-[#5ec1ca] truncate transition-colors"
-            >
-              {task.source === 'jira' && task.source_id && (
-                <span className="text-neutral-500 mr-1.5">
-                  {task.source_id}
-                </span>
-              )}
-              {task.title}
-            </a>
-          ) : (
-            <span className="text-sm font-medium text-neutral-100 truncate">
-              {task.title}
-            </span>
-          )}
+          <span className="text-sm font-medium text-neutral-100 truncate">
+            {task.source === 'jira' && task.source_id && (
+              <span className="text-neutral-500 mr-1.5">
+                {task.source_id}
+              </span>
+            )}
+            {task.title}
+          </span>
           {task.is_pinned && (
-            <span className="text-[10px] text-amber-400">PINNED</span>
+            <span className="text-[10px] text-amber-400">FOCUSED</span>
           )}
         </div>
 
@@ -181,33 +174,29 @@ export function TaskCard({ task, onUpdate }: Props) {
 
       {/* Actions (visible on hover) */}
       <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
-        {task.source_url && (
-          <a
-            href={task.source_url}
-            target="_blank"
-            rel="noopener noreferrer"
+        {onClick && (
+          <span
             className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-[#5ec1ca] transition-colors text-xs"
-            title="Open in source"
           >
-            Open
-          </a>
+            Edit
+          </span>
         )}
         <button
-          onClick={() => onUpdate(task.id, { is_pinned: !task.is_pinned })}
+          onClick={(e) => { e.stopPropagation(); onUpdate(task.id, { is_pinned: !task.is_pinned }); }}
           className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-amber-400 transition-colors text-xs"
-          title={task.is_pinned ? 'Unpin' : 'Pin'}
+          title={task.is_pinned ? 'Unfocus' : 'Focus'}
         >
-          {task.is_pinned ? 'Unpin' : 'Pin'}
+          {task.is_pinned ? 'Unfocus' : 'Focus'}
         </button>
         <button
-          onClick={() => onUpdate(task.id, { status: 'done' })}
+          onClick={(e) => { e.stopPropagation(); onUpdate(task.id, { status: 'done' }); }}
           className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-green-400 transition-colors text-xs"
           title="Mark as done"
         >
           Done
         </button>
         <button
-          onClick={() => onUpdate(task.id, { status: 'dismissed' })}
+          onClick={(e) => { e.stopPropagation(); onUpdate(task.id, { status: 'dismissed' }); }}
           className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-red-400 transition-colors text-xs"
           title="Dismiss"
         >

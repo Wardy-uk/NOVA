@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
-import { JiraDrawer } from './JiraDrawer.js';
+import { TaskDrawer } from './TaskDrawer.js';
 
 interface Suggestion {
   task_id: string;
@@ -130,7 +130,6 @@ export function NextActions({ onUpdateTask }: Props) {
   };
 
   const openDrawer = (index: number) => {
-    if (suggestions[index]?.task.source !== 'jira') return;
     setActiveIndex(index);
   };
 
@@ -210,13 +209,12 @@ export function NextActions({ onUpdateTask }: Props) {
               </button>
               <button
                 onClick={() => {
-                  const firstJira = suggestions.findIndex((s) => s.task.source === 'jira');
-                  if (firstJira >= 0) openDrawer(firstJira);
+                  if (suggestions.length > 0) openDrawer(0);
                 }}
                 className="text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors"
-                disabled={suggestions.every((s) => s.task.source !== 'jira')}
+                disabled={suggestions.length === 0}
               >
-                Open Focus
+                Focus
               </button>
               <button
                 onClick={() => setDismissed(true)}
@@ -252,24 +250,18 @@ export function NextActions({ onUpdateTask }: Props) {
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
-                  {s.task.source === 'jira' && (
-                    <button
-                      onClick={() => openDrawer(i)}
-                      className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-[#5ec1ca] transition-colors text-xs"
-                    >
-                      Edit
-                    </button>
-                  )}
-                  {s.task.source_url && (
-                    <a
-                      href={s.task.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-[#5ec1ca] transition-colors text-xs"
-                    >
-                      Open
-                    </a>
-                  )}
+                  <button
+                    onClick={() => openDrawer(i)}
+                    className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-[#5ec1ca] transition-colors text-xs"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleAction(s.task_id, { is_pinned: true })}
+                    className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-amber-400 transition-colors text-xs"
+                  >
+                    Focus
+                  </button>
                   <button
                     onClick={() => handleAction(s.task_id, { status: 'done' })}
                     className="p-1 rounded hover:bg-[#363d47] text-neutral-500 hover:text-green-400 transition-colors text-xs"
@@ -289,14 +281,20 @@ export function NextActions({ onUpdateTask }: Props) {
         </div>
       )}
 
-      {activeSuggestion && activeSuggestion.task.source === 'jira' && (
-        <JiraDrawer
+      {activeSuggestion && (
+        <TaskDrawer
           task={activeSuggestion.task}
           index={activeIndex ?? 0}
           total={suggestions.length}
           onClose={closeDrawer}
           onPrev={() => setActiveIndex((prev) => (prev && prev > 0 ? prev - 1 : 0))}
           onNext={() => setActiveIndex((prev) => (prev !== null && prev < suggestions.length - 1 ? prev + 1 : prev))}
+          onTaskUpdated={() => {
+            // Remove from suggestions after update
+            if (activeSuggestion) {
+              handleAction(activeSuggestion.task_id, {});
+            }
+          }}
         />
       )}
     </div>

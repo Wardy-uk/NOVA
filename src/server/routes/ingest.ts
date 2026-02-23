@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import type { TaskQueries } from '../db/queries.js';
+import type { TaskQueries, SettingsQueries } from '../db/queries.js';
 import { saveDb } from '../db/schema.js';
 
 const M365_SOURCES = ['planner', 'todo', 'calendar', 'email'] as const;
@@ -24,7 +24,7 @@ const IngestRequestSchema = z.object({
   tasks: z.array(IngestTaskSchema).max(500),
 });
 
-export function createIngestRoutes(taskQueries: TaskQueries): Router {
+export function createIngestRoutes(taskQueries: TaskQueries, settingsQueries?: SettingsQueries): Router {
   const router = Router();
 
   // POST /api/ingest — Bulk ingest tasks from Power Automate Desktop
@@ -36,6 +36,18 @@ export function createIngestRoutes(taskQueries: TaskQueries): Router {
     }
 
     const { source, tasks } = parsed.data;
+
+    // Check if PA bridge is disabled globally
+    if (settingsQueries?.get('pa_bridge_enabled') === 'false') {
+      res.json({ ok: true, data: { source, upserted: 0, removed: 0, skipped: true, reason: 'PA bridge disabled' } });
+      return;
+    }
+
+    // Check if this source is enabled
+    if (settingsQueries?.get(`sync_${source}_enabled`) === 'false') {
+      res.json({ ok: true, data: { source, upserted: 0, removed: 0, skipped: true, reason: `${source} sync disabled` } });
+      return;
+    }
     const prune = String(req.query.prune ?? 'false').toLowerCase() === 'true';
 
     const mismatch = tasks.find(t => t.source !== source);

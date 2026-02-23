@@ -146,6 +146,19 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  // Migrations — add columns that may not exist in older databases
+  const migrations: [string, string][] = [
+    ['delivery_entries', 'training_date TEXT'],
+    ['delivery_entries', 'is_starred INTEGER DEFAULT 0'],
+  ];
+  for (const [table, colDef] of migrations) {
+    try {
+      database.run(`ALTER TABLE ${table} ADD COLUMN ${colDef}`);
+    } catch {
+      // Column already exists — ignore
+    }
+  }
+
   // Indexes
   database.run(`CREATE INDEX IF NOT EXISTS idx_delivery_product ON delivery_entries(product)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source)`);

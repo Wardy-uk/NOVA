@@ -20,19 +20,59 @@ COMPLETED
 [DONE] Daily Stats as home page
 [DONE] Delivery data entry - local DB CRUD for delivery entries
 [DONE] CRM page - customer health (RAG), business reviews, DB-backed CRUD
+[DONE] login - JWT auth with login/register gate, first-run admin setup
+[DONE] add toggle to turn off - sync source toggles per M365 type in Settings
+[DONE] PA bridge top-level on/off toggle + per-source toggles
+[DONE] O365 per-source sync toggles (Planner, To-Do, Calendar, Email) in integration card
+[DONE] O365 enable toggle auto-saves (no more needing to click Save)
+[DONE] fix login race condition - token not synced before task/health fetches caused instant logout
+[DONE] PA bridge toggle moved to RH side to match integration card layout
+[DONE] configurable email filter + days-to-pull in Settings (flagged/unread/all, 1-30 days)
+[DONE] delivery sheet MRR overflow CSS fix (truncate + min-w-0 on KpiCard)
+[DONE] add Remember Me to login page (sessionStorage when unchecked, localStorage when checked)
+[DONE] sync frequency dropdown in Settings (1/2/5/10/15/30 min, reads refresh_interval_minutes)
+[DONE] remove JQL search from UI (kept Create Issue only)
+[DONE] create tasks from NOVA — O365 Planner + To-Do via /api/o365/ routes + CreateTaskForm UI
+[DONE] edit tasks + sync back to source — update-planner-task, update-todo-task via TaskDrawer
+[DONE] universal side drawer for all task types — click any task to open, editable for Planner/To-Do
+[DONE] remove "Open" from task items — Edit button opens universal drawer
+[DONE] Jira fields in TaskDrawer — Priority dropdown, Due Date picker, Agent Last Updated, Agent Next Update
+[DONE] Jira transitions + comment history ported to universal TaskDrawer (replaces old JiraDrawer)
+[DONE] NextActions uses universal TaskDrawer instead of old JiraDrawer
+[DONE] stale task cleanup hardened — ephemeral sources (calendar/email) allow empty purge, task sources (jira/planner/todo/monday) protected from accidental wipe
+[DONE] per-integration auto sync — each source has its own interval dropdown (O365 per-source, Jira/Monday per-card), falls back to global default
+[DONE] My Focus panel — dedicated view, Focus/Unfocus replaces Pin/Unpin across all UI, Focus button in NextActions + Standup, Focus card on Command Centre
+[DONE] deliveries — wider panel (max-w-7xl for delivery view)
+[DONE] deliveries — training date column (DB schema + form + table column)
+[DONE] deliveries — starred deliveries (star/unstar toggle, starred panel above table, amber accent)
+[DONE] Jira assignee picker — search/reassign users from TaskDrawer, user search API route
+[DONE] deliveries — side drawer for editing (DeliveryDrawer replaces inline form, click row to edit, delete confirm, star toggle)
 
-TO DO NEXT (easiest first)
---------------------------
-1. add task/to dos from NOVA
-2. login
-4. multi-user
-5. sales pipeline - replace onboarding spreadsheet, add order form creates task,
-   - create tickets from NOVA
-   - launch onboarding tool from NOVA
-   - add "welcome pack" to NOVA
+TO DO
+-----
 
-deploy to server
-user roles
-deliver sheet - total MRR value is bigger tan total mrr box
-add Jira Automation (specifically move team automation)
-add in full O365 integration now that admin has approved it
+--- Tier 1: Jira power features ---
+1. Jira move-team automation (move ticket to a different Jira project)
+
+--- Tier 2: O365 capabilities to wire up ---
+2. send/reply/forward emails from NOVA — send-mail, reply-mail-message, forward-mail-message
+3. create/edit calendar events from NOVA — create-calendar-event, update-calendar-event
+4. browse mail folders — list-mail-folders, list-mail-folder-messages
+5. browse specific planner plans — get-planner-plan, list-plan-tasks
+6. email attachments — list/get/add attachments on messages
+7. multi-calendar support — list-calendars, get-specific-calendar-view
+8. deprecate PA workaround now admin has approved O365 integration (on hold)
+
+--- Tier 3: Bigger features ---
+9. user roles — admin vs viewer vs editor
+10. multi-user — depends on roles
+11. deploy to server
+
+--- Tier 4: Roadmap ---
+12. Documentation — User guides (help page) and technical docs (README)
+13. sales pipeline — replace onboarding spreadsheet
+    - create tickets from NOVA
+    - launch onboarding tool from NOVA
+    - add order form creates task
+    - add "welcome pack" to NOVA
+

@@ -63,7 +63,7 @@ export function StatusBar({ health }: Props) {
   return (
     <footer className="border-t border-[#3a424d] px-6 py-2 flex items-center justify-between text-xs text-neutral-500">
       <div className="flex items-center gap-4">
-        {health ? (
+        {health?.servers ? (
           health.servers.map((server) => (
             <div
               key={server.name}

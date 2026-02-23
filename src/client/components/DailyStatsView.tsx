@@ -60,9 +60,10 @@ function ProgressBar({ label, count, total, color }: {
   );
 }
 
-export function DailyStatsView({ tasks }: { tasks: Task[] }) {
+export function DailyStatsView({ tasks, onNavigate }: { tasks: Task[]; onNavigate?: (view: string) => void }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
+  const focusCount = tasks.filter((t) => t.is_pinned).length;
 
   useEffect(() => {
     fetch('/api/tasks/stats')
@@ -88,6 +89,28 @@ export function DailyStatsView({ tasks }: { tasks: Task[] }) {
         <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">Command Centre</h2>
         <p className="text-[11px] text-neutral-500 mt-0.5">{today}</p>
       </div>
+
+      {/* My Focus card */}
+      {focusCount > 0 && (
+        <button
+          onClick={() => onNavigate?.('focus')}
+          className="w-full border border-[#3a424d] rounded-lg px-4 py-3 bg-[#2f353d] hover:bg-[#363d47] transition-colors text-left group"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-2xl font-bold font-[var(--font-heading)] text-amber-400">
+                {focusCount}
+              </div>
+              <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-0.5">
+                My Focus
+              </div>
+            </div>
+            <span className="text-xs text-neutral-600 group-hover:text-neutral-400 transition-colors">
+              View &rarr;
+            </span>
+          </div>
+        </button>
+      )}
 
       {/* Today's snapshot */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">

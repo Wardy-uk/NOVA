@@ -366,25 +366,58 @@ function parseCalendarEvents(text: string): NormalizedTask[] | null {
 }
 
 // ---------- Email Adapter ----------
-const emailAdapter: SourceAdapter = {
-  source: 'email',
-  serverName: 'msgraph',
+type EmailFilter = 'flagged' | 'unread' | 'unread_and_flagged' | 'all';
 
-  async fetch(mcp: McpClientManager): Promise<FetchResult> {
-    if (!mcp.isConnected('msgraph')) return { tasks: [], ok: false };
+function buildEmailODataFilter(filter: EmailFilter, days: number): string {
+  const parts: string[] = [];
 
-    const result = (await mcp.callTool('msgraph', 'list-mail-messages', {
-      filter: "flag/flagStatus eq 'flagged'",
-      top: 50,
-    })) as { content?: Array<{ text?: string }> };
+  if (filter === 'flagged') {
+    parts.push("flag/flagStatus eq 'flagged'");
+  } else if (filter === 'unread') {
+    parts.push('isRead eq false');
+  } else if (filter === 'unread_and_flagged') {
+    parts.push("(isRead eq false or flag/flagStatus eq 'flagged')");
+  }
+  // 'all' = no status filter
 
-    const text = result?.content?.[0]?.text;
-    if (!text) return { tasks: [], ok: false };
+  if (days > 0) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    parts.push(`receivedDateTime ge ${since.toISOString()}`);
+  }
 
-    const tasks = parseFlaggedEmails(text);
-    return { tasks: tasks ?? [], ok: tasks !== null };
-  },
-};
+  return parts.join(' and ');
+}
+
+function createEmailAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
+  return {
+    source: 'email',
+    serverName: 'msgraph',
+
+    async fetch(mcp: McpClientManager): Promise<FetchResult> {
+      if (!mcp.isConnected('msgraph')) return { tasks: [], ok: false };
+
+      const filterType = (settingsQueries?.get('email_filter') ?? 'flagged') as EmailFilter;
+      const days = parseInt(settingsQueries?.get('email_days') ?? '7', 10) || 7;
+      const limit = parseInt(settingsQueries?.get('email_limit') ?? '50', 10) || 50;
+
+      const odata = buildEmailODataFilter(filterType, days);
+
+      const args: Record<string, unknown> = { top: limit };
+      if (odata) args.filter = odata;
+
+      const result = (await mcp.callTool('msgraph', 'list-mail-messages', args)) as {
+        content?: Array<{ text?: string }>;
+      };
+
+      const text = result?.content?.[0]?.text;
+      if (!text) return { tasks: [], ok: false };
+
+      const tasks = parseFlaggedEmails(text);
+      return { tasks: tasks ?? [], ok: tasks !== null };
+    },
+  };
+}
 
 function parseFlaggedEmails(text: string): NormalizedTask[] | null {
   try {
@@ -599,55 +632,80 @@ export class TaskAggregator {
       plannerAdapter,
       todoAdapter,
       calendarAdapter,
-      emailAdapter,
+      createEmailAdapter(settingsQueries),
       mondayAdapter,
     ];
+  }
+
+  /** Sync a single source by name. Returns result with count and optional error. */
+  async syncSource(sourceName: string): Promise<{ source: string; count: number; error?: string }> {
+    const adapter = this.adapters.find((a) => a.source === sourceName);
+    if (!adapter) return { source: sourceName, count: 0, error: 'Unknown source' };
+
+    // Check if this source is disabled in settings
+    if (this.settingsQueries?.get(`sync_${adapter.source}_enabled`) === 'false') {
+      console.log(`[Aggregator] ${adapter.source}: Skipped — sync disabled`);
+      return { source: adapter.source, count: 0 };
+    }
+
+    try {
+      const { tasks, ok } = await adapter.fetch(this.mcp);
+      let didChange = false;
+      const freshIds: string[] = [];
+      for (const task of tasks) {
+        this.taskQueries.upsertFromSource(task, { deferSave: true });
+        freshIds.push(`${task.source}:${task.source_id}`);
+        didChange = true;
+      }
+
+      // Remove tasks that are no longer in the source
+      // Ephemeral sources (calendar, email) can legitimately return 0 items
+      // Task sources should not purge all when 0 returned (likely API glitch)
+      const ephemeralSources = new Set(['calendar', 'email']);
+      const canPurgeAll = ephemeralSources.has(adapter.source);
+      let removed = 0;
+      if (ok) {
+        if (freshIds.length === 0 && !canPurgeAll) {
+          console.warn(
+            `[Aggregator] ${adapter.source}: Returned 0 tasks with ok=true — skipping stale cleanup to prevent accidental purge`
+          );
+        } else {
+          removed = this.taskQueries.deleteStaleBySource(adapter.source, freshIds, {
+            allowEmpty: canPurgeAll,
+            deferSave: true,
+          });
+        }
+      }
+      if (removed > 0) didChange = true;
+
+      if (didChange) {
+        saveDb();
+      }
+
+      console.log(
+        `[Aggregator] ${adapter.source}: Synced ${tasks.length} tasks` +
+        (removed > 0 ? `, removed ${removed} stale` : '')
+      );
+      return { source: adapter.source, count: tasks.length };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[Aggregator] ${adapter.source}: Sync failed:`, errMsg);
+      return { source: adapter.source, count: 0, error: errMsg };
+    }
+  }
+
+  /** Get the list of known source names from registered adapters. */
+  get sourceNames(): string[] {
+    return this.adapters.map((a) => a.source);
   }
 
   async syncAll(): Promise<
     { source: string; count: number; error?: string }[]
   > {
     const results = [];
-
     for (const adapter of this.adapters) {
-      try {
-        const { tasks, ok } = await adapter.fetch(this.mcp);
-        let didChange = false;
-        const freshIds: string[] = [];
-        for (const task of tasks) {
-          this.taskQueries.upsertFromSource(task, { deferSave: true });
-          freshIds.push(`${task.source}:${task.source_id}`);
-          didChange = true;
-        }
-
-        // Remove tasks that are no longer in the source
-        const removed = ok
-          ? this.taskQueries.deleteStaleBySource(adapter.source, freshIds, {
-              allowEmpty: true,
-              deferSave: true,
-            })
-          : 0;
-        if (removed > 0) didChange = true;
-
-        if (didChange) {
-          saveDb();
-        }
-
-        results.push({ source: adapter.source, count: tasks.length });
-        console.log(
-          `[Aggregator] ${adapter.source}: Synced ${tasks.length} tasks` +
-          (removed > 0 ? `, removed ${removed} stale` : '')
-        );
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        results.push({ source: adapter.source, count: 0, error: errMsg });
-        console.error(
-          `[Aggregator] ${adapter.source}: Sync failed:`,
-          errMsg
-        );
-      }
+      results.push(await this.syncSource(adapter.source));
     }
-
     return results;
   }
 }

@@ -4,6 +4,7 @@ export function AISettingsCard() {
   const [apiKey, setApiKey] = useState('');
   const [actionCount, setActionCount] = useState('10');
   const [provider, setProvider] = useState<'openai' | 'claude'>('openai');
+  const [syncInterval, setSyncInterval] = useState('5');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -15,6 +16,7 @@ export function AISettingsCard() {
           if (json.data.openai_api_key) setApiKey(json.data.openai_api_key);
           if (json.data.ai_action_count) setActionCount(json.data.ai_action_count);
           if (json.data.ai_provider) setProvider(json.data.ai_provider);
+          if (json.data.refresh_interval_minutes) setSyncInterval(json.data.refresh_interval_minutes);
         }
       })
       .catch(() => {});
@@ -41,6 +43,11 @@ export function AISettingsCard() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: actionCount }),
+      }));
+      requests.push(fetch('/api/settings/refresh_interval_minutes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: syncInterval }),
       }));
       await Promise.all(requests);
       setSaved(true);
@@ -109,6 +116,25 @@ export function AISettingsCard() {
             <option value="5">5</option>
             <option value="10">10</option>
             <option value="20">20</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs text-neutral-400 mb-1.5">
+            Default sync frequency
+            <span className="text-[10px] text-neutral-600 ml-1">(fallback when per-source not set)</span>
+          </label>
+          <select
+            value={syncInterval}
+            onChange={(e) => setSyncInterval(e.target.value)}
+            className="px-3 py-2 text-sm bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 outline-none focus:border-[#5ec1ca] transition-colors"
+          >
+            <option value="1">Every 1 minute</option>
+            <option value="2">Every 2 minutes</option>
+            <option value="5">Every 5 minutes</option>
+            <option value="10">Every 10 minutes</option>
+            <option value="15">Every 15 minutes</option>
+            <option value="30">Every 30 minutes</option>
           </select>
         </div>
 

@@ -6,7 +6,10 @@ const SettingUpdateSchema = z.object({
   value: z.string(),
 });
 
-export function createSettingsRoutes(settingsQueries: SettingsQueries): Router {
+export function createSettingsRoutes(
+  settingsQueries: SettingsQueries,
+  onSettingChanged?: (key: string) => void,
+): Router {
   const router = Router();
 
   // GET /api/settings — All settings
@@ -26,6 +29,7 @@ export function createSettingsRoutes(settingsQueries: SettingsQueries): Router {
       return;
     }
     settingsQueries.set(req.params.key, parsed.data.value);
+    onSettingChanged?.(req.params.key);
     res.json({ ok: true });
   });
 

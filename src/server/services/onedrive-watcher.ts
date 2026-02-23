@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import type { TaskQueries } from '../db/queries.js';
+import type { TaskQueries, SettingsQueries } from '../db/queries.js';
 import { saveDb } from '../db/schema.js';
 
 const VALID_SOURCES = ['planner', 'todo', 'calendar', 'email'];
@@ -29,6 +29,7 @@ export class OneDriveWatcher {
 
   constructor(
     private taskQueries: TaskQueries,
+    private settingsQueries?: SettingsQueries,
     watchDir?: string
   ) {
     // Default: OneDrive Business folder / DayPilot
@@ -207,6 +208,18 @@ export class OneDriveWatcher {
 
       if (!source || !VALID_SOURCES.includes(source)) {
         console.warn(`[OneDrive] ${fileName}: Invalid source "${source}"`);
+        return;
+      }
+
+      // Check if PA bridge is disabled globally
+      if (this.settingsQueries?.get('pa_bridge_enabled') === 'false') {
+        console.log(`[OneDrive] ${fileName}: Skipped — PA bridge disabled`);
+        return;
+      }
+
+      // Check if this source is enabled in settings
+      if (this.settingsQueries?.get(`sync_${source}_enabled`) === 'false') {
+        console.log(`[OneDrive] ${fileName}: Skipped — ${source} sync disabled`);
         return;
       }
 
