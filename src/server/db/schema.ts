@@ -77,7 +77,28 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  database.run(`
+    CREATE TABLE IF NOT EXISTS delivery_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product TEXT NOT NULL,
+      account TEXT NOT NULL,
+      status TEXT DEFAULT '',
+      onboarder TEXT,
+      order_date TEXT,
+      go_live_date TEXT,
+      predicted_delivery TEXT,
+      branches INTEGER,
+      mrr REAL,
+      incremental REAL,
+      licence_fee REAL,
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   // Indexes
+  database.run(`CREATE INDEX IF NOT EXISTS idx_delivery_product ON delivery_entries(product)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority DESC)`);

@@ -175,7 +175,9 @@ function loadWorkbook(): Record<string, SheetResult> & { _lastModified: string }
   return Object.assign({}, sheets, { _lastModified: lastModified });
 }
 
-export function createDeliveryRoutes(): Router {
+import type { DeliveryQueries } from '../db/queries.js';
+
+export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries): Router {
   const router = Router();
 
   // Pre-load on startup (non-blocking to avoid slowing boot)
@@ -228,6 +230,45 @@ export function createDeliveryRoutes(): Router {
       });
     }
   });
+
+  // ---- DB-backed entries (CRUD) ----
+  if (deliveryQueries) {
+    router.get('/entries', (req, res) => {
+      const product = req.query.product as string | undefined;
+      res.json({ ok: true, data: deliveryQueries.getAll(product) });
+    });
+
+    router.post('/entries', (req, res) => {
+      const { product, account, status, onboarder, order_date, go_live_date,
+        predicted_delivery, branches, mrr, incremental, licence_fee, notes } = req.body;
+      if (!product || !account) {
+        res.status(400).json({ ok: false, error: 'product and account are required' });
+        return;
+      }
+      const id = deliveryQueries.create({
+        product, account, status: status ?? '', onboarder, order_date, go_live_date,
+        predicted_delivery, branches: branches ?? null, mrr: mrr ?? null,
+        incremental: incremental ?? null, licence_fee: licence_fee ?? null, notes,
+      });
+      res.json({ ok: true, data: deliveryQueries.getById(id) });
+    });
+
+    router.put('/entries/:id', (req, res) => {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      const updated = deliveryQueries.update(id, req.body);
+      if (!updated) { res.status(404).json({ ok: false, error: 'Entry not found' }); return; }
+      res.json({ ok: true, data: deliveryQueries.getById(id) });
+    });
+
+    router.delete('/entries/:id', (req, res) => {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      const deleted = deliveryQueries.delete(id);
+      if (!deleted) { res.status(404).json({ ok: false, error: 'Entry not found' }); return; }
+      res.json({ ok: true });
+    });
+  }
 
   return router;
 }

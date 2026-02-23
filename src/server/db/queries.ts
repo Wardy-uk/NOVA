@@ -343,6 +343,115 @@ export class RitualQueries {
   }
 }
 
+// ---------- Delivery Entries ----------
+
+export interface DeliveryEntry {
+  id: number;
+  product: string;
+  account: string;
+  status: string;
+  onboarder: string | null;
+  order_date: string | null;
+  go_live_date: string | null;
+  predicted_delivery: string | null;
+  branches: number | null;
+  mrr: number | null;
+  incremental: number | null;
+  licence_fee: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export class DeliveryQueries {
+  constructor(private db: Database) {}
+
+  getAll(product?: string): DeliveryEntry[] {
+    let sql = `SELECT * FROM delivery_entries`;
+    const params: string[] = [];
+    if (product) {
+      sql += ` WHERE product = ?`;
+      params.push(product);
+    }
+    sql += ` ORDER BY created_at DESC`;
+
+    const stmt = this.db.prepare(sql);
+    if (params.length > 0) stmt.bind(params);
+
+    const entries: DeliveryEntry[] = [];
+    while (stmt.step()) {
+      entries.push(stmt.getAsObject() as unknown as DeliveryEntry);
+    }
+    stmt.free();
+    return entries;
+  }
+
+  getById(id: number): DeliveryEntry | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_entries WHERE id = ?`);
+    stmt.bind([id]);
+    if (stmt.step()) {
+      const entry = stmt.getAsObject() as unknown as DeliveryEntry;
+      stmt.free();
+      return entry;
+    }
+    stmt.free();
+    return undefined;
+  }
+
+  create(entry: Omit<DeliveryEntry, 'id' | 'created_at' | 'updated_at'>): number {
+    this.db.run(
+      `INSERT INTO delivery_entries (product, account, status, onboarder, order_date, go_live_date,
+        predicted_delivery, branches, mrr, incremental, licence_fee, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        entry.product, entry.account, entry.status ?? '',
+        entry.onboarder ?? null, entry.order_date ?? null, entry.go_live_date ?? null,
+        entry.predicted_delivery ?? null, entry.branches ?? null,
+        entry.mrr ?? null, entry.incremental ?? null, entry.licence_fee ?? null,
+        entry.notes ?? null,
+      ]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  update(id: number, updates: Partial<Omit<DeliveryEntry, 'id' | 'created_at' | 'updated_at'>>): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [key, val] of Object.entries(updates)) {
+      fields.push(`${key} = ?`);
+      params.push(val ?? null);
+    }
+    if (fields.length === 0) return false;
+    fields.push(`updated_at = datetime('now')`);
+    params.push(id);
+    this.db.run(`UPDATE delivery_entries SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return this.getById(id) !== undefined;
+  }
+
+  delete(id: number): boolean {
+    const exists = this.getById(id);
+    if (!exists) return false;
+    this.db.run(`DELETE FROM delivery_entries WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+
+  getProducts(): string[] {
+    const stmt = this.db.prepare(`SELECT DISTINCT product FROM delivery_entries ORDER BY product`);
+    const products: string[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      products.push(row.product as string);
+    }
+    stmt.free();
+    return products;
+  }
+}
+
 export class SettingsQueries {
   constructor(private db: Database) {}
 
