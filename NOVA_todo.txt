@@ -46,33 +46,50 @@ COMPLETED
 [DONE] deliveries — training date column (DB schema + form + table column)
 [DONE] deliveries — starred deliveries (star/unstar toggle, starred panel above table, amber accent)
 [DONE] Jira assignee picker — search/reassign users from TaskDrawer, user search API route
-[DONE] deliveries — side drawer for editing (DeliveryDrawer replaces inline form, click row to edit, delete confirm, star toggle)
+[DONE] deliveries — side drawer for editing (DeliveryDrawer, click any row to open, xlsx rows pre-fill new entry)
+[DONE] deliveries — remove Branches + Incr columns, full-width panel (max-w-full)
+[DONE] deliveries — multi-select status filter on table
+[DONE] deliveries — multi-select status filter on dashboard KPI figures
+[DONE] move Sync Now button to Settings page — per-integration + per-O365-source Sync Now buttons
+[DONE] README technical documentation
+[DONE] deliveries — starred for me / starred for all (star_scope + starred_by, panel toggle My Stars / Team Stars)
+[DONE] deliveries — remove duplicate entries (dedup query + endpoint, hide xlsx rows when DB entry exists)
+[DONE] deliveries — clean up test data
+[DONE] deliveries — manual SharePoint sync (pull from SP via MCP file tools, Sync from SharePoint button)
+[DONE] per-source Sync Now buttons in integration cards (POST /api/tasks/sync/:source)
+[DONE] removed global Sync Now from navbar (now per-integration in Settings)
+[DONE] star xlsx rows — star button on spreadsheet rows creates DB entry with is_starred=1
+[DONE] deliveries — prefill drawer from xlsx row click (opens DeliveryDrawer with spreadsheet data)
 
 TO DO
 -----
 
---- Tier 1: Jira power features ---
-1. Jira move-team automation (move ticket to a different Jira project)
+--- Tier 1: Daily workflow unlocks ---
+1. send/reply/forward emails from NOVA — send-mail, reply-mail-message, forward-mail-message
+2. create/edit calendar events from NOVA — create-calendar-event, update-calendar-event
+3. deploy to server
+4. deliveries — push to SharePoint (write local DB changes back to xlsx on SharePoint)
 
---- Tier 2: O365 capabilities to wire up ---
-2. send/reply/forward emails from NOVA — send-mail, reply-mail-message, forward-mail-message
-3. create/edit calendar events from NOVA — create-calendar-event, update-calendar-event
-4. browse mail folders — list-mail-folders, list-mail-folder-messages
-5. browse specific planner plans — get-planner-plan, list-plan-tasks
-6. email attachments — list/get/add attachments on messages
-7. multi-calendar support — list-calendars, get-specific-calendar-view
-8. deprecate PA workaround now admin has approved O365 integration (on hold)
+--- Tier 2: Polish & depth ---
+5. user roles — admin vs viewer vs editor
+    a. requireRole('admin') middleware function
+    b. define which routes are admin-only (Settings writes, user management, CRM deletes, etc.)
+    c. add 'editor' role to schema if needed
+    d. UI gating — hide admin-only controls (Settings, CRM delete, user management) for non-admin users
+6. multi-user — depends on roles
+7. browse mail folders — list-mail-folders, list-mail-folder-messages
+8. browse specific planner plans — get-planner-plan, list-plan-tasks
+9. deprecate PA workaround now admin has approved O365 integration (on hold)
 
---- Tier 3: Bigger features ---
-9. user roles — admin vs viewer vs editor
-10. multi-user — depends on roles
-11. deploy to server
+--- Tier 3: Nice to have ---
+10. email attachments — list/get/add attachments on messages
+11. multi-calendar support — list-calendars, get-specific-calendar-view
+12. Documentation — User guides (help page)
 
 --- Tier 4: Roadmap ---
-12. Documentation — User guides (help page) and technical docs (README)
-13. sales pipeline — replace onboarding spreadsheet
+13. Jira move-team automation (move ticket to a different Jira project)
+14. sales pipeline — replace onboarding spreadsheet
     - create tickets from NOVA
     - launch onboarding tool from NOVA
     - add order form creates task
     - add "welcome pack" to NOVA
-

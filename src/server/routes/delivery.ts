@@ -176,8 +176,9 @@ function loadWorkbook(): Record<string, SheetResult> & { _lastModified: string }
 }
 
 import type { DeliveryQueries } from '../db/queries.js';
+import type { SharePointSync } from '../services/sharepoint-sync.js';
 
-export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries): Router {
+export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync): Router {
   const router = Router();
 
   // Pre-load on startup (non-blocking to avoid slowing boot)
@@ -240,9 +241,21 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries): Router 
 
     router.post('/entries', (req, res) => {
       const { product, account, status, onboarder, order_date, go_live_date,
-        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, notes } = req.body;
+        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, is_starred, notes } = req.body;
       if (!product || !account) {
         res.status(400).json({ ok: false, error: 'product and account are required' });
+        return;
+      }
+      const star_scope = req.body.star_scope ?? 'me';
+      const userId = req.user?.id ?? null;
+      // Prevent duplicates — return existing entry if same product+account
+      const existing = deliveryQueries.findByProductAccount(product, account);
+      if (existing) {
+        // If caller wants it starred, star the existing entry
+        if (is_starred && !existing.is_starred) {
+          deliveryQueries.update(existing.id, { is_starred: 1, star_scope, starred_by: userId });
+        }
+        res.json({ ok: true, data: deliveryQueries.getById(existing.id) });
         return;
       }
       const id = deliveryQueries.create({
@@ -250,15 +263,22 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries): Router 
         predicted_delivery, training_date: training_date ?? null,
         branches: branches ?? null, mrr: mrr ?? null,
         incremental: incremental ?? null, licence_fee: licence_fee ?? null,
-        is_starred: 0, notes,
+        is_starred: is_starred ?? 0, star_scope, starred_by: is_starred ? userId : null,
+        notes,
       });
       res.json({ ok: true, data: deliveryQueries.getById(id) });
+    });
+
+    // DELETE /entries/duplicates — one-time cleanup
+    router.delete('/entries/duplicates', (_req, res) => {
+      const removed = deliveryQueries.deleteDuplicates();
+      res.json({ ok: true, data: { removed } });
     });
 
     router.patch('/entries/:id/star', (req, res) => {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-      const toggled = deliveryQueries.toggleStar(id);
+      const toggled = deliveryQueries.toggleStar(id, req.user?.id);
       if (!toggled) { res.status(404).json({ ok: false, error: 'Entry not found' }); return; }
       res.json({ ok: true, data: deliveryQueries.getById(id) });
     });
@@ -277,6 +297,43 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries): Router 
       const deleted = deliveryQueries.delete(id);
       if (!deleted) { res.status(404).json({ ok: false, error: 'Entry not found' }); return; }
       res.json({ ok: true });
+    });
+  }
+
+  // SharePoint sync (manual-only)
+  if (spSync) {
+    router.get('/sync/status', (_req, res) => {
+      res.json({
+        ok: true,
+        data: {
+          available: spSync.isAvailable(),
+          tools: spSync.getAvailableTools(),
+        },
+      });
+    });
+
+    router.post('/sync/pull', async (_req, res) => {
+      try {
+        const result = await spSync.pull();
+        res.json({ ok: result.errors.length === 0, data: result });
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          error: err instanceof Error ? err.message : 'SharePoint pull failed',
+        });
+      }
+    });
+
+    router.post('/sync/push', async (_req, res) => {
+      try {
+        const result = await spSync.push();
+        res.json({ ok: result.errors.length === 0, data: result });
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          error: err instanceof Error ? err.message : 'SharePoint push failed',
+        });
+      }
     });
   }
 

@@ -25,6 +25,7 @@ import crypto from 'crypto';
 import { generateMorningBriefing } from './services/ai-standup.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
 import { OneDriveWatcher } from './services/onedrive-watcher.js';
+import { SharePointSync } from './services/sharepoint-sync.js';
 
 dotenv.config();
 
@@ -140,7 +141,8 @@ async function main() {
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries));
   app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries));
-  app.use('/api/delivery', createDeliveryRoutes(deliveryQueries));
+  const spSync = new SharePointSync(mcpManager, deliveryQueries);
+  app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync));
   app.use('/api/crm', createCrmRoutes(crmQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
 

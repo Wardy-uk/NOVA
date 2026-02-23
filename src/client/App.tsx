@@ -46,7 +46,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 export function App() {
   const [view, setView] = useState<View>('daily');
   const auth = useAuth();
-  const { tasks, loading, error, syncing, syncTasks, updateTask } = useTasks();
+  const { tasks, loading, error, syncing, updateTask } = useTasks();
   const health = useHealth();
   const { theme, setTheme } = useTheme();
   const [apiDebug, setApiDebug] = useState<Array<{ ts: string; text: string }>>([]);
@@ -210,15 +210,6 @@ export function App() {
             >
               Settings
             </button>
-            {view === 'tasks' && (
-              <button
-                onClick={syncTasks}
-                disabled={syncing}
-                className="px-3 py-1.5 text-xs bg-[#2f353d] hover:bg-[#363d47] text-neutral-300 hover:text-neutral-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ml-2"
-              >
-                {syncing ? 'Syncing...' : 'Sync Now'}
-              </button>
-            )}
             {/* Theme toggle */}
             <div className="flex items-center bg-[#2f353d] rounded border border-[#3a424d] ml-2">
               {([
@@ -268,7 +259,7 @@ export function App() {
         </header>
 
         {/* Main content */}
-        <main className={`flex-1 px-6 py-6 mx-auto w-full ${view === 'delivery' ? 'max-w-7xl' : 'max-w-4xl'}`}>
+        <main className={`flex-1 px-6 py-6 mx-auto w-full ${view === 'delivery' ? 'max-w-full' : 'max-w-4xl'}`}>
           {view === 'tasks' ? (
             <>
               {error && (

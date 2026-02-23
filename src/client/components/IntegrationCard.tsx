@@ -153,6 +153,16 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
     }
   };
 
+  const [syncingSource, setSyncingSource] = useState<string | null>(null);
+
+  const handleSyncSource = async (source: string) => {
+    setSyncingSource(source);
+    try {
+      await fetch(`/api/tasks/sync/${source}`, { method: 'POST' });
+    } catch { /* ignore */ }
+    setSyncingSource(null);
+  };
+
   const isDeviceCode = integration.authType === 'device_code';
   const isMsgraph = integration.id === 'msgraph';
 
@@ -258,28 +268,37 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
         </div>
       )}
 
-      {/* Sync interval for non-O365 integrations (jira, monday) */}
+      {/* Sync interval + Sync Now for non-O365 integrations (jira, monday) */}
       {enabled && !isMsgraph && (
         <div className="mb-4">
           <label className="block text-[10px] text-neutral-500 uppercase tracking-wider mb-1">
             Sync Frequency
           </label>
-          <select
-            value={syncIntervals[integration.id] ?? ''}
-            onChange={(e) => {
-              setSyncIntervals((prev) => ({ ...prev, [integration.id]: e.target.value }));
-              saveSetting(`sync_${integration.id}_interval_minutes`, e.target.value);
-            }}
-            className="bg-[#2f353d] border border-[#3a424d] rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:border-[#5ec1ca] focus:outline-none"
-          >
-            <option value="">Default (global)</option>
-            <option value="1">Every 1 minute</option>
-            <option value="2">Every 2 minutes</option>
-            <option value="5">Every 5 minutes</option>
-            <option value="10">Every 10 minutes</option>
-            <option value="15">Every 15 minutes</option>
-            <option value="30">Every 30 minutes</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={syncIntervals[integration.id] ?? ''}
+              onChange={(e) => {
+                setSyncIntervals((prev) => ({ ...prev, [integration.id]: e.target.value }));
+                saveSetting(`sync_${integration.id}_interval_minutes`, e.target.value);
+              }}
+              className="bg-[#2f353d] border border-[#3a424d] rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:border-[#5ec1ca] focus:outline-none"
+            >
+              <option value="">Default (global)</option>
+              <option value="1">Every 1 minute</option>
+              <option value="2">Every 2 minutes</option>
+              <option value="5">Every 5 minutes</option>
+              <option value="10">Every 10 minutes</option>
+              <option value="15">Every 15 minutes</option>
+              <option value="30">Every 30 minutes</option>
+            </select>
+            <button
+              onClick={() => handleSyncSource(integration.id)}
+              disabled={syncingSource === integration.id}
+              className="px-3 py-1.5 text-[10px] bg-[#2f353d] hover:bg-[#363d47] text-neutral-300 hover:text-neutral-100 rounded border border-[#3a424d] transition-colors disabled:opacity-50"
+            >
+              {syncingSource === integration.id ? 'Syncing...' : 'Sync Now'}
+            </button>
+          </div>
           <p className="text-[10px] text-neutral-600 mt-1">
             Overrides the global default for this integration.
           </p>
@@ -370,22 +389,31 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
                 </div>
               </div>
               {syncToggles[s.key] && (
-                <select
-                  value={syncIntervals[s.key] ?? ''}
-                  onChange={(e) => {
-                    setSyncIntervals((prev) => ({ ...prev, [s.key]: e.target.value }));
-                    saveSetting(`sync_${s.key}_interval_minutes`, e.target.value);
-                  }}
-                  className="bg-[#272C33] border border-[#3a424d] rounded px-2 py-1 text-[10px] text-neutral-300 focus:border-[#5ec1ca] focus:outline-none"
-                >
-                  <option value="">Default</option>
-                  <option value="1">1 min</option>
-                  <option value="2">2 min</option>
-                  <option value="5">5 min</option>
-                  <option value="10">10 min</option>
-                  <option value="15">15 min</option>
-                  <option value="30">30 min</option>
-                </select>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={syncIntervals[s.key] ?? ''}
+                    onChange={(e) => {
+                      setSyncIntervals((prev) => ({ ...prev, [s.key]: e.target.value }));
+                      saveSetting(`sync_${s.key}_interval_minutes`, e.target.value);
+                    }}
+                    className="bg-[#272C33] border border-[#3a424d] rounded px-2 py-1 text-[10px] text-neutral-300 focus:border-[#5ec1ca] focus:outline-none"
+                  >
+                    <option value="">Default</option>
+                    <option value="1">1 min</option>
+                    <option value="2">2 min</option>
+                    <option value="5">5 min</option>
+                    <option value="10">10 min</option>
+                    <option value="15">15 min</option>
+                    <option value="30">30 min</option>
+                  </select>
+                  <button
+                    onClick={() => handleSyncSource(s.key)}
+                    disabled={syncingSource === s.key}
+                    className="px-2 py-1 text-[10px] bg-[#272C33] hover:bg-[#363d47] text-neutral-400 hover:text-neutral-200 rounded border border-[#3a424d] transition-colors disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {syncingSource === s.key ? 'Syncing...' : 'Sync'}
+                  </button>
+                </div>
               )}
             </div>
           ))}

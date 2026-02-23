@@ -59,7 +59,7 @@ export function buildMcpConfig(
     case 'msgraph':
       return {
         command: 'npx',
-        args: ['@softeria/ms-365-mcp-server', '--preset', 'tasks,calendar,mail'],
+        args: ['@softeria/ms-365-mcp-server', '--preset', 'tasks,calendar,mail,files', '--org-mode'],
       };
     case 'monday':
       return {

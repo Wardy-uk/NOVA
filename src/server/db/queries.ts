@@ -360,6 +360,8 @@ export interface DeliveryEntry {
   incremental: number | null;
   licence_fee: number | null;
   is_starred: number;
+  star_scope: 'me' | 'all';
+  starred_by: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -400,18 +402,43 @@ export class DeliveryQueries {
     return undefined;
   }
 
+  findByProductAccount(product: string, account: string): DeliveryEntry | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_entries WHERE product = ? AND account = ? LIMIT 1`);
+    stmt.bind([product, account]);
+    if (stmt.step()) {
+      const entry = stmt.getAsObject() as unknown as DeliveryEntry;
+      stmt.free();
+      return entry;
+    }
+    stmt.free();
+    return undefined;
+  }
+
+  deleteDuplicates(): number {
+    // Keep the lowest id per product+account, delete the rest
+    const result = this.db.exec(
+      `SELECT id FROM delivery_entries WHERE id NOT IN (SELECT MIN(id) FROM delivery_entries GROUP BY product, account)`
+    );
+    if (!result[0] || result[0].values.length === 0) return 0;
+    const dupeIds = result[0].values.map((row: unknown[]) => row[0] as number);
+    this.db.run(`DELETE FROM delivery_entries WHERE id IN (${dupeIds.join(',')})`);
+    saveDb();
+    return dupeIds.length;
+  }
+
   create(entry: Omit<DeliveryEntry, 'id' | 'created_at' | 'updated_at'>): number {
     this.db.run(
       `INSERT INTO delivery_entries (product, account, status, onboarder, order_date, go_live_date,
-        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, is_starred, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, is_starred, star_scope, starred_by, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         entry.product, entry.account, entry.status ?? '',
         entry.onboarder ?? null, entry.order_date ?? null, entry.go_live_date ?? null,
         entry.predicted_delivery ?? null, entry.training_date ?? null,
         entry.branches ?? null,
         entry.mrr ?? null, entry.incremental ?? null, entry.licence_fee ?? null,
-        entry.is_starred ?? 0, entry.notes ?? null,
+        entry.is_starred ?? 0, entry.star_scope ?? 'me', entry.starred_by ?? null,
+        entry.notes ?? null,
       ]
     );
     const result = this.db.exec('SELECT last_insert_rowid() as id');
@@ -443,11 +470,22 @@ export class DeliveryQueries {
     return true;
   }
 
-  toggleStar(id: number): boolean {
+  toggleStar(id: number, userId?: number): boolean {
     const entry = this.getById(id);
     if (!entry) return false;
     const newVal = entry.is_starred ? 0 : 1;
-    this.db.run(`UPDATE delivery_entries SET is_starred = ?, updated_at = datetime('now') WHERE id = ?`, [newVal, id]);
+    const params: unknown[] = [newVal];
+    let sql = `UPDATE delivery_entries SET is_starred = ?`;
+    if (newVal && userId) {
+      sql += `, starred_by = ?`;
+      params.push(userId);
+    }
+    if (!newVal) {
+      sql += `, starred_by = NULL, star_scope = 'me'`;
+    }
+    sql += `, updated_at = datetime('now') WHERE id = ?`;
+    params.push(id);
+    this.db.run(sql, params as (string | number | null)[]);
     saveDb();
     return true;
   }

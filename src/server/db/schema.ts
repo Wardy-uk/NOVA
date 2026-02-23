@@ -150,6 +150,8 @@ export function initializeSchema(database: Database): void {
   const migrations: [string, string][] = [
     ['delivery_entries', 'training_date TEXT'],
     ['delivery_entries', 'is_starred INTEGER DEFAULT 0'],
+    ['delivery_entries', 'star_scope TEXT DEFAULT \'me\''],
+    ['delivery_entries', 'starred_by INTEGER'],
   ];
   for (const [table, colDef] of migrations) {
     try {

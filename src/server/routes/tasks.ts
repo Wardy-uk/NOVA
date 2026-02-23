@@ -113,7 +113,7 @@ export function createTaskRoutes(
     res.json({ ok: true, data: taskQueries.getById(req.params.id) });
   });
 
-  // POST /api/tasks/sync — Trigger manual sync
+  // POST /api/tasks/sync — Trigger manual sync (all sources)
   router.post('/sync', async (_req, res) => {
     try {
       const results = await aggregator.syncAll();
@@ -122,6 +122,24 @@ export function createTaskRoutes(
       res.status(500).json({
         ok: false,
         error: err instanceof Error ? err.message : 'Sync failed',
+      });
+    }
+  });
+
+  // POST /api/tasks/sync/:source — Trigger manual sync for a single source
+  router.post('/sync/:source', async (req, res) => {
+    const source = req.params.source;
+    if (!aggregator.sourceNames.includes(source)) {
+      res.status(400).json({ ok: false, error: `Unknown source: ${source}` });
+      return;
+    }
+    try {
+      const result = await aggregator.syncSource(source);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : `Sync ${source} failed`,
       });
     }
   });

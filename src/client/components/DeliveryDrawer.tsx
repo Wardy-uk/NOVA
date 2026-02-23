@@ -49,13 +49,14 @@ interface Props {
   isNew: boolean;
   products: string[];
   defaultProduct: string;
+  prefill?: Record<string, string> | null;
   onClose: () => void;
   onSaved: () => void;
   onDeleted: (id: number) => void;
   onStarToggled: (id: number) => void;
 }
 
-export function DeliveryDrawer({ entry, isNew, products, defaultProduct, onClose, onSaved, onDeleted, onStarToggled }: Props) {
+export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill, onClose, onSaved, onDeleted, onStarToggled }: Props) {
   const [form, setForm] = useState({
     product: '', account: '', status: 'Not Started', onboarder: '',
     order_date: '', go_live_date: '', predicted_delivery: '', training_date: '',
@@ -83,6 +84,22 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, onClose
         licence_fee: entry.licence_fee?.toString() ?? '',
         notes: entry.notes ?? '',
       });
+    } else if (prefill) {
+      setForm({
+        product: defaultProduct,
+        account: prefill.account ?? '',
+        status: prefill.status ?? 'Not Started',
+        onboarder: prefill.onboarder ?? '',
+        order_date: prefill.order_date ?? '',
+        go_live_date: prefill.go_live_date ?? '',
+        predicted_delivery: prefill.predicted_delivery ?? '',
+        training_date: prefill.training_date ?? '',
+        branches: prefill.branches ?? '',
+        mrr: prefill.mrr ?? '',
+        incremental: prefill.incremental ?? '',
+        licence_fee: prefill.licence_fee ?? '',
+        notes: prefill.notes ?? '',
+      });
     } else {
       setForm({
         product: defaultProduct, account: '', status: 'Not Started', onboarder: '',
@@ -93,7 +110,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, onClose
     setError(null);
     setSuccess(null);
     setConfirmDelete(false);
-  }, [entry, isNew, defaultProduct]);
+  }, [entry, isNew, defaultProduct, prefill]);
 
   const setField = (key: string, val: string) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -154,7 +171,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, onClose
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-[#5ec1ca]/20 text-[#5ec1ca]">
-                {entry && !isNew ? entry.product : 'New Entry'}
+                {entry && !isNew ? entry.product : prefill ? 'From Spreadsheet' : 'New Entry'}
               </span>
               {entry && !isNew && (
                 <button
@@ -167,7 +184,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, onClose
               )}
             </div>
             <div className="text-sm text-neutral-100 font-semibold truncate">
-              {entry && !isNew ? entry.account : 'New Delivery Entry'}
+              {entry && !isNew ? entry.account : prefill?.account || 'New Delivery Entry'}
             </div>
           </div>
           <button
