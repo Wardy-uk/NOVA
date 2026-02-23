@@ -8,12 +8,13 @@ import { DeliveryView } from './components/DeliveryView.js';
 import { CrmView } from './components/CrmView.js';
 import { MyFocusView } from './components/MyFocusView.js';
 import { LoginView } from './components/LoginView.js';
+import { HelpView } from './components/HelpView.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
 
-type View = 'tasks' | 'focus' | 'settings' | 'standup' | 'daily' | 'kpis' | 'delivery' | 'crm' | 'debug';
+type View = 'tasks' | 'focus' | 'settings' | 'standup' | 'daily' | 'kpis' | 'delivery' | 'crm' | 'help' | 'debug';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -250,6 +251,17 @@ export function App() {
                 </button>
               ))}
             </div>
+            <button
+              onClick={() => setView('help')}
+              title="Help & User Guide"
+              className={`w-7 h-7 text-xs rounded-full transition-colors flex items-center justify-center font-semibold ${
+                view === 'help'
+                  ? 'bg-[#5ec1ca] text-[#272C33]'
+                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200 border border-[#3a424d]'
+              }`}
+            >
+              ?
+            </button>
             {import.meta.env.DEV && (
               <button
                 onClick={() => setView('debug')}
@@ -309,6 +321,8 @@ export function App() {
             <CrmView />
           ) : view === 'settings' ? (
             <SettingsView />
+          ) : view === 'help' ? (
+            <HelpView />
           ) : (
             <div className="space-y-4">
               <div className="border border-[#3a424d] rounded-lg p-4 bg-[#2f353d]">
