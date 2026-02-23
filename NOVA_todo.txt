@@ -64,14 +64,32 @@ COMPLETED
 TO DO
 -----
 
+--- Tier 0: Blockers ---
+0. MS365 MCP re-auth — device code flow needs admin approval at https://login.microsoft.com/device
+   - Token for NickW@nurtur.tech is expired
+   - Blocks: SharePoint sync fix, any new MS365 features
+   - After auth: verify-login, then continue SP sync debugging (see memory/sharepoint-debug.md)
+
 --- Tier 1: Daily workflow unlocks ---
 1. send/reply/forward emails from NOVA — send-mail, reply-mail-message, forward-mail-message
 2. create/edit calendar events from NOVA — create-calendar-event, update-calendar-event
 3. deploy to server
-4. deliveries — push to SharePoint (write local DB changes back to xlsx on SharePoint)
+4. deliveries — fix SharePoint sync pull (3 bugs found, see memory/sharepoint-debug.md):
+   a. pull() calls nonexistent tools (get-sharepoint-site-by-path, search-sharepoint-sites)
+   b. download-onedrive-file-content needs driveItemId not filePath
+   c. rewrite to: list-drives → list-folder-files (navigate folders) → download by driveItemId
+5. deliveries — push to SharePoint (write local DB changes back to xlsx on SharePoint)
 
---- Tier 2: Polish & depth ---
-5. user roles — admin vs viewer vs editor
+--- Tier 2: Dynamics 365 + Polish ---
+5. Dynamics 365 CRM integration — pull accounts + tasks from Dataverse
+   - Org: https://nurtur-prod.crm11.dynamics.com/ (UK region, crm11)
+   - Dataverse MCP server: https://nurtur-prod.crm11.dynamics.com/api/mcp (HTTP transport)
+   - Needs: a. Add HTTP/SSE MCP transport to McpClientManager (currently stdio only)
+            b. Azure AD OAuth for Dataverse (same tenant as MS365 — NickW@nurtur.tech)
+            c. Register Dataverse as MCP server, tools: read_query, list_tables, create_record, update_record, Search
+            d. Build CRM sync service — pull accounts, tasks, activities into NOVA
+   - Depends on: Tier 0 (MS365 re-auth, same Azure AD tenant)
+6. user roles — admin vs viewer vs editor
     a. requireRole('admin') middleware function
     b. define which routes are admin-only (Settings writes, user management, CRM deletes, etc.)
     c. add 'editor' role to schema if needed

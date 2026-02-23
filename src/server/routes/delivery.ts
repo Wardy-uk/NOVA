@@ -246,7 +246,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
         res.status(400).json({ ok: false, error: 'product and account are required' });
         return;
       }
-      const star_scope = req.body.star_scope ?? 'me';
+      const star_scope = req.body.star_scope ?? 'all';
       const userId = req.user?.id ?? null;
       // Prevent duplicates — return existing entry if same product+account
       const existing = deliveryQueries.findByProductAccount(product, account);
@@ -310,6 +310,10 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
           tools: spSync.getAvailableTools(),
         },
       });
+    });
+
+    router.get('/sync/debug', (_req, res) => {
+      res.json({ ok: true, data: spSync.getDebugInfo() });
     });
 
     router.post('/sync/pull', async (_req, res) => {

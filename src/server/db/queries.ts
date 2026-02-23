@@ -437,7 +437,7 @@ export class DeliveryQueries {
         entry.predicted_delivery ?? null, entry.training_date ?? null,
         entry.branches ?? null,
         entry.mrr ?? null, entry.incremental ?? null, entry.licence_fee ?? null,
-        entry.is_starred ?? 0, entry.star_scope ?? 'me', entry.starred_by ?? null,
+        entry.is_starred ?? 0, entry.star_scope ?? 'all', entry.starred_by ?? null,
         entry.notes ?? null,
       ]
     );

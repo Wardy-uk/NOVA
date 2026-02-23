@@ -128,6 +128,33 @@ async function main() {
   // Public API routes (no auth required)
   app.use('/api/auth', createAuthRoutes(userQueries, jwtSecret));
 
+  // TEMP DEBUG: SP exploration (remove after debugging)
+  app.get('/api/debug/tools', async (_req, res) => {
+    try {
+      const server = (mcpManager as any).servers.get('msgraph');
+      if (!server?.client) { res.json({ error: 'msgraph not connected' }); return; }
+      const { tools } = await server.client.listTools();
+      const spTools = tools.filter((t: any) =>
+        t.name.includes('sharepoint') || t.name.includes('drive') || t.name.includes('download') || t.name.includes('list-folder')
+      );
+      res.json({ count: spTools.length, tools: spTools.map((t: any) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+    } catch (err: any) { res.json({ error: err.message }); }
+  });
+
+  // TEMP DEBUG: call any msgraph tool and return raw result
+  app.get('/api/debug/sp-probe', async (req, res) => {
+    try {
+      const tool = String(req.query.tool || 'list-drives');
+      const argsStr = String(req.query.args || '{}');
+      const args = JSON.parse(argsStr);
+      console.log(`[SP-Probe] Calling ${tool} with`, args);
+      const result = await mcpManager.callTool('msgraph', tool, args);
+      res.json({ ok: true, tool, args, result });
+    } catch (err: any) {
+      res.json({ ok: false, error: err.message, stack: err.stack?.split('\n').slice(0, 5) });
+    }
+  });
+
   // Protected API routes
   app.use('/api', authMiddleware(jwtSecret));
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator));

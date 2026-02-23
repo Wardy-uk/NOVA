@@ -51,6 +51,8 @@ export function App() {
   const { theme, setTheme } = useTheme();
   const [apiDebug, setApiDebug] = useState<Array<{ ts: string; text: string }>>([]);
   const [lastSuggest, setLastSuggest] = useState<string>('');
+  const [spDebug, setSpDebug] = useState<Record<string, unknown> | null>(null);
+  const [spDebugLoading, setSpDebugLoading] = useState(false);
   const standupChecked = useRef(false);
 
   // Auto-trigger standup on first visit if no morning ritual today
@@ -86,7 +88,24 @@ export function App() {
       }
     };
 
+    const fetchSpDebug = async () => {
+      try {
+        const res = await fetch('/api/delivery/sync/debug');
+        const json = await res.json();
+        if (active) {
+          if (json.ok) {
+            setSpDebug(json.data);
+          } else {
+            setSpDebug({ _error: json.error || `HTTP ${res.status}` });
+          }
+        }
+      } catch (err) {
+        if (active) setSpDebug({ _error: err instanceof Error ? err.message : 'Fetch failed' });
+      }
+    };
+
     fetchDebug();
+    fetchSpDebug();
     const interval = setInterval(fetchDebug, 5000);
     return () => {
       active = false;
@@ -316,6 +335,100 @@ export function App() {
                   {lastSuggest ? `Last Suggest: ${lastSuggest}` : 'Last Suggest: none'}
                 </div>
               </div>
+              <div className="border border-[#3a424d] rounded-lg p-4 bg-[#2f353d]">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-neutral-500 uppercase tracking-wider">
+                    SharePoint Sync Debug
+                  </div>
+                  <button
+                    onClick={async () => {
+                      setSpDebugLoading(true);
+                      try {
+                        const res = await fetch('/api/delivery/sync/debug');
+                        const json = await res.json();
+                        if (json.ok) setSpDebug(json.data);
+                      } catch { /* ignore */ }
+                      setSpDebugLoading(false);
+                    }}
+                    className="px-2 py-1 text-[10px] rounded bg-[#363d47] text-neutral-400 hover:text-neutral-200 transition-colors"
+                  >
+                    {spDebugLoading ? 'Loading...' : 'Refresh'}
+                  </button>
+                </div>
+                {spDebug ? (
+                  spDebug._error ? (
+                    <div className="text-[11px] text-red-400">Error: {String(spDebug._error)}</div>
+                  ) : (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-3 text-[11px]">
+                      <div>
+                        <span className="text-neutral-500">Registered: </span>
+                        <span className={spDebug.registered ? 'text-green-400' : 'text-red-400'}>
+                          {String(spDebug.registered)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500">Connected: </span>
+                        <span className={spDebug.connected ? 'text-green-400' : 'text-red-400'}>
+                          {String(spDebug.connected)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500">Available: </span>
+                        <span className={spDebug.available ? 'text-green-400' : 'text-red-400'}>
+                          {String(spDebug.available)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-[11px]">
+                      <div className="text-neutral-500 mb-0.5">Site path:</div>
+                      <code className="text-neutral-300">{String(spDebug.sitePath)}</code>
+                    </div>
+                    <div className="text-[11px]">
+                      <div className="text-neutral-500 mb-0.5">File path:</div>
+                      <code className="text-neutral-300">{String(spDebug.filePath)}</code>
+                    </div>
+                    <div className="text-[11px]">
+                      <div className="text-neutral-500 mb-0.5">
+                        All msgraph tools ({Array.isArray(spDebug.allMsgraphTools) ? spDebug.allMsgraphTools.length : 0}):
+                      </div>
+                      <pre className="text-[10px] text-neutral-400 overflow-auto max-h-[120px] whitespace-pre-wrap">
+                        {Array.isArray(spDebug.allMsgraphTools) && spDebug.allMsgraphTools.length > 0
+                          ? (spDebug.allMsgraphTools as string[]).join('\n')
+                          : 'none'}
+                      </pre>
+                    </div>
+                    <div className="text-[11px]">
+                      <div className="text-neutral-500 mb-0.5">
+                        SP-relevant tools ({Array.isArray(spDebug.spRelevantTools) ? spDebug.spRelevantTools.length : 0}):
+                      </div>
+                      <pre className="text-[10px] text-[#5ec1ca] overflow-auto max-h-[80px] whitespace-pre-wrap">
+                        {Array.isArray(spDebug.spRelevantTools) && spDebug.spRelevantTools.length > 0
+                          ? (spDebug.spRelevantTools as string[]).join('\n')
+                          : 'none'}
+                      </pre>
+                    </div>
+                    {spDebug.lastAttempt ? (
+                      <div className="text-[11px]">
+                        <span className="text-neutral-500">Last attempt: </span>
+                        <span className="text-neutral-300">{String(spDebug.lastAttempt)}</span>
+                      </div>
+                    ) : null}
+                    {spDebug.lastResult ? (
+                      <div className="text-[11px]">
+                        <div className="text-neutral-500 mb-0.5">Last result:</div>
+                        <pre className="text-[10px] text-neutral-300 overflow-auto max-h-[200px] whitespace-pre-wrap bg-[#272C33] rounded p-2">
+                          {JSON.stringify(spDebug.lastResult, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
+                  </div>
+                )
+                ) : (
+                  <div className="text-[11px] text-neutral-600">Loading SP debug info...</div>
+                )}
+              </div>
+
               <div className="border border-[#3a424d] rounded-lg p-4 bg-[#2f353d]">
                 <div className="text-xs text-neutral-500 uppercase tracking-wider mb-2">
                   Sample Task

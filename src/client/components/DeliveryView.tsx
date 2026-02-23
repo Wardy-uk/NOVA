@@ -142,14 +142,13 @@ export function DeliveryView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
+  const [excludeStatuses, setExcludeStatuses] = useState<Set<string>>(new Set(['complete']));
   const [search, setSearch] = useState('');
   const [drawerEntryId, setDrawerEntryId] = useState<number | null>(null);
   const [drawerIsNew, setDrawerIsNew] = useState(false);
   const [xlsxPrefill, setXlsxPrefill] = useState<Record<string, string> | null>(null);
-  const [dashFilter, setDashFilter] = useState<Set<string>>(new Set());
   const [starringAccount, setStarringAccount] = useState<string | null>(null);
-  const [starView, setStarView] = useState<'mine' | 'team'>('mine');
+  const [starView, setStarView] = useState<'mine' | 'team'>('team');
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -320,9 +319,6 @@ export function DeliveryView() {
 
   const { summary, sheets } = data;
   const currentSheet = activeTab ? sheets[activeTab] : null;
-  const sheetStatuses = currentSheet
-    ? [...new Set(currentSheet.rows.map((r) => (r.status || '').toLowerCase().trim()))].filter(Boolean).sort()
-    : [];
   // Build a set of accounts that already have DB entries for the active tab — hide those xlsx rows
   const dbAccountsForTab = new Set(
     dbEntries.filter((e) => e.product === activeTab).map((e) => e.account)
@@ -331,7 +327,8 @@ export function DeliveryView() {
     ? currentSheet.rows.filter((r) => {
         // Hide xlsx row if a DB entry exists for same product+account
         if (dbAccountsForTab.has(r.account)) return false;
-        if (statusFilter.size > 0 && !statusFilter.has((r.status || '').toLowerCase().trim())) return false;
+        const rowStatus = (r.status || '').toLowerCase().trim();
+        if (excludeStatuses.has(rowStatus)) return false;
         if (search) {
           const q = search.toLowerCase();
           return r.account.toLowerCase().includes(q) || (r.onboarder ?? '').toLowerCase().includes(q) || (r.notes ?? '').toLowerCase().includes(q);
@@ -341,7 +338,12 @@ export function DeliveryView() {
     : [];
 
   // DB entries for the active product tab
-  const dbForTab = activeTab ? dbEntries.filter((e) => e.product === activeTab) : [];
+  const dbForTab = activeTab ? dbEntries.filter((e) => {
+    if (e.product !== activeTab) return false;
+    const s = (e.status || '').toLowerCase().trim();
+    if (excludeStatuses.size > 0 && excludeStatuses.has(s)) return false;
+    return true;
+  }) : [];
   // DB entries for products not in xlsx
   const dbExtraProducts = [...new Set(dbEntries.map((e) => e.product))].filter((p) => !summary.products.includes(p));
   // Starred entries across all products — filtered by star view
@@ -361,20 +363,11 @@ export function DeliveryView() {
     ]),
   ].filter(Boolean).sort();
 
-  // Compute KPI figures — either from summary (no filter) or recomputed from raw data (filtered)
+  // Compute KPI figures — respects excludeStatuses
   const kpi = (() => {
-    if (dashFilter.size === 0) {
-      return {
-        totalCustomers: summary.totalCustomers + dbEntries.length,
-        totalMrr: summary.totalMrr + dbEntries.reduce((sum, e) => sum + (e.mrr ?? 0), 0),
-        totalWip: summary.totalWip,
-        totalComplete: summary.totalComplete,
-        novaEntries: dbEntries.length,
-      };
-    }
-    const matchStatus = (s: string) => dashFilter.has((s || '').toLowerCase().trim());
-    const allXlsxRows = Object.values(sheets).flatMap((s) => s.rows).filter((r) => matchStatus(r.status));
-    const filteredDb = dbEntries.filter((e) => matchStatus(e.status));
+    const isExcluded = (s: string) => excludeStatuses.has((s || '').toLowerCase().trim());
+    const allXlsxRows = Object.values(sheets).flatMap((s) => s.rows).filter((r) => !isExcluded(r.status));
+    const filteredDb = dbEntries.filter((e) => !isExcluded(e.status));
     return {
       totalCustomers: allXlsxRows.length + filteredDb.length,
       totalMrr: allXlsxRows.reduce((s, r) => s + (r.mrr ?? 0), 0) + filteredDb.reduce((s, e) => s + (e.mrr ?? 0), 0),
@@ -427,41 +420,6 @@ export function DeliveryView() {
         </div>
       )}
 
-      {/* Dashboard status filter */}
-      <div className="flex items-center gap-1.5 mb-3 flex-wrap">
-        <span className="text-[10px] text-neutral-600 uppercase tracking-wider mr-1">Filter:</span>
-        <button
-          onClick={() => setDashFilter(new Set())}
-          className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
-            dashFilter.size === 0 ? 'bg-[#5ec1ca] text-[#272C33] font-semibold' : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47]'
-          }`}
-        >
-          All
-        </button>
-        {allStatuses.map((status) => {
-          const isActive = dashFilter.has(status);
-          return (
-            <button
-              key={`dash-${status}`}
-              onClick={() => {
-                setDashFilter((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(status)) next.delete(status);
-                  else next.add(status);
-                  return next;
-                });
-              }}
-              className={`px-2 py-0.5 text-[10px] rounded-full transition-colors flex items-center gap-1 ${
-                isActive ? 'bg-[#5ec1ca] text-[#272C33] font-semibold' : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47]'
-              }`}
-            >
-              <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: isActive ? '#272C33' : getStatusColor(status) }} />
-              {status}
-            </button>
-          );
-        })}
-      </div>
-
       {/* Summary KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
         <KpiCard label="Total Customers" value={kpi.totalCustomers} />
@@ -471,29 +429,78 @@ export function DeliveryView() {
         <KpiCard label="NOVA Entries" value={kpi.novaEntries} sub="Local additions" />
       </div>
 
-      {/* Product tabs */}
-      <div className="flex items-center gap-1.5 mb-4 flex-wrap">
-        {allProducts.map((product) => {
-          const sheet = sheets[product];
-          const dbCount = dbEntries.filter((e) => e.product === product).length;
-          const isActive = activeTab === product;
-          return (
+      {/* Filters */}
+      <div className="mb-4 space-y-2">
+        {/* Brand filter */}
+        <div>
+          <div className="text-[10px] text-neutral-600 uppercase tracking-wider mb-1.5">Brand Filter</div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {allProducts.map((product) => {
+              const sheet = sheets[product];
+              const dbCount = dbEntries.filter((e) => e.product === product).length;
+              const isActive = activeTab === product;
+              return (
+                <button
+                  key={product}
+                  onClick={() => { setActiveTab(product); setSearch(''); }}
+                  className={`px-3 py-1.5 text-[11px] rounded transition-colors ${
+                    isActive
+                      ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                      : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47]'
+                  }`}
+                >
+                  {product}
+                  <span className={`ml-1.5 ${isActive ? 'text-[#272C33]/70' : 'text-neutral-600'}`}>
+                    {(sheet?.totals.count ?? 0) + dbCount}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {/* Status filter */}
+        <div>
+          <div className="text-[10px] text-neutral-600 uppercase tracking-wider mb-1.5">Status Filter</div>
+          <div className="flex items-center gap-1.5 flex-wrap">
             <button
-              key={product}
-              onClick={() => { setActiveTab(product); setStatusFilter(new Set()); setSearch(''); }}
-              className={`px-3 py-1.5 text-[11px] rounded transition-colors ${
-                isActive
-                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
-                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47]'
+              onClick={() => setExcludeStatuses(new Set())}
+              className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                excludeStatuses.size === 0 ? 'bg-[#5ec1ca] text-[#272C33] font-semibold' : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47]'
               }`}
             >
-              {product}
-              <span className={`ml-1.5 ${isActive ? 'text-[#272C33]/70' : 'text-neutral-600'}`}>
-                {(sheet?.totals.count ?? 0) + dbCount}
-              </span>
+              All
             </button>
-          );
-        })}
+            {allStatuses.map((status) => {
+              const isHidden = excludeStatuses.has(status);
+              return (
+                <button
+                  key={`filter-${status}`}
+                  onClick={() => {
+                    setExcludeStatuses((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(status)) next.delete(status);
+                      else next.add(status);
+                      return next;
+                    });
+                  }}
+                  className={`px-2 py-0.5 text-[10px] rounded-full transition-colors flex items-center gap-1 ${
+                    isHidden ? 'bg-[#2f353d] text-neutral-600 line-through' : 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                  }`}
+                >
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: isHidden ? '#4b5563' : getStatusColor(status) }} />
+                  {status}
+                </button>
+              );
+            })}
+            <div className="ml-auto">
+              <input
+                type="text" placeholder="Search accounts..." value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="bg-[#2f353d] text-neutral-300 text-[11px] rounded px-2.5 py-1 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-48 placeholder:text-neutral-600"
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Starred panel */}
@@ -587,50 +594,9 @@ export function DeliveryView() {
             </div>
           )}
 
-          {/* Filters row */}
-          <div className="flex items-center gap-2 mb-3 flex-wrap">
-            <button
-              onClick={() => setStatusFilter(new Set())}
-              className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
-                statusFilter.size === 0 ? 'bg-[#5ec1ca] text-[#272C33] font-semibold' : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47]'
-              }`}
-            >
-              All
-            </button>
-            {sheetStatuses.map((status) => {
-              const isActive = statusFilter.has(status);
-              return (
-                <button
-                  key={status}
-                  onClick={() => {
-                    setStatusFilter((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(status)) next.delete(status);
-                      else next.add(status);
-                      return next;
-                    });
-                  }}
-                  className={`px-2 py-0.5 text-[10px] rounded-full transition-colors flex items-center gap-1 ${
-                    isActive ? 'bg-[#5ec1ca] text-[#272C33] font-semibold' : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47]'
-                  }`}
-                >
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: isActive ? '#272C33' : getStatusColor(status) }} />
-                  {status}
-                </button>
-              );
-            })}
-            <div className="ml-auto">
-              <input
-                type="text" placeholder="Search accounts..." value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="bg-[#2f353d] text-neutral-300 text-[11px] rounded px-2.5 py-1 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-48 placeholder:text-neutral-600"
-              />
-            </div>
-          </div>
-
-          {(statusFilter.size > 0 || search) && (
+          {(excludeStatuses.size > 0 || search) && (
             <div className="text-[10px] text-neutral-600 mb-2">
-              Showing {filteredRows.length} of {currentSheet?.rows.length ?? 0}
+              Showing {filteredRows.length + dbForTab.length} of {(currentSheet?.rows.length ?? 0) + dbEntries.filter((e) => e.product === activeTab).length}
             </div>
           )}
 

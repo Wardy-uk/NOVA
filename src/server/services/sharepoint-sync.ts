@@ -31,10 +31,33 @@ export interface SyncResult {
  * the delivery xlsx on SharePoint.
  */
 export class SharePointSync {
+  private _lastResult: SyncResult | null = null;
+  private _lastAttempt: string | null = null;
+
   constructor(
     private mcp: McpClientManager,
     private deliveryQueries: DeliveryQueries,
   ) {}
+
+  /** Diagnostic info for the debug screen */
+  getDebugInfo() {
+    const registered = this.mcp.isRegistered('msgraph');
+    const connected = registered ? this.mcp.isConnected('msgraph') : false;
+    const allTools = registered ? this.mcp.getServerTools('msgraph') : [];
+    const spTools = this.getAvailableTools();
+    return {
+      registered,
+      connected,
+      available: this.isAvailable(),
+      allMsgraphTools: allTools,
+      spRelevantTools: spTools,
+      sitePath: SP_SITE_PATH,
+      filePath: SP_FILE_PATH,
+      productSheets: PRODUCT_SHEETS,
+      lastAttempt: this._lastAttempt,
+      lastResult: this._lastResult,
+    };
+  }
 
   /** Check if the msgraph MCP server is connected and has file tools */
   isAvailable(): boolean {
@@ -54,6 +77,7 @@ export class SharePointSync {
    * Only creates new entries for rows not already tracked locally.
    */
   async pull(): Promise<SyncResult> {
+    this._lastAttempt = new Date().toISOString();
     const result: SyncResult = {
       direction: 'pull',
       sheetsProcessed: 0,
@@ -66,12 +90,15 @@ export class SharePointSync {
 
     if (!this.isAvailable()) {
       result.errors.push('Microsoft 365 MCP server not connected or missing file tools');
+      this._lastResult = result;
       return result;
     }
 
     try {
       // Step 1: Find the SharePoint site
       const tools = this.getAvailableTools();
+      const allTools = this.mcp.getServerTools('msgraph');
+      console.log('[SP-Sync] ALL msgraph tools:', allTools.join(', '));
       console.log('[SP-Sync] Available file/SP tools:', tools.join(', '));
 
       // Try to get the site drive and locate the file
@@ -95,10 +122,11 @@ export class SharePointSync {
       }
 
       // Step 2: List drives on the site to find "Documents"
+      const siteText = this.extractText(siteInfo);
+      console.log('[SP-Sync] Site info raw text:', siteText.slice(0, 1000));
       const siteId = this.extractSiteId(siteInfo);
       if (!siteId) {
         result.errors.push('Could not determine SharePoint site ID from response');
-        console.log('[SP-Sync] Site info response:', JSON.stringify(siteInfo).slice(0, 500));
         return result;
       }
       console.log('[SP-Sync] Site ID:', siteId);
@@ -194,6 +222,7 @@ export class SharePointSync {
       result.errors.push(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
+    this._lastResult = result;
     return result;
   }
 
