@@ -94,7 +94,7 @@ export function App() {
   }, [view]);
 
   // Auth gate
-  if (auth.loading) {
+  if (auth.initializing) {
     return (
       <div className="min-h-screen bg-[#272C33] flex items-center justify-center">
         <div className="text-neutral-500 text-sm">Loading...</div>
@@ -109,7 +109,7 @@ export function App() {
           onLogin={auth.login}
           onRegister={auth.register}
           error={auth.error}
-          loading={auth.loading}
+          loading={auth.busy}
         />
       </ErrorBoundary>
     );

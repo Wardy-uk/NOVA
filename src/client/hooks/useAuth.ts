@@ -12,7 +12,8 @@ export interface AuthUser {
 interface AuthState {
   user: AuthUser | null;
   token: string | null;
-  loading: boolean;
+  initializing: boolean; // true only during initial token validation
+  busy: boolean;         // true during login/register actions
   error: string | null;
 }
 
@@ -50,7 +51,8 @@ export function useAuth() {
   const [state, setState] = useState<AuthState>({
     user: null,
     token: localStorage.getItem(TOKEN_KEY),
-    loading: true,
+    initializing: true,
+    busy: false,
     error: null,
   });
 
@@ -64,7 +66,7 @@ export function useAuth() {
     onUnauthorized = () => {
       localStorage.removeItem(TOKEN_KEY);
       currentToken = null;
-      setState({ user: null, token: null, loading: false, error: null });
+      setState({ user: null, token: null, initializing: false, busy: false, error: null });
     };
     return () => { onUnauthorized = null; };
   }, []);
@@ -73,7 +75,7 @@ export function useAuth() {
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY);
     if (!token) {
-      setState({ user: null, token: null, loading: false, error: null });
+      setState({ user: null, token: null, initializing: false, busy: false, error: null });
       return;
     }
 
@@ -83,20 +85,20 @@ export function useAuth() {
       .then(r => r.json())
       .then(json => {
         if (json.ok && json.data?.user) {
-          setState({ user: json.data.user, token, loading: false, error: null });
+          setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
         } else {
           localStorage.removeItem(TOKEN_KEY);
-          setState({ user: null, token: null, loading: false, error: null });
+          setState({ user: null, token: null, initializing: false, busy: false, error: null });
         }
       })
       .catch(() => {
         localStorage.removeItem(TOKEN_KEY);
-        setState({ user: null, token: null, loading: false, error: null });
+        setState({ user: null, token: null, initializing: false, busy: false, error: null });
       });
   }, []);
 
   const login = useCallback(async (username: string, password: string): Promise<boolean> => {
-    setState(s => ({ ...s, error: null, loading: true }));
+    setState(s => ({ ...s, error: null, busy: true }));
     try {
       const res = await originalFetch('/api/auth/login', {
         method: 'POST',
@@ -106,19 +108,19 @@ export function useAuth() {
       const json = await res.json();
       if (json.ok && json.data) {
         localStorage.setItem(TOKEN_KEY, json.data.token);
-        setState({ user: json.data.user, token: json.data.token, loading: false, error: null });
+        setState({ user: json.data.user, token: json.data.token, initializing: false, busy: false, error: null });
         return true;
       }
-      setState(s => ({ ...s, loading: false, error: json.error || 'Login failed' }));
+      setState(s => ({ ...s, busy: false, error: json.error || 'Login failed' }));
       return false;
     } catch {
-      setState(s => ({ ...s, loading: false, error: 'Network error' }));
+      setState(s => ({ ...s, busy: false, error: 'Network error' }));
       return false;
     }
   }, []);
 
   const register = useCallback(async (username: string, password: string, displayName?: string): Promise<boolean> => {
-    setState(s => ({ ...s, error: null, loading: true }));
+    setState(s => ({ ...s, error: null, busy: true }));
     try {
       const res = await originalFetch('/api/auth/register', {
         method: 'POST',
@@ -128,13 +130,13 @@ export function useAuth() {
       const json = await res.json();
       if (json.ok && json.data) {
         localStorage.setItem(TOKEN_KEY, json.data.token);
-        setState({ user: json.data.user, token: json.data.token, loading: false, error: null });
+        setState({ user: json.data.user, token: json.data.token, initializing: false, busy: false, error: null });
         return true;
       }
-      setState(s => ({ ...s, loading: false, error: json.error || 'Registration failed' }));
+      setState(s => ({ ...s, busy: false, error: json.error || 'Registration failed' }));
       return false;
     } catch {
-      setState(s => ({ ...s, loading: false, error: 'Network error' }));
+      setState(s => ({ ...s, busy: false, error: 'Network error' }));
       return false;
     }
   }, []);
@@ -142,12 +144,13 @@ export function useAuth() {
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     currentToken = null;
-    setState({ user: null, token: null, loading: false, error: null });
+    setState({ user: null, token: null, initializing: false, busy: false, error: null });
   }, []);
 
   return {
     user: state.user,
-    loading: state.loading,
+    initializing: state.initializing,
+    busy: state.busy,
     error: state.error,
     isAuthenticated: !!state.user,
     login,
