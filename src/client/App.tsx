@@ -5,11 +5,12 @@ import { StandupView } from './components/StandupView.js';
 import { DailyStatsView } from './components/DailyStatsView.js';
 import { KpisView } from './components/KpisView.js';
 import { DeliveryView } from './components/DeliveryView.js';
+import { CrmView } from './components/CrmView.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 
-type View = 'tasks' | 'settings' | 'standup' | 'daily' | 'kpis' | 'delivery' | 'debug';
+type View = 'tasks' | 'settings' | 'standup' | 'daily' | 'kpis' | 'delivery' | 'crm' | 'debug';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -154,6 +155,16 @@ export function App() {
               Delivery
             </button>
             <button
+              onClick={() => setView('crm')}
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                view === 'crm'
+                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                  : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
+              }`}
+            >
+              CRM
+            </button>
+            <button
               onClick={() => setView('settings')}
               className={`px-3 py-1.5 text-xs rounded transition-colors ${
                 view === 'settings'
@@ -234,6 +245,8 @@ export function App() {
             <KpisView tasks={tasks} />
           ) : view === 'delivery' ? (
             <DeliveryView />
+          ) : view === 'crm' ? (
+            <CrmView />
           ) : view === 'settings' ? (
             <SettingsView />
           ) : (

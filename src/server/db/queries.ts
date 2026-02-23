@@ -452,6 +452,208 @@ export class DeliveryQueries {
   }
 }
 
+// ---------- CRM ----------
+
+export type RagStatus = 'red' | 'amber' | 'green';
+
+export interface CrmCustomer {
+  id: number;
+  name: string;
+  company: string | null;
+  sector: string | null;
+  mrr: number | null;
+  owner: string | null;
+  rag_status: RagStatus;
+  next_review_date: string | null;
+  contract_start: string | null;
+  contract_end: string | null;
+  dynamics_id: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CrmReview {
+  id: number;
+  customer_id: number;
+  review_date: string;
+  rag_status: RagStatus;
+  outcome: string | null;
+  actions: string | null;
+  reviewer: string | null;
+  next_review_date: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export class CrmQueries {
+  constructor(private db: Database) {}
+
+  // --- Customers ---
+
+  getAllCustomers(filters?: { rag_status?: string; owner?: string; search?: string }): CrmCustomer[] {
+    let sql = `SELECT * FROM crm_customers WHERE 1=1`;
+    const params: string[] = [];
+    if (filters?.rag_status) { sql += ` AND rag_status = ?`; params.push(filters.rag_status); }
+    if (filters?.owner) { sql += ` AND owner = ?`; params.push(filters.owner); }
+    if (filters?.search) {
+      sql += ` AND (name LIKE ? OR company LIKE ?)`;
+      params.push(`%${filters.search}%`, `%${filters.search}%`);
+    }
+    sql += ` ORDER BY CASE rag_status WHEN 'red' THEN 0 WHEN 'amber' THEN 1 WHEN 'green' THEN 2 END, next_review_date ASC`;
+
+    const stmt = this.db.prepare(sql);
+    if (params.length > 0) stmt.bind(params);
+    const results: CrmCustomer[] = [];
+    while (stmt.step()) { results.push(stmt.getAsObject() as unknown as CrmCustomer); }
+    stmt.free();
+    return results;
+  }
+
+  getCustomerById(id: number): CrmCustomer | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM crm_customers WHERE id = ?`);
+    stmt.bind([id]);
+    if (stmt.step()) { const c = stmt.getAsObject() as unknown as CrmCustomer; stmt.free(); return c; }
+    stmt.free();
+    return undefined;
+  }
+
+  createCustomer(c: Omit<CrmCustomer, 'id' | 'created_at' | 'updated_at'>): number {
+    this.db.run(
+      `INSERT INTO crm_customers (name, company, sector, mrr, owner, rag_status, next_review_date, contract_start, contract_end, dynamics_id, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [c.name, c.company ?? null, c.sector ?? null, c.mrr ?? null, c.owner ?? null,
+       c.rag_status ?? 'green', c.next_review_date ?? null, c.contract_start ?? null,
+       c.contract_end ?? null, c.dynamics_id ?? null, c.notes ?? null]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  updateCustomer(id: number, updates: Partial<Omit<CrmCustomer, 'id' | 'created_at' | 'updated_at'>>): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [key, val] of Object.entries(updates)) {
+      fields.push(`${key} = ?`);
+      params.push(val ?? null);
+    }
+    if (fields.length === 0) return false;
+    fields.push(`updated_at = datetime('now')`);
+    params.push(id);
+    this.db.run(`UPDATE crm_customers SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return this.getCustomerById(id) !== undefined;
+  }
+
+  deleteCustomer(id: number): boolean {
+    const exists = this.getCustomerById(id);
+    if (!exists) return false;
+    this.db.run(`DELETE FROM crm_reviews WHERE customer_id = ?`, [id]);
+    this.db.run(`DELETE FROM crm_customers WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+
+  getOwners(): string[] {
+    const stmt = this.db.prepare(`SELECT DISTINCT owner FROM crm_customers WHERE owner IS NOT NULL AND owner != '' ORDER BY owner`);
+    const owners: string[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      if (row.owner) owners.push(row.owner as string);
+    }
+    stmt.free();
+    return owners;
+  }
+
+  // --- Reviews ---
+
+  getReviewsForCustomer(customerId: number): CrmReview[] {
+    const stmt = this.db.prepare(`SELECT * FROM crm_reviews WHERE customer_id = ? ORDER BY review_date DESC`);
+    stmt.bind([customerId]);
+    const results: CrmReview[] = [];
+    while (stmt.step()) { results.push(stmt.getAsObject() as unknown as CrmReview); }
+    stmt.free();
+    return results;
+  }
+
+  getReviewById(id: number): CrmReview | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM crm_reviews WHERE id = ?`);
+    stmt.bind([id]);
+    if (stmt.step()) { const r = stmt.getAsObject() as unknown as CrmReview; stmt.free(); return r; }
+    stmt.free();
+    return undefined;
+  }
+
+  createReview(r: Omit<CrmReview, 'id' | 'created_at'>): number {
+    this.db.run(
+      `INSERT INTO crm_reviews (customer_id, review_date, rag_status, outcome, actions, reviewer, next_review_date, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [r.customer_id, r.review_date, r.rag_status, r.outcome ?? null, r.actions ?? null,
+       r.reviewer ?? null, r.next_review_date ?? null, r.notes ?? null]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    // Propagate RAG + next review to parent customer
+    this.db.run(
+      `UPDATE crm_customers SET rag_status = ?, next_review_date = COALESCE(?, next_review_date), updated_at = datetime('now') WHERE id = ?`,
+      [r.rag_status, r.next_review_date ?? null, r.customer_id]
+    );
+    saveDb();
+    return id;
+  }
+
+  updateReview(id: number, updates: Partial<Omit<CrmReview, 'id' | 'created_at'>>): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [key, val] of Object.entries(updates)) {
+      fields.push(`${key} = ?`);
+      params.push(val ?? null);
+    }
+    if (fields.length === 0) return false;
+    params.push(id);
+    this.db.run(`UPDATE crm_reviews SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return this.getReviewById(id) !== undefined;
+  }
+
+  deleteReview(id: number): boolean {
+    const exists = this.getReviewById(id);
+    if (!exists) return false;
+    this.db.run(`DELETE FROM crm_reviews WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+
+  getSummary(): { total: number; red: number; amber: number; green: number; overdueReviews: number; totalMrr: number } {
+    const stmt = this.db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN rag_status = 'red' THEN 1 ELSE 0 END) as red,
+        SUM(CASE WHEN rag_status = 'amber' THEN 1 ELSE 0 END) as amber,
+        SUM(CASE WHEN rag_status = 'green' THEN 1 ELSE 0 END) as green,
+        SUM(CASE WHEN next_review_date < date('now') THEN 1 ELSE 0 END) as overdueReviews,
+        COALESCE(SUM(mrr), 0) as totalMrr
+      FROM crm_customers
+    `);
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      stmt.free();
+      return {
+        total: (row.total as number) ?? 0,
+        red: (row.red as number) ?? 0,
+        amber: (row.amber as number) ?? 0,
+        green: (row.green as number) ?? 0,
+        overdueReviews: (row.overdueReviews as number) ?? 0,
+        totalMrr: (row.totalMrr as number) ?? 0,
+      };
+    }
+    stmt.free();
+    return { total: 0, red: 0, amber: 0, green: 0, overdueReviews: 0, totalMrr: 0 };
+  }
+}
+
 export class SettingsQueries {
   constructor(private db: Database) {}
 

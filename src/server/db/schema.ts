@@ -97,6 +97,40 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  database.run(`
+    CREATE TABLE IF NOT EXISTS crm_customers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      company TEXT,
+      sector TEXT,
+      mrr REAL,
+      owner TEXT,
+      rag_status TEXT DEFAULT 'green',
+      next_review_date TEXT,
+      contract_start TEXT,
+      contract_end TEXT,
+      dynamics_id TEXT,
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS crm_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL,
+      review_date TEXT NOT NULL,
+      rag_status TEXT NOT NULL,
+      outcome TEXT,
+      actions TEXT,
+      reviewer TEXT,
+      next_review_date TEXT,
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   // Indexes
   database.run(`CREATE INDEX IF NOT EXISTS idx_delivery_product ON delivery_entries(product)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source)`);
@@ -105,6 +139,10 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_sla_breach ON tasks(sla_breach_at)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_rituals_type_date ON rituals(type, date)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_crm_customers_rag ON crm_customers(rag_status)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_crm_customers_next_review ON crm_customers(next_review_date)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_crm_reviews_customer ON crm_reviews(customer_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_crm_reviews_date ON crm_reviews(review_date DESC)`);
 
   // Seed default settings
   const defaults: [string, string][] = [

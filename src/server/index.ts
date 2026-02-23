@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { getDb, initializeSchema } from './db/schema.js';
-import { TaskQueries, SettingsQueries, RitualQueries, DeliveryQueries } from './db/queries.js';
+import { TaskQueries, SettingsQueries, RitualQueries, DeliveryQueries, CrmQueries } from './db/queries.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
 import { createTaskRoutes } from './routes/tasks.js';
@@ -17,6 +17,7 @@ import { createActionRoutes } from './routes/actions.js';
 import { createJiraRoutes } from './routes/jira.js';
 import { createStandupRoutes } from './routes/standups.js';
 import { createDeliveryRoutes } from './routes/delivery.js';
+import { createCrmRoutes } from './routes/crm.js';
 import { generateMorningBriefing } from './services/ai-standup.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
 import { OneDriveWatcher } from './services/onedrive-watcher.js';
@@ -37,6 +38,7 @@ async function main() {
   const settingsQueries = new SettingsQueries(db);
   const ritualQueries = new RitualQueries(db);
   const deliveryQueries = new DeliveryQueries(db);
+  const crmQueries = new CrmQueries(db);
 
   // 2. MCP Client Manager
   console.log('[N.O.V.A] Setting up MCP servers...');
@@ -119,6 +121,7 @@ async function main() {
   app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries));
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries));
+  app.use('/api/crm', createCrmRoutes(crmQueries));
 
   // 6. OneDrive file watcher (Power Automate bridge)
   const watcher = new OneDriveWatcher(taskQueries);

@@ -18,14 +18,21 @@ COMPLETED
 [DONE] Split Daily Stats and KPIs - 2 separate pages
 [DONE] preload delivery sheet mock up - max 5 latest from each tab (?limit=N param)
 [DONE] Daily Stats as home page
+[DONE] Delivery data entry - local DB CRUD for delivery entries
+[DONE] CRM page - customer health (RAG), business reviews, DB-backed CRUD
 
 TO DO NEXT (easiest first)
 --------------------------
 1. add task/to dos from NOVA
-2. add tasks from Dynamics CRM - list of business reviews, RAG customers to prioritise contact
-3. login
+2. login
 4. multi-user
 5. sales pipeline - replace onboarding spreadsheet, add order form creates task,
    - create tickets from NOVA
    - launch onboarding tool from NOVA
    - add "welcome pack" to NOVA
+
+deploy to server
+user roles
+deliver sheet - total MRR value is bigger tan total mrr box
+add Jira Automation (specifically move team automation)
+add in full O365 integration now that admin has approved it
