@@ -64,6 +64,17 @@ COMPLETED
 TO DO
 -----
 
+Do Next
+
+[DONE] Create MS todos from NOVA (single or multiple) — batch mode toggle in CreateTaskForm, POST /api/o365/todo/tasks/batch endpoint
+[DONE] Admin screen — AdminView with Users/Teams/AI Keys tabs, admin-only nav button
+[DONE] Users, roles & teams — teams table + user_settings table, team_id on users, role dropdown (admin/editor/viewer)
+[DONE] Feature access - role based — requireRole() middleware, Settings writes gated to admin/editor, viewer gets read-only mode
+[DONE] Global api key for AI — managed in Admin > AI Keys tab
+[DONE] Allow individual ai key override — per-user AI key in Admin > AI Keys tab (user_settings table)
+Workflows for tickets and deliveries
+
+
 --- Tier 0: Blockers ---
 0. MS365 MCP re-auth — device code flow needs admin approval at https://login.microsoft.com/device
    - Token for NickW@nurtur.tech is expired
@@ -102,7 +113,7 @@ TO DO
 --- Tier 3: Nice to have ---
 10. email attachments — list/get/add attachments on messages
 11. multi-calendar support — list-calendars, get-specific-calendar-view
-12. Documentation — User guides (help page)
+12. [DONE] Documentation — User guides (help page)
 
 --- Tier 4: Roadmap ---
 13. Jira move-team automation (move ticket to a different Jira project)

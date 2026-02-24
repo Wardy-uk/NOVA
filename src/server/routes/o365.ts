@@ -115,6 +115,41 @@ export function createO365Routes(mcpManager: McpClientManager): Router {
     }
   });
 
+  // POST /api/o365/todo/tasks/batch — create multiple To-Do tasks
+  router.post('/todo/tasks/batch', async (req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = tools.find(t => t === 'create-todo-task');
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'create-todo-task tool not available', tools });
+      return;
+    }
+
+    const { titles, taskListId, dueDateTime } = req.body;
+    if (!Array.isArray(titles) || titles.length === 0) {
+      res.status(400).json({ ok: false, error: 'titles array is required' });
+      return;
+    }
+
+    const results: Array<{ title: string; ok: boolean; error?: string }> = [];
+    for (const rawTitle of titles) {
+      const title = String(rawTitle).trim();
+      if (!title) continue;
+      try {
+        const args: Record<string, unknown> = { title };
+        if (taskListId) args.taskListId = taskListId;
+        if (dueDateTime) args.dueDateTime = dueDateTime;
+        await mcpManager.callTool('msgraph', toolName, args);
+        results.push({ title, ok: true });
+      } catch (err) {
+        results.push({ title, ok: false, error: err instanceof Error ? err.message : 'Failed' });
+      }
+    }
+
+    const created = results.filter(r => r.ok).length;
+    const failed = results.filter(r => !r.ok).length;
+    res.json({ ok: true, data: { created, failed, total: results.length, results } });
+  });
+
   // PATCH /api/o365/todo/tasks/:taskId — update a To-Do task
   router.patch('/todo/tasks/:taskId', async (req, res) => {
     const tools = mcpManager.getServerTools('msgraph');

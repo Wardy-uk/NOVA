@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { SettingsQueries } from '../db/queries.js';
+import { requireRole } from '../middleware/auth.js';
 
 const SettingUpdateSchema = z.object({
   value: z.string(),
@@ -17,8 +18,8 @@ export function createSettingsRoutes(
     res.json({ ok: true, data: settingsQueries.getAll() });
   });
 
-  // PUT /api/settings/:key — Update a setting
-  router.put('/:key', (req, res) => {
+  // PUT /api/settings/:key — Update a setting (admin/editor only)
+  router.put('/:key', requireRole('admin', 'editor'), (req, res) => {
     const parsed = SettingUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ ok: false, error: parsed.error.message });

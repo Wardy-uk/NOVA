@@ -9,12 +9,13 @@ import { CrmView } from './components/CrmView.js';
 import { MyFocusView } from './components/MyFocusView.js';
 import { LoginView } from './components/LoginView.js';
 import { HelpView } from './components/HelpView.js';
+import { AdminView } from './components/AdminView.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
 
-type View = 'tasks' | 'focus' | 'settings' | 'standup' | 'daily' | 'kpis' | 'delivery' | 'crm' | 'help' | 'debug';
+type View = 'tasks' | 'focus' | 'settings' | 'standup' | 'daily' | 'kpis' | 'delivery' | 'crm' | 'admin' | 'help' | 'debug';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -230,6 +231,18 @@ export function App() {
             >
               Settings
             </button>
+            {auth.user?.role === 'admin' && (
+              <button
+                onClick={() => setView('admin')}
+                className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                  view === 'admin'
+                    ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                    : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
+                }`}
+              >
+                Admin
+              </button>
+            )}
             {/* Theme toggle */}
             <div className="flex items-center bg-[#2f353d] rounded border border-[#3a424d] ml-2">
               {([
@@ -321,6 +334,8 @@ export function App() {
             <CrmView />
           ) : view === 'settings' ? (
             <SettingsView />
+          ) : view === 'admin' ? (
+            <AdminView />
           ) : view === 'help' ? (
             <HelpView />
           ) : (

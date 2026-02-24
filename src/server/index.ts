@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { getDb, initializeSchema } from './db/schema.js';
-import { TaskQueries, SettingsQueries, RitualQueries, DeliveryQueries, CrmQueries, UserQueries } from './db/queries.js';
+import { TaskQueries, SettingsQueries, RitualQueries, DeliveryQueries, CrmQueries, UserQueries, TeamQueries, UserSettingsQueries } from './db/queries.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
 import { createTaskRoutes } from './routes/tasks.js';
@@ -20,6 +20,7 @@ import { createDeliveryRoutes } from './routes/delivery.js';
 import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
 import { createO365Routes } from './routes/o365.js';
+import { createAdminRoutes } from './routes/admin.js';
 import { authMiddleware } from './middleware/auth.js';
 import crypto from 'crypto';
 import { generateMorningBriefing } from './services/ai-standup.js';
@@ -45,6 +46,8 @@ async function main() {
   const deliveryQueries = new DeliveryQueries(db);
   const crmQueries = new CrmQueries(db);
   const userQueries = new UserQueries(db);
+  const teamQueries = new TeamQueries(db);
+  const userSettingsQueries = new UserSettingsQueries(db);
 
   // JWT secret — use env, or persist a random one in settings
   let jwtSecret = process.env.JWT_SECRET ?? settingsQueries.get('jwt_secret');
@@ -172,6 +175,7 @@ async function main() {
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync));
   app.use('/api/crm', createCrmRoutes(crmQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
+  app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
 
   // 6. OneDrive file watcher (Power Automate bridge)
   const watcher = new OneDriveWatcher(taskQueries, settingsQueries);

@@ -783,11 +783,109 @@ export class UserQueries {
   }
 
   getAll(): Omit<User, 'password_hash'>[] {
-    const stmt = this.db.prepare(`SELECT id, username, display_name, email, role, auth_provider, provider_id, created_at, updated_at FROM users ORDER BY created_at`);
+    const stmt = this.db.prepare(`SELECT id, username, display_name, email, role, auth_provider, provider_id, team_id, created_at, updated_at FROM users ORDER BY created_at`);
     const users: Omit<User, 'password_hash'>[] = [];
     while (stmt.step()) { users.push(stmt.getAsObject() as unknown as Omit<User, 'password_hash'>); }
     stmt.free();
     return users;
+  }
+
+  delete(id: number): boolean {
+    this.db.run(`DELETE FROM users WHERE id = ?`, [id]);
+    this.db.run(`DELETE FROM user_settings WHERE user_id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+}
+
+// ---------- Teams ----------
+export interface Team {
+  id: number;
+  name: string;
+  description: string | null;
+  created_at: string;
+}
+
+export class TeamQueries {
+  constructor(private db: Database) {}
+
+  getAll(): Team[] {
+    const stmt = this.db.prepare(`SELECT * FROM teams ORDER BY name`);
+    const teams: Team[] = [];
+    while (stmt.step()) { teams.push(stmt.getAsObject() as unknown as Team); }
+    stmt.free();
+    return teams;
+  }
+
+  getById(id: number): Team | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM teams WHERE id = ?`);
+    stmt.bind([id]);
+    if (stmt.step()) { const t = stmt.getAsObject() as unknown as Team; stmt.free(); return t; }
+    stmt.free();
+    return undefined;
+  }
+
+  create(name: string, description?: string): number {
+    this.db.run(`INSERT INTO teams (name, description) VALUES (?, ?)`, [name, description ?? null]);
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  update(id: number, updates: { name?: string; description?: string }): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
+    if (updates.description !== undefined) { fields.push('description = ?'); params.push(updates.description); }
+    if (fields.length === 0) return false;
+    params.push(id);
+    this.db.run(`UPDATE teams SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return true;
+  }
+
+  delete(id: number): boolean {
+    this.db.run(`UPDATE users SET team_id = NULL WHERE team_id = ?`, [id]);
+    this.db.run(`DELETE FROM teams WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+}
+
+// ---------- User Settings (per-user key/value) ----------
+export class UserSettingsQueries {
+  constructor(private db: Database) {}
+
+  get(userId: number, key: string): string | null {
+    const stmt = this.db.prepare(`SELECT value FROM user_settings WHERE user_id = ? AND key = ?`);
+    stmt.bind([userId, key]);
+    if (stmt.step()) { const row = stmt.getAsObject() as Record<string, unknown>; stmt.free(); return (row.value as string) ?? null; }
+    stmt.free();
+    return null;
+  }
+
+  set(userId: number, key: string, value: string): void {
+    this.db.run(
+      `INSERT INTO user_settings (user_id, key, value, updated_at) VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+      [userId, key, value]
+    );
+    saveDb();
+  }
+
+  delete(userId: number, key: string): void {
+    this.db.run(`DELETE FROM user_settings WHERE user_id = ? AND key = ?`, [userId, key]);
+    saveDb();
+  }
+
+  getAllForUser(userId: number): Record<string, string> {
+    const stmt = this.db.prepare(`SELECT key, value FROM user_settings WHERE user_id = ?`);
+    stmt.bind([userId]);
+    const result: Record<string, string> = {};
+    while (stmt.step()) { const row = stmt.getAsObject() as Record<string, unknown>; result[row.key as string] = row.value as string; }
+    stmt.free();
+    return result;
   }
 }
 

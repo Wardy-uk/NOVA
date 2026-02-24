@@ -146,12 +146,32 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  database.run(`
+    CREATE TABLE IF NOT EXISTS teams (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      description TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_id INTEGER NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, key)
+    )
+  `);
+
   // Migrations — add columns that may not exist in older databases
   const migrations: [string, string][] = [
     ['delivery_entries', 'training_date TEXT'],
     ['delivery_entries', 'is_starred INTEGER DEFAULT 0'],
     ['delivery_entries', 'star_scope TEXT DEFAULT \'me\''],
     ['delivery_entries', 'starred_by INTEGER'],
+    ['users', 'team_id INTEGER'],
   ];
   for (const [table, colDef] of migrations) {
     try {
