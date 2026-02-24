@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import type { TaskQueries, SettingsQueries, RitualQueries } from '../db/queries.js';
+import type { TaskQueries, RitualQueries } from '../db/queries.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import { generateMorningBriefing, generateReplan, generateEndOfDay } from '../services/ai-standup.js';
 
 export function createStandupRoutes(
@@ -48,18 +49,20 @@ export function createStandupRoutes(
     ritual_id: ritualId,
   });
 
-  // Check what exists today
-  router.get('/today', (_req, res) => {
-    const rituals = ritualQueries.getByDate(today());
+  // Check what exists today (per-user)
+  router.get('/today', (req, res) => {
+    const userId = (req as any).user?.id as number | undefined;
+    const rituals = ritualQueries.getByDate(today(), undefined, userId);
     const hasMorning = rituals.some((r) => r.type === 'morning');
     const hasReplan = rituals.some((r) => r.type === 'replan');
     const hasEod = rituals.some((r) => r.type === 'eod');
     res.json({ ok: true, data: { rituals, hasMorning, hasReplan, hasEod, date: today() } });
   });
 
-  // Load cached rituals for today, re-enriched with current task data
-  router.get('/cached', (_req, res) => {
-    const rituals = ritualQueries.getByDate(today());
+  // Load cached rituals for today, re-enriched with current task data (per-user)
+  router.get('/cached', (req, res) => {
+    const userId = (req as any).user?.id as number | undefined;
+    const rituals = ritualQueries.getByDate(today(), undefined, userId);
     const result: Record<string, unknown> = {};
 
     for (const ritual of rituals) {
@@ -80,7 +83,7 @@ export function createStandupRoutes(
   });
 
   // Morning standup
-  router.post('/morning', async (_req, res) => {
+  router.post('/morning', async (req, res) => {
     try {
       const apiKey = requireApiKey();
       if (!apiKey) {
@@ -88,11 +91,12 @@ export function createStandupRoutes(
         return;
       }
 
-      const tasks = taskQueries.getAll();
+      const userId = (req as any).user?.id as number | undefined;
+      const tasks = taskQueries.getAll({ userId });
 
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayRituals = ritualQueries.getByDate(yesterday.toISOString().split('T')[0], 'morning');
+      const yesterdayRituals = ritualQueries.getByDate(yesterday.toISOString().split('T')[0], 'morning', userId);
 
       const briefing = await generateMorningBriefing(tasks, apiKey, yesterdayRituals[0] ?? null);
 
@@ -102,6 +106,7 @@ export function createStandupRoutes(
         summary_md: briefing.summary,
         planned_items: JSON.stringify(briefing.top_priorities.map((p) => p.task_id)),
         conversation: JSON.stringify(briefing),
+        user_id: userId,
       });
 
       const enriched = enrichMorning(briefing as unknown as Record<string, unknown>, ritualId);
@@ -113,7 +118,7 @@ export function createStandupRoutes(
   });
 
   // Re-plan
-  router.post('/replan', async (_req, res) => {
+  router.post('/replan', async (req, res) => {
     try {
       const apiKey = requireApiKey();
       if (!apiKey) {
@@ -121,8 +126,9 @@ export function createStandupRoutes(
         return;
       }
 
-      const tasks = taskQueries.getAll();
-      const todayRituals = ritualQueries.getByDate(today(), 'morning');
+      const userId = (req as any).user?.id as number | undefined;
+      const tasks = taskQueries.getAll({ userId });
+      const todayRituals = ritualQueries.getByDate(today(), 'morning', userId);
 
       const replan = await generateReplan(tasks, apiKey, todayRituals[0] ?? null);
 
@@ -131,6 +137,7 @@ export function createStandupRoutes(
         date: today(),
         summary_md: replan.summary,
         conversation: JSON.stringify(replan),
+        user_id: userId,
       });
 
       const enriched = enrichReplan(replan as unknown as Record<string, unknown>, ritualId);
@@ -142,7 +149,7 @@ export function createStandupRoutes(
   });
 
   // End of day
-  router.post('/eod', async (_req, res) => {
+  router.post('/eod', async (req, res) => {
     try {
       const apiKey = requireApiKey();
       if (!apiKey) {
@@ -150,8 +157,9 @@ export function createStandupRoutes(
         return;
       }
 
-      const tasks = taskQueries.getAll();
-      const todayRituals = ritualQueries.getByDate(today(), 'morning');
+      const userId = (req as any).user?.id as number | undefined;
+      const tasks = taskQueries.getAll({ userId });
+      const todayRituals = ritualQueries.getByDate(today(), 'morning', userId);
 
       const review = await generateEndOfDay(tasks, apiKey, todayRituals[0] ?? null);
 
@@ -161,6 +169,7 @@ export function createStandupRoutes(
         summary_md: review.summary,
         completed_items: JSON.stringify(review.accomplished),
         conversation: JSON.stringify(review),
+        user_id: userId,
       });
 
       const enriched = enrichEod(review as unknown as Record<string, unknown>, ritualId);

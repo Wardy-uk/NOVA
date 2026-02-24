@@ -3,12 +3,13 @@ import type { Task } from '../../shared/types.js';
 import { TaskCard } from './TaskCard.js';
 import { TaskDrawer } from './TaskDrawer.js';
 import { CreateTaskForm } from './CreateTaskForm.js';
-import { NextActions } from './NextActions.js';
 
 interface Props {
   tasks: Task[];
   loading: boolean;
   onUpdateTask: (id: string, updates: Record<string, unknown>) => void;
+  /** Hide filters/grouping — show a flat sorted list */
+  minimal?: boolean;
 }
 
 const SOURCE_META: Record<string, { label: string; color: string }> = {
@@ -25,7 +26,7 @@ const SOURCE_ORDER = ['jira', 'planner', 'todo', 'monday', 'email', 'calendar'];
 
 type SortField = 'priority' | 'due_date' | 'updated_at';
 
-export function TaskList({ tasks, loading, onUpdateTask }: Props) {
+export function TaskList({ tasks, loading, onUpdateTask, minimal }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [sourceFilter, setSourceFilter] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
@@ -199,9 +200,48 @@ export function TaskList({ tasks, loading, onUpdateTask }: Props) {
     return !isNaN(due.getTime()) && due < today;
   }).length;
 
+  // Minimal mode: flat sorted list, no filters/grouping
+  if (minimal) {
+    const allSorted = sortTasks(tasks);
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[11px] text-neutral-500">{tasks.length} tickets</div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-neutral-600 uppercase tracking-wider">Sort</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortField)}
+              className="bg-[#2f353d] text-neutral-300 text-[11px] rounded px-2 py-1 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors"
+            >
+              <option value="priority">Priority</option>
+              <option value="due_date">Due Date</option>
+              <option value="updated_at">Recently Updated</option>
+            </select>
+          </div>
+        </div>
+        <div className="space-y-1">
+          {allSorted.map((task) => (
+            <TaskCard key={task.id} task={task} onUpdate={onUpdateTask} onClick={() => openDrawer(task.id)} />
+          ))}
+        </div>
+        {drawerTask && (
+          <TaskDrawer
+            task={drawerTask}
+            index={drawerIndex}
+            total={flatTasks.length}
+            onClose={closeDrawer}
+            onPrev={prevDrawer}
+            onNext={nextDrawer}
+            onTaskUpdated={() => onUpdateTask(drawerTask.id, {})}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
-      <NextActions onUpdateTask={onUpdateTask} />
       <CreateTaskForm />
 
       {/* Filter / Sort toolbar */}

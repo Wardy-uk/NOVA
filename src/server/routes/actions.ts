@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import type { TaskQueries, SettingsQueries } from '../db/queries.js';
+import type { TaskQueries } from '../db/queries.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import { getNextActions, getAiActionsDebugLog, recordAiActionsDebug } from '../services/ai-actions.js';
 
 export function createActionRoutes(

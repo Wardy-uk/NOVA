@@ -1,8 +1,14 @@
 import { Router } from 'express';
-import type { CrmQueries } from '../db/queries.js';
+import type { CrmQueries, DeliveryQueries, OnboardingRunQueries } from '../db/queries.js';
+import { requireRole } from '../middleware/auth.js';
 
-export function createCrmRoutes(crmQueries: CrmQueries): Router {
+export function createCrmRoutes(
+  crmQueries: CrmQueries,
+  deliveryQueries?: DeliveryQueries,
+  onboardingRunQueries?: OnboardingRunQueries,
+): Router {
   const router = Router();
+  const writeGuard = requireRole('admin', 'editor');
 
   // --- Summary ---
   router.get('/summary', (_req, res) => {
@@ -25,30 +31,30 @@ export function createCrmRoutes(crmQueries: CrmQueries): Router {
   });
 
   router.get('/customers/:id', (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const customer = crmQueries.getCustomerById(id);
     if (!customer) { res.status(404).json({ ok: false, error: 'Customer not found' }); return; }
     res.json({ ok: true, data: customer });
   });
 
-  router.post('/customers', (req, res) => {
+  router.post('/customers', writeGuard, (req, res) => {
     const { name } = req.body;
     if (!name?.trim()) { res.status(400).json({ ok: false, error: 'name is required' }); return; }
     const id = crmQueries.createCustomer(req.body);
     res.json({ ok: true, data: crmQueries.getCustomerById(id) });
   });
 
-  router.put('/customers/:id', (req, res) => {
-    const id = parseInt(req.params.id, 10);
+  router.put('/customers/:id', writeGuard, (req, res) => {
+    const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const updated = crmQueries.updateCustomer(id, req.body);
     if (!updated) { res.status(404).json({ ok: false, error: 'Customer not found' }); return; }
     res.json({ ok: true, data: crmQueries.getCustomerById(id) });
   });
 
-  router.delete('/customers/:id', (req, res) => {
-    const id = parseInt(req.params.id, 10);
+  router.delete('/customers/:id', writeGuard, (req, res) => {
+    const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const deleted = crmQueries.deleteCustomer(id);
     if (!deleted) { res.status(404).json({ ok: false, error: 'Customer not found' }); return; }
@@ -57,13 +63,13 @@ export function createCrmRoutes(crmQueries: CrmQueries): Router {
 
   // --- Reviews CRUD ---
   router.get('/customers/:id/reviews', (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     res.json({ ok: true, data: crmQueries.getReviewsForCustomer(id) });
   });
 
-  router.post('/customers/:id/reviews', (req, res) => {
-    const customerId = parseInt(req.params.id, 10);
+  router.post('/customers/:id/reviews', writeGuard, (req, res) => {
+    const customerId = parseInt(req.params.id as string, 10);
     if (isNaN(customerId)) { res.status(400).json({ ok: false, error: 'Invalid customer id' }); return; }
     const { review_date, rag_status } = req.body;
     if (!review_date || !rag_status) {
@@ -74,20 +80,58 @@ export function createCrmRoutes(crmQueries: CrmQueries): Router {
     res.json({ ok: true, data: crmQueries.getReviewById(id) });
   });
 
-  router.put('/reviews/:id', (req, res) => {
-    const id = parseInt(req.params.id, 10);
+  router.put('/reviews/:id', writeGuard, (req, res) => {
+    const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const updated = crmQueries.updateReview(id, req.body);
     if (!updated) { res.status(404).json({ ok: false, error: 'Review not found' }); return; }
     res.json({ ok: true, data: crmQueries.getReviewById(id) });
   });
 
-  router.delete('/reviews/:id', (req, res) => {
-    const id = parseInt(req.params.id, 10);
+  router.delete('/reviews/:id', writeGuard, (req, res) => {
+    const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const deleted = crmQueries.deleteReview(id);
     if (!deleted) { res.status(404).json({ ok: false, error: 'Review not found' }); return; }
     res.json({ ok: true });
+  });
+
+  // --- Customer 360 Timeline ---
+  router.get('/customers/:id/timeline', (req, res) => {
+    const id = parseInt(req.params.id as string, 10);
+    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+
+    const customer = crmQueries.getCustomerById(id);
+    if (!customer) { res.status(404).json({ ok: false, error: 'Customer not found' }); return; }
+
+    const reviews = crmQueries.getReviewsForCustomer(id);
+
+    // Find delivery entries by account name (case-insensitive)
+    let deliveryEntries: unknown[] = [];
+    if (deliveryQueries) {
+      const allDelivery = deliveryQueries.getAll();
+      deliveryEntries = allDelivery.filter(
+        (de) => de.account.toLowerCase() === customer.name.toLowerCase()
+      );
+    }
+
+    // Find onboarding runs via delivery entries' onboarding_ids
+    let onboardingRuns: unknown[] = [];
+    if (onboardingRunQueries) {
+      const seenRefs = new Set<string>();
+      for (const de of deliveryEntries as Array<{ onboarding_id?: string }>) {
+        if (de.onboarding_id && !seenRefs.has(de.onboarding_id)) {
+          seenRefs.add(de.onboarding_id);
+          const runs = onboardingRunQueries.getAllByRef(de.onboarding_id);
+          onboardingRuns.push(...runs);
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      data: { customer, reviews, deliveryEntries, onboardingRuns },
+    });
   });
 
   return router;

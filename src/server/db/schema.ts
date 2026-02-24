@@ -138,7 +138,7 @@ export function initializeSchema(database: Database): void {
       display_name TEXT,
       email TEXT,
       password_hash TEXT NOT NULL,
-      role TEXT DEFAULT 'user',
+      role TEXT DEFAULT 'viewer',
       auth_provider TEXT DEFAULT 'local',
       provider_id TEXT,
       created_at TEXT DEFAULT (datetime('now')),
@@ -165,6 +165,102 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  database.run(`
+    CREATE TABLE IF NOT EXISTS feedback (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT DEFAULT 'open',
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS user_task_pins (
+      user_id INTEGER NOT NULL,
+      task_id TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, task_id)
+    )
+  `);
+
+  // ── Onboarding configuration tables ──
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS onboarding_ticket_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS onboarding_sale_types (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS onboarding_capabilities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      code TEXT,
+      ticket_group_id INTEGER REFERENCES onboarding_ticket_groups(id),
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS onboarding_matrix (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sale_type_id INTEGER NOT NULL REFERENCES onboarding_sale_types(id) ON DELETE CASCADE,
+      capability_id INTEGER NOT NULL REFERENCES onboarding_capabilities(id) ON DELETE CASCADE,
+      enabled INTEGER DEFAULT 1,
+      notes TEXT,
+      UNIQUE(sale_type_id, capability_id)
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS onboarding_capability_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      capability_id INTEGER NOT NULL REFERENCES onboarding_capabilities(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      is_bolt_on INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS onboarding_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      onboarding_ref TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      parent_key TEXT,
+      child_keys TEXT,
+      created_count INTEGER DEFAULT 0,
+      linked_count INTEGER DEFAULT 0,
+      error_message TEXT,
+      payload TEXT,
+      dry_run INTEGER DEFAULT 0,
+      user_id INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   // Migrations — add columns that may not exist in older databases
   const migrations: [string, string][] = [
     ['delivery_entries', 'training_date TEXT'],
@@ -172,7 +268,14 @@ export function initializeSchema(database: Database): void {
     ['delivery_entries', 'star_scope TEXT DEFAULT \'me\''],
     ['delivery_entries', 'starred_by INTEGER'],
     ['users', 'team_id INTEGER'],
+    ['delivery_entries', 'onboarding_id TEXT'],
+    ['rituals', 'user_id INTEGER'],
+    ['onboarding_capabilities', 'ticket_group_id INTEGER'],
+    ['onboarding_sale_types', 'jira_tickets_required INTEGER DEFAULT 0'],
+    ['delivery_entries', 'sale_type TEXT'],
   ];
+  // Data migration: consolidate 'user' role → 'viewer'
+  try { database.run(`UPDATE users SET role = 'viewer' WHERE role = 'user'`); } catch { /* ignore */ }
   for (const [table, colDef] of migrations) {
     try {
       database.run(`ALTER TABLE ${table} ADD COLUMN ${colDef}`);
@@ -183,6 +286,7 @@ export function initializeSchema(database: Database): void {
 
   // Indexes
   database.run(`CREATE INDEX IF NOT EXISTS idx_delivery_product ON delivery_entries(product)`);
+  database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_delivery_onboarding_id ON delivery_entries(onboarding_id) WHERE onboarding_id IS NOT NULL`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority DESC)`);
@@ -194,6 +298,16 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_crm_reviews_customer ON crm_reviews(customer_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_crm_reviews_date ON crm_reviews(review_date DESC)`);
   database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_user_task_pins_user ON user_task_pins(user_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_rituals_user ON rituals(user_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_ticket_groups ON onboarding_ticket_groups(sort_order)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_caps_group ON onboarding_capabilities(ticket_group_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_matrix_sale ON onboarding_matrix(sale_type_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_matrix_cap ON onboarding_matrix(capability_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_items_cap ON onboarding_capability_items(capability_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_runs_ref ON onboarding_runs(onboarding_ref)`);
 
   // Seed default settings
   const defaults: [string, string][] = [

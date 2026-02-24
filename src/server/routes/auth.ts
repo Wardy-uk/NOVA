@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import type { UserQueries } from '../db/queries.js';
+import type { FileUserQueries } from '../db/user-store.js';
+type UserQueries = FileUserQueries;
 import { authMiddleware, type AuthPayload } from '../middleware/auth.js';
 
 function signToken(user: { id: number; username: string; role: string }, secret: string): string {
@@ -79,7 +80,7 @@ export function createAuthRoutes(userQueries: UserQueries, jwtSecret: string): R
     }
 
     const hash = await bcrypt.hash(password, 10);
-    const role = userCount === 0 ? 'admin' : 'user'; // First user is admin
+    const role = userCount === 0 ? 'admin' : 'viewer'; // First user is admin
     const id = userQueries.create({
       username: normalizedUsername,
       display_name: display_name?.trim() || normalizedUsername,

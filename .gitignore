@@ -5,3 +5,6 @@ daypilot.db
 standups/
 reflections/
 *.log
+.d365-token-cache.json
+users.json
+settings.json

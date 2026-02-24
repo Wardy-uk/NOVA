@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import type { TaskQueries, SettingsQueries } from '../db/queries.js';
+import type { TaskQueries } from '../db/queries.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import { saveDb } from '../db/schema.js';
 
 const M365_SOURCES = ['planner', 'todo', 'calendar', 'email'] as const;

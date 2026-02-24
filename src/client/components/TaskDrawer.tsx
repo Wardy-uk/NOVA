@@ -102,6 +102,8 @@ function extractJiraDate(issue: Record<string, unknown> | null, ...keys: string[
 export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTaskUpdated }: Props) {
   const source = SOURCE_COLORS[task.source] ?? { bg: 'bg-neutral-800', text: 'text-neutral-300', label: task.source };
   const isJira = task.source === 'jira';
+  const isEmail = task.source === 'email';
+  const isCalendar = task.source === 'calendar';
   const canEditO365 = task.source === 'planner' || task.source === 'todo';
 
   // Live Jira issue data (fetched from MCP)
@@ -139,6 +141,20 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
   } | null>(null);
   const [transitionComment, setTransitionComment] = useState('');
   const [transitionCommentType, setTransitionCommentType] = useState<'internal' | 'public'>('internal');
+
+  // Email compose state
+  const [emailMode, setEmailMode] = useState<'reply' | 'forward' | null>(null);
+  const [emailTo, setEmailTo] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+  const [emailSending, setEmailSending] = useState(false);
+
+  // Calendar edit state
+  const [calSubject, setCalSubject] = useState('');
+  const [calStart, setCalStart] = useState('');
+  const [calEnd, setCalEnd] = useState('');
+  const [calLocation, setCalLocation] = useState('');
+  const [calEditing, setCalEditing] = useState(false);
+  const [calSaving, setCalSaving] = useState(false);
 
   // Parse metadata from description lines (Jira-style "Key: Value") — memoised on description
   const metadata = useMemo(() => parseMetadata(task.description), [task.description]);
@@ -422,6 +438,108 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
   };
 
   const handleSave = isJira ? handleSaveJira : handleSaveO365;
+  // Init calendar fields from task data
+  useEffect(() => {
+    if (!isCalendar) return;
+    const raw = task.raw_data as Record<string, unknown> | null;
+    setCalSubject(task.title || '');
+    // Extract start/end from raw_data (ISO datetime strings)
+    const startDt = raw?.start as { dateTime?: string } | string | undefined;
+    const endDt = raw?.end as { dateTime?: string } | string | undefined;
+    const startStr = typeof startDt === 'string' ? startDt : startDt?.dateTime ?? '';
+    const endStr = typeof endDt === 'string' ? endDt : endDt?.dateTime ?? '';
+    setCalStart(startStr ? startStr.slice(0, 16) : ''); // datetime-local format
+    setCalEnd(endStr ? endStr.slice(0, 16) : '');
+    const loc = raw?.location as { displayName?: string } | string | undefined;
+    setCalLocation(typeof loc === 'string' ? loc : loc?.displayName ?? '');
+  }, [isCalendar, task.title, task.raw_data]);
+
+  // Calendar event save
+  const handleCalendarSave = async () => {
+    if (!calSubject.trim() || !calStart || !calEnd) return;
+    setCalSaving(true);
+    setError(null);
+    try {
+      const eventId = task.source_id;
+      const args = {
+        subject: calSubject,
+        start: calStart,
+        end: calEnd,
+        location: calLocation || undefined,
+      };
+
+      if (eventId) {
+        await fetch(`/api/o365/calendar/events/${encodeURIComponent(eventId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(args),
+        });
+        setSuccess('Calendar event updated');
+      } else {
+        await fetch('/api/o365/calendar/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(args),
+        });
+        setSuccess('Calendar event created');
+      }
+      setCalEditing(false);
+      onTaskUpdated?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save event');
+    } finally {
+      setCalSaving(false);
+    }
+  };
+
+  // Email reply/forward handler
+  const handleEmailAction = async () => {
+    if (!emailMode || !emailBody.trim()) return;
+    setEmailSending(true);
+    setError(null);
+
+    const rawData = task.raw_data as Record<string, unknown> | null;
+    const from = rawData?.from as { emailAddress?: { address?: string; name?: string } } | undefined;
+    const originalFrom = from?.emailAddress?.address ?? from?.emailAddress?.name ?? '';
+
+    try {
+      if (emailMode === 'reply') {
+        await fetch(`/api/o365/mail/${encodeURIComponent(task.source_id ?? '')}/reply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            body: emailBody,
+            replyTo: originalFrom,
+            originalSubject: task.title,
+            originalBody: task.description,
+          }),
+        });
+        setSuccess('Reply sent');
+      } else {
+        if (!emailTo.trim()) { setError('Recipient is required'); setEmailSending(false); return; }
+        await fetch(`/api/o365/mail/${encodeURIComponent(task.source_id ?? '')}/forward`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: emailTo,
+            body: emailBody,
+            originalSubject: task.title,
+            originalBody: task.description,
+            originalFrom,
+          }),
+        });
+        setSuccess('Email forwarded');
+      }
+      setEmailMode(null);
+      setEmailBody('');
+      setEmailTo('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send');
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
   const canSave = isJira || canEditO365;
 
   // Status update for local DB (pin/dismiss/snooze)
@@ -761,6 +879,127 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
                 )}
               </div>
             </>
+          )}
+
+          {/* Calendar edit */}
+          {isCalendar && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[10px] uppercase tracking-widest text-neutral-400">Calendar Event</div>
+                <button
+                  onClick={() => setCalEditing(!calEditing)}
+                  className="text-[10px] text-[#5ec1ca] hover:text-[#4db0b9]"
+                >
+                  {calEditing ? 'Cancel' : 'Edit'}
+                </button>
+              </div>
+              {calEditing ? (
+                <div className="border border-[#3a424d] rounded bg-[#272C33] p-3 space-y-2">
+                  <div>
+                    <label className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block">Subject</label>
+                    <input
+                      value={calSubject} onChange={(e) => setCalSubject(e.target.value)}
+                      className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block">Start</label>
+                      <input type="datetime-local" value={calStart} onChange={(e) => setCalStart(e.target.value)}
+                        className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block">End</label>
+                      <input type="datetime-local" value={calEnd} onChange={(e) => setCalEnd(e.target.value)}
+                        className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block">Location</label>
+                    <input value={calLocation} onChange={(e) => setCalLocation(e.target.value)} placeholder="Meeting room or link"
+                      className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none" />
+                  </div>
+                  <button
+                    onClick={handleCalendarSave}
+                    disabled={calSaving || !calSubject.trim() || !calStart || !calEnd}
+                    className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50 transition-colors"
+                  >
+                    {calSaving ? 'Saving...' : 'Save Event'}
+                  </button>
+                </div>
+              ) : (
+                <div className="text-xs text-neutral-400 space-y-1">
+                  {calStart && <div>Start: <span className="text-neutral-200">{new Date(calStart).toLocaleString('en-GB')}</span></div>}
+                  {calEnd && <div>End: <span className="text-neutral-200">{new Date(calEnd).toLocaleString('en-GB')}</span></div>}
+                  {calLocation && <div>Location: <span className="text-neutral-200">{calLocation}</span></div>}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Email actions */}
+          {isEmail && (
+            <div>
+              <div className="text-[10px] uppercase tracking-widest mb-2 text-neutral-400">Email Actions</div>
+              <div className="flex flex-wrap gap-2 mb-3">
+                <button
+                  onClick={() => { setEmailMode('reply'); setEmailTo(''); setEmailBody(''); }}
+                  className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+                    emailMode === 'reply'
+                      ? 'bg-[#5ec1ca]/20 border-[#5ec1ca]/40 text-[#5ec1ca]'
+                      : 'bg-[#2f353d] border-[#3a424d] text-neutral-300 hover:bg-[#363d47]'
+                  }`}
+                >
+                  Reply
+                </button>
+                <button
+                  onClick={() => { setEmailMode('forward'); setEmailTo(''); setEmailBody(''); }}
+                  className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+                    emailMode === 'forward'
+                      ? 'bg-[#5ec1ca]/20 border-[#5ec1ca]/40 text-[#5ec1ca]'
+                      : 'bg-[#2f353d] border-[#3a424d] text-neutral-300 hover:bg-[#363d47]'
+                  }`}
+                >
+                  Forward
+                </button>
+              </div>
+
+              {emailMode && (
+                <div className="border border-[#3a424d] rounded bg-[#272C33] p-3 space-y-2">
+                  {emailMode === 'forward' && (
+                    <input
+                      type="email"
+                      value={emailTo}
+                      onChange={(e) => setEmailTo(e.target.value)}
+                      placeholder="Recipient email address"
+                      className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none"
+                    />
+                  )}
+                  <textarea
+                    value={emailBody}
+                    onChange={(e) => setEmailBody(e.target.value)}
+                    rows={4}
+                    placeholder={emailMode === 'reply' ? 'Type your reply...' : 'Add a message (optional)...'}
+                    className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-2 border border-[#3a424d] text-xs resize-none focus:border-[#5ec1ca] focus:outline-none"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleEmailAction}
+                      disabled={emailSending || !emailBody.trim()}
+                      className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50 transition-colors"
+                    >
+                      {emailSending ? 'Sending...' : emailMode === 'reply' ? 'Send Reply' : 'Forward'}
+                    </button>
+                    <button
+                      onClick={() => setEmailMode(null)}
+                      className="px-3 py-1.5 text-xs rounded bg-[#363d47] text-neutral-400 hover:bg-[#3a424d] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Quick actions */}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { DeliveryDrawer } from './DeliveryDrawer.js';
+import { DeliveryKanban } from './DeliveryKanban.js';
 
 interface DeliveryRow {
   orderDate: string | null;
@@ -38,6 +39,7 @@ interface DeliveryData {
 
 interface DbEntry {
   id: number;
+  onboarding_id: string | null;
   product: string;
   account: string;
   status: string;
@@ -50,6 +52,7 @@ interface DbEntry {
   mrr: number | null;
   incremental: number | null;
   licence_fee: number | null;
+  sale_type: string | null;
   is_starred: number;
   star_scope: 'me' | 'all';
   starred_by: number | null;
@@ -136,7 +139,8 @@ function XlsxStarButton({ row, activeTab, dbEntries, starring, onToggleStar, onS
   );
 }
 
-export function DeliveryView() {
+export function DeliveryView({ userRole = 'viewer' }: { userRole?: string }) {
+  const canWrite = userRole === 'admin' || userRole === 'editor';
   const [data, setData] = useState<DeliveryData | null>(null);
   const [dbEntries, setDbEntries] = useState<DbEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -149,8 +153,14 @@ export function DeliveryView() {
   const [xlsxPrefill, setXlsxPrefill] = useState<Record<string, string> | null>(null);
   const [starringAccount, setStarringAccount] = useState<string | null>(null);
   const [starView, setStarView] = useState<'mine' | 'team'>('team');
-  const [syncing, setSyncing] = useState(false);
+  const [syncing, setSyncing] = useState<'pull' | 'push' | false>(false);
   const [syncResult, setSyncResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [editingCell, setEditingCell] = useState<{ id: number; column: string } | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [novaOnly, setNovaOnly] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -278,7 +288,7 @@ export function DeliveryView() {
   };
 
   const handleSyncPull = async () => {
-    setSyncing(true);
+    setSyncing('pull');
     setSyncResult(null);
     try {
       const resp = await fetch('/api/delivery/sync/pull', { method: 'POST' });
@@ -299,6 +309,173 @@ export function DeliveryView() {
       setSyncing(false);
     }
   };
+
+  const handleSyncPush = async () => {
+    setSyncing('push');
+    setSyncResult(null);
+    try {
+      const resp = await fetch('/api/delivery/sync/push', { method: 'POST' });
+      const json = await resp.json();
+      if (json.ok) {
+        const d = json.data;
+        setSyncResult({
+          ok: true,
+          message: `Pushed ${d.entriesUpdated} entries across ${d.sheetsProcessed} sheets to SharePoint`,
+        });
+      } else {
+        setSyncResult({ ok: false, message: json.data?.errors?.join(', ') || json.error || 'Push failed' });
+      }
+    } catch (err) {
+      setSyncResult({ ok: false, message: err instanceof Error ? err.message : 'Network error' });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleImportXlsx = async () => {
+    setSyncing('pull');
+    setSyncResult(null);
+    try {
+      const resp = await fetch('/api/delivery/entries/import-xlsx', { method: 'POST' });
+      const json = await resp.json();
+      if (json.ok) {
+        const { created, skipped, sheetsProcessed } = json.data;
+        setSyncResult({
+          ok: true,
+          message: `Imported ${created} entries from ${sheetsProcessed} sheets (${skipped} already in DB). Onboarding IDs auto-assigned.`,
+        });
+        refreshDbEntries();
+      } else {
+        setSyncResult({ ok: false, message: json.error || 'Import failed' });
+      }
+    } catch (err) {
+      setSyncResult({ ok: false, message: err instanceof Error ? err.message : 'Network error' });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleKanbanStatusChange = async (id: number, newStatus: string) => {
+    const entry = dbEntries.find(e => e.id === id);
+    if (!entry) return;
+    setDbEntries(prev => prev.map(e => e.id === id ? { ...e, status: newStatus } : e));
+    try {
+      const resp = await fetch(`/api/delivery/entries/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const json = await resp.json();
+      if (json.ok && json.data) {
+        setDbEntries(prev => prev.map(e => e.id === id ? json.data : e));
+      } else {
+        setDbEntries(prev => prev.map(e => e.id === id ? entry : e));
+      }
+    } catch {
+      setDbEntries(prev => prev.map(e => e.id === id ? entry : e));
+    }
+  };
+
+  const handleSort = (col: string) => {
+    if (sortColumn === col) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortColumn(col);
+      setSortDir('asc');
+    }
+  };
+
+  const sortIndicator = (col: string) =>
+    sortColumn === col ? (sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : '';
+
+  const sortFn = <T,>(items: T[], getter: (item: T, col: string) => string | number | null): T[] => {
+    if (!sortColumn) return items;
+    return [...items].sort((a, b) => {
+      const av = getter(a, sortColumn);
+      const bv = getter(b, sortColumn);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const cmp = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  };
+
+  const dbColumnGetter = (entry: DbEntry, col: string): string | number | null => {
+    switch (col) {
+      case 'account': return entry.account;
+      case 'status': return entry.status;
+      case 'onboarder': return entry.onboarder;
+      case 'order_date': return entry.order_date;
+      case 'go_live': return entry.go_live_date;
+      case 'predicted': return entry.predicted_delivery;
+      case 'training': return entry.training_date;
+      case 'mrr': return entry.mrr;
+      case 'notes': return entry.notes;
+      case 'id': return entry.onboarding_id;
+      default: return null;
+    }
+  };
+
+  const xlsxColumnGetter = (row: DeliveryRow, col: string): string | number | null => {
+    switch (col) {
+      case 'account': return row.account;
+      case 'status': return row.status;
+      case 'onboarder': return row.onboarder;
+      case 'order_date': return row.orderDate;
+      case 'go_live': return row.goLiveDate;
+      case 'predicted': return row.predictedDelivery;
+      case 'mrr': return row.mrr;
+      case 'notes': return row.notes;
+      default: return null;
+    }
+  };
+
+  const startEdit = (id: number, column: string, currentValue: string) => {
+    setEditingCell({ id, column });
+    setEditValue(currentValue);
+  };
+
+  const saveEdit = async () => {
+    if (!editingCell) return;
+    const { id, column } = editingCell;
+    const entry = dbEntries.find((e) => e.id === id);
+    if (!entry) { setEditingCell(null); return; }
+
+    // Map column name to DB field
+    const fieldMap: Record<string, string> = {
+      account: 'account', status: 'status', onboarder: 'onboarder',
+      order_date: 'order_date', go_live: 'go_live_date', predicted: 'predicted_delivery',
+      training: 'training_date', mrr: 'mrr', notes: 'notes',
+    };
+    const dbField = fieldMap[column];
+    if (!dbField) { setEditingCell(null); return; }
+
+    const val = column === 'mrr' ? (editValue ? parseFloat(editValue) : null) : (editValue || null);
+
+    // Optimistic update
+    setDbEntries((prev) => prev.map((e) => e.id === id ? { ...e, [dbField]: val } : e));
+    setEditingCell(null);
+
+    try {
+      const resp = await fetch(`/api/delivery/entries/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [dbField]: val }),
+      });
+      const json = await resp.json();
+      if (json.ok && json.data) {
+        setDbEntries((prev) => prev.map((e) => e.id === id ? json.data : e));
+      }
+    } catch {
+      // Revert on failure
+      setDbEntries((prev) => prev.map((e) => e.id === id ? entry : e));
+    }
+  };
+
+  const cancelEdit = () => setEditingCell(null);
 
   const drawerEntry = drawerEntryId != null ? dbEntries.find((e) => e.id === drawerEntryId) ?? null : null;
 
@@ -327,6 +504,8 @@ export function DeliveryView() {
     ? currentSheet.rows.filter((r) => {
         // Hide xlsx row if a DB entry exists for same product+account
         if (dbAccountsForTab.has(r.account)) return false;
+        // Hide all xlsx rows when NOVA-only filter is active
+        if (novaOnly) return false;
         const rowStatus = (r.status || '').toLowerCase().trim();
         if (excludeStatuses.has(rowStatus)) return false;
         if (search) {
@@ -391,20 +570,58 @@ export function DeliveryView() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleSyncPull}
-            disabled={syncing}
-            className="px-3 py-2 text-xs rounded bg-[#2f353d] text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 border border-[#3a424d] transition-colors disabled:opacity-50"
-            title="Pull latest data from SharePoint"
-          >
-            {syncing ? 'Syncing...' : 'Sync from SharePoint'}
-          </button>
-          <button
-            onClick={() => { setXlsxPrefill(null); setDrawerEntryId(null); setDrawerIsNew(true); }}
-            className="px-4 py-2 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors"
-          >
-            + Add Entry
-          </button>
+          {canWrite && (
+            <>
+              <button
+                onClick={handleSyncPull}
+                disabled={!!syncing}
+                className="px-3 py-2 text-xs rounded bg-[#2f353d] text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 border border-[#3a424d] transition-colors disabled:opacity-50"
+                title="Pull latest data from SharePoint"
+              >
+                {syncing === 'pull' ? 'Pulling...' : 'Pull from SP'}
+              </button>
+              <button
+                onClick={handleSyncPush}
+                disabled={!!syncing}
+                className="px-3 py-2 text-xs rounded bg-[#2f353d] text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 border border-[#3a424d] transition-colors disabled:opacity-50"
+                title="Push local DB entries to SharePoint"
+              >
+                {syncing === 'push' ? 'Pushing...' : 'Push to SP'}
+              </button>
+              <button
+                onClick={handleImportXlsx}
+                disabled={!!syncing}
+                className="px-3 py-2 text-xs rounded bg-[#2f353d] text-amber-400 hover:bg-[#363d47] hover:text-amber-300 border border-amber-500/30 transition-colors disabled:opacity-50"
+                title="Import all xlsx rows to DB with auto-generated onboarding IDs"
+              >
+                {syncing === 'pull' ? 'Importing...' : 'Import xlsx to DB'}
+              </button>
+              <button
+                onClick={() => { setXlsxPrefill(null); setDrawerEntryId(null); setDrawerIsNew(true); }}
+                className="px-4 py-2 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors"
+              >
+                + Add Entry
+              </button>
+            </>
+          )}
+          <div className="flex items-center bg-[#272C33] rounded border border-[#3a424d]">
+            <button
+              onClick={() => setViewMode('table')}
+              className={`px-3 py-2 text-xs rounded-l transition-colors ${
+                viewMode === 'table' ? 'bg-[#5ec1ca] text-[#272C33] font-semibold' : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              Table
+            </button>
+            <button
+              onClick={() => setViewMode('kanban')}
+              className={`px-3 py-2 text-xs rounded-r transition-colors ${
+                viewMode === 'kanban' ? 'bg-[#5ec1ca] text-[#272C33] font-semibold' : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              Kanban
+            </button>
+          </div>
         </div>
       </div>
 
@@ -492,7 +709,18 @@ export function DeliveryView() {
                 </button>
               );
             })}
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={() => setNovaOnly(!novaOnly)}
+                className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                  novaOnly
+                    ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                    : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47]'
+                }`}
+                title="Show only NOVA database entries (hide spreadsheet rows)"
+              >
+                NOVA Only
+              </button>
               <input
                 type="text" placeholder="Search accounts..." value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -548,6 +776,9 @@ export function DeliveryView() {
                   <div className="min-w-0 flex-1">
                     <div className="text-[11px] text-neutral-200 font-medium truncate">{entry.account}</div>
                     <div className="flex items-center gap-2 mt-0.5">
+                      {entry.onboarding_id && (
+                        <span className="text-[9px] text-[#5ec1ca] font-mono">{entry.onboarding_id}</span>
+                      )}
                       <span className="text-[9px] text-neutral-500">{entry.product}</span>
                       <StatusBadge status={entry.status} />
                       {entry.training_date && (
@@ -579,7 +810,17 @@ export function DeliveryView() {
       )}
 
       {/* Sheet content */}
-      {activeTab && (
+      {activeTab && viewMode === 'kanban' && (
+        <DeliveryKanban
+          entries={dbForTab}
+          onStatusChange={handleKanbanStatusChange}
+          onCardClick={(id) => { setDrawerEntryId(id); setDrawerIsNew(false); }}
+          onToggleStar={handleToggleStar}
+          canWrite={canWrite}
+        />
+      )}
+
+      {activeTab && viewMode === 'table' && (
         <>
           {/* Sheet summary bar */}
           {currentSheet && (
@@ -606,54 +847,94 @@ export function DeliveryView() {
               <thead>
                 <tr className="bg-[#2f353d] text-neutral-500 uppercase tracking-wider text-left">
                   <th className="px-3 py-2 font-medium w-8"></th>
-                  <th className="px-3 py-2 font-medium">Account</th>
-                  <th className="px-3 py-2 font-medium">Status</th>
-                  <th className="px-3 py-2 font-medium">Onboarder</th>
-                  <th className="px-3 py-2 font-medium">Order Date</th>
-                  <th className="px-3 py-2 font-medium">Go Live</th>
-                  <th className="px-3 py-2 font-medium">Predicted</th>
-                  <th className="px-3 py-2 font-medium">Training</th>
-                  <th className="px-3 py-2 font-medium text-right">MRR</th>
-                  <th className="px-3 py-2 font-medium">Notes</th>
+                  <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('id')}>ID{sortIndicator('id')}</th>
+                  <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('account')}>Account{sortIndicator('account')}</th>
+                  <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('status')}>Status{sortIndicator('status')}</th>
+                  <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('onboarder')}>Onboarder{sortIndicator('onboarder')}</th>
+                  <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('order_date')}>Order Date{sortIndicator('order_date')}</th>
+                  <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('go_live')}>Go Live{sortIndicator('go_live')}</th>
+                  <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('predicted')}>Predicted{sortIndicator('predicted')}</th>
+                  <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('training')}>Training{sortIndicator('training')}</th>
+                  <th className="px-3 py-2 font-medium text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('mrr')}>MRR{sortIndicator('mrr')}</th>
+                  <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('notes')}>Notes{sortIndicator('notes')}</th>
                   <th className="px-3 py-2 font-medium w-16"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#3a424d]">
-                {/* DB entries for this tab (shown first, highlighted) */}
-                {dbForTab.map((entry) => (
-                  <tr
-                    key={`db-${entry.id}`}
-                    className="hover:bg-[#363d47]/50 transition-colors bg-[#5ec1ca]/5 cursor-pointer"
-                    onClick={() => { setDrawerEntryId(entry.id); setDrawerIsNew(false); }}
-                  >
-                    <td className="px-3 py-2 text-center">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleToggleStar(entry.id); }}
-                        className={`text-sm transition-colors ${entry.is_starred ? 'text-amber-400' : 'text-neutral-600 hover:text-amber-400'}`}
-                        title={entry.is_starred ? 'Unstar' : 'Star'}
+                {/* DB entries for this tab (shown first, highlighted, sorted) */}
+                {sortFn(dbForTab, dbColumnGetter).map((entry) => {
+                  const isEditing = (col: string) => editingCell?.id === entry.id && editingCell?.column === col;
+                  const editableCell = (col: string, value: string | null, type: 'text' | 'date' | 'number' = 'text') => {
+                    if (isEditing(col)) {
+                      return col === 'status' ? (
+                        <select
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={saveEdit}
+                          onKeyDown={(e) => { if (e.key === 'Escape') cancelEdit(); }}
+                          className="bg-[#272C33] text-neutral-200 text-[11px] rounded px-1 py-0.5 border border-[#5ec1ca] outline-none w-full"
+                          autoFocus
+                        >
+                          {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      ) : (
+                        <input
+                          type={type}
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={saveEdit}
+                          onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                          className="bg-[#272C33] text-neutral-200 text-[11px] rounded px-1 py-0.5 border border-[#5ec1ca] outline-none w-full"
+                          autoFocus
+                        />
+                      );
+                    }
+                    return (
+                      <span
+                        className="cursor-text hover:bg-[#363d47] rounded px-0.5 -mx-0.5"
+                        onClick={(e) => { e.stopPropagation(); startEdit(entry.id, col, value ?? ''); }}
                       >
-                        {entry.is_starred ? '\u2605' : '\u2606'}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2 text-neutral-200 font-medium whitespace-nowrap">
-                      {entry.account}
-                      <span className="ml-1.5 text-[9px] text-[#5ec1ca] uppercase">nova</span>
-                    </td>
-                    <td className="px-3 py-2"><StatusBadge status={entry.status} /></td>
-                    <td className="px-3 py-2 text-neutral-400">{entry.onboarder ?? '-'}</td>
-                    <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{entry.order_date ?? '-'}</td>
-                    <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{entry.go_live_date ?? '-'}</td>
-                    <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{entry.predicted_delivery ?? '-'}</td>
-                    <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{entry.training_date ?? '-'}</td>
-                    <td className="px-3 py-2 text-neutral-200 text-right font-medium">{formatCurrency(entry.mrr)}</td>
-                    <td className="px-3 py-2 text-neutral-500 max-w-[200px] truncate" title={entry.notes ?? ''}>{entry.notes ?? '-'}</td>
-                    <td className="px-3 py-2">
-                      <span className="text-[10px] text-[#5ec1ca]">Edit</span>
-                    </td>
-                  </tr>
-                ))}
-                {/* xlsx rows */}
-                {filteredRows.map((row, i) => (
+                        {col === 'status' ? <StatusBadge status={value ?? ''} /> : (col === 'mrr' ? formatCurrency(entry.mrr) : (value ?? '-'))}
+                      </span>
+                    );
+                  };
+
+                  return (
+                    <tr
+                      key={`db-${entry.id}`}
+                      className="hover:bg-[#363d47]/50 transition-colors bg-[#5ec1ca]/5 cursor-pointer"
+                      onClick={() => { if (!editingCell) { setDrawerEntryId(entry.id); setDrawerIsNew(false); } }}
+                    >
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleToggleStar(entry.id); }}
+                          className={`text-sm transition-colors ${entry.is_starred ? 'text-amber-400' : 'text-neutral-600 hover:text-amber-400'}`}
+                          title={entry.is_starred ? 'Unstar' : 'Star'}
+                        >
+                          {entry.is_starred ? '\u2605' : '\u2606'}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 text-[10px] text-[#5ec1ca] font-mono whitespace-nowrap">{entry.onboarding_id ?? '-'}</td>
+                      <td className="px-3 py-2 text-neutral-200 font-medium whitespace-nowrap">
+                        {editableCell('account', entry.account)}
+                        <span className="ml-1.5 text-[9px] text-[#5ec1ca] uppercase">nova</span>
+                      </td>
+                      <td className="px-3 py-2">{editableCell('status', entry.status)}</td>
+                      <td className="px-3 py-2 text-neutral-400">{editableCell('onboarder', entry.onboarder)}</td>
+                      <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{editableCell('order_date', entry.order_date, 'date')}</td>
+                      <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{editableCell('go_live', entry.go_live_date, 'date')}</td>
+                      <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{editableCell('predicted', entry.predicted_delivery, 'date')}</td>
+                      <td className="px-3 py-2 text-neutral-400 whitespace-nowrap">{editableCell('training', entry.training_date, 'date')}</td>
+                      <td className="px-3 py-2 text-neutral-200 text-right font-medium">{editableCell('mrr', entry.mrr?.toString() ?? '', 'number')}</td>
+                      <td className="px-3 py-2 text-neutral-500 max-w-[200px] truncate" title={entry.notes ?? ''}>{editableCell('notes', entry.notes)}</td>
+                      <td className="px-3 py-2">
+                        <span className="text-[10px] text-[#5ec1ca]">Edit</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {/* xlsx rows (sorted) */}
+                {sortFn(filteredRows, xlsxColumnGetter).map((row, i) => (
                   <tr
                     key={`xlsx-${row.account}-${i}`}
                     className="hover:bg-[#363d47]/50 transition-colors cursor-pointer"
@@ -685,6 +966,7 @@ export function DeliveryView() {
                         onStarXlsx={handleStarXlsxRow}
                       />
                     </td>
+                    <td className="px-3 py-2 text-[10px] text-neutral-600 font-mono">-</td>
                     <td className="px-3 py-2 text-neutral-200 font-medium whitespace-nowrap">{row.account}</td>
                     <td className="px-3 py-2"><StatusBadge status={row.status} /></td>
                     <td className="px-3 py-2 text-neutral-400">{row.onboarder ?? '-'}</td>
@@ -701,7 +983,7 @@ export function DeliveryView() {
                 ))}
                 {filteredRows.length === 0 && dbForTab.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="px-3 py-8 text-center text-neutral-600">
+                    <td colSpan={12} className="px-3 py-8 text-center text-neutral-600">
                       No rows match your filters
                     </td>
                   </tr>

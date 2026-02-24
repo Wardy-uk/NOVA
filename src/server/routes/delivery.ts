@@ -177,6 +177,7 @@ function loadWorkbook(): Record<string, SheetResult> & { _lastModified: string }
 
 import type { DeliveryQueries } from '../db/queries.js';
 import type { SharePointSync } from '../services/sharepoint-sync.js';
+import { requireRole } from '../middleware/auth.js';
 
 export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync): Router {
   const router = Router();
@@ -234,14 +235,33 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
 
   // ---- DB-backed entries (CRUD) ----
   if (deliveryQueries) {
+    const writeGuard = requireRole('admin', 'editor');
+
+    // My Focus: starred-for-me + entries where I'm the onboarder
+    router.get('/entries/my-focus', (req, res) => {
+      const userId = req.user?.id as number | undefined;
+      const username = req.user?.username as string | undefined;
+      if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
+      // Match onboarder by username and also by splitting username into parts
+      // e.g. "nickw" → ["nickw", "nick"] for fuzzy matching "Nick W", "Nick", etc.
+      const names: string[] = [];
+      if (username) {
+        names.push(username);
+        // Also try first name portion (letters before trailing consonant cluster or initial)
+        const alphaOnly = username.replace(/[^a-z]/gi, '');
+        if (alphaOnly.length > 3) names.push(alphaOnly.slice(0, -1)); // "nickw" → "nick"
+      }
+      res.json({ ok: true, data: deliveryQueries.getMyFocus(userId, names) });
+    });
+
     router.get('/entries', (req, res) => {
       const product = req.query.product as string | undefined;
       res.json({ ok: true, data: deliveryQueries.getAll(product) });
     });
 
-    router.post('/entries', (req, res) => {
+    router.post('/entries', writeGuard, (req, res) => {
       const { product, account, status, onboarder, order_date, go_live_date,
-        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, is_starred, notes } = req.body;
+        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, sale_type, is_starred, notes } = req.body;
       if (!product || !account) {
         res.status(400).json({ ok: false, error: 'product and account are required' });
         return;
@@ -263,16 +283,85 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
         predicted_delivery, training_date: training_date ?? null,
         branches: branches ?? null, mrr: mrr ?? null,
         incremental: incremental ?? null, licence_fee: licence_fee ?? null,
+        sale_type: sale_type ?? null,
         is_starred: is_starred ?? 0, star_scope, starred_by: is_starred ? userId : null,
         notes,
       });
       res.json({ ok: true, data: deliveryQueries.getById(id) });
     });
 
+    // POST /entries/import-xlsx — bulk import all xlsx rows to DB (skips existing, auto-assigns IDs)
+    router.post('/entries/import-xlsx', writeGuard, (_req, res) => {
+      try {
+        if (!fs.existsSync(DELIVERY_PATH)) {
+          res.status(404).json({ ok: false, error: 'Delivery spreadsheet not found' });
+          return;
+        }
+        const loaded = loadWorkbook();
+        let created = 0;
+        let skipped = 0;
+        let sheetsProcessed = 0;
+
+        for (const sheetName of PRODUCT_SHEETS) {
+          const sheet = loaded[sheetName] as SheetResult | undefined;
+          if (!sheet || sheet.rows.length === 0) continue;
+          sheetsProcessed++;
+
+          for (const row of sheet.rows) {
+            if (!row.account) continue;
+
+            // Skip if already in DB
+            const existing = deliveryQueries.findByProductAccount(sheetName, row.account);
+            if (existing) {
+              skipped++;
+              continue;
+            }
+
+            deliveryQueries.create({
+              product: sheetName,
+              account: row.account,
+              status: row.status || 'Not Started',
+              onboarder: row.onboarder || null,
+              order_date: row.orderDate || null,
+              go_live_date: row.goLiveDate || null,
+              predicted_delivery: row.predictedDelivery || null,
+              training_date: null,
+              branches: row.branches ?? null,
+              mrr: row.mrr ?? null,
+              incremental: row.incremental ?? null,
+              licence_fee: row.licenceFee ?? null,
+              sale_type: null,
+              is_starred: 0,
+              star_scope: 'me',
+              starred_by: null,
+              notes: row.notes || null,
+            });
+            created++;
+          }
+        }
+
+        res.json({
+          ok: true,
+          data: { created, skipped, sheetsProcessed },
+        });
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          error: err instanceof Error ? err.message : 'Import failed',
+        });
+      }
+    });
+
     // DELETE /entries/duplicates — one-time cleanup
-    router.delete('/entries/duplicates', (_req, res) => {
+    router.delete('/entries/duplicates', writeGuard, (_req, res) => {
       const removed = deliveryQueries.deleteDuplicates();
       res.json({ ok: true, data: { removed } });
+    });
+
+    // POST /entries/backfill-ids — assign onboarding IDs to entries that don't have one
+    router.post('/entries/backfill-ids', writeGuard, (_req, res) => {
+      const count = deliveryQueries.backfillOnboardingIds();
+      res.json({ ok: true, data: { backfilled: count } });
     });
 
     router.patch('/entries/:id/star', (req, res) => {
@@ -283,7 +372,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       res.json({ ok: true, data: deliveryQueries.getById(id) });
     });
 
-    router.put('/entries/:id', (req, res) => {
+    router.put('/entries/:id', writeGuard, (req, res) => {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
       const updated = deliveryQueries.update(id, req.body);
@@ -291,7 +380,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       res.json({ ok: true, data: deliveryQueries.getById(id) });
     });
 
-    router.delete('/entries/:id', (req, res) => {
+    router.delete('/entries/:id', writeGuard, (req, res) => {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
       const deleted = deliveryQueries.delete(id);
@@ -316,7 +405,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       res.json({ ok: true, data: spSync.getDebugInfo() });
     });
 
-    router.post('/sync/pull', async (_req, res) => {
+    router.post('/sync/pull', requireRole('admin', 'editor'), async (_req, res) => {
       try {
         const result = await spSync.pull();
         res.json({ ok: result.errors.length === 0, data: result });
@@ -328,7 +417,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       }
     });
 
-    router.post('/sync/push', async (_req, res) => {
+    router.post('/sync/push', requireRole('admin', 'editor'), async (_req, res) => {
       try {
         const result = await spSync.push();
         res.json({ ok: result.errors.length === 0, data: result });

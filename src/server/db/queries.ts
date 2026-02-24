@@ -5,22 +5,38 @@ import { saveDb } from './schema.js';
 export class TaskQueries {
   constructor(private db: Database) {}
 
-  getAll(filters?: { status?: string; source?: string }): Task[] {
-    let sql = `SELECT * FROM tasks WHERE 1=1`;
-    const params: string[] = [];
+  getAll(filters?: { status?: string; source?: string; userId?: number }): Task[] {
+    const useUserPins = filters?.userId != null;
+    let sql: string;
+    if (useUserPins) {
+      sql = `SELECT t.*, CASE WHEN p.task_id IS NOT NULL THEN 1 ELSE 0 END as is_pinned
+             FROM tasks t LEFT JOIN user_task_pins p ON t.id = p.task_id AND p.user_id = ?
+             WHERE 1=1`;
+    } else {
+      sql = `SELECT * FROM tasks WHERE 1=1`;
+    }
+    const params: (string | number)[] = [];
+    if (useUserPins) params.push(filters!.userId!);
 
     if (filters?.status) {
-      sql += ` AND status = ?`;
+      sql += ` AND ${useUserPins ? 't.' : ''}status = ?`;
       params.push(filters.status);
     }
     if (filters?.source) {
-      sql += ` AND source = ?`;
+      sql += ` AND ${useUserPins ? 't.' : ''}source = ?`;
       params.push(filters.source);
     }
 
-    sql += ` AND (snoozed_until IS NULL OR snoozed_until <= datetime('now'))`;
-    sql += ` AND status NOT IN ('dismissed', 'done')`;
-    sql += ` ORDER BY is_pinned DESC, priority DESC, due_date ASC`;
+    if (useUserPins) {
+      sql += ` AND (t.snoozed_until IS NULL OR t.snoozed_until <= datetime('now'))`;
+      sql += ` AND t.status NOT IN ('dismissed', 'done')`;
+    } else {
+      sql += ` AND (snoozed_until IS NULL OR snoozed_until <= datetime('now'))`;
+      sql += ` AND status NOT IN ('dismissed', 'done')`;
+    }
+    sql += useUserPins
+      ? ` ORDER BY (CASE WHEN p.task_id IS NOT NULL THEN 1 ELSE 0 END) DESC, t.priority DESC, t.due_date ASC`
+      : ` ORDER BY is_pinned DESC, priority DESC, due_date ASC`;
 
     const stmt = this.db.prepare(sql);
     if (params.length > 0) stmt.bind(params);
@@ -156,14 +172,29 @@ export class TaskQueries {
     return count;
   }
 
-  update(id: string, updates: TaskUpdate): boolean {
+  update(id: string, updates: TaskUpdate, userId?: number): boolean {
     const fields: string[] = [];
     const params: unknown[] = [];
 
-    if (updates.is_pinned !== undefined) {
+    // Handle per-user pin via user_task_pins table
+    if (updates.is_pinned !== undefined && userId != null) {
+      if (updates.is_pinned) {
+        this.db.run(
+          `INSERT OR IGNORE INTO user_task_pins (user_id, task_id) VALUES (?, ?)`,
+          [userId, id]
+        );
+      } else {
+        this.db.run(
+          `DELETE FROM user_task_pins WHERE user_id = ? AND task_id = ?`,
+          [userId, id]
+        );
+      }
+    } else if (updates.is_pinned !== undefined) {
+      // Fallback: legacy global pin
       fields.push('is_pinned = ?');
       params.push(updates.is_pinned ? 1 : 0);
     }
+
     if (updates.snoozed_until !== undefined) {
       fields.push('snoozed_until = ?');
       params.push(updates.snoozed_until);
@@ -173,18 +204,16 @@ export class TaskQueries {
       params.push(updates.status);
     }
 
-    if (fields.length === 0) return false;
+    if (fields.length > 0) {
+      fields.push(`updated_at = datetime('now')`);
+      params.push(id);
+      this.db.run(
+        `UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`,
+        params as (string | number | null)[]
+      );
+    }
 
-    fields.push(`updated_at = datetime('now')`);
-    params.push(id);
-
-    this.db.run(
-      `UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`,
-      params as (string | number | null)[]
-    );
     saveDb();
-
-    // Check if row was actually updated
     const check = this.getById(id);
     return check !== undefined;
   }
@@ -239,10 +268,11 @@ export class RitualQueries {
     blockers?: string;
     openai_response_id?: string;
     conversation?: string;
+    user_id?: number;
   }): number {
     this.db.run(
-      `INSERT INTO rituals (type, date, summary_md, planned_items, completed_items, blockers, openai_response_id, conversation)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO rituals (type, date, summary_md, planned_items, completed_items, blockers, openai_response_id, conversation, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         ritual.type,
         ritual.date,
@@ -252,6 +282,7 @@ export class RitualQueries {
         ritual.blockers ?? null,
         ritual.openai_response_id ?? null,
         ritual.conversation ?? null,
+        ritual.user_id ?? null,
       ]
     );
     saveDb();
@@ -259,12 +290,16 @@ export class RitualQueries {
     return (result[0]?.values[0]?.[0] as number) ?? 0;
   }
 
-  getByDate(date: string, type?: string): Ritual[] {
+  getByDate(date: string, type?: string, userId?: number): Ritual[] {
     let sql = `SELECT * FROM rituals WHERE date = ?`;
-    const params: string[] = [date];
+    const params: (string | number)[] = [date];
     if (type) {
       sql += ` AND type = ?`;
       params.push(type);
+    }
+    if (userId != null) {
+      sql += ` AND (user_id = ? OR user_id IS NULL)`;
+      params.push(userId);
     }
     sql += ` ORDER BY created_at DESC`;
 
@@ -347,6 +382,7 @@ export class RitualQueries {
 
 export interface DeliveryEntry {
   id: number;
+  onboarding_id: string | null;
   product: string;
   account: string;
   status: string;
@@ -359,6 +395,7 @@ export interface DeliveryEntry {
   mrr: number | null;
   incremental: number | null;
   licence_fee: number | null;
+  sale_type: string | null;
   is_starred: number;
   star_scope: 'me' | 'all';
   starred_by: number | null;
@@ -367,8 +404,67 @@ export interface DeliveryEntry {
   updated_at: string;
 }
 
+// Brand prefix mapping — product name → short code for onboarding IDs
+const BRAND_PREFIXES: Record<string, string> = {
+  'BYM': 'BYM',
+  'KYM': 'KYM',
+  'Yomdel': 'YMD',
+  'Leadpro': 'LDP',
+  'TPJ': 'TPJ',
+  'Voice AI': 'VAI',
+  'GRS': 'GRS',
+  'Undeliverable': 'UND',
+  'SB - Web': 'SBW',
+  'SB - DM': 'SBD',
+  'Google Ad Spend': 'GAS',
+  'Google SEO': 'GSO',
+  'Guild Package': 'GLD',
+};
+
+function getBrandPrefix(product: string): string {
+  if (BRAND_PREFIXES[product]) return BRAND_PREFIXES[product];
+  // Fallback: first 3 uppercase chars
+  return product.replace(/[^a-zA-Z]/g, '').substring(0, 3).toUpperCase() || 'UNK';
+}
+
 export class DeliveryQueries {
   constructor(private db: Database) {}
+
+  /** Get the next available onboarding ID for a product, e.g. BYM0001 */
+  getNextOnboardingId(product: string): string {
+    const prefix = getBrandPrefix(product);
+    const stmt = this.db.prepare(
+      `SELECT onboarding_id FROM delivery_entries WHERE onboarding_id LIKE ? ORDER BY onboarding_id DESC LIMIT 1`
+    );
+    stmt.bind([`${prefix}%`]);
+    let nextNum = 1;
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      const lastId = row.onboarding_id as string;
+      const numPart = parseInt(lastId.substring(prefix.length), 10);
+      if (!isNaN(numPart)) nextNum = numPart + 1;
+    }
+    stmt.free();
+    return `${prefix}${String(nextNum).padStart(4, '0')}`;
+  }
+
+  /** Backfill onboarding IDs for all entries that don't have one */
+  backfillOnboardingIds(): number {
+    const stmt = this.db.prepare(`SELECT id, product FROM delivery_entries WHERE onboarding_id IS NULL ORDER BY id`);
+    const entries: Array<{ id: number; product: string }> = [];
+    while (stmt.step()) {
+      entries.push(stmt.getAsObject() as { id: number; product: string });
+    }
+    stmt.free();
+    let count = 0;
+    for (const entry of entries) {
+      const newId = this.getNextOnboardingId(entry.product);
+      this.db.run(`UPDATE delivery_entries SET onboarding_id = ? WHERE id = ?`, [newId, entry.id]);
+      count++;
+    }
+    if (count > 0) saveDb();
+    return count;
+  }
 
   getAll(product?: string): DeliveryEntry[] {
     let sql = `SELECT * FROM delivery_entries`;
@@ -426,17 +522,20 @@ export class DeliveryQueries {
     return dupeIds.length;
   }
 
-  create(entry: Omit<DeliveryEntry, 'id' | 'created_at' | 'updated_at'>): number {
+  create(entry: Omit<DeliveryEntry, 'id' | 'onboarding_id' | 'created_at' | 'updated_at'> & { onboarding_id?: string | null }): number {
+    const onboardingId = entry.onboarding_id || this.getNextOnboardingId(entry.product);
     this.db.run(
-      `INSERT INTO delivery_entries (product, account, status, onboarder, order_date, go_live_date,
-        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, is_starred, star_scope, starred_by, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO delivery_entries (onboarding_id, product, account, status, onboarder, order_date, go_live_date,
+        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, sale_type, is_starred, star_scope, starred_by, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        onboardingId,
         entry.product, entry.account, entry.status ?? '',
         entry.onboarder ?? null, entry.order_date ?? null, entry.go_live_date ?? null,
         entry.predicted_delivery ?? null, entry.training_date ?? null,
         entry.branches ?? null,
         entry.mrr ?? null, entry.incremental ?? null, entry.licence_fee ?? null,
+        entry.sale_type ?? null,
         entry.is_starred ?? 0, entry.star_scope ?? 'all', entry.starred_by ?? null,
         entry.notes ?? null,
       ]
@@ -488,6 +587,36 @@ export class DeliveryQueries {
     this.db.run(sql, params as (string | number | null)[]);
     saveDb();
     return true;
+  }
+
+  /** Entries relevant to the current user's focus:
+   *  - starred by me (star_scope='me') or starred for all (star_scope='all')
+   *  - onboarder matches user's display_name or username (case-insensitive) */
+  getMyFocus(userId: number, userNames: string[]): DeliveryEntry[] {
+    // Build LIKE conditions for onboarder matching
+    const conditions: string[] = [
+      `(is_starred = 1 AND (starred_by = ? OR star_scope = 'all'))`,
+    ];
+    const params: unknown[] = [userId];
+
+    if (userNames.length > 0) {
+      const nameClauses = userNames.map(() => `LOWER(onboarder) LIKE ?`);
+      conditions.push(`(${nameClauses.join(' OR ')})`);
+      for (const name of userNames) {
+        params.push(`%${name.toLowerCase()}%`);
+      }
+    }
+
+    const sql = `SELECT * FROM delivery_entries WHERE ${conditions.join(' OR ')} ORDER BY is_starred DESC, updated_at DESC`;
+    const stmt = this.db.prepare(sql);
+    stmt.bind(params as (string | number | null)[]);
+
+    const entries: DeliveryEntry[] = [];
+    while (stmt.step()) {
+      entries.push(stmt.getAsObject() as unknown as DeliveryEntry);
+    }
+    stmt.free();
+    return entries;
   }
 
   getProducts(): string[] {
@@ -751,7 +880,7 @@ export class UserQueries {
       `INSERT INTO users (username, display_name, email, password_hash, role, auth_provider, provider_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [user.username, user.display_name ?? null, user.email ?? null, user.password_hash,
-       user.role ?? 'user', user.auth_provider ?? 'local', user.provider_id ?? null]
+       user.role ?? 'viewer', user.auth_provider ?? 'local', user.provider_id ?? null]
     );
     const result = this.db.exec('SELECT last_insert_rowid() as id');
     const id = (result[0]?.values[0]?.[0] as number) ?? 0;
@@ -886,6 +1015,485 @@ export class UserSettingsQueries {
     while (stmt.step()) { const row = stmt.getAsObject() as Record<string, unknown>; result[row.key as string] = row.value as string; }
     stmt.free();
     return result;
+  }
+}
+
+// ---------- Feedback ----------
+
+export interface Feedback {
+  id: number;
+  user_id: number;
+  type: 'bug' | 'question' | 'feature';
+  title: string;
+  description: string | null;
+  status: string;
+  created_at: string;
+}
+
+export class FeedbackQueries {
+  constructor(private db: Database) {}
+
+  create(entry: { user_id: number; type: string; title: string; description?: string }): number {
+    this.db.run(
+      `INSERT INTO feedback (user_id, type, title, description) VALUES (?, ?, ?, ?)`,
+      [entry.user_id, entry.type, entry.title, entry.description ?? null]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  getAll(filters?: { status?: string }): (Feedback & { username?: string })[] {
+    let sql = `SELECT f.*, u.username FROM feedback f LEFT JOIN users u ON f.user_id = u.id WHERE 1=1`;
+    const params: string[] = [];
+    if (filters?.status) { sql += ` AND f.status = ?`; params.push(filters.status); }
+    sql += ` ORDER BY f.created_at DESC`;
+    const stmt = this.db.prepare(sql);
+    if (params.length > 0) stmt.bind(params);
+    const results: (Feedback & { username?: string })[] = [];
+    while (stmt.step()) { results.push(stmt.getAsObject() as unknown as Feedback & { username?: string }); }
+    stmt.free();
+    return results;
+  }
+
+  updateStatus(id: number, status: string): boolean {
+    this.db.run(`UPDATE feedback SET status = ? WHERE id = ?`, [status, id]);
+    saveDb();
+    return true;
+  }
+
+  delete(id: number): boolean {
+    this.db.run(`DELETE FROM feedback WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+}
+
+// ---------- Onboarding Config ----------
+
+export interface OnboardingTicketGroup {
+  id: number;
+  name: string;
+  sort_order: number;
+  active: number;
+  created_at: string;
+}
+
+export interface OnboardingSaleType {
+  id: number;
+  name: string;
+  sort_order: number;
+  active: number;
+  jira_tickets_required: number;
+  created_at: string;
+}
+
+export interface OnboardingCapability {
+  id: number;
+  name: string;
+  code: string | null;
+  ticket_group_id: number | null;
+  ticket_group_name?: string;
+  sort_order: number;
+  active: number;
+  created_at: string;
+  item_count?: number;
+}
+
+export interface OnboardingMatrixCell {
+  id: number;
+  sale_type_id: number;
+  capability_id: number;
+  enabled: number;
+  notes: string | null;
+}
+
+export interface OnboardingCapabilityItem {
+  id: number;
+  capability_id: number;
+  name: string;
+  is_bolt_on: number;
+  sort_order: number;
+  active: number;
+  created_at: string;
+}
+
+export interface ResolvedCapability {
+  capabilityId: number;
+  capabilityName: string;
+  code: string | null;
+  items: string[];
+}
+
+export interface ResolvedTicketGroup {
+  ticketGroupId: number | null;
+  ticketGroupName: string;
+  capabilities: ResolvedCapability[];
+}
+
+export class OnboardingConfigQueries {
+  constructor(private db: Database) {}
+
+  // ── Ticket Groups ──
+
+  getAllTicketGroups(): OnboardingTicketGroup[] {
+    const stmt = this.db.prepare(`SELECT * FROM onboarding_ticket_groups ORDER BY sort_order, name`);
+    const results: OnboardingTicketGroup[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingTicketGroup);
+    stmt.free();
+    return results;
+  }
+
+  createTicketGroup(name: string, sortOrder?: number): number {
+    this.db.run(
+      `INSERT INTO onboarding_ticket_groups (name, sort_order) VALUES (?, ?)`,
+      [name, sortOrder ?? 0]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  updateTicketGroup(id: number, updates: { name?: string; sort_order?: number; active?: number }): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
+    if (updates.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(updates.sort_order); }
+    if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
+    if (fields.length === 0) return false;
+    params.push(id);
+    this.db.run(`UPDATE onboarding_ticket_groups SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return true;
+  }
+
+  deleteTicketGroup(id: number): boolean {
+    // Unlink capabilities from this group
+    this.db.run(`UPDATE onboarding_capabilities SET ticket_group_id = NULL WHERE ticket_group_id = ?`, [id]);
+    this.db.run(`DELETE FROM onboarding_ticket_groups WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+
+  // ── Sale Types ──
+
+  getAllSaleTypes(): OnboardingSaleType[] {
+    const stmt = this.db.prepare(`SELECT * FROM onboarding_sale_types ORDER BY sort_order, name`);
+    const results: OnboardingSaleType[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingSaleType);
+    stmt.free();
+    return results;
+  }
+
+  createSaleType(name: string, sortOrder?: number, jiraTicketsRequired?: number): number {
+    this.db.run(
+      `INSERT INTO onboarding_sale_types (name, sort_order, jira_tickets_required) VALUES (?, ?, ?)`,
+      [name, sortOrder ?? 0, jiraTicketsRequired ?? 0]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  updateSaleType(id: number, updates: { name?: string; sort_order?: number; active?: number }): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
+    if (updates.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(updates.sort_order); }
+    if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
+    if (fields.length === 0) return false;
+    params.push(id);
+    this.db.run(`UPDATE onboarding_sale_types SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return true;
+  }
+
+  deleteSaleType(id: number): boolean {
+    this.db.run(`DELETE FROM onboarding_matrix WHERE sale_type_id = ?`, [id]);
+    this.db.run(`DELETE FROM onboarding_sale_types WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+
+  // ── Capabilities ──
+
+  getAllCapabilities(): OnboardingCapability[] {
+    const stmt = this.db.prepare(`
+      SELECT c.*, tg.name as ticket_group_name, COUNT(i.id) as item_count
+      FROM onboarding_capabilities c
+      LEFT JOIN onboarding_ticket_groups tg ON c.ticket_group_id = tg.id
+      LEFT JOIN onboarding_capability_items i ON c.id = i.capability_id
+      GROUP BY c.id
+      ORDER BY c.sort_order, c.name
+    `);
+    const results: OnboardingCapability[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingCapability);
+    stmt.free();
+    return results;
+  }
+
+  createCapability(name: string, code?: string, sortOrder?: number, ticketGroupId?: number): number {
+    this.db.run(
+      `INSERT INTO onboarding_capabilities (name, code, sort_order, ticket_group_id) VALUES (?, ?, ?, ?)`,
+      [name, code ?? null, sortOrder ?? 0, ticketGroupId ?? null]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  updateCapability(id: number, updates: { name?: string; code?: string; sort_order?: number; active?: number; ticket_group_id?: number | null }): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
+    if (updates.code !== undefined) { fields.push('code = ?'); params.push(updates.code); }
+    if (updates.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(updates.sort_order); }
+    if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
+    if (updates.ticket_group_id !== undefined) { fields.push('ticket_group_id = ?'); params.push(updates.ticket_group_id); }
+    if (fields.length === 0) return false;
+    params.push(id);
+    this.db.run(`UPDATE onboarding_capabilities SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return true;
+  }
+
+  deleteCapability(id: number): boolean {
+    this.db.run(`DELETE FROM onboarding_capability_items WHERE capability_id = ?`, [id]);
+    this.db.run(`DELETE FROM onboarding_matrix WHERE capability_id = ?`, [id]);
+    this.db.run(`DELETE FROM onboarding_capabilities WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+
+  // ── Matrix ──
+
+  getFullMatrix(): { saleTypes: OnboardingSaleType[]; capabilities: OnboardingCapability[]; cells: OnboardingMatrixCell[]; ticketGroups: OnboardingTicketGroup[] } {
+    const saleTypes = this.getAllSaleTypes();
+    const capabilities = this.getAllCapabilities();
+    const ticketGroups = this.getAllTicketGroups();
+
+    const stmt = this.db.prepare(`SELECT * FROM onboarding_matrix`);
+    const cells: OnboardingMatrixCell[] = [];
+    while (stmt.step()) cells.push(stmt.getAsObject() as unknown as OnboardingMatrixCell);
+    stmt.free();
+
+    return { saleTypes, capabilities, cells, ticketGroups };
+  }
+
+  setMatrixCell(saleTypeId: number, capabilityId: number, enabled: boolean, notes?: string | null): void {
+    this.db.run(
+      `INSERT INTO onboarding_matrix (sale_type_id, capability_id, enabled, notes)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(sale_type_id, capability_id) DO UPDATE SET enabled = excluded.enabled, notes = COALESCE(excluded.notes, notes)`,
+      [saleTypeId, capabilityId, enabled ? 1 : 0, notes ?? null]
+    );
+    saveDb();
+  }
+
+  batchUpdateMatrix(updates: Array<{ sale_type_id: number; capability_id: number; enabled: boolean; notes?: string | null }>): void {
+    for (const u of updates) {
+      this.db.run(
+        `INSERT INTO onboarding_matrix (sale_type_id, capability_id, enabled, notes)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(sale_type_id, capability_id) DO UPDATE SET enabled = excluded.enabled, notes = COALESCE(excluded.notes, notes)`,
+        [u.sale_type_id, u.capability_id, u.enabled ? 1 : 0, u.notes ?? null]
+      );
+    }
+    saveDb();
+  }
+
+  /** Resolved ticket group — one Jira ticket per group, listing X'd capabilities within */
+  resolveForSaleType(saleTypeName: string): ResolvedTicketGroup[] {
+    const stStmt = this.db.prepare(`SELECT id FROM onboarding_sale_types WHERE name = ? AND active = 1`);
+    stStmt.bind([saleTypeName]);
+    if (!stStmt.step()) { stStmt.free(); return []; }
+    const saleTypeId = (stStmt.getAsObject() as Record<string, unknown>).id as number;
+    stStmt.free();
+
+    // Get all enabled capabilities for this sale type, joined with their ticket group
+    const capStmt = this.db.prepare(`
+      SELECT c.id, c.name, c.code, c.ticket_group_id, COALESCE(tg.name, c.name) as ticket_group_name, COALESCE(tg.sort_order, c.sort_order) as group_sort
+      FROM onboarding_matrix m
+      JOIN onboarding_capabilities c ON m.capability_id = c.id
+      LEFT JOIN onboarding_ticket_groups tg ON c.ticket_group_id = tg.id
+      WHERE m.sale_type_id = ? AND m.enabled = 1 AND c.active = 1
+      ORDER BY group_sort, c.sort_order, c.name
+    `);
+    capStmt.bind([saleTypeId]);
+
+    // Group capabilities by ticket_group_id (null → singleton group per capability)
+    const groupMap = new Map<string, ResolvedTicketGroup>();
+    while (capStmt.step()) {
+      const row = capStmt.getAsObject() as Record<string, unknown>;
+      const groupId = row.ticket_group_id as number | null;
+      const groupKey = groupId != null ? `g:${groupId}` : `c:${row.id}`;
+      const groupName = row.ticket_group_name as string;
+
+      if (!groupMap.has(groupKey)) {
+        groupMap.set(groupKey, {
+          ticketGroupId: groupId,
+          ticketGroupName: groupName,
+          capabilities: [],
+        });
+      }
+
+      const cap: ResolvedCapability = {
+        capabilityId: row.id as number,
+        capabilityName: row.name as string,
+        code: (row.code as string) ?? null,
+        items: [],
+      };
+
+      // Fill items
+      const itemStmt = this.db.prepare(
+        `SELECT name FROM onboarding_capability_items WHERE capability_id = ? AND active = 1 ORDER BY sort_order, name`
+      );
+      itemStmt.bind([cap.capabilityId]);
+      while (itemStmt.step()) {
+        const itemRow = itemStmt.getAsObject() as Record<string, unknown>;
+        cap.items.push(itemRow.name as string);
+      }
+      itemStmt.free();
+
+      groupMap.get(groupKey)!.capabilities.push(cap);
+    }
+    capStmt.free();
+
+    return Array.from(groupMap.values());
+  }
+
+  // ── Items ──
+
+  getItemsForCapability(capabilityId: number): OnboardingCapabilityItem[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM onboarding_capability_items WHERE capability_id = ? ORDER BY sort_order, name`
+    );
+    stmt.bind([capabilityId]);
+    const results: OnboardingCapabilityItem[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingCapabilityItem);
+    stmt.free();
+    return results;
+  }
+
+  createItem(capabilityId: number, name: string, isBoltOn?: boolean, sortOrder?: number): number {
+    this.db.run(
+      `INSERT INTO onboarding_capability_items (capability_id, name, is_bolt_on, sort_order) VALUES (?, ?, ?, ?)`,
+      [capabilityId, name, isBoltOn ? 1 : 0, sortOrder ?? 0]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  updateItem(id: number, updates: { name?: string; is_bolt_on?: number; sort_order?: number; active?: number }): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
+    if (updates.is_bolt_on !== undefined) { fields.push('is_bolt_on = ?'); params.push(updates.is_bolt_on); }
+    if (updates.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(updates.sort_order); }
+    if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
+    if (fields.length === 0) return false;
+    params.push(id);
+    this.db.run(`UPDATE onboarding_capability_items SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return true;
+  }
+
+  deleteItem(id: number): boolean {
+    this.db.run(`DELETE FROM onboarding_capability_items WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+
+  /** Clear all config tables (used before import) */
+  clearAll(): void {
+    this.db.run(`DELETE FROM onboarding_capability_items`);
+    this.db.run(`DELETE FROM onboarding_matrix`);
+    this.db.run(`DELETE FROM onboarding_capabilities`);
+    this.db.run(`DELETE FROM onboarding_sale_types`);
+    this.db.run(`DELETE FROM onboarding_ticket_groups`);
+    saveDb();
+  }
+}
+
+// ---------- Onboarding Runs ----------
+
+export interface OnboardingRun {
+  id: number;
+  onboarding_ref: string;
+  status: 'pending' | 'success' | 'partial' | 'error';
+  parent_key: string | null;
+  child_keys: string | null;
+  created_count: number;
+  linked_count: number;
+  error_message: string | null;
+  payload: string | null;
+  dry_run: number;
+  user_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export class OnboardingRunQueries {
+  constructor(private db: Database) {}
+
+  getByRef(ref: string): OnboardingRun | undefined {
+    const stmt = this.db.prepare(
+      `SELECT * FROM onboarding_runs WHERE onboarding_ref = ? AND status = 'success' ORDER BY created_at DESC LIMIT 1`
+    );
+    stmt.bind([ref]);
+    if (stmt.step()) { const r = stmt.getAsObject() as unknown as OnboardingRun; stmt.free(); return r; }
+    stmt.free();
+    return undefined;
+  }
+
+  getAllByRef(ref: string): OnboardingRun[] {
+    const stmt = this.db.prepare(`SELECT * FROM onboarding_runs WHERE onboarding_ref = ? ORDER BY created_at DESC`);
+    stmt.bind([ref]);
+    const results: OnboardingRun[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingRun);
+    stmt.free();
+    return results;
+  }
+
+  getRecent(limit: number = 20): OnboardingRun[] {
+    const stmt = this.db.prepare(`SELECT * FROM onboarding_runs ORDER BY created_at DESC LIMIT ?`);
+    stmt.bind([limit]);
+    const results: OnboardingRun[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingRun);
+    stmt.free();
+    return results;
+  }
+
+  create(run: { onboarding_ref: string; payload?: string; user_id?: number; dry_run?: boolean }): number {
+    this.db.run(
+      `INSERT INTO onboarding_runs (onboarding_ref, payload, user_id, dry_run) VALUES (?, ?, ?, ?)`,
+      [run.onboarding_ref, run.payload ?? null, run.user_id ?? null, run.dry_run ? 1 : 0]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  update(id: number, updates: Partial<Pick<OnboardingRun, 'status' | 'parent_key' | 'child_keys' | 'created_count' | 'linked_count' | 'error_message'>>): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [key, val] of Object.entries(updates)) {
+      fields.push(`${key} = ?`);
+      params.push(val ?? null);
+    }
+    if (fields.length === 0) return false;
+    fields.push(`updated_at = datetime('now')`);
+    params.push(id);
+    this.db.run(`UPDATE onboarding_runs SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return true;
   }
 }
 

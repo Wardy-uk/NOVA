@@ -4,8 +4,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { getDb, initializeSchema } from './db/schema.js';
-import { TaskQueries, SettingsQueries, RitualQueries, DeliveryQueries, CrmQueries, UserQueries, TeamQueries, UserSettingsQueries } from './db/queries.js';
+import { getDb, initializeSchema, saveDb } from './db/schema.js';
+import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries } from './db/queries.js';
+import { FileUserQueries } from './db/user-store.js';
+import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
 import { createTaskRoutes } from './routes/tasks.js';
@@ -21,12 +23,19 @@ import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
 import { createO365Routes } from './routes/o365.js';
 import { createAdminRoutes } from './routes/admin.js';
+import { createFeedbackRoutes } from './routes/feedback.js';
+import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
+import { createOnboardingRoutes } from './routes/onboarding.js';
+import { JiraRestClient } from './services/jira-client.js';
+import { OnboardingOrchestrator } from './services/onboarding-orchestrator.js';
 import { authMiddleware } from './middleware/auth.js';
 import crypto from 'crypto';
 import { generateMorningBriefing } from './services/ai-standup.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
 import { OneDriveWatcher } from './services/onedrive-watcher.js';
 import { SharePointSync } from './services/sharepoint-sync.js';
+import { Dynamics365Service } from './services/dynamics365.js';
+import { createDynamics365Routes } from './routes/dynamics365.js';
 
 dotenv.config();
 
@@ -41,13 +50,35 @@ async function main() {
   initializeSchema(db);
 
   const taskQueries = new TaskQueries(db);
-  const settingsQueries = new SettingsQueries(db);
+  const settingsQueries = new FileSettingsQueries();
   const ritualQueries = new RitualQueries(db);
   const deliveryQueries = new DeliveryQueries(db);
+  // Auto-assign onboarding IDs to any entries missing them
+  const backfilled = deliveryQueries.backfillOnboardingIds();
+  if (backfilled > 0) console.log(`[N.O.V.A] Backfilled ${backfilled} onboarding IDs`);
   const crmQueries = new CrmQueries(db);
-  const userQueries = new UserQueries(db);
+  const userQueries = new FileUserQueries();
   const teamQueries = new TeamQueries(db);
   const userSettingsQueries = new UserSettingsQueries(db);
+  const feedbackQueries = new FeedbackQueries(db);
+  const onboardingConfigQueries = new OnboardingConfigQueries(db);
+  const onboardingRunQueries = new OnboardingRunQueries(db);
+
+  // Auto-seed onboarding matrix from xlsx if tables are empty
+  if (onboardingConfigQueries.getAllSaleTypes().length === 0) {
+    const xlsxPath = path.resolve('OnboardingMatix.xlsx');
+    if (fs.existsSync(xlsxPath)) {
+      try {
+        const XLSX = (await import('xlsx')).default;
+        const { importFromWorkbook } = await import('./routes/onboarding-config.js');
+        const wb = XLSX.readFile(xlsxPath);
+        const stats = importFromWorkbook(wb, onboardingConfigQueries);
+        console.log(`[N.O.V.A] Auto-seeded onboarding matrix: ${stats.ticketGroups} ticket groups, ${stats.saleTypes} sale types, ${stats.capabilities} capabilities, ${stats.matrixCells} matrix cells, ${stats.items} items`);
+      } catch (err) {
+        console.error('[N.O.V.A] Onboarding auto-seed failed:', err instanceof Error ? err.message : err);
+      }
+    }
+  }
 
   // JWT secret — use env, or persist a random one in settings
   let jwtSecret = process.env.JWT_SECRET ?? settingsQueries.get('jwt_secret');
@@ -158,6 +189,22 @@ async function main() {
     }
   });
 
+  // Dynamics 365 — direct Web API with delegated auth (device code flow)
+  let d365Service: Dynamics365Service | null = null;
+  function buildD365Service() {
+    const s = settingsQueries.getAll();
+    if (s.d365_enabled === 'true' && s.d365_client_id && s.d365_tenant_id) {
+      d365Service = new Dynamics365Service({
+        clientId: s.d365_client_id,
+        tenantId: s.d365_tenant_id,
+      });
+      console.log('[N.O.V.A] Dynamics 365: Service configured (device code auth)');
+    } else {
+      d365Service = null;
+    }
+  }
+  buildD365Service();
+
   // Protected API routes
   app.use('/api', authMiddleware(jwtSecret));
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator));
@@ -165,17 +212,37 @@ async function main() {
   app.use('/api/settings', createSettingsRoutes(settingsQueries, (key) => {
     // Restart sync timers when interval settings change
     if (key.includes('interval_minutes')) restartSyncTimers();
+    // Rebuild D365 service when credentials change
+    if (key.startsWith('d365_')) buildD365Service();
   }));
-  app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, uvxCommand));
+  app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, uvxCommand, () => d365Service, (key) => {
+    if (key.startsWith('d365_')) buildD365Service();
+  }));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries));
   app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries));
-  const spSync = new SharePointSync(mcpManager, deliveryQueries);
+  const spSync = new SharePointSync(mcpManager, deliveryQueries, () => settingsQueries.getAll());
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync));
-  app.use('/api/crm', createCrmRoutes(crmQueries));
+  app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
+  app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
+  app.use('/api/feedback', createFeedbackRoutes(feedbackQueries));
+  app.use('/api/onboarding/config', createOnboardingConfigRoutes(onboardingConfigQueries));
+
+  // Onboarding ticket orchestrator — lazy JiraRestClient from settings
+  function buildJiraClient(): JiraRestClient | null {
+    const s = settingsQueries.getAll();
+    if (s.jira_enabled !== 'true' || !s.jira_url || !s.jira_username || !s.jira_token) return null;
+    return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
+  }
+  function buildOrchestrator(): OnboardingOrchestrator | null {
+    const client = buildJiraClient();
+    if (!client) return null;
+    return new OnboardingOrchestrator(client, onboardingConfigQueries, onboardingRunQueries, () => settingsQueries.getAll());
+  }
+  app.use('/api/onboarding', createOnboardingRoutes(buildOrchestrator, buildJiraClient, onboardingRunQueries));
 
   // 6. OneDrive file watcher (Power Automate bridge)
   const watcher = new OneDriveWatcher(taskQueries, settingsQueries);
@@ -328,11 +395,25 @@ async function main() {
     });
   });
 
+  // Periodic auto-save: flush in-memory sql.js database to disk every 30s
+  const autoSaveTimer = setInterval(() => {
+    try { saveDb(); } catch (err) {
+      console.error('[AutoSave] Failed:', err instanceof Error ? err.message : err);
+    }
+  }, 30_000);
+
+  // Also save after the initial auto-seed completes
+  saveDb();
+
   // Graceful shutdown
   const shutdown = async () => {
     console.log('[N.O.V.A] Shutting down...');
+    clearInterval(autoSaveTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     watcher.stop();
+    try { saveDb(); console.log('[N.O.V.A] Database saved to disk'); } catch (err) {
+      console.error('[N.O.V.A] Failed to save DB on shutdown:', err instanceof Error ? err.message : err);
+    }
     await mcpManager.disconnectAll();
     process.exit(0);
   };

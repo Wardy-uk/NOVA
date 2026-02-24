@@ -43,6 +43,32 @@ interface CrmSummary {
   totalMrr: number;
 }
 
+interface TimelineDeliveryEntry {
+  id: number;
+  onboarding_id: string | null;
+  product: string;
+  account: string;
+  status: string;
+  onboarder: string | null;
+  mrr: number | null;
+  sale_type: string | null;
+}
+
+interface TimelineOnboardingRun {
+  id: number;
+  onboarding_ref: string;
+  parent_key: string;
+  status: string;
+  created_at: string;
+}
+
+interface TimelineData {
+  customer: CrmCustomer;
+  reviews: CrmReview[];
+  deliveryEntries: TimelineDeliveryEntry[];
+  onboardingRuns: TimelineOnboardingRun[];
+}
+
 // ---- Constants ----
 
 const RAG: Record<RagStatus, { bg: string; text: string; label: string }> = {
@@ -108,11 +134,16 @@ const emptyReviewForm = {
 
 // ---- Main Component ----
 
-export function CrmView() {
+export function CrmView({ userRole = 'viewer' }: { userRole?: string }) {
+  const canWrite = userRole === 'admin' || userRole === 'editor';
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [summary, setSummary] = useState<CrmSummary | null>(null);
   const [owners, setOwners] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // D365 sync
+  const [d365Status, setD365Status] = useState<'idle' | 'syncing' | 'done' | 'error'>('idle');
+  const [d365Message, setD365Message] = useState('');
 
   // Filters
   const [ragFilter, setRagFilter] = useState<RagStatus | null>(null);
@@ -122,6 +153,10 @@ export function CrmView() {
   // Expand / reviews
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [reviews, setReviews] = useState<Record<number, CrmReview[]>>({});
+
+  // Timeline (Customer 360)
+  const [timeline, setTimeline] = useState<Record<number, TimelineData>>({});
+  const [timelineLoading, setTimelineLoading] = useState<Record<number, boolean>>({});
 
   // Customer form
   const [showForm, setShowForm] = useState(false);
@@ -162,6 +197,17 @@ export function CrmView() {
     if (json.ok) setReviews(prev => ({ ...prev, [customerId]: json.data }));
   };
 
+  const loadTimeline = async (customerId: number) => {
+    setTimelineLoading(prev => ({ ...prev, [customerId]: true }));
+    try {
+      const resp = await fetch(`/api/crm/customers/${customerId}/timeline`);
+      const json = await resp.json();
+      if (json.ok) setTimeline(prev => ({ ...prev, [customerId]: json.data }));
+    } finally {
+      setTimelineLoading(prev => ({ ...prev, [customerId]: false }));
+    }
+  };
+
   const toggleExpand = (id: number) => {
     if (expandedId === id) {
       setExpandedId(null);
@@ -170,6 +216,7 @@ export function CrmView() {
       setExpandedId(id);
       setReviewFormFor(null);
       if (!reviews[id]) loadReviews(id);
+      if (!timeline[id]) loadTimeline(id);
     }
   };
 
@@ -264,6 +311,29 @@ export function CrmView() {
     loadData();
   };
 
+  // ---- D365 Sync ----
+
+  const syncFromD365 = async () => {
+    setD365Status('syncing');
+    setD365Message('');
+    try {
+      const resp = await fetch('/api/dynamics365/sync', { method: 'POST' });
+      const json = await resp.json();
+      if (json.ok) {
+        const { created, updated, total } = json.data;
+        setD365Status('done');
+        setD365Message(`Synced ${total} accounts (${created} new, ${updated} updated)`);
+        loadData();
+      } else {
+        setD365Status('error');
+        setD365Message(json.error ?? 'Sync failed');
+      }
+    } catch (err) {
+      setD365Status('error');
+      setD365Message(err instanceof Error ? err.message : 'Sync failed');
+    }
+  };
+
   // ---- Computed ----
 
   const filteredCount = customers.length;
@@ -275,10 +345,34 @@ export function CrmView() {
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold text-neutral-100 font-[var(--font-heading)]">CRM</h2>
-        <button onClick={openAdd} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors">
-          + Add Customer
-        </button>
+        <div className="flex items-center gap-2">
+          {canWrite && (
+            <>
+              <button
+                onClick={syncFromD365}
+                disabled={d365Status === 'syncing'}
+                className="px-3 py-1.5 text-xs rounded bg-[#363d47] text-neutral-300 font-medium hover:bg-[#3a424d] disabled:opacity-50 transition-colors"
+              >
+                {d365Status === 'syncing' ? 'Syncing...' : 'Sync from D365'}
+              </button>
+              <button onClick={openAdd} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors">
+                + Add Customer
+              </button>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* D365 sync feedback */}
+      {d365Status !== 'idle' && d365Status !== 'syncing' && (
+        <div className={`text-[11px] px-3 py-2 rounded mb-4 ${
+          d365Status === 'done' ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+            : 'bg-red-500/10 text-red-400 border border-red-500/20'
+        }`}>
+          {d365Message}
+          <button onClick={() => setD365Status('idle')} className="ml-2 opacity-60 hover:opacity-100">dismiss</button>
+        </div>
+      )}
 
       {/* KPI Summary */}
       {summary && (
@@ -426,7 +520,14 @@ export function CrmView() {
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: RAG[c.rag_status].bg }} />
                       <div className="min-w-0">
-                        <div className="text-sm font-medium text-neutral-200 truncate">{c.name}</div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium text-neutral-200 truncate">{c.name}</span>
+                          {c.dynamics_id && (
+                            <span className="px-1.5 py-0.5 text-[8px] font-semibold uppercase rounded bg-blue-500/15 text-blue-400 border border-blue-500/20 flex-shrink-0">
+                              D365
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-neutral-500 truncate">
                           {c.company}{c.sector ? ` · ${c.sector}` : ''}
                         </div>
@@ -554,6 +655,88 @@ export function CrmView() {
                         ))}
                       </div>
                     )}
+
+                    {/* Customer 360: Delivery & Onboarding */}
+                    {timelineLoading[c.id] ? (
+                      <div className="mt-4 pt-3 border-t border-[#3a424d]/50 text-[11px] text-neutral-600">Loading timeline...</div>
+                    ) : timeline[c.id] && (timeline[c.id].deliveryEntries.length > 0 || timeline[c.id].onboardingRuns.length > 0) ? (
+                      <div className="mt-4 pt-3 border-t border-[#3a424d]/50">
+                        {/* Delivery entries */}
+                        {timeline[c.id].deliveryEntries.length > 0 && (
+                          <div className="mb-3">
+                            <div className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold mb-2">
+                              Delivery Entries ({timeline[c.id].deliveryEntries.length})
+                            </div>
+                            <div className="space-y-1.5">
+                              {timeline[c.id].deliveryEntries.map(de => (
+                                <div
+                                  key={de.id}
+                                  className="flex items-center gap-3 pl-3 py-1.5 border-l-2 border-[#5ec1ca]"
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#5ec1ca]/10 text-[#5ec1ca] font-medium">{de.product}</span>
+                                      <span className={`text-[10px] font-medium ${
+                                        de.status === 'Complete' ? 'text-green-400' :
+                                        de.status === 'WIP' || de.status === 'In Progress' ? 'text-amber-400' :
+                                        de.status === 'On Hold' ? 'text-purple-400' :
+                                        de.status === 'Dead' || de.status === 'Back to Sales' ? 'text-red-400' :
+                                        'text-neutral-400'
+                                      }`}>{de.status || 'Not Started'}</span>
+                                      {de.onboarding_id && (
+                                        <span className="text-[8px] font-mono text-neutral-500">{de.onboarding_id}</span>
+                                      )}
+                                      {de.sale_type && (
+                                        <span className="text-[9px] text-neutral-600">{de.sale_type}</span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-0.5 text-[10px] text-neutral-500">
+                                      {de.onboarder && <span>{de.onboarder}</span>}
+                                      {de.mrr != null && de.mrr > 0 && (
+                                        <span className="text-neutral-400 font-medium ml-auto">{formatCurrency(de.mrr)}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Onboarding runs */}
+                        {timeline[c.id].onboardingRuns.length > 0 && (
+                          <div>
+                            <div className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold mb-2">
+                              Onboarding Runs ({timeline[c.id].onboardingRuns.length})
+                            </div>
+                            <div className="space-y-1.5">
+                              {timeline[c.id].onboardingRuns.map(run => (
+                                <div
+                                  key={run.id}
+                                  className="flex items-center gap-3 pl-3 py-1.5 border-l-2 border-purple-500"
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-[10px] font-mono text-neutral-400">{run.onboarding_ref}</span>
+                                      <span className={`text-[10px] font-medium ${
+                                        run.status === 'complete' ? 'text-green-400' :
+                                        run.status === 'running' ? 'text-amber-400' :
+                                        run.status === 'failed' ? 'text-red-400' :
+                                        'text-neutral-400'
+                                      }`}>{run.status}</span>
+                                      <span className="text-[9px] text-neutral-600">{run.parent_key}</span>
+                                    </div>
+                                    <div className="text-[10px] text-neutral-600 mt-0.5">
+                                      {run.created_at?.split('T')[0] ?? ''}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
 
                     {/* Contract info */}
                     {(c.contract_start || c.contract_end) && (

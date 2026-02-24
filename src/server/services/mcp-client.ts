@@ -22,6 +22,7 @@ interface McpServerConnection {
   tools: string[];
   lastError: string | null;
   lastConnected: string | null;
+  reconnecting: boolean;
 }
 
 export class McpClientManager {
@@ -36,17 +37,48 @@ export class McpClientManager {
       tools: [],
       lastError: null,
       lastConnected: null,
+      reconnecting: false,
     });
   }
 
   async connectAll(): Promise<void> {
-    const promises = [...this.servers.keys()].map((name) => this.connect(name));
+    const promises = [...this.servers.keys()].map((name) => this.connectWithRetry(name));
     await Promise.allSettled(promises);
+  }
+
+  /** Connect with retry logic for flaky initial connections (e.g. Monday.com) */
+  async connectWithRetry(name: string, maxRetries = 2): Promise<boolean> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const ok = await this.connect(name);
+      if (ok) return true;
+
+      const server = this.servers.get(name);
+      // Don't retry if the command is unavailable (not a transient error)
+      if (server?.status === 'unavailable') return false;
+
+      if (attempt < maxRetries) {
+        const delay = (attempt + 1) * 3000; // 3s, 6s
+        console.log(`[MCP] ${name}: Retry ${attempt + 1}/${maxRetries} in ${delay / 1000}s...`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+    return false;
   }
 
   async connect(name: string): Promise<boolean> {
     const server = this.servers.get(name);
     if (!server) throw new Error(`Unknown server: ${name}`);
+
+    // Guard against concurrent reconnection
+    if (server.reconnecting) return false;
+    server.reconnecting = true;
+
+    // Clean up old connection if any
+    if (server.client) {
+      try { await server.client.close(); } catch { /* ignore */ }
+      server.client = null;
+      server.transport = null;
+    }
 
     server.status = 'connecting';
     server.lastError = null;
@@ -61,6 +93,7 @@ export class McpClientManager {
           ? 'Install uv: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"'
           : `Ensure ${server.config.command} is on PATH.`);
       console.warn(`[MCP] ${name}: ${server.lastError}`);
+      server.reconnecting = false;
       return false;
     }
 
@@ -91,6 +124,17 @@ export class McpClientManager {
 
       await server.client.connect(server.transport);
 
+      // Listen for transport close to detect process crashes
+      server.transport.onclose = () => {
+        if (server.status === 'connected') {
+          console.warn(`[MCP] ${name}: Transport closed unexpectedly — marking for reconnect`);
+          server.status = 'error';
+          server.lastError = 'Connection closed unexpectedly';
+          server.client = null;
+          server.transport = null;
+        }
+      };
+
       // Discover tools
       const { tools } = await server.client.listTools();
       server.tools = tools.map((t) => t.name);
@@ -100,11 +144,13 @@ export class McpClientManager {
       console.log(
         `[MCP] ${name}: Connected. ${tools.length} tools available.`
       );
+      server.reconnecting = false;
       return true;
     } catch (err) {
       server.status = 'error';
       server.lastError = err instanceof Error ? err.message : String(err);
       console.error(`[MCP] ${name}: Connection failed:`, server.lastError);
+      server.reconnecting = false;
       return false;
     }
   }
@@ -115,18 +161,55 @@ export class McpClientManager {
     args: Record<string, unknown> = {}
   ): Promise<unknown> {
     const server = this.servers.get(serverName);
-    if (!server?.client || server.status !== 'connected') {
+    if (!server) {
+      throw new Error(`Server "${serverName}" is not registered`);
+    }
+
+    // Auto-reconnect if connection was lost
+    if (server.status === 'error' || (server.status === 'disconnected' && server.lastConnected)) {
+      if (!server.reconnecting) {
+        console.log(`[MCP] ${serverName}: Auto-reconnecting (was ${server.status})...`);
+        const ok = await this.connect(serverName);
+        if (!ok) {
+          throw new Error(
+            `Server "${serverName}" reconnection failed: ${server.lastError}`
+          );
+        }
+      }
+    }
+
+    if (!server.client || server.status !== 'connected') {
       throw new Error(
-        `Server "${serverName}" is not connected (status: ${server?.status})`
+        `Server "${serverName}" is not connected (status: ${server.status})`
       );
     }
 
-    const result = await server.client.callTool({
-      name: toolName,
-      arguments: args,
-    });
+    try {
+      const result = await server.client.callTool({
+        name: toolName,
+        arguments: args,
+      });
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Detect connection-closed errors (JSON-RPC -32000) and retry once
+      if (msg.includes('-32000') || msg.includes('Connection closed') || msg.includes('transport')) {
+        console.warn(`[MCP] ${serverName}: Connection lost during call to ${toolName}, reconnecting...`);
+        server.status = 'error';
+        server.lastError = msg;
+        server.client = null;
+        server.transport = null;
 
-    return result;
+        const ok = await this.connect(serverName);
+        if (!ok) {
+          throw new Error(`Server "${serverName}" reconnection failed after call error: ${server.lastError}`);
+        }
+
+        // Retry once
+        return server.client!.callTool({ name: toolName, arguments: args });
+      }
+      throw err;
+    }
   }
 
   getStatus(): McpServerInfo[] {

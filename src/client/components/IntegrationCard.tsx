@@ -69,10 +69,13 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
     try {
       const result = await onSave(integration.id, enabled, values);
       if (result.ok) {
+        const isOk = result.mcpStatus === 'connected' || result.mcpStatus === 'configured';
         setFeedback({
-          type: result.mcpStatus === 'connected' ? 'success' : 'error',
+          type: isOk ? 'success' : 'error',
           message: result.mcpStatus === 'connected'
             ? 'Saved and connected'
+            : result.mcpStatus === 'configured'
+            ? 'Saved — sign in when ready'
             : `Saved. Status: ${result.mcpStatus ?? 'disconnected'}${result.lastError ? ` — ${result.lastError}` : ''}`,
         });
       } else {
@@ -119,7 +122,7 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
         }, 3000);
       } else {
         setLoginPending(false);
-        setFeedback({ type: 'error', message: 'Failed to start login' });
+        setFeedback({ type: 'error', message: (result as { error?: string }).error || 'Failed to start login' });
       }
     } catch {
       setLoginPending(false);
@@ -141,10 +144,13 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
     try {
       const result = await onSave(integration.id, newEnabled, values);
       if (result.ok && newEnabled) {
+        const isOk = result.mcpStatus === 'connected' || result.mcpStatus === 'configured';
         setFeedback({
-          type: result.mcpStatus === 'connected' ? 'success' : 'error',
+          type: isOk ? 'success' : 'error',
           message: result.mcpStatus === 'connected'
             ? 'Enabled and connected'
+            : result.mcpStatus === 'configured'
+            ? 'Enabled — sign in when ready'
             : `Enabled. Status: ${result.mcpStatus ?? 'connecting...'}`,
         });
       }
@@ -246,8 +252,8 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
 
       <p className="text-xs text-neutral-500 mb-4">{integration.description}</p>
 
-      {/* Credential fields (for credentials auth type) */}
-      {enabled && !isDeviceCode && (
+      {/* Credential fields */}
+      {enabled && integration.fields.length > 0 && (
         <div className="space-y-3 mb-4">
           {integration.fields.map((field) => (
             <div key={field.key}>
@@ -310,7 +316,7 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
         <div className="mb-4">
           {integration.loggedIn ? (
             <div className="flex items-center gap-3">
-              <span className="text-xs text-green-400">Signed in to Microsoft 365</span>
+              <span className="text-xs text-green-400">Signed in to {integration.name}</span>
               <button
                 onClick={handleLogout}
                 className="px-2 py-1 text-xs text-neutral-400 hover:text-neutral-200 transition-colors"

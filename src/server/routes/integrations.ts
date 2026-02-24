@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
-import type { SettingsQueries } from '../db/queries.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import { McpClientManager } from '../services/mcp-client.js';
 import { INTEGRATIONS, buildMcpConfig } from '../services/integrations.js';
-import type { IntegrationStatus } from '../../shared/types.js';
+import type { Dynamics365Service } from '../services/dynamics365.js';
+import type { IntegrationStatus, McpServerStatus } from '../../shared/types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -19,13 +20,17 @@ const SaveSchema = z.object({
   credentials: z.record(z.string()),
 });
 
-// Track active device code login processes
+// Track active device code login processes (MS365 spawned processes)
 const activeLogins = new Map<string, { process: ReturnType<typeof spawn>; output: string }>();
+// Track active D365 login (MSAL device code — resolves when user completes)
+let d365LoginPending = false;
 
 export function createIntegrationRoutes(
   mcpManager: McpClientManager,
   settingsQueries: SettingsQueries,
-  uvxCommand: string
+  uvxCommand: string,
+  getD365Service: () => Dynamics365Service | null,
+  onSettingsChange?: (key: string) => void
 ): Router {
   const router = Router();
 
@@ -60,8 +65,23 @@ export function createIntegrationRoutes(
       }
 
       let loggedIn = false;
-      if (integ.authType === 'device_code' && integ.id === 'msgraph') {
-        loggedIn = await checkMs365LoggedIn();
+      let d365Status: McpServerStatus | undefined;
+      let d365Error: string | null = null;
+      let d365LastConnected: string | null = null;
+
+      if (integ.authType === 'device_code') {
+        if (integ.id === 'msgraph') {
+          loggedIn = await checkMs365LoggedIn();
+        } else if (integ.id === 'dynamics365') {
+          const svc = getD365Service();
+          loggedIn = svc ? await svc.isLoggedIn() : false;
+          if (svc) {
+            const st = svc.getStatus();
+            d365Status = st.status;
+            d365Error = st.lastError;
+            d365LastConnected = st.lastConnected;
+          }
+        }
       }
 
       results.push({
@@ -71,9 +91,9 @@ export function createIntegrationRoutes(
         enabled: settings[integ.enabledKey] === 'true',
         fields: integ.fields,
         values,
-        mcpStatus: mcpInfo?.status ?? 'disconnected',
-        lastError: mcpInfo?.lastError ?? null,
-        lastConnected: mcpInfo?.lastConnected ?? null,
+        mcpStatus: d365Status ?? mcpInfo?.status ?? 'disconnected',
+        lastError: d365Error ?? mcpInfo?.lastError ?? null,
+        lastConnected: d365LastConnected ?? mcpInfo?.lastConnected ?? null,
         toolCount: mcpInfo?.toolCount ?? 0,
         authType: integ.authType,
         loggedIn,
@@ -111,28 +131,43 @@ export function createIntegrationRoutes(
       }
     }
 
-    // Reconnect
-    try {
-      if (mcpManager.isRegistered(integId)) {
-        await mcpManager.unregisterServer(integId);
+    // Notify settings change callback (e.g. rebuild D365 service)
+    if (onSettingsChange) {
+      onSettingsChange(integ.enabledKey);
+      for (const field of integ.fields) {
+        onSettingsChange(field.key);
       }
+    }
 
-      if (enabled) {
-        const settings = settingsQueries.getAll();
-        const config = buildMcpConfig(integId, settings, uvxCommand);
-        if (config) {
-          mcpManager.registerServer(integId, config);
-          await mcpManager.connect(integId);
+    // Reconnect MCP (skip for non-MCP integrations like dynamics365)
+    const config = enabled ? buildMcpConfig(integId, settingsQueries.getAll(), uvxCommand) : null;
+    if (config) {
+      try {
+        if (mcpManager.isRegistered(integId)) {
+          await mcpManager.unregisterServer(integId);
         }
+        mcpManager.registerServer(integId, config);
+        await mcpManager.connectWithRetry(integId);
+      } catch (err) {
+        console.error(`[Integrations] Reconnect ${integId} failed:`, err);
       }
-    } catch (err) {
-      console.error(`[Integrations] Reconnect ${integId} failed:`, err);
+    } else if (!enabled && mcpManager.isRegistered(integId)) {
+      await mcpManager.unregisterServer(integId);
     }
 
     const mcpInfo = mcpManager.getStatus().find((s) => s.name === integId);
+
+    // For D365, return saved status (service rebuilt by callback above)
+    if (integId === 'dynamics365') {
+      const svc = getD365Service();
+      const loggedIn = svc ? await svc.isLoggedIn() : false;
+      res.json({ ok: true, mcpStatus: loggedIn ? 'connected' : 'configured', lastError: null });
+      return;
+    }
+
     res.json({
       ok: true,
-      mcpStatus: mcpInfo?.status ?? 'disconnected',
+      mcpStatus: mcpInfo?.status ?? (enabled ? 'connected' : 'disconnected'),
       lastError: mcpInfo?.lastError ?? null,
     });
   });
@@ -148,13 +183,13 @@ export function createIntegrationRoutes(
     try {
       if (mcpManager.isRegistered(integId)) {
         await mcpManager.disconnect(integId);
-        await mcpManager.connect(integId);
+        await mcpManager.connectWithRetry(integId);
       } else {
         const settings = settingsQueries.getAll();
         const config = buildMcpConfig(integId, settings, uvxCommand);
         if (config) {
           mcpManager.registerServer(integId, config);
-          await mcpManager.connect(integId);
+          await mcpManager.connectWithRetry(integId);
         }
       }
 
@@ -174,14 +209,41 @@ export function createIntegrationRoutes(
       return;
     }
 
-    // Kill any existing login process
+    // ── D365: use MSAL device code directly ──
+    if (integId === 'dynamics365') {
+      const svc = getD365Service();
+      if (!svc) {
+        res.status(503).json({ ok: false, error: 'Dynamics 365 not configured. Save Client ID and Tenant ID first.' });
+        return;
+      }
+
+      d365LoginPending = true;
+
+      // startLogin calls the MSAL device code callback synchronously (before the token resolves)
+      svc.startLogin((info) => {
+        // This fires immediately with the device code
+        res.json({
+          ok: true,
+          deviceCodeUrl: info.verificationUri,
+          userCode: info.userCode,
+          rawOutput: info.message,
+        });
+      }).then(() => {
+        d365LoginPending = false;
+      }).catch(() => {
+        d365LoginPending = false;
+      });
+
+      return;
+    }
+
+    // ── MS365: spawn CLI process ──
     const existing = activeLogins.get(integId);
     if (existing) {
       existing.process.kill();
       activeLogins.delete(integId);
     }
 
-    // Spawn the login process
     const child = spawn('npx', ['@softeria/ms-365-mcp-server', '--login'], {
       shell: true,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -212,7 +274,6 @@ export function createIntegrationRoutes(
       const entry = activeLogins.get(integId);
       const text = entry?.output ?? output;
 
-      // Parse the device code URL and code from output
       const urlMatch = text.match(/(https:\/\/microsoft\.com\/devicelogin\S*)/i)
         || text.match(/(https:\/\/\S*microsoft\S*\/devicelogin\S*)/i);
       const codeMatch = text.match(/code\s+([A-Z0-9]{6,12})/i)
@@ -236,6 +297,20 @@ export function createIntegrationRoutes(
       return;
     }
 
+    // D365: check MSAL cache
+    if (integId === 'dynamics365') {
+      const svc = getD365Service();
+      const loggedIn = svc ? await svc.isLoggedIn() : false;
+      res.json({
+        ok: true,
+        loggedIn,
+        loginInProgress: d365LoginPending,
+        output: null,
+      });
+      return;
+    }
+
+    // MS365: check CLI
     const loggedIn = await checkMs365LoggedIn();
     const loginProcess = activeLogins.get(integId);
 
@@ -250,6 +325,20 @@ export function createIntegrationRoutes(
   // POST /api/integrations/:id/logout — log out of device code auth
   router.post('/:id/logout', async (req, res) => {
     const integId = req.params.id;
+
+    // D365: clear MSAL cache
+    if (integId === 'dynamics365') {
+      const svc = getD365Service();
+      if (svc) {
+        await svc.logout();
+        res.json({ ok: true });
+      } else {
+        res.json({ ok: true });
+      }
+      return;
+    }
+
+    // MS365: CLI logout
     try {
       await execFileAsync('npx', ['@softeria/ms-365-mcp-server', '--logout'], {
         timeout: 30000,

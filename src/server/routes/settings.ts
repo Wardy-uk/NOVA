@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import type { SettingsQueries } from '../db/queries.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import { requireRole } from '../middleware/auth.js';
 
 const SettingUpdateSchema = z.object({

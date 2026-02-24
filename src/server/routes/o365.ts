@@ -138,9 +138,17 @@ export function createO365Routes(mcpManager: McpClientManager): Router {
         const args: Record<string, unknown> = { title };
         if (taskListId) args.taskListId = taskListId;
         if (dueDateTime) args.dueDateTime = dueDateTime;
-        await mcpManager.callTool('msgraph', toolName, args);
-        results.push({ title, ok: true });
+        const result = await mcpManager.callTool('msgraph', toolName, args);
+        // Check for error in the tool result
+        const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
+        if (resultStr.toLowerCase().includes('error')) {
+          console.warn(`[O365] Batch create "${title}" — tool returned possible error:`, resultStr.substring(0, 300));
+          results.push({ title, ok: false, error: resultStr.substring(0, 200) });
+        } else {
+          results.push({ title, ok: true });
+        }
       } catch (err) {
+        console.error(`[O365] Batch create "${title}" failed:`, err instanceof Error ? err.message : err);
         results.push({ title, ok: false, error: err instanceof Error ? err.message : 'Failed' });
       }
     }
@@ -217,6 +225,304 @@ export function createO365Routes(mcpManager: McpClientManager): Router {
       res.status(500).json({
         ok: false,
         error: err instanceof Error ? err.message : 'Failed to list todo lists',
+      });
+    }
+  });
+
+  // ---- Calendar routes ----
+
+  // GET /api/o365/calendars — list user's calendars
+  router.get('/calendars', async (_req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = tools.find(t => t === 'list-calendars');
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'list-calendars tool not available', tools });
+      return;
+    }
+    try {
+      const result = await mcpManager.callTool('msgraph', toolName, {});
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to list calendars' });
+    }
+  });
+
+  // POST /api/o365/calendar/events — create a calendar event
+  router.post('/calendar/events', async (req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = tools.find(t => t === 'create-calendar-event');
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'create-calendar-event tool not available', tools });
+      return;
+    }
+
+    const { subject, start, end, body, location, attendees, isAllDay, calendarId } = req.body;
+    if (!subject?.trim() || !start || !end) {
+      res.status(400).json({ ok: false, error: 'subject, start, and end are required' });
+      return;
+    }
+
+    try {
+      const args: Record<string, unknown> = { subject, start, end };
+      if (body) args.body = body;
+      if (location) args.location = location;
+      if (attendees) args.attendees = attendees;
+      if (isAllDay !== undefined) args.isAllDay = isAllDay;
+      if (calendarId) args.calendarId = calendarId;
+
+      const result = await mcpManager.callTool('msgraph', toolName, args);
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create event' });
+    }
+  });
+
+  // PATCH /api/o365/calendar/events/:eventId — update a calendar event
+  router.patch('/calendar/events/:eventId', async (req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = tools.find(t => t === 'update-calendar-event');
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'update-calendar-event tool not available', tools });
+      return;
+    }
+
+    const { eventId } = req.params;
+    const { subject, start, end, body, location, attendees, isAllDay } = req.body;
+
+    try {
+      const args: Record<string, unknown> = { eventId };
+      if (subject !== undefined) args.subject = subject;
+      if (start !== undefined) args.start = start;
+      if (end !== undefined) args.end = end;
+      if (body !== undefined) args.body = body;
+      if (location !== undefined) args.location = location;
+      if (attendees !== undefined) args.attendees = attendees;
+      if (isAllDay !== undefined) args.isAllDay = isAllDay;
+
+      const result = await mcpManager.callTool('msgraph', toolName, args);
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to update event' });
+    }
+  });
+
+  // GET /api/o365/calendar/events/:eventId — get a specific event
+  router.get('/calendar/events/:eventId', async (req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = tools.find(t => t === 'get-calendar-event');
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'get-calendar-event tool not available', tools });
+      return;
+    }
+    try {
+      const result = await mcpManager.callTool('msgraph', toolName, { eventId: req.params.eventId });
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get event' });
+    }
+  });
+
+  // DELETE /api/o365/calendar/events/:eventId — delete a calendar event
+  router.delete('/calendar/events/:eventId', async (req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = tools.find(t => t === 'delete-calendar-event');
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'delete-calendar-event tool not available', tools });
+      return;
+    }
+    try {
+      const result = await mcpManager.callTool('msgraph', toolName, { eventId: req.params.eventId });
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to delete event' });
+    }
+  });
+
+  // ---- Email routes ----
+
+  // POST /api/o365/mail/send — send a new email
+  router.post('/mail/send', async (req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = tools.find(t => t === 'send-mail');
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'send-mail tool not available', tools });
+      return;
+    }
+
+    const { to, subject, body, cc, bcc, importance } = req.body;
+    if (!to?.trim() || !subject?.trim() || !body?.trim()) {
+      res.status(400).json({ ok: false, error: 'to, subject, and body are required' });
+      return;
+    }
+
+    try {
+      const args: Record<string, unknown> = {
+        to: to.trim(),
+        subject: subject.trim(),
+        body: body.trim(),
+      };
+      if (cc?.trim()) args.cc = cc.trim();
+      if (bcc?.trim()) args.bcc = bcc.trim();
+      if (importance) args.importance = importance;
+
+      const result = await mcpManager.callTool('msgraph', toolName, args);
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to send email',
+      });
+    }
+  });
+
+  // GET /api/o365/mail/:messageId — get full email details
+  router.get('/mail/:messageId', async (req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = tools.find(t => t === 'get-mail-message');
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'get-mail-message tool not available', tools });
+      return;
+    }
+
+    try {
+      const result = await mcpManager.callTool('msgraph', toolName, {
+        messageId: req.params.messageId,
+      });
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to get email',
+      });
+    }
+  });
+
+  // POST /api/o365/mail/:messageId/reply — reply to an email
+  // Uses send-mail with quoted original + reply-to address
+  router.post('/mail/:messageId/reply', async (req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+
+    // Prefer native reply tool if available, fall back to send-mail
+    const replyTool = tools.find(t => t === 'reply-mail-message' || t === 'reply-to-mail');
+    const sendTool = tools.find(t => t === 'send-mail');
+
+    if (!replyTool && !sendTool) {
+      res.status(501).json({ ok: false, error: 'No mail reply or send tool available', tools });
+      return;
+    }
+
+    const { body, replyTo, originalSubject, originalBody, replyAll } = req.body;
+    if (!body?.trim()) {
+      res.status(400).json({ ok: false, error: 'body is required' });
+      return;
+    }
+
+    try {
+      if (replyTool) {
+        // Use native reply tool
+        const args: Record<string, unknown> = {
+          messageId: req.params.messageId,
+          comment: body.trim(),
+        };
+        if (replyAll) args.replyAll = true;
+        const result = await mcpManager.callTool('msgraph', replyTool, args);
+        res.json({ ok: true, data: parseToolResult(result) });
+      } else {
+        // Fallback: compose reply via send-mail
+        if (!replyTo?.trim()) {
+          res.status(400).json({ ok: false, error: 'replyTo is required when using send-mail fallback' });
+          return;
+        }
+        const subject = originalSubject
+          ? (originalSubject.startsWith('Re:') ? originalSubject : `Re: ${originalSubject}`)
+          : 'Re:';
+        const quotedBody = originalBody
+          ? `${body.trim()}\n\n---\nOriginal message:\n${originalBody}`
+          : body.trim();
+
+        const result = await mcpManager.callTool('msgraph', sendTool!, {
+          to: replyTo.trim(),
+          subject,
+          body: quotedBody,
+        });
+        res.json({ ok: true, data: parseToolResult(result) });
+      }
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to reply',
+      });
+    }
+  });
+
+  // POST /api/o365/mail/:messageId/forward — forward an email
+  router.post('/mail/:messageId/forward', async (req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+
+    const forwardTool = tools.find(t => t === 'forward-mail-message' || t === 'forward-mail');
+    const sendTool = tools.find(t => t === 'send-mail');
+
+    if (!forwardTool && !sendTool) {
+      res.status(501).json({ ok: false, error: 'No mail forward or send tool available', tools });
+      return;
+    }
+
+    const { to, body, originalSubject, originalBody, originalFrom } = req.body;
+    if (!to?.trim()) {
+      res.status(400).json({ ok: false, error: 'to is required' });
+      return;
+    }
+
+    try {
+      if (forwardTool) {
+        const args: Record<string, unknown> = {
+          messageId: req.params.messageId,
+          to: to.trim(),
+        };
+        if (body?.trim()) args.comment = body.trim();
+        const result = await mcpManager.callTool('msgraph', forwardTool, args);
+        res.json({ ok: true, data: parseToolResult(result) });
+      } else {
+        // Fallback: compose forward via send-mail
+        const subject = originalSubject
+          ? (originalSubject.startsWith('Fwd:') ? originalSubject : `Fwd: ${originalSubject}`)
+          : 'Fwd:';
+        const intro = body?.trim() ? `${body.trim()}\n\n` : '';
+        const forwarded = originalBody
+          ? `${intro}---------- Forwarded message ----------\nFrom: ${originalFrom ?? 'Unknown'}\nSubject: ${originalSubject ?? ''}\n\n${originalBody}`
+          : intro || '(forwarded)';
+
+        const result = await mcpManager.callTool('msgraph', sendTool!, {
+          to: to.trim(),
+          subject,
+          body: forwarded,
+        });
+        res.json({ ok: true, data: parseToolResult(result) });
+      }
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to forward',
+      });
+    }
+  });
+
+  // GET /api/o365/mail/folders — list mail folders
+  router.get('/mail/folders', async (_req, res) => {
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = tools.find(t => t === 'list-mail-folders');
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'list-mail-folders tool not available', tools });
+      return;
+    }
+
+    try {
+      const result = await mcpManager.callTool('msgraph', toolName, {});
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to list folders',
       });
     }
   });

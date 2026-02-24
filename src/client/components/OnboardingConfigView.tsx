@@ -1,0 +1,611 @@
+import { useState, useEffect, useCallback } from 'react';
+
+type Tab = 'sale-types' | 'capabilities' | 'matrix' | 'items' | 'ticket-groups';
+
+interface TicketGroup { id: number; name: string; sort_order: number; active: number; }
+interface SaleType { id: number; name: string; sort_order: number; active: number; jira_tickets_required?: number; }
+interface Capability { id: number; name: string; code: string | null; ticket_group_id: number | null; ticket_group_name?: string; sort_order: number; active: number; item_count?: number; }
+interface MatrixCell { sale_type_id: number; capability_id: number; enabled: number; notes: string | null; }
+interface CapItem { id: number; capability_id: number; name: string; is_bolt_on: number; sort_order: number; active: number; }
+
+const BASE = '/api/onboarding/config';
+
+async function api<T = unknown>(path: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || 'Request failed');
+  return json.data as T;
+}
+
+export function OnboardingConfigView() {
+  const [tab, setTab] = useState<Tab>('matrix');
+  const [ticketGroups, setTicketGroups] = useState<TicketGroup[]>([]);
+  const [saleTypes, setSaleTypes] = useState<SaleType[]>([]);
+  const [capabilities, setCapabilities] = useState<Capability[]>([]);
+  const [cells, setCells] = useState<MatrixCell[]>([]);
+  const [items, setItems] = useState<CapItem[]>([]);
+  const [selectedCapId, setSelectedCapId] = useState<number | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
+  const [newName, setNewName] = useState('');
+
+  const loadMatrix = useCallback(async () => {
+    const data = await api<{ saleTypes: SaleType[]; capabilities: Capability[]; cells: MatrixCell[]; ticketGroups: TicketGroup[] }>('/matrix');
+    setSaleTypes(data.saleTypes);
+    setCapabilities(data.capabilities);
+    setCells(data.cells);
+    setTicketGroups(data.ticketGroups);
+  }, []);
+
+  const loadSaleTypes = useCallback(async () => {
+    setSaleTypes(await api<SaleType[]>('/sale-types'));
+  }, []);
+
+  const loadCapabilities = useCallback(async () => {
+    setCapabilities(await api<Capability[]>('/capabilities'));
+  }, []);
+
+  const loadTicketGroups = useCallback(async () => {
+    setTicketGroups(await api<TicketGroup[]>('/ticket-groups'));
+  }, []);
+
+  const loadItems = useCallback(async (capId: number) => {
+    setItems(await api<CapItem[]>(`/capabilities/${capId}/items`));
+  }, []);
+
+  useEffect(() => {
+    loadMatrix();
+  }, [loadMatrix]);
+
+  useEffect(() => {
+    if (tab === 'items' && selectedCapId) loadItems(selectedCapId);
+  }, [tab, selectedCapId, loadItems]);
+
+  // ── Import xlsx ──
+  const handleImport = async () => {
+    if (!confirm('This will replace all onboarding configuration with data from the xlsx file. Continue?')) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const data = await api<{ ticketGroups: number; saleTypes: number; capabilities: number; matrixCells: number; items: number }>(
+        '/import-xlsx', { method: 'POST' }
+      );
+      setImportResult(`Imported: ${data.ticketGroups} ticket groups, ${data.saleTypes} sale types, ${data.capabilities} capabilities, ${data.matrixCells} matrix cells, ${data.items} items`);
+      loadMatrix();
+      loadCapabilities();
+      loadTicketGroups();
+    } catch (err) {
+      setImportResult(`Error: ${err instanceof Error ? err.message : 'Import failed'}`);
+    }
+    setImporting(false);
+  };
+
+  // ── Matrix cell toggle ──
+  const toggleCell = async (stId: number, capId: number) => {
+    const existing = cells.find(c => c.sale_type_id === stId && c.capability_id === capId);
+    const newEnabled = existing ? !existing.enabled : true;
+
+    // Optimistic update
+    setCells(prev => {
+      const idx = prev.findIndex(c => c.sale_type_id === stId && c.capability_id === capId);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], enabled: newEnabled ? 1 : 0 };
+        return updated;
+      }
+      return [...prev, { sale_type_id: stId, capability_id: capId, enabled: newEnabled ? 1 : 0, notes: null }];
+    });
+
+    await api('/matrix', {
+      method: 'PUT',
+      body: JSON.stringify({ updates: [{ sale_type_id: stId, capability_id: capId, enabled: newEnabled }] }),
+    });
+  };
+
+  const isCellEnabled = (stId: number, capId: number) => {
+    const cell = cells.find(c => c.sale_type_id === stId && c.capability_id === capId);
+    return cell?.enabled === 1;
+  };
+
+  const getCellNotes = (stId: number, capId: number) => {
+    const cell = cells.find(c => c.sale_type_id === stId && c.capability_id === capId);
+    return cell?.notes ?? null;
+  };
+
+  // ── CRUD helpers ──
+  const addSaleType = async () => {
+    if (!newName.trim()) return;
+    await api('/sale-types', { method: 'POST', body: JSON.stringify({ name: newName.trim() }) });
+    setNewName('');
+    loadSaleTypes();
+    loadMatrix();
+  };
+
+  const deleteSaleType = async (id: number) => {
+    if (!confirm('Delete this sale type and all its matrix entries?')) return;
+    await api(`/sale-types/${id}`, { method: 'DELETE' });
+    loadSaleTypes();
+    loadMatrix();
+  };
+
+  const toggleSaleTypeActive = async (st: SaleType) => {
+    await api(`/sale-types/${st.id}`, { method: 'PUT', body: JSON.stringify({ active: st.active ? 0 : 1 }) });
+    loadSaleTypes();
+    loadMatrix();
+  };
+
+  const addCapability = async () => {
+    if (!newName.trim()) return;
+    await api('/capabilities', { method: 'POST', body: JSON.stringify({ name: newName.trim() }) });
+    setNewName('');
+    loadCapabilities();
+    loadMatrix();
+  };
+
+  const deleteCapability = async (id: number) => {
+    if (!confirm('Delete this capability, its items, and all matrix entries?')) return;
+    await api(`/capabilities/${id}`, { method: 'DELETE' });
+    loadCapabilities();
+    loadMatrix();
+  };
+
+  const toggleCapActive = async (cap: Capability) => {
+    await api(`/capabilities/${cap.id}`, { method: 'PUT', body: JSON.stringify({ active: cap.active ? 0 : 1 }) });
+    loadCapabilities();
+    loadMatrix();
+  };
+
+  const addItem = async () => {
+    if (!newName.trim() || !selectedCapId) return;
+    await api(`/capabilities/${selectedCapId}/items`, { method: 'POST', body: JSON.stringify({ name: newName.trim() }) });
+    setNewName('');
+    loadItems(selectedCapId);
+  };
+
+  const deleteItem = async (id: number) => {
+    await api(`/items/${id}`, { method: 'DELETE' });
+    if (selectedCapId) loadItems(selectedCapId);
+  };
+
+  const toggleItemBoltOn = async (item: CapItem) => {
+    await api(`/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ is_bolt_on: item.is_bolt_on ? 0 : 1 }) });
+    if (selectedCapId) loadItems(selectedCapId);
+  };
+
+  const toggleItemActive = async (item: CapItem) => {
+    await api(`/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ active: item.active ? 0 : 1 }) });
+    if (selectedCapId) loadItems(selectedCapId);
+  };
+
+  const addTicketGroup = async () => {
+    if (!newName.trim()) return;
+    await api('/ticket-groups', { method: 'POST', body: JSON.stringify({ name: newName.trim() }) });
+    setNewName('');
+    loadTicketGroups();
+    loadMatrix();
+  };
+
+  const deleteTicketGroup = async (id: number) => {
+    if (!confirm('Delete this ticket group? Capabilities will be unlinked.')) return;
+    await api(`/ticket-groups/${id}`, { method: 'DELETE' });
+    loadTicketGroups();
+    loadCapabilities();
+    loadMatrix();
+  };
+
+  const toggleTicketGroupActive = async (tg: TicketGroup) => {
+    await api(`/ticket-groups/${tg.id}`, { method: 'PUT', body: JSON.stringify({ active: tg.active ? 0 : 1 }) });
+    loadTicketGroups();
+    loadMatrix();
+  };
+
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'matrix', label: 'Matrix' },
+    { key: 'sale-types', label: 'Sale Types' },
+    { key: 'ticket-groups', label: 'Ticket Groups' },
+    { key: 'capabilities', label: 'Capabilities' },
+    { key: 'items', label: 'Items' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-neutral-100">Onboarding Configuration</h2>
+        <button
+          onClick={handleImport}
+          disabled={importing}
+          className="px-3 py-1.5 text-xs rounded bg-amber-600 text-white hover:bg-amber-500 disabled:opacity-50 transition-colors"
+        >
+          {importing ? 'Importing...' : 'Import from xlsx'}
+        </button>
+      </div>
+
+      {importResult && (
+        <div className={`p-2 text-xs rounded ${importResult.startsWith('Error') ? 'bg-red-950/50 text-red-400 border border-red-900' : 'bg-green-950/50 text-green-400 border border-green-900'}`}>
+          {importResult}
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-[#3a424d] pb-px">
+        {tabs.map(t => (
+          <button
+            key={t.key}
+            onClick={() => { setTab(t.key); setNewName(''); }}
+            className={`px-4 py-2 text-xs rounded-t transition-colors ${
+              tab === t.key
+                ? 'bg-[#2f353d] text-[#5ec1ca] border-b-2 border-[#5ec1ca] font-semibold'
+                : 'text-neutral-400 hover:text-neutral-200'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+        {tab === 'matrix' && (
+          <MatrixGrid
+            saleTypes={saleTypes}
+            capabilities={capabilities}
+            ticketGroups={ticketGroups}
+            isCellEnabled={isCellEnabled}
+            getCellNotes={getCellNotes}
+            onToggle={toggleCell}
+          />
+        )}
+
+        {tab === 'sale-types' && (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addSaleType()}
+                placeholder="New sale type name..."
+                className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
+              />
+              <button onClick={addSaleType} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
+                Add
+              </button>
+            </div>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-neutral-500 border-b border-[#3a424d]">
+                  <th className="text-left py-2 px-2">Name</th>
+                  <th className="text-left py-2 px-2 w-20">Order</th>
+                  <th className="text-center py-2 px-2 w-20">Active</th>
+                  <th className="text-center py-2 px-2 w-16"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {saleTypes.map(st => (
+                  <tr key={st.id} className={`border-b border-[#3a424d]/50 ${!st.active ? 'opacity-40' : ''}`}>
+                    <td className="py-1.5 px-2 text-neutral-200">{st.name}</td>
+                    <td className="py-1.5 px-2 text-neutral-400">{st.sort_order}</td>
+                    <td className="py-1.5 px-2 text-center">
+                      <button onClick={() => toggleSaleTypeActive(st)} className={`w-5 h-5 rounded text-[10px] ${st.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
+                        {st.active ? '\u2713' : '\u2717'}
+                      </button>
+                    </td>
+                    <td className="py-1.5 px-2 text-center">
+                      <button onClick={() => deleteSaleType(st.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {saleTypes.length === 0 && <div className="text-center text-neutral-500 text-xs py-4">No sale types. Import from xlsx or add manually.</div>}
+          </div>
+        )}
+
+        {tab === 'ticket-groups' && (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addTicketGroup()}
+                placeholder="New ticket group name..."
+                className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
+              />
+              <button onClick={addTicketGroup} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
+                Add
+              </button>
+            </div>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-neutral-500 border-b border-[#3a424d]">
+                  <th className="text-left py-2 px-2">Name</th>
+                  <th className="text-left py-2 px-2 w-20">Order</th>
+                  <th className="text-center py-2 px-2 w-28">Capabilities</th>
+                  <th className="text-center py-2 px-2 w-20">Active</th>
+                  <th className="text-center py-2 px-2 w-16"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {ticketGroups.map(tg => {
+                  const capCount = capabilities.filter(c => c.ticket_group_id === tg.id).length;
+                  return (
+                    <tr key={tg.id} className={`border-b border-[#3a424d]/50 ${!tg.active ? 'opacity-40' : ''}`}>
+                      <td className="py-1.5 px-2 text-neutral-200">{tg.name}</td>
+                      <td className="py-1.5 px-2 text-neutral-400">{tg.sort_order}</td>
+                      <td className="py-1.5 px-2 text-center text-neutral-400">{capCount}</td>
+                      <td className="py-1.5 px-2 text-center">
+                        <button onClick={() => toggleTicketGroupActive(tg)} className={`w-5 h-5 rounded text-[10px] ${tg.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
+                          {tg.active ? '\u2713' : '\u2717'}
+                        </button>
+                      </td>
+                      <td className="py-1.5 px-2 text-center">
+                        <button onClick={() => deleteTicketGroup(tg.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {ticketGroups.length === 0 && <div className="text-center text-neutral-500 text-xs py-4">No ticket groups. Import from xlsx or add manually.</div>}
+          </div>
+        )}
+
+        {tab === 'capabilities' && (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addCapability()}
+                placeholder="New capability name..."
+                className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
+              />
+              <button onClick={addCapability} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
+                Add
+              </button>
+            </div>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-neutral-500 border-b border-[#3a424d]">
+                  <th className="text-left py-2 px-2">Name</th>
+                  <th className="text-left py-2 px-2 w-32">Ticket Group</th>
+                  <th className="text-center py-2 px-2 w-20">Items</th>
+                  <th className="text-center py-2 px-2 w-20">Active</th>
+                  <th className="text-center py-2 px-2 w-16"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {capabilities.map(cap => (
+                  <tr key={cap.id} className={`border-b border-[#3a424d]/50 ${!cap.active ? 'opacity-40' : ''}`}>
+                    <td className="py-1.5 px-2 text-neutral-200">{cap.name}</td>
+                    <td className="py-1.5 px-2">
+                      {cap.ticket_group_name ? (
+                        <span className="px-1.5 py-0.5 text-[10px] rounded bg-purple-900/40 text-purple-300 border border-purple-800/50">
+                          {cap.ticket_group_name}
+                        </span>
+                      ) : (
+                        <span className="text-neutral-600">-</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 px-2 text-center text-neutral-400">{cap.item_count ?? 0}</td>
+                    <td className="py-1.5 px-2 text-center">
+                      <button onClick={() => toggleCapActive(cap)} className={`w-5 h-5 rounded text-[10px] ${cap.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
+                        {cap.active ? '\u2713' : '\u2717'}
+                      </button>
+                    </td>
+                    <td className="py-1.5 px-2 text-center">
+                      <button onClick={() => deleteCapability(cap.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {capabilities.length === 0 && <div className="text-center text-neutral-500 text-xs py-4">No capabilities. Import from xlsx or add manually.</div>}
+          </div>
+        )}
+
+        {tab === 'items' && (
+          <div className="space-y-3">
+            <div className="flex gap-2 items-center">
+              <select
+                value={selectedCapId ?? ''}
+                onChange={e => { const v = parseInt(e.target.value, 10); setSelectedCapId(v || null); if (v) loadItems(v); }}
+                className="px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200"
+              >
+                <option value="">Select capability...</option>
+                {capabilities.filter(c => c.active).map(cap => (
+                  <option key={cap.id} value={cap.id}>{cap.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {selectedCapId && (
+              <>
+                <div className="flex gap-2">
+                  <input
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addItem()}
+                    placeholder="New item name..."
+                    className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
+                  />
+                  <button onClick={addItem} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
+                    Add
+                  </button>
+                </div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-neutral-500 border-b border-[#3a424d]">
+                      <th className="text-left py-2 px-2">Item Name</th>
+                      <th className="text-center py-2 px-2 w-24">Bolt-On</th>
+                      <th className="text-center py-2 px-2 w-20">Active</th>
+                      <th className="text-center py-2 px-2 w-16"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map(item => (
+                      <tr key={item.id} className={`border-b border-[#3a424d]/50 ${!item.active ? 'opacity-40' : ''}`}>
+                        <td className="py-1.5 px-2 text-neutral-200">{item.name}</td>
+                        <td className="py-1.5 px-2 text-center">
+                          <button
+                            onClick={() => toggleItemBoltOn(item)}
+                            className={`px-2 py-0.5 rounded text-[10px] ${item.is_bolt_on ? 'bg-amber-900/50 text-amber-400' : 'bg-neutral-700 text-neutral-500'}`}
+                          >
+                            {item.is_bolt_on ? 'Bolt-On' : 'Standard'}
+                          </button>
+                        </td>
+                        <td className="py-1.5 px-2 text-center">
+                          <button onClick={() => toggleItemActive(item)} className={`w-5 h-5 rounded text-[10px] ${item.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
+                            {item.active ? '\u2713' : '\u2717'}
+                          </button>
+                        </td>
+                        <td className="py-1.5 px-2 text-center">
+                          <button onClick={() => deleteItem(item.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {items.length === 0 && <div className="text-center text-neutral-500 text-xs py-4">No items for this capability.</div>}
+              </>
+            )}
+            {!selectedCapId && <div className="text-center text-neutral-500 text-xs py-4">Select a capability to manage its items.</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Matrix Grid sub-component ──
+
+function MatrixGrid({
+  saleTypes,
+  capabilities,
+  ticketGroups,
+  isCellEnabled,
+  getCellNotes,
+  onToggle,
+}: {
+  saleTypes: SaleType[];
+  capabilities: Capability[];
+  ticketGroups: TicketGroup[];
+  isCellEnabled: (stId: number, capId: number) => boolean;
+  getCellNotes: (stId: number, capId: number) => string | null;
+  onToggle: (stId: number, capId: number) => void;
+}) {
+  const activeSaleTypes = saleTypes.filter(st => st.active);
+  const activeCaps = capabilities.filter(c => c.active);
+
+  if (activeSaleTypes.length === 0 || activeCaps.length === 0) {
+    return <div className="text-center text-neutral-500 text-xs py-8">No data. Import from xlsx or add sale types and capabilities first.</div>;
+  }
+
+  // Build grouped columns: group ticket groups and their capabilities
+  const activeGroups = ticketGroups.filter(tg => tg.active);
+  const groupedCaps: Array<{ group: TicketGroup | null; caps: Capability[] }> = [];
+
+  // Capabilities with a ticket group (in group order)
+  for (const group of activeGroups) {
+    const groupCaps = activeCaps.filter(c => c.ticket_group_id === group.id);
+    if (groupCaps.length > 0) {
+      groupedCaps.push({ group, caps: groupCaps });
+    }
+  }
+
+  // Ungrouped capabilities (no ticket_group_id)
+  const ungroupedCaps = activeCaps.filter(c => !c.ticket_group_id || !activeGroups.some(g => g.id === c.ticket_group_id));
+  if (ungroupedCaps.length > 0) {
+    groupedCaps.push({ group: null, caps: ungroupedCaps });
+  }
+
+  // Flatten for rendering
+  const flatCaps = groupedCaps.flatMap(g => g.caps);
+
+  // Alternating group colors for visual distinction
+  const groupColors = [
+    'bg-purple-900/20 border-purple-800/30',
+    'bg-blue-900/20 border-blue-800/30',
+    'bg-teal-900/20 border-teal-800/30',
+    'bg-indigo-900/20 border-indigo-800/30',
+    'bg-cyan-900/20 border-cyan-800/30',
+    'bg-violet-900/20 border-violet-800/30',
+  ];
+
+  return (
+    <div className="overflow-auto max-h-[70vh]">
+      <table className="text-[11px] border-collapse">
+        <thead className="sticky top-0 z-10">
+          {/* Row 1: Ticket group headers */}
+          {activeGroups.length > 0 && (
+            <tr className="bg-[#2f353d]">
+              <th className="sticky left-0 z-20 bg-[#2f353d] border-b border-r border-[#3a424d]" />
+              {groupedCaps.map((gc, idx) => (
+                <th
+                  key={gc.group?.id ?? 'ungrouped'}
+                  colSpan={gc.caps.length}
+                  className={`px-2 py-1.5 text-center font-semibold border-b border-x border-[#3a424d] ${
+                    gc.group ? `text-purple-300 ${groupColors[idx % groupColors.length]}` : 'text-neutral-500'
+                  }`}
+                >
+                  {gc.group?.name ?? 'Other'}
+                </th>
+              ))}
+            </tr>
+          )}
+          {/* Row 2: Individual capability names */}
+          <tr className="bg-[#2f353d]">
+            <th className="sticky left-0 z-20 bg-[#2f353d] text-left px-2 py-1.5 text-neutral-500 min-w-[160px] border-b border-r border-[#3a424d]">
+              Sale Type
+            </th>
+            {flatCaps.map(cap => (
+              <th
+                key={cap.id}
+                className="px-1 py-1.5 text-neutral-400 font-normal border-b border-[#3a424d] min-w-[32px]"
+                title={cap.name}
+              >
+                <div className="writing-mode-vertical max-h-[100px] overflow-hidden whitespace-nowrap text-ellipsis"
+                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', maxHeight: '100px' }}
+                >
+                  {cap.name}
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {activeSaleTypes.map(st => (
+            <tr key={st.id} className="hover:bg-[#363d47]/50">
+              <td className="sticky left-0 bg-[#2f353d] px-2 py-1 text-neutral-200 border-r border-[#3a424d] whitespace-nowrap">
+                {st.name}
+              </td>
+              {flatCaps.map(cap => {
+                const enabled = isCellEnabled(st.id, cap.id);
+                const notes = getCellNotes(st.id, cap.id);
+                return (
+                  <td
+                    key={cap.id}
+                    onClick={() => onToggle(st.id, cap.id)}
+                    title={notes ? `${cap.name}: ${notes}` : cap.name}
+                    className={`text-center cursor-pointer border border-[#3a424d]/30 transition-colors ${
+                      enabled
+                        ? notes
+                          ? 'bg-amber-900/40 hover:bg-amber-800/50 text-amber-300'
+                          : 'bg-[#5ec1ca]/20 hover:bg-[#5ec1ca]/30 text-[#5ec1ca]'
+                        : 'hover:bg-[#363d47]/50'
+                    }`}
+                  >
+                    {enabled ? '\u2713' : ''}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

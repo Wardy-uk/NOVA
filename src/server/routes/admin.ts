@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import type { UserQueries, TeamQueries, UserSettingsQueries, SettingsQueries } from '../db/queries.js';
+import type { TeamQueries, UserSettingsQueries } from '../db/queries.js';
+import type { SettingsQueries } from '../db/settings-store.js';
+import type { FileUserQueries } from '../db/user-store.js';
+type UserQueries = FileUserQueries;
 import { requireRole } from '../middleware/auth.js';
 
 export function createAdminRoutes(
@@ -18,6 +21,34 @@ export function createAdminRoutes(
     const users = userQueries.getAll();
     const teams = teamQueries.getAll();
     res.json({ ok: true, data: { users, teams } });
+  });
+
+  router.post('/users', async (req, res) => {
+    const { username, password, display_name, email, role } = req.body;
+    if (!username?.trim()) {
+      res.status(400).json({ ok: false, error: 'Username is required' });
+      return;
+    }
+    if (!password || password.length < 6) {
+      res.status(400).json({ ok: false, error: 'Password must be at least 6 characters' });
+      return;
+    }
+    const validRoles = ['admin', 'editor', 'viewer'];
+    const assignedRole = role && validRoles.includes(role) ? role : 'viewer';
+    const normalizedUsername = username.trim().toLowerCase();
+    if (userQueries.getByUsername(normalizedUsername)) {
+      res.status(409).json({ ok: false, error: 'Username already taken' });
+      return;
+    }
+    const hash = await bcrypt.hash(password, 10);
+    const id = userQueries.create({
+      username: normalizedUsername,
+      display_name: display_name?.trim() || normalizedUsername,
+      email: email?.trim() || undefined,
+      password_hash: hash,
+      role: assignedRole,
+    });
+    res.json({ ok: true, data: { id } });
   });
 
   router.put('/users/:id', (req, res) => {

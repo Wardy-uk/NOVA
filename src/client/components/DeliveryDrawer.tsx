@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 
 interface DbEntry {
   id: number;
+  onboarding_id: string | null;
   product: string;
   account: string;
   status: string;
@@ -14,10 +15,27 @@ interface DbEntry {
   mrr: number | null;
   incremental: number | null;
   licence_fee: number | null;
+  sale_type: string | null;
   is_starred: number;
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface SaleType {
+  id: number;
+  name: string;
+  active: number;
+}
+
+interface TicketResult {
+  parentKey: string;
+  childKeys: string[];
+  createdCount: number;
+  linkedCount: number;
+  existing: boolean;
+  dryRun: boolean;
+  details?: { parentSummary: string; childSummaries: string[] };
 }
 
 const STATUSES = ['Not Started', 'WIP', 'In Progress', 'On Hold', 'Complete', 'Dead', 'Back to Sales'];
@@ -38,7 +56,7 @@ function getStatusColor(status: string): string {
 
 function formatCurrency(value: number | null): string {
   if (value == null) return '-';
-  return `£${value.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  return `\u00A3${value.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
 const inputCls = 'bg-[#272C33] text-neutral-200 text-xs rounded px-3 py-2 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-full placeholder:text-neutral-600';
@@ -60,12 +78,29 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
   const [form, setForm] = useState({
     product: '', account: '', status: 'Not Started', onboarder: '',
     order_date: '', go_live_date: '', predicted_delivery: '', training_date: '',
-    branches: '', mrr: '', incremental: '', licence_fee: '', notes: '',
+    branches: '', mrr: '', incremental: '', licence_fee: '', sale_type: '', notes: '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Sale types for dropdown
+  const [saleTypes, setSaleTypes] = useState<SaleType[]>([]);
+
+  // Ticket creation state
+  const [ticketPreview, setTicketPreview] = useState<TicketResult | null>(null);
+  const [ticketCreating, setTicketCreating] = useState(false);
+  const [ticketResult, setTicketResult] = useState<TicketResult | null>(null);
+  const [ticketError, setTicketError] = useState<string | null>(null);
+
+  // Fetch sale types on mount
+  useEffect(() => {
+    fetch('/api/onboarding/config/sale-types')
+      .then(r => r.json())
+      .then(json => { if (json.ok) setSaleTypes(json.data.filter((st: SaleType) => st.active)); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (entry && !isNew) {
@@ -82,6 +117,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         mrr: entry.mrr?.toString() ?? '',
         incremental: entry.incremental?.toString() ?? '',
         licence_fee: entry.licence_fee?.toString() ?? '',
+        sale_type: entry.sale_type ?? '',
         notes: entry.notes ?? '',
       });
     } else if (prefill) {
@@ -98,18 +134,22 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         mrr: prefill.mrr ?? '',
         incremental: prefill.incremental ?? '',
         licence_fee: prefill.licence_fee ?? '',
+        sale_type: prefill.sale_type ?? '',
         notes: prefill.notes ?? '',
       });
     } else {
       setForm({
         product: defaultProduct, account: '', status: 'Not Started', onboarder: '',
         order_date: '', go_live_date: '', predicted_delivery: '', training_date: '',
-        branches: '', mrr: '', incremental: '', licence_fee: '', notes: '',
+        branches: '', mrr: '', incremental: '', licence_fee: '', sale_type: '', notes: '',
       });
     }
     setError(null);
     setSuccess(null);
     setConfirmDelete(false);
+    setTicketPreview(null);
+    setTicketResult(null);
+    setTicketError(null);
   }, [entry, isNew, defaultProduct, prefill]);
 
   const setField = (key: string, val: string) => setForm((f) => ({ ...f, [key]: val }));
@@ -132,6 +172,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         mrr: form.mrr ? parseFloat(form.mrr) : null,
         incremental: form.incremental ? parseFloat(form.incremental) : null,
         licence_fee: form.licence_fee ? parseFloat(form.licence_fee) : null,
+        sale_type: form.sale_type || null,
         notes: form.notes.trim() || null,
       };
 
@@ -160,6 +201,69 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
     onDeleted(entry.id);
   };
 
+  // ── Ticket creation ──
+
+  const canCreateTickets = !!(form.sale_type && form.account.trim() && (entry?.onboarding_id || isNew));
+
+  const handleDryRun = async () => {
+    if (!canCreateTickets) return;
+    setTicketCreating(true);
+    setTicketError(null);
+    setTicketPreview(null);
+    try {
+      const onboardingRef = entry?.onboarding_id || 'PREVIEW';
+      const payload = {
+        schemaVersion: 1,
+        onboardingRef,
+        saleType: form.sale_type,
+        customer: { name: form.account.trim() },
+        targetDueDate: form.go_live_date || new Date().toISOString().split('T')[0],
+        config: {},
+      };
+      const resp = await fetch('/api/onboarding/create-tickets?dryRun=true', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error ?? 'Dry run failed');
+      setTicketPreview(json.data);
+    } catch (err) {
+      setTicketError(err instanceof Error ? err.message : 'Dry run failed');
+    } finally {
+      setTicketCreating(false);
+    }
+  };
+
+  const handleCreateTickets = async () => {
+    if (!canCreateTickets || !entry?.onboarding_id) return;
+    setTicketCreating(true);
+    setTicketError(null);
+    try {
+      const payload = {
+        schemaVersion: 1,
+        onboardingRef: entry.onboarding_id,
+        saleType: form.sale_type,
+        customer: { name: form.account.trim() },
+        targetDueDate: form.go_live_date || new Date().toISOString().split('T')[0],
+        config: {},
+      };
+      const resp = await fetch('/api/onboarding/create-tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error ?? 'Ticket creation failed');
+      setTicketResult(json.data);
+      setTicketPreview(null);
+    } catch (err) {
+      setTicketError(err instanceof Error ? err.message : 'Ticket creation failed');
+    } finally {
+      setTicketCreating(false);
+    }
+  };
+
   const statusColor = getStatusColor(form.status);
 
   return (
@@ -173,6 +277,11 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
               <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-[#5ec1ca]/20 text-[#5ec1ca]">
                 {entry && !isNew ? entry.product : prefill ? 'From Spreadsheet' : 'New Entry'}
               </span>
+              {entry?.onboarding_id && (
+                <span className="px-2 py-0.5 text-[10px] font-mono rounded bg-[#272C33] text-[#5ec1ca] border border-[#3a424d]">
+                  {entry.onboarding_id}
+                </span>
+              )}
               {entry && !isNew && (
                 <button
                   onClick={() => onStarToggled(entry.id)}
@@ -229,16 +338,28 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
             </div>
           </div>
 
-          {/* Account + Onboarder */}
+          {/* Account + Sale Type */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Account *</label>
               <input className={inputCls} value={form.account} onChange={(e) => setField('account', e.target.value)} placeholder="Customer name" />
             </div>
             <div>
+              <label className={labelCls}>Sale Type</label>
+              <select value={form.sale_type} onChange={(e) => setField('sale_type', e.target.value)} className={inputCls}>
+                <option value="">Select...</option>
+                {saleTypes.map((st) => <option key={st.id} value={st.name}>{st.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Onboarder */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
               <label className={labelCls}>Onboarder</label>
               <input className={inputCls} value={form.onboarder} onChange={(e) => setField('onboarder', e.target.value)} placeholder="Name" />
             </div>
+            <div />
           </div>
 
           {/* Dates */}
@@ -292,6 +413,87 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
               className={`${inputCls} resize-none`}
             />
           </div>
+
+          {/* ── Jira Ticket Creation ── */}
+          {form.sale_type && (
+            <div className="border border-[#3a424d] rounded-lg bg-[#272C33] p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-neutral-300">Jira Onboarding Tickets</span>
+                <span className="text-[10px] text-neutral-500">
+                  Sale: {form.sale_type} {entry?.onboarding_id ? `\u00B7 Ref: ${entry.onboarding_id}` : ''}
+                </span>
+              </div>
+
+              {/* Dry run preview */}
+              {ticketPreview && ticketPreview.details && (
+                <div className="space-y-2">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider">Preview — tickets to create:</div>
+                  <div className="text-[11px] text-purple-300 bg-purple-950/30 border border-purple-900/40 rounded px-2 py-1.5">
+                    {ticketPreview.details.parentSummary}
+                  </div>
+                  {ticketPreview.details.childSummaries.map((s, i) => (
+                    <div key={i} className="text-[11px] text-[#5ec1ca] bg-[#5ec1ca]/10 border border-[#5ec1ca]/20 rounded px-2 py-1.5">
+                      {s}
+                    </div>
+                  ))}
+                  {entry?.onboarding_id && (
+                    <button
+                      onClick={handleCreateTickets}
+                      disabled={ticketCreating}
+                      className="w-full px-3 py-2 text-xs rounded bg-green-700 text-white hover:bg-green-600 disabled:opacity-50 transition-colors font-semibold"
+                    >
+                      {ticketCreating ? 'Creating...' : `Create ${ticketPreview.details.childSummaries.length + 1} Tickets in Jira`}
+                    </button>
+                  )}
+                  {!entry?.onboarding_id && (
+                    <div className="text-[10px] text-amber-400">Save entry first to get an onboarding ref before creating tickets.</div>
+                  )}
+                </div>
+              )}
+
+              {/* Live result */}
+              {ticketResult && (
+                <div className="space-y-2">
+                  <div className="text-[10px] text-green-400 uppercase tracking-wider">
+                    {ticketResult.existing ? 'Tickets already exist' : `Created ${ticketResult.createdCount} tickets, ${ticketResult.linkedCount} links`}
+                  </div>
+                  <div className="text-[11px] text-neutral-200">
+                    Parent: <span className="font-mono text-purple-300">{ticketResult.parentKey}</span>
+                  </div>
+                  {ticketResult.childKeys.map((key, i) => (
+                    <div key={i} className="text-[11px] text-neutral-200">
+                      Child: <span className="font-mono text-[#5ec1ca]">{key}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Error */}
+              {ticketError && (
+                <div className="p-2 bg-red-950/50 border border-red-900 rounded text-red-400 text-[11px]">{ticketError}</div>
+              )}
+
+              {/* Buttons */}
+              {!ticketPreview && !ticketResult && (
+                <button
+                  onClick={handleDryRun}
+                  disabled={ticketCreating || !canCreateTickets}
+                  className="w-full px-3 py-2 text-xs rounded bg-purple-700 text-white hover:bg-purple-600 disabled:opacity-50 transition-colors font-semibold"
+                >
+                  {ticketCreating ? 'Loading...' : 'Preview Tickets'}
+                </button>
+              )}
+
+              {(ticketPreview || ticketResult) && (
+                <button
+                  onClick={() => { setTicketPreview(null); setTicketResult(null); setTicketError(null); }}
+                  className="text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Metadata (edit mode only) */}
           {entry && !isNew && (

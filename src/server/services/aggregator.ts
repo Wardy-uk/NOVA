@@ -1,5 +1,6 @@
 import type { McpClientManager } from './mcp-client.js';
-import type { TaskQueries, SettingsQueries } from '../db/queries.js';
+import type { TaskQueries } from '../db/queries.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import { saveDb } from '../db/schema.js';
 
 interface NormalizedTask {

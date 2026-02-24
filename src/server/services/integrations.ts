@@ -32,6 +32,17 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'monday_board_ids', label: 'Board IDs', type: 'text', placeholder: 'Comma-separated (optional, blank = all)', required: false },
     ],
   },
+  {
+    id: 'dynamics365',
+    name: 'Dynamics 365',
+    description: 'Microsoft Dynamics 365 CRM (nurtur-prod). Sign in with your Microsoft account to sync accounts.',
+    enabledKey: 'd365_enabled',
+    authType: 'device_code',
+    fields: [
+      { key: 'd365_client_id', label: 'Client ID', type: 'text', placeholder: 'Azure AD app registration client ID', required: true },
+      { key: 'd365_tenant_id', label: 'Tenant ID', type: 'text', placeholder: 'Azure AD directory (tenant) ID', required: true },
+    ],
+  },
 ];
 
 export interface McpServerConfig {

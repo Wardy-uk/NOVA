@@ -9,12 +9,14 @@ export function createTaskRoutes(
 ): Router {
   const router = Router();
 
-  // GET /api/tasks — List tasks
+  // GET /api/tasks — List tasks (per-user focus via user_task_pins)
   router.get('/', (req, res) => {
     const { status, source } = req.query;
+    const userId = (req as any).user?.id as number | undefined;
     const tasks = taskQueries.getAll({
       status: status as string | undefined,
       source: source as string | undefined,
+      userId,
     });
     res.json({ ok: true, data: tasks });
   });
@@ -105,7 +107,8 @@ export function createTaskRoutes(
       res.status(400).json({ ok: false, error: parsed.error.message });
       return;
     }
-    const updated = taskQueries.update(req.params.id, parsed.data);
+    const userId = (req as any).user?.id as number | undefined;
+    const updated = taskQueries.update(req.params.id, parsed.data, userId);
     if (!updated) {
       res.status(404).json({ ok: false, error: 'Task not found' });
       return;
