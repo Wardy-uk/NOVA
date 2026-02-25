@@ -4,7 +4,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.resolve(__dirname, '../../../daypilot.db');
+const PROJECT_ROOT = path.resolve(__dirname, '../../../');
+const DATA_DIR = process.env.DATA_DIR || PROJECT_ROOT;
+const DB_PATH = path.join(DATA_DIR, 'daypilot.db');
 
 let db: Database | null = null;
 
@@ -261,6 +263,37 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  // ── Milestone tables ──
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS milestone_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      day_offset INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      checklist_json TEXT DEFAULT '[]',
+      active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS delivery_milestones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_id INTEGER NOT NULL,
+      template_id INTEGER NOT NULL,
+      template_name TEXT NOT NULL,
+      target_date TEXT,
+      actual_date TEXT,
+      status TEXT DEFAULT 'pending',
+      checklist_state_json TEXT DEFAULT '[]',
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   // Migrations — add columns that may not exist in older databases
   const migrations: [string, string][] = [
     ['delivery_entries', 'training_date TEXT'],
@@ -308,6 +341,76 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_matrix_cap ON onboarding_matrix(capability_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_items_cap ON onboarding_capability_items(capability_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_runs_ref ON onboarding_runs(onboarding_ref)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_milestones_delivery ON delivery_milestones(delivery_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_milestones_status ON delivery_milestones(status)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_milestones_target ON delivery_milestones(target_date)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_milestone_templates_active ON milestone_templates(active, sort_order)`);
+
+  // Milestone sale type matrix: day offsets per sale type per template
+  database.run(`
+    CREATE TABLE IF NOT EXISTS milestone_sale_type_offsets (
+      sale_type_id INTEGER NOT NULL,
+      template_id INTEGER NOT NULL,
+      day_offset INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (sale_type_id, template_id),
+      FOREIGN KEY (sale_type_id) REFERENCES onboarding_sale_types(id) ON DELETE CASCADE,
+      FOREIGN KEY (template_id) REFERENCES milestone_templates(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Seed default milestone templates from file
+  const tmplCount = database.exec('SELECT COUNT(*) as c FROM milestone_templates');
+  if ((tmplCount[0]?.values[0]?.[0] as number) === 0) {
+    try {
+      const seedPath = path.join(PROJECT_ROOT, 'src/server/data/milestone-templates.json');
+      const seedData = JSON.parse(fs.readFileSync(seedPath, 'utf-8')) as Array<{
+        name: string; day_offset: number; sort_order: number; checklist: string[];
+      }>;
+      for (const tmpl of seedData) {
+        database.run(
+          `INSERT INTO milestone_templates (name, day_offset, sort_order, checklist_json) VALUES (?, ?, ?, ?)`,
+          [tmpl.name, tmpl.day_offset, tmpl.sort_order, JSON.stringify(tmpl.checklist)]
+        );
+      }
+      console.log(`[N.O.V.A] Seeded ${seedData.length} milestone templates from file`);
+    } catch (err) {
+      console.error('[N.O.V.A] Failed to seed milestone templates:', err instanceof Error ? err.message : err);
+    }
+  } else {
+    // Backfill checklists for existing templates that have empty checklist_json
+    try {
+      const seedPath = path.join(PROJECT_ROOT, 'src/server/data/milestone-templates.json');
+      const seedData = JSON.parse(fs.readFileSync(seedPath, 'utf-8')) as Array<{
+        name: string; checklist: string[];
+      }>;
+      for (const tmpl of seedData) {
+        database.run(
+          `UPDATE milestone_templates SET checklist_json = ? WHERE name = ? AND (checklist_json IS NULL OR checklist_json = '[]')`,
+          [JSON.stringify(tmpl.checklist), tmpl.name]
+        );
+      }
+    } catch { /* ignore — file may not exist */ }
+  }
+
+  // Seed milestone matrix offsets if empty (populate all active sale types x all active templates with template defaults)
+  const matrixCount = database.exec('SELECT COUNT(*) as c FROM milestone_sale_type_offsets');
+  if ((matrixCount[0]?.values[0]?.[0] as number) === 0) {
+    const stRows = database.exec('SELECT id FROM onboarding_sale_types WHERE active = 1');
+    const tmplRows = database.exec('SELECT id, day_offset FROM milestone_templates WHERE active = 1');
+    if (stRows.length > 0 && tmplRows.length > 0) {
+      let seeded = 0;
+      for (const st of stRows[0].values) {
+        for (const tmpl of tmplRows[0].values) {
+          database.run(
+            `INSERT OR IGNORE INTO milestone_sale_type_offsets (sale_type_id, template_id, day_offset) VALUES (?, ?, ?)`,
+            [st[0], tmpl[0], tmpl[1]]
+          );
+          seeded++;
+        }
+      }
+      console.log(`[N.O.V.A] Seeded ${seeded} milestone matrix offsets (${stRows[0].values.length} sale types x ${tmplRows[0].values.length} templates)`);
+    }
+  }
 
   // Seed default settings
   const defaults: [string, string][] = [

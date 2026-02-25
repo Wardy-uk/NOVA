@@ -7,7 +7,7 @@ export const TaskStatusSchema = z.enum([
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
 export const TaskSourceSchema = z.enum([
-  'jira', 'planner', 'todo', 'monday', 'email', 'calendar',
+  'jira', 'planner', 'todo', 'monday', 'email', 'calendar', 'milestone',
 ]);
 export type TaskSource = z.infer<typeof TaskSourceSchema>;
 

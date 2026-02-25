@@ -3,6 +3,13 @@ import type { Task } from '../../shared/types.js';
 import { TaskCard } from './TaskCard.js';
 import { TaskDrawer } from './TaskDrawer.js';
 
+interface MilestoneSummary {
+  overdueCount: number;
+  totalCount: number;
+  completeCount: number;
+  nextOverdue: string | null;
+}
+
 interface DeliveryEntry {
   id: number;
   onboarding_id: string | null;
@@ -19,6 +26,7 @@ interface DeliveryEntry {
   is_starred: number;
   star_scope: 'me' | 'all';
   notes: string | null;
+  milestone_summary: MilestoneSummary | null;
 }
 
 interface Props {
@@ -134,51 +142,87 @@ export function MyFocusView({ tasks, onUpdateTask }: Props) {
                 </span>
               </div>
               <div className="space-y-1.5">
-                {deliveries.map((d) => (
-                  <div
-                    key={d.id}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-md bg-[#272C33] border border-[#3a424d]"
-                  >
-                    {/* Star indicator */}
-                    {d.is_starred ? (
-                      <span className="text-amber-400 text-sm shrink-0" title={d.star_scope === 'all' ? 'Team star' : 'My star'}>
-                        &#9733;
-                      </span>
-                    ) : (
-                      <span className="text-neutral-600 text-sm shrink-0" title="Assigned">
-                        &#9679;
-                      </span>
-                    )}
+                {deliveries.map((d) => {
+                  const ms = d.milestone_summary;
+                  const progress = ms ? Math.round((ms.completeCount / ms.totalCount) * 100) : 0;
 
-                    {/* Product badge */}
-                    <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-[#0052CC] text-white shrink-0">
-                      {d.product}
-                    </span>
+                  return (
+                    <div
+                      key={d.id}
+                      className={`px-3 py-2.5 rounded-md bg-[#272C33] border transition-colors ${
+                        ms && ms.overdueCount > 0 ? 'border-red-900/60' : 'border-[#3a424d]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        {/* Star / overdue indicator */}
+                        {d.is_starred ? (
+                          <span className="text-amber-400 text-sm shrink-0" title={d.star_scope === 'all' ? 'Team star' : 'My star'}>
+                            &#9733;
+                          </span>
+                        ) : ms && ms.overdueCount > 0 ? (
+                          <span className="text-red-400 text-sm shrink-0" title={`${ms.overdueCount} overdue milestone(s)`}>
+                            &#9888;
+                          </span>
+                        ) : (
+                          <span className="text-neutral-600 text-sm shrink-0" title="Assigned">
+                            &#9679;
+                          </span>
+                        )}
 
-                    {/* Account + ID */}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-neutral-100 font-medium truncate">
-                        {d.account}
+                        {/* Product badge */}
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-[#0052CC] text-white shrink-0">
+                          {d.product}
+                        </span>
+
+                        {/* Account + ID */}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm text-neutral-100 font-medium truncate">
+                            {d.account}
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-neutral-500 mt-0.5">
+                            {d.onboarding_id && <span className="text-neutral-400">{d.onboarding_id}</span>}
+                            {d.onboarder && <span>Onboarder: {d.onboarder}</span>}
+                          </div>
+                        </div>
+
+                        {/* Status */}
+                        <span className={`text-[11px] font-medium shrink-0 ${statusColor(d.status)}`}>
+                          {d.status || 'No status'}
+                        </span>
+
+                        {/* Dates */}
+                        <div className="text-[10px] text-neutral-500 shrink-0 text-right leading-relaxed">
+                          {d.go_live_date && <div>Go-live: {d.go_live_date}</div>}
+                          {d.training_date && <div>Training: {d.training_date}</div>}
+                          {!d.go_live_date && d.predicted_delivery && <div>Est: {d.predicted_delivery}</div>}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 text-[11px] text-neutral-500 mt-0.5">
-                        {d.onboarding_id && <span className="text-neutral-400">{d.onboarding_id}</span>}
-                        {d.onboarder && <span>Onboarder: {d.onboarder}</span>}
-                      </div>
-                    </div>
 
-                    {/* Status */}
-                    <span className={`text-[11px] font-medium shrink-0 ${statusColor(d.status)}`}>
-                      {d.status || 'No status'}
-                    </span>
-
-                    {/* Dates */}
-                    <div className="text-[10px] text-neutral-500 shrink-0 text-right leading-relaxed">
-                      {d.go_live_date && <div>Go-live: {d.go_live_date}</div>}
-                      {d.training_date && <div>Training: {d.training_date}</div>}
-                      {!d.go_live_date && d.predicted_delivery && <div>Est: {d.predicted_delivery}</div>}
+                      {/* Milestone progress row */}
+                      {ms && ms.totalCount > 0 && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="flex-1 h-1 bg-[#1f242b] rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${progress}%`,
+                                backgroundColor: progress === 100 ? '#22c55e' : ms.overdueCount > 0 ? '#ef4444' : '#5ec1ca',
+                              }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-neutral-500 shrink-0">
+                            {ms.completeCount}/{ms.totalCount}
+                          </span>
+                          {ms.overdueCount > 0 && (
+                            <span className="text-[10px] text-red-400 shrink-0">
+                              {ms.overdueCount} overdue{ms.nextOverdue ? ` — ${ms.nextOverdue}` : ''}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

@@ -11,6 +11,7 @@ import { LoginView } from './components/LoginView.js';
 import { HelpView } from './components/HelpView.js';
 import { AdminView } from './components/AdminView.js';
 import { OnboardingConfigView } from './components/OnboardingConfigView.js';
+import { OnboardingCalendar } from './components/OnboardingCalendar.js';
 import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NextActions } from './components/NextActions.js';
@@ -24,9 +25,9 @@ import { filterByOwnership, type OwnershipFilter } from './utils/taskHelpers.js'
 // ── Area / View definitions ──
 
 type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts' | 'admin';
-type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'kpis'
+type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar'
-  | 'delivery' | 'onboarding-config'
+  | 'delivery' | 'onboarding-config' | 'ob-calendar'
   | 'crm'
   | 'settings' | 'admin-panel'
   | 'help' | 'debug';
@@ -45,10 +46,10 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'daily',
     tabs: [
       { view: 'daily', label: 'Dashboard' },
+      { view: 'nova', label: 'Ask N.O.V.A' },
       { view: 'focus', label: 'My Focus' },
       { view: 'tasks', label: 'Tasks' },
       { view: 'standup', label: 'Standup' },
-      { view: 'kpis', label: 'KPIs' },
     ],
   },
   servicedesk: {
@@ -65,6 +66,7 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'delivery',
     tabs: [
       { view: 'delivery', label: 'Delivery' },
+      { view: 'ob-calendar', label: 'Milestones' },
       { view: 'onboarding-config', label: 'Config' },
     ],
     role: 'editor',
@@ -98,7 +100,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'kanban', 'tickets', 'sd-calendar']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'kanban', 'tickets', 'sd-calendar', 'admin-panel']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -446,8 +448,11 @@ export function App() {
           {view === 'daily' && (
             <>
               <DailyStatsView tasks={tasks} onNavigate={navigate} />
-              <NextActions onUpdateTask={updateTask} />
+              <KpisView tasks={tasks} embedded />
             </>
+          )}
+          {view === 'nova' && (
+            <NextActions onUpdateTask={updateTask} />
           )}
           {view === 'focus' && (
             <MyFocusView tasks={tasks} onUpdateTask={updateTask} />
@@ -464,9 +469,6 @@ export function App() {
           )}
           {view === 'standup' && (
             <StandupView onUpdateTask={updateTask} onNavigate={navigate} />
-          )}
-          {view === 'kpis' && (
-            <KpisView tasks={tasks} />
           )}
 
           {/* Service Desk */}
@@ -491,8 +493,11 @@ export function App() {
           {view === 'delivery' && (
             <DeliveryView userRole={userRole} />
           )}
+          {view === 'ob-calendar' && (
+            <OnboardingCalendar />
+          )}
           {view === 'onboarding-config' && (
-            <OnboardingConfigView />
+            <OnboardingConfigView readOnly />
           )}
 
           {/* Account Management */}

@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { getDb, initializeSchema, saveDb } from './db/schema.js';
-import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries } from './db/queries.js';
+import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries } from './db/queries.js';
 import { FileUserQueries } from './db/user-store.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
@@ -26,6 +26,7 @@ import { createAdminRoutes } from './routes/admin.js';
 import { createFeedbackRoutes } from './routes/feedback.js';
 import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
 import { createOnboardingRoutes } from './routes/onboarding.js';
+import { createMilestoneRoutes } from './routes/milestones.js';
 import { JiraRestClient } from './services/jira-client.js';
 import { OnboardingOrchestrator } from './services/onboarding-orchestrator.js';
 import { authMiddleware } from './middleware/auth.js';
@@ -63,6 +64,7 @@ async function main() {
   const feedbackQueries = new FeedbackQueries(db);
   const onboardingConfigQueries = new OnboardingConfigQueries(db);
   const onboardingRunQueries = new OnboardingRunQueries(db);
+  const milestoneQueries = new MilestoneQueries(db);
 
   // Auto-seed onboarding matrix from xlsx if tables are empty
   if (onboardingConfigQueries.getAllSaleTypes().length === 0) {
@@ -92,15 +94,19 @@ async function main() {
   console.log('[N.O.V.A] Setting up MCP servers...');
   const mcpManager = new McpClientManager();
 
-  // Resolve uvx path — winget installs to a non-PATH location
-  const uvxCandidates = [
-    path.join(process.env.LOCALAPPDATA ?? '', 'Microsoft/WinGet/Packages/astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe/uvx.exe'),
-    path.join(process.env.USERPROFILE ?? '', '.local/bin/uvx.exe'),
-    path.join(process.env.USERPROFILE ?? '', '.local/bin/uvx'),
-  ];
+  // Resolve uvx path — platform-aware candidate search
+  const uvxCandidates: string[] = [];
+  if (process.platform === 'win32') {
+    uvxCandidates.push(
+      path.join(process.env.LOCALAPPDATA ?? '', 'Microsoft/WinGet/Packages/astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe/uvx.exe'),
+      path.join(process.env.USERPROFILE ?? '', '.local/bin/uvx.exe'),
+    );
+  }
+  const userHome = process.env.HOME || process.env.USERPROFILE || '';
+  uvxCandidates.push(path.join(userHome, '.local/bin/uvx'));
   let uvxCommand = 'uvx';
   for (const candidate of uvxCandidates) {
-    if (fs.existsSync(candidate)) {
+    if (candidate && fs.existsSync(candidate)) {
       uvxCommand = candidate;
       console.log(`[N.O.V.A] Found uvx at: ${candidate}`);
       break;
@@ -207,7 +213,7 @@ async function main() {
 
   // Protected API routes
   app.use('/api', authMiddleware(jwtSecret));
-  app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator));
+  app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries, (key) => {
     // Restart sync timers when interval settings change
@@ -223,7 +229,8 @@ async function main() {
   app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries));
   const spSync = new SharePointSync(mcpManager, deliveryQueries, () => settingsQueries.getAll());
-  app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync));
+  app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries));
+  app.use('/api/milestones', createMilestoneRoutes(milestoneQueries, deliveryQueries, taskQueries));
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
@@ -234,6 +241,11 @@ async function main() {
   // Onboarding ticket orchestrator — lazy JiraRestClient from settings
   function buildJiraClient(): JiraRestClient | null {
     const s = settingsQueries.getAll();
+    // Prefer dedicated onboarding credentials
+    if (s.jira_ob_enabled === 'true' && s.jira_ob_url && s.jira_ob_email && s.jira_ob_token) {
+      return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
+    }
+    // Fallback to personal Jira creds
     if (s.jira_enabled !== 'true' || !s.jira_url || !s.jira_username || !s.jira_token) return null;
     return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
   }

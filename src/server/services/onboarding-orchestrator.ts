@@ -77,12 +77,12 @@ export class OnboardingOrchestrator {
   private refreshConfig(): void {
     const s = this.settingsGetter();
     this.config = {
-      projectKey: s.jira_onboarding_project || DEFAULT_CONFIG.projectKey,
-      issueTypeName: s.jira_onboarding_issue_type || DEFAULT_CONFIG.issueTypeName,
-      requestTypeField: s.jira_request_type_field || DEFAULT_CONFIG.requestTypeField,
-      deliveryQaRequestTypeId: s.jira_rt_delivery_qa_id || '',
-      onboardingRequestTypeId: s.jira_rt_onboarding_id || '',
-      linkTypeName: s.jira_link_type_name || DEFAULT_CONFIG.linkTypeName,
+      projectKey: s.jira_ob_project || s.jira_onboarding_project || DEFAULT_CONFIG.projectKey,
+      issueTypeName: s.jira_ob_issue_type || s.jira_onboarding_issue_type || DEFAULT_CONFIG.issueTypeName,
+      requestTypeField: s.jira_ob_request_type_field || s.jira_request_type_field || DEFAULT_CONFIG.requestTypeField,
+      deliveryQaRequestTypeId: s.jira_ob_rt_qa_id || s.jira_rt_delivery_qa_id || '',
+      onboardingRequestTypeId: s.jira_ob_rt_onboarding_id || s.jira_rt_onboarding_id || '',
+      linkTypeName: s.jira_ob_link_type || s.jira_link_type_name || DEFAULT_CONFIG.linkTypeName,
       defaultPriority: DEFAULT_CONFIG.defaultPriority,
     };
   }

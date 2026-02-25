@@ -1,106 +1,66 @@
-To Triage
-----------
-
-moving ticket in Calander view does not update ticket
-
-service desk Kanban view, add Waiting on Assignee, Waiting on Requesor and Waiting on Partner buckets
-
-service desk Kanban - add drag and drop to move buckets, and update ticket
-
-Add a "Dashboard" to Jira ticket view - distinct customers (infer from requestor email domain), over SLA, Overdue Update
-
-Plan for Calendar and Kanban view for onboarding  - will need to group some of the status filters into "types" - BA required
-
-My Starred deliveries don't show in My Focus - they should
-
-My tickets that are over SLA, or overdue an update should auto appear in My Focus
-
-My Deliveries (where I am the owner, or are over due) should auto appear in My Focus
-
-
-
-
 TO DO
 -----
 
---- Work in Progress ---
+[DO NEXT] Deploy to server — provision server, copy data, configure nginx + pm2
+    - see docs/deployment.md for full guide
+    - paths now configurable via DATA_DIR, DELIVERY_XLSX_PATH, ONEDRIVE_WATCH_DIR env vars
+    - DB persistence already works (sql.js saves to daypilot.db every 30s + on shutdown)
+    - cross-platform uvx resolution done (Windows + Linux)
 
-A) Jira endpoint to use for creating tickets: api.atlassian.net
+--- Bugs ---
 
-E) Replace in-memory SQLite with a proper database (PostgreSQL/MySQL) for server deployment
+BUG1. Service Desk — Unassigned and All Tickets filters don't work
+      - filterByOwnership() logic looks correct, need to debug why 'unassigned'/'all' return wrong results
 
---- Tier 1: Service Desk improvements ---
+--- Tier 1: High-value daily workflow ---
 
-SD1. Service Desk ticket tabs — My Tickets (current), Unassigned Tickets, All Tickets
-     - with multi-select filter for Current Tier
-     - applies to both Tickets list view and Kanban view
-SD2. Service Desk Kanban — toggle between group-by-status and group-by-date
-     - date groups: Overdue, This Week, Next Week, Future
-SD3. Service Desk calendar view — new tab alongside Tickets / Kanban
+1. Dashboard KPIs — include Onboarding metrics (delivery milestones progress, overdue milestones, onboarding runs)
+2. My Focus auto-population — tickets over SLA or overdue update auto-appear in My Focus
+3. Service Desk Kanban — default groupBy to 'date' buckets (one-liner: ServiceDeskKanban.tsx:137)
+4. Delivery kanban board — drag cards between status columns (Not Started → In Progress → Training → Complete)
 
---- Tier 1: Daily workflow unlocks ---
+--- Tier 2: Onboarding Ticket Automation ---
 
-2. [ONGOING] Documentation — keep user guides (help page) updated as features change
+5. Ticket creation UI — form in Admin > Onboarding to trigger POST /api/onboarding/create-tickets
+   - sale type dropdown, customer name, onboarding ref, due date
+   - dry-run preview before live execution
+   - show result (parent key + child keys) or error
+6. Jira settings for ticket creation — configure request type field IDs in Admin > Integrations
+7. Test ticket creation — dry run + live test against Jira NT project
+8. Onboarding run history UI — view past runs (status, parent/child keys, errors)
 
---- Tier 2: Enhancements ---
-19. Onboarding config role-gating — create “onboarding_admin” role, add requireRole() guard on config routes
-20. Propose and create other needed roles — review which features need role-gating beyond admin/editor/viewer
-3. browse mail folders — route exists (GET /api/o365/mail/folders), needs UI for folder browsing
-4. browse specific planner plans — get-planner-plan, list-plan-tasks
+--- Tier 2: Service Desk & Integration ---
 
---- Tier 3: Nice to have ---
-10. email attachments — list/get/add attachments on messages
-11. multi-calendar support — list-calendars route exists, needs UI for calendar selection
+9.  Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
+10. Jira dual-account config — Settings = personal read, Admin = service account for automation
+11. Browse mail folders — route exists (GET /api/o365/mail/folders), needs UI
+12. Browse specific planner plans — get-planner-plan, list-plan-tasks
 
---- Tier 4: Roadmap ---
-12. workflows for tickets and deliveries
-13. Jira move-team automation (move ticket to a different Jira project)
-14. sales pipeline — replace onboarding spreadsheet
-    - add order form creates task
-    - add “welcome pack” to NOVA
-5. deprecate PA workaround now admin has approved O365 integration (on hold)
-1. deploy to server
+--- Tier 3: Platform maturity ---
 
---- Tier 5: Onboarding Ticket Automation — outstanding ---
+13. Customer 360 timeline — unified per-customer view across deliveries, CRM, Jira, onboarding, emails
+14. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls, overdue tasks (in-app + email digest)
+15. Team workload view — onboarder/assignee load heatmap across deliveries + Jira
+16. Activity audit log — who changed what and when (append-only table, Admin timeline view)
+17. [ONGOING] Documentation — keep help page updated as features change
 
-15. Ticket creation UI — form/button in OnboardingConfigView to trigger POST /api/onboarding/create-tickets
-    - sale type dropdown, customer name, onboarding ref, due date, config JSON editor
-    - dry-run preview before live execution
-    - show result (parent key + child keys) or error
-16. Jira settings configuration — configure request type field IDs in Admin > Integrations
-    - jira_request_type_field (customfield_10010)
-    - jira_rt_delivery_qa_id (discover via GET /api/onboarding/jira-meta)
-    - jira_rt_onboarding_id (discover via GET /api/onboarding/jira-meta)
-    - jira_onboarding_project (default NT)
-    - jira_link_type_name (default Blocks)
-17. Test ticket creation — dry run + live test against Jira NT project
-18. Onboarding run history UI — view past runs (status, parent/child keys, errors) in OnboardingConfigView
+--- Tier 4: Nice to have ---
 
---- New Features ---
-
-21. Customer 360 timeline — unified view per customer across deliveries, CRM, Jira tickets, onboarding runs, emails
-    - click customer name anywhere → single page with everything NOVA knows
-    - data already exists across tables, needs cross-referencing + timeline UI
-22. Notifications & alerts — SLA breaches, delivery dates approaching, onboarding stalled, tasks overdue
-    - in-app toast notifications + optional email digest
-    - extends morning briefing concept from passive to proactive
-23. Team workload view — onboarder/assignee load across deliveries + Jira in one heatmap or bar chart
-    - cross-reference delivery onboarders with Jira assignees
-    - identify overloaded team members, rebalance work
-24. Activity audit log — who changed what and when
-    - append-only activity_log table (entity, entity_id, action, user_id, timestamp, diff)
-    - timeline view in Admin, filterable by user/entity
-25. Delivery kanban board — drag cards between status columns (Not Started → In Progress → Training → Complete)
-    - data model already supports it, needs visual drag-and-drop layer
+18. Email attachments — list/get/add attachments on messages
+19. Multi-calendar support — list-calendars route exists, needs UI
+20. Workflows for tickets and deliveries
+21. Jira move-team automation (move ticket to a different Jira project)
 
 --- Future Consideration ---
-- Global search — search across all entities (tasks, deliveries, CRM, onboarding) from a single search bar
-- Scheduled email digests — weekly delivery progress, overdue items, stalled onboardings via M365 send-mail
-- CSV/PDF export — export filtered delivery tables, CRM data, onboarding status for stakeholders
+- Global search — search across all entities from a single search bar
+- Scheduled email digests — weekly delivery progress, overdue items via M365 send-mail
+- CSV/PDF export — export filtered data for stakeholders
 - Keyboard shortcuts — G+D deliveries, G+T tasks, / search, N new entry
-- PWA support — manifest + service worker for installable desktop/mobile app
-- Saved filters/views — bookmark favourite delivery filter combos (e.g. “My WIP BYM entries”)
-- Webhook receiver — accept inbound Jira/Monday webhooks for real-time sync instead of polling
+- PWA support — manifest + service worker for installable app
+- Saved filters/views — bookmark favourite filter combos
+- Webhook receiver — inbound Jira/Monday webhooks for real-time sync
+- Sales pipeline — replace onboarding spreadsheet (order form → task → welcome pack)
+- Deprecate PA workaround (on hold pending O365 integration stability)
 
 -----------------------------------------------------------------------
 
@@ -230,3 +190,14 @@ COMPLETED
 [DONE] Ask NOVA moved to Command Centre dashboard — removed from TaskList (was duplicating on Service Desk)
 [DONE] Service Desk filters removed — tickets view shows flat sorted list, no source/overdue filters
 [DONE] My Focus includes deliveries — starred-for-me and onboarder-matched delivery entries appear in My Focus view
+[DONE] SD1 — Service Desk ticket ownership tabs (My Tickets / Unassigned / All) with filter persisted to localStorage
+[DONE] SD2 — Service Desk Kanban toggle between group-by-status and group-by-date (Overdue/Today/This Week/Next Week/Future/No Date)
+[DONE] SD3 — Service Desk calendar view with monthly grid, drag-and-drop reschedule, reschedule modal with Jira push + optional comment
+[DONE] SD4 — Service Desk Kanban fixed 5 columns (Open, WIP, Waiting on Agent, Waiting on Requestor, Waiting on Partner) using original Jira statuses from raw_data
+[DONE] DM1 — Delivery milestones (30-day model) — milestone_templates + delivery_milestones tables, Admin config tab, auto-create on delivery entry, progress timeline with expandable checklists in DeliveryDrawer, file-persisted seed data (milestone-templates.json)
+[DONE] DM2 — Milestone instances as tasks — source='milestone', bidirectional sync (task↔milestone status), deleteBySourcePrefix cleanup
+[DONE] F2 — My Focus milestone-aware — deliveries assigned to me with overdue milestones auto-appear, progress bar + overdue count on cards
+[DONE] BYM default milestones imported — 10 milestones (Day 0–35) with full checklists per onboarding model, seeded from src/server/data/milestone-templates.json
+[DONE] Milestone auto-creation on import — bulk import (import-xlsx) now creates milestones + tasks for each imported entry. Added backfill-milestones endpoint for existing entries.
+[DONE] SD5 — Service Desk Kanban drag-and-drop — drag tickets between status columns to transition in Jira. Shows transition picker modal with available transitions, optional comment.
+[DONE] Onboarding Calendar — monthly grid showing delivery milestones by target date. Side panel with overdue + future milestones. Product/onboarder filters. Click milestone for detail drawer with status cycling.

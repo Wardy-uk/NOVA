@@ -3,8 +3,8 @@ import XLSX from 'xlsx';
 import path from 'path';
 import fs from 'fs';
 
-const DELIVERY_PATH = path.join(
-  process.env.USERPROFILE ?? 'C:/Users/NickW',
+const DELIVERY_PATH = process.env.DELIVERY_XLSX_PATH || path.join(
+  process.env.HOME || process.env.USERPROFILE || '',
   'Downloads',
   'Delivery sheet Master.xlsx'
 );
@@ -175,11 +175,12 @@ function loadWorkbook(): Record<string, SheetResult> & { _lastModified: string }
   return Object.assign({}, sheets, { _lastModified: lastModified });
 }
 
-import type { DeliveryQueries } from '../db/queries.js';
+import type { DeliveryQueries, MilestoneQueries, TaskQueries } from '../db/queries.js';
 import type { SharePointSync } from '../services/sharepoint-sync.js';
 import { requireRole } from '../middleware/auth.js';
+import { syncDeliveryMilestonesToTasks } from './milestones.js';
 
-export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync): Router {
+export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync, milestoneQueries?: MilestoneQueries, taskQueries?: TaskQueries): Router {
   const router = Router();
 
   // Pre-load on startup (non-blocking to avoid slowing boot)
@@ -237,21 +238,31 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
   if (deliveryQueries) {
     const writeGuard = requireRole('admin', 'editor');
 
-    // My Focus: starred-for-me + entries where I'm the onboarder
+    // My Focus: starred-for-me + entries assigned to me with overdue milestones
     router.get('/entries/my-focus', (req, res) => {
       const userId = req.user?.id as number | undefined;
       const username = req.user?.username as string | undefined;
       if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
-      // Match onboarder by username and also by splitting username into parts
-      // e.g. "nickw" → ["nickw", "nick"] for fuzzy matching "Nick W", "Nick", etc.
       const names: string[] = [];
       if (username) {
         names.push(username);
-        // Also try first name portion (letters before trailing consonant cluster or initial)
         const alphaOnly = username.replace(/[^a-z]/gi, '');
-        if (alphaOnly.length > 3) names.push(alphaOnly.slice(0, -1)); // "nickw" → "nick"
+        if (alphaOnly.length > 3) names.push(alphaOnly.slice(0, -1));
       }
-      res.json({ ok: true, data: deliveryQueries.getMyFocus(userId, names) });
+      const entries = deliveryQueries.getMyFocus(userId, names);
+
+      // Enrich with milestone progress if available
+      if (milestoneQueries && entries.length > 0) {
+        const ids = entries.map(e => e.id);
+        const milestoneSummary = milestoneQueries.getOverdueSummaryByDelivery(ids);
+        const enriched = entries.map(e => ({
+          ...e,
+          milestone_summary: milestoneSummary.get(e.id) ?? null,
+        }));
+        res.json({ ok: true, data: enriched });
+      } else {
+        res.json({ ok: true, data: entries });
+      }
     });
 
     router.get('/entries', (req, res) => {
@@ -287,6 +298,17 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
         is_starred: is_starred ?? 0, star_scope, starred_by: is_starred ? userId : null,
         notes,
       });
+
+      // Auto-create milestones if we have a start date
+      if (milestoneQueries && taskQueries && order_date) {
+        try {
+          milestoneQueries.createForDelivery(id, order_date, sale_type ?? undefined);
+          syncDeliveryMilestonesToTasks(id, account, milestoneQueries, taskQueries);
+        } catch (err) {
+          console.error('[Delivery] Milestone auto-creation failed:', err instanceof Error ? err.message : err);
+        }
+      }
+
       res.json({ ok: true, data: deliveryQueries.getById(id) });
     });
 
@@ -300,6 +322,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
         const loaded = loadWorkbook();
         let created = 0;
         let skipped = 0;
+        let milestonesCreated = 0;
         let sheetsProcessed = 0;
 
         for (const sheetName of PRODUCT_SHEETS) {
@@ -317,7 +340,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
               continue;
             }
 
-            deliveryQueries.create({
+            const id = deliveryQueries.create({
               product: sheetName,
               account: row.account,
               status: row.status || 'Not Started',
@@ -337,18 +360,53 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
               notes: row.notes || null,
             });
             created++;
+
+            // Auto-create milestones for imported entries with an order date
+            if (milestoneQueries && taskQueries && row.orderDate) {
+              try {
+                milestoneQueries.createForDelivery(id, row.orderDate);
+                syncDeliveryMilestonesToTasks(id, row.account, milestoneQueries, taskQueries);
+                milestonesCreated++;
+              } catch (err) {
+                console.error(`[Delivery] Milestone creation failed for ${row.account}:`, err instanceof Error ? err.message : err);
+              }
+            }
           }
         }
 
         res.json({
           ok: true,
-          data: { created, skipped, sheetsProcessed },
+          data: { created, skipped, milestonesCreated, sheetsProcessed },
         });
       } catch (err) {
         res.status(500).json({
           ok: false,
           error: err instanceof Error ? err.message : 'Import failed',
         });
+      }
+    });
+
+    // POST /entries/backfill-milestones — create milestones for all entries that don't have any
+    router.post('/entries/backfill-milestones', writeGuard, (_req, res) => {
+      if (!milestoneQueries || !taskQueries) {
+        res.status(500).json({ ok: false, error: 'Milestone system not available' });
+        return;
+      }
+      try {
+        const allEntries = deliveryQueries.getAll();
+        let created = 0;
+        let skipped = 0;
+        for (const entry of allEntries) {
+          const existing = milestoneQueries.getByDelivery(entry.id);
+          if (existing.length > 0) { skipped++; continue; }
+          const startDate = entry.order_date || entry.go_live_date || new Date().toISOString().split('T')[0];
+          milestoneQueries.createForDelivery(entry.id, startDate);
+          syncDeliveryMilestonesToTasks(entry.id, entry.account, milestoneQueries, taskQueries);
+          created++;
+        }
+        res.json({ ok: true, data: { created, skipped } });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Backfill failed' });
       }
     });
 

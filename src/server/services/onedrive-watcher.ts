@@ -34,8 +34,8 @@ export class OneDriveWatcher {
     watchDir?: string
   ) {
     // Default: OneDrive Business folder / DayPilot
-    const userProfile = process.env.USERPROFILE ?? '';
-    this.watchDir = watchDir ?? path.join(userProfile, 'OneDrive - Nurtur Limited', 'DayPilot');
+    const userHome = process.env.HOME || process.env.USERPROFILE || '';
+    this.watchDir = watchDir ?? (process.env.ONEDRIVE_WATCH_DIR || path.join(userHome, 'OneDrive - Nurtur Limited', 'DayPilot'));
   }
 
   start(): void {

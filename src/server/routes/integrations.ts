@@ -84,6 +84,13 @@ export function createIntegrationRoutes(
         }
       }
 
+      // For credential-only integrations without MCP, derive status from config completeness
+      let effectiveMcpStatus: McpServerStatus = d365Status ?? mcpInfo?.status ?? 'disconnected';
+      if (!mcpInfo && !d365Status && integ.authType === 'credentials' && settings[integ.enabledKey] === 'true') {
+        const allRequired = integ.fields.filter(f => f.required).every(f => !!settings[f.key]);
+        effectiveMcpStatus = allRequired ? 'connected' : 'disconnected';
+      }
+
       results.push({
         id: integ.id,
         name: integ.name,
@@ -91,7 +98,7 @@ export function createIntegrationRoutes(
         enabled: settings[integ.enabledKey] === 'true',
         fields: integ.fields,
         values,
-        mcpStatus: d365Status ?? mcpInfo?.status ?? 'disconnected',
+        mcpStatus: effectiveMcpStatus,
         lastError: d365Error ?? mcpInfo?.lastError ?? null,
         lastConnected: d365LastConnected ?? mcpInfo?.lastConnected ?? null,
         toolCount: mcpInfo?.toolCount ?? 0,

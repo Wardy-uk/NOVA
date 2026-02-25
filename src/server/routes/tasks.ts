@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import type { TaskQueries } from '../db/queries.js';
+import type { TaskQueries, MilestoneQueries } from '../db/queries.js';
 import type { TaskAggregator } from '../services/aggregator.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
 
 export function createTaskRoutes(
   taskQueries: TaskQueries,
-  aggregator: TaskAggregator
+  aggregator: TaskAggregator,
+  milestoneQueries?: MilestoneQueries,
 ): Router {
   const router = Router();
 
@@ -113,6 +114,33 @@ export function createTaskRoutes(
       res.status(404).json({ ok: false, error: 'Task not found' });
       return;
     }
+
+    // Bidirectional milestone sync: when a milestone task status changes, update the milestone
+    if (parsed.data.status && milestoneQueries) {
+      const task = taskQueries.getById(req.params.id);
+      if (task?.source === 'milestone' && task.source_id?.startsWith('milestone:')) {
+        const parts = task.source_id.split(':');
+        // source_id format: milestone:{deliveryId}:{templateId}
+        const deliveryId = parseInt(parts[1], 10);
+        const templateId = parseInt(parts[2], 10);
+        if (!isNaN(deliveryId) && !isNaN(templateId)) {
+          const milestones = milestoneQueries.getByDelivery(deliveryId);
+          const milestone = milestones.find(m => m.template_id === templateId);
+          if (milestone) {
+            const statusMap: Record<string, string> = { open: 'pending', in_progress: 'in_progress', done: 'complete' };
+            const newMilestoneStatus = statusMap[parsed.data.status] ?? milestone.status;
+            const milestoneUpdates: Record<string, unknown> = { status: newMilestoneStatus };
+            if (newMilestoneStatus === 'complete') {
+              milestoneUpdates.actual_date = new Date().toISOString().split('T')[0];
+            } else {
+              milestoneUpdates.actual_date = null;
+            }
+            milestoneQueries.updateMilestone(milestone.id, milestoneUpdates as any);
+          }
+        }
+      }
+    }
+
     res.json({ ok: true, data: taskQueries.getById(req.params.id) });
   });
 

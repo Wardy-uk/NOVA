@@ -4,8 +4,9 @@ import type { CrmQueries } from '../db/queries.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const D365_BASE_URL = 'https://nurtur-prod.crm11.dynamics.com';
-const CACHE_FILE = path.resolve(process.cwd(), '.d365-token-cache.json');
+const D365_BASE_URL = process.env.D365_ORG_URL || 'https://nurtur-prod.crm11.dynamics.com';
+const DATA_DIR = process.env.DATA_DIR || process.cwd();
+const CACHE_FILE = path.join(DATA_DIR, '.d365-token-cache.json');
 
 interface D365Config {
   tenantId: string;

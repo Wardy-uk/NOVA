@@ -20,7 +20,7 @@ async function api<T = unknown>(path: string, opts?: RequestInit): Promise<T> {
   return json.data as T;
 }
 
-export function OnboardingConfigView() {
+export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [tab, setTab] = useState<Tab>('matrix');
   const [ticketGroups, setTicketGroups] = useState<TicketGroup[]>([]);
   const [saleTypes, setSaleTypes] = useState<SaleType[]>([]);
@@ -215,14 +215,21 @@ export function OnboardingConfigView() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-neutral-100">Onboarding Configuration</h2>
-        <button
-          onClick={handleImport}
-          disabled={importing}
-          className="px-3 py-1.5 text-xs rounded bg-amber-600 text-white hover:bg-amber-500 disabled:opacity-50 transition-colors"
-        >
-          {importing ? 'Importing...' : 'Import from xlsx'}
-        </button>
+        {!readOnly && (
+          <button
+            onClick={handleImport}
+            disabled={importing}
+            className="px-3 py-1.5 text-xs rounded bg-amber-600 text-white hover:bg-amber-500 disabled:opacity-50 transition-colors"
+          >
+            {importing ? 'Importing...' : 'Import from xlsx'}
+          </button>
+        )}
       </div>
+      {readOnly && (
+        <div className="px-3 py-2 text-xs rounded bg-[#272C33] border border-[#3a424d] text-neutral-400">
+          Read-only view. Edit in <span className="text-[#5ec1ca] font-medium">Admin &rarr; Onboarding</span>.
+        </div>
+      )}
 
       {importResult && (
         <div className={`p-2 text-xs rounded ${importResult.startsWith('Error') ? 'bg-red-950/50 text-red-400 border border-red-900' : 'bg-green-950/50 text-green-400 border border-green-900'}`}>
@@ -256,31 +263,34 @@ export function OnboardingConfigView() {
             ticketGroups={ticketGroups}
             isCellEnabled={isCellEnabled}
             getCellNotes={getCellNotes}
-            onToggle={toggleCell}
+            onToggle={readOnly ? undefined : toggleCell}
+            readOnly={readOnly}
           />
         )}
 
         {tab === 'sale-types' && (
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <input
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addSaleType()}
-                placeholder="New sale type name..."
-                className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
-              />
-              <button onClick={addSaleType} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
-                Add
-              </button>
-            </div>
+            {!readOnly && (
+              <div className="flex gap-2">
+                <input
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addSaleType()}
+                  placeholder="New sale type name..."
+                  className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
+                />
+                <button onClick={addSaleType} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
+                  Add
+                </button>
+              </div>
+            )}
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-neutral-500 border-b border-[#3a424d]">
                   <th className="text-left py-2 px-2">Name</th>
                   <th className="text-left py-2 px-2 w-20">Order</th>
                   <th className="text-center py-2 px-2 w-20">Active</th>
-                  <th className="text-center py-2 px-2 w-16"></th>
+                  {!readOnly && <th className="text-center py-2 px-2 w-16"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -289,13 +299,21 @@ export function OnboardingConfigView() {
                     <td className="py-1.5 px-2 text-neutral-200">{st.name}</td>
                     <td className="py-1.5 px-2 text-neutral-400">{st.sort_order}</td>
                     <td className="py-1.5 px-2 text-center">
-                      <button onClick={() => toggleSaleTypeActive(st)} className={`w-5 h-5 rounded text-[10px] ${st.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
-                        {st.active ? '\u2713' : '\u2717'}
-                      </button>
+                      {readOnly ? (
+                        <span className={`text-[10px] ${st.active ? 'text-green-400' : 'text-neutral-500'}`}>
+                          {st.active ? '\u2713' : '\u2717'}
+                        </span>
+                      ) : (
+                        <button onClick={() => toggleSaleTypeActive(st)} className={`w-5 h-5 rounded text-[10px] ${st.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
+                          {st.active ? '\u2713' : '\u2717'}
+                        </button>
+                      )}
                     </td>
-                    <td className="py-1.5 px-2 text-center">
-                      <button onClick={() => deleteSaleType(st.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
-                    </td>
+                    {!readOnly && (
+                      <td className="py-1.5 px-2 text-center">
+                        <button onClick={() => deleteSaleType(st.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -306,18 +324,20 @@ export function OnboardingConfigView() {
 
         {tab === 'ticket-groups' && (
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <input
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addTicketGroup()}
-                placeholder="New ticket group name..."
-                className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
-              />
-              <button onClick={addTicketGroup} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
-                Add
-              </button>
-            </div>
+            {!readOnly && (
+              <div className="flex gap-2">
+                <input
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addTicketGroup()}
+                  placeholder="New ticket group name..."
+                  className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
+                />
+                <button onClick={addTicketGroup} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
+                  Add
+                </button>
+              </div>
+            )}
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-neutral-500 border-b border-[#3a424d]">
@@ -325,7 +345,7 @@ export function OnboardingConfigView() {
                   <th className="text-left py-2 px-2 w-20">Order</th>
                   <th className="text-center py-2 px-2 w-28">Capabilities</th>
                   <th className="text-center py-2 px-2 w-20">Active</th>
-                  <th className="text-center py-2 px-2 w-16"></th>
+                  {!readOnly && <th className="text-center py-2 px-2 w-16"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -337,13 +357,21 @@ export function OnboardingConfigView() {
                       <td className="py-1.5 px-2 text-neutral-400">{tg.sort_order}</td>
                       <td className="py-1.5 px-2 text-center text-neutral-400">{capCount}</td>
                       <td className="py-1.5 px-2 text-center">
-                        <button onClick={() => toggleTicketGroupActive(tg)} className={`w-5 h-5 rounded text-[10px] ${tg.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
-                          {tg.active ? '\u2713' : '\u2717'}
-                        </button>
+                        {readOnly ? (
+                          <span className={`text-[10px] ${tg.active ? 'text-green-400' : 'text-neutral-500'}`}>
+                            {tg.active ? '\u2713' : '\u2717'}
+                          </span>
+                        ) : (
+                          <button onClick={() => toggleTicketGroupActive(tg)} className={`w-5 h-5 rounded text-[10px] ${tg.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
+                            {tg.active ? '\u2713' : '\u2717'}
+                          </button>
+                        )}
                       </td>
-                      <td className="py-1.5 px-2 text-center">
-                        <button onClick={() => deleteTicketGroup(tg.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
-                      </td>
+                      {!readOnly && (
+                        <td className="py-1.5 px-2 text-center">
+                          <button onClick={() => deleteTicketGroup(tg.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -355,18 +383,20 @@ export function OnboardingConfigView() {
 
         {tab === 'capabilities' && (
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <input
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addCapability()}
-                placeholder="New capability name..."
-                className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
-              />
-              <button onClick={addCapability} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
-                Add
-              </button>
-            </div>
+            {!readOnly && (
+              <div className="flex gap-2">
+                <input
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addCapability()}
+                  placeholder="New capability name..."
+                  className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
+                />
+                <button onClick={addCapability} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
+                  Add
+                </button>
+              </div>
+            )}
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-neutral-500 border-b border-[#3a424d]">
@@ -374,7 +404,7 @@ export function OnboardingConfigView() {
                   <th className="text-left py-2 px-2 w-32">Ticket Group</th>
                   <th className="text-center py-2 px-2 w-20">Items</th>
                   <th className="text-center py-2 px-2 w-20">Active</th>
-                  <th className="text-center py-2 px-2 w-16"></th>
+                  {!readOnly && <th className="text-center py-2 px-2 w-16"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -392,13 +422,21 @@ export function OnboardingConfigView() {
                     </td>
                     <td className="py-1.5 px-2 text-center text-neutral-400">{cap.item_count ?? 0}</td>
                     <td className="py-1.5 px-2 text-center">
-                      <button onClick={() => toggleCapActive(cap)} className={`w-5 h-5 rounded text-[10px] ${cap.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
-                        {cap.active ? '\u2713' : '\u2717'}
-                      </button>
+                      {readOnly ? (
+                        <span className={`text-[10px] ${cap.active ? 'text-green-400' : 'text-neutral-500'}`}>
+                          {cap.active ? '\u2713' : '\u2717'}
+                        </span>
+                      ) : (
+                        <button onClick={() => toggleCapActive(cap)} className={`w-5 h-5 rounded text-[10px] ${cap.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
+                          {cap.active ? '\u2713' : '\u2717'}
+                        </button>
+                      )}
                     </td>
-                    <td className="py-1.5 px-2 text-center">
-                      <button onClick={() => deleteCapability(cap.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
-                    </td>
+                    {!readOnly && (
+                      <td className="py-1.5 px-2 text-center">
+                        <button onClick={() => deleteCapability(cap.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -424,25 +462,27 @@ export function OnboardingConfigView() {
 
             {selectedCapId && (
               <>
-                <div className="flex gap-2">
-                  <input
-                    value={newName}
-                    onChange={e => setNewName(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && addItem()}
-                    placeholder="New item name..."
-                    className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
-                  />
-                  <button onClick={addItem} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
-                    Add
-                  </button>
-                </div>
+                {!readOnly && (
+                  <div className="flex gap-2">
+                    <input
+                      value={newName}
+                      onChange={e => setNewName(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && addItem()}
+                      placeholder="New item name..."
+                      className="flex-1 px-3 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500"
+                    />
+                    <button onClick={addItem} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9]">
+                      Add
+                    </button>
+                  </div>
+                )}
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="text-neutral-500 border-b border-[#3a424d]">
                       <th className="text-left py-2 px-2">Item Name</th>
                       <th className="text-center py-2 px-2 w-24">Bolt-On</th>
                       <th className="text-center py-2 px-2 w-20">Active</th>
-                      <th className="text-center py-2 px-2 w-16"></th>
+                      {!readOnly && <th className="text-center py-2 px-2 w-16"></th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -450,21 +490,35 @@ export function OnboardingConfigView() {
                       <tr key={item.id} className={`border-b border-[#3a424d]/50 ${!item.active ? 'opacity-40' : ''}`}>
                         <td className="py-1.5 px-2 text-neutral-200">{item.name}</td>
                         <td className="py-1.5 px-2 text-center">
-                          <button
-                            onClick={() => toggleItemBoltOn(item)}
-                            className={`px-2 py-0.5 rounded text-[10px] ${item.is_bolt_on ? 'bg-amber-900/50 text-amber-400' : 'bg-neutral-700 text-neutral-500'}`}
-                          >
-                            {item.is_bolt_on ? 'Bolt-On' : 'Standard'}
-                          </button>
+                          {readOnly ? (
+                            <span className={`px-2 py-0.5 rounded text-[10px] ${item.is_bolt_on ? 'bg-amber-900/50 text-amber-400' : 'bg-neutral-700 text-neutral-500'}`}>
+                              {item.is_bolt_on ? 'Bolt-On' : 'Standard'}
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => toggleItemBoltOn(item)}
+                              className={`px-2 py-0.5 rounded text-[10px] ${item.is_bolt_on ? 'bg-amber-900/50 text-amber-400' : 'bg-neutral-700 text-neutral-500'}`}
+                            >
+                              {item.is_bolt_on ? 'Bolt-On' : 'Standard'}
+                            </button>
+                          )}
                         </td>
                         <td className="py-1.5 px-2 text-center">
-                          <button onClick={() => toggleItemActive(item)} className={`w-5 h-5 rounded text-[10px] ${item.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
-                            {item.active ? '\u2713' : '\u2717'}
-                          </button>
+                          {readOnly ? (
+                            <span className={`text-[10px] ${item.active ? 'text-green-400' : 'text-neutral-500'}`}>
+                              {item.active ? '\u2713' : '\u2717'}
+                            </span>
+                          ) : (
+                            <button onClick={() => toggleItemActive(item)} className={`w-5 h-5 rounded text-[10px] ${item.active ? 'bg-green-900/50 text-green-400' : 'bg-neutral-700 text-neutral-500'}`}>
+                              {item.active ? '\u2713' : '\u2717'}
+                            </button>
+                          )}
                         </td>
-                        <td className="py-1.5 px-2 text-center">
-                          <button onClick={() => deleteItem(item.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
-                        </td>
+                        {!readOnly && (
+                          <td className="py-1.5 px-2 text-center">
+                            <button onClick={() => deleteItem(item.id)} className="text-red-500 hover:text-red-400 text-[10px]">{'\u2715'}</button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -472,7 +526,7 @@ export function OnboardingConfigView() {
                 {items.length === 0 && <div className="text-center text-neutral-500 text-xs py-4">No items for this capability.</div>}
               </>
             )}
-            {!selectedCapId && <div className="text-center text-neutral-500 text-xs py-4">Select a capability to manage its items.</div>}
+            {!selectedCapId && <div className="text-center text-neutral-500 text-xs py-4">Select a capability to {readOnly ? 'view' : 'manage'} its items.</div>}
           </div>
         )}
       </div>
@@ -489,13 +543,15 @@ function MatrixGrid({
   isCellEnabled,
   getCellNotes,
   onToggle,
+  readOnly = false,
 }: {
   saleTypes: SaleType[];
   capabilities: Capability[];
   ticketGroups: TicketGroup[];
   isCellEnabled: (stId: number, capId: number) => boolean;
   getCellNotes: (stId: number, capId: number) => string | null;
-  onToggle: (stId: number, capId: number) => void;
+  onToggle?: (stId: number, capId: number) => void;
+  readOnly?: boolean;
 }) {
   const activeSaleTypes = saleTypes.filter(st => st.active);
   const activeCaps = capabilities.filter(c => c.active);
@@ -588,14 +644,16 @@ function MatrixGrid({
                 return (
                   <td
                     key={cap.id}
-                    onClick={() => onToggle(st.id, cap.id)}
+                    onClick={readOnly ? undefined : () => onToggle?.(st.id, cap.id)}
                     title={notes ? `${cap.name}: ${notes}` : cap.name}
-                    className={`text-center cursor-pointer border border-[#3a424d]/30 transition-colors ${
+                    className={`text-center border border-[#3a424d]/30 transition-colors ${
+                      readOnly ? '' : 'cursor-pointer'
+                    } ${
                       enabled
                         ? notes
-                          ? 'bg-amber-900/40 hover:bg-amber-800/50 text-amber-300'
-                          : 'bg-[#5ec1ca]/20 hover:bg-[#5ec1ca]/30 text-[#5ec1ca]'
-                        : 'hover:bg-[#363d47]/50'
+                          ? `bg-amber-900/40 text-amber-300${readOnly ? '' : ' hover:bg-amber-800/50'}`
+                          : `bg-[#5ec1ca]/20 text-[#5ec1ca]${readOnly ? '' : ' hover:bg-[#5ec1ca]/30'}`
+                        : readOnly ? '' : 'hover:bg-[#363d47]/50'
                     }`}
                   >
                     {enabled ? '\u2713' : ''}

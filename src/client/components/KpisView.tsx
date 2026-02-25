@@ -33,7 +33,7 @@ function rateColor(rate: number): string {
   return 'text-red-400';
 }
 
-export function KpisView({ tasks }: { tasks: Task[] }) {
+export function KpisView({ tasks, embedded }: { tasks: Task[]; embedded?: boolean }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -59,7 +59,7 @@ export function KpisView({ tasks }: { tasks: Task[] }) {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">KPIs</h2>
+      {!embedded && <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">KPIs</h2>}
 
       {/* Headline metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">

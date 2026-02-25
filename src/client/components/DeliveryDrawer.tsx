@@ -38,6 +38,18 @@ interface TicketResult {
   details?: { parentSummary: string; childSummaries: string[] };
 }
 
+interface Milestone {
+  id: number;
+  delivery_id: number;
+  template_id: number;
+  template_name: string;
+  target_date: string | null;
+  actual_date: string | null;
+  status: string;
+  checklist_state_json: string;
+  notes: string | null;
+}
+
 const STATUSES = ['Not Started', 'WIP', 'In Progress', 'On Hold', 'Complete', 'Dead', 'Back to Sales'];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -87,6 +99,12 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
 
   // Sale types for dropdown
   const [saleTypes, setSaleTypes] = useState<SaleType[]>([]);
+
+  // Milestone state
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [milestonesLoading, setMilestonesLoading] = useState(false);
+  const [milestoneError, setMilestoneError] = useState<string | null>(null);
+  const [expandedMilestone, setExpandedMilestone] = useState<number | null>(null);
 
   // Ticket creation state
   const [ticketPreview, setTicketPreview] = useState<TicketResult | null>(null);
@@ -150,7 +168,20 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
     setTicketPreview(null);
     setTicketResult(null);
     setTicketError(null);
+    setMilestones([]);
+    setMilestoneError(null);
+    setExpandedMilestone(null);
   }, [entry, isNew, defaultProduct, prefill]);
+
+  // Fetch milestones for existing entries
+  useEffect(() => {
+    if (entry && !isNew) {
+      fetch(`/api/milestones/delivery/${entry.id}`)
+        .then(r => r.json())
+        .then(json => { if (json.ok) setMilestones(json.data); })
+        .catch(() => {});
+    }
+  }, [entry, isNew]);
 
   const setField = (key: string, val: string) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -263,6 +294,70 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
       setTicketCreating(false);
     }
   };
+
+  const handleCreateMilestones = async () => {
+    if (!entry) return;
+    setMilestonesLoading(true);
+    setMilestoneError(null);
+    try {
+      const resp = await fetch(`/api/milestones/delivery/${entry.id}/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error ?? 'Failed to create milestones');
+      setMilestones(json.data);
+    } catch (err) {
+      setMilestoneError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setMilestonesLoading(false);
+    }
+  };
+
+  const handleMilestoneStatusChange = async (milestoneId: number, newStatus: string) => {
+    try {
+      const resp = await fetch(`/api/milestones/${milestoneId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const json = await resp.json();
+      if (json.ok) {
+        setMilestones(prev => prev.map(m => m.id === milestoneId ? json.data : m));
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleChecklistToggle = async (milestoneId: number, checkIndex: number) => {
+    const milestone = milestones.find(m => m.id === milestoneId);
+    if (!milestone) return;
+    try {
+      const items = JSON.parse(milestone.checklist_state_json || '[]');
+      if (Array.isArray(items) && items[checkIndex] && typeof items[checkIndex] === 'object') {
+        items[checkIndex].checked = !items[checkIndex].checked;
+      }
+      const resp = await fetch(`/api/milestones/${milestoneId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checklist_state_json: JSON.stringify(items) }),
+      });
+      const json = await resp.json();
+      if (json.ok) {
+        setMilestones(prev => prev.map(m => m.id === milestoneId ? json.data : m));
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleDeleteMilestones = async () => {
+    if (!entry || !confirm('Delete all milestones for this delivery?')) return;
+    try {
+      await fetch(`/api/milestones/delivery/${entry.id}`, { method: 'DELETE' });
+      setMilestones([]);
+    } catch { /* ignore */ }
+  };
+
+  const completedCount = milestones.filter(m => m.status === 'complete').length;
+  const milestoneProgress = milestones.length > 0 ? Math.round((completedCount / milestones.length) * 100) : 0;
 
   const statusColor = getStatusColor(form.status);
 
@@ -413,6 +508,169 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
               className={`${inputCls} resize-none`}
             />
           </div>
+
+          {/* ── Delivery Milestones ── */}
+          {entry && !isNew && (
+            <div className="border border-[#3a424d] rounded-lg bg-[#272C33] p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-neutral-300">Delivery Milestones</span>
+                {milestones.length > 0 && (
+                  <span className="text-[10px] text-neutral-500">
+                    {completedCount}/{milestones.length} complete ({milestoneProgress}%)
+                  </span>
+                )}
+              </div>
+
+              {/* Progress bar */}
+              {milestones.length > 0 && (
+                <div className="h-1.5 bg-[#1f242b] rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-300"
+                    style={{
+                      width: `${milestoneProgress}%`,
+                      backgroundColor: milestoneProgress === 100 ? '#22c55e' : milestoneProgress > 50 ? '#5ec1ca' : '#f59e0b',
+                    }}
+                  />
+                </div>
+              )}
+
+              {milestoneError && (
+                <div className="p-2 bg-red-950/50 border border-red-900 rounded text-red-400 text-[11px]">{milestoneError}</div>
+              )}
+
+              {/* Timeline */}
+              {milestones.length > 0 ? (
+                <div className="space-y-0">
+                  {milestones.map((m, idx) => {
+                    const isOverdue = m.status !== 'complete' && m.target_date && new Date(m.target_date) < new Date();
+                    const nodeColor = m.status === 'complete'
+                      ? '#22c55e'
+                      : m.status === 'in_progress'
+                        ? '#f59e0b'
+                        : isOverdue
+                          ? '#ef4444'
+                          : '#4b5563';
+
+                    return (
+                      <div key={m.id} className="flex gap-3 group">
+                        {/* Timeline line + node */}
+                        <div className="flex flex-col items-center w-4 shrink-0">
+                          <div
+                            className="w-3 h-3 rounded-full border-2 shrink-0 mt-1 cursor-pointer transition-colors"
+                            style={{ borderColor: nodeColor, backgroundColor: m.status === 'complete' ? nodeColor : 'transparent' }}
+                            onClick={() => {
+                              const next = m.status === 'pending' ? 'in_progress' : m.status === 'in_progress' ? 'complete' : 'pending';
+                              handleMilestoneStatusChange(m.id, next);
+                            }}
+                            title={`Click to cycle: ${m.status} → ${m.status === 'pending' ? 'in_progress' : m.status === 'in_progress' ? 'complete' : 'pending'}`}
+                          />
+                          {idx < milestones.length - 1 && (
+                            <div className="w-px flex-1 min-h-[16px]" style={{ backgroundColor: '#3a424d' }} />
+                          )}
+                        </div>
+                        {/* Content */}
+                        <div className="flex-1 pb-3 min-w-0">
+                          <button
+                            className="flex items-center gap-2 w-full text-left"
+                            onClick={() => setExpandedMilestone(expandedMilestone === m.id ? null : m.id)}
+                          >
+                            <span className={`text-[11px] font-medium ${m.status === 'complete' ? 'text-green-400 line-through' : isOverdue ? 'text-red-400' : 'text-neutral-200'}`}>
+                              {m.template_name}
+                            </span>
+                            {(() => {
+                              try {
+                                const items = JSON.parse(m.checklist_state_json || '[]');
+                                if (Array.isArray(items) && items.length > 0) {
+                                  return (
+                                    <span className="text-[9px] text-neutral-600">
+                                      {expandedMilestone === m.id ? '\u25B2' : '\u25BC'}
+                                    </span>
+                                  );
+                                }
+                              } catch { /* ignore */ }
+                              return null;
+                            })()}
+                          </button>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {m.target_date && (
+                              <span className={`text-[10px] ${isOverdue ? 'text-red-400' : 'text-neutral-500'}`}>
+                                Target: {new Date(m.target_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                              </span>
+                            )}
+                            {m.actual_date && (
+                              <span className="text-[10px] text-green-400">
+                                Done: {new Date(m.actual_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Expandable checklist */}
+                          {expandedMilestone === m.id && (() => {
+                            try {
+                              const items = JSON.parse(m.checklist_state_json || '[]');
+                              if (!Array.isArray(items) || items.length === 0) return null;
+
+                              // Handle both formats: [{text, checked}] and legacy string[]
+                              const isStateful = typeof items[0] === 'object' && items[0].text;
+
+                              if (isStateful) {
+                                return (
+                                  <div className="mt-1.5 space-y-1">
+                                    {items.map((item: { text: string; checked: boolean }, ci: number) => (
+                                      <label key={ci} className="flex items-start gap-1.5 cursor-pointer group/check">
+                                        <input
+                                          type="checkbox"
+                                          checked={item.checked}
+                                          onChange={() => handleChecklistToggle(m.id, ci)}
+                                          className="mt-0.5 accent-[#5ec1ca]"
+                                        />
+                                        <span className={`text-[10px] ${item.checked ? 'text-neutral-600 line-through' : 'text-neutral-400'}`}>
+                                          {item.text}
+                                        </span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                );
+                              }
+
+                              // Legacy: plain string array
+                              return (
+                                <div className="mt-1.5 space-y-1">
+                                  {items.map((item: string, ci: number) => (
+                                    <div key={ci} className="flex items-start gap-1.5">
+                                      <span className="text-[10px] text-neutral-500">-</span>
+                                      <span className="text-[10px] text-neutral-400">{item}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            } catch { return null; }
+                          })()}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <button
+                  onClick={handleCreateMilestones}
+                  disabled={milestonesLoading}
+                  className="w-full px-3 py-2 text-xs rounded bg-[#5ec1ca]/20 text-[#5ec1ca] hover:bg-[#5ec1ca]/30 disabled:opacity-50 transition-colors font-semibold border border-[#5ec1ca]/30"
+                >
+                  {milestonesLoading ? 'Creating...' : 'Create Milestones'}
+                </button>
+              )}
+
+              {milestones.length > 0 && (
+                <button
+                  onClick={handleDeleteMilestones}
+                  className="text-[10px] text-neutral-600 hover:text-red-400 transition-colors"
+                >
+                  Reset milestones
+                </button>
+              )}
+            </div>
+          )}
 
           {/* ── Jira Ticket Creation ── */}
           {form.sale_type && (

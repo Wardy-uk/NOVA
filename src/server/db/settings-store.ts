@@ -10,7 +10,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SETTINGS_FILE = path.resolve(__dirname, '../../../settings.json');
+const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../../../');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 interface SettingsData {
   settings: Record<string, string>;

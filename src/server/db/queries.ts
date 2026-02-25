@@ -218,6 +218,23 @@ export class TaskQueries {
     return check !== undefined;
   }
 
+  deleteBySourcePrefix(source: string, sourceIdPrefix: string): number {
+    const countStmt = this.db.prepare(
+      `SELECT COUNT(*) as c FROM tasks WHERE source = ? AND source_id LIKE ?`
+    );
+    countStmt.bind([source, sourceIdPrefix + '%']);
+    let count = 0;
+    if (countStmt.step()) {
+      count = (countStmt.getAsObject() as Record<string, unknown>).c as number;
+    }
+    countStmt.free();
+    if (count > 0) {
+      this.db.run(`DELETE FROM tasks WHERE source = ? AND source_id LIKE ?`, [source, sourceIdPrefix + '%']);
+      saveDb();
+    }
+    return count;
+  }
+
   private rowToTask(row: Record<string, unknown>): Task {
     return {
       id: row.id as string,
@@ -591,23 +608,28 @@ export class DeliveryQueries {
 
   /** Entries relevant to the current user's focus:
    *  - starred by me (star_scope='me') or starred for all (star_scope='all')
-   *  - onboarder matches user's display_name or username (case-insensitive) */
+   *  - onboarder matches me AND has at least one overdue milestone */
   getMyFocus(userId: number, userNames: string[]): DeliveryEntry[] {
-    // Build LIKE conditions for onboarder matching
     const conditions: string[] = [
-      `(is_starred = 1 AND (starred_by = ? OR star_scope = 'all'))`,
+      `(de.is_starred = 1 AND (de.starred_by = ? OR de.star_scope = 'all'))`,
     ];
     const params: unknown[] = [userId];
 
     if (userNames.length > 0) {
-      const nameClauses = userNames.map(() => `LOWER(onboarder) LIKE ?`);
-      conditions.push(`(${nameClauses.join(' OR ')})`);
+      const nameClauses = userNames.map(() => `LOWER(de.onboarder) LIKE ?`);
+      conditions.push(`(
+        (${nameClauses.join(' OR ')})
+        AND EXISTS (
+          SELECT 1 FROM delivery_milestones dm
+          WHERE dm.delivery_id = de.id AND dm.status != 'complete' AND dm.target_date < date('now')
+        )
+      )`);
       for (const name of userNames) {
         params.push(`%${name.toLowerCase()}%`);
       }
     }
 
-    const sql = `SELECT * FROM delivery_entries WHERE ${conditions.join(' OR ')} ORDER BY is_starred DESC, updated_at DESC`;
+    const sql = `SELECT de.* FROM delivery_entries de WHERE ${conditions.join(' OR ')} ORDER BY de.is_starred DESC, de.updated_at DESC`;
     const stmt = this.db.prepare(sql);
     stmt.bind(params as (string | number | null)[]);
 
@@ -1494,6 +1516,298 @@ export class OnboardingRunQueries {
     this.db.run(`UPDATE onboarding_runs SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
     saveDb();
     return true;
+  }
+}
+
+// ---------- Milestone Templates & Delivery Milestones ----------
+
+export interface MilestoneTemplate {
+  id: number;
+  name: string;
+  day_offset: number;
+  sort_order: number;
+  checklist_json: string;
+  active: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeliveryMilestone {
+  id: number;
+  delivery_id: number;
+  template_id: number;
+  template_name: string;
+  target_date: string | null;
+  actual_date: string | null;
+  status: string;
+  checklist_state_json: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export class MilestoneQueries {
+  constructor(private db: Database) {}
+
+  // ── Templates ──
+
+  getAllTemplates(activeOnly = false): MilestoneTemplate[] {
+    const sql = activeOnly
+      ? `SELECT * FROM milestone_templates WHERE active = 1 ORDER BY sort_order, name`
+      : `SELECT * FROM milestone_templates ORDER BY sort_order, name`;
+    const stmt = this.db.prepare(sql);
+    const results: MilestoneTemplate[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as MilestoneTemplate);
+    stmt.free();
+    return results;
+  }
+
+  getTemplateById(id: number): MilestoneTemplate | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM milestone_templates WHERE id = ?`);
+    stmt.bind([id]);
+    if (stmt.step()) { const t = stmt.getAsObject() as unknown as MilestoneTemplate; stmt.free(); return t; }
+    stmt.free();
+    return undefined;
+  }
+
+  createTemplate(data: { name: string; day_offset: number; sort_order?: number; checklist_json?: string }): number {
+    this.db.run(
+      `INSERT INTO milestone_templates (name, day_offset, sort_order, checklist_json) VALUES (?, ?, ?, ?)`,
+      [data.name, data.day_offset, data.sort_order ?? 0, data.checklist_json ?? '[]']
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  updateTemplate(id: number, updates: Partial<Pick<MilestoneTemplate, 'name' | 'day_offset' | 'sort_order' | 'checklist_json' | 'active'>>): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
+    if (updates.day_offset !== undefined) { fields.push('day_offset = ?'); params.push(updates.day_offset); }
+    if (updates.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(updates.sort_order); }
+    if (updates.checklist_json !== undefined) { fields.push('checklist_json = ?'); params.push(updates.checklist_json); }
+    if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
+    if (fields.length === 0) return false;
+    fields.push(`updated_at = datetime('now')`);
+    params.push(id);
+    this.db.run(`UPDATE milestone_templates SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return true;
+  }
+
+  deleteTemplate(id: number): boolean {
+    this.db.run(`DELETE FROM milestone_templates WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+
+  // ── Sale Type Matrix (day offsets per sale type per template) ──
+
+  getMatrixOffsets(): Array<{ sale_type_id: number; template_id: number; day_offset: number }> {
+    const stmt = this.db.prepare(`SELECT sale_type_id, template_id, day_offset FROM milestone_sale_type_offsets`);
+    const results: Array<{ sale_type_id: number; template_id: number; day_offset: number }> = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as { sale_type_id: number; template_id: number; day_offset: number });
+    stmt.free();
+    return results;
+  }
+
+  setMatrixOffset(saleTypeId: number, templateId: number, dayOffset: number): void {
+    this.db.run(
+      `INSERT INTO milestone_sale_type_offsets (sale_type_id, template_id, day_offset) VALUES (?, ?, ?)
+       ON CONFLICT(sale_type_id, template_id) DO UPDATE SET day_offset = excluded.day_offset`,
+      [saleTypeId, templateId, dayOffset]
+    );
+    saveDb();
+  }
+
+  batchSetMatrixOffsets(updates: Array<{ sale_type_id: number; template_id: number; day_offset: number }>): void {
+    for (const u of updates) {
+      this.db.run(
+        `INSERT INTO milestone_sale_type_offsets (sale_type_id, template_id, day_offset) VALUES (?, ?, ?)
+         ON CONFLICT(sale_type_id, template_id) DO UPDATE SET day_offset = excluded.day_offset`,
+        [u.sale_type_id, u.template_id, u.day_offset]
+      );
+    }
+    saveDb();
+  }
+
+  deleteMatrixRow(saleTypeId: number): void {
+    this.db.run(`DELETE FROM milestone_sale_type_offsets WHERE sale_type_id = ?`, [saleTypeId]);
+    saveDb();
+  }
+
+  /** Get offsets for a sale type name (falls back to template defaults) */
+  getOffsetsForSaleType(saleTypeName: string): Map<number, number> {
+    const result = new Map<number, number>();
+    // Start with template defaults
+    const templates = this.getAllTemplates(true);
+    for (const t of templates) result.set(t.id, t.day_offset);
+    // Override with sale-type-specific offsets if found
+    const stmt = this.db.prepare(`
+      SELECT mso.template_id, mso.day_offset
+      FROM milestone_sale_type_offsets mso
+      JOIN onboarding_sale_types ost ON mso.sale_type_id = ost.id
+      WHERE ost.name = ? AND ost.active = 1
+    `);
+    stmt.bind([saleTypeName]);
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      result.set(row.template_id as number, row.day_offset as number);
+    }
+    stmt.free();
+    return result;
+  }
+
+  // ── Delivery Milestone Instances ──
+
+  getByDelivery(deliveryId: number): DeliveryMilestone[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM delivery_milestones WHERE delivery_id = ? ORDER BY target_date, template_name`
+    );
+    stmt.bind([deliveryId]);
+    const results: DeliveryMilestone[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as DeliveryMilestone);
+    stmt.free();
+    return results;
+  }
+
+  getMilestoneById(id: number): DeliveryMilestone | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_milestones WHERE id = ?`);
+    stmt.bind([id]);
+    if (stmt.step()) { const m = stmt.getAsObject() as unknown as DeliveryMilestone; stmt.free(); return m; }
+    stmt.free();
+    return undefined;
+  }
+
+  createForDelivery(deliveryId: number, startDate: string, saleType?: string): DeliveryMilestone[] {
+    const templates = this.getAllTemplates(true);
+    const start = new Date(startDate);
+    if (isNaN(start.getTime())) return [];
+
+    // Use sale-type-specific offsets if available
+    const saleTypeOffsets = saleType ? this.getOffsetsForSaleType(saleType) : null;
+
+    for (const tmpl of templates) {
+      const dayOffset = saleTypeOffsets?.get(tmpl.id) ?? tmpl.day_offset;
+      const target = new Date(start);
+      target.setDate(target.getDate() + dayOffset);
+      const targetStr = target.toISOString().split('T')[0];
+
+      // Convert template checklist items (string[]) to stateful format [{text, checked}]
+      let stateJson = '[]';
+      try {
+        const items = JSON.parse(tmpl.checklist_json || '[]');
+        if (Array.isArray(items)) {
+          stateJson = JSON.stringify(items.map((text: string) => ({ text, checked: false })));
+        }
+      } catch { /* keep empty */ }
+
+      this.db.run(
+        `INSERT INTO delivery_milestones (delivery_id, template_id, template_name, target_date, checklist_state_json)
+         VALUES (?, ?, ?, ?, ?)`,
+        [deliveryId, tmpl.id, tmpl.name, targetStr, stateJson]
+      );
+    }
+    saveDb();
+    return this.getByDelivery(deliveryId);
+  }
+
+  updateMilestone(id: number, updates: Partial<Pick<DeliveryMilestone, 'status' | 'actual_date' | 'checklist_state_json' | 'notes' | 'target_date'>>): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    if (updates.status !== undefined) { fields.push('status = ?'); params.push(updates.status); }
+    if (updates.actual_date !== undefined) { fields.push('actual_date = ?'); params.push(updates.actual_date); }
+    if (updates.checklist_state_json !== undefined) { fields.push('checklist_state_json = ?'); params.push(updates.checklist_state_json); }
+    if (updates.notes !== undefined) { fields.push('notes = ?'); params.push(updates.notes); }
+    if (updates.target_date !== undefined) { fields.push('target_date = ?'); params.push(updates.target_date); }
+    if (fields.length === 0) return false;
+    fields.push(`updated_at = datetime('now')`);
+    params.push(id);
+    this.db.run(`UPDATE delivery_milestones SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return this.getMilestoneById(id) !== undefined;
+  }
+
+  deleteByDelivery(deliveryId: number): number {
+    const countStmt = this.db.prepare(`SELECT COUNT(*) as c FROM delivery_milestones WHERE delivery_id = ?`);
+    countStmt.bind([deliveryId]);
+    let count = 0;
+    if (countStmt.step()) count = (countStmt.getAsObject() as Record<string, unknown>).c as number;
+    countStmt.free();
+    this.db.run(`DELETE FROM delivery_milestones WHERE delivery_id = ?`, [deliveryId]);
+    saveDb();
+    return count;
+  }
+
+  getOverdueSummaryByDelivery(deliveryIds: number[]): Map<number, { overdueCount: number; totalCount: number; completeCount: number; nextOverdue: string | null }> {
+    const result = new Map<number, { overdueCount: number; totalCount: number; completeCount: number; nextOverdue: string | null }>();
+    if (deliveryIds.length === 0) return result;
+
+    const placeholders = deliveryIds.map(() => '?').join(',');
+    const stmt = this.db.prepare(`
+      SELECT delivery_id,
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'complete' THEN 1 ELSE 0 END) as complete,
+        SUM(CASE WHEN status != 'complete' AND target_date < date('now') THEN 1 ELSE 0 END) as overdue,
+        MIN(CASE WHEN status != 'complete' AND target_date < date('now') THEN template_name END) as next_overdue
+      FROM delivery_milestones
+      WHERE delivery_id IN (${placeholders})
+      GROUP BY delivery_id
+    `);
+    stmt.bind(deliveryIds);
+
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      result.set(row.delivery_id as number, {
+        overdueCount: (row.overdue as number) ?? 0,
+        totalCount: (row.total as number) ?? 0,
+        completeCount: (row.complete as number) ?? 0,
+        nextOverdue: (row.next_overdue as string) ?? null,
+      });
+    }
+    stmt.free();
+    return result;
+  }
+
+  /** Get all milestones joined with delivery info, for calendar view */
+  getAllWithDelivery(): Array<DeliveryMilestone & { account: string; product: string; onboarding_id: string | null; onboarder: string | null }> {
+    const stmt = this.db.prepare(`
+      SELECT dm.*, de.account, de.product, de.onboarding_id, de.onboarder
+      FROM delivery_milestones dm
+      JOIN delivery_entries de ON dm.delivery_id = de.id
+      ORDER BY dm.target_date, de.account, dm.template_name
+    `);
+    const results: Array<DeliveryMilestone & { account: string; product: string; onboarding_id: string | null; onboarder: string | null }> = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as any);
+    stmt.free();
+    return results;
+  }
+
+  getSummary(): { total: number; pending: number; in_progress: number; complete: number; overdue: number } {
+    const stmt = this.db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN status = 'complete' THEN 1 ELSE 0 END) as complete,
+        SUM(CASE WHEN status != 'complete' AND target_date < date('now') THEN 1 ELSE 0 END) as overdue
+      FROM delivery_milestones
+    `);
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      stmt.free();
+      return {
+        total: (row.total as number) ?? 0,
+        pending: (row.pending as number) ?? 0,
+        in_progress: (row.in_progress as number) ?? 0,
+        complete: (row.complete as number) ?? 0,
+        overdue: (row.overdue as number) ?? 0,
+      };
+    }
+    stmt.free();
+    return { total: 0, pending: 0, in_progress: 0, complete: 0, overdue: 0 };
   }
 }
 

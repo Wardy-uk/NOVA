@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TaskDrawer } from './TaskDrawer.js';
 import {
@@ -16,44 +16,157 @@ interface Props {
 
 type GroupBy = 'status' | 'date';
 
-const STATUS_COLORS: Record<string, string> = {
-  'open': '#3b82f6',
-  'to do': '#6b7280',
-  'in progress': '#f59e0b',
-  'in review': '#8b5cf6',
-  'waiting for customer': '#ef4444',
-  'waiting for support': '#f97316',
-  'done': '#22c55e',
-  'closed': '#22c55e',
-  'resolved': '#22c55e',
-};
+// ── Fixed Kanban columns with Jira status mapping ──
 
-function getStatusColor(status: string): string {
-  return STATUS_COLORS[status.toLowerCase()] ?? '#6b7280';
+interface FixedColumn {
+  key: string;
+  label: string;
+  jiraStatuses: string[];       // original Jira status names (case-insensitive match)
+  normalizedStatuses: string[]; // fallback match against task.status
+  color: string;
+}
+
+const FIXED_COLUMNS: FixedColumn[] = [
+  {
+    key: 'open',
+    label: 'Open',
+    jiraStatuses: ['open', 'to do', 'new', 'backlog', 'reopened'],
+    normalizedStatuses: ['open'],
+    color: '#3b82f6',
+  },
+  {
+    key: 'wip',
+    label: 'Work In Progress',
+    jiraStatuses: ['in progress', 'in development', 'in review', 'code review'],
+    normalizedStatuses: ['in_progress'],
+    color: '#f59e0b',
+  },
+  {
+    key: 'waiting-agent',
+    label: 'Waiting on Agent',
+    jiraStatuses: ['waiting for support', 'waiting on agent', 'pending'],
+    normalizedStatuses: [],
+    color: '#f97316',
+  },
+  {
+    key: 'waiting-requestor',
+    label: 'Waiting on Requestor',
+    jiraStatuses: ['waiting for customer', 'waiting on requestor', 'awaiting customer'],
+    normalizedStatuses: [],
+    color: '#ef4444',
+  },
+  {
+    key: 'waiting-partner',
+    label: 'Waiting on Partner',
+    jiraStatuses: ['waiting on partner', 'escalated', 'with third party'],
+    normalizedStatuses: [],
+    color: '#8b5cf6',
+  },
+];
+
+const DONE_STATUSES = new Set(['done', 'closed', 'resolved', 'cancelled']);
+
+// Build a lookup map for fast column assignment
+const STATUS_TO_COLUMN = new Map<string, string>();
+for (const col of FIXED_COLUMNS) {
+  for (const s of col.jiraStatuses) STATUS_TO_COLUMN.set(s, col.key);
+}
+const NORMALIZED_TO_COLUMN = new Map<string, string>();
+for (const col of FIXED_COLUMNS) {
+  for (const s of col.normalizedStatuses) NORMALIZED_TO_COLUMN.set(s, col.key);
+}
+
+function getOriginalJiraStatus(task: Task): string {
+  // Try raw_data.status.name (structured Jira response)
+  if (task.raw_data && typeof task.raw_data === 'object') {
+    const rd = task.raw_data as Record<string, unknown>;
+    const statusObj = rd.status;
+    if (typeof statusObj === 'string') return statusObj;
+    if (statusObj && typeof statusObj === 'object') {
+      const name = (statusObj as Record<string, unknown>).name;
+      if (typeof name === 'string') return name;
+    }
+  }
+  // Fallback: extract from description "Status: ..." line
+  if (task.description) {
+    const match = task.description.match(/^Status:\s*(.+)/m);
+    if (match) return match[1].trim();
+  }
+  // Last resort: normalized status
+  return task.status;
+}
+
+function getFixedColumnKey(task: Task): string | null {
+  const originalStatus = getOriginalJiraStatus(task);
+  const lower = originalStatus.toLowerCase();
+
+  if (DONE_STATUSES.has(lower)) return null;
+
+  // Match by original Jira status
+  const colKey = STATUS_TO_COLUMN.get(lower);
+  if (colKey) return colKey;
+
+  // Fallback: match by normalized status
+  const normKey = NORMALIZED_TO_COLUMN.get(task.status);
+  if (normKey) return normKey;
+
+  // Default to 'open'
+  return 'open';
+}
+
+function getColumnColor(key: string): string {
+  return FIXED_COLUMNS.find((c) => c.key === key)?.color ?? '#6b7280';
+}
+
+// ── Transition modal state ──
+
+interface PendingTransition {
+  task: Task;
+  targetColumn: FixedColumn;
+  issueKey: string;
+}
+
+interface JiraTransition {
+  id: string;
+  name: string;
+  to?: { name?: string; statusCategory?: { name?: string } };
 }
 
 export function ServiceDeskKanban({ tasks, onUpdateTask }: Props) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [groupBy, setGroupBy] = useState<GroupBy>('status');
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [pendingTransition, setPendingTransition] = useState<PendingTransition | null>(null);
 
   // Tasks are pre-filtered to Jira by parent component
   const jiraTasks = tasks;
 
-  // Status-based columns
+  // Status-based columns (fixed 5 columns, always shown)
   const statusColumns = useMemo(() => {
-    const statusMap = new Map<string, Task[]>();
+    const columnMap = new Map<string, Task[]>();
+    for (const col of FIXED_COLUMNS) columnMap.set(col.key, []);
+
     for (const task of jiraTasks) {
-      const status = task.status || 'open';
-      if (!statusMap.has(status)) statusMap.set(status, []);
-      statusMap.get(status)!.push(task);
+      const colKey = getFixedColumnKey(task);
+      if (colKey && columnMap.has(colKey)) {
+        columnMap.get(colKey)!.push(task);
+      }
     }
-    const doneStatuses = new Set(['done', 'closed', 'resolved']);
-    return [...statusMap.entries()].sort((a, b) => {
-      const aIsDone = doneStatuses.has(a[0].toLowerCase());
-      const bIsDone = doneStatuses.has(b[0].toLowerCase());
-      if (aIsDone !== bIsDone) return aIsDone ? 1 : -1;
-      return a[0].localeCompare(b[0]);
-    });
+
+    // Sort tasks within each column by priority DESC, then due_date ASC
+    for (const [, colTasks] of columnMap) {
+      colTasks.sort((a, b) => {
+        const pa = a.priority ?? 50;
+        const pb = b.priority ?? 50;
+        if (pa !== pb) return pb - pa;
+        if (a.due_date && b.due_date) return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+        if (a.due_date) return -1;
+        if (b.due_date) return 1;
+        return 0;
+      });
+    }
+
+    return FIXED_COLUMNS.map((col) => [col.key, columnMap.get(col.key)!] as [string, Task[]]);
   }, [jiraTasks]);
 
   // Date-based columns
@@ -64,7 +177,6 @@ export function ServiceDeskKanban({ tasks, onUpdateTask }: Props) {
       const group = getDateGroup(task);
       groups.get(group)!.push(task);
     }
-    // Sort tasks within each group by due_date (earliest first), no-date tasks by priority
     for (const [, groupTasks] of groups) {
       groupTasks.sort((a, b) => {
         if (a.due_date && b.due_date) return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
@@ -76,6 +188,46 @@ export function ServiceDeskKanban({ tasks, onUpdateTask }: Props) {
     return [...groups.entries()].filter(([, t]) => t.length > 0);
   }, [jiraTasks]);
 
+  // ── Drag & drop handlers ──
+
+  const handleDragStart = useCallback((e: React.DragEvent, taskId: string) => {
+    e.dataTransfer.setData('text/plain', taskId);
+    e.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, key: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverKey(key);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverKey(null);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent, targetColumnKey: string) => {
+    e.preventDefault();
+    setDragOverKey(null);
+
+    // Only support DnD in status mode
+    if (groupBy !== 'status') return;
+
+    const taskId = e.dataTransfer.getData('text/plain');
+    if (!taskId) return;
+    const task = jiraTasks.find((t) => t.id === taskId);
+    if (!task) return;
+
+    const currentColumn = getFixedColumnKey(task);
+    if (currentColumn === targetColumnKey) return; // same column
+
+    const targetCol = FIXED_COLUMNS.find((c) => c.key === targetColumnKey);
+    if (!targetCol) return;
+
+    const issueKey = task.source_id ?? task.id.replace(/^jira:/, '');
+
+    setPendingTransition({ task, targetColumn: targetCol, issueKey });
+  }, [jiraTasks, groupBy]);
+
   if (jiraTasks.length === 0) {
     return (
       <div className="text-center py-16 text-sm text-neutral-500">
@@ -85,6 +237,7 @@ export function ServiceDeskKanban({ tasks, onUpdateTask }: Props) {
   }
 
   const columns = groupBy === 'status' ? statusColumns : dateColumns;
+  const isStatusMode = groupBy === 'status';
 
   return (
     <div className="space-y-4">
@@ -117,19 +270,31 @@ export function ServiceDeskKanban({ tasks, onUpdateTask }: Props) {
             </button>
           </div>
           <span className="text-xs text-neutral-500">{jiraTasks.length} ticket{jiraTasks.length !== 1 ? 's' : ''}</span>
+          {isStatusMode && (
+            <span className="text-[10px] text-neutral-600">Drag to transition</span>
+          )}
         </div>
       </div>
 
       <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: 'calc(100vh - 200px)' }}>
         {columns.map(([key, columnTasks]) => {
           const isDateMode = groupBy === 'date';
-          const label = isDateMode ? DATE_GROUP_LABELS[key as DateGroup] : key;
-          const color = isDateMode ? DATE_GROUP_COLORS[key as DateGroup] : getStatusColor(key);
+          const fixedCol = FIXED_COLUMNS.find((c) => c.key === key);
+          const label = isDateMode ? DATE_GROUP_LABELS[key as DateGroup] : (fixedCol?.label ?? key);
+          const color = isDateMode ? DATE_GROUP_COLORS[key as DateGroup] : (fixedCol?.color ?? '#6b7280');
+          const isDragTarget = dragOverKey === key;
 
           return (
             <div
               key={key}
-              className="flex-shrink-0 w-72 bg-[#2f353d] border border-[#3a424d] rounded-lg flex flex-col"
+              className={`flex-shrink-0 w-72 bg-[#2f353d] border rounded-lg flex flex-col transition-colors ${
+                isDragTarget && isStatusMode
+                  ? 'border-[#5ec1ca] bg-[#5ec1ca]/5'
+                  : 'border-[#3a424d]'
+              }`}
+              onDragOver={isStatusMode ? (e) => handleDragOver(e, key) : undefined}
+              onDragLeave={isStatusMode ? handleDragLeave : undefined}
+              onDrop={isStatusMode ? (e) => handleDrop(e, key) : undefined}
             >
               {/* Column header */}
               <div className="px-3 py-2.5 border-b border-[#3a424d] flex items-center gap-2">
@@ -153,8 +318,15 @@ export function ServiceDeskKanban({ tasks, onUpdateTask }: Props) {
                     task={task}
                     onClick={() => setSelectedTask(task)}
                     showStatus={isDateMode}
+                    draggable={isStatusMode}
+                    onDragStart={isStatusMode ? (e) => handleDragStart(e, task.id) : undefined}
                   />
                 ))}
+                {columnTasks.length === 0 && (
+                  <div className="text-[10px] text-neutral-600 italic text-center py-4">
+                    No tickets
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -172,19 +344,45 @@ export function ServiceDeskKanban({ tasks, onUpdateTask }: Props) {
           onTaskUpdated={() => onUpdateTask(selectedTask.id, {})}
         />
       )}
+
+      {pendingTransition && (
+        <TransitionModal
+          pending={pendingTransition}
+          onConfirm={() => {
+            onUpdateTask(pendingTransition.task.id, {});
+            setPendingTransition(null);
+          }}
+          onCancel={() => setPendingTransition(null)}
+        />
+      )}
     </div>
   );
 }
 
-function KanbanCard({ task, onClick, showStatus }: { task: Task; onClick: () => void; showStatus?: boolean }) {
+// ── Kanban Card ──
+
+function KanbanCard({
+  task, onClick, showStatus, draggable, onDragStart,
+}: {
+  task: Task;
+  onClick: () => void;
+  showStatus?: boolean;
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+}) {
   const priority = task.priority ?? 50;
   const isOverdue = task.due_date && new Date(task.due_date) < new Date();
   const isSlaBreached = task.sla_breach_at && new Date(task.sla_breach_at) < new Date();
+  const originalStatus = getOriginalJiraStatus(task);
 
   return (
-    <button
+    <div
+      draggable={draggable}
+      onDragStart={onDragStart}
       onClick={onClick}
-      className="w-full text-left bg-[#272C33] border border-[#3a424d] rounded-md p-3 hover:border-[#5ec1ca]/50 transition-colors cursor-pointer"
+      className={`w-full text-left bg-[#272C33] border border-[#3a424d] rounded-md p-3 hover:border-[#5ec1ca]/50 transition-colors ${
+        draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+      }`}
     >
       {/* Source ID */}
       {task.source_id && (
@@ -207,13 +405,23 @@ function KanbanCard({ task, onClick, showStatus }: { task: Task; onClick: () => 
           P{priority >= 80 ? '1' : priority >= 60 ? '2' : priority >= 40 ? '3' : '4'}
         </span>
 
+        {/* Original Jira status badge */}
+        {originalStatus && originalStatus !== task.status && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded bg-[#363d47] text-neutral-400 truncate max-w-[120px]"
+            title={originalStatus}
+          >
+            {originalStatus}
+          </span>
+        )}
+
         {/* Status badge (shown in date mode) */}
         {showStatus && (
           <span
             className="text-[10px] px-1.5 py-0.5 rounded"
-            style={{ backgroundColor: getStatusColor(task.status) + '30', color: getStatusColor(task.status) }}
+            style={{ backgroundColor: getColumnColor(getFixedColumnKey(task) ?? 'open') + '30', color: getColumnColor(getFixedColumnKey(task) ?? 'open') }}
           >
-            {task.status}
+            {originalStatus || task.status}
           </span>
         )}
 
@@ -229,6 +437,227 @@ function KanbanCard({ task, onClick, showStatus }: { task: Task; onClick: () => 
           <span className="text-[10px] text-red-400 font-semibold">SLA</span>
         )}
       </div>
-    </button>
+    </div>
+  );
+}
+
+// ── Transition Modal ──
+
+function TransitionModal({
+  pending,
+  onConfirm,
+  onCancel,
+}: {
+  pending: PendingTransition;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const [transitions, setTransitions] = useState<JiraTransition[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedTransition, setSelectedTransition] = useState<string | null>(null);
+  const [comment, setComment] = useState('');
+  const [saving, setSaving] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const { issueKey, targetColumn, task } = pending;
+  const currentStatus = getOriginalJiraStatus(task);
+
+  // Fetch available transitions on mount
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}/transitions`);
+        const json = await res.json();
+        if (!active) return;
+        if (!json.ok) { setError(json.error ?? 'Failed to fetch transitions'); setLoading(false); return; }
+
+        // Parse transitions — could be in data.transitions or data directly
+        let txns: JiraTransition[] = [];
+        const data = json.data;
+        if (Array.isArray(data)) {
+          txns = data;
+        } else if (data?.transitions && Array.isArray(data.transitions)) {
+          txns = data.transitions;
+        } else if (typeof data === 'string') {
+          // MCP sometimes returns markdown — try to parse
+          try { txns = JSON.parse(data).transitions ?? []; } catch { /* empty */ }
+        }
+
+        setTransitions(txns);
+
+        // Auto-select the best matching transition for the target column
+        const targetStatuses = new Set(targetColumn.jiraStatuses);
+        const best = txns.find((t) => {
+          const toName = t.to?.name?.toLowerCase() ?? t.name?.toLowerCase() ?? '';
+          return targetStatuses.has(toName);
+        });
+        if (best) setSelectedTransition(best.id);
+
+        setLoading(false);
+      } catch (err) {
+        if (active) { setError(err instanceof Error ? err.message : 'Failed to fetch transitions'); setLoading(false); }
+      }
+    })();
+    return () => { active = false; };
+  }, [issueKey, targetColumn]);
+
+  useEffect(() => {
+    if (!loading) textareaRef.current?.focus();
+  }, [loading]);
+
+  const handleConfirm = async () => {
+    if (!selectedTransition) return;
+    setSaving(true);
+    setError(null);
+
+    try {
+      const body: Record<string, unknown> = { transition: selectedTransition };
+      if (comment.trim()) body.comment = comment.trim();
+
+      const res = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error ?? 'Transition failed');
+
+      onConfirm();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to transition issue');
+      setSaving(false);
+    }
+  };
+
+  const selectedTxn = transitions.find((t) => t.id === selectedTransition);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
+      <div
+        className="bg-[#2f353d] border border-[#3a424d] rounded-lg shadow-xl w-full max-w-md mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-[#3a424d]">
+          <h3 className="text-sm font-semibold text-neutral-100">Transition Ticket</h3>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 space-y-4">
+          {/* Ticket info */}
+          <div>
+            <div className="text-xs text-[#5ec1ca] font-mono">{issueKey}</div>
+            <div className="text-sm text-neutral-200 truncate">{task.title}</div>
+          </div>
+
+          {/* Status change indicator */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-neutral-400">{currentStatus}</span>
+            <span className="text-neutral-600">&rarr;</span>
+            <span className="font-semibold" style={{ color: targetColumn.color }}>{targetColumn.label}</span>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center gap-2 py-4">
+              <span className="inline-block w-3 h-3 border-2 border-neutral-600 border-t-[#5ec1ca] rounded-full animate-spin" />
+              <span className="text-xs text-neutral-400">Loading available transitions...</span>
+            </div>
+          ) : transitions.length === 0 ? (
+            <div className="text-xs text-amber-400 bg-amber-900/20 border border-amber-900/30 rounded px-3 py-2">
+              No transitions available for this ticket. The workflow may not allow moving to this status.
+            </div>
+          ) : (
+            <>
+              {/* Transition selector */}
+              <div>
+                <label className="block text-[11px] text-neutral-400 mb-1.5">Select transition</label>
+                <div className="space-y-1">
+                  {transitions.map((txn) => {
+                    const toName = txn.to?.name ?? txn.name;
+                    const isSelected = selectedTransition === txn.id;
+                    return (
+                      <button
+                        key={txn.id}
+                        onClick={() => setSelectedTransition(txn.id)}
+                        className={`w-full text-left px-3 py-2 rounded text-xs transition-colors ${
+                          isSelected
+                            ? 'bg-[#5ec1ca]/20 border border-[#5ec1ca]/50 text-neutral-100'
+                            : 'bg-[#272C33] border border-[#3a424d] text-neutral-300 hover:border-[#5ec1ca]/30'
+                        }`}
+                      >
+                        <span className="font-medium">{txn.name}</span>
+                        {toName && toName !== txn.name && (
+                          <span className="text-neutral-500 ml-2">&rarr; {toName}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Comment */}
+              <div>
+                <label className="block text-[11px] text-neutral-400 mb-1">
+                  Comment <span className="text-neutral-600">(optional)</span>
+                </label>
+                <textarea
+                  ref={textareaRef}
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="Add a comment to the transition..."
+                  rows={2}
+                  className="w-full bg-[#272C33] border border-[#3a424d] rounded px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-[#5ec1ca]/50 resize-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      handleConfirm();
+                    }
+                  }}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="text-xs text-red-400 bg-red-900/20 border border-red-900/30 rounded px-3 py-2">
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-[#3a424d] flex items-center justify-between">
+          <span className="text-[10px] text-neutral-600">
+            {selectedTxn ? `Transition: ${selectedTxn.name}` : 'Select a transition'}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={onCancel}
+              disabled={saving}
+              className="px-3 py-1.5 text-xs rounded bg-[#272C33] text-neutral-400 hover:text-neutral-200 border border-[#3a424d] hover:border-[#5ec1ca]/50 transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={saving || !selectedTransition || loading}
+              className="px-4 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {saving ? (
+                <>
+                  <span className="inline-block w-3 h-3 border-2 border-[#272C33]/30 border-t-[#272C33] rounded-full animate-spin" />
+                  Transitioning...
+                </>
+              ) : (
+                'Transition in Jira'
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -1,0 +1,108 @@
+[
+  {
+    "name": "Contract Received",
+    "day_offset": 0,
+    "sort_order": 1,
+    "checklist": [
+      "Signed order form received",
+      "CRM account created/validated",
+      "Onboarding ticket raised",
+      "Account assigned to OBS / CSM"
+    ]
+  },
+  {
+    "name": "Welcome Pack Requested",
+    "day_offset": 2,
+    "sort_order": 2,
+    "checklist": [
+      "Welcome Pack sent to customer (if not sent by Sales)",
+      "Logo and assets requested",
+      "Follow-up process begins if no response"
+    ]
+  },
+  {
+    "name": "Welcome Pack Received",
+    "day_offset": 7,
+    "sort_order": 3,
+    "checklist": [
+      "Welcome Pack returned",
+      "Assets uploaded to CRM",
+      "Design and QA tickets raised",
+      "Internal teams notified"
+    ]
+  },
+  {
+    "name": "Welcome Call Completed",
+    "day_offset": 10,
+    "sort_order": 4,
+    "checklist": [
+      "Welcome Call held",
+      "Roles and expectations agreed",
+      "Timeline confirmed"
+    ]
+  },
+  {
+    "name": "Design Templates Approved",
+    "day_offset": 15,
+    "sort_order": 5,
+    "checklist": [
+      "Templates shared with customer",
+      "Feedback received",
+      "Amendments completed",
+      "Templates signed off"
+    ]
+  },
+  {
+    "name": "System Build Complete",
+    "day_offset": 25,
+    "sort_order": 6,
+    "checklist": [
+      "System build completed",
+      "Automations configured",
+      "Data validation completed",
+      "QA passed",
+      "Platform ready for training"
+    ]
+  },
+  {
+    "name": "Training Delivered",
+    "day_offset": 28,
+    "sort_order": 7,
+    "checklist": [
+      "Training session completed",
+      "User accounts prepared",
+      "Follow-up sessions scheduled if required"
+    ]
+  },
+  {
+    "name": "System Live",
+    "day_offset": 30,
+    "sort_order": 8,
+    "checklist": [
+      "User access provided",
+      "Customer operational in system",
+      "Billing triggered"
+    ]
+  },
+  {
+    "name": "Billing & Ownership Transfer",
+    "day_offset": 32,
+    "sort_order": 9,
+    "checklist": [
+      "Billing confirmed",
+      "Account ownership transferred to CSM",
+      "Delivery sheet updated"
+    ]
+  },
+  {
+    "name": "Final Review & Closure",
+    "day_offset": 35,
+    "sort_order": 10,
+    "checklist": [
+      "All tickets closed",
+      "Documentation complete",
+      "Stakeholders notified",
+      "Onboarding marked complete"
+    ]
+  }
+]

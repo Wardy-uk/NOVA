@@ -10,7 +10,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const USERS_FILE = path.resolve(__dirname, '../../../users.json');
+const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../../../');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 export interface User {
   id: number;
