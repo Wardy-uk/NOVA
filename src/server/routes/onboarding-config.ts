@@ -4,15 +4,16 @@ import XLSX from 'xlsx';
 import path from 'path';
 import fs from 'fs';
 import type { OnboardingConfigQueries } from '../db/queries.js';
-import { requireRole } from '../middleware/auth.js';
+import type { AreaAccessGuard } from '../middleware/auth.js';
 
 const XLSX_PATH = path.resolve('OnboardingMatix.xlsx');
 
 export function createOnboardingConfigRoutes(
-  configQueries: OnboardingConfigQueries
+  configQueries: OnboardingConfigQueries,
+  requireAreaAccess?: AreaAccessGuard,
 ): Router {
   const router = Router();
-  const writeGuard = requireRole('admin', 'editor');
+  const writeGuard = requireAreaAccess ? requireAreaAccess('onboarding', 'edit') : (_req: any, _res: any, next: any) => next();
 
   // ── Ticket Groups ──
 

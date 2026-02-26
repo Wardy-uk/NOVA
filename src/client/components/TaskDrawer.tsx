@@ -8,6 +8,7 @@ const SOURCE_COLORS: Record<string, { bg: string; text: string; label: string }>
   calendar: { bg: 'bg-amber-900/50', text: 'text-amber-300', label: 'Calendar' },
   email: { bg: 'bg-red-900/50', text: 'text-red-300', label: 'Email' },
   monday: { bg: 'bg-orange-900/50', text: 'text-orange-300', label: 'Monday' },
+  milestone: { bg: 'bg-emerald-900/50', text: 'text-emerald-300', label: 'Onboarding' },
 };
 
 const JIRA_PRIORITIES = ['Highest', 'High', 'Medium', 'Low', 'Lowest'];

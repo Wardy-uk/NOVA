@@ -24,7 +24,7 @@ import { filterByOwnership, type OwnershipFilter } from './utils/taskHelpers.js'
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts' | 'admin';
+type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar'
   | 'delivery' | 'onboarding-config' | 'ob-calendar'
@@ -32,17 +32,26 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'settings' | 'admin-panel'
   | 'help' | 'debug';
 
+// Standalone views that don't belong to any area (no sub-tab bar)
+const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel']);
+
 interface AreaDef {
   label: string;
   defaultView: View;
   tabs: Array<{ view: View; label: string }>;
-  role?: 'admin' | 'editor'; // minimum role to see this area
-  hidden?: boolean; // hide from top nav (accessed via user menu)
 }
+
+// Per-area access levels resolved from custom roles
+type AccessLevel = 'hidden' | 'view' | 'edit';
+interface AreaAccess { [areaId: string]: AccessLevel }
+
+const DEFAULT_AREA_ACCESS: AreaAccess = {
+  command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view', admin: 'hidden',
+};
 
 const AREAS: Record<Area, AreaDef> = {
   command: {
-    label: 'Command Centre',
+    label: 'My NOVA',
     defaultView: 'daily',
     tabs: [
       { view: 'daily', label: 'Dashboard' },
@@ -67,9 +76,8 @@ const AREAS: Record<Area, AreaDef> = {
     tabs: [
       { view: 'delivery', label: 'Delivery' },
       { view: 'ob-calendar', label: 'Milestones' },
-      { view: 'onboarding-config', label: 'Config' },
+      { view: 'onboarding-config', label: 'Onboarding Matrix' },
     ],
-    role: 'editor',
   },
   accounts: {
     label: 'Account Management',
@@ -78,25 +86,17 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'crm', label: 'CRM' },
     ],
   },
-  admin: {
-    label: 'Administration',
-    defaultView: 'settings',
-    tabs: [
-      { view: 'settings', label: 'Settings' },
-      { view: 'admin-panel', label: 'Admin' },
-    ],
-    hidden: true, // accessed via user menu instead
-  },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'onboarding', 'accounts', 'admin'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'onboarding', 'accounts'];
 
-// Derive area from view
+// Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
+  if (STANDALONE_VIEWS.has(view)) return 'command';
   for (const [area, def] of Object.entries(AREAS) as [Area, AreaDef][]) {
     if (def.tabs.some((t) => t.view === view)) return area;
   }
-  return 'command'; // fallback for help/debug
+  return 'command';
 }
 
 // Full-width views (no max-w constraint)
@@ -140,6 +140,7 @@ export function App() {
   const [lastSuggest, setLastSuggest] = useState<string>('');
   const [spDebug, setSpDebug] = useState<Record<string, unknown> | null>(null);
   const [spDebugLoading, setSpDebugLoading] = useState(false);
+  const [d365Debug, setD365Debug] = useState<Array<{ ts: string; text: string }>>([]);
   const [showFeedback, setShowFeedback] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [sdFilter, setSdFilter] = useState<OwnershipFilter>(() => {
@@ -152,6 +153,24 @@ export function App() {
   const currentArea = getArea(view);
   const areaDef = AREAS[currentArea];
   const userRole = auth.user?.role ?? 'viewer';
+
+  // Resolved area access from custom roles
+  const [areaAccess, setAreaAccess] = useState<AreaAccess>(
+    userRole === 'admin'
+      ? { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', admin: 'edit' }
+      : DEFAULT_AREA_ACCESS,
+  );
+  useEffect(() => {
+    if (!auth.isAuthenticated || !auth.token) return;
+    fetch('/api/auth/permissions', {
+      headers: { Authorization: `Bearer ${auth.token}` },
+    })
+      .then(r => r.json())
+      .then(json => {
+        if (json.ok && json.data?.areaAccess) setAreaAccess(json.data.areaAccess);
+      })
+      .catch(() => {});
+  }, [auth.isAuthenticated, auth.token]);
 
   // Auto-trigger standup on first visit if no morning ritual today
   useEffect(() => {
@@ -202,9 +221,20 @@ export function App() {
       }
     };
 
+    const fetchD365Debug = async () => {
+      try {
+        const res = await fetch('/api/dynamics365/debug-log');
+        const json = await res.json();
+        if (active && json.ok && Array.isArray(json.data)) {
+          setD365Debug(json.data);
+        }
+      } catch { /* ignore */ }
+    };
+
     fetchDebug();
     fetchSpDebug();
-    const interval = setInterval(fetchDebug, 5000);
+    fetchD365Debug();
+    const interval = setInterval(() => { fetchDebug(); fetchD365Debug(); }, 5000);
     return () => {
       active = false;
       clearInterval(interval);
@@ -253,6 +283,7 @@ export function App() {
         <LoginView
           onLogin={auth.login}
           onRegister={auth.register}
+          onSsoLogin={auth.loginWithSso}
           error={auth.error}
           loading={auth.busy}
         />
@@ -260,21 +291,13 @@ export function App() {
     );
   }
 
-  // Check if user can see an area
+  // Check if user can see an area (uses resolved area access from custom roles)
   const canSeeArea = (area: Area): boolean => {
-    const def = AREAS[area];
-    if (!def.role) return true;
-    if (def.role === 'editor') return userRole === 'admin' || userRole === 'editor';
-    if (def.role === 'admin') return userRole === 'admin';
-    return true;
+    return (areaAccess[area] || 'hidden') !== 'hidden';
   };
 
-  // Filter admin-panel tab for non-admins
   const getVisibleTabs = (area: Area) => {
-    return AREAS[area].tabs.filter((t) => {
-      if (t.view === 'admin-panel') return userRole === 'admin';
-      return true;
-    });
+    return AREAS[area].tabs;
   };
 
   const isFullWidth = FULL_WIDTH_VIEWS.has(view);
@@ -293,12 +316,12 @@ export function App() {
 
               {/* Area tabs */}
               <nav className="flex items-center gap-1">
-                {AREA_ORDER.filter((a) => canSeeArea(a) && !AREAS[a].hidden).map((area) => (
+                {AREA_ORDER.filter((a) => canSeeArea(a)).map((area) => (
                   <button
                     key={area}
                     onClick={() => setView(AREAS[area].defaultView)}
                     className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                      currentArea === area
+                      currentArea === area && !STANDALONE_VIEWS.has(view)
                         ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
                         : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
                     }`}
@@ -351,9 +374,9 @@ export function App() {
                       onClick={() => { setView('settings'); setShowUserMenu(false); }}
                       className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
                     >
-                      Settings
+                      My Settings
                     </button>
-                    {userRole === 'admin' && (
+                    {areaAccess.admin === 'edit' && (
                       <button
                         onClick={() => { setView('admin-panel'); setShowUserMenu(false); }}
                         className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
@@ -396,7 +419,7 @@ export function App() {
         </header>
 
         {/* Sub-tab bar — shows tabs for the current area (only if >1 tab) */}
-        {view !== 'help' && view !== 'debug' && getVisibleTabs(currentArea).length > 1 && (
+        {!STANDALONE_VIEWS.has(view) && getVisibleTabs(currentArea).length > 1 && (
           <div className="border-b border-[#3a424d] px-6 py-1.5 bg-[#2a2f36]">
             <div className="flex items-center gap-1">
               {getVisibleTabs(currentArea).map((tab) => (
@@ -491,7 +514,7 @@ export function App() {
 
           {/* Onboarding */}
           {view === 'delivery' && (
-            <DeliveryView userRole={userRole} />
+            <DeliveryView canWrite={areaAccess.onboarding === 'edit'} />
           )}
           {view === 'ob-calendar' && (
             <OnboardingCalendar />
@@ -502,7 +525,7 @@ export function App() {
 
           {/* Account Management */}
           {view === 'crm' && (
-            <CrmView userRole={userRole} />
+            <CrmView canWrite={areaAccess.accounts === 'edit'} />
           )}
 
           {/* Administration */}
@@ -529,6 +552,7 @@ export function App() {
               spDebugLoading={spDebugLoading}
               setSpDebugLoading={setSpDebugLoading}
               setSpDebug={setSpDebug}
+              d365Debug={d365Debug}
             />
           )}
         </main>
@@ -544,7 +568,7 @@ export function App() {
 // ── Debug View (extracted to keep App clean) ──
 
 function DebugView({
-  tasks, loading, syncing, error, apiDebug, lastSuggest, spDebug, spDebugLoading, setSpDebugLoading, setSpDebug,
+  tasks, loading, syncing, error, apiDebug, lastSuggest, spDebug, spDebugLoading, setSpDebugLoading, setSpDebug, d365Debug,
 }: {
   tasks: Array<{ id: string; raw_data: unknown; [k: string]: unknown }>;
   loading: boolean;
@@ -556,6 +580,7 @@ function DebugView({
   spDebugLoading: boolean;
   setSpDebugLoading: (v: boolean) => void;
   setSpDebug: (v: Record<string, unknown>) => void;
+  d365Debug: Array<{ ts: string; text: string }>;
 }) {
   return (
     <div className="space-y-4">
@@ -659,6 +684,14 @@ function DebugView({
         ) : (
           <div className="text-[11px] text-neutral-600">Loading SP debug info...</div>
         )}
+      </div>
+      <div className="border border-[#3a424d] rounded-lg p-4 bg-[#2f353d]">
+        <div className="text-xs text-neutral-500 uppercase tracking-wider mb-2">D365 Sync Debug</div>
+        <pre className="text-[11px] text-neutral-300 overflow-auto max-h-[260px] whitespace-pre-wrap">
+          {d365Debug.length === 0
+            ? 'No D365 debug entries yet. Run a D365 sync from the CRM page to populate.'
+            : d365Debug.map((e) => `${e.ts}  ${e.text}`).join('\n\n')}
+        </pre>
       </div>
       <div className="border border-[#3a424d] rounded-lg p-4 bg-[#2f353d]">
         <div className="text-xs text-neutral-500 uppercase tracking-wider mb-2">Sample Task</div>

@@ -8,6 +8,16 @@ const D365_BASE_URL = process.env.D365_ORG_URL || 'https://nurtur-prod.crm11.dyn
 const DATA_DIR = process.env.DATA_DIR || process.cwd();
 const CACHE_FILE = path.join(DATA_DIR, '.d365-token-cache.json');
 
+// In-memory debug log (ring buffer, max 50 entries)
+const d365DebugLog: Array<{ ts: string; text: string }> = [];
+function d365Debug(text: string) {
+  const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  d365DebugLog.push({ ts, text });
+  if (d365DebugLog.length > 50) d365DebugLog.shift();
+  console.log(`[D365] ${text}`);
+}
+export function getD365DebugLog() { return [...d365DebugLog]; }
+
 interface D365Config {
   tenantId: string;
   clientId: string;
@@ -221,13 +231,35 @@ export class Dynamics365Service {
   }
 
   async getAccounts(top = 100): Promise<D365Account[]> {
+    // Get current user's D365 ID to filter to owned accounts only
+    const me = await this.whoAmI();
+    const userId = me.UserId.toLowerCase();
+    d365Debug(`WhoAmI userId: ${userId}`);
+
     const result = await this.fetch<{ value: D365Account[] }>('accounts', {
       $select: 'accountid,name,revenue,telephone1,emailaddress1,industrycode,statecode,statuscode,_ownerid_value,createdon,modifiedon',
       $orderby: 'name asc',
       $top: String(top),
-      $filter: 'statecode eq 0', // Active only
+      $filter: `statecode eq 0 and _ownerid_value eq '${userId}'`,
     });
-    return result.value;
+
+    d365Debug(`OData returned ${result.value.length} accounts (with owner filter in query)`);
+
+    // Fallback: filter server-side if OData filter didn't work (GUID format mismatch)
+    const filtered = result.value.filter(a => {
+      const owner = a._ownerid_value?.toLowerCase();
+      return owner === userId;
+    });
+
+    if (filtered.length !== result.value.length) {
+      d365Debug(`Post-filter: ${result.value.length} → ${filtered.length} (OData filter was ineffective)`);
+      const sample = result.value.slice(0, 5).map(a => `${a.name}: owner=${a._ownerid_value}`);
+      d365Debug(`Non-owned sample: ${sample.join(', ')}`);
+    } else {
+      d365Debug(`All ${filtered.length} accounts match owner filter`);
+    }
+
+    return filtered;
   }
 
   async getAccountActivities(accountId: string): Promise<unknown[]> {
@@ -240,7 +272,7 @@ export class Dynamics365Service {
     return result.value;
   }
 
-  async syncToLocal(crmQueries: CrmQueries): Promise<{ created: number; updated: number; total: number }> {
+  async syncToLocal(crmQueries: CrmQueries): Promise<{ created: number; updated: number; total: number; message: string }> {
     const accounts = await this.getAccounts(500);
     let created = 0;
     let updated = 0;
@@ -287,7 +319,7 @@ export class Dynamics365Service {
     this.lastConnected = new Date().toISOString();
     this.lastError = null;
 
-    return { created, updated, total: accounts.length };
+    return { created, updated, total: accounts.length, message: `Synced ${accounts.length} owned accounts (${created} new, ${updated} updated)` };
   }
 
   getStatus() {

@@ -32,9 +32,13 @@ interface Props {
   onCheckLoginStatus: (id: string) => Promise<{ ok: boolean; loggedIn: boolean; loginInProgress: boolean }>;
   onLogout: (id: string) => Promise<void>;
   onRefresh: () => Promise<void>;
+  /** Hide credential fields (used by Admin for non-editable status display) */
+  hideCredentials?: boolean;
+  /** Callback to delete all local records for this integration */
+  onDeleteRecords?: () => Promise<void>;
 }
 
-export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin, onCheckLoginStatus, onLogout, onRefresh }: Props) {
+export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin, onCheckLoginStatus, onLogout, onRefresh, hideCredentials, onDeleteRecords }: Props) {
   const [enabled, setEnabled] = useState(integration.enabled);
   const [values, setValues] = useState<Record<string, string>>({ ...integration.values });
   const [saving, setSaving] = useState(false);
@@ -159,6 +163,23 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
     }
   };
 
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteRecords = async () => {
+    if (!onDeleteRecords) return;
+    if (!confirm(`Delete all local ${integration.name} records? They will be re-fetched on next sync.`)) return;
+    setDeleting(true);
+    setFeedback(null);
+    try {
+      await onDeleteRecords();
+      setFeedback({ type: 'success', message: 'Local data deleted' });
+    } catch {
+      setFeedback({ type: 'error', message: 'Delete failed' });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const [syncingSource, setSyncingSource] = useState<string | null>(null);
 
   const handleSyncSource = async (source: string) => {
@@ -253,7 +274,7 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
       <p className="text-xs text-neutral-500 mb-4">{integration.description}</p>
 
       {/* Credential fields */}
-      {enabled && integration.fields.length > 0 && (
+      {enabled && !hideCredentials && integration.fields.length > 0 && (
         <div className="space-y-3 mb-4">
           {integration.fields.map((field) => (
             <div key={field.key}>
@@ -494,13 +515,15 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
 
       {/* Actions */}
       <div className="flex items-center gap-2">
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-3 py-1.5 text-xs bg-[#363d47] hover:bg-[#3a424d] rounded border border-[#3a424d] transition-colors disabled:opacity-50"
-        >
-          {saving ? 'Saving...' : 'Save'}
-        </button>
+        {!hideCredentials && (
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-3 py-1.5 text-xs bg-[#363d47] hover:bg-[#3a424d] rounded border border-[#3a424d] transition-colors disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        )}
         {integration.mcpStatus === 'error' && (
           <button
             onClick={handleReconnect}
@@ -508,6 +531,15 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
             className="px-3 py-1.5 text-xs bg-[#363d47] hover:bg-[#3a424d] rounded border border-[#3a424d] transition-colors disabled:opacity-50"
           >
             {reconnecting ? 'Reconnecting...' : 'Retry Connection'}
+          </button>
+        )}
+        {enabled && onDeleteRecords && (
+          <button
+            onClick={handleDeleteRecords}
+            disabled={deleting}
+            className="px-3 py-1.5 text-xs text-red-400 hover:text-red-300 bg-red-950/30 hover:bg-red-950/50 rounded border border-red-900/50 transition-colors disabled:opacity-50 ml-auto"
+          >
+            {deleting ? 'Deleting...' : 'Delete Local Data'}
           </button>
         )}
       </div>

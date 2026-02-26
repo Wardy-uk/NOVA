@@ -1,57 +1,119 @@
 TO DO
 -----
 
-[DO NEXT] Deploy to server — provision server, copy data, configure nginx + pm2
-    - see docs/deployment.md for full guide
-    - paths now configurable via DATA_DIR, DELIVERY_XLSX_PATH, ONEDRIVE_WATCH_DIR env vars
-    - DB persistence already works (sql.js saves to daypilot.db every 30s + on shutdown)
-    - cross-platform uvx resolution done (Windows + Linux)
+=== CURRENT STATUS (26 Feb 2026) ===
 
---- Bugs ---
+N.O.V.A is a fully functional personal productivity aggregator running locally on Windows.
+It pulls tasks from Jira, Microsoft 365 (Planner, To-Do, Calendar, Email), Monday.com, and
+Dynamics 365 CRM into a single dashboard with AI-powered standups, focus prioritisation, and
+delivery tracking.
+
+What's working:
+  - Express + React/Vite + SQLite stack, JWT auth with Entra SSO option
+  - 5 MCP integrations: Jira (45 tools), MS365 (70 tools), Monday.com (46 tools), D365, OneDrive
+  - 6 main areas: My NOVA (dashboard/AI/standup), Service Desk (kanban/calendar), Onboarding
+    (matrix config + Jira ticket automation), Delivery (xlsx/SP sync, milestones), CRM (D365),
+    Admin (users, teams, roles, permissions, integrations, milestones, onboarding, feedback)
+  - Delivery milestones (30-day model) with auto-creation, checklist tracking, task surfacing
+  - Onboarding ticket orchestrator — idempotent, resume-safe, dry-run capable
+  - Multi-user with role-based access, per-user settings/AI keys, file-based stores
+  - Email send/reply/forward, calendar create/edit, SharePoint sync push/pull
+
+What's not working or partially working:
+  - Service Desk "Unassigned" and "All" filters (BUG1 — JQL only fetches current user's tickets)
+  - Monday.com syncs 0 tasks (connection fixed, but needs board IDs configured or search tuned)
+  - MS365 To-Do sync errors (MCP returning non-JSON for some lists)
+  - Not deployed — runs on localhost only
+
+Current branch: nova-codex (many uncommitted changes across 40+ files)
+
+To Triage - Feedback should record who sent the feedback, and allow admin to reply, also, add the option to add the feedback to our todo list doc
+
+=== BLOCKERS / BUGS ===
 
 BUG1. Service Desk — Unassigned and All Tickets filters don't work
       - filterByOwnership() logic looks correct, need to debug why 'unassigned'/'all' return wrong results
 
---- Tier 1: High-value daily workflow ---
+BUG2. [FIXED] Monday.com MCP — globally-installed v1.16.1 + OTEL_SDK_DISABLED, adapter updated for new tool names
+      - Needs board IDs in Settings > Monday.com for full sync
+
+clear out D365 records for a fresh repull - remove accounts that aren't assigned to me
+
+CRM - total MRR value is bigger than size of panel
+
+
+=== DO NEXT (high priority, unblocks daily use) ===
+
+- Deploy to server — move off local dev, make NOVA accessible remotely
+    - containerise (Docker) or deploy to internal server
+    - replace in-memory SQLite with file-persisted or PostgreSQL
+    - environment config (JWT secret, DB path, MCP server paths)
+
+- O365 SSO — allow Microsoft login alongside username/password
+
+- Map roles to tab & feature access — custom roles (Admin > Permissions) wired to route guards + UI visibility
+
+- Jira SLA prioritisation — tickets over SLA or overdue an update should be prioritised (user will supply logic)
+
+
+=== QUICK WINS (small effort, visible impact) ===
+
+- [DONE] Rename Command Centre to 'My NOVA'
+- [DONE] Rename Onboarding > Config to 'Onboarding Matrix'
+- [DONE] Add Sale Type filter on onboarding matrix
+- [DONE] Service Desk Kanban — default groupBy to 'date' buckets
+
+
+=== TIER 1: Daily workflow enhancements ===
 
 1. Dashboard KPIs — include Onboarding metrics (delivery milestones progress, overdue milestones, onboarding runs)
 2. My Focus auto-population — tickets over SLA or overdue update auto-appear in My Focus
-3. Service Desk Kanban — default groupBy to 'date' buckets (one-liner: ServiceDeskKanban.tsx:137)
-4. Delivery kanban board — drag cards between status columns (Not Started → In Progress → Training → Complete)
+3. Delivery kanban board — drag cards between status columns (Not Started → In Progress → Training → Complete)
+4. Add CRM integration partners list to onboarding — validate for ticket creation
 
---- Tier 2: Onboarding Ticket Automation ---
+
+=== TIER 2: Onboarding ticket automation ===
 
 5. Ticket creation UI — form in Admin > Onboarding to trigger POST /api/onboarding/create-tickets
    - sale type dropdown, customer name, onboarding ref, due date
    - dry-run preview before live execution
    - show result (parent key + child keys) or error
-6. Jira settings for ticket creation — configure request type field IDs in Admin > Integrations
+6. Jira settings for ticket creation — configure request type field IDs in Admin > Integrations (Jira Onboarding card)
 7. Test ticket creation — dry run + live test against Jira NT project
 8. Onboarding run history UI — view past runs (status, parent/child keys, errors)
 
---- Tier 2: Service Desk & Integration ---
+
+=== TIER 2: Service Desk ===
 
 9.  Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
-10. Jira dual-account config — Settings = personal read, Admin = service account for automation
-11. Browse mail folders — route exists (GET /api/o365/mail/folders), needs UI
-12. Browse specific planner plans — get-planner-plan, list-plan-tasks
 
---- Tier 3: Platform maturity ---
 
-13. Customer 360 timeline — unified per-customer view across deliveries, CRM, Jira, onboarding, emails
-14. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls, overdue tasks (in-app + email digest)
-15. Team workload view — onboarder/assignee load heatmap across deliveries + Jira
-16. Activity audit log — who changed what and when (append-only table, Admin timeline view)
-17. [ONGOING] Documentation — keep help page updated as features change
+=== TIER 3: Platform maturity ===
 
---- Tier 4: Nice to have ---
+10. Customer 360 timeline — unified per-customer view across deliveries, CRM, Jira, onboarding, emails
+11. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls, overdue tasks (in-app + email digest)
+12. Team workload view — onboarder/assignee load heatmap across deliveries + Jira
+13. Activity audit log — who changed what and when (append-only table, Admin timeline view)
+14. Jira OAuth device-code flow — replace email+token with "Sign in with Atlassian" button
+    - register Atlassian OAuth 2.0 app (3LO)
+    - implement device code / authorization code flow
+    - per-user token storage + refresh
+    - may require replacing mcp-atlassian with direct Jira REST calls
+15. [ONGOING] Documentation — keep help page updated as features change
 
-18. Email attachments — list/get/add attachments on messages
-19. Multi-calendar support — list-calendars route exists, needs UI
-20. Workflows for tickets and deliveries
-21. Jira move-team automation (move ticket to a different Jira project)
 
---- Future Consideration ---
+=== TIER 4: Nice to have ===
+
+16. Email attachments — list/get/add attachments on messages
+17. Multi-calendar support — list-calendars route exists, needs UI
+18. Workflows for tickets and deliveries
+19. Jira move-team automation (move ticket to a different Jira project)
+20. Browse mail folders — route exists (GET /api/o365/mail/folders), needs UI
+21. Browse specific planner plans — get-planner-plan, list-plan-tasks
+
+
+=== FUTURE CONSIDERATION ===
+
 - Global search — search across all entities from a single search bar
 - Scheduled email digests — weekly delivery progress, overdue items via M365 send-mail
 - CSV/PDF export — export filtered data for stakeholders
@@ -62,142 +124,141 @@ BUG1. Service Desk — Unassigned and All Tickets filters don't work
 - Sales pipeline — replace onboarding spreadsheet (order form → task → welcome pack)
 - Deprecate PA workaround (on hold pending O365 integration stability)
 
+
 -----------------------------------------------------------------------
 
-COMPLETED
+COMPLETED (recent first)
 ---------
-[DONE] persist settings
-[DONE] persist filter selection
-[DONE] auto run Ask Nova when session first loads
-[DONE] pre load AI tasks - esp the stand ups - they take too long in the UI
-[DONE] add comment history to jira side drawer
-[DONE] Jira transitions - filtered to valid transitions with comment modals
-[DONE] Standup persistence - past results persist, re-run option, resets at midnight
-[DONE] make ask nova button x2 height, and central top/bottom in the panel
-[DONE] lightmode/dark mode/system preference toggle
-[DONE] allow multi select of sources for ask nova
-[DONE] put borders round Ask NOVA to make it look like a button
-[DONE] reduce ask nova button size by 20%
-[DONE] Jira automations from NOVA - JQL search, create issue, preset queries
-[DONE] daily stats/KPIs in own Stats page - overdue, due today/week, completion rate, avg age, SLA, by source/status
-[DONE] create mock up page for "delivery sheet" - reads from local xlsx, cached, with limit param
-[DONE] Split Daily Stats and KPIs - 2 separate pages
-[DONE] preload delivery sheet mock up - max 5 latest from each tab (?limit=N param)
-[DONE] Daily Stats as home page
-[DONE] Delivery data entry - local DB CRUD for delivery entries
-[DONE] CRM page - customer health (RAG), business reviews, DB-backed CRUD
-[DONE] login - JWT auth with login/register gate, first-run admin setup
-[DONE] add toggle to turn off - sync source toggles per M365 type in Settings
-[DONE] PA bridge top-level on/off toggle + per-source toggles
-[DONE] O365 per-source sync toggles (Planner, To-Do, Calendar, Email) in integration card
-[DONE] O365 enable toggle auto-saves (no more needing to click Save)
-[DONE] fix login race condition - token not synced before task/health fetches caused instant logout
-[DONE] PA bridge toggle moved to RH side to match integration card layout
-[DONE] configurable email filter + days-to-pull in Settings (flagged/unread/all, 1-30 days)
-[DONE] delivery sheet MRR overflow CSS fix (truncate + min-w-0 on KpiCard)
-[DONE] add Remember Me to login page (sessionStorage when unchecked, localStorage when checked)
-[DONE] sync frequency dropdown in Settings (1/2/5/10/15/30 min, reads refresh_interval_minutes)
-[DONE] remove JQL search from UI (kept Create Issue only)
-[DONE] create tasks from NOVA — O365 Planner + To-Do via /api/o365/ routes + CreateTaskForm UI
-[DONE] edit tasks + sync back to source — update-planner-task, update-todo-task via TaskDrawer
-[DONE] universal side drawer for all task types — click any task to open, editable for Planner/To-Do
-[DONE] remove "Open" from task items — Edit button opens universal drawer
-[DONE] Jira fields in TaskDrawer — Priority dropdown, Due Date picker, Agent Last Updated, Agent Next Update
-[DONE] Jira transitions + comment history ported to universal TaskDrawer (replaces old JiraDrawer)
-[DONE] NextActions uses universal TaskDrawer instead of old JiraDrawer
-[DONE] stale task cleanup hardened — ephemeral sources (calendar/email) allow empty purge, task sources (jira/planner/todo/monday) protected from accidental wipe
-[DONE] per-integration auto sync — each source has its own interval dropdown (O365 per-source, Jira/Monday per-card), falls back to global default
-[DONE] My Focus panel — dedicated view, Focus/Unfocus replaces Pin/Unpin across all UI, Focus button in NextActions + Standup, Focus card on Command Centre
-[DONE] deliveries — wider panel (max-w-7xl for delivery view)
-[DONE] deliveries — training date column (DB schema + form + table column)
-[DONE] deliveries — starred deliveries (star/unstar toggle, starred panel above table, amber accent)
-[DONE] Jira assignee picker — search/reassign users from TaskDrawer, user search API route
-[DONE] deliveries — side drawer for editing (DeliveryDrawer, click any row to open, xlsx rows pre-fill new entry)
-[DONE] deliveries — remove Branches + Incr columns, full-width panel (max-w-full)
-[DONE] deliveries — multi-select status filter on table
-[DONE] deliveries — multi-select status filter on dashboard KPI figures
-[DONE] move Sync Now button to Settings page — per-integration + per-O365-source Sync Now buttons
-[DONE] README technical documentation
-[DONE] deliveries — starred for me / starred for all (star_scope + starred_by, panel toggle My Stars / Team Stars)
-[DONE] deliveries — remove duplicate entries (dedup query + endpoint, hide xlsx rows when DB entry exists)
-[DONE] deliveries — clean up test data
-[DONE] deliveries — manual SharePoint sync (pull from SP via MCP file tools, Sync from SharePoint button)
-[DONE] per-source Sync Now buttons in integration cards (POST /api/tasks/sync/:source)
-[DONE] removed global Sync Now from navbar (now per-integration in Settings)
-[DONE] star xlsx rows — star button on spreadsheet rows creates DB entry with is_starred=1
-[DONE] deliveries — prefill drawer from xlsx row click (opens DeliveryDrawer with spreadsheet data)
-[DONE] Create MS todos from NOVA (single or multiple) — batch mode toggle in CreateTaskForm, POST /api/o365/todo/tasks/batch endpoint
-[DONE] Admin screen — AdminView with Users/Teams/AI Keys tabs, admin-only nav button
-[DONE] Users, roles & teams — teams table + user_settings table, team_id on users, role dropdown (admin/editor/viewer)
-[DONE] Feature access - role based — requireRole() middleware, Settings writes gated to admin/editor, viewer gets read-only mode
-[DONE] Global api key for AI — managed in Admin > AI Keys tab
-[DONE] Allow individual ai key override — per-user AI key in Admin > AI Keys tab (user_settings table)
+[DONE] Jira dual-account config — My Settings = personal Jira (read/sync), Admin = service account for onboarding automation
+[DONE] My Settings / Admin split — separate standalone pages, personal integrations in My Settings, global config in Admin
+[DONE] Personal AI key override — per-user API key in My Settings > AI Preferences, overrides global key
+[DONE] Milestone tasks surfaced across all views — source='milestone' in Dashboard, Tasks, Ask NOVA, Standup, TaskCard, NextActions, TaskDrawer
+[DONE] My Focus next milestone per delivery — shows next pending milestone with due date colour coding
+[DONE] Milestone dynamic priority — overdue=80, due 3d=70, due 7d=60, normal=50, complete=20
+[DONE] Milestone stale-delete protection — deleteStaleBySource skips 'milestone' source
+[DONE] AI prompts enhanced with milestone context — morning/replan/eod + ai-actions system prompt
+[DONE] MCP reconnect improvements — stuck flag timeout (30s), connection timeout (30s), partial cleanup, EPIPE detection
+[DONE] Monday.com MCP pinned to v1.16.1 — v2.0.0 crashes on Windows (OpenTelemetry EPERM)
+[DONE] Entra ID SSO integration card — Admin > Integrations for SSO config
+[DONE] Onboarding Calendar — monthly grid showing delivery milestones by target date
+[DONE] SD5 — Service Desk Kanban drag-and-drop — drag tickets between status columns to transition in Jira
+[DONE] BYM default milestones imported — 10 milestones (Day 0-35) with full checklists
+[DONE] Milestone auto-creation on import — bulk import creates milestones + tasks for each imported entry
+[DONE] F2 — My Focus milestone-aware — deliveries with overdue milestones auto-appear
+[DONE] DM2 — Milestone instances as tasks — source='milestone', bidirectional sync
+[DONE] DM1 — Delivery milestones (30-day model) — milestone_templates + delivery_milestones tables
+[DONE] SD4 — Service Desk Kanban fixed 5 columns
+[DONE] SD3 — Service Desk calendar view with monthly grid, drag-and-drop reschedule
+[DONE] SD2 — Service Desk Kanban toggle group-by-status / group-by-date
+[DONE] SD1 — Service Desk ticket ownership tabs (My Tickets / Unassigned / All)
+[DONE] My Focus includes deliveries — starred-for-me and onboarder-matched entries
+[DONE] Ask NOVA moved to Command Centre dashboard
+[DONE] Service Desk filters removed — flat sorted list
+[DONE] D365 sync NOT NULL fix
+[DONE] D365 credential saving — fixed field visibility + status feedback
+[DONE] Administration tab hidden from top nav — accessed via user menu
+[DONE] User menu dropdown — Settings/Admin/Help/Feedback/Debug/Logout
+[DONE] File-based settings store — settings.json
+[DONE] File-based user store — users.json
+[DONE] Add User modal in AdminView
+[DONE] Nav restructured into 5 team areas
+[DONE] Onboarding auto-seed on startup
+[DONE] Onboarding grouped matrix UI — 5-tab editor
+[DONE] Onboarding ticket type grouping
+[DONE] Onboarding nav + wiring
+[DONE] Onboarding execution API
+[DONE] Onboarding ticket orchestrator — idempotent, resume-safe, dry-run
+[DONE] Onboarding matrix resolver
+[DONE] Direct Jira REST v3 client
+[DONE] Standalone import script
+[DONE] Onboarding config UI — 4-tab editor
+[DONE] Onboarding matrix import from xlsx
+[DONE] Onboarding config CRUD API
+[DONE] Onboarding config DB tables — 5 tables
+[DONE] delivery — SP folder path configurable
+[DONE] delivery — NOVA Only filter toggle
+[DONE] D365 config to Admin
+[DONE] Bulk ToDo result validation
+[DONE] Monday.com MCP -32000 on save fix
+[DONE] D365 delegated auth — device code flow
+[DONE] multi-user — per-user focus/pins, per-user standups
+[DONE] Monday.com initial connection retry
+[DONE] deliveries — inline editing
+[DONE] deliveries — column sorting
+[DONE] delete delivery items
+[DONE] delete users
+[DONE] Feedback feature
+[DONE] create/edit calendar events from NOVA
+[DONE] send/reply/forward emails from NOVA
+[DONE] Import xlsx to DB
+[DONE] SharePoint sync push
+[DONE] SharePoint sync pull
+[DONE] Dynamics 365 CRM integration
+[DONE] Onboarding unique IDs — BYM0001 format
+[DONE] MCP auto-reconnect
 [DONE] Documentation — User guides (help page)
-[DONE] MCP auto-reconnect — transport close detection, auto-reconnect on callTool, retry on -32000
-[DONE] Onboarding unique IDs — BYM0001 format, auto-assigned on create, backfilled on startup
-[DONE] Dynamics 365 CRM integration — direct Dataverse Web API (MSAL auth), sync accounts to NOVA CRM, D365 badges on customers
-[DONE] SharePoint sync pull — rewrote to list-drives → list-folder-files → download by driveItemId
-[DONE] SharePoint sync push — builds xlsx from DB, uploads via upload-file-content
-[DONE] Import xlsx to DB — bulk import all xlsx rows to DB with auto-assigned onboarding IDs
-[DONE] Email send/reply/forward — send-mail MCP tool, reply/forward in TaskDrawer
-[DONE] Calendar create/edit — full CRUD routes + edit UI in TaskDrawer for calendar events
-[DONE] Help page updated — delivery (IDs, SP push, import), CRM (D365), email/calendar actions, tips
-[DONE] MS365 MCP re-auth — re-auth'd, no longer blocking
-[DONE] Monday.com MCP auto-reconnect — added transport close detection + auto-reconnect on callTool
-[DONE] onboarding unique IDs — brand prefix + sequential number (BYM0001), auto-assigned, backfilled on startup
-[DONE] global AI API key override — already on user settings (Admin > AI Keys tab)
-[DONE] deliveries — fix SharePoint sync pull (rewrote to list-drives → list-folder-files → download by driveItemId)
-[DONE] deliveries — push to SharePoint (builds xlsx from DB, uploads via upload-file-content, Push to SP button in UI)
-[DONE] deliveries — import xlsx to database (POST /entries/import-xlsx, amber "Import xlsx to DB" button, auto-assigns onboarding IDs)
-[DONE] send/reply/forward emails from NOVA — send-mail MCP tool, reply/forward with send-mail fallback, Reply/Forward UI in TaskDrawer
-[DONE] create/edit calendar events from NOVA — full CRUD routes (create, update, get, delete, list calendars), edit UI in TaskDrawer
-[DONE] Feedback feature — raise bug, ask question, suggest feature (feedback table, modal UI, admin can view all feedback)
-[DONE] delete users — DELETE /api/admin/users/:id with self-delete + last-admin protection, Delete button in AdminView
-[DONE] delete delivery items — DELETE /api/delivery/entries/:id, Delete button in DeliveryDrawer with confirmation
-[DONE] deliveries — column sorting (click column headers to sort asc/desc, both DB entries and xlsx rows)
-[DONE] deliveries — inline editing (click any DB entry cell to edit in-place, auto-save on blur)
-[DONE] Monday.com initial connection retry — connectWithRetry() with 2 retries + backoff on initial setup failure
-[DONE] multi-user — per-user focus/pins (user_task_pins table), per-user standups (user_id on rituals), team-scoped views
-[DONE] D365 delegated auth — switched from client_credentials to device code flow (PublicClientApplication), token cache persisted to disk, no client secret needed
-[DONE] Monday.com MCP -32000 on save — made connectWithRetry() public, used in save + reconnect handlers (not just startup)
-[DONE] Bulk ToDo — added result validation + logging to batch endpoint (was silently discarding MCP tool results)
-[DONE] D365 config to Admin — new Integrations tab in Admin for client_id/tenant_id, Settings card shows only Sign In button
-[DONE] delivery — NOVA Only filter toggle (hides xlsx rows, shows only DB entries)
-[DONE] delivery — SP folder path configurable via settings (sp_drive_hint, sp_folder_path, sp_file_name)
-[RESOLVED] team persistence — investigated, saveDb() is called correctly on create/update/delete
-[RESOLVED] delivery import persistence — investigated, saveDb() is called per row in create()
-[DONE] Onboarding config DB tables — sale_types, capabilities, matrix, capability_items, runs (5 tables in schema.ts)
-[DONE] Onboarding config CRUD API — full REST endpoints for sale types, capabilities, matrix, items (routes/onboarding-config.ts)
-[DONE] Onboarding matrix import from xlsx — imports OnboardingMatix.xlsx Sheet 1 (Matrix per Sale) + Sheet 2 (Items per Product) with group-to-capability mapping
-[DONE] Onboarding config UI — 4-tab editor: Matrix grid, Sale Types, Capabilities, Items per Capability (OnboardingConfigView.tsx)
-[DONE] Standalone import script — scripts/import-onboarding.mjs bypasses auth, writes directly to SQLite
-[DONE] Direct Jira REST v3 client — jira-client.ts with basic auth, rate-limit handling (429 + Retry-After), ADF description builder
-[DONE] Onboarding matrix resolver — DB-backed resolver returns capabilities + items for a sale type (onboarding-matrix.ts)
-[DONE] Onboarding ticket orchestrator — idempotent, resume-safe, dry-run capable. Creates parent QA + N child tickets with BLOCKS links (onboarding-orchestrator.ts)
-[DONE] Onboarding execution API — POST /create-tickets, GET /status/:ref, GET /runs, GET /jira-meta (routes/onboarding.ts)
-[DONE] Onboarding nav + wiring — Onboarding page in App.tsx (admin/editor only), routes mounted in index.ts
-[DONE] Onboarding ticket type grouping — new 3-row xlsx structure (ticket group headers row 1, capabilities row 2, data row 3+), onboarding_ticket_groups table, grouped resolver, one Jira ticket per group listing X'd capabilities
-[DONE] Onboarding grouped matrix UI — 5-tab editor (Matrix, Sale Types, Ticket Groups, Capabilities, Items), matrix grid shows grouped column headers with colSpan
-[DONE] Onboarding auto-seed on startup — if onboarding tables empty + xlsx exists, auto-import on server start (survives code deploys)
-[DONE] Nav restructured into 5 team areas — Command Centre, Service Desk, Onboarding, Account Management, Administration (with sub-tabs)
-[DONE] Add User modal in AdminView Users tab — form wired to POST /api/auth/register
-[DONE] File-based user store — users.json drop-in replacement for SQLite UserQueries
-[DONE] File-based settings store — settings.json drop-in replacement for SQLite SettingsQueries, excluded from git
-[DONE] User menu dropdown — username in header opens Settings/Admin/Help/Feedback/Debug/Logout menu
-[DONE] Administration tab hidden from top nav — accessed via user menu instead
-[DONE] D365 credential saving — fixed field visibility, save callback, and status feedback for device_code auth
-[DONE] D365 sync NOT NULL fix — skip accounts with null/empty name from Dataverse
-[DONE] Ask NOVA moved to Command Centre dashboard — removed from TaskList (was duplicating on Service Desk)
-[DONE] Service Desk filters removed — tickets view shows flat sorted list, no source/overdue filters
-[DONE] My Focus includes deliveries — starred-for-me and onboarder-matched delivery entries appear in My Focus view
-[DONE] SD1 — Service Desk ticket ownership tabs (My Tickets / Unassigned / All) with filter persisted to localStorage
-[DONE] SD2 — Service Desk Kanban toggle between group-by-status and group-by-date (Overdue/Today/This Week/Next Week/Future/No Date)
-[DONE] SD3 — Service Desk calendar view with monthly grid, drag-and-drop reschedule, reschedule modal with Jira push + optional comment
-[DONE] SD4 — Service Desk Kanban fixed 5 columns (Open, WIP, Waiting on Agent, Waiting on Requestor, Waiting on Partner) using original Jira statuses from raw_data
-[DONE] DM1 — Delivery milestones (30-day model) — milestone_templates + delivery_milestones tables, Admin config tab, auto-create on delivery entry, progress timeline with expandable checklists in DeliveryDrawer, file-persisted seed data (milestone-templates.json)
-[DONE] DM2 — Milestone instances as tasks — source='milestone', bidirectional sync (task↔milestone status), deleteBySourcePrefix cleanup
-[DONE] F2 — My Focus milestone-aware — deliveries assigned to me with overdue milestones auto-appear, progress bar + overdue count on cards
-[DONE] BYM default milestones imported — 10 milestones (Day 0–35) with full checklists per onboarding model, seeded from src/server/data/milestone-templates.json
-[DONE] Milestone auto-creation on import — bulk import (import-xlsx) now creates milestones + tasks for each imported entry. Added backfill-milestones endpoint for existing entries.
-[DONE] SD5 — Service Desk Kanban drag-and-drop — drag tickets between status columns to transition in Jira. Shows transition picker modal with available transitions, optional comment.
-[DONE] Onboarding Calendar — monthly grid showing delivery milestones by target date. Side panel with overdue + future milestones. Product/onboarder filters. Click milestone for detail drawer with status cycling.
+[DONE] per-user AI key override
+[DONE] Global API key for AI
+[DONE] Feature access — role based
+[DONE] Users, roles & teams
+[DONE] Admin screen
+[DONE] Create MS todos from NOVA (batch)
+[DONE] deliveries — prefill drawer from xlsx row
+[DONE] star xlsx rows
+[DONE] removed global Sync Now from navbar
+[DONE] per-source Sync Now buttons
+[DONE] deliveries — manual SharePoint sync
+[DONE] deliveries — clean up test data
+[DONE] deliveries — remove duplicate entries
+[DONE] deliveries — starred for me / starred for all
+[DONE] README technical documentation
+[DONE] move Sync Now to Settings
+[DONE] deliveries — multi-select status filter (table + dashboard)
+[DONE] deliveries — remove Branches + Incr columns
+[DONE] deliveries — side drawer for editing
+[DONE] Jira assignee picker
+[DONE] deliveries — starred deliveries
+[DONE] deliveries — training date column
+[DONE] deliveries — wider panel
+[DONE] My Focus panel
+[DONE] per-integration auto sync
+[DONE] stale task cleanup hardened
+[DONE] NextActions uses universal TaskDrawer
+[DONE] Jira transitions + comment history in universal TaskDrawer
+[DONE] Jira fields in TaskDrawer
+[DONE] remove "Open" from task items
+[DONE] universal side drawer for all task types
+[DONE] edit tasks + sync back to source
+[DONE] create tasks from NOVA
+[DONE] remove JQL search from UI
+[DONE] sync frequency dropdown
+[DONE] Remember Me on login
+[DONE] delivery sheet MRR overflow fix
+[DONE] configurable email filter + days-to-pull
+[DONE] PA bridge toggle layout
+[DONE] fix login race condition
+[DONE] O365 enable toggle auto-saves
+[DONE] O365 per-source sync toggles
+[DONE] PA bridge toggles
+[DONE] sync source toggles
+[DONE] login — JWT auth
+[DONE] CRM page
+[DONE] Delivery data entry
+[DONE] Daily Stats as home page
+[DONE] preload delivery sheet
+[DONE] Split Daily Stats and KPIs
+[DONE] delivery sheet mock up
+[DONE] daily stats/KPIs page
+[DONE] Jira automations from NOVA
+[DONE] reduce ask nova button size
+[DONE] borders round Ask NOVA
+[DONE] multi select sources for ask nova
+[DONE] lightmode/dark mode toggle
+[DONE] make ask nova button bigger
+[DONE] Standup persistence
+[DONE] Jira transitions
+[DONE] Jira comment history
+[DONE] pre load AI tasks
+[DONE] auto run Ask Nova on load
+[DONE] persist filter selection
+[DONE] persist settings

@@ -1,19 +1,25 @@
 import { Router } from 'express';
-import type { TaskQueries } from '../db/queries.js';
+import type { TaskQueries, UserSettingsQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { getNextActions, getAiActionsDebugLog, recordAiActionsDebug } from '../services/ai-actions.js';
 
 export function createActionRoutes(
   taskQueries: TaskQueries,
   settingsQueries: SettingsQueries,
+  userSettingsQueries: UserSettingsQueries,
 ) {
   const router = Router();
 
-  const resolveApiKey = (): string | null => {
-    // DB is the source of truth (seeded from env on startup)
+  const resolveApiKey = (userId?: number): string | null => {
+    // 1. Per-user override (from user_settings table)
+    if (userId) {
+      const userKey = userSettingsQueries.get(userId, 'openai_api_key');
+      if (userKey?.trim()) return userKey.trim();
+    }
+    // 2. Global key from settings
     const fromDb = settingsQueries.get('openai_api_key');
     if (fromDb?.trim()) return fromDb.trim();
-    // Read-only fallback to env vars — no side-effect writes
+    // 3. Read-only fallback to env vars
     const fromEnv = process.env.OPENAI_API_KEY ?? process.env.OPENAI_KEY ?? null;
     if (fromEnv?.trim()) return fromEnv.trim();
     return null;
@@ -40,12 +46,12 @@ export function createActionRoutes(
         return;
       }
 
-      const apiKey = resolveApiKey();
+      const apiKey = resolveApiKey(req.user?.id as number | undefined);
       if (!apiKey) {
         recordAiActionsDebug('[error] missing OpenAI API key');
         res.status(400).json({
           ok: false,
-          error: 'OpenAI API key not configured. Add it in Settings → AI Assistant.',
+          error: 'OpenAI API key not configured. Set a personal key in My Settings → AI Preferences, or ask your admin to set a global key.',
         });
         return;
       }

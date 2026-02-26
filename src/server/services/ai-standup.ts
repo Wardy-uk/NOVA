@@ -84,7 +84,7 @@ export async function generateMorningBriefing(
     messages: [
       {
         role: 'system',
-        content: `You are N.O.V.A (Nurtur Operational Virtual Assistant), running a morning standup briefing. Analyse the task list and produce a structured morning briefing.
+        content: `You are N.O.V.A (Nurtur Operational Virtual Assistant), running a morning standup briefing. Analyse the task list and produce a structured morning briefing. Tasks with source "milestone" are customer onboarding milestones — highlight overdue ones prominently as they impact customer delivery timelines.
 
 Return ONLY a JSON object with these fields:
 - "summary": 2-3 sentence overview of the day ahead. Be direct, professional, slightly motivating.
@@ -134,7 +134,7 @@ export async function generateReplan(
     messages: [
       {
         role: 'system',
-        content: `You are N.O.V.A running a quick mid-day re-plan. Look at the current task state and suggest adjusted priorities for the rest of the day.
+        content: `You are N.O.V.A running a quick mid-day re-plan. Look at the current task state and suggest adjusted priorities for the rest of the day. Pay attention to onboarding milestones (source: "milestone") that are overdue or due today.
 
 Return ONLY a JSON object:
 - "summary": 1-2 sentence re-assessment
@@ -178,7 +178,7 @@ export async function generateEndOfDay(
     messages: [
       {
         role: 'system',
-        content: `You are N.O.V.A running an end-of-day review. Summarise what was accomplished and what's rolling over to tomorrow.
+        content: `You are N.O.V.A running an end-of-day review. Summarise what was accomplished and what's rolling over to tomorrow. Note progress on onboarding milestones (source: "milestone") in the accomplishments.
 
 Return ONLY a JSON object:
 - "summary": 2-3 sentence end-of-day wrap up. Be constructive, note achievements.

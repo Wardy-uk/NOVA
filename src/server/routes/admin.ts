@@ -33,8 +33,13 @@ export function createAdminRoutes(
       res.status(400).json({ ok: false, error: 'Password must be at least 6 characters' });
       return;
     }
-    const validRoles = ['admin', 'editor', 'viewer'];
-    const assignedRole = role && validRoles.includes(role) ? role : 'viewer';
+    const rawRoles = settingsQueries.get('custom_roles');
+    let customRoleIds: string[] = [];
+    try {
+      if (rawRoles) customRoleIds = (JSON.parse(rawRoles) as Array<{ id: string }>).map(r => r.id);
+    } catch { /* ignore */ }
+    const allValidRoles = ['admin', ...customRoleIds];
+    const assignedRole = role && allValidRoles.includes(role) ? role : (customRoleIds.includes('viewer') ? 'viewer' : customRoleIds[0] || 'viewer');
     const normalizedUsername = username.trim().toLowerCase();
     if (userQueries.getByUsername(normalizedUsername)) {
       res.status(409).json({ ok: false, error: 'Username already taken' });
@@ -63,8 +68,15 @@ export function createAdminRoutes(
     if (display_name !== undefined) updates.display_name = display_name;
     if (email !== undefined) updates.email = email;
     if (role !== undefined) {
-      if (!['admin', 'editor', 'viewer'].includes(role)) {
-        res.status(400).json({ ok: false, error: 'Role must be admin, editor, or viewer' });
+      // Validate role: must be 'admin' or a custom role ID
+      const rawRoles = settingsQueries.get('custom_roles');
+      let customRoleIds: string[] = [];
+      try {
+        if (rawRoles) customRoleIds = (JSON.parse(rawRoles) as Array<{ id: string }>).map(r => r.id);
+      } catch { /* ignore */ }
+      const validRoles = ['admin', ...customRoleIds];
+      if (!validRoles.includes(role)) {
+        res.status(400).json({ ok: false, error: `Invalid role. Valid: ${validRoles.join(', ')}` });
         return;
       }
       // Prevent removing the last admin
@@ -185,6 +197,69 @@ export function createAdminRoutes(
       userSettingsQueries.delete(userId, 'openai_api_key');
     }
     res.json({ ok: true });
+  });
+
+  // ---- Custom Roles ----
+
+  router.get('/roles', (_req, res) => {
+    const raw = settingsQueries.get('custom_roles');
+    let roles: Array<{ id: string; name: string; areas: Record<string, string> }> = [];
+    try {
+      if (raw) roles = JSON.parse(raw);
+    } catch { /* ignore */ }
+    res.json({ ok: true, data: { roles } });
+  });
+
+  router.put('/roles', (req, res) => {
+    const { roles } = req.body;
+    if (!Array.isArray(roles)) {
+      res.status(400).json({ ok: false, error: 'roles must be an array' });
+      return;
+    }
+
+    const validAccess = ['hidden', 'view', 'edit'];
+    const ids = new Set<string>();
+
+    for (const role of roles) {
+      if (!role.id || typeof role.id !== 'string' || !role.name || typeof role.name !== 'string') {
+        res.status(400).json({ ok: false, error: 'Each role must have id and name' });
+        return;
+      }
+      if (role.id === 'admin') {
+        res.status(400).json({ ok: false, error: 'Cannot define a custom role with id "admin"' });
+        return;
+      }
+      if (ids.has(role.id)) {
+        res.status(400).json({ ok: false, error: `Duplicate role id: ${role.id}` });
+        return;
+      }
+      ids.add(role.id);
+
+      if (!role.areas || typeof role.areas !== 'object') {
+        res.status(400).json({ ok: false, error: `Role "${role.name}" must have areas object` });
+        return;
+      }
+      for (const [area, access] of Object.entries(role.areas)) {
+        if (!validAccess.includes(access as string)) {
+          res.status(400).json({ ok: false, error: `Invalid access "${access}" for area "${area}" in role "${role.name}"` });
+          return;
+        }
+      }
+    }
+
+    settingsQueries.set('custom_roles', JSON.stringify(roles));
+    res.json({ ok: true });
+  });
+
+  // Update user role validation to accept custom role IDs
+  router.get('/valid-roles', (_req, res) => {
+    const raw = settingsQueries.get('custom_roles');
+    let customRoles: Array<{ id: string; name: string }> = [];
+    try {
+      if (raw) customRoles = JSON.parse(raw);
+    } catch { /* ignore */ }
+    const validRoles = ['admin', ...customRoles.map(r => r.id)];
+    res.json({ ok: true, data: { roles: validRoles, customRoles } });
   });
 
   return router;

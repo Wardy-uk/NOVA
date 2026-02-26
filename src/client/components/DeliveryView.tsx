@@ -139,8 +139,7 @@ function XlsxStarButton({ row, activeTab, dbEntries, starring, onToggleStar, onS
   );
 }
 
-export function DeliveryView({ userRole = 'viewer' }: { userRole?: string }) {
-  const canWrite = userRole === 'admin' || userRole === 'editor';
+export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
   const [data, setData] = useState<DeliveryData | null>(null);
   const [dbEntries, setDbEntries] = useState<DbEntry[]>([]);
   const [loading, setLoading] = useState(true);

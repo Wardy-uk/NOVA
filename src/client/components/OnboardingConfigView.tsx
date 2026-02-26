@@ -28,6 +28,7 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
   const [cells, setCells] = useState<MatrixCell[]>([]);
   const [items, setItems] = useState<CapItem[]>([]);
   const [selectedCapId, setSelectedCapId] = useState<number | null>(null);
+  const [matrixSaleTypeFilter, setMatrixSaleTypeFilter] = useState<number | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
@@ -257,15 +258,30 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
       {/* Tab content */}
       <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
         {tab === 'matrix' && (
-          <MatrixGrid
-            saleTypes={saleTypes}
-            capabilities={capabilities}
-            ticketGroups={ticketGroups}
-            isCellEnabled={isCellEnabled}
-            getCellNotes={getCellNotes}
-            onToggle={readOnly ? undefined : toggleCell}
-            readOnly={readOnly}
-          />
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <label className="text-[10px] text-neutral-500 uppercase tracking-wider">Filter Sale Type</label>
+              <select
+                value={matrixSaleTypeFilter ?? ''}
+                onChange={(e) => setMatrixSaleTypeFilter(e.target.value ? Number(e.target.value) : null)}
+                className="px-2.5 py-1.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 focus:border-[#5ec1ca] focus:outline-none"
+              >
+                <option value="">All Sale Types</option>
+                {saleTypes.filter(st => st.active).map(st => (
+                  <option key={st.id} value={st.id}>{st.name}</option>
+                ))}
+              </select>
+            </div>
+            <MatrixGrid
+              saleTypes={matrixSaleTypeFilter ? saleTypes.filter(st => st.id === matrixSaleTypeFilter) : saleTypes}
+              capabilities={capabilities}
+              ticketGroups={ticketGroups}
+              isCellEnabled={isCellEnabled}
+              getCellNotes={getCellNotes}
+              onToggle={readOnly ? undefined : toggleCell}
+              readOnly={readOnly}
+            />
+          </div>
         )}
 
         {tab === 'sale-types' && (

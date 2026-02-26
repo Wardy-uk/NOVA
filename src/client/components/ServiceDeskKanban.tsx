@@ -134,7 +134,7 @@ interface JiraTransition {
 
 export function ServiceDeskKanban({ tasks, onUpdateTask }: Props) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [groupBy, setGroupBy] = useState<GroupBy>('status');
+  const [groupBy, setGroupBy] = useState<GroupBy>('date');
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingTransition, setPendingTransition] = useState<PendingTransition | null>(null);
 

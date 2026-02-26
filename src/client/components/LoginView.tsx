@@ -3,17 +3,20 @@ import { useState, useEffect } from 'react';
 interface LoginViewProps {
   onLogin: (username: string, password: string, rememberMe?: boolean) => Promise<boolean>;
   onRegister: (username: string, password: string, displayName?: string) => Promise<boolean>;
+  onSsoLogin?: () => Promise<void>;
   error: string | null;
   loading: boolean;
 }
 
 const inputCls = 'bg-[#272C33] text-neutral-200 text-sm rounded-lg px-4 py-2.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-full placeholder:text-neutral-600';
 
-export function LoginView({ onLogin, onRegister, error, loading }: LoginViewProps) {
+export function LoginView({ onLogin, onRegister, onSsoLogin, error, loading }: LoginViewProps) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [firstRun, setFirstRun] = useState(false);
+  const [ssoEnabled, setSsoEnabled] = useState(false);
 
   // Check if any users exist — if not, default to register mode
+  // Also check SSO status
   useEffect(() => {
     fetch('/api/auth/status')
       .then(r => r.json())
@@ -22,6 +25,12 @@ export function LoginView({ onLogin, onRegister, error, loading }: LoginViewProp
           setMode('register');
           setFirstRun(true);
         }
+      })
+      .catch(() => {});
+    fetch('/api/auth/sso/status')
+      .then(r => r.json())
+      .then(json => {
+        if (json.ok && json.data.enabled) setSsoEnabled(true);
       })
       .catch(() => {});
   }, []);
@@ -161,6 +170,33 @@ export function LoginView({ onLogin, onRegister, error, loading }: LoginViewProp
               {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
+
+          {ssoEnabled && onSsoLogin && mode === 'login' && (
+            <>
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-[#3a424d]" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-[#2f353d] px-3 text-[10px] text-neutral-500 uppercase">or</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onSsoLogin}
+                disabled={loading}
+                className="w-full px-4 py-2.5 text-sm rounded-lg bg-[#2f353d] border border-[#3a424d] text-neutral-200 font-medium hover:bg-[#363d47] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 21 21" fill="none">
+                  <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+                  <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+                  <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+                  <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+                </svg>
+                Sign in with Microsoft
+              </button>
+            </>
+          )}
 
           <div className="mt-4 text-center">
             {mode === 'login' ? (

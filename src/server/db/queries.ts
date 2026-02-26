@@ -127,6 +127,9 @@ export class TaskQueries {
     freshIds: string[],
     options?: { allowEmpty?: boolean; deferSave?: boolean }
   ): number {
+    // Milestone tasks are managed by the milestone system, not external sync
+    if (source === 'milestone') return 0;
+
     if (freshIds.length === 0) {
       if (!options?.allowEmpty) {
         return 0;
@@ -230,6 +233,21 @@ export class TaskQueries {
     countStmt.free();
     if (count > 0) {
       this.db.run(`DELETE FROM tasks WHERE source = ? AND source_id LIKE ?`, [source, sourceIdPrefix + '%']);
+      saveDb();
+    }
+    return count;
+  }
+
+  deleteAllBySource(source: string): number {
+    const countStmt = this.db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE source = ?`);
+    countStmt.bind([source]);
+    let count = 0;
+    if (countStmt.step()) {
+      count = (countStmt.getAsObject() as Record<string, unknown>).c as number;
+    }
+    countStmt.free();
+    if (count > 0) {
+      this.db.run(`DELETE FROM tasks WHERE source = ?`, [source]);
       saveDb();
     }
     return count;
@@ -755,6 +773,14 @@ export class CrmQueries {
     this.db.run(`DELETE FROM crm_customers WHERE id = ?`, [id]);
     saveDb();
     return true;
+  }
+
+  deleteAllCustomers(): number {
+    const count = this.getAllCustomers({}).length;
+    this.db.run(`DELETE FROM crm_reviews`);
+    this.db.run(`DELETE FROM crm_customers`);
+    saveDb();
+    return count;
   }
 
   getOwners(): string[] {
@@ -1808,6 +1834,37 @@ export class MilestoneQueries {
     }
     stmt.free();
     return { total: 0, pending: 0, in_progress: 0, complete: 0, overdue: 0 };
+  }
+
+  /** Get the next non-complete milestone per delivery, ordered by target_date ASC */
+  getNextPendingByDelivery(deliveryIds: number[]): Map<number, { name: string; target_date: string; status: string }> {
+    const result = new Map<number, { name: string; target_date: string; status: string }>();
+    if (deliveryIds.length === 0) return result;
+
+    const placeholders = deliveryIds.map(() => '?').join(',');
+    const stmt = this.db.prepare(`
+      SELECT delivery_id, template_name, target_date, status
+      FROM delivery_milestones
+      WHERE delivery_id IN (${placeholders})
+        AND status != 'complete'
+      ORDER BY target_date ASC
+    `);
+    stmt.bind(deliveryIds);
+
+    const seen = new Set<number>();
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      const did = row.delivery_id as number;
+      if (seen.has(did)) continue;
+      seen.add(did);
+      result.set(did, {
+        name: row.template_name as string,
+        target_date: (row.target_date as string) ?? '',
+        status: row.status as string,
+      });
+    }
+    stmt.free();
+    return result;
   }
 }
 

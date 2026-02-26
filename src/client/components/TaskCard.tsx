@@ -14,6 +14,7 @@ const SOURCE_COLORS: Record<string, string> = {
   monday: 'bg-[#FF6D00]',
   email: 'bg-[#0078D4]',
   calendar: 'bg-[#8764B8]',
+  milestone: 'bg-emerald-600',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -23,6 +24,7 @@ const SOURCE_LABELS: Record<string, string> = {
   monday: 'MON',
   email: 'EMAIL',
   calendar: 'CAL',
+  milestone: 'OB',
 };
 
 function parseDescMeta(description: string | null): Record<string, string> {

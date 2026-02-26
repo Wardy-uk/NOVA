@@ -61,6 +61,10 @@ export class FileUserQueries {
     return load().users.find((u) => u.auth_provider === provider && u.provider_id === providerId);
   }
 
+  getByEmail(email: string): User | undefined {
+    return load().users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+  }
+
   create(user: {
     username: string;
     display_name?: string;

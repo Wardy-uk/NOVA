@@ -1,14 +1,15 @@
 import { Router } from 'express';
 import type { CrmQueries, DeliveryQueries, OnboardingRunQueries } from '../db/queries.js';
-import { requireRole } from '../middleware/auth.js';
+import type { AreaAccessGuard } from '../middleware/auth.js';
 
 export function createCrmRoutes(
   crmQueries: CrmQueries,
   deliveryQueries?: DeliveryQueries,
   onboardingRunQueries?: OnboardingRunQueries,
+  requireAreaAccess?: AreaAccessGuard,
 ): Router {
   const router = Router();
-  const writeGuard = requireRole('admin', 'editor');
+  const writeGuard = requireAreaAccess ? requireAreaAccess('accounts', 'edit') : (_req: any, _res: any, next: any) => next();
 
   // --- Summary ---
   router.get('/summary', (_req, res) => {

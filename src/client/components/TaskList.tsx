@@ -19,10 +19,11 @@ const SOURCE_META: Record<string, { label: string; color: string }> = {
   monday: { label: 'Monday', color: '#FF6D00' },
   email: { label: 'Email', color: '#0078D4' },
   calendar: { label: 'Calendar', color: '#8764B8' },
+  milestone: { label: 'Onboarding', color: '#10B981' },
 };
 
 // Ordered source list for consistent display
-const SOURCE_ORDER = ['jira', 'planner', 'todo', 'monday', 'email', 'calendar'];
+const SOURCE_ORDER = ['jira', 'planner', 'todo', 'monday', 'email', 'calendar', 'milestone'];
 
 type SortField = 'priority' | 'due_date' | 'updated_at';
 
@@ -43,12 +44,11 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal }: Props) {
   const [pinnedCollapsed, setPinnedCollapsed] = useState(true);
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
 
-  // Available sources (only those with tasks)
+  // Available sources — always show all known sources, plus any extras from tasks
   const activeSources = useMemo(() => {
     const set = new Set(tasks.map((t) => t.source));
-    return SOURCE_ORDER.filter((s) => set.has(s)).concat(
-      [...set].filter((s) => !SOURCE_ORDER.includes(s))
-    );
+    const extras = [...set].filter((s) => !SOURCE_ORDER.includes(s));
+    return [...SOURCE_ORDER, ...extras];
   }, [tasks]);
   
   useEffect(() => {

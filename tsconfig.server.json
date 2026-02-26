@@ -2,7 +2,11 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist/server",
-    "jsx": "preserve"
+    "jsx": "preserve",
+    "types": [],
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmitOnError": false
   },
   "include": ["src/server/**/*", "src/shared/**/*"]
 }

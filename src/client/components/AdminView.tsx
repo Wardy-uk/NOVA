@@ -18,7 +18,18 @@ interface Team {
   description: string | null;
 }
 
-type Tab = 'users' | 'teams' | 'milestones' | 'ai-keys' | 'integrations' | 'onboarding';
+type Tab = 'users' | 'teams' | 'milestones' | 'ai-keys' | 'integrations' | 'onboarding' | 'permissions' | 'feedback';
+
+interface FeedbackItem {
+  id: number;
+  user_id: number;
+  username?: string;
+  type: 'bug' | 'question' | 'feature';
+  title: string;
+  description: string | null;
+  status: string;
+  created_at: string;
+}
 
 interface MilestoneTemplate {
   id: number;
@@ -50,7 +61,21 @@ interface IntegrationConfig {
   enabled: boolean;
 }
 
-const ROLES = ['admin', 'editor', 'viewer'] as const;
+interface CustomRole {
+  id: string;
+  name: string;
+  areas: Record<string, 'hidden' | 'view' | 'edit'>;
+}
+
+const AREA_DEFS = [
+  { id: 'command', label: 'My NOVA' },
+  { id: 'servicedesk', label: 'Service Desk' },
+  { id: 'onboarding', label: 'Onboarding' },
+  { id: 'accounts', label: 'Account Management' },
+] as const;
+
+const ACCESS_LEVELS = ['hidden', 'view', 'edit'] as const;
+type AccessLevel = typeof ACCESS_LEVELS[number];
 
 export function AdminView() {
   const [tab, setTab] = useState<Tab>('users');
@@ -90,6 +115,20 @@ export function AdminView() {
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({ username: '', password: '', display_name: '', email: '', role: 'viewer' });
 
+  // Custom roles state
+  const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
+  const [rolesDirty, setRolesDirty] = useState(false);
+  const [rolesSaving, setRolesSaving] = useState(false);
+  const [editingRole, setEditingRole] = useState<CustomRole | null>(null);
+  const [showAddRole, setShowAddRole] = useState(false);
+  const [newRoleName, setNewRoleName] = useState('');
+  const [validRoleIds, setValidRoleIds] = useState<string[]>(['admin']);
+
+  // Feedback state
+  const [feedbackItems, setFeedbackItems] = useState<FeedbackItem[]>([]);
+  const [feedbackFilter, setFeedbackFilter] = useState<string>('all');
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+
   const clearMessages = () => { setError(null); setSuccess(null); };
 
   const fetchData = useCallback(async () => {
@@ -123,7 +162,8 @@ export function AdminView() {
       const res = await fetch('/api/integrations');
       const json = await res.json();
       if (json.ok) {
-        const withFields = (json.data as IntegrationConfig[]).filter(i => i.fields.length > 0);
+        const ADMIN_ONLY = new Set(['jira-onboarding', 'sso']);
+        const withFields = (json.data as IntegrationConfig[]).filter(i => ADMIN_ONLY.has(i.id));
         setIntegrations(withFields);
         const vals: Record<string, Record<string, string>> = {};
         for (const integ of withFields) {
@@ -186,7 +226,74 @@ export function AdminView() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { fetchData(); fetchAiKeys(); fetchIntegrations(); fetchMilestones(); fetchSaleTypes(); fetchMatrixOffsets(); }, [fetchData, fetchAiKeys, fetchIntegrations, fetchMilestones, fetchSaleTypes, fetchMatrixOffsets]);
+  const fetchRoles = useCallback(async () => {
+    try {
+      const [rolesRes, validRes] = await Promise.all([
+        fetch('/api/admin/roles'),
+        fetch('/api/admin/valid-roles'),
+      ]);
+      const rolesJson = await rolesRes.json();
+      const validJson = await validRes.json();
+      if (rolesJson.ok) { setCustomRoles(rolesJson.data.roles); setRolesDirty(false); }
+      if (validJson.ok) setValidRoleIds(validJson.data.roles);
+    } catch { /* ignore */ }
+  }, []);
+
+  const saveRoles = async () => {
+    clearMessages();
+    setRolesSaving(true);
+    try {
+      const res = await fetch('/api/admin/roles', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roles: customRoles }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setSuccess('Roles saved');
+        setRolesDirty(false);
+        fetchRoles();
+      } else {
+        setError(json.error || 'Failed to save roles');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    }
+    setRolesSaving(false);
+  };
+
+  const fetchFeedback = useCallback(async () => {
+    setFeedbackLoading(true);
+    try {
+      const res = await fetch('/api/feedback');
+      const json = await res.json();
+      if (json.ok) setFeedbackItems(json.data);
+    } catch { /* ignore */ }
+    setFeedbackLoading(false);
+  }, []);
+
+  const updateFeedbackStatus = async (id: number, status: string) => {
+    try {
+      const res = await fetch(`/api/feedback/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json();
+      if (json.ok) fetchFeedback();
+    } catch { /* ignore */ }
+  };
+
+  const deleteFeedback = async (id: number) => {
+    if (!confirm('Delete this feedback item?')) return;
+    try {
+      const res = await fetch(`/api/feedback/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (json.ok) fetchFeedback();
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { fetchData(); fetchAiKeys(); fetchIntegrations(); fetchMilestones(); fetchSaleTypes(); fetchMatrixOffsets(); fetchRoles(); fetchFeedback(); }, [fetchData, fetchAiKeys, fetchIntegrations, fetchMilestones, fetchSaleTypes, fetchMatrixOffsets, fetchRoles, fetchFeedback]);
 
   const updateUser = async (id: number, updates: Record<string, unknown>) => {
     clearMessages();
@@ -485,9 +592,14 @@ export function AdminView() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">
-        Admin
-      </h2>
+      <div className="mb-2">
+        <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">
+          Administration
+        </h2>
+        <p className="text-[11px] text-neutral-500 mt-0.5">
+          Global settings, users, teams, and system configuration
+        </p>
+      </div>
 
       {/* Messages */}
       {error && (
@@ -503,7 +615,7 @@ export function AdminView() {
 
       {/* Tabs */}
       <div className="flex items-center gap-2">
-        {([['users', 'Users'], ['teams', 'Teams'], ['milestones', 'Milestones'], ['onboarding', 'Onboarding'], ['ai-keys', 'AI Keys'], ['integrations', 'Integrations']] as const).map(([key, label]) => (
+        {([['users', 'Users'], ['teams', 'Teams'], ['milestones', 'Milestones'], ['onboarding', 'Onboarding'], ['ai-keys', 'AI Keys'], ['integrations', 'Integrations'], ['permissions', 'Permissions'], ['feedback', 'Feedback']] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => { setTab(key); clearMessages(); }}
@@ -564,7 +676,7 @@ export function AdminView() {
                     <select value={newUser.role}
                       onChange={(e) => setNewUser(u => ({ ...u, role: e.target.value }))}
                       className="w-full bg-[#272C33] text-neutral-300 text-sm rounded px-3 py-2 border border-[#3a424d] outline-none focus:border-[#5ec1ca]">
-                      {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                      {validRoleIds.map((r) => <option key={r} value={r}>{r === 'admin' ? 'admin' : (customRoles.find(cr => cr.id === r)?.name || r)}</option>)}
                     </select>
                   </div>
                 </div>
@@ -608,8 +720,8 @@ export function AdminView() {
                       onChange={(e) => updateUser(user.id, { role: e.target.value })}
                       className="bg-[#272C33] text-neutral-300 text-xs rounded px-2 py-1 border border-[#3a424d] outline-none focus:border-[#5ec1ca]"
                     >
-                      {ROLES.map((r) => (
-                        <option key={r} value={r}>{r}</option>
+                      {validRoleIds.map((r) => (
+                        <option key={r} value={r}>{r === 'admin' ? 'admin' : (customRoles.find(cr => cr.id === r)?.name || r)}</option>
                       ))}
                     </select>
                   </td>
@@ -794,7 +906,7 @@ export function AdminView() {
       {tab === 'integrations' && (
         <div className="space-y-4">
           <p className="text-xs text-neutral-500">
-            Configure credentials for integrations that require setup. Users sign in via Settings.
+            Global integrations managed by admins. Personal integrations (Jira, M365, Monday) are in My Settings.
           </p>
           {integrations.length === 0 && (
             <div className="text-center py-8 text-sm text-neutral-500">
@@ -860,6 +972,328 @@ export function AdminView() {
       {/* Onboarding Config Tab */}
       {tab === 'onboarding' && (
         <OnboardingConfigView />
+      )}
+
+      {/* Permissions Tab — Custom Role Editor */}
+      {tab === 'permissions' && (
+        <div className="space-y-4">
+          <div className="text-xs text-neutral-400">
+            Define custom roles with per-area access levels. Admin always has full access everywhere.
+          </div>
+
+          {/* Admin role (read-only) */}
+          <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-hidden">
+            <div className="px-4 py-3 border-b border-[#3a424d] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-neutral-100">Admin</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-900/40 text-amber-400">Built-in</span>
+              </div>
+            </div>
+            <div className="px-4 py-2">
+              <div className="flex items-center gap-3 flex-wrap">
+                {AREA_DEFS.map(area => (
+                  <div key={area.id} className="flex items-center gap-1.5 text-[11px]">
+                    <span className="text-neutral-500">{area.label}:</span>
+                    <span className="px-2 py-0.5 rounded bg-green-900/40 text-green-400 font-medium">edit</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Custom roles */}
+          {customRoles.map((role, ri) => (
+            <div key={role.id} className="border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-hidden">
+              <div className="px-4 py-3 border-b border-[#3a424d] flex items-center justify-between">
+                {editingRole?.id === role.id ? (
+                  <input
+                    type="text"
+                    value={editingRole.name}
+                    onChange={e => setEditingRole({ ...editingRole, name: e.target.value })}
+                    className="bg-[#272C33] text-neutral-200 text-sm font-semibold rounded px-2 py-1 border border-[#5ec1ca] outline-none w-48"
+                    autoFocus
+                  />
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-neutral-100">{role.name}</span>
+                    <span className="text-[10px] text-neutral-600 font-mono">({role.id})</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5">
+                  {editingRole?.id === role.id ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          setCustomRoles(prev => prev.map(r => r.id === editingRole.id ? editingRole : r));
+                          setEditingRole(null);
+                          setRolesDirty(true);
+                        }}
+                        className="px-2 py-1 text-[10px] rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors"
+                      >
+                        Done
+                      </button>
+                      <button
+                        onClick={() => setEditingRole(null)}
+                        className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-neutral-200 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setEditingRole({ ...role })}
+                        className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-[#5ec1ca] transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (!confirm(`Delete role "${role.name}"? Users with this role will lose access.`)) return;
+                          setCustomRoles(prev => prev.filter(r => r.id !== role.id));
+                          setRolesDirty(true);
+                        }}
+                        className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-red-400 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="px-4 py-3">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr>
+                      <th className="text-left py-1 text-neutral-500 font-medium w-40">Area</th>
+                      {ACCESS_LEVELS.map(level => (
+                        <th key={level} className="text-center py-1 text-neutral-500 font-medium">{level}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {AREA_DEFS.map(area => {
+                      const current = (editingRole?.id === role.id ? editingRole : role).areas[area.id] || 'hidden';
+                      return (
+                        <tr key={area.id}>
+                          <td className="py-1.5 text-neutral-300">{area.label}</td>
+                          {ACCESS_LEVELS.map(level => (
+                            <td key={level} className="text-center py-1.5">
+                              <button
+                                disabled={editingRole?.id !== role.id}
+                                onClick={() => {
+                                  if (editingRole?.id === role.id) {
+                                    setEditingRole({
+                                      ...editingRole,
+                                      areas: { ...editingRole.areas, [area.id]: level },
+                                    });
+                                  }
+                                }}
+                                className={`w-6 h-6 rounded-full border-2 transition-colors ${
+                                  current === level
+                                    ? level === 'edit'
+                                      ? 'bg-green-500 border-green-500'
+                                      : level === 'view'
+                                        ? 'bg-blue-500 border-blue-500'
+                                        : 'bg-neutral-600 border-neutral-600'
+                                    : editingRole?.id === role.id
+                                      ? 'border-[#3a424d] hover:border-neutral-400 bg-transparent'
+                                      : 'border-[#3a424d] bg-transparent cursor-default'
+                                }`}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+
+          {/* Add Role */}
+          {showAddRole ? (
+            <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+              <h4 className="text-xs text-neutral-400 mb-3">New Role</h4>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Role name (e.g. Onboarder)"
+                  value={newRoleName}
+                  onChange={e => setNewRoleName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && newRoleName.trim()) {
+                      const id = newRoleName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                      if (customRoles.some(r => r.id === id) || id === 'admin') {
+                        setError(`Role ID "${id}" already exists`);
+                        return;
+                      }
+                      const areas: Record<string, AccessLevel> = {};
+                      for (const a of AREA_DEFS) areas[a.id] = 'view';
+                      setCustomRoles(prev => [...prev, { id, name: newRoleName.trim(), areas }]);
+                      setNewRoleName('');
+                      setShowAddRole(false);
+                      setRolesDirty(true);
+                    }
+                  }}
+                  className="flex-1 bg-[#272C33] text-neutral-300 text-sm rounded px-3 py-2 border border-[#3a424d] outline-none focus:border-[#5ec1ca] placeholder:text-neutral-600"
+                  autoFocus
+                />
+                <button
+                  onClick={() => {
+                    if (!newRoleName.trim()) return;
+                    const id = newRoleName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                    if (customRoles.some(r => r.id === id) || id === 'admin') {
+                      setError(`Role ID "${id}" already exists`);
+                      return;
+                    }
+                    const areas: Record<string, AccessLevel> = {};
+                    for (const a of AREA_DEFS) areas[a.id] = 'view';
+                    setCustomRoles(prev => [...prev, { id, name: newRoleName.trim(), areas }]);
+                    setNewRoleName('');
+                    setShowAddRole(false);
+                    setRolesDirty(true);
+                  }}
+                  disabled={!newRoleName.trim()}
+                  className="px-4 py-2 bg-[#5ec1ca] text-[#272C33] font-semibold rounded text-sm hover:bg-[#4db0b9] transition-colors disabled:opacity-40"
+                >
+                  Add
+                </button>
+                <button
+                  onClick={() => { setShowAddRole(false); setNewRoleName(''); }}
+                  className="px-4 py-2 text-sm text-neutral-400 hover:text-neutral-200 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowAddRole(true)}
+              className="px-4 py-2 bg-[#5ec1ca] text-[#272C33] font-semibold rounded text-sm hover:bg-[#4db0b9] transition-colors"
+            >
+              + Add Role
+            </button>
+          )}
+
+          {/* Save button */}
+          {rolesDirty && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={saveRoles}
+                disabled={rolesSaving}
+                className="px-4 py-2 bg-[#5ec1ca] text-[#272C33] font-semibold rounded text-sm hover:bg-[#4db0b9] disabled:opacity-50 transition-colors"
+              >
+                {rolesSaving ? 'Saving...' : 'Save Roles'}
+              </button>
+              <span className="text-xs text-amber-400">Unsaved changes</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Feedback Tab */}
+      {tab === 'feedback' && (
+        <div className="space-y-4">
+          {feedbackLoading ? (
+            <div className="text-sm text-neutral-500">Loading feedback...</div>
+          ) : feedbackItems.length === 0 ? (
+            <div className="text-sm text-neutral-500">No feedback submitted yet.</div>
+          ) : (
+            <>
+              {/* Filter bar */}
+              <div className="flex items-center gap-2">
+                {['all', 'new', 'reviewed', 'resolved'].map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setFeedbackFilter(f)}
+                    className={`px-3 py-1 text-[11px] rounded transition-colors ${
+                      feedbackFilter === f
+                        ? 'bg-[#5ec1ca]/20 text-[#5ec1ca] font-semibold border border-[#5ec1ca]/40'
+                        : 'bg-[#272C33] text-neutral-400 hover:text-neutral-200 border border-[#3a424d]'
+                    }`}
+                  >
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                    {f !== 'all' && (
+                      <span className="ml-1.5 text-[10px] text-neutral-500">
+                        {feedbackItems.filter(i => i.status === f).length}
+                      </span>
+                    )}
+                  </button>
+                ))}
+                <span className="ml-auto text-[11px] text-neutral-500">{feedbackItems.length} total</span>
+              </div>
+
+              {/* Feedback list */}
+              <div className="space-y-2">
+                {feedbackItems
+                  .filter(i => feedbackFilter === 'all' || i.status === feedbackFilter)
+                  .map(item => (
+                    <div key={item.id} className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                              item.type === 'bug' ? 'bg-red-900/40 text-red-400' :
+                              item.type === 'feature' ? 'bg-purple-900/40 text-purple-400' :
+                              'bg-blue-900/40 text-blue-400'
+                            }`}>
+                              {item.type}
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                              item.status === 'new' ? 'bg-amber-900/40 text-amber-400' :
+                              item.status === 'reviewed' ? 'bg-blue-900/40 text-blue-400' :
+                              'bg-green-900/40 text-green-400'
+                            }`}>
+                              {item.status}
+                            </span>
+                          </div>
+                          <div className="text-sm text-neutral-100 font-medium">{item.title}</div>
+                          {item.description && (
+                            <div className="text-xs text-neutral-400 mt-1">{item.description}</div>
+                          )}
+                          <div className="text-[10px] text-neutral-600 mt-2">
+                            {item.username || `User #${item.user_id}`} &middot; {new Date(item.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {item.status === 'new' && (
+                            <button
+                              onClick={() => updateFeedbackStatus(item.id, 'reviewed')}
+                              className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-blue-400 transition-colors"
+                              title="Mark as reviewed"
+                            >
+                              Reviewed
+                            </button>
+                          )}
+                          {item.status !== 'resolved' && (
+                            <button
+                              onClick={() => updateFeedbackStatus(item.id, 'resolved')}
+                              className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-green-400 transition-colors"
+                              title="Mark as resolved"
+                            >
+                              Resolve
+                            </button>
+                          )}
+                          <button
+                            onClick={() => deleteFeedback(item.id)}
+                            className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-red-400 transition-colors"
+                            title="Delete"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                {feedbackItems.filter(i => feedbackFilter === 'all' || i.status === feedbackFilter).length === 0 && (
+                  <div className="text-sm text-neutral-500">No {feedbackFilter} feedback items.</div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

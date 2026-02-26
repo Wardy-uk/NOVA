@@ -96,8 +96,48 @@ export function useAuth() {
     return () => { onUnauthorized = null; };
   }, []);
 
-  // Validate token on mount
+  // Validate token on mount — SSO token in hash takes priority
   useEffect(() => {
+    // 1. Check for SSO token in URL hash (from callback redirect)
+    const hash = window.location.hash;
+    const ssoTokenMatch = hash.match(/sso_token=([^&]+)/);
+    if (ssoTokenMatch) {
+      const token = ssoTokenMatch[1];
+      window.history.replaceState(null, '', window.location.pathname);
+      storeToken(token, true); // always remember SSO sessions
+      currentToken = token;
+
+      originalFetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(r => r.json())
+        .then(json => {
+          if (json.ok && json.data?.user) {
+            setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
+          } else {
+            clearToken();
+            currentToken = null;
+            setState({ user: null, token: null, initializing: false, busy: false, error: 'SSO login failed. Please try again.' });
+          }
+        })
+        .catch(() => {
+          clearToken();
+          currentToken = null;
+          setState({ user: null, token: null, initializing: false, busy: false, error: 'Network error during SSO login.' });
+        });
+      return;
+    }
+
+    // 2. Check for SSO error in query params
+    const params = new URLSearchParams(window.location.search);
+    const ssoError = params.get('sso_error');
+    if (ssoError) {
+      window.history.replaceState(null, '', window.location.pathname);
+      setState({ user: null, token: null, initializing: false, busy: false, error: `Microsoft sign-in failed: ${ssoError}` });
+      return;
+    }
+
+    // 3. Normal stored token validation
     const token = getStoredToken();
     if (!token) {
       setState({ user: null, token: null, initializing: false, busy: false, error: null });
@@ -145,6 +185,22 @@ export function useAuth() {
     }
   }, []);
 
+  const loginWithSso = useCallback(async (): Promise<void> => {
+    setState(s => ({ ...s, error: null, busy: true }));
+    try {
+      const res = await originalFetch('/api/auth/sso/login');
+      const json = await res.json();
+      if (json.ok && json.data?.url) {
+        // Full redirect to Microsoft — we leave the SPA entirely
+        window.location.href = json.data.url;
+      } else {
+        setState(s => ({ ...s, busy: false, error: json.error || 'SSO not available' }));
+      }
+    } catch {
+      setState(s => ({ ...s, busy: false, error: 'Network error' }));
+    }
+  }, []);
+
   const register = useCallback(async (username: string, password: string, displayName?: string): Promise<boolean> => {
     setState(s => ({ ...s, error: null, busy: true }));
     try {
@@ -176,11 +232,13 @@ export function useAuth() {
 
   return {
     user: state.user,
+    token: state.token,
     initializing: state.initializing,
     busy: state.busy,
     error: state.error,
     isAuthenticated: !!state.user,
     login,
+    loginWithSso,
     register,
     logout,
   };

@@ -61,6 +61,18 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'd365_tenant_id', label: 'Tenant ID', type: 'text', placeholder: 'Azure AD directory (tenant) ID', required: true },
     ],
   },
+  {
+    id: 'sso',
+    name: 'Entra ID SSO',
+    description: 'Microsoft Entra ID single sign-on. Allows users to sign in with their Microsoft work account.',
+    enabledKey: 'sso_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'sso_tenant_id', label: 'Tenant ID', type: 'text', placeholder: 'Azure AD directory (tenant) ID', required: true },
+      { key: 'sso_client_id', label: 'Client ID', type: 'text', placeholder: 'Azure AD app registration client ID', required: true },
+      { key: 'sso_client_secret', label: 'Client Secret', type: 'password', placeholder: 'Azure AD app registration client secret', required: true },
+    ],
+  },
 ];
 
 export interface McpServerConfig {
@@ -90,16 +102,25 @@ export function buildMcpConfig(
         command: 'npx',
         args: ['@softeria/ms-365-mcp-server', '--preset', 'tasks,calendar,mail,files', '--org-mode'],
       };
-    case 'monday':
+    case 'monday': {
+      // Use globally-installed package directly to avoid npx cache corruption
+      // (OpenTelemetry EPERM on Windows breaks npx cache)
+      const mondayEntry = process.env.APPDATA
+        ? `${process.env.APPDATA}\\npm\\node_modules\\@mondaydotcomorg\\monday-api-mcp\\dist\\index.js`
+        : 'mcp-server-monday-api';
       return {
-        command: 'npx',
+        command: 'node',
         args: [
-          '@mondaydotcomorg/monday-api-mcp@latest',
+          mondayEntry,
           '--read-only',
           '-t',
           settings.monday_token ?? '',
         ],
+        env: {
+          OTEL_SDK_DISABLED: 'true',
+        },
       };
+    }
     default:
       return null;
   }

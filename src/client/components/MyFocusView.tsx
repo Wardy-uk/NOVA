@@ -10,6 +10,12 @@ interface MilestoneSummary {
   nextOverdue: string | null;
 }
 
+interface NextMilestone {
+  name: string;
+  target_date: string;
+  status: string;
+}
+
 interface DeliveryEntry {
   id: number;
   onboarding_id: string | null;
@@ -27,6 +33,7 @@ interface DeliveryEntry {
   star_scope: 'me' | 'all';
   notes: string | null;
   milestone_summary: MilestoneSummary | null;
+  next_milestone: NextMilestone | null;
 }
 
 interface Props {
@@ -218,6 +225,19 @@ export function MyFocusView({ tasks, onUpdateTask }: Props) {
                               {ms.overdueCount} overdue{ms.nextOverdue ? ` — ${ms.nextOverdue}` : ''}
                             </span>
                           )}
+                          {d.next_milestone && (() => {
+                            const dueDate = new Date(d.next_milestone.target_date);
+                            const now = new Date();
+                            now.setHours(0, 0, 0, 0);
+                            const diffDays = Math.round((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                            const isUrgent = diffDays <= 7;
+                            const isOverdue = diffDays < 0;
+                            return (
+                              <span className={`text-[10px] shrink-0 ${isOverdue ? 'text-red-400' : isUrgent ? 'text-amber-400' : 'text-neutral-500'}`}>
+                                Next: {d.next_milestone.name} — due {d.next_milestone.target_date}
+                              </span>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>

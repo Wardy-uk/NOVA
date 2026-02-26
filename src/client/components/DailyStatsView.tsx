@@ -25,6 +25,7 @@ const SOURCE_META: Record<string, { label: string; color: string }> = {
   monday: { label: 'Monday', color: '#FF6D00' },
   email: { label: 'Email', color: '#0078D4' },
   calendar: { label: 'Calendar', color: '#8764B8' },
+  milestone: { label: 'Onboarding', color: '#10B981' },
 };
 
 function KpiCard({ value, label, color = 'text-neutral-100', large }: {

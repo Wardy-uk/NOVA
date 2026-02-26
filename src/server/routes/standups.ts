@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { TaskQueries, RitualQueries } from '../db/queries.js';
+import type { TaskQueries, RitualQueries, UserSettingsQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { generateMorningBriefing, generateReplan, generateEndOfDay } from '../services/ai-standup.js';
 
@@ -7,12 +7,17 @@ export function createStandupRoutes(
   taskQueries: TaskQueries,
   settingsQueries: SettingsQueries,
   ritualQueries: RitualQueries,
+  userSettingsQueries: UserSettingsQueries,
 ) {
   const router = Router();
 
   const today = () => new Date().toISOString().split('T')[0];
 
-  const requireApiKey = (): string | null => {
+  const requireApiKey = (userId?: number): string | null => {
+    if (userId) {
+      const userKey = userSettingsQueries.get(userId, 'openai_api_key');
+      if (userKey?.trim()) return userKey.trim();
+    }
     const fromDb = settingsQueries.get('openai_api_key');
     if (fromDb?.trim()) return fromDb.trim();
     const fromEnv = process.env.OPENAI_API_KEY ?? process.env.OPENAI_KEY ?? null;
@@ -85,13 +90,12 @@ export function createStandupRoutes(
   // Morning standup
   router.post('/morning', async (req, res) => {
     try {
-      const apiKey = requireApiKey();
+      const userId = (req as any).user?.id as number | undefined;
+      const apiKey = requireApiKey(userId);
       if (!apiKey) {
         res.status(400).json({ ok: false, error: 'OpenAI API key not configured.' });
         return;
       }
-
-      const userId = (req as any).user?.id as number | undefined;
       const tasks = taskQueries.getAll({ userId });
 
       const yesterday = new Date();
@@ -120,13 +124,12 @@ export function createStandupRoutes(
   // Re-plan
   router.post('/replan', async (req, res) => {
     try {
-      const apiKey = requireApiKey();
+      const userId = (req as any).user?.id as number | undefined;
+      const apiKey = requireApiKey(userId);
       if (!apiKey) {
         res.status(400).json({ ok: false, error: 'OpenAI API key not configured.' });
         return;
       }
-
-      const userId = (req as any).user?.id as number | undefined;
       const tasks = taskQueries.getAll({ userId });
       const todayRituals = ritualQueries.getByDate(today(), 'morning', userId);
 
@@ -151,13 +154,12 @@ export function createStandupRoutes(
   // End of day
   router.post('/eod', async (req, res) => {
     try {
-      const apiKey = requireApiKey();
+      const userId = (req as any).user?.id as number | undefined;
+      const apiKey = requireApiKey(userId);
       if (!apiKey) {
         res.status(400).json({ ok: false, error: 'OpenAI API key not configured.' });
         return;
       }
-
-      const userId = (req as any).user?.id as number | undefined;
       const tasks = taskQueries.getAll({ userId });
       const todayRituals = ritualQueries.getByDate(today(), 'morning', userId);
 

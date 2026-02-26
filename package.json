@@ -8,7 +8,7 @@
     "dev:server": "tsx watch src/server/index.ts",
     "dev:client": "vite",
     "build": "vite build && tsc -p tsconfig.server.json",
-    "start": "node dist/server/index.js",
+    "start": "node dist/server/server/index.js",
     "db:reset": "tsx src/server/db/schema.ts"
   },
   "dependencies": {

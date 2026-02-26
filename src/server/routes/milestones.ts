@@ -26,6 +26,19 @@ const MilestoneUpdateSchema = z.object({
   target_date: z.string().nullable().optional(),
 });
 
+function calculateMilestonePriority(targetDate: string | null, status: string): number {
+  if (status === 'complete') return 20;
+  if (!targetDate) return 50;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(targetDate);
+  const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return 80;   // overdue
+  if (diffDays <= 3) return 70;   // due very soon
+  if (diffDays <= 7) return 60;   // due this week
+  return 50;
+}
+
 /** Sync a single milestone instance to the tasks table */
 function syncMilestoneToTask(
   milestone: { id: number; delivery_id: number; template_id: number; template_name: string; target_date: string | null; status: string },
@@ -41,7 +54,7 @@ function syncMilestoneToTask(
     title: `${account} — ${milestone.template_name}`,
     description: `Delivery milestone for ${account}`,
     status: statusMap[milestone.status] ?? 'open',
-    priority: 50,
+    priority: calculateMilestonePriority(milestone.target_date, milestone.status),
     due_date: milestone.target_date ?? undefined,
     category: 'project',
   }, { deferSave: true });
@@ -58,6 +71,21 @@ export function syncDeliveryMilestonesToTasks(
   for (const m of milestones) {
     syncMilestoneToTask(m, account, taskQueries);
   }
+}
+
+/** Re-sync all active milestone tasks (recalculates priorities based on current date) */
+export function resyncAllMilestoneTasks(
+  milestoneQueries: MilestoneQueries,
+  taskQueries: TaskQueries,
+) {
+  const all = milestoneQueries.getAllWithDelivery();
+  let synced = 0;
+  for (const m of all) {
+    if (m.status === 'complete') continue;
+    syncMilestoneToTask(m, m.account, taskQueries);
+    synced++;
+  }
+  console.log(`[Milestones] Re-synced ${synced} active milestone tasks`);
 }
 
 export function createMilestoneRoutes(

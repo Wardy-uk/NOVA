@@ -19,6 +19,7 @@ const SOURCE_COLORS: Record<string, string> = {
   monday: 'bg-[#FF6D00]',
   email: 'bg-[#0078D4]',
   calendar: 'bg-[#8764B8]',
+  milestone: 'bg-emerald-600',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -28,6 +29,7 @@ const SOURCE_LABELS: Record<string, string> = {
   monday: 'MON',
   email: 'EMAIL',
   calendar: 'CAL',
+  milestone: 'OB',
 };
 
 const SOURCES = [
@@ -37,6 +39,7 @@ const SOURCES = [
   { value: 'monday', label: 'Monday' },
   { value: 'email', label: 'Email' },
   { value: 'calendar', label: 'Calendar' },
+  { value: 'milestone', label: 'Onboarding' },
 ];
 
 const ALL_SOURCE_VALUES = new Set(SOURCES.map((s) => s.value));
@@ -149,18 +152,32 @@ export function NextActions({ onUpdateTask }: Props) {
           <div className="text-[11px] text-neutral-500 uppercase tracking-widest mb-2">
             Recommendation Sources
           </div>
-          <div className="flex flex-wrap gap-3 text-[11px] text-neutral-300">
-            {SOURCES.map((opt) => (
-              <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={sourceFilter.has(opt.value)}
-                  onChange={() => handleSourceToggle(opt.value)}
-                  className="accent-[#5ec1ca]"
-                />
-                <span>{opt.label}</span>
-              </label>
-            ))}
+          <div className="flex flex-wrap gap-1.5">
+            {SOURCES.map((opt) => {
+              const isActive = sourceFilter.has(opt.value);
+              const dotColors: Record<string, string> = {
+                jira: '#0052CC', planner: '#31752F', todo: '#797673',
+                monday: '#FF6D00', email: '#0078D4', calendar: '#8764B8',
+                milestone: '#10B981',
+              };
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => handleSourceToggle(opt.value)}
+                  className={`px-2.5 py-1 text-[11px] rounded-full transition-colors flex items-center gap-1.5 ${
+                    isActive
+                      ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                      : 'bg-[#272C33] text-neutral-400 hover:bg-[#363d47]'
+                  }`}
+                >
+                  <div
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: isActive ? '#272C33' : (dotColors[opt.value] ?? '#6b7280') }}
+                  />
+                  {opt.label}
+                </button>
+              );
+            })}
           </div>
         </div>
         {/* Ask NOVA button (right, centered, bordered) */}

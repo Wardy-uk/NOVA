@@ -177,10 +177,10 @@ function loadWorkbook(): Record<string, SheetResult> & { _lastModified: string }
 
 import type { DeliveryQueries, MilestoneQueries, TaskQueries } from '../db/queries.js';
 import type { SharePointSync } from '../services/sharepoint-sync.js';
-import { requireRole } from '../middleware/auth.js';
+import type { AreaAccessGuard } from '../middleware/auth.js';
 import { syncDeliveryMilestonesToTasks } from './milestones.js';
 
-export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync, milestoneQueries?: MilestoneQueries, taskQueries?: TaskQueries): Router {
+export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync, milestoneQueries?: MilestoneQueries, taskQueries?: TaskQueries, requireAreaAccess?: AreaAccessGuard): Router {
   const router = Router();
 
   // Pre-load on startup (non-blocking to avoid slowing boot)
@@ -236,7 +236,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
 
   // ---- DB-backed entries (CRUD) ----
   if (deliveryQueries) {
-    const writeGuard = requireRole('admin', 'editor');
+    const writeGuard = requireAreaAccess ? requireAreaAccess('onboarding', 'edit') : (_req: any, _res: any, next: any) => next();
 
     // My Focus: starred-for-me + entries assigned to me with overdue milestones
     router.get('/entries/my-focus', (req, res) => {
@@ -255,9 +255,11 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       if (milestoneQueries && entries.length > 0) {
         const ids = entries.map(e => e.id);
         const milestoneSummary = milestoneQueries.getOverdueSummaryByDelivery(ids);
+        const nextPending = milestoneQueries.getNextPendingByDelivery(ids);
         const enriched = entries.map(e => ({
           ...e,
           milestone_summary: milestoneSummary.get(e.id) ?? null,
+          next_milestone: nextPending.get(e.id) ?? null,
         }));
         res.json({ ok: true, data: enriched });
       } else {
@@ -449,6 +451,8 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
 
   // SharePoint sync (manual-only)
   if (spSync) {
+    const syncWriteGuard = requireAreaAccess ? requireAreaAccess('onboarding', 'edit') : (_req: any, _res: any, next: any) => next();
+
     router.get('/sync/status', (_req, res) => {
       res.json({
         ok: true,
@@ -463,7 +467,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       res.json({ ok: true, data: spSync.getDebugInfo() });
     });
 
-    router.post('/sync/pull', requireRole('admin', 'editor'), async (_req, res) => {
+    router.post('/sync/pull', syncWriteGuard, async (_req, res) => {
       try {
         const result = await spSync.pull();
         res.json({ ok: result.errors.length === 0, data: result });
@@ -475,7 +479,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       }
     });
 
-    router.post('/sync/push', requireRole('admin', 'editor'), async (_req, res) => {
+    router.post('/sync/push', syncWriteGuard, async (_req, res) => {
       try {
         const result = await spSync.push();
         res.json({ ok: result.errors.length === 0, data: result });

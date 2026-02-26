@@ -23,6 +23,7 @@ interface McpServerConnection {
   lastError: string | null;
   lastConnected: string | null;
   reconnecting: boolean;
+  _reconnectStarted?: number;
 }
 
 export class McpClientManager {
@@ -69,9 +70,17 @@ export class McpClientManager {
     const server = this.servers.get(name);
     if (!server) throw new Error(`Unknown server: ${name}`);
 
-    // Guard against concurrent reconnection
-    if (server.reconnecting) return false;
+    // Guard against concurrent reconnection (with staleness check — reset after 30s)
+    if (server.reconnecting) {
+      if (server._reconnectStarted && Date.now() - server._reconnectStarted > 30_000) {
+        console.warn(`[MCP] ${name}: Reconnecting flag stuck for 30s, resetting...`);
+        server.reconnecting = false;
+      } else {
+        return false;
+      }
+    }
     server.reconnecting = true;
+    server._reconnectStarted = Date.now();
 
     // Clean up old connection if any
     if (server.client) {
@@ -122,7 +131,13 @@ export class McpClientManager {
         version: '0.1.0',
       });
 
-      await server.client.connect(server.transport);
+      // Connect with timeout (npx downloads can stall)
+      await Promise.race([
+        server.client.connect(server.transport),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Connection timed out after 30s')), 30_000)
+        ),
+      ]);
 
       // Listen for transport close to detect process crashes
       server.transport.onclose = () => {
@@ -141,15 +156,19 @@ export class McpClientManager {
       server.status = 'connected';
       server.lastConnected = new Date().toISOString();
 
-      console.log(
-        `[MCP] ${name}: Connected. ${tools.length} tools available.`
-      );
+      console.log(`[MCP] ${name}: Connected. ${tools.length} tools available.`);
       server.reconnecting = false;
       return true;
     } catch (err) {
       server.status = 'error';
       server.lastError = err instanceof Error ? err.message : String(err);
       console.error(`[MCP] ${name}: Connection failed:`, server.lastError);
+      // Clean up partial connection on failure
+      if (server.client) {
+        try { await server.client.close(); } catch { /* ignore */ }
+      }
+      server.client = null;
+      server.transport = null;
       server.reconnecting = false;
       return false;
     }
@@ -193,7 +212,7 @@ export class McpClientManager {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // Detect connection-closed errors (JSON-RPC -32000) and retry once
-      if (msg.includes('-32000') || msg.includes('Connection closed') || msg.includes('transport')) {
+      if (msg.includes('-32000') || msg.includes('Connection closed') || msg.includes('transport') || msg.includes('EPIPE')) {
         console.warn(`[MCP] ${serverName}: Connection lost during call to ${toolName}, reconnecting...`);
         server.status = 'error';
         server.lastError = msg;
@@ -205,8 +224,13 @@ export class McpClientManager {
           throw new Error(`Server "${serverName}" reconnection failed after call error: ${server.lastError}`);
         }
 
+        if (!server.client) {
+          throw new Error(`Server "${serverName}" reconnected but client is null`);
+        }
+
         // Retry once
-        return server.client!.callTool({ name: toolName, arguments: args });
+        console.log(`[MCP] ${serverName}: Retrying ${toolName} after reconnect...`);
+        return server.client.callTool({ name: toolName, arguments: args });
       }
       throw err;
     }

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { Dynamics365Service } from '../services/dynamics365.js';
+import { getD365DebugLog } from '../services/dynamics365.js';
 import type { CrmQueries } from '../db/queries.js';
 
 export function createDynamics365Routes(
@@ -61,6 +62,30 @@ export function createDynamics365Routes(
         error: err instanceof Error ? err.message : 'Sync failed',
       });
     }
+  });
+
+  // POST /api/dynamics365/purge-and-sync — delete all CRM customers then re-sync from D365
+  router.post('/purge-and-sync', async (_req, res) => {
+    const svc = getService();
+    if (!svc) {
+      res.status(503).json({ ok: false, error: 'Dynamics 365 not configured' });
+      return;
+    }
+    try {
+      const deleted = crmQueries.deleteAllCustomers();
+      const result = await svc.syncToLocal(crmQueries);
+      res.json({ ok: true, data: { ...result, purged: deleted } });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Purge and sync failed',
+      });
+    }
+  });
+
+  // GET /api/dynamics365/debug-log — in-memory debug log (ring buffer)
+  router.get('/debug-log', (_req, res) => {
+    res.json({ ok: true, data: getD365DebugLog() });
   });
 
   // GET /api/dynamics365/status — service status

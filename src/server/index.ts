@@ -26,10 +26,11 @@ import { createAdminRoutes } from './routes/admin.js';
 import { createFeedbackRoutes } from './routes/feedback.js';
 import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
 import { createOnboardingRoutes } from './routes/onboarding.js';
-import { createMilestoneRoutes } from './routes/milestones.js';
+import { createMilestoneRoutes, resyncAllMilestoneTasks } from './routes/milestones.js';
 import { JiraRestClient } from './services/jira-client.js';
 import { OnboardingOrchestrator } from './services/onboarding-orchestrator.js';
-import { authMiddleware } from './middleware/auth.js';
+import { authMiddleware, createAreaAccessGuard } from './middleware/auth.js';
+import type { CustomRole } from './middleware/auth.js';
 import crypto from 'crypto';
 import { generateMorningBriefing } from './services/ai-standup.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
@@ -37,6 +38,7 @@ import { OneDriveWatcher } from './services/onedrive-watcher.js';
 import { SharePointSync } from './services/sharepoint-sync.js';
 import { Dynamics365Service } from './services/dynamics365.js';
 import { createDynamics365Routes } from './routes/dynamics365.js';
+import { EntraSsoService } from './services/entra-sso.js';
 
 dotenv.config();
 
@@ -65,6 +67,10 @@ async function main() {
   const onboardingConfigQueries = new OnboardingConfigQueries(db);
   const onboardingRunQueries = new OnboardingRunQueries(db);
   const milestoneQueries = new MilestoneQueries(db);
+
+  // Re-sync milestone task priorities on startup
+  resyncAllMilestoneTasks(milestoneQueries, taskQueries);
+  saveDb();
 
   // Auto-seed onboarding matrix from xlsx if tables are empty
   if (onboardingConfigQueries.getAllSaleTypes().length === 0) {
@@ -165,8 +171,20 @@ async function main() {
   app.use(cors());
   app.use(express.json());
 
+  // Entra SSO service
+  const ssoService = new EntraSsoService(() => settingsQueries.getAll());
+
+  // Area access guard for custom role-based route protection
+  const requireAreaAccess = createAreaAccessGuard(() => {
+    const raw = settingsQueries.get('custom_roles');
+    try {
+      if (raw) return JSON.parse(raw) as CustomRole[];
+    } catch { /* ignore */ }
+    return [];
+  });
+
   // Public API routes (no auth required)
-  app.use('/api/auth', createAuthRoutes(userQueries, jwtSecret));
+  app.use('/api/auth', createAuthRoutes(userQueries, jwtSecret, ssoService, settingsQueries));
 
   // TEMP DEBUG: SP exploration (remove after debugging)
   app.get('/api/debug/tools', async (_req, res) => {
@@ -215,7 +233,7 @@ async function main() {
   app.use('/api', authMiddleware(jwtSecret));
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
-  app.use('/api/settings', createSettingsRoutes(settingsQueries, (key) => {
+  app.use('/api/settings', createSettingsRoutes(settingsQueries, userSettingsQueries, (key) => {
     // Restart sync timers when interval settings change
     if (key.includes('interval_minutes')) restartSyncTimers();
     // Rebuild D365 service when credentials change
@@ -225,18 +243,39 @@ async function main() {
     if (key.startsWith('d365_')) buildD365Service();
   }));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
-  app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries));
+  app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
   app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
-  app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries));
+  app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
   const spSync = new SharePointSync(mcpManager, deliveryQueries, () => settingsQueries.getAll());
-  app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries));
+  app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess));
   app.use('/api/milestones', createMilestoneRoutes(milestoneQueries, deliveryQueries, taskQueries));
-  app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries));
+  app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries));
-  app.use('/api/onboarding/config', createOnboardingConfigRoutes(onboardingConfigQueries));
+
+  // DELETE /api/data/source/:source — purge local records for a given integration source
+  app.delete('/api/data/source/:source', (req, res) => {
+    const source = req.params.source;
+    const validSources = ['jira', 'planner', 'todo', 'calendar', 'email', 'monday', 'dynamics365'];
+    if (!validSources.includes(source)) {
+      res.status(400).json({ ok: false, error: `Invalid source: ${source}. Valid: ${validSources.join(', ')}` });
+      return;
+    }
+    try {
+      let deleted = 0;
+      if (source === 'dynamics365') {
+        deleted = crmQueries.deleteAllCustomers();
+      } else {
+        deleted = taskQueries.deleteAllBySource(source);
+      }
+      res.json({ ok: true, deleted });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Delete failed' });
+    }
+  });
+  app.use('/api/onboarding/config', createOnboardingConfigRoutes(onboardingConfigQueries, requireAreaAccess));
 
   // Onboarding ticket orchestrator — lazy JiraRestClient from settings
   function buildJiraClient(): JiraRestClient | null {
@@ -266,9 +305,9 @@ async function main() {
 
   // Production: serve built Vite frontend
   if (isProduction) {
-    const clientDist = path.resolve(__dirname, '../client');
+    const clientDist = path.resolve(__dirname, '../../client');
     app.use(express.static(clientDist));
-    app.get('*', (_req, res) => {
+    app.get('{*path}', (_req, res) => {
       res.sendFile(path.join(clientDist, 'index.html'));
     });
   }

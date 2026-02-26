@@ -450,116 +450,111 @@ function parseFlaggedEmails(text: string): NormalizedTask[] | null {
 }
 
 // ---------- Monday.com Adapter ----------
-const mondayAdapter: SourceAdapter = {
+function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
+  return {
   source: 'monday',
   serverName: 'monday',
 
   async fetch(mcp: McpClientManager): Promise<FetchResult> {
     if (!mcp.isConnected('monday')) return { tasks: [], ok: false };
 
-    // 1. Get boards (optionally filtered by env var)
-    const boardIdsEnv = process.env.MONDAY_BOARD_IDS;
-    let boards: Array<Record<string, unknown>>;
+    // 1. Get boards (optionally filtered by settings)
+    const boardIdsEnv = settingsQueries?.get('monday_board_ids') ?? process.env.MONDAY_BOARD_IDS;
+    let boardIds: string[];
 
     if (boardIdsEnv) {
-      // Use configured board IDs directly
-      boards = boardIdsEnv
-        .split(',')
-        .map((id) => id.trim())
-        .filter(Boolean)
-        .map((id) => ({ id }));
+      boardIds = boardIdsEnv.split(',').map((id) => id.trim()).filter(Boolean);
     } else {
-      const boardsResult = (await mcp.callTool('monday', 'monday-list-boards', {})) as {
-        content?: Array<{ text?: string }>;
-      };
-      const boardsText = boardsResult?.content?.[0]?.text;
-      if (!boardsText) return { tasks: [], ok: false };
+      // Use search tool to find boards
+      const searchResult = (await mcp.callTool('monday', 'search', {
+        query: '*',
+        searchType: 'BOARD',
+      })) as { content?: Array<{ text?: string }> };
+      const searchText = searchResult?.content?.[0]?.text;
+      if (!searchText) return { tasks: [], ok: false };
 
       try {
-        const parsed = JSON.parse(boardsText);
-        boards = Array.isArray(parsed) ? parsed : parsed.boards ?? parsed.data?.boards ?? [];
+        const parsed = JSON.parse(searchText);
+        const boards = Array.isArray(parsed) ? parsed : parsed.boards ?? parsed.data?.boards ?? [];
+        boardIds = boards.map((b: Record<string, unknown>) => String(b.id));
       } catch {
-        console.warn('[mondayAdapter] Could not parse boards response');
-        return { tasks: [], ok: false };
+        // search may return markdown/text — try to extract board IDs from get_board_info
+        // Fallback: try get_board_info without a board ID to list boards
+        console.warn('[mondayAdapter] Could not parse search response, trying get_user_context');
+        try {
+          const ctxResult = (await mcp.callTool('monday', 'get_user_context', {})) as {
+            content?: Array<{ text?: string }>;
+          };
+          const ctxText = ctxResult?.content?.[0]?.text;
+          if (!ctxText) return { tasks: [], ok: false };
+          const ctxParsed = JSON.parse(ctxText);
+          boardIds = (ctxParsed.boards ?? []).map((b: Record<string, unknown>) => String(b.id));
+        } catch {
+          console.warn('[mondayAdapter] Could not determine board IDs');
+          return { tasks: [], ok: false };
+        }
       }
     }
 
-    // 2. For each board, get groups and items
+    if (boardIds.length === 0) return { tasks: [], ok: true };
+
+    // 2. For each board, get full data (groups + items in one call)
     const allTasks: NormalizedTask[] = [];
     let hadAnyFetch = false;
     let hadError = false;
 
-    for (const board of boards) {
-      const boardId = String(board.id);
-      const boardName = (board.name as string) ?? '';
-
+    for (const boardId of boardIds) {
       try {
-        // Get groups for this board
-        const groupsResult = (await mcp.callTool('monday', 'monday-get-board-groups', {
-          boardId,
+        const boardResult = (await mcp.callTool('monday', 'get_full_board_data', {
+          boardId: Number(boardId),
         })) as { content?: Array<{ text?: string }> };
 
-        const groupsText = groupsResult?.content?.[0]?.text;
-        if (!groupsText) {
-          hadError = true;
-          continue;
+        const boardText = boardResult?.content?.[0]?.text;
+        if (!boardText) { hadError = true; continue; }
+
+        let boardData: Record<string, unknown>;
+        try {
+          boardData = JSON.parse(boardText);
+        } catch {
+          // Response may be markdown — try extracting JSON block
+          const jsonMatch = boardText.match(/```json\s*([\s\S]*?)```/);
+          if (jsonMatch) {
+            boardData = JSON.parse(jsonMatch[1]);
+          } else {
+            hadError = true;
+            continue;
+          }
         }
 
-        let groups: Array<Record<string, unknown>>;
-        try {
-          const parsed = JSON.parse(groupsText);
-          groups = Array.isArray(parsed) ? parsed : parsed.groups ?? parsed.data?.groups ?? [];
-        } catch {
-          hadError = true;
-          continue;
-        }
+        const boardName = (boardData.name as string) ?? '';
+        const groups = (boardData.groups as Array<Record<string, unknown>>) ?? [];
 
         // Filter out done/completed groups
         const activeGroups = groups.filter((g) => {
-          const title = ((g.title as string) ?? '').toLowerCase();
+          const title = ((g.title as string) ?? (g.name as string) ?? '').toLowerCase();
           return !title.includes('done') && !title.includes('completed') && !title.includes('closed');
         });
 
-        if (activeGroups.length === 0) continue;
-
-        const groupIds = activeGroups.map((g) => String(g.id));
-
-        // Get items from active groups
-        const itemsResult = (await mcp.callTool('monday', 'monday-list-items-in-groups', {
-          boardId,
-          groupIds,
-        })) as { content?: Array<{ text?: string }> };
-
-        const itemsText = itemsResult?.content?.[0]?.text;
-        if (!itemsText) {
-          hadError = true;
-          continue;
-        }
-
-        let items: Array<Record<string, unknown>>;
-        try {
-          const parsed = JSON.parse(itemsText);
-          items = Array.isArray(parsed) ? parsed : parsed.items ?? parsed.data?.items ?? [];
-        } catch {
-          hadError = true;
-          continue;
-        }
-
         hadAnyFetch = true;
-        for (const item of items) {
-          const columnValues = (item.column_values as Array<Record<string, unknown>>) ?? [];
-          allTasks.push({
-            source: 'monday',
-            source_id: String(item.id),
-            source_url: `https://monday.com/boards/${boardId}/pulses/${item.id}`,
-            title: (item.name as string) ?? 'Untitled',
-            description: boardName ? `Board: ${boardName}` : undefined,
-            status: mapMondayStatus(columnValues),
-            priority: mapMondayPriority(columnValues),
-            due_date: extractMondayDate(columnValues),
-            category: 'project',
-            raw_data: item,
-          });
+        for (const group of activeGroups) {
+          const items = (group.items as Array<Record<string, unknown>>)
+            ?? (group.items_page as Record<string, unknown>)?.items as Array<Record<string, unknown>>
+            ?? [];
+          for (const item of items) {
+            const columnValues = (item.column_values as Array<Record<string, unknown>>) ?? [];
+            allTasks.push({
+              source: 'monday',
+              source_id: String(item.id),
+              source_url: `https://monday.com/boards/${boardId}/pulses/${item.id}`,
+              title: (item.name as string) ?? 'Untitled',
+              description: boardName ? `Board: ${boardName}` : undefined,
+              status: mapMondayStatus(columnValues),
+              priority: mapMondayPriority(columnValues),
+              due_date: extractMondayDate(columnValues),
+              category: 'project',
+              raw_data: item,
+            });
+          }
         }
       } catch (err) {
         hadError = true;
@@ -570,6 +565,7 @@ const mondayAdapter: SourceAdapter = {
     return { tasks: allTasks, ok: hadAnyFetch && !hadError };
   },
 };
+}
 
 function findColumnValue(
   columns: Array<Record<string, unknown>>,
@@ -634,7 +630,7 @@ export class TaskAggregator {
       todoAdapter,
       calendarAdapter,
       createEmailAdapter(settingsQueries),
-      mondayAdapter,
+      createMondayAdapter(settingsQueries),
     ];
   }
 

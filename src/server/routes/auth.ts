@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 import type { FileUserQueries } from '../db/user-store.js';
 type UserQueries = FileUserQueries;
 import { authMiddleware, type AuthPayload } from '../middleware/auth.js';
+import type { EntraSsoService } from '../services/entra-sso.js';
+import type { FileSettingsQueries } from '../db/settings-store.js';
 
 function signToken(user: { id: number; username: string; role: string }, secret: string): string {
   return jwt.sign({ id: user.id, username: user.username, role: user.role }, secret, { expiresIn: '7d' });
@@ -13,7 +15,36 @@ function safeUser(u: { id: number; username: string; display_name: string | null
   return { id: u.id, username: u.username, display_name: u.display_name, email: u.email, role: u.role, auth_provider: u.auth_provider };
 }
 
-export function createAuthRoutes(userQueries: UserQueries, jwtSecret: string): Router {
+import type { CustomRole } from '../middleware/auth.js';
+
+const DEFAULT_CUSTOM_ROLES: CustomRole[] = [
+  { id: 'editor', name: 'Editor', areas: { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit' } },
+  { id: 'viewer', name: 'Viewer', areas: { command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view' } },
+];
+
+function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
+  const raw = settingsQueries.get('custom_roles');
+  try {
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return DEFAULT_CUSTOM_ROLES;
+}
+
+function resolveAreaAccess(role: string, roles: CustomRole[]): Record<string, string> {
+  if (role === 'admin') {
+    return { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', admin: 'edit' };
+  }
+  const def = roles.find(r => r.id === role);
+  if (!def) return { command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view' };
+  return { ...def.areas, admin: 'hidden' };
+}
+
+export function createAuthRoutes(
+  userQueries: UserQueries,
+  jwtSecret: string,
+  ssoService: EntraSsoService,
+  settingsQueries: FileSettingsQueries,
+): Router {
   const router = Router();
 
   // POST /api/auth/login
@@ -27,6 +58,12 @@ export function createAuthRoutes(userQueries: UserQueries, jwtSecret: string): R
     const user = userQueries.getByUsername(username.trim().toLowerCase());
     if (!user) {
       res.status(401).json({ ok: false, error: 'Invalid username or password' });
+      return;
+    }
+
+    // SSO-only users cannot log in locally
+    if (user.auth_provider === 'entra' && !user.password_hash) {
+      res.status(401).json({ ok: false, error: 'This account uses Microsoft SSO. Please sign in with Microsoft.' });
       return;
     }
 
@@ -108,6 +145,135 @@ export function createAuthRoutes(userQueries: UserQueries, jwtSecret: string): R
       return;
     }
     res.json({ ok: true, data: { user: safeUser(user) } });
+  });
+
+  // ── SSO Routes ──
+
+  // GET /api/auth/sso/status — public, check if SSO is configured
+  router.get('/sso/status', (_req, res) => {
+    res.json({ ok: true, data: { enabled: ssoService.isConfigured() } });
+  });
+
+  // GET /api/auth/sso/login — public, returns Microsoft OAuth login URL
+  router.get('/sso/login', async (_req, res) => {
+    try {
+      if (!ssoService.isConfigured()) {
+        res.status(503).json({ ok: false, error: 'SSO not configured' });
+        return;
+      }
+      // Build redirect URI pointing to the backend callback route
+      const settings = settingsQueries.getAll();
+      const baseUrl = settings.sso_base_url || `http://localhost:${process.env.PORT ?? '3001'}`;
+      const redirectUri = `${baseUrl}/api/auth/sso/callback`;
+      const url = await ssoService.getLoginUrl(redirectUri);
+      res.json({ ok: true, data: { url } });
+    } catch (err) {
+      console.error('[SSO] Login URL error:', err);
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'SSO login failed' });
+    }
+  });
+
+  // GET /api/auth/sso/callback — Microsoft redirects here after authentication
+  router.get('/sso/callback', async (req, res) => {
+    try {
+      const { code, state, error: oauthError, error_description } = req.query;
+
+      // Determine frontend URL for redirects
+      const frontendUrl = process.env.FRONTEND_URL || '';
+
+      if (oauthError) {
+        res.redirect(`${frontendUrl}/?sso_error=${encodeURIComponent(String(error_description || oauthError))}`);
+        return;
+      }
+
+      if (!code || !state) {
+        res.redirect(`${frontendUrl}/?sso_error=${encodeURIComponent('Missing code or state')}`);
+        return;
+      }
+
+      // Reconstruct the same redirect URI used in getLoginUrl
+      const settings = settingsQueries.getAll();
+      const baseUrl = settings.sso_base_url || `http://localhost:${process.env.PORT ?? '3001'}`;
+      const redirectUri = `${baseUrl}/api/auth/sso/callback`;
+
+      const claims = await ssoService.handleCallback(
+        String(code),
+        String(state),
+        redirectUri,
+      );
+
+      // User resolution: OID lookup → email lookup (link existing) → auto-create
+      let user = userQueries.getByProviderId('entra', claims.oid);
+
+      if (!user) {
+        // Try matching by email to link existing local accounts
+        const existing = userQueries.getByEmail(claims.email);
+        if (existing) {
+          // Link existing account to Entra
+          userQueries.update(existing.id, {
+            auth_provider: 'entra',
+            provider_id: claims.oid,
+            email: claims.email,
+            display_name: claims.name || existing.display_name,
+          });
+          user = userQueries.getById(existing.id);
+        }
+      }
+
+      if (!user) {
+        // Auto-provision new user
+        let username = claims.preferredUsername.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
+        if (userQueries.getByUsername(username)) {
+          username = `${username}_${Date.now().toString(36)}`;
+        }
+
+        const isFirstUser = userQueries.count() === 0;
+        const id = userQueries.create({
+          username,
+          display_name: claims.name || username,
+          email: claims.email,
+          password_hash: '', // SSO users cannot use local login
+          role: isFirstUser ? 'admin' : 'viewer',
+          auth_provider: 'entra',
+          provider_id: claims.oid,
+        });
+        user = userQueries.getById(id);
+      }
+
+      if (!user) {
+        res.redirect(`${frontendUrl}/?sso_error=${encodeURIComponent('Failed to create user')}`);
+        return;
+      }
+
+      const token = signToken(user, jwtSecret);
+      // Redirect to frontend with token in hash fragment (never sent to server)
+      res.redirect(`${frontendUrl}/#sso_token=${token}`);
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'SSO callback failed';
+      console.error('[SSO Callback]', msg);
+      const frontendUrl = process.env.FRONTEND_URL || '';
+      res.redirect(`${frontendUrl}/?sso_error=${encodeURIComponent(msg)}`);
+    }
+  });
+
+  // ── Permissions ──
+
+  // GET /api/auth/permissions — public, returns custom roles + caller's resolved area access
+  router.get('/permissions', (req, res) => {
+    const roles = getCustomRoles(settingsQueries);
+
+    // If caller is authenticated, resolve their access; otherwise return roles only
+    let areaAccess: Record<string, string> | null = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        const payload = jwt.verify(authHeader.slice(7), jwtSecret) as { role: string };
+        areaAccess = resolveAreaAccess(payload.role, roles);
+      } catch { /* ignore invalid token */ }
+    }
+
+    res.json({ ok: true, data: { roles, areaAccess } });
   });
 
   return router;

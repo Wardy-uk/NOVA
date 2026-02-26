@@ -134,8 +134,7 @@ const emptyReviewForm = {
 
 // ---- Main Component ----
 
-export function CrmView({ userRole = 'viewer' }: { userRole?: string }) {
-  const canWrite = userRole === 'admin' || userRole === 'editor';
+export function CrmView({ canWrite = false }: { canWrite?: boolean }) {
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [summary, setSummary] = useState<CrmSummary | null>(null);
   const [owners, setOwners] = useState<string[]>([]);
