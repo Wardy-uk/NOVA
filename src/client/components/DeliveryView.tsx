@@ -173,10 +173,19 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
           if (xlsxJson.data.summary.products.length > 0 && !activeTab) {
             setActiveTab(xlsxJson.data.summary.products[0]);
           }
-        } else {
+        }
+        if (dbJson.ok) {
+          setDbEntries(dbJson.data);
+          // Set active tab from DB entries when xlsx isn't available
+          if (!xlsxJson.ok && dbJson.data?.length > 0 && !activeTab) {
+            const products = [...new Set(dbJson.data.map((e: DbEntry) => e.product))];
+            if (products.length > 0) setActiveTab(products[0]);
+          }
+        }
+        // Only show error if both xlsx AND DB entries failed
+        if (!xlsxJson.ok && (!dbJson.ok || dbJson.data?.length === 0)) {
           setError(xlsxJson.error ?? 'Failed to load delivery data');
         }
-        if (dbJson.ok) setDbEntries(dbJson.data);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -491,9 +500,17 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
       </div>
     );
   }
-  if (!data) return null;
-
-  const { summary, sheets } = data;
+  // When no local xlsx is available but DB entries exist, build a fallback summary from DB
+  const summary: Summary = data?.summary ?? {
+    totalCustomers: dbEntries.length,
+    totalMrr: dbEntries.reduce((s, e) => s + (e.mrr ?? 0), 0),
+    totalWip: dbEntries.filter((e) => !['complete', 'dead', 'back to sales'].includes((e.status || '').toLowerCase())).length,
+    totalComplete: dbEntries.filter((e) => (e.status || '').toLowerCase() === 'complete').length,
+    totalDead: dbEntries.filter((e) => (e.status || '').toLowerCase() === 'dead').length,
+    products: [...new Set(dbEntries.map((e) => e.product))],
+    lastModified: dbEntries.length > 0 ? dbEntries[0].updated_at : '',
+  };
+  const sheets = data?.sheets ?? {};
   const currentSheet = activeTab ? sheets[activeTab] : null;
   // Build a set of accounts that already have DB entries for the active tab — hide those xlsx rows
   const dbAccountsForTab = new Set(
@@ -564,9 +581,11 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">Delivery Sheet</h2>
-          <div className="text-[10px] text-neutral-600 mt-0.5">
-            xlsx last modified: {lastMod.toLocaleDateString('en-GB')} {lastMod.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-          </div>
+          {summary.lastModified && (
+            <div className="text-[10px] text-neutral-600 mt-0.5">
+              {data ? 'xlsx' : 'data'} last modified: {lastMod.toLocaleDateString('en-GB')} {lastMod.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {canWrite && (
