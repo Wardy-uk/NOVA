@@ -251,7 +251,7 @@ export function createIntegrationRoutes(
       activeLogins.delete(integId);
     }
 
-    const child = spawn('npx', ['@softeria/ms-365-mcp-server', '--login'], {
+    const child = spawn('npx', ['@softeria/ms-365-mcp-server', '--login', '--org-mode'], {
       shell: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
