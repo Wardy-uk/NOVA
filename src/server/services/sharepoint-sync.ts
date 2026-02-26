@@ -2,7 +2,8 @@ import type { McpClientManager } from './mcp-client.js';
 import type { DeliveryQueries, DeliveryEntry } from '../db/queries.js';
 
 // SharePoint location defaults (overridden by settings)
-const DEFAULT_DRIVE_HINT = 'Nurtur';
+const DEFAULT_SITE_URL = 'nurturcloud.sharepoint.com/sites/Nurtur';
+const DEFAULT_DRIVE_HINT = 'Documents';
 const DEFAULT_FOLDER_PATH = 'Clients/Tech/!Overview Documents';
 const DEFAULT_FILE_NAME = 'Delivery sheet Master.xlsx';
 
@@ -44,10 +45,11 @@ export class SharePointSync {
   /** Get SP config from settings, falling back to defaults */
   private getSpConfig() {
     const s = this.getSettings?.() ?? {};
+    const siteUrl = s.sp_site_url || DEFAULT_SITE_URL;
     const driveHint = s.sp_drive_hint || DEFAULT_DRIVE_HINT;
     const folderPath = (s.sp_folder_path || DEFAULT_FOLDER_PATH).split('/').filter(Boolean);
     const fileName = s.sp_file_name || DEFAULT_FILE_NAME;
-    return { driveHint, folderPath, fileName };
+    return { siteUrl, driveHint, folderPath, fileName };
   }
 
   /** Diagnostic info for the debug screen */
@@ -107,18 +109,18 @@ export class SharePointSync {
       return result;
     }
 
-    const { driveHint, folderPath, fileName } = this.getSpConfig();
+    const { siteUrl, driveHint, folderPath, fileName } = this.getSpConfig();
 
     try {
-      // Step 1: List all accessible drives and find the SP one
-      console.log('[SP-Sync] Listing drives...');
-      const drivesResp = await this.mcp.callTool('msgraph', 'list-drives', {});
+      // Step 1: List SharePoint site drives (not personal OneDrive)
+      console.log('[SP-Sync] Listing site drives for:', siteUrl);
+      const drivesResp = await this.mcp.callTool('msgraph', 'list-sharepoint-site-drives', { siteUrl });
       const drivesText = this.extractText(drivesResp);
-      console.log('[SP-Sync] Drives response:', drivesText.slice(0, 2000));
+      console.log('[SP-Sync] Site drives response:', drivesText.slice(0, 2000));
 
       const driveId = this.findDriveByHint(drivesText, driveHint);
       if (!driveId) {
-        result.errors.push(`Could not find a drive matching "${driveHint}" in list-drives response`);
+        result.errors.push(`Could not find a drive matching "${driveHint}" in SharePoint site drives`);
         this._lastResult = result;
         return result;
       }
@@ -256,16 +258,16 @@ export class SharePointSync {
       return result;
     }
 
-    const { driveHint, folderPath, fileName } = this.getSpConfig();
+    const { siteUrl, driveHint, folderPath, fileName } = this.getSpConfig();
 
     try {
-      // Step 1: Locate the drive and target folder (same as pull)
-      console.log('[SP-Push] Listing drives...');
-      const drivesResp = await this.mcp.callTool('msgraph', 'list-drives', {});
+      // Step 1: Locate the SP site drive and target folder (same as pull)
+      console.log('[SP-Push] Listing site drives for:', siteUrl);
+      const drivesResp = await this.mcp.callTool('msgraph', 'list-sharepoint-site-drives', { siteUrl });
       const drivesText = this.extractText(drivesResp);
       const driveId = this.findDriveByHint(drivesText, driveHint);
       if (!driveId) {
-        result.errors.push(`Could not find a drive matching "${driveHint}"`);
+        result.errors.push(`Could not find a drive matching "${driveHint}" in SharePoint site drives`);
         this._lastResult = result;
         return result;
       }
