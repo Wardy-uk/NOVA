@@ -114,7 +114,7 @@ export class SharePointSync {
     try {
       // Step 1: List SharePoint site drives (not personal OneDrive)
       console.log('[SP-Sync] Listing site drives for:', siteUrl);
-      const drivesResp = await this.mcp.callTool('msgraph', 'list-sharepoint-site-drives', { siteUrl });
+      const drivesResp = await this.mcp.callTool('msgraph', 'list-sharepoint-site-drives', { 'site-id': siteUrl });
       const drivesText = this.extractText(drivesResp);
       console.log('[SP-Sync] Site drives response:', drivesText.slice(0, 2000));
 
@@ -263,7 +263,7 @@ export class SharePointSync {
     try {
       // Step 1: Locate the SP site drive and target folder (same as pull)
       console.log('[SP-Push] Listing site drives for:', siteUrl);
-      const drivesResp = await this.mcp.callTool('msgraph', 'list-sharepoint-site-drives', { siteUrl });
+      const drivesResp = await this.mcp.callTool('msgraph', 'list-sharepoint-site-drives', { 'site-id': siteUrl });
       const drivesText = this.extractText(drivesResp);
       const driveId = this.findDriveByHint(drivesText, driveHint);
       if (!driveId) {
