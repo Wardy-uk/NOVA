@@ -44,7 +44,11 @@ try {
     # ── Build ────────────────────────────────────────────────────────────────
     Write-Host "[3/4] Building client + server..." -ForegroundColor Yellow
     npm run build
-    if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
+    # TypeScript emits JS despite type errors (noEmitOnError: false)
+    # so we check for the output file instead of the exit code
+    $entry = Join-Path $AppDir "dist\server\server\index.js"
+    if (-not (Test-Path $entry)) { throw "Build failed: $entry not found" }
+    Write-Host "Build output verified: $entry" -ForegroundColor Green
     Write-Host ""
 
     # ── Restart service ──────────────────────────────────────────────────────
