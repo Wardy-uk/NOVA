@@ -156,7 +156,7 @@ export class McpClientManager {
       server.status = 'connected';
       server.lastConnected = new Date().toISOString();
 
-      console.log(`[MCP] ${name}: Connected. ${tools.length} tools available.`);
+      console.log(`[MCP] ${name}: Connected. ${tools.length} tools available: ${server.tools.join(', ')}`);
       server.reconnecting = false;
       return true;
     } catch (err) {
