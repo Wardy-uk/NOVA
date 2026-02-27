@@ -108,7 +108,7 @@ export function TaskCard({ task, onUpdate, onClick }: Props) {
   return (
     <div
       onClick={onClick}
-      className={`group flex items-start gap-3 px-3 py-2.5 rounded-md hover:bg-[#2f353d] border border-transparent hover:border-[#3a424d] transition-colors ${onClick ? 'cursor-pointer' : ''}`}
+      className={`group flex items-start gap-3 px-3 py-2.5 rounded-md hover:bg-[#2f353d] border border-[#3a424d]/40 hover:border-[#3a424d] transition-colors ${onClick ? 'cursor-pointer' : ''}`}
     >
       {/* Source badge */}
       <span
