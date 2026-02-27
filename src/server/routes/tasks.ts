@@ -37,6 +37,34 @@ function getAllowedSources(
   return allowed;
 }
 
+/** Check if Jira is enabled for this user (per-user first, admin falls back to global). */
+function isJiraEnabled(
+  userId: number | undefined,
+  userRole: string | undefined,
+  userSettingsQueries?: UserSettingsQueries,
+  settingsQueries?: SettingsQueries,
+): boolean {
+  if (!userId) return false;
+  const userVal = userSettingsQueries?.get(userId, 'jira_enabled');
+  if (userVal !== undefined && userVal !== null) return userVal === 'true';
+  if (userRole === 'admin') return settingsQueries?.get('jira_enabled') === 'true';
+  return false;
+}
+
+/** Get the Jira username for this user (per-user first, admin falls back to global). */
+function getJiraUsername(
+  userId: number | undefined,
+  userRole: string | undefined,
+  userSettingsQueries?: UserSettingsQueries,
+  settingsQueries?: SettingsQueries,
+): string | undefined {
+  if (!userId) return undefined;
+  const userVal = userSettingsQueries?.get(userId, 'jira_username');
+  if (userVal) return userVal;
+  if (userRole === 'admin') return settingsQueries?.get('jira_username') ?? undefined;
+  return undefined;
+}
+
 export function createTaskRoutes(
   taskQueries: TaskQueries,
   aggregator: TaskAggregator,
@@ -73,19 +101,15 @@ export function createTaskRoutes(
         return;
       }
       const userId = (req as any).user?.id as number | undefined;
-      // "mine" requires personal Jira config; global views just need MCP connected
+      const userRole = (req as any).user?.role as string | undefined;
+      // "mine" requires Jira config (per-user, admin falls back to global)
       if (filter === 'mine') {
-        const userJiraEnabled = userId && userSettingsQueries
-          ? userSettingsQueries.get(userId, 'jira_enabled') === 'true'
-          : false;
-        if (!userJiraEnabled) {
+        if (!isJiraEnabled(userId, userRole, userSettingsQueries, settingsQueries)) {
           res.json({ ok: true, data: [] });
           return;
         }
       }
-      const jiraUsername = userId && userSettingsQueries
-        ? (userSettingsQueries.get(userId, 'jira_username') ?? undefined)
-        : undefined;
+      const jiraUsername = getJiraUsername(userId, userRole, userSettingsQueries, settingsQueries);
       const tickets = await aggregator.fetchServiceDeskTickets(filter as SdFilter, jiraUsername);
       // Map to task-like objects for the frontend
       const mapped = tickets.map((t) => ({
@@ -119,21 +143,16 @@ export function createTaskRoutes(
   router.get('/service-desk/attention', async (req, res) => {
     try {
       const userId = (req as any).user?.id as number | undefined;
+      const userRole = (req as any).user?.role as string | undefined;
       const scope = (req.query.scope as string) || 'all';
 
       let tickets;
       if (scope === 'mine') {
-        // "mine" requires personal Jira config
-        const userJiraEnabled = userId && userSettingsQueries
-          ? userSettingsQueries.get(userId, 'jira_enabled') === 'true'
-          : false;
-        if (!userJiraEnabled) {
+        if (!isJiraEnabled(userId, userRole, userSettingsQueries, settingsQueries)) {
           res.json({ ok: true, data: [] });
           return;
         }
-        const jiraUsername = userId && userSettingsQueries
-          ? (userSettingsQueries.get(userId, 'jira_username') ?? undefined)
-          : undefined;
+        const jiraUsername = getJiraUsername(userId, userRole, userSettingsQueries, settingsQueries);
         tickets = await aggregator.fetchServiceDeskTickets('mine', jiraUsername);
       } else {
         tickets = await aggregator.fetchServiceDeskTickets('all');
