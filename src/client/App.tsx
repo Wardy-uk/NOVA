@@ -278,27 +278,38 @@ export function App() {
   const [sdTasks, setSdTasks] = useState<typeof tasks>([]);
   const [sdLoading, setSdLoading] = useState(false);
   const sdApiFilter = sdFilter === null ? 'mine' : sdFilter;
+  const sdInitialDone = useRef(false);
   useEffect(() => {
     if (!auth.isAuthenticated) return;
-    // Don't fetch ticket list for 'all-breached' — NeedsAttentionView handles its own fetch
     if (sdApiFilter === 'all-breached') return;
     let active = true;
-    setSdLoading(true);
-    fetch(`/api/tasks/service-desk?filter=${sdApiFilter}`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (!active) return;
-        if (json.ok && json.data) {
-          setSdTasks(json.data);
-        } else {
-          setSdTasks(tasks.filter((t) => t.source === 'jira'));
-        }
-      })
-      .catch(() => {
-        if (active) setSdTasks(tasks.filter((t) => t.source === 'jira'));
-      })
-      .finally(() => { if (active) setSdLoading(false); });
-    return () => { active = false; };
+    // Only show loading on first fetch or filter change, not background refreshes
+    if (!sdInitialDone.current) setSdLoading(true);
+    const doFetch = () => {
+      fetch(`/api/tasks/service-desk?filter=${sdApiFilter}`)
+        .then((r) => r.json())
+        .then((json) => {
+          if (!active) return;
+          if (json.ok && json.data) {
+            setSdTasks(json.data);
+          } else {
+            setSdTasks(tasks.filter((t) => t.source === 'jira'));
+          }
+        })
+        .catch(() => {
+          if (active) setSdTasks(tasks.filter((t) => t.source === 'jira'));
+        })
+        .finally(() => {
+          if (active && !sdInitialDone.current) {
+            setSdLoading(false);
+            sdInitialDone.current = true;
+          }
+        });
+    };
+    doFetch();
+    // Background refresh every 60s — silent, no loading spinner
+    const interval = setInterval(doFetch, 60_000);
+    return () => { active = false; clearInterval(interval); };
   }, [sdApiFilter, auth.isAuthenticated, tasks]);
 
   // Auth gate

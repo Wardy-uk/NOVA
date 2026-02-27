@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task, ApiResponse, HealthResponse } from '../../shared/types.js';
 
 export function useTasks() {
@@ -6,7 +6,9 @@ export function useTasks() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const initialLoadDone = useRef(false);
 
+  // Silent fetch — updates data without triggering loading states
   const fetchTasks = useCallback(async () => {
     try {
       const res = await fetch('/api/tasks');
@@ -14,25 +16,28 @@ export function useTasks() {
       if (json.ok && json.data) {
         setTasks(json.data);
         setError(null);
-      } else {
-        setError(json.error ?? 'Failed to fetch tasks');
       }
     } catch {
-      setError('Cannot reach server');
+      // Silent — don't flash errors on background refresh
     } finally {
-      setLoading(false);
+      // Only clear loading on initial fetch
+      if (!initialLoadDone.current) {
+        setLoading(false);
+        initialLoadDone.current = true;
+      }
     }
   }, []);
 
-  const syncTasks = useCallback(async () => {
-    setSyncing(true);
+  // Sync: only shows syncing indicator on manual trigger, not background
+  const syncTasks = useCallback(async (silent = false) => {
+    if (!silent) setSyncing(true);
     try {
       await fetch('/api/tasks/sync', { method: 'POST' });
       await fetchTasks();
     } catch {
-      setError('Sync failed');
+      if (!silent) setError('Sync failed');
     } finally {
-      setSyncing(false);
+      if (!silent) setSyncing(false);
     }
   }, [fetchTasks]);
 
@@ -58,9 +63,9 @@ export function useTasks() {
   );
 
   useEffect(() => {
-    // Sync all sources on first load, then fetch
-    syncTasks();
-    // Poll for task updates every 30s (picks up auto-sync changes)
+    // Initial sync (silent — no syncing spinner, just populates data)
+    syncTasks(true);
+    // Background poll every 30s — silent, no UI disruption
     const interval = setInterval(fetchTasks, 30_000);
     return () => clearInterval(interval);
   }, [fetchTasks, syncTasks]);
@@ -75,9 +80,9 @@ export function useHealth() {
     const fetchHealth = async () => {
       try {
         const res = await fetch('/api/health');
-        if (!res.ok) return; // 401 or other error — don't overwrite valid state
+        if (!res.ok) return;
         const json = await res.json();
-        if (json.servers) setHealth(json); // only set if valid health shape
+        if (json.servers) setHealth(json);
       } catch {
         /* server unreachable */
       }
