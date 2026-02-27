@@ -1,10 +1,6 @@
 TO DO
 -----
 
---- Triage ---
-
-Review architecture/infrastructure for supporting 50 + users
-
 === CURRENT STATUS (27 Feb 2026) ===
 
 N.O.V.A is deployed to a Windows Server VM at https://nova.nurtur.tech, served via
@@ -16,14 +12,19 @@ What's working:
   - 6 main areas: My NOVA (dashboard/AI/standup), Service Desk (kanban/calendar), Onboarding
     (matrix config + Jira ticket automation), Delivery (xlsx/SP sync, milestones), CRM (D365),
     Admin (users, teams, roles, permissions, integrations, milestones, onboarding, feedback)
+  - Service Desk: live Jira search for My/Unassigned/All filters, kanban drag-and-drop transitions
   - Delivery milestones (30-day model) with auto-creation, checklist tracking, task surfacing
   - Onboarding ticket orchestrator — idempotent, resume-safe, dry-run capable
-  - Multi-user with role-based access, per-user settings/AI keys, file-based stores
+  - Multi-user with role-based access, per-user settings/AI keys (self-serve in My Settings)
   - Email send/reply/forward, calendar create/edit, SharePoint sync push/pull
+  - Session-only MS365 data — transient tasks purged on server restart
+  - Security: helmet headers, login rate limiting, debug endpoints admin-gated
+  - Interactive tour overlay for new users
+  - Feedback system with admin reply and create-task-from-feedback
   - Deployed: IIS + NSSM on Windows Server, git-based deploys via deploy.ps1
 
 What's not fully working:
-  - SharePoint sync — needs Azure admin consent for Sites.Read.All scope [BLOCKED: awaiting admin approval]
+  - SharePoint sync — needs Azure admin consent for Sites.Read.All scope [BLOCKED]
   - Monday.com syncs 0 tasks — connection ok but needs board IDs or search tuning
   - MS365 To-Do sync errors — MCP returning non-JSON for some lists
 
@@ -50,7 +51,7 @@ BUG2. MS365 To-Do sync errors — MCP returning non-JSON for some lists
 
 === DO NEXT (high priority) ===
 
-2. Jira SLA prioritisation — tickets over SLA or overdue an update should be prioritised
+1. Jira SLA prioritisation — tickets over SLA or overdue an update should be prioritised
    (user will supply logic)
 
 
@@ -63,38 +64,41 @@ BUG2. MS365 To-Do sync errors — MCP returning non-JSON for some lists
 
 === TIER 1: Daily workflow enhancements ===
 
-6. Add CRM integration partners list to onboarding — validate for ticket creation
-7. Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
+2. Add CRM integration partners list to onboarding — validate for ticket creation
+3. Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
 
 
 === TIER 2: Onboarding ticket automation ===
 
-8. Ticket creation UI — form in Admin > Onboarding to trigger POST /api/onboarding/create-tickets
+4. Ticket creation UI — form in Admin > Onboarding to trigger POST /api/onboarding/create-tickets
    - sale type dropdown, customer name, onboarding ref, due date
    - dry-run preview before live execution
    - show result (parent key + child keys) or error
-9. Jira settings for ticket creation — configure request type field IDs in Admin > Integrations
-10. Onboarding run history UI — view past runs (status, parent/child keys, errors)
+5. Jira settings for ticket creation — configure request type field IDs in Admin > Integrations
+6. Onboarding run history UI — view past runs (status, parent/child keys, errors)
 
 
 === TIER 3: Platform maturity ===
 
-11. Customer 360 timeline — unified per-customer view across deliveries, CRM, Jira, onboarding, emails
-12. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls (in-app + email digest)
-13. Team workload view — onboarder/assignee load heatmap across deliveries + Jira
-14. Activity audit log — who changed what and when (append-only table, Admin timeline view)
-15. Jira OAuth device-code flow — replace email+token with "Sign in with Atlassian"
-16. [ONGOING] Documentation — keep help page updated as features change
+7.  Review architecture/infrastructure for supporting 50+ users
+    - sql.js in-memory limitations, MCP connection pooling, concurrent requests
+    - Session management at scale, database migration path (sql.js → better-sqlite3 or PostgreSQL)
+8.  Customer 360 timeline — unified per-customer view across deliveries, CRM, Jira, onboarding, emails
+9.  Notifications & alerts — SLA breaches, delivery dates, onboarding stalls (in-app + email digest)
+10. Team workload view — onboarder/assignee load heatmap across deliveries + Jira
+11. Activity audit log — who changed what and when (append-only table, Admin timeline view)
+12. Jira OAuth device-code flow — replace email+token with "Sign in with Atlassian"
+13. [ONGOING] Documentation — keep help page updated as features change
 
 
 === TIER 4: Nice to have ===
 
-17. Email attachments — list/get/add attachments on messages
-18. Multi-calendar support — list-calendars route exists, needs UI
-19. Workflows for tickets and deliveries
-20. Jira move-team automation (move ticket to a different Jira project)
-21. Browse mail folders — route exists (GET /api/o365/mail/folders), needs UI
-22. Browse specific planner plans — get-planner-plan, list-plan-tasks
+14. Email attachments — list/get/add attachments on messages
+15. Multi-calendar support — list-calendars route exists, needs UI
+16. Workflows for tickets and deliveries
+17. Jira move-team automation (move ticket to a different Jira project)
+18. Browse mail folders — route exists (GET /api/o365/mail/folders), needs UI
+19. Browse specific planner plans — get-planner-plan, list-plan-tasks
 
 
 === FUTURE CONSIDERATION ===
@@ -114,6 +118,9 @@ BUG2. MS365 To-Do sync errors — MCP returning non-JSON for some lists
 
 COMPLETED (recent first)
 ---------
+[DONE] SSO primary login — Microsoft sign-in button at top, local password form below
+[DONE] Tour expanded — step descriptions now list specific tabs within each area
+[DONE] Milestones merged into Onboarding tab — removed standalone admin Milestones tab
 [DONE] Per-User AI Key Overrides moved to My Settings — removed admin per-user key management, users self-serve
 [DONE] Security hardening — helmet headers, login rate limiting, debug endpoints gated behind admin auth
 [DONE] Quick tour / onboarding — 5-step interactive walkthrough overlay, localStorage persistence, "Take Tour" in user menu
@@ -122,6 +129,9 @@ COMPLETED (recent first)
 [DONE] BUG1 fix — Service Desk live Jira search for Unassigned/All filters (GET /api/tasks/service-desk?filter=)
 [DONE] BUG3 fix — CRM MRR value truncation with tooltip
 [DONE] BUG4 fix — D365 Purge & Re-sync button with confirmation dialog
+[DONE] Deploy script fix — npm ci instead of npm install to prevent lockfile drift
+[DONE] README rewrite — current features, deployment, full project structure
+[DONE] .gitignore update — db backups, temp xlsx files, .claude dir
 [DONE] IIS + NSSM deployment — reverse proxy, Windows Service, auto-restart, git-based deploys
 [DONE] Express 5 wildcard route fix — '{*path}' instead of '*'
 [DONE] Production static file path fix — ../../client instead of ../client

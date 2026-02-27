@@ -18,7 +18,7 @@ interface Team {
   description: string | null;
 }
 
-type Tab = 'users' | 'teams' | 'milestones' | 'ai-keys' | 'integrations' | 'onboarding' | 'permissions' | 'feedback';
+type Tab = 'users' | 'teams' | 'ai-keys' | 'integrations' | 'onboarding' | 'permissions' | 'feedback';
 
 interface FeedbackItem {
   id: number;
@@ -643,7 +643,7 @@ export function AdminView() {
 
       {/* Tabs */}
       <div className="flex items-center gap-2">
-        {([['users', 'Users'], ['teams', 'Teams'], ['milestones', 'Milestones'], ['onboarding', 'Onboarding'], ['ai-keys', 'AI Keys'], ['integrations', 'Integrations'], ['permissions', 'Permissions'], ['feedback', 'Feedback']] as const).map(([key, label]) => (
+        {([['users', 'Users'], ['teams', 'Teams'], ['onboarding', 'Onboarding'], ['ai-keys', 'AI Keys'], ['integrations', 'Integrations'], ['permissions', 'Permissions'], ['feedback', 'Feedback']] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => { setTab(key); clearMessages(); }}
@@ -853,34 +853,6 @@ export function AdminView() {
         </div>
       )}
 
-      {/* Milestones Tab */}
-      {tab === 'milestones' && (
-        <MilestonesTab
-          milestoneTemplates={milestoneTemplates}
-          saleTypes={saleTypes}
-          matrixOffsets={matrixOffsets}
-          matrixEdits={matrixEdits}
-          matrixDirty={matrixDirty}
-          matrixSaving={matrixSaving}
-          editingTemplate={editingTemplate}
-          showAddTemplate={showAddTemplate}
-          newTemplate={newTemplate}
-          selectedSaleTypeId={selectedSaleTypeId}
-          getMatrixValue={getMatrixValue}
-          setMatrixValue={setMatrixValue}
-          saveMatrix={saveMatrix}
-          addSaleTypeToMatrix={addSaleTypeToMatrix}
-          removeSaleTypeFromMatrix={removeSaleTypeFromMatrix}
-          setSelectedSaleTypeId={setSelectedSaleTypeId}
-          setShowAddTemplate={setShowAddTemplate}
-          setNewTemplate={setNewTemplate}
-          createMilestoneTemplate={createMilestoneTemplate}
-          updateMilestoneTemplate={updateMilestoneTemplate}
-          deleteMilestoneTemplate={deleteMilestoneTemplate}
-          setEditingTemplate={setEditingTemplate}
-        />
-      )}
-
       {/* AI Keys Tab */}
       {tab === 'ai-keys' && (
         <div className="space-y-4">
@@ -988,7 +960,37 @@ export function AdminView() {
 
       {/* Onboarding Config Tab */}
       {tab === 'onboarding' && (
-        <OnboardingConfigView />
+        <div className="space-y-8">
+          <OnboardingConfigView />
+
+          <div className="border-t border-[#3a424d] pt-6">
+            <h3 className="text-sm font-semibold text-neutral-200 mb-4">Milestone Templates & Matrix</h3>
+            <MilestonesTab
+              milestoneTemplates={milestoneTemplates}
+              saleTypes={saleTypes}
+              matrixOffsets={matrixOffsets}
+              matrixEdits={matrixEdits}
+              matrixDirty={matrixDirty}
+              matrixSaving={matrixSaving}
+              editingTemplate={editingTemplate}
+              showAddTemplate={showAddTemplate}
+              newTemplate={newTemplate}
+              selectedSaleTypeId={selectedSaleTypeId}
+              getMatrixValue={getMatrixValue}
+              setMatrixValue={setMatrixValue}
+              saveMatrix={saveMatrix}
+              addSaleTypeToMatrix={addSaleTypeToMatrix}
+              removeSaleTypeFromMatrix={removeSaleTypeFromMatrix}
+              setSelectedSaleTypeId={setSelectedSaleTypeId}
+              setShowAddTemplate={setShowAddTemplate}
+              setNewTemplate={setNewTemplate}
+              createMilestoneTemplate={createMilestoneTemplate}
+              updateMilestoneTemplate={updateMilestoneTemplate}
+              deleteMilestoneTemplate={deleteMilestoneTemplate}
+              setEditingTemplate={setEditingTemplate}
+            />
+          </div>
+        </div>
       )}
 
       {/* Permissions Tab — Custom Role Editor */}

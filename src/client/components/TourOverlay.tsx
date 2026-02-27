@@ -11,31 +11,31 @@ const TOUR_STEPS: TourStep[] = [
   {
     target: '[data-area="command"]',
     title: 'My NOVA',
-    description: 'Your command centre. Dashboard shows daily stats, Ask NOVA gives AI-powered task suggestions, My Focus highlights your priorities, and Standup generates daily updates.',
+    description: 'Your command centre hub. Tabs: Dashboard (KPIs & charts), Ask NOVA (AI assistant for task suggestions), My Focus (priority tasks & starred deliveries), and Standup (AI morning briefing, mid-day replan, end-of-day review).',
     position: 'bottom',
   },
   {
     target: '[data-area="servicedesk"]',
     title: 'Service Desk',
-    description: 'View and manage Jira service desk tickets. Switch between list, kanban board, and calendar views. Drag tickets between columns to transition them in Jira.',
+    description: 'View and manage Jira service desk tickets. Tabs: Tickets (sortable list with ownership filters), Kanban (drag cards between columns to transition in Jira), and Calendar (monthly view with drag-to-reschedule).',
     position: 'bottom',
   },
   {
     target: '[data-area="onboarding"]',
     title: 'Onboarding',
-    description: 'Track customer deliveries with milestones, view the onboarding calendar, and manage the ticket automation matrix for new customer setups.',
+    description: 'Track the delivery pipeline and customer onboarding. Tabs: Delivery (milestones, xlsx/SharePoint sync, starred items), Onboarding Calendar (monthly milestone grid), and Config (ticket automation matrix for new setups).',
     position: 'bottom',
   },
   {
     target: '[data-area="accounts"]',
     title: 'Account Management',
-    description: 'CRM view powered by Dynamics 365. Monitor customer health (RAG status), track MRR, and manage account reviews.',
+    description: 'Dynamics 365 CRM integration. View customer health (RAG status), track MRR across your portfolio, log business reviews, and sync or purge accounts from D365.',
     position: 'bottom',
   },
   {
     target: '[data-tour="user-menu"]',
     title: 'Settings & Admin',
-    description: 'Access your personal settings, integration configuration, admin panel (if you have access), help documentation, and feedback submission from the user menu.',
+    description: 'My Settings for personal integrations and AI key. Admin panel for users, teams, roles, permissions, and onboarding config. Plus the Help guide and Feedback form.',
     position: 'left',
   },
 ];

@@ -98,6 +98,33 @@ export function LoginView({ onLogin, onRegister, onSsoLogin, error, loading }: L
             </div>
           )}
 
+          {ssoEnabled && onSsoLogin && mode === 'login' && (
+            <>
+              <button
+                type="button"
+                onClick={onSsoLogin}
+                disabled={loading}
+                className="w-full px-4 py-2.5 text-sm rounded-lg bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 21 21" fill="none">
+                  <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+                  <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+                  <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+                  <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+                </svg>
+                Sign in with Microsoft
+              </button>
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-[#3a424d]" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-[#2f353d] px-3 text-[10px] text-neutral-500 uppercase">or sign in with password</span>
+                </div>
+              </div>
+            </>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block">Username</label>
@@ -106,7 +133,7 @@ export function LoginView({ onLogin, onRegister, onSsoLogin, error, loading }: L
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 placeholder="Enter username"
-                autoFocus
+                autoFocus={!ssoEnabled}
                 autoComplete="username"
               />
             </div>
@@ -165,38 +192,11 @@ export function LoginView({ onLogin, onRegister, onSsoLogin, error, loading }: L
             <button
               type="submit"
               disabled={loading}
-              className="w-full px-4 py-2.5 text-sm rounded-lg bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50 transition-colors mt-2"
+              className="w-full px-4 py-2.5 text-sm rounded-lg bg-[#2f353d] border border-[#3a424d] text-neutral-200 font-medium hover:bg-[#363d47] disabled:opacity-50 transition-colors mt-2"
             >
               {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
-
-          {ssoEnabled && onSsoLogin && mode === 'login' && (
-            <>
-              <div className="relative my-4">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-[#3a424d]" />
-                </div>
-                <div className="relative flex justify-center">
-                  <span className="bg-[#2f353d] px-3 text-[10px] text-neutral-500 uppercase">or</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={onSsoLogin}
-                disabled={loading}
-                className="w-full px-4 py-2.5 text-sm rounded-lg bg-[#2f353d] border border-[#3a424d] text-neutral-200 font-medium hover:bg-[#363d47] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 21 21" fill="none">
-                  <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
-                  <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
-                  <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
-                  <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
-                </svg>
-                Sign in with Microsoft
-              </button>
-            </>
-          )}
 
           <div className="mt-4 text-center">
             {mode === 'login' ? (
