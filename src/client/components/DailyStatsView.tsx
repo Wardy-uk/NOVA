@@ -86,14 +86,21 @@ export function DailyStatsView({ tasks, onNavigate }: { tasks: Task[]; onNavigat
 
   const copyDebug = async () => {
     let tasksApiDebug = null;
+    let syncResult = null;
     try {
       const r = await fetch('/api/tasks');
       const j = await r.json();
       tasksApiDebug = j._debug ?? null;
     } catch {}
+    try {
+      const r = await fetch('/api/tasks/sync', { method: 'POST' });
+      const j = await r.json();
+      syncResult = j.data ?? j;
+    } catch (e) { syncResult = String(e); }
     const debug = {
       _debug: 'DailyStatsView',
       tasksApiDebug,
+      syncResult,
       tasksFromProp: tasks.length,
       taskSourcesFromProp: tasks.reduce((acc, t) => { acc[t.source] = (acc[t.source] ?? 0) + 1; return acc; }, {} as Record<string, number>),
       focusCount,
