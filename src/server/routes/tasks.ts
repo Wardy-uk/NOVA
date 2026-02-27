@@ -61,7 +61,7 @@ export function createTaskRoutes(
     const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
     const filtered = tasks.filter((t) => allowedSources.has(t.source));
 
-    res.json({ ok: true, data: filtered });
+    res.json({ ok: true, data: filtered, _debug: { userId, userRole, allowedSources: [...allowedSources], totalBeforeFilter: tasks.length, totalAfterFilter: filtered.length } });
   });
 
   // GET /api/tasks/service-desk — live Jira search with ownership filter

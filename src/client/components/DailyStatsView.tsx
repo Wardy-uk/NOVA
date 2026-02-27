@@ -84,9 +84,16 @@ export function DailyStatsView({ tasks, onNavigate }: { tasks: Task[]; onNavigat
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   const sources = Object.keys(SOURCE_META).filter((s) => (stats.bySource[s] ?? 0) > 0);
 
-  const copyDebug = () => {
+  const copyDebug = async () => {
+    let tasksApiDebug = null;
+    try {
+      const r = await fetch('/api/tasks');
+      const j = await r.json();
+      tasksApiDebug = j._debug ?? null;
+    } catch {}
     const debug = {
       _debug: 'DailyStatsView',
+      tasksApiDebug,
       tasksFromProp: tasks.length,
       taskSourcesFromProp: tasks.reduce((acc, t) => { acc[t.source] = (acc[t.source] ?? 0) + 1; return acc; }, {} as Record<string, number>),
       focusCount,
