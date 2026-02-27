@@ -84,11 +84,28 @@ export function DailyStatsView({ tasks, onNavigate }: { tasks: Task[]; onNavigat
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   const sources = Object.keys(SOURCE_META).filter((s) => (stats.bySource[s] ?? 0) > 0);
 
+  const copyDebug = () => {
+    const debug = {
+      _debug: 'DailyStatsView',
+      tasksFromProp: tasks.length,
+      taskSourcesFromProp: tasks.reduce((acc, t) => { acc[t.source] = (acc[t.source] ?? 0) + 1; return acc; }, {} as Record<string, number>),
+      focusCount,
+      statsFromApi: stats,
+    };
+    navigator.clipboard.writeText(JSON.stringify(debug, null, 2));
+    alert('Dashboard debug copied to clipboard');
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">Command Centre</h2>
-        <p className="text-[11px] text-neutral-500 mt-0.5">{today}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">Command Centre</h2>
+          <p className="text-[11px] text-neutral-500 mt-0.5">{today}</p>
+        </div>
+        <button onClick={copyDebug} className="text-[10px] text-neutral-600 hover:text-neutral-400 border border-[#3a424d] rounded px-2 py-1" title="Copy dashboard debug data">
+          Debug
+        </button>
       </div>
 
       {/* My Focus card */}
