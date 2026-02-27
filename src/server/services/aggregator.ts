@@ -588,39 +588,57 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
           }
         }
 
-        const boardName = (boardData.name as string) ?? '';
-        const groups = (boardData.groups as Array<Record<string, unknown>>) ?? [];
-        console.log(`[mondayAdapter] Board "${boardName}" (${boardId}): ${groups.length} groups`);
+        // Response may be { board: { name, items, columns } } or { name, groups, items }
+        const board = (boardData.board as Record<string, unknown>) ?? boardData;
+        const boardName = (board.name as string) ?? '';
 
-        // Filter out done/completed groups
-        const activeGroups = groups.filter((g) => {
-          const title = ((g.title as string) ?? (g.name as string) ?? '').toLowerCase();
-          return !title.includes('done') && !title.includes('completed') && !title.includes('closed');
-        });
-        console.log(`[mondayAdapter] Board "${boardName}": ${activeGroups.length} active groups (${groups.length - activeGroups.length} filtered as done/completed)`);
+        // Items can be flat (board.items) or nested in groups (board.groups[].items)
+        let items: Array<Record<string, unknown>> = [];
+        const groups = (board.groups as Array<Record<string, unknown>>) ?? [];
+
+        if (groups.length > 0) {
+          // Grouped response: filter out done groups, collect items
+          const activeGroups = groups.filter((g) => {
+            const title = ((g.title as string) ?? (g.name as string) ?? '').toLowerCase();
+            return !title.includes('done') && !title.includes('completed') && !title.includes('closed');
+          });
+          console.log(`[mondayAdapter] Board "${boardName}" (${boardId}): ${activeGroups.length} active groups (${groups.length - activeGroups.length} filtered)`);
+          for (const group of activeGroups) {
+            const groupItems = (group.items as Array<Record<string, unknown>>)
+              ?? ((group.items_page as Record<string, unknown>)?.items as Array<Record<string, unknown>>)
+              ?? [];
+            items.push(...groupItems);
+          }
+        } else {
+          // Flat response: items directly on board
+          items = (board.items as Array<Record<string, unknown>>) ?? [];
+          console.log(`[mondayAdapter] Board "${boardName}" (${boardId}): ${items.length} items (flat)`);
+        }
 
         hadAnyFetch = true;
-        for (const group of activeGroups) {
-          const items = (group.items as Array<Record<string, unknown>>)
-            ?? (group.items_page as Record<string, unknown>)?.items as Array<Record<string, unknown>>
-            ?? [];
-          const groupTitle = (group.title as string) ?? (group.name as string) ?? 'unnamed';
-          console.log(`[mondayAdapter]   Group "${groupTitle}": ${items.length} items`);
-          for (const item of items) {
-            const columnValues = (item.column_values as Array<Record<string, unknown>>) ?? [];
-            allTasks.push({
-              source: 'monday',
-              source_id: String(item.id),
-              source_url: `https://monday.com/boards/${boardId}/pulses/${item.id}`,
-              title: (item.name as string) ?? 'Untitled',
-              description: boardName ? `Board: ${boardName}` : undefined,
-              status: mapMondayStatus(columnValues),
-              priority: mapMondayPriority(columnValues),
-              due_date: extractMondayDate(columnValues),
-              category: 'project',
-              raw_data: item,
-            });
-          }
+
+        // Filter out done/completed items (since flat response has no group-level filtering)
+        let skippedDone = 0;
+        for (const item of items) {
+          const columnValues = (item.column_values as Array<Record<string, unknown>>) ?? [];
+          const status = mapMondayStatus(columnValues);
+          if (status === 'done') { skippedDone++; continue; }
+
+          allTasks.push({
+            source: 'monday',
+            source_id: String(item.id),
+            source_url: `https://monday.com/boards/${boardId}/pulses/${item.id}`,
+            title: (item.name as string) ?? 'Untitled',
+            description: boardName ? `Board: ${boardName}` : undefined,
+            status,
+            priority: mapMondayPriority(columnValues),
+            due_date: extractMondayDate(columnValues),
+            category: 'project',
+            raw_data: item,
+          });
+        }
+        if (skippedDone > 0) {
+          console.log(`[mondayAdapter] Board "${boardName}": Skipped ${skippedDone} done items`);
         }
       } catch (err) {
         hadError = true;
