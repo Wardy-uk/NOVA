@@ -136,9 +136,11 @@ export class SharePointSync {
           driveItemId: currentFolderId,
         });
         const folderText = this.extractText(folderResp);
+        console.log(`[SP-Sync] Folder listing response (first 1500):`, folderText.slice(0, 1500));
         const folderId = this.findItemIdByName(folderText, folderName);
+        console.log(`[SP-Sync] findItemIdByName("${folderName}") => ${folderId}`);
         if (!folderId) {
-          result.errors.push(`Could not find folder "${folderName}" in drive navigation`);
+          result.errors.push(`Could not find folder "${folderName}" in drive navigation. Response: ${folderText.slice(0, 500)}`);
           this._lastResult = result;
           return result;
         }
@@ -146,15 +148,17 @@ export class SharePointSync {
       }
 
       // Now list the final folder to find the xlsx file
-      console.log(`[SP-Sync] Listing final folder for ${fileName}...`);
+      console.log(`[SP-Sync] Listing final folder for ${fileName} (folder: ${currentFolderId})...`);
       const finalResp = await this.mcp.callTool('msgraph', 'list-folder-files', {
         driveId,
         driveItemId: currentFolderId,
       });
       const finalText = this.extractText(finalResp);
+      console.log(`[SP-Sync] Final folder listing (first 2000):`, finalText.slice(0, 2000));
       const fileItemId = this.findItemIdByName(finalText, fileName);
+      console.log(`[SP-Sync] findItemIdByName("${fileName}") => ${fileItemId}`);
       if (!fileItemId) {
-        result.errors.push(`Could not find "${fileName}" in the target folder`);
+        result.errors.push(`Could not find "${fileName}" in the target folder. Contents: ${finalText.slice(0, 500)}`);
         this._lastResult = result;
         return result;
       }
@@ -166,9 +170,12 @@ export class SharePointSync {
         driveId,
         driveItemId: fileItemId,
       });
+      const rawDownload = this.extractText(downloadResp);
+      console.log(`[SP-Sync] Download response length: ${rawDownload.length}, first 200:`, rawDownload.slice(0, 200));
       const fileContent = this.extractFileContent(downloadResp);
+      console.log(`[SP-Sync] Extracted file content length: ${fileContent?.length ?? 0}`);
       if (!fileContent) {
-        result.errors.push('Downloaded file content is empty');
+        result.errors.push(`Downloaded file content is empty. Raw response (first 500): ${rawDownload.slice(0, 500)}`);
         this._lastResult = result;
         return result;
       }
@@ -176,15 +183,22 @@ export class SharePointSync {
       // Step 4: Parse the xlsx
       const XLSX = (await import('xlsx')).default;
       const buf = Buffer.from(fileContent, 'base64');
+      console.log(`[SP-Sync] Base64 decoded to ${buf.length} bytes`);
       const wb = XLSX.read(buf);
       console.log('[SP-Sync] Parsed workbook with', wb.SheetNames.length, 'sheets:', wb.SheetNames.join(', '));
 
       // Step 5: Process each product sheet
+      console.log(`[SP-Sync] Looking for product sheets: ${PRODUCT_SHEETS.join(', ')}`);
+      console.log(`[SP-Sync] Workbook sheet names: ${wb.SheetNames.join(', ')}`);
       for (const sheetName of PRODUCT_SHEETS) {
         const ws = wb.Sheets[sheetName];
-        if (!ws) continue;
+        if (!ws) {
+          console.log(`[SP-Sync] Sheet "${sheetName}" not found in workbook`);
+          continue;
+        }
 
         const rows = this.parseSheetRows(XLSX, ws);
+        console.log(`[SP-Sync] Sheet "${sheetName}": ${rows.length} parseable rows`);
         if (rows.length === 0) continue;
 
         result.sheetsProcessed++;
@@ -227,6 +241,8 @@ export class SharePointSync {
         `${result.entriesCreated} created, ${result.entriesSkipped} skipped`
       );
     } catch (err) {
+      const msg = err instanceof Error ? err.stack ?? err.message : String(err);
+      console.error('[SP-Sync] Pull failed with exception:', msg);
       result.errors.push(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
