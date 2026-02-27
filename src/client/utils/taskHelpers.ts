@@ -2,6 +2,16 @@ import type { Task } from '../../shared/types.js';
 
 export type OwnershipFilter = 'unassigned' | 'all' | 'all-breached' | null;
 
+/** Extract Current Tier from raw_data.customfield_12981 */
+export function getTier(task: Task): string | null {
+  const rd = (task.raw_data && typeof task.raw_data === 'object') ? task.raw_data as Record<string, unknown> : null;
+  if (!rd) return null;
+  const raw = rd.customfield_12981;
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object') return (raw as any).value ?? (raw as any).name ?? null;
+  return null;
+}
+
 /** Extract assignee name from task description metadata line "Assignee: ..." */
 export function getAssignee(task: Task): string {
   if (!task.description) return 'Unassigned';

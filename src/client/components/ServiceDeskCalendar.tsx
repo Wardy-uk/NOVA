@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TaskDrawer } from './TaskDrawer.js';
-import { getAssignee } from '../utils/taskHelpers.js';
+import { getAssignee, getTier } from '../utils/taskHelpers.js';
 
 interface Props {
   tasks: Task[];
@@ -252,9 +252,10 @@ export function ServiceDeskCalendar({ tasks, onUpdateTask }: Props) {
                         onDragStart={(e) => handleDragStart(e, task.id)}
                         onClick={() => openTask(task, dayTasks)}
                         className={`w-full text-left text-[10px] px-1.5 py-0.5 rounded truncate border-l-2 ${getPriorityClass(task.priority ?? 50)} bg-[#272C33] text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors cursor-grab active:cursor-grabbing`}
-                        title={`${task.source_id}: ${task.title}`}
+                        title={`${task.source_id}: ${task.title}${getTier(task) ? ` [${getTier(task)}]` : ''}`}
                       >
                         <span className="text-[#5ec1ca] font-mono">{task.source_id}</span>{' '}
+                        {getTier(task) && <span className="text-indigo-300">[{getTier(task)}]</span>}{' '}
                         {task.title}
                       </div>
                     ))}
@@ -298,6 +299,9 @@ export function ServiceDeskCalendar({ tasks, onUpdateTask }: Props) {
                     <div className="text-[10px] text-[#5ec1ca] font-mono">{task.source_id}</div>
                   )}
                   <div className="text-[11px] text-neutral-300 truncate">{task.title}</div>
+                  {getTier(task) && (
+                    <span className="text-[10px] px-1 py-0.5 rounded bg-indigo-900/40 text-indigo-300 inline-block mt-0.5">{getTier(task)}</span>
+                  )}
                   <div className="text-[10px] text-neutral-500 mt-0.5">{getAssignee(task)}</div>
                 </div>
               ))}

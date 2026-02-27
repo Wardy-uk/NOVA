@@ -692,6 +692,17 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
                   />
                 </div>
                 <div>
+                  <div className="text-[10px] uppercase tracking-widest mb-1">Current Tier</div>
+                  <div className="text-neutral-200">
+                    {(() => {
+                      const rd = (task.raw_data && typeof task.raw_data === 'object') ? task.raw_data as Record<string, unknown> : null;
+                      const raw = rd?.customfield_12981;
+                      const tier = typeof raw === 'string' ? raw : (raw as any)?.value ?? (raw as any)?.name ?? null;
+                      return tier || 'None';
+                    })()}
+                  </div>
+                </div>
+                <div>
                   <div className="text-[10px] uppercase tracking-widest mb-1">Agent Last Updated</div>
                   <div className="text-neutral-200">
                     {jiraFields?.agentLastUpdated ? formatDate(jiraFields.agentLastUpdated) : 'None'}

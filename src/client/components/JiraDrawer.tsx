@@ -73,7 +73,9 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
     const dueDate = (fieldsObj.duedate as string | undefined) ?? task.due_date ?? '';
     const assignee = (fieldsObj.assignee as { displayName?: string; name?: string } | undefined);
     const assigneeLabel = assignee?.displayName ?? assignee?.name ?? '';
-    return { summary, description, priority, status, dueDate, assigneeLabel };
+    const tierRaw = fieldsObj.customfield_12981;
+    const tier = typeof tierRaw === 'string' ? tierRaw : (tierRaw as any)?.value ?? (tierRaw as any)?.name ?? null;
+    return { summary, description, priority, status, dueDate, assigneeLabel, tier };
   }, [issue, task]);
 
   const [summary, setSummary] = useState(fields.summary);
@@ -303,6 +305,10 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
                 placeholder="YYYY-MM-DD"
                 className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1 border border-[#3a424d] disabled:opacity-50"
               />
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest mb-1">Current Tier</div>
+              <div className="text-neutral-200">{fields.tier || 'None'}</div>
             </div>
           </div>
 

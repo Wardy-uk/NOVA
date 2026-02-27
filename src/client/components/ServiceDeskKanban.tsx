@@ -3,6 +3,7 @@ import type { Task } from '../../shared/types.js';
 import { TaskDrawer } from './TaskDrawer.js';
 import {
   getDateGroup,
+  getTier,
   DATE_GROUP_ORDER,
   DATE_GROUP_LABELS,
   DATE_GROUP_COLORS,
@@ -380,9 +381,7 @@ function KanbanCard({
   const assigneeRaw = rd?.assignee;
   const assignee = typeof assigneeRaw === 'string' ? assigneeRaw
     : (assigneeRaw as any)?.displayName ?? (assigneeRaw as any)?.name ?? null;
-  const tierRaw = rd?.customfield_12981;
-  const tier = typeof tierRaw === 'string' ? tierRaw
-    : (tierRaw as any)?.value ?? (tierRaw as any)?.name ?? null;
+  const tier = getTier(task);
 
   return (
     <div

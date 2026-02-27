@@ -1,5 +1,6 @@
 import type { Task } from '../../shared/types.js';
 import { SLATimer } from './SLATimer.js';
+import { getTier } from '../utils/taskHelpers.js';
 
 interface Props {
   task: Task;
@@ -102,6 +103,7 @@ function getDueDateInfo(dateStr: string): { label: string; className: string } {
 export function TaskCard({ task, onUpdate, onClick }: Props) {
   const meta = parseDescMeta(task.description);
   const descText = getDescriptionText(task.description);
+  const tier = getTier(task);
 
   return (
     <div
@@ -149,6 +151,11 @@ export function TaskCard({ task, onUpdate, onClick }: Props) {
           {meta.Priority && (
             <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${getPriorityColor(meta.Priority)}`}>
               {meta.Priority}
+            </span>
+          )}
+          {tier && (
+            <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-indigo-900/40 text-indigo-300" title={tier}>
+              {tier}
             </span>
           )}
           {meta.Created && (
