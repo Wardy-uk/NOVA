@@ -380,7 +380,7 @@ function KanbanCard({
   const assigneeRaw = rd?.assignee;
   const assignee = typeof assigneeRaw === 'string' ? assigneeRaw
     : (assigneeRaw as any)?.displayName ?? (assigneeRaw as any)?.name ?? null;
-  const tierRaw = rd?.['Current Tier'];
+  const tierRaw = rd?.customfield_12981;
   const tier = typeof tierRaw === 'string' ? tierRaw
     : (tierRaw as any)?.value ?? (tierRaw as any)?.name ?? null;
 
