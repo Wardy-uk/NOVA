@@ -754,7 +754,7 @@ export class TaskAggregator {
     const result = (await this.mcp.callTool('jira', 'jira_search', {
       jql,
       limit: 200,
-      fields: 'summary,status,priority,description,assignee,created,duedate,requestType,queue,"Agent Next Update","Last Agent Public Comment"',
+      fields: 'summary,status,priority,description,assignee,created,duedate,requestType,queue,"Agent Next Update","Last Agent Public Comment",customfield_14081,customfield_14185,customfield_14048',
       expand: 'sla',
     })) as { content?: Array<{ text?: string }> };
 

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { TaskQueries, MilestoneQueries } from '../db/queries.js';
 import type { TaskAggregator, SdFilter } from '../services/aggregator.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
+import { evaluateAttention } from '../services/jira-sla.js';
 
 export function createTaskRoutes(
   taskQueries: TaskQueries,
@@ -55,6 +56,50 @@ export function createTaskRoutes(
       res.status(500).json({
         ok: false,
         error: err instanceof Error ? err.message : 'Service desk fetch failed',
+      });
+    }
+  });
+
+  // GET /api/tasks/service-desk/attention — tickets assigned to me that need attention
+  router.get('/service-desk/attention', async (_req, res) => {
+    try {
+      const tickets = await aggregator.fetchServiceDeskTickets('mine');
+      const now = new Date();
+
+      const attentionTickets = tickets
+        .map((t) => {
+          const issue = (t.raw_data ?? {}) as Record<string, unknown>;
+          const result = evaluateAttention(issue, now);
+          return { ticket: t, attention: result };
+        })
+        .filter(({ attention }) => attention.needsAttention);
+
+      const mapped = attentionTickets.map(({ ticket: t, attention }) => ({
+        id: `jira:${t.source_id}`,
+        source: t.source,
+        source_id: t.source_id,
+        source_url: t.source_url ?? null,
+        title: t.title,
+        description: t.description ?? null,
+        status: t.status ?? 'open',
+        priority: t.priority ?? 50,
+        due_date: t.due_date ?? null,
+        sla_breach_at: t.sla_breach_at ?? null,
+        category: t.category ?? null,
+        raw_data: t.raw_data ?? null,
+        pinned: false,
+        snoozed_until: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        attention_reasons: attention.reasons,
+      }));
+
+      console.log(`[ServiceDesk] Attention: ${attentionTickets.length}/${tickets.length} tickets need attention`);
+      res.json({ ok: true, data: mapped });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Attention fetch failed',
       });
     }
   });

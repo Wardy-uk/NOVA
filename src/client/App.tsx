@@ -14,6 +14,7 @@ import { OnboardingConfigView } from './components/OnboardingConfigView.js';
 import { OnboardingCalendar } from './components/OnboardingCalendar.js';
 import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
+import { NeedsAttentionView } from './components/NeedsAttentionView.js';
 import { NextActions } from './components/NextActions.js';
 import { StatusBar } from './components/StatusBar.js';
 import { FeedbackModal } from './components/FeedbackModal.js';
@@ -27,7 +28,7 @@ import { type OwnershipFilter } from './utils/taskHelpers.js';
 
 type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
-  | 'tickets' | 'kanban' | 'sd-calendar'
+  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention'
   | 'delivery' | 'onboarding-config' | 'ob-calendar'
   | 'crm'
   | 'settings' | 'admin-panel'
@@ -69,6 +70,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'tickets', label: 'Tickets' },
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
+      { view: 'attention', label: 'Needs Attention' },
     ],
   },
   onboarding: {
@@ -101,7 +103,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'kanban', 'tickets', 'sd-calendar', 'admin-panel']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'kanban', 'tickets', 'sd-calendar', 'attention', 'admin-panel']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -469,7 +471,7 @@ export function App() {
               ))}
 
               {/* Service Desk ownership filter */}
-              {currentArea === 'servicedesk' && (
+              {currentArea === 'servicedesk' && view !== 'attention' && (
                 <div className="ml-auto flex items-center gap-1">
                   {([
                     { value: 'mine' as OwnershipFilter, label: 'My Tickets' },
@@ -542,6 +544,9 @@ export function App() {
           )}
           {view === 'sd-calendar' && (
             <ServiceDeskCalendar tasks={sdTasks} onUpdateTask={updateTask} />
+          )}
+          {view === 'attention' && (
+            <NeedsAttentionView onUpdateTask={updateTask} />
           )}
 
           {/* Onboarding */}
