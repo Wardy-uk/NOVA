@@ -1,12 +1,10 @@
 TO DO
 -----
 
-=== CURRENT STATUS (26 Feb 2026) ===
+=== CURRENT STATUS (27 Feb 2026) ===
 
-N.O.V.A is a fully functional personal productivity aggregator running locally on Windows.
-It pulls tasks from Jira, Microsoft 365 (Planner, To-Do, Calendar, Email), Monday.com, and
-Dynamics 365 CRM into a single dashboard with AI-powered standups, focus prioritisation, and
-delivery tracking.
+N.O.V.A is deployed to a Windows Server VM at https://nova.nurtur.tech, served via
+IIS reverse proxy to a Node.js backend managed by NSSM as a Windows Service.
 
 What's working:
   - Express + React/Vite + SQLite stack, JWT auth with Entra SSO option
@@ -18,98 +16,81 @@ What's working:
   - Onboarding ticket orchestrator — idempotent, resume-safe, dry-run capable
   - Multi-user with role-based access, per-user settings/AI keys, file-based stores
   - Email send/reply/forward, calendar create/edit, SharePoint sync push/pull
+  - Deployed: IIS + NSSM on Windows Server, git-based deploys via deploy.ps1
 
-What's not working or partially working:
-  - Service Desk "Unassigned" and "All" filters (BUG1 — JQL only fetches current user's tickets)
-  - Monday.com syncs 0 tasks (connection fixed, but needs board IDs configured or search tuned)
-  - MS365 To-Do sync errors (MCP returning non-JSON for some lists)
-  - Not deployed — runs on localhost only
+What's not fully working:
+  - SharePoint sync — needs Azure admin consent for Sites.Read.All scope [BLOCKED: awaiting admin approval]
+  - Monday.com syncs 0 tasks — connection ok but needs board IDs or search tuning
+  - MS365 To-Do sync errors — MCP returning non-JSON for some lists
 
-Current branch: nova-codex (many uncommitted changes across 40+ files)
-
-To Triage - Feedback should record who sent the feedback, and allow admin to reply, also, add the option to add the feedback to our todo list doc
-
-=== BLOCKERS / BUGS ===
-
-BUG1. Service Desk — Unassigned and All Tickets filters don't work
-      - filterByOwnership() logic looks correct, need to debug why 'unassigned'/'all' return wrong results
-
-BUG2. [FIXED] Monday.com MCP — globally-installed v1.16.1 + OTEL_SDK_DISABLED, adapter updated for new tool names
-      - Needs board IDs in Settings > Monday.com for full sync
-
-clear out D365 records for a fresh repull - remove accounts that aren't assigned to me
-
-CRM - total MRR value is bigger than size of panel
+Current branch: nova-codex
+Deploy: .\deploy\deploy.ps1 -Branch nova-codex (on server C:\Nurtur\NOVA)
 
 
-=== DO NEXT (high priority, unblocks daily use) ===
+=== BLOCKERS (waiting on external action) ===
 
-- Deploy to server — move off local dev, make NOVA accessible remotely
-    - containerise (Docker) or deploy to internal server
-    - replace in-memory SQLite with file-persisted or PostgreSQL
-    - environment config (JWT secret, DB path, MCP server paths)
+BLOCK1. SharePoint sync — MS365 MCP needs Sites.Read.All scope
+        Azure admin must consent to the org-mode permissions for the MS365 MCP app registration.
+        Once approved: logout + login from Settings > MS365, then "Pull from SP" on Delivery page.
 
-- O365 SSO — allow Microsoft login alongside username/password
+BLOCK2. Monday.com syncs 0 tasks
+        Connection works (46 tools), but no tasks pulled. Needs board IDs configured in
+        Settings > Monday.com, or the adapter's search query tuned.
 
-- Map roles to tab & feature access — custom roles (Admin > Permissions) wired to route guards + UI visibility
 
-- Jira SLA prioritisation — tickets over SLA or overdue an update should be prioritised (user will supply logic)
+=== BUGS ===
+
+BUG2. MS365 To-Do sync errors — MCP returning non-JSON for some lists
+      [todoAdapter] Error fetching list Tasks/Flagged Emails: SyntaxError "MCP error" is not valid JSON
+
+
+=== DO NEXT (high priority) ===
+
+2. Jira SLA prioritisation — tickets over SLA or overdue an update should be prioritised
+   (user will supply logic)
 
 
 === QUICK WINS (small effort, visible impact) ===
 
-- [DONE] Rename Command Centre to 'My NOVA'
-- [DONE] Rename Onboarding > Config to 'Onboarding Matrix'
-- [DONE] Add Sale Type filter on onboarding matrix
-- [DONE] Service Desk Kanban — default groupBy to 'date' buckets
+- Dashboard KPIs — add Onboarding metrics (milestone progress, overdue milestones, onboarding runs)
+- My Focus auto-population — tickets over SLA or overdue update auto-appear
+- Delivery kanban board — drag cards between status columns
 
 
 === TIER 1: Daily workflow enhancements ===
 
-1. Dashboard KPIs — include Onboarding metrics (delivery milestones progress, overdue milestones, onboarding runs)
-2. My Focus auto-population — tickets over SLA or overdue update auto-appear in My Focus
-3. Delivery kanban board — drag cards between status columns (Not Started → In Progress → Training → Complete)
-4. Add CRM integration partners list to onboarding — validate for ticket creation
+6. Add CRM integration partners list to onboarding — validate for ticket creation
+7. Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
 
 
 === TIER 2: Onboarding ticket automation ===
 
-5. Ticket creation UI — form in Admin > Onboarding to trigger POST /api/onboarding/create-tickets
+8. Ticket creation UI — form in Admin > Onboarding to trigger POST /api/onboarding/create-tickets
    - sale type dropdown, customer name, onboarding ref, due date
    - dry-run preview before live execution
    - show result (parent key + child keys) or error
-6. Jira settings for ticket creation — configure request type field IDs in Admin > Integrations (Jira Onboarding card)
-7. Test ticket creation — dry run + live test against Jira NT project
-8. Onboarding run history UI — view past runs (status, parent/child keys, errors)
-
-
-=== TIER 2: Service Desk ===
-
-9.  Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
+9. Jira settings for ticket creation — configure request type field IDs in Admin > Integrations
+10. Onboarding run history UI — view past runs (status, parent/child keys, errors)
 
 
 === TIER 3: Platform maturity ===
 
-10. Customer 360 timeline — unified per-customer view across deliveries, CRM, Jira, onboarding, emails
-11. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls, overdue tasks (in-app + email digest)
-12. Team workload view — onboarder/assignee load heatmap across deliveries + Jira
-13. Activity audit log — who changed what and when (append-only table, Admin timeline view)
-14. Jira OAuth device-code flow — replace email+token with "Sign in with Atlassian" button
-    - register Atlassian OAuth 2.0 app (3LO)
-    - implement device code / authorization code flow
-    - per-user token storage + refresh
-    - may require replacing mcp-atlassian with direct Jira REST calls
-15. [ONGOING] Documentation — keep help page updated as features change
+11. Customer 360 timeline — unified per-customer view across deliveries, CRM, Jira, onboarding, emails
+12. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls (in-app + email digest)
+13. Team workload view — onboarder/assignee load heatmap across deliveries + Jira
+14. Activity audit log — who changed what and when (append-only table, Admin timeline view)
+15. Jira OAuth device-code flow — replace email+token with "Sign in with Atlassian"
+16. [ONGOING] Documentation — keep help page updated as features change
 
 
 === TIER 4: Nice to have ===
 
-16. Email attachments — list/get/add attachments on messages
-17. Multi-calendar support — list-calendars route exists, needs UI
-18. Workflows for tickets and deliveries
-19. Jira move-team automation (move ticket to a different Jira project)
-20. Browse mail folders — route exists (GET /api/o365/mail/folders), needs UI
-21. Browse specific planner plans — get-planner-plan, list-plan-tasks
+17. Email attachments — list/get/add attachments on messages
+18. Multi-calendar support — list-calendars route exists, needs UI
+19. Workflows for tickets and deliveries
+20. Jira move-team automation (move ticket to a different Jira project)
+21. Browse mail folders — route exists (GET /api/o365/mail/folders), needs UI
+22. Browse specific planner plans — get-planner-plan, list-plan-tasks
 
 
 === FUTURE CONSIDERATION ===
@@ -129,6 +110,21 @@ CRM - total MRR value is bigger than size of panel
 
 COMPLETED (recent first)
 ---------
+[DONE] Security hardening — helmet headers, login rate limiting, debug endpoints gated behind admin auth
+[DONE] Quick tour / onboarding — 5-step interactive walkthrough overlay, localStorage persistence, "Take Tour" in user menu
+[DONE] Feedback improvements — admin reply, username tracking, create-task-from-feedback
+[DONE] Session-only MS365 data — transient flag on tasks, purge on server restart, MS365 sources non-persistent
+[DONE] BUG1 fix — Service Desk live Jira search for Unassigned/All filters (GET /api/tasks/service-desk?filter=)
+[DONE] BUG3 fix — CRM MRR value truncation with tooltip
+[DONE] BUG4 fix — D365 Purge & Re-sync button with confirmation dialog
+[DONE] IIS + NSSM deployment — reverse proxy, Windows Service, auto-restart, git-based deploys
+[DONE] Express 5 wildcard route fix — '{*path}' instead of '*'
+[DONE] Production static file path fix — ../../client instead of ../client
+[DONE] Deploy scripts — install-service.ps1, deploy.ps1, setup-iis-site.ps1
+[DONE] Delete Local Data per integration — Settings > Integrations delete button
+[DONE] Delivery view graceful fallback — works without local xlsx, shows DB entries + SP sync
+[DONE] Entra SSO login flow — device code, auto-provision, OID/email matching
+[DONE] Configurable role permissions — per-area min role, Admin > Permissions grid
 [DONE] Jira dual-account config — My Settings = personal Jira (read/sync), Admin = service account for onboarding automation
 [DONE] My Settings / Admin split — separate standalone pages, personal integrations in My Settings, global config in Admin
 [DONE] Personal AI key override — per-user API key in My Settings > AI Preferences, overrides global key

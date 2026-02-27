@@ -15,7 +15,11 @@ interface NormalizedTask {
   sla_breach_at?: string;
   category?: string;
   raw_data?: unknown;
+  transient?: boolean;
 }
+
+// Sources whose data should not persist across server restarts
+const TRANSIENT_SOURCES = new Set(['planner', 'todo', 'calendar', 'email']);
 
 interface FetchResult {
   tasks: NormalizedTask[];
@@ -615,6 +619,8 @@ function extractMondayDate(columns: Array<Record<string, unknown>>): string | un
 }
 
 // ---------- Aggregator Service ----------
+export type SdFilter = 'mine' | 'unassigned' | 'all';
+
 export class TaskAggregator {
   private adapters: SourceAdapter[];
 
@@ -634,6 +640,42 @@ export class TaskAggregator {
     ];
   }
 
+  /** Live Jira search for Service Desk with ownership filter. Returns normalized tasks (not persisted). */
+  async fetchServiceDeskTickets(filter: SdFilter = 'mine'): Promise<NormalizedTask[]> {
+    if (!this.mcp.isConnected('jira')) return [];
+
+    const sdProject = this.settingsQueries?.get('jira_sd_project');
+    const jiraBaseUrl = this.settingsQueries?.get('jira_url') ?? undefined;
+
+    // Build JQL based on filter
+    const parts: string[] = [];
+    if (filter === 'mine') {
+      parts.push('assignee = currentUser()');
+    } else if (filter === 'unassigned') {
+      parts.push('assignee IS EMPTY');
+    }
+    // 'all' = no assignee filter
+
+    if (sdProject) {
+      parts.push(`project = ${sdProject}`);
+    }
+
+    parts.push('status NOT IN (Done, Closed, Resolved)');
+    const jql = parts.join(' AND ') + ' ORDER BY priority DESC, updated DESC';
+
+    const result = (await this.mcp.callTool('jira', 'jira_search', {
+      jql,
+      limit: 100,
+      fields: 'summary,status,priority,description,assignee,created,duedate,requestType,queue,"Agent Next Update","Last Agent Public Comment"',
+      expand: 'sla',
+    })) as { content?: Array<{ text?: string }> };
+
+    const text = result?.content?.[0]?.text;
+    if (!text) return [];
+
+    return parseJiraSearchResults(text, jiraBaseUrl);
+  }
+
   /** Sync a single source by name. Returns result with count and optional error. */
   async syncSource(sourceName: string): Promise<{ source: string; count: number; error?: string }> {
     const adapter = this.adapters.find((a) => a.source === sourceName);
@@ -649,8 +691,9 @@ export class TaskAggregator {
       const { tasks, ok } = await adapter.fetch(this.mcp);
       let didChange = false;
       const freshIds: string[] = [];
+      const isTransient = TRANSIENT_SOURCES.has(adapter.source);
       for (const task of tasks) {
-        this.taskQueries.upsertFromSource(task, { deferSave: true });
+        this.taskQueries.upsertFromSource({ ...task, transient: isTransient }, { deferSave: true });
         freshIds.push(`${task.source}:${task.source_id}`);
         didChange = true;
       }

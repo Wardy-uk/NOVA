@@ -29,6 +29,10 @@ interface FeedbackItem {
   description: string | null;
   status: string;
   created_at: string;
+  admin_reply: string | null;
+  admin_reply_at: string | null;
+  admin_reply_by: number | null;
+  task_id: number | null;
 }
 
 interface MilestoneTemplate {
@@ -288,6 +292,30 @@ export function AdminView() {
     if (!confirm('Delete this feedback item?')) return;
     try {
       const res = await fetch(`/api/feedback/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (json.ok) fetchFeedback();
+    } catch { /* ignore */ }
+  };
+
+  const [replyingTo, setReplyingTo] = useState<number | null>(null);
+  const [replyText, setReplyText] = useState('');
+
+  const submitReply = async (id: number) => {
+    if (!replyText.trim()) return;
+    try {
+      const res = await fetch(`/api/feedback/${id}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reply: replyText.trim() }),
+      });
+      const json = await res.json();
+      if (json.ok) { setReplyingTo(null); setReplyText(''); fetchFeedback(); }
+    } catch { /* ignore */ }
+  };
+
+  const createTaskFromFeedback = async (id: number) => {
+    try {
+      const res = await fetch(`/api/feedback/${id}/to-task`, { method: 'POST' });
       const json = await res.json();
       if (json.ok) fetchFeedback();
     } catch { /* ignore */ }
@@ -1248,6 +1276,11 @@ export function AdminView() {
                             }`}>
                               {item.status}
                             </span>
+                            {item.task_id && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#5ec1ca]/20 text-[#5ec1ca]">
+                                Task created
+                              </span>
+                            )}
                           </div>
                           <div className="text-sm text-neutral-100 font-medium">{item.title}</div>
                           {item.description && (
@@ -1256,8 +1289,68 @@ export function AdminView() {
                           <div className="text-[10px] text-neutral-600 mt-2">
                             {item.username || `User #${item.user_id}`} &middot; {new Date(item.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </div>
+
+                          {/* Admin reply display */}
+                          {item.admin_reply && (
+                            <div className="mt-3 pl-3 border-l-2 border-[#5ec1ca]/30">
+                              <div className="text-[10px] text-[#5ec1ca] mb-0.5">Admin reply</div>
+                              <div className="text-xs text-neutral-300">{item.admin_reply}</div>
+                              {item.admin_reply_at && (
+                                <div className="text-[10px] text-neutral-600 mt-0.5">
+                                  {new Date(item.admin_reply_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Reply textarea */}
+                          {replyingTo === item.id && (
+                            <div className="mt-3 space-y-2">
+                              <textarea
+                                value={replyText}
+                                onChange={(e) => setReplyText(e.target.value)}
+                                placeholder="Write a reply..."
+                                rows={2}
+                                className="w-full bg-[#272C33] border border-[#3a424d] rounded px-3 py-2 text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-[#5ec1ca]/50 resize-none"
+                                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitReply(item.id); } }}
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => submitReply(item.id)}
+                                  disabled={!replyText.trim()}
+                                  className="px-3 py-1 text-[10px] rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50 transition-colors"
+                                >
+                                  Send Reply
+                                </button>
+                                <button
+                                  onClick={() => { setReplyingTo(null); setReplyText(''); }}
+                                  className="px-3 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-neutral-200 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          {replyingTo !== item.id && (
+                            <button
+                              onClick={() => { setReplyingTo(item.id); setReplyText(item.admin_reply ?? ''); }}
+                              className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-[#5ec1ca] transition-colors"
+                              title="Reply to feedback"
+                            >
+                              Reply
+                            </button>
+                          )}
+                          {!item.task_id && (
+                            <button
+                              onClick={() => createTaskFromFeedback(item.id)}
+                              className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-purple-400 transition-colors"
+                              title="Create task from feedback"
+                            >
+                              + Task
+                            </button>
+                          )}
                           {item.status === 'new' && (
                             <button
                               onClick={() => updateFeedbackStatus(item.id, 'reviewed')}

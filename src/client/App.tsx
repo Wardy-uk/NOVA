@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, Component, type ReactNode } from 'react';
+import { useState, useEffect, useRef, Component, type ReactNode } from 'react';
 import { TaskList } from './components/TaskList.js';
 import { SettingsView } from './components/SettingsView.js';
 import { StandupView } from './components/StandupView.js';
@@ -17,10 +17,11 @@ import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NextActions } from './components/NextActions.js';
 import { StatusBar } from './components/StatusBar.js';
 import { FeedbackModal } from './components/FeedbackModal.js';
+import { TourOverlay, useTour } from './components/TourOverlay.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
-import { filterByOwnership, type OwnershipFilter } from './utils/taskHelpers.js';
+import { type OwnershipFilter } from './utils/taskHelpers.js';
 
 // ── Area / View definitions ──
 
@@ -136,6 +137,7 @@ export function App() {
   const { tasks, loading, error, syncing, updateTask } = useTasks();
   const health = useHealth();
   const { theme, setTheme } = useTheme();
+  const { showTour, startTour, closeTour, checkFirstVisit } = useTour();
   const [apiDebug, setApiDebug] = useState<Array<{ ts: string; text: string }>>([]);
   const [lastSuggest, setLastSuggest] = useState<string>('');
   const [spDebug, setSpDebug] = useState<Record<string, unknown> | null>(null);
@@ -171,6 +173,11 @@ export function App() {
       })
       .catch(() => {});
   }, [auth.isAuthenticated, auth.token]);
+
+  // Auto-show tour on first visit
+  useEffect(() => {
+    if (auth.isAuthenticated) checkFirstVisit();
+  }, [auth.isAuthenticated, checkFirstVisit]);
 
   // Auto-trigger standup on first visit if no morning ritual today
   useEffect(() => {
@@ -261,12 +268,30 @@ export function App() {
   // Navigate helper — used by child components
   const navigate = (v: string) => setView(v as View);
 
-  // Service Desk: filtered Jira tasks by ownership
-  const userName = auth.user?.display_name || auth.user?.username || '';
-  const sdTasks = useMemo(
-    () => filterByOwnership(tasks.filter((t) => t.source === 'jira'), sdFilter, userName),
-    [tasks, sdFilter, userName],
-  );
+  // Service Desk: fetch tickets from live Jira search with ownership filter
+  const [sdTasks, setSdTasks] = useState<typeof tasks>([]);
+  const [sdLoading, setSdLoading] = useState(false);
+  useEffect(() => {
+    if (!auth.isAuthenticated) return;
+    let active = true;
+    setSdLoading(true);
+    fetch(`/api/tasks/service-desk?filter=${sdFilter}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (!active) return;
+        if (json.ok && json.data) {
+          setSdTasks(json.data);
+        } else {
+          // Fallback: use locally synced Jira tasks for 'mine'
+          setSdTasks(tasks.filter((t) => t.source === 'jira'));
+        }
+      })
+      .catch(() => {
+        if (active) setSdTasks(tasks.filter((t) => t.source === 'jira'));
+      })
+      .finally(() => { if (active) setSdLoading(false); });
+    return () => { active = false; };
+  }, [sdFilter, auth.isAuthenticated, tasks]);
 
   // Auth gate
   if (auth.initializing) {
@@ -319,6 +344,7 @@ export function App() {
                 {AREA_ORDER.filter((a) => canSeeArea(a)).map((area) => (
                   <button
                     key={area}
+                    data-area={area}
                     onClick={() => setView(AREAS[area].defaultView)}
                     className={`px-3 py-1.5 text-xs rounded transition-colors ${
                       currentArea === area && !STANDALONE_VIEWS.has(view)
@@ -356,7 +382,7 @@ export function App() {
                 ))}
               </div>
               {/* User menu */}
-              <div className="relative ml-1 pl-2 border-l border-[#3a424d]" ref={userMenuRef}>
+              <div className="relative ml-1 pl-2 border-l border-[#3a424d]" ref={userMenuRef} data-tour="user-menu">
                 <button
                   onClick={() => setShowUserMenu((prev) => !prev)}
                   className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-[#363d47] transition-colors"
@@ -395,6 +421,12 @@ export function App() {
                       className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
                     >
                       Send Feedback
+                    </button>
+                    <button
+                      onClick={() => { startTour(); setShowUserMenu(false); }}
+                      className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
+                    >
+                      Take Tour
                     </button>
                     {import.meta.env.DEV && (
                       <button
@@ -502,7 +534,7 @@ export function App() {
                   {error}
                 </div>
               )}
-              <TaskList tasks={sdTasks} loading={loading} onUpdateTask={updateTask} minimal />
+              <TaskList tasks={sdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
             </>
           )}
           {view === 'kanban' && (
@@ -561,6 +593,7 @@ export function App() {
         <StatusBar health={health} />
       </div>
       {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
+      <TourOverlay show={showTour} onClose={closeTour} />
     </ErrorBoundary>
   );
 }

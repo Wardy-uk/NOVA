@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import type { FeedbackQueries } from '../db/queries.js';
+import type { FeedbackQueries, TaskQueries } from '../db/queries.js';
+import { saveDb } from '../db/schema.js';
 
-export function createFeedbackRoutes(feedbackQueries: FeedbackQueries): Router {
+export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueries?: TaskQueries): Router {
   const router = Router();
 
   // Submit feedback (any authenticated user)
@@ -31,6 +32,52 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries): Router {
     const status = req.query.status as string | undefined;
     const items = feedbackQueries.getAll(status ? { status } : undefined);
     res.json({ ok: true, data: items });
+  });
+
+  // Reply to feedback (admin only)
+  router.post('/:id/reply', (req, res) => {
+    const role = (req as any).user?.role;
+    if (role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+
+    const id = parseInt(req.params.id, 10);
+    const adminUserId = (req as any).user?.id;
+    const { reply } = req.body;
+    if (!reply?.trim()) { res.status(400).json({ ok: false, error: 'reply is required' }); return; }
+
+    feedbackQueries.reply(id, reply.trim(), adminUserId);
+    const updated = feedbackQueries.getById(id);
+    res.json({ ok: true, data: updated });
+  });
+
+  // Create task from feedback (admin only)
+  router.post('/:id/to-task', (req, res) => {
+    const role = (req as any).user?.role;
+    if (role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!taskQueries) { res.status(503).json({ ok: false, error: 'Task system not available' }); return; }
+
+    const id = parseInt(req.params.id, 10);
+    const feedback = feedbackQueries.getById(id);
+    if (!feedback) { res.status(404).json({ ok: false, error: 'Feedback not found' }); return; }
+
+    // Create a task from this feedback
+    taskQueries.upsertFromSource({
+      source: 'feedback',
+      source_id: `feedback-${id}`,
+      title: `[${feedback.type}] ${feedback.title}`,
+      description: feedback.description ?? undefined,
+      status: 'open',
+      priority: feedback.type === 'bug' ? 70 : 50,
+      category: 'internal',
+    });
+    saveDb();
+
+    // Link feedback to the task
+    const task = taskQueries.getById(`feedback:feedback-${id}`);
+    if (task) {
+      feedbackQueries.linkTask(id, parseInt(task.id.replace('feedback:', ''), 10) || id);
+    }
+
+    res.json({ ok: true, data: { taskCreated: true } });
   });
 
   // Update feedback status (admin only)

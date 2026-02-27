@@ -11,6 +11,7 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'jira_url', label: 'Jira URL', type: 'url', placeholder: 'https://yourorg.atlassian.net', required: true },
       { key: 'jira_username', label: 'Email', type: 'text', placeholder: 'you@company.com', required: true },
       { key: 'jira_token', label: 'API Token', type: 'password', placeholder: 'From id.atlassian.com/manage-profile/security/api-tokens', required: true },
+      { key: 'jira_sd_project', label: 'Service Desk Project', type: 'text', placeholder: 'e.g. NT (for Unassigned / All filters)', required: false },
     ],
   },
   {

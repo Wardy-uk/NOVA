@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { TaskQueries, MilestoneQueries } from '../db/queries.js';
-import type { TaskAggregator } from '../services/aggregator.js';
+import type { TaskAggregator, SdFilter } from '../services/aggregator.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
 
 export function createTaskRoutes(
@@ -20,6 +20,43 @@ export function createTaskRoutes(
       userId,
     });
     res.json({ ok: true, data: tasks });
+  });
+
+  // GET /api/tasks/service-desk — live Jira search with ownership filter
+  router.get('/service-desk', async (req, res) => {
+    try {
+      const filter = (req.query.filter as string) || 'mine';
+      if (!['mine', 'unassigned', 'all'].includes(filter)) {
+        res.status(400).json({ ok: false, error: 'filter must be mine, unassigned, or all' });
+        return;
+      }
+      const tickets = await aggregator.fetchServiceDeskTickets(filter as SdFilter);
+      // Map to task-like objects for the frontend
+      const mapped = tickets.map((t) => ({
+        id: `jira:${t.source_id}`,
+        source: t.source,
+        source_id: t.source_id,
+        source_url: t.source_url ?? null,
+        title: t.title,
+        description: t.description ?? null,
+        status: t.status ?? 'open',
+        priority: t.priority ?? 50,
+        due_date: t.due_date ?? null,
+        sla_breach_at: t.sla_breach_at ?? null,
+        category: t.category ?? null,
+        raw_data: t.raw_data ?? null,
+        pinned: false,
+        snoozed_until: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+      res.json({ ok: true, data: mapped });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Service desk fetch failed',
+      });
+    }
   });
 
   // GET /api/tasks/stats — must be before /:id

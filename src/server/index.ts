@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -67,6 +69,10 @@ async function main() {
   const onboardingConfigQueries = new OnboardingConfigQueries(db);
   const onboardingRunQueries = new OnboardingRunQueries(db);
   const milestoneQueries = new MilestoneQueries(db);
+
+  // Purge transient MS365 data from previous session
+  const purgedCount = taskQueries.deleteTransientTasks();
+  if (purgedCount > 0) console.log(`[Startup] Purged ${purgedCount} transient tasks from previous session`);
 
   // Re-sync milestone task priorities on startup
   resyncAllMilestoneTasks(milestoneQueries, taskQueries);
@@ -168,8 +174,18 @@ async function main() {
 
   // 4. Express app
   const app = express();
+  app.use(helmet({ contentSecurityPolicy: false })); // CSP off for SPA
   app.use(cors());
   app.use(express.json());
+
+  // Rate limit login attempts (15 per 15 min window)
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 15,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { ok: false, error: 'Too many login attempts. Try again in 15 minutes.' },
+  });
 
   // Entra SSO service
   const ssoService = new EntraSsoService(() => settingsQueries.getAll());
@@ -184,34 +200,11 @@ async function main() {
   });
 
   // Public API routes (no auth required)
+  app.post('/api/auth/login', loginLimiter);
+  app.post('/api/auth/register', loginLimiter);
   app.use('/api/auth', createAuthRoutes(userQueries, jwtSecret, ssoService, settingsQueries));
 
-  // TEMP DEBUG: SP exploration (remove after debugging)
-  app.get('/api/debug/tools', async (_req, res) => {
-    try {
-      const server = (mcpManager as any).servers.get('msgraph');
-      if (!server?.client) { res.json({ error: 'msgraph not connected' }); return; }
-      const { tools } = await server.client.listTools();
-      const spTools = tools.filter((t: any) =>
-        t.name.includes('sharepoint') || t.name.includes('drive') || t.name.includes('download') || t.name.includes('list-folder')
-      );
-      res.json({ count: spTools.length, tools: spTools.map((t: any) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
-    } catch (err: any) { res.json({ error: err.message }); }
-  });
-
-  // TEMP DEBUG: call any msgraph tool and return raw result
-  app.get('/api/debug/sp-probe', async (req, res) => {
-    try {
-      const tool = String(req.query.tool || 'list-drives');
-      const argsStr = String(req.query.args || '{}');
-      const args = JSON.parse(argsStr);
-      console.log(`[SP-Probe] Calling ${tool} with`, args);
-      const result = await mcpManager.callTool('msgraph', tool, args);
-      res.json({ ok: true, tool, args, result });
-    } catch (err: any) {
-      res.json({ ok: false, error: err.message, stack: err.stack?.split('\n').slice(0, 5) });
-    }
-  });
+  // Debug endpoints are registered after auth middleware below (admin-only)
 
   // Dynamics 365 — direct Web API with delegated auth (device code flow)
   let d365Service: Dynamics365Service | null = null;
@@ -253,7 +246,7 @@ async function main() {
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
-  app.use('/api/feedback', createFeedbackRoutes(feedbackQueries));
+  app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries));
 
   // DELETE /api/data/source/:source — purge local records for a given integration source
   app.delete('/api/data/source/:source', (req, res) => {
@@ -276,6 +269,38 @@ async function main() {
     }
   });
   app.use('/api/onboarding/config', createOnboardingConfigRoutes(onboardingConfigQueries, requireAreaAccess));
+
+  // Debug endpoints (admin-only, behind auth)
+  app.get('/api/debug/tools', (req, res, next) => {
+    if (req.user?.role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    next();
+  }, async (_req, res) => {
+    try {
+      const server = (mcpManager as any).servers.get('msgraph');
+      if (!server?.client) { res.json({ error: 'msgraph not connected' }); return; }
+      const { tools } = await server.client.listTools();
+      const spTools = tools.filter((t: any) =>
+        t.name.includes('sharepoint') || t.name.includes('drive') || t.name.includes('download') || t.name.includes('list-folder')
+      );
+      res.json({ count: spTools.length, tools: spTools.map((t: any) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+    } catch (err: any) { res.json({ error: err.message }); }
+  });
+
+  app.get('/api/debug/sp-probe', (req, res, next) => {
+    if (req.user?.role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    next();
+  }, async (req, res) => {
+    try {
+      const tool = String(req.query.tool || 'list-drives');
+      const argsStr = String(req.query.args || '{}');
+      const args = JSON.parse(argsStr);
+      console.log(`[SP-Probe] Calling ${tool} with`, args);
+      const result = await mcpManager.callTool('msgraph', tool, args);
+      res.json({ ok: true, tool, args, result });
+    } catch (err: any) {
+      res.json({ ok: false, error: err.message, stack: err.stack?.split('\n').slice(0, 5) });
+    }
+  });
 
   // Onboarding ticket orchestrator — lazy JiraRestClient from settings
   function buildJiraClient(): JiraRestClient | null {

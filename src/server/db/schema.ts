@@ -306,6 +306,11 @@ export function initializeSchema(database: Database): void {
     ['onboarding_capabilities', 'ticket_group_id INTEGER'],
     ['onboarding_sale_types', 'jira_tickets_required INTEGER DEFAULT 0'],
     ['delivery_entries', 'sale_type TEXT'],
+    ['tasks', 'transient INTEGER DEFAULT 0'],
+    ['feedback', 'admin_reply TEXT'],
+    ['feedback', 'admin_reply_at TEXT'],
+    ['feedback', 'admin_reply_by INTEGER'],
+    ['feedback', 'task_id INTEGER'],
   ];
   // Data migration: consolidate 'user' role → 'viewer'
   try { database.run(`UPDATE users SET role = 'viewer' WHERE role = 'user'`); } catch { /* ignore */ }

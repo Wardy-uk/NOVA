@@ -100,7 +100,7 @@ function KpiCard({ label, value, sub, color }: { label: string; value: string | 
   return (
     <div className="bg-[#2f353d] rounded-lg border border-[#3a424d] p-3 flex flex-col">
       <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">{label}</div>
-      <div className="text-xl font-bold" style={{ color: color ?? '#f5f5f5' }}>{value}</div>
+      <div className="text-xl font-bold truncate" title={String(value)} style={{ color: color ?? '#f5f5f5' }}>{value}</div>
       {sub && <div className="text-[10px] text-neutral-500 mt-0.5">{sub}</div>}
     </div>
   );
@@ -333,6 +333,28 @@ export function CrmView({ canWrite = false }: { canWrite?: boolean }) {
     }
   };
 
+  const purgeAndResync = async () => {
+    if (!window.confirm('This will delete ALL local CRM data and re-pull from Dynamics 365. Continue?')) return;
+    setD365Status('syncing');
+    setD365Message('');
+    try {
+      const resp = await fetch('/api/dynamics365/purge-and-sync', { method: 'POST' });
+      const json = await resp.json();
+      if (json.ok) {
+        const { created, purged, total } = json.data;
+        setD365Status('done');
+        setD365Message(`Purged ${purged} old records, synced ${total} accounts (${created} new)`);
+        loadData();
+      } else {
+        setD365Status('error');
+        setD365Message(json.error ?? 'Purge & re-sync failed');
+      }
+    } catch (err) {
+      setD365Status('error');
+      setD365Message(err instanceof Error ? err.message : 'Purge & re-sync failed');
+    }
+  };
+
   // ---- Computed ----
 
   const filteredCount = customers.length;
@@ -353,6 +375,13 @@ export function CrmView({ canWrite = false }: { canWrite?: boolean }) {
                 className="px-3 py-1.5 text-xs rounded bg-[#363d47] text-neutral-300 font-medium hover:bg-[#3a424d] disabled:opacity-50 transition-colors"
               >
                 {d365Status === 'syncing' ? 'Syncing...' : 'Sync from D365'}
+              </button>
+              <button
+                onClick={purgeAndResync}
+                disabled={d365Status === 'syncing'}
+                className="px-3 py-1.5 text-xs rounded bg-[#363d47] text-red-400 font-medium hover:bg-red-500/20 disabled:opacity-50 transition-colors"
+              >
+                Purge & Re-sync
               </button>
               <button onClick={openAdd} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors">
                 + Add Customer

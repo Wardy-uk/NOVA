@@ -84,12 +84,13 @@ export class TaskQueries {
     sla_breach_at?: string;
     category?: string;
     raw_data?: unknown;
+    transient?: boolean;
   }, options?: { deferSave?: boolean }): void {
     const id = `${task.source}:${task.source_id}`;
     this.db.run(
       `INSERT INTO tasks (id, source, source_id, source_url, title, description,
-        status, priority, due_date, sla_breach_at, category, raw_data, last_synced, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        status, priority, due_date, sla_breach_at, category, raw_data, transient, last_synced, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
       ON CONFLICT(id) DO UPDATE SET
         source_url = excluded.source_url,
         title = excluded.title,
@@ -100,6 +101,7 @@ export class TaskQueries {
         sla_breach_at = excluded.sla_breach_at,
         category = excluded.category,
         raw_data = excluded.raw_data,
+        transient = excluded.transient,
         last_synced = datetime('now'),
         updated_at = datetime('now')`,
       [
@@ -115,11 +117,22 @@ export class TaskQueries {
         task.sla_breach_at ?? null,
         task.category ?? null,
         task.raw_data ? JSON.stringify(task.raw_data) : null,
+        task.transient ? 1 : 0,
       ]
     );
     if (!options?.deferSave) {
       saveDb();
     }
+  }
+
+  deleteTransientTasks(): number {
+    const countResult = this.db.exec('SELECT COUNT(*) FROM tasks WHERE transient = 1');
+    const count = (countResult[0]?.values[0]?.[0] as number) ?? 0;
+    if (count > 0) {
+      this.db.run('DELETE FROM tasks WHERE transient = 1');
+      saveDb();
+    }
+    return count;
   }
 
   deleteStaleBySource(
@@ -1076,6 +1089,10 @@ export interface Feedback {
   description: string | null;
   status: string;
   created_at: string;
+  admin_reply: string | null;
+  admin_reply_at: string | null;
+  admin_reply_by: number | null;
+  task_id: number | null;
 }
 
 export class FeedbackQueries {
@@ -1109,6 +1126,35 @@ export class FeedbackQueries {
     this.db.run(`UPDATE feedback SET status = ? WHERE id = ?`, [status, id]);
     saveDb();
     return true;
+  }
+
+  reply(id: number, reply: string, adminUserId: number): boolean {
+    this.db.run(
+      `UPDATE feedback SET admin_reply = ?, admin_reply_at = datetime('now'), admin_reply_by = ?, status = 'reviewed' WHERE id = ?`,
+      [reply, adminUserId, id]
+    );
+    saveDb();
+    return true;
+  }
+
+  linkTask(id: number, taskId: number): boolean {
+    this.db.run(`UPDATE feedback SET task_id = ? WHERE id = ?`, [taskId, id]);
+    saveDb();
+    return true;
+  }
+
+  getById(id: number): (Feedback & { username?: string }) | null {
+    const stmt = this.db.prepare(
+      `SELECT f.*, u.username FROM feedback f LEFT JOIN users u ON f.user_id = u.id WHERE f.id = ?`
+    );
+    stmt.bind([id]);
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as unknown as Feedback & { username?: string };
+      stmt.free();
+      return row;
+    }
+    stmt.free();
+    return null;
   }
 
   delete(id: number): boolean {
