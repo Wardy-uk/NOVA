@@ -172,8 +172,23 @@ export function createTaskRoutes(
   });
 
   // GET /api/tasks/stats — must be before /:id
-  router.get('/stats', (_req, res) => {
-    const allTasks = taskQueries.getAllIncludingDone();
+  router.get('/stats', (req, res) => {
+    const userId = (req as any).user?.id as number | undefined;
+
+    // Scope stats to sources the user has personally enabled
+    const allowedSources = new Set(['milestone', 'manual']);
+    if (userId && userSettingsQueries) {
+      if (userSettingsQueries.get(userId, 'jira_enabled') === 'true') allowedSources.add('jira');
+      if (userSettingsQueries.get(userId, 'msgraph_enabled') === 'true') {
+        allowedSources.add('planner');
+        allowedSources.add('todo');
+        allowedSources.add('calendar');
+        allowedSources.add('email');
+      }
+      if (userSettingsQueries.get(userId, 'monday_enabled') === 'true') allowedSources.add('monday');
+    }
+
+    const allTasks = taskQueries.getAllIncludingDone().filter((t) => allowedSources.has(t.source));
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
