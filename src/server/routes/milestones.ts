@@ -114,7 +114,7 @@ export function createMilestoneRoutes(
   router.post('/templates', writeGuard, (req, res) => {
     const parsed = TemplateCreateSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    const id = milestoneQueries.createTemplate(parsed.data);
+    const id = milestoneQueries.createTemplate(parsed.data as any);
     res.json({ ok: true, data: milestoneQueries.getTemplateById(id) });
   });
 

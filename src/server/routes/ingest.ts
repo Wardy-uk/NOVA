@@ -62,7 +62,7 @@ export function createIngestRoutes(taskQueries: TaskQueries, settingsQueries?: S
 
     const freshIds: string[] = [];
     for (const task of tasks) {
-      taskQueries.upsertFromSource(task, { deferSave: true });
+      taskQueries.upsertFromSource(task as any, { deferSave: true });
       freshIds.push(`${task.source}:${task.source_id}`);
     }
 
