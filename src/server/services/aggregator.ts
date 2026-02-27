@@ -747,10 +747,10 @@ export class TaskAggregator {
       parts.push(`project = ${sdProject}`);
     }
 
-    // Tier filter — primarily useful for 'unassigned' to scope to relevant queues
-    if (sdTiers && filter !== 'mine') {
+    // Tier exclusion filter — applied to ALL queries (mine, unassigned, all, attention)
+    if (sdTiers) {
       const tierValues = sdTiers.split(',').map(t => `"${t.trim()}"`).join(', ');
-      parts.push(`"Current Tier" IN (${tierValues})`);
+      parts.push(`"Current Tier" NOT IN (${tierValues})`);
     }
 
     parts.push('status NOT IN (Done, Closed, Resolved)');
