@@ -37,7 +37,7 @@ try {
 
     # ── Install dependencies ─────────────────────────────────────────────────
     Write-Host "[2/4] Installing dependencies..." -ForegroundColor Yellow
-    npm install
+    npm ci
     if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
     Write-Host ""
 
