@@ -100,12 +100,22 @@ export function createTaskRoutes(
       }
       const now = new Date();
 
-      // Debug: log field shape for first 3 tickets to diagnose SLA field paths
-      for (const t of tickets.slice(0, 3)) {
+      // Debug: attach field shape diagnostics to response
+      const _debugSamples = tickets.slice(0, 3).map((t) => {
         const issue = (t.raw_data ?? {}) as Record<string, unknown>;
         const fields = issue.fields as Record<string, unknown> | undefined;
-        console.log(`[Attention Debug] ${t.source_id} | hasRawData=${!!t.raw_data} | hasFieldsObj=${!!fields} | topKeys=${Object.keys(issue).join(',')} | status=${JSON.stringify(issue.status ?? fields?.status)} | cf14081=${JSON.stringify(issue.customfield_14081 ?? fields?.customfield_14081 ?? 'MISSING')} | cf14185=${JSON.stringify(issue.customfield_14185 ?? fields?.customfield_14185 ?? 'MISSING')} | cf14048=${JSON.stringify(issue.customfield_14048 ?? fields?.customfield_14048 ?? 'MISSING')} | created=${issue.created ?? fields?.created ?? 'MISSING'}`);
-      }
+        return {
+          key: t.source_id,
+          hasRawData: !!t.raw_data,
+          hasFieldsObj: !!fields,
+          topKeys: Object.keys(issue).slice(0, 20),
+          status: issue.status ?? fields?.status ?? 'MISSING',
+          created: issue.created ?? fields?.created ?? 'MISSING',
+          cf14081: issue.customfield_14081 ?? fields?.customfield_14081 ?? 'MISSING',
+          cf14185: issue.customfield_14185 ?? fields?.customfield_14185 ?? 'MISSING',
+          cf14048_type: issue.customfield_14048 ? typeof issue.customfield_14048 : (fields?.customfield_14048 ? `fields.${typeof fields.customfield_14048}` : 'MISSING'),
+        };
+      });
 
       const attentionTickets = tickets
         .map((t) => {
@@ -136,7 +146,7 @@ export function createTaskRoutes(
       }));
 
       console.log(`[ServiceDesk] Attention: ${attentionTickets.length}/${tickets.length} tickets need attention`);
-      res.json({ ok: true, data: mapped });
+      res.json({ ok: true, data: mapped, _debug: { totalTickets: tickets.length, attentionCount: attentionTickets.length, samples: _debugSamples } });
     } catch (err) {
       res.status(500).json({
         ok: false,
