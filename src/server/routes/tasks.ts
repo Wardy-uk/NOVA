@@ -32,8 +32,16 @@ export function createTaskRoutes(
         res.status(400).json({ ok: false, error: 'filter must be mine, unassigned, or all' });
         return;
       }
-      // For "mine" filter, use the logged-in user's Jira identity
+      // Gate: user must have Jira enabled in their personal settings
       const userId = (req as any).user?.id as number | undefined;
+      const userJiraEnabled = userId && userSettingsQueries
+        ? userSettingsQueries.get(userId, 'jira_enabled') === 'true'
+        : false;
+      if (!userJiraEnabled) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
+      // For "mine" filter, use the logged-in user's Jira identity
       const jiraUsername = userId && userSettingsQueries
         ? (userSettingsQueries.get(userId, 'jira_username') ?? undefined)
         : undefined;
@@ -67,8 +75,17 @@ export function createTaskRoutes(
   });
 
   // GET /api/tasks/service-desk/attention — ALL tickets that need attention (not user-scoped)
-  router.get('/service-desk/attention', async (_req, res) => {
+  router.get('/service-desk/attention', async (req, res) => {
     try {
+      // Gate: user must have Jira enabled in their personal settings
+      const userId = (req as any).user?.id as number | undefined;
+      const userJiraEnabled = userId && userSettingsQueries
+        ? userSettingsQueries.get(userId, 'jira_enabled') === 'true'
+        : false;
+      if (!userJiraEnabled) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
       const tickets = await aggregator.fetchServiceDeskTickets('all');
       const now = new Date();
 
