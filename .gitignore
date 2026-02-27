@@ -1,6 +1,7 @@
 node_modules/
 dist/
 daypilot.db
+daypilot.db.backup-*
 .env
 standups/
 reflections/
@@ -8,3 +9,5 @@ reflections/
 .d365-token-cache.json
 users.json
 settings.json
+~$*
+.claude/

@@ -1,6 +1,6 @@
-# N.O.V.A — Nurtur Operational Virtual Assistant
+# N.O.V.A (Nurtur Operational Virtual Assistant)
 
-A single-pane-of-glass operational dashboard that aggregates tasks from Jira, Microsoft 365 (Planner, To-Do, Calendar, Email), and Monday.com. Powered by AI standup rituals, a delivery pipeline tracker, CRM, and KPI dashboards.
+A single-pane-of-glass operational dashboard that aggregates tasks, tickets, emails, and calendar events from multiple sources into a unified workspace with AI-powered insights, delivery pipeline tracking, and onboarding automation.
 
 ## Tech Stack
 
@@ -8,240 +8,173 @@ A single-pane-of-glass operational dashboard that aggregates tasks from Jira, Mi
 |-------|-----------|
 | Frontend | React 19, Tailwind CSS v4, Vite 6 |
 | Backend | Express v5 (Node.js), TypeScript |
-| Database | sql.js (WASM SQLite) |
-| Integrations | MCP SDK (Jira via `mcp-atlassian`, MS Graph, Monday) |
+| Database | sql.js (WASM SQLite, in-memory with file persistence) |
+| Integrations | MCP SDK (Jira, MS365, Monday.com), Dataverse API (D365) |
 | AI | OpenAI GPT-4o-mini (standups, next-action suggestions) |
-| Auth | JWT + bcrypt, first-user admin setup |
+| Auth | JWT + bcrypt, optional Entra ID SSO |
+
+## Features
+
+| Area | Description |
+|------|-------------|
+| **My NOVA** | Dashboard with AI standup rituals, task prioritisation, next actions |
+| **Service Desk** | Kanban board with Jira drag-and-drop transitions, calendar view, ownership filters |
+| **Onboarding** | Ticket automation matrix, bulk Jira ticket creation, milestone calendar |
+| **Delivery** | Pipeline tracker with milestones (30-day model), xlsx/SharePoint sync |
+| **CRM** | Dynamics 365 account management with RAG status reviews |
+| **Admin** | Users, teams, roles, permissions, integrations, milestones, onboarding config, feedback |
+
+## Integrations
+
+| Source | Method | Data |
+|--------|--------|------|
+| Jira | MCP (`mcp-atlassian`) | Tickets, transitions, comments, Service Desk |
+| Microsoft 365 | MCP (`@softeria/ms-365-mcp-server`) | Planner, To-Do, Calendar, Email, OneDrive |
+| Monday.com | MCP (`@mondaydotcomorg/monday-mcp-server`) | Boards, tasks |
+| Dynamics 365 | Dataverse Web API (`@azure/msal-node`) | CRM accounts, contacts |
+| SharePoint | Via MS365 MCP | Delivery spreadsheet sync (push/pull) |
 
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
+# Install dependencies
 npm install
 
-# 2. Configure environment
-cp .env.template .env
-# Edit .env with your credentials (see Configuration below)
-
-# 3. Start development servers
+# Start dev server (API on :3001, Vite on :5173)
 npm run dev
-```
 
-This runs:
-- **API server** on `http://localhost:3001` (Express)
-- **Dev server** on `http://localhost:5173` (Vite, proxies `/api` to 3001)
+# Build for production
+npm run build
+
+# Start production server
+npm start
+
+# Reset database
+npm run db:reset
+```
 
 On first load, you'll be prompted to create an admin account.
 
-## Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start both servers (concurrently) |
-| `npm run dev:server` | API server only (tsx watch) |
-| `npm run dev:client` | Vite dev server only |
-| `npm run build` | Production build (Vite + tsc) |
-| `npm start` | Run production build |
-| `npm run db:reset` | Reset database schema |
-
 ## Configuration
 
-Copy `.env.template` to `.env` and configure:
+Integration credentials are configured through the UI:
 
-### Required
+- **My Settings** -- Personal integrations (Jira, MS365, Monday.com), AI key override
+- **Admin > Integrations** -- Global integrations (D365, SSO, Jira service account)
+- **Admin > AI Keys** -- Global OpenAI API key
 
-| Variable | Description |
-|----------|-------------|
-| `PORT` | API server port (default: `3001`) |
+### Environment Variables
 
-### Jira
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Server port | `3001` |
+| `JWT_SECRET` | JWT signing secret | Random (dev only) |
+| `DATA_DIR` | Database file location | Project root |
+| `FRONTEND_URL` | Frontend URL for SSO callback | `http://localhost:5173` |
 
-| Variable | Description |
-|----------|-------------|
-| `JIRA_URL` | Your Atlassian instance URL |
-| `JIRA_PERSONAL_TOKEN` | Jira Personal Access Token |
-
-Jira connects via `mcp-atlassian` (installed with `uvx`). The server auto-detects available tools and uses a fallback pattern to handle different MCP tool versions.
-
-### Microsoft 365
-
-| Variable | Description |
-|----------|-------------|
-| `MS365_MCP_CLIENT_ID` | Azure AD app registration client ID |
-| `MS365_MCP_TENANT_ID` | Tenant ID (default: `common`) |
-
-Requires an Azure AD app registration with delegated permissions: `Tasks.Read`, `Calendars.Read`, `Mail.Read`, `User.Read`. Enable "Allow public client flows" for device-code auth.
-
-Alternatively, M365 data can be synced via **Power Automate Cloud flows** that write JSON to OneDrive. See `docs/power-automate-cloud-flows.md`.
-
-### Monday.com
-
-| Variable | Description |
-|----------|-------------|
-| `MONDAY_API_TOKEN` | Monday.com Personal API Token |
-| `MONDAY_BOARD_IDS` | Optional: comma-separated board IDs to limit sync |
-
-### AI Features
-
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key (configured in Settings UI) |
-
-The API key can also be set via the Settings page at runtime. Used for standup rituals and next-action suggestions.
-
-## Architecture
+## Project Structure
 
 ```
 src/
-├── client/                    # React frontend
-│   ├── App.tsx                # Root component, view routing, auth gate
-│   ├── main.tsx               # React entry point
-│   ├── hooks/                 # useAuth, useTasks, useTheme, useIntegrations
-│   ├── components/            # All UI views and components
-│   └── styles/globals.css     # Tailwind v4 theme variables
-├── server/
-│   ├── index.ts               # Express bootstrap, route mounting, sync timers
-│   ├── middleware/auth.ts      # JWT Bearer token verification
-│   ├── db/
-│   │   ├── schema.ts          # DDL, migrations, index seeds
-│   │   └── queries.ts         # Query classes (Tasks, Rituals, Settings, Delivery, CRM, Users)
-│   ├── routes/                # Express route handlers
-│   │   ├── auth.ts            # Login, register, first-run setup
-│   │   ├── tasks.ts           # Task CRUD + stats + sync trigger
-│   │   ├── jira.ts            # Jira MCP tool calls (issues, transitions, users)
-│   │   ├── o365.ts            # MS Graph Planner + To-Do create/update
-│   │   ├── delivery.ts        # Delivery pipeline (xlsx + DB entries)
-│   │   ├── crm.ts             # CRM customers + reviews
-│   │   ├── standups.ts        # AI standup rituals (morning/replan/eod)
-│   │   ├── actions.ts         # AI next-action suggestions
-│   │   ├── settings.ts        # Key-value settings
-│   │   ├── integrations.ts    # Integration credential management
-│   │   ├── health.ts          # Health check + MCP server status
-│   │   └── ingest.ts          # Power Automate bulk task ingestion
-│   └── services/
-│       ├── aggregator.ts      # 6 source adapters + stale task cleanup
-│       ├── ai-actions.ts      # GPT-4o-mini next-action suggestions
-│       ├── ai-standup.ts      # GPT-4o-mini standup ritual generation
-│       ├── integrations.ts    # Integration definitions + MCP config
-│       ├── mcp-client.ts      # MCP SDK client lifecycle
-│       └── onedrive-watcher.ts# OneDrive folder polling for PA Cloud
-└── shared/
-    └── types.ts               # Zod schemas + shared TypeScript interfaces
+  client/
+    App.tsx                   # Root component, area routing, auth gate
+    components/               # 30+ React components
+    hooks/                    # useTasks, useAuth, useTheme, useIntegrations
+    utils/                    # Task helpers, formatters
+  server/
+    index.ts                  # Express server, route mounting, sync timers
+    middleware/auth.ts         # JWT Bearer token verification
+    db/
+      schema.ts               # DDL, migrations, indexes, seed data
+      queries.ts              # Query classes (Tasks, Rituals, Settings, Delivery, CRM, Users, Feedback)
+    routes/
+      auth.ts                 # Login, register, SSO (Entra ID)
+      tasks.ts                # Task CRUD, stats, service desk search
+      delivery.ts             # Delivery pipeline, xlsx import, SharePoint sync
+      dynamics365.ts           # D365 CRM sync, purge & re-sync
+      milestones.ts           # Delivery milestone management
+      onboarding.ts           # Jira ticket orchestration
+      onboarding-config.ts    # Onboarding matrix configuration
+      feedback.ts             # User feedback with admin reply
+      settings.ts             # User and global settings
+      admin.ts                # User/team/role management
+      crm.ts                  # CRM customers + reviews
+      standups.ts             # AI standup rituals
+      actions.ts              # AI next-action suggestions
+    services/
+      aggregator.ts           # Multi-source task sync engine (6 adapters)
+      mcp-client.ts           # MCP server connection manager
+      dynamics365.ts          # Dataverse API client
+      integrations.ts         # Integration definitions + MCP config
+      ai-actions.ts           # OpenAI task analysis
+      ai-standup.ts           # OpenAI standup generation
+      jira-client.ts          # Direct Jira REST v3 (onboarding automation)
+      entra-sso.ts            # Entra ID SSO auth flow
+deploy/
+  deploy.ps1                  # Git pull + build + restart service
+  install-service.ps1         # NSSM Windows Service setup
+  setup-iis-site.ps1          # IIS reverse proxy configuration
 ```
-
-### Key Patterns
-
-- **Task IDs** are composite: `${source}:${source_id}` (e.g., `jira:PROJ-123`)
-- **MCP tool calls** use a candidate-list fallback — tries multiple tool name variants to handle different MCP server versions
-- **Database writes** call `saveDb()` to flush WASM in-memory state to disk
-- **Stale cleanup** is source-aware: task sources (Jira, Planner, Monday) skip cleanup when 0 tasks returned; ephemeral sources (calendar, email) allow full purge
-- **Per-source sync intervals** — each integration has its own configurable polling interval, falling back to the global default (5 min)
 
 ## Database
 
-Uses `sql.js` (SQLite compiled to WASM). The database file `daypilot.db` is stored at the project root.
+Uses `sql.js` (SQLite compiled to WASM). The database file `daypilot.db` is stored at the project root (or `DATA_DIR`).
 
 ### Tables
 
 | Table | Purpose |
 |-------|---------|
-| `tasks` | Aggregated tasks from all sources |
-| `rituals` | AI standup ritual outputs (morning/replan/eod) |
+| `tasks` | Aggregated tasks from all sources (transient flag for session-only MS365 data) |
+| `rituals` | AI standup outputs (morning/replan/eod) |
 | `settings` | Key-value configuration |
-| `delivery_entries` | Delivery pipeline entries (DB-backed) |
+| `delivery_entries` | Delivery pipeline entries |
+| `delivery_milestones` | Per-delivery milestone instances |
+| `milestone_templates` | Milestone definitions (30-day model) |
+| `milestone_sale_type_offsets` | Milestone day offsets per sale type |
 | `crm_customers` | CRM customer records with RAG status |
-| `crm_reviews` | Business review history per customer |
-| `users` | Auth accounts (JWT, bcrypt) |
+| `crm_reviews` | Business review history |
+| `users` | Auth accounts (local + SSO) |
+| `user_settings` | Per-user preferences |
+| `user_task_pins` | Per-user pinned tasks |
+| `teams` | Team definitions |
+| `feedback` | User feedback with admin reply |
+| `onboarding_sale_types` | Sale type definitions |
+| `onboarding_capabilities` | Capability definitions |
+| `onboarding_matrix` | Sale type x capability matrix |
+| `onboarding_capability_items` | Capability sub-items |
+| `onboarding_ticket_groups` | Jira ticket groupings |
+| `onboarding_runs` | Ticket creation run history |
 
-Schema migrations run automatically on startup via `ALTER TABLE` wrapped in try/catch (safe for existing databases).
+Schema migrations run automatically on startup via `ALTER TABLE` wrapped in try/catch.
 
-## API Routes
+## Deployment
 
-All routes under `/api/*` (except `/api/auth/*`) require a JWT Bearer token.
+Deployed on Windows Server via IIS reverse proxy to Node.js, managed as a Windows Service (NSSM).
 
-### Core
+```powershell
+# On the server (C:\Nurtur\NOVA)
+.\deploy\deploy.ps1 -Branch nova-codex
+```
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /api/auth/login` | Authenticate, returns JWT |
-| `POST /api/auth/register` | Create account (open on first run) |
-| `GET /api/tasks` | List tasks (filters: `?status=`, `?source=`) |
-| `GET /api/tasks/stats` | Aggregated statistics |
-| `POST /api/tasks/sync` | Trigger full sync |
-| `GET /api/health` | Server + MCP connection health |
+This pulls latest code, runs `npm ci`, builds, and restarts the service.
 
-### Jira
+## Security
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/jira/issues/:key` | Fetch issue detail |
-| `PATCH /api/jira/issues/:key` | Update fields, add comment, transition |
-| `GET /api/jira/issues/:key/transitions` | Available workflow transitions |
-| `POST /api/jira/issues` | Create issue |
-| `GET /api/jira/projects` | List projects |
-| `GET /api/jira/users/search?query=` | Search Jira users |
+- Helmet HTTP security headers
+- Rate limiting on login/register (15 attempts per 15 min)
+- JWT auth on all `/api/*` routes (except `/api/auth/*`)
+- Debug endpoints gated behind admin role
+- Role-based access control with configurable permissions per area
 
-### Microsoft 365
+## Key Patterns
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /api/o365/planner/tasks` | Create Planner task |
-| `PATCH /api/o365/planner/tasks/:id` | Update Planner task |
-| `POST /api/o365/todo/tasks` | Create To-Do task |
-| `PATCH /api/o365/todo/tasks/:id` | Update To-Do task |
+- **Task IDs** are composite: `${source}:${source_id}` (e.g., `jira:PROJ-123`)
+- **MCP tool calls** use candidate-list fallback for cross-version compatibility
+- **Database writes** call `saveDb()` to flush WASM in-memory state to disk
+- **Transient tasks** -- MS365 sources are session-only, purged on server restart
+- **Stale cleanup** is source-aware: skips when 0 tasks returned from a source
+- **Onboarding orchestrator** is idempotent and resume-safe via onboardingRef lookup
 
-### Delivery & CRM
+## License
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/delivery` | Parsed xlsx data (`?limit=N`) |
-| `CRUD /api/delivery/entries` | DB-backed delivery entries |
-| `CRUD /api/crm/customers` | CRM customer management |
-| `CRUD /api/crm/customers/:id/reviews` | Business reviews |
-
-### AI
-
-| Endpoint | Description |
-|----------|-------------|
-| `POST /api/actions/suggest` | AI next-action suggestions |
-| `POST /api/standups/morning` | Generate morning briefing |
-| `POST /api/standups/replan` | Generate mid-day replan |
-| `POST /api/standups/eod` | Generate end-of-day review |
-
-### Ingestion
-
-| Endpoint | Description |
-|----------|-------------|
-| `POST /api/ingest` | Bulk task upsert from Power Automate (`?prune=true`) |
-| `GET /api/ingest/status` | PA bridge health check |
-
-## Views
-
-| View | Description |
-|------|-------------|
-| **Command Centre** | Home page: overdue tasks, due today/week, completion counts, urgency and status charts |
-| **My Focus** | AI-suggested next actions with priority reasoning |
-| **Tasks** | All tasks grouped by source, filter chips, sort, overdue filter |
-| **Standup** | AI morning briefing, mid-day replan, end-of-day review with persistence |
-| **KPIs** | Completion rate, average task age, per-source breakdown, health indicators |
-| **Delivery** | Delivery pipeline: xlsx viewer + DB-backed entries with starred items |
-| **CRM** | Customer health (RAG), business reviews, CRUD |
-| **Settings** | Integration credentials, sync intervals, AI config, theme toggle |
-
-## M365 Integration Options
-
-Two paths for Microsoft 365 data:
-
-1. **Direct MCP** — MS Graph MCP server with device-code OAuth (requires Azure AD app registration)
-2. **Power Automate Bridge** — PA Cloud flows write JSON to OneDrive, server watches the folder and ingests
-
-See `docs/power-automate-cloud-flows.md` and `docs/power-automate-bridge.md` for setup guides.
-
-## Branding
-
-Nurtur brand theme applied throughout:
-- Primary teal: `#5ec1ca`
-- Dark navy background: `#272C33`
-- Surface: `#2f353d`, Overlay: `#363d47`, Border: `#3a424d`
-- Fonts: Plus Jakarta Sans (headings), Figtree (body)
-- Light/dark/system theme toggle supported
+Private -- internal use only.

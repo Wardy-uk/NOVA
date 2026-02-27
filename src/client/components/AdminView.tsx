@@ -913,20 +913,9 @@ export function AdminView() {
             </div>
           </div>
 
-          {/* Per-user overrides */}
-          <div className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
-            <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold mb-3">
-              Per-User AI Key Overrides
-            </h3>
-            <p className="text-xs text-neutral-500 mb-3">
-              Users with a personal key will use it instead of the global key.
-            </p>
-            <div className="space-y-2">
-              {users.map((user) => (
-                <UserKeyRow key={user.id} user={user} onSuccess={() => { setSuccess('User key updated'); }} onError={setError} />
-              ))}
-            </div>
-          </div>
+          <p className="text-xs text-neutral-500 mt-2">
+            Users can set a personal API key override in My Settings &gt; AI Preferences.
+          </p>
         </div>
       )}
 
@@ -1684,54 +1673,3 @@ function MilestonesTab({
   );
 }
 
-function UserKeyRow({ user, onSuccess, onError }: { user: UserRow; onSuccess: () => void; onError: (msg: string) => void }) {
-  const [key, setKey] = useState('');
-  const [hasKey, setHasKey] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    fetch(`/api/admin/ai-keys/user/${user.id}`)
-      .then((r) => r.json())
-      .then((json) => { if (json.ok) setHasKey(json.data.hasKey); setLoaded(true); })
-      .catch(() => setLoaded(true));
-  }, [user.id]);
-
-  const save = async () => {
-    try {
-      const res = await fetch(`/api/admin/ai-keys/user/${user.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: key.trim() || null }),
-      });
-      const json = await res.json();
-      if (json.ok) { onSuccess(); setKey(''); setHasKey(!!key.trim()); }
-      else onError(json.error || 'Save failed');
-    } catch (err) {
-      onError(err instanceof Error ? err.message : 'Save failed');
-    }
-  };
-
-  if (!loaded) return null;
-
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-neutral-300 w-32 truncate">{user.display_name || user.username}</span>
-      <span className={`text-[10px] px-1.5 py-0.5 rounded ${hasKey ? 'bg-green-900/40 text-green-400' : 'bg-[#272C33] text-neutral-600'}`}>
-        {hasKey ? 'Custom key' : 'Uses global'}
-      </span>
-      <input
-        type="password"
-        placeholder={hasKey ? 'Replace key...' : 'Set override...'}
-        value={key}
-        onChange={(e) => setKey(e.target.value)}
-        className="bg-[#272C33] text-neutral-300 text-xs rounded px-2 py-1 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors flex-1 placeholder:text-neutral-600"
-      />
-      <button
-        onClick={save}
-        className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-[#5ec1ca] transition-colors"
-      >
-        {key.trim() ? 'Save' : hasKey ? 'Clear' : 'Save'}
-      </button>
-    </div>
-  );
-}

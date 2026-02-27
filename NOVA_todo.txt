@@ -1,6 +1,10 @@
 TO DO
 -----
 
+--- Triage ---
+
+Review architecture/infrastructure for supporting 50 + users
+
 === CURRENT STATUS (27 Feb 2026) ===
 
 N.O.V.A is deployed to a Windows Server VM at https://nova.nurtur.tech, served via
@@ -110,6 +114,7 @@ BUG2. MS365 To-Do sync errors — MCP returning non-JSON for some lists
 
 COMPLETED (recent first)
 ---------
+[DONE] Per-User AI Key Overrides moved to My Settings — removed admin per-user key management, users self-serve
 [DONE] Security hardening — helmet headers, login rate limiting, debug endpoints gated behind admin auth
 [DONE] Quick tour / onboarding — 5-step interactive walkthrough overlay, localStorage persistence, "Take Tour" in user menu
 [DONE] Feedback improvements — admin reply, username tracking, create-task-from-feedback
