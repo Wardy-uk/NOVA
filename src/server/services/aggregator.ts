@@ -550,7 +550,7 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
       try {
         console.log(`[mondayAdapter] Fetching board ${boardId}...`);
         const boardResult = (await mcp.callTool('monday', 'get_full_board_data', {
-          boardId: Number(boardId),
+          boardId: boardId,
         })) as { content?: Array<{ text?: string }> };
 
         const boardText = boardResult?.content?.[0]?.text;
