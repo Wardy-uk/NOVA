@@ -6,9 +6,12 @@ import { TaskUpdateSchema } from '../../shared/types.js';
 import { evaluateAttention } from '../services/jira-sla.js';
 
 /** Build the set of task sources a user is allowed to see.
- *  Checks per-user settings first, falls back to global (same logic as integrations route). */
+ *  Per-user settings are checked first. Only admin users fall back to global settings
+ *  (since they configured the global integrations). Non-admin users must explicitly
+ *  enable integrations in their own My Settings to see tasks from those sources. */
 function getAllowedSources(
   userId: number | undefined,
+  userRole: string | undefined,
   userSettingsQueries?: UserSettingsQueries,
   settingsQueries?: SettingsQueries,
 ): Set<string> {
@@ -17,8 +20,10 @@ function getAllowedSources(
 
   const check = (key: string): boolean => {
     const userVal = userSettingsQueries?.get(userId, key);
-    const val = userVal ?? settingsQueries?.get(key);
-    return val === 'true';
+    if (userVal !== undefined && userVal !== null) return userVal === 'true';
+    // Only admins fall back to global (they configured the global integrations)
+    if (userRole === 'admin') return settingsQueries?.get(key) === 'true';
+    return false;
   };
 
   if (check('jira_enabled')) allowed.add('jira');
@@ -45,14 +50,15 @@ export function createTaskRoutes(
   router.get('/', (req, res) => {
     const { status, source } = req.query;
     const userId = (req as any).user?.id as number | undefined;
+    const userRole = (req as any).user?.role as string | undefined;
     const tasks = taskQueries.getAll({
       status: status as string | undefined,
       source: source as string | undefined,
       userId,
     });
 
-    // Scope to sources the user has enabled (per-user, falls back to global)
-    const allowedSources = getAllowedSources(userId, userSettingsQueries, settingsQueries);
+    // Scope to sources the user has enabled (per-user; admin falls back to global)
+    const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
     const filtered = tasks.filter((t) => allowedSources.has(t.source));
 
     res.json({ ok: true, data: filtered });
@@ -192,7 +198,8 @@ export function createTaskRoutes(
   // GET /api/tasks/stats — must be before /:id
   router.get('/stats', (req, res) => {
     const userId = (req as any).user?.id as number | undefined;
-    const allowedSources = getAllowedSources(userId, userSettingsQueries, settingsQueries);
+    const userRole = (req as any).user?.role as string | undefined;
+    const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
     const allTasks = taskQueries.getAllIncludingDone().filter((t) => allowedSources.has(t.source));
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
