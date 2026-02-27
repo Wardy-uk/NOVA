@@ -375,6 +375,15 @@ function KanbanCard({
   const isSlaBreached = task.sla_breach_at && new Date(task.sla_breach_at) < new Date();
   const originalStatus = getOriginalJiraStatus(task);
 
+  // Extract assignee and tier from raw_data
+  const rd = (task.raw_data && typeof task.raw_data === 'object') ? task.raw_data as Record<string, unknown> : null;
+  const assigneeRaw = rd?.assignee;
+  const assignee = typeof assigneeRaw === 'string' ? assigneeRaw
+    : (assigneeRaw as any)?.displayName ?? (assigneeRaw as any)?.name ?? null;
+  const tierRaw = rd?.['Current Tier'];
+  const tier = typeof tierRaw === 'string' ? tierRaw
+    : (tierRaw as any)?.value ?? (tierRaw as any)?.name ?? null;
+
   return (
     <div
       draggable={draggable}
@@ -425,6 +434,13 @@ function KanbanCard({
           </span>
         )}
 
+        {/* Tier badge */}
+        {tier && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 truncate max-w-[100px]" title={tier}>
+            {tier}
+          </span>
+        )}
+
         {/* Due date */}
         {task.due_date && (
           <span className={`text-[10px] ${isOverdue ? 'text-red-400' : 'text-neutral-500'}`}>
@@ -437,6 +453,13 @@ function KanbanCard({
           <span className="text-[10px] text-red-400 font-semibold">SLA</span>
         )}
       </div>
+
+      {/* Assignee */}
+      {assignee && (
+        <div className="text-[10px] text-neutral-500 mt-1.5 truncate" title={assignee}>
+          {assignee}
+        </div>
+      )}
     </div>
   );
 }
