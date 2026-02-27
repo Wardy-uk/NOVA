@@ -116,11 +116,11 @@ export class SharePointSync {
       console.log('[SP-Sync] Listing site drives for:', siteUrl);
       const drivesResp = await this.mcp.callTool('msgraph', 'list-sharepoint-site-drives', { siteId: siteUrl });
       const drivesText = this.extractText(drivesResp);
-      console.log('[SP-Sync] Site drives response:', drivesText.slice(0, 2000));
+      console.log('[SP-Sync] Site drives response (first 2000):', drivesText.slice(0, 2000));
 
       const driveId = this.findDriveByHint(drivesText, driveHint);
       if (!driveId) {
-        result.errors.push(`Could not find a drive matching "${driveHint}" in SharePoint site drives`);
+        result.errors.push(`Could not find a drive matching "${driveHint}" in SharePoint site drives. Available drives: ${drivesText.slice(0, 800)}`);
         this._lastResult = result;
         return result;
       }
@@ -265,9 +265,10 @@ export class SharePointSync {
       console.log('[SP-Push] Listing site drives for:', siteUrl);
       const drivesResp = await this.mcp.callTool('msgraph', 'list-sharepoint-site-drives', { siteId: siteUrl });
       const drivesText = this.extractText(drivesResp);
+      console.log('[SP-Push] Site drives response (first 2000):', drivesText.slice(0, 2000));
       const driveId = this.findDriveByHint(drivesText, driveHint);
       if (!driveId) {
-        result.errors.push(`Could not find a drive matching "${driveHint}" in SharePoint site drives`);
+        result.errors.push(`Could not find a drive matching "${driveHint}" in SharePoint site drives. Available drives: ${drivesText.slice(0, 800)}`);
         this._lastResult = result;
         return result;
       }
