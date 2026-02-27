@@ -8,13 +8,19 @@ export function useTasks() {
   const [syncing, setSyncing] = useState(false);
   const initialLoadDone = useRef(false);
 
-  // Silent fetch — updates data without triggering loading states
+  // Silent fetch — updates data without triggering loading states.
+  // Only calls setTasks when data actually changed to avoid re-renders that close drawers.
+  const lastJson = useRef('');
   const fetchTasks = useCallback(async () => {
     try {
       const res = await fetch('/api/tasks');
       const json: ApiResponse<Task[]> = await res.json();
       if (json.ok && json.data) {
-        setTasks(json.data);
+        const serialized = JSON.stringify(json.data);
+        if (serialized !== lastJson.current) {
+          lastJson.current = serialized;
+          setTasks(json.data);
+        }
         setError(null);
       }
     } catch {

@@ -1,6 +1,35 @@
 TO DO
 -----
 
+--- triage ---
+
+we need to correlate jira tickets with onboarding tasks
+
+
+=== PLAN: 28 Feb 2026 ===
+
+1. Cleanup debug artifacts (~5 min)
+   - Remove `/api/debug/attention-fields` endpoint from index.ts
+   - Remove `_debug` field from GET /api/tasks response in tasks.ts
+   - Remove debug button + copyDebug handler from DailyStatsView.tsx
+   - Commit, push, deploy
+
+2. Fix BUG5: MS365 transient sources empty after restart (~30 min)
+   - Auto-sync fires before MCP is connected — Planner/Email/Calendar return 0
+   - Options: delay sync until MCP ready, or retry sync after short delay if 0 results
+   - Affects every deploy/restart for all users
+
+3. Jira SLA prioritisation — DO NEXT #1 (main work, needs user input on rules)
+   - Foundation exists: SLA timer on cards, attention endpoint, jira-sla service
+   - Define prioritisation logic: auto-focus over-SLA tickets, sort/highlight in
+     My Tickets, surface overdue updates on dashboard
+   - Discuss rules at start of day before implementing
+
+4. Correlate Jira tickets with onboarding tasks (triage, if time permits)
+   - Scope TBD — link SD tickets to onboarding deliveries? Show related tickets
+     on delivery detail? Auto-tag?
+
+
 === CURRENT STATUS (27 Feb 2026) ===
 
 N.O.V.A is deployed to a Windows Server VM at https://nova.nurtur.tech, served via
@@ -12,12 +41,17 @@ What's working:
   - 6 main areas: My NOVA (dashboard/AI/standup), Service Desk (kanban/calendar), Onboarding
     (matrix config + Jira ticket automation), Delivery (xlsx/SP sync, milestones), CRM (D365),
     Admin (users, teams, roles, permissions, integrations, milestones, onboarding, feedback)
-  - Service Desk: live Jira search for My/Unassigned/All filters, kanban drag-and-drop transitions
+  - Per-user task scoping — users only see tasks from integrations they've personally enabled;
+    admin users fall back to global settings. Applied to: tasks, stats, service desk, Ask NOVA,
+    standup (including cached ritual enrichment). Shared source-filter utility.
+  - Service Desk: live Jira search for My/Unassigned/All filters, kanban drag-and-drop transitions,
+    Current Tier (customfield_12981) and Assignee shown on all ticket displays
   - Delivery milestones (30-day model) with auto-creation, checklist tracking, task surfacing
   - Onboarding ticket orchestrator — idempotent, resume-safe, dry-run capable
   - Multi-user with role-based access, per-user settings/AI keys (self-serve in My Settings)
   - Email send/reply/forward, calendar create/edit, SharePoint sync push/pull
-  - Session-only MS365 data — transient tasks purged on server restart
+  - Session-only MS365 data — transient tasks purged on server restart, auto-sync on first load
+  - Silent background refresh — all screens poll in background without UI disruption
   - Security: helmet headers, login rate limiting, debug endpoints admin-gated
   - Interactive tour overlay for new users
   - Feedback system with admin reply and create-task-from-feedback
@@ -26,6 +60,8 @@ What's working:
 What's not fully working:
   - Monday.com syncs 0 tasks — connection ok but needs board IDs or search tuning
   - MS365 To-Do sync errors — MCP returning non-JSON for some lists
+  - MS365 Planner/Email/Calendar may not populate after server restart — auto-sync fires but
+    MCP connection may not be ready; works after manual sync from Settings
 
 Current branch: nova-codex
 Deploy: .\deploy\deploy.ps1 -Branch nova-codex (on server C:\Nurtur\NOVA)
@@ -43,16 +79,22 @@ BLOCK1. Monday.com syncs 0 tasks
 BUG2. MS365 To-Do sync errors — MCP returning non-JSON for some lists
       [todoAdapter] Error fetching list Tasks/Flagged Emails: SyntaxError "MCP error" is not valid JSON
 
+BUG5. MS365 Planner/Email/Calendar show 0 tasks after server restart
+      Auto-sync fires on first page load but transient sources don't populate.
+      Likely MCP not connected yet when sync runs. Manual sync from Settings works.
+
 
 === DO NEXT (high priority) ===
 
 1. Jira SLA prioritisation — tickets over SLA or overdue an update should be prioritised
-   (user will supply logic)
+   (user will supply logic). SLA timer and attention endpoint already exist.
 
 
 === CLEANUP ===
 
-- Remove temporary debug endpoint `/api/debug/attention-fields` from index.ts (added for SLA field diagnosis)
+- Remove temporary debug endpoint `/api/debug/attention-fields` from index.ts
+- Remove `_debug` field from `GET /api/tasks` response in tasks.ts
+- Remove debug button + copyDebug handler from DailyStatsView.tsx
 
 === QUICK WINS (small effort, visible impact) ===
 
@@ -118,6 +160,21 @@ BUG2. MS365 To-Do sync errors — MCP returning non-JSON for some lists
 
 COMPLETED (recent first)
 ---------
+[DONE] Per-user task scoping — cached standup enrichment filtered by allowed sources
+[DONE] Per-user task scoping — Ask NOVA and Standup routes scoped, shared source-filter utility extracted
+[DONE] Current Tier (customfield_12981) shown on all ticket displays — TaskCard, Kanban, Calendar, TaskDrawer, JiraDrawer
+[DONE] Silent background refresh — all screens poll without UI disruption (useTasks 30s, SD 60s)
+[DONE] Auto-sync all task sources on first page load — useTasks fires silent sync on mount
+[DONE] Service Desk routes use admin fallback for Jira settings — isJiraEnabled/getJiraUsername helpers
+[DONE] Per-user task scoping — admin falls back to global settings, non-admin must enable in My Settings
+[DONE] Dashboard stats scoped to user's enabled integrations
+[DONE] Assignee + Current Tier on Service Desk Kanban cards
+[DONE] Jira SLA field reader — unwrap {value: X} wrappers from MCP custom fields
+[DONE] SD project + tier filters moved to admin-only Service Desk Config
+[DONE] SD left/right split — user tickets on left tabs, all-tickets views on right pills
+[DONE] SD queries gated on user's personal Jira config
+[DONE] SD project + tier filter applied to all queries with exclude logic
+[DONE] Don't flag tickets as overdue if Agent Last Updated was never set
 [DONE] SharePoint sync pull working — fixed site URL format + download URL fetch (was decoding JSON metadata as base64)
 [DONE] SSO primary login — Microsoft sign-in button at top, local password form below
 [DONE] Tour expanded — step descriptions now list specific tabs within each area

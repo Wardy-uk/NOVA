@@ -279,19 +279,25 @@ export function App() {
   const [sdLoading, setSdLoading] = useState(false);
   const sdApiFilter = sdFilter === null ? 'mine' : sdFilter;
   const sdInitialDone = useRef(false);
+  const lastSdJson = useRef('');
   useEffect(() => {
     if (!auth.isAuthenticated) return;
     if (sdApiFilter === 'all-breached') return;
     let active = true;
     // Only show loading on first fetch or filter change, not background refreshes
     if (!sdInitialDone.current) setSdLoading(true);
+    lastSdJson.current = ''; // Reset on filter change so new data always applies
     const doFetch = () => {
       fetch(`/api/tasks/service-desk?filter=${sdApiFilter}`)
         .then((r) => r.json())
         .then((json) => {
           if (!active) return;
           if (json.ok && json.data) {
-            setSdTasks(json.data);
+            const serialized = JSON.stringify(json.data);
+            if (serialized !== lastSdJson.current) {
+              lastSdJson.current = serialized;
+              setSdTasks(json.data);
+            }
           } else {
             setSdTasks(tasks.filter((t) => t.source === 'jira'));
           }
