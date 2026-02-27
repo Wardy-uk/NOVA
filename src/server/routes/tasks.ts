@@ -32,16 +32,17 @@ export function createTaskRoutes(
         res.status(400).json({ ok: false, error: 'filter must be mine, unassigned, or all' });
         return;
       }
-      // Gate: user must have Jira enabled in their personal settings
       const userId = (req as any).user?.id as number | undefined;
-      const userJiraEnabled = userId && userSettingsQueries
-        ? userSettingsQueries.get(userId, 'jira_enabled') === 'true'
-        : false;
-      if (!userJiraEnabled) {
-        res.json({ ok: true, data: [] });
-        return;
+      // "mine" requires personal Jira config; global views just need MCP connected
+      if (filter === 'mine') {
+        const userJiraEnabled = userId && userSettingsQueries
+          ? userSettingsQueries.get(userId, 'jira_enabled') === 'true'
+          : false;
+        if (!userJiraEnabled) {
+          res.json({ ok: true, data: [] });
+          return;
+        }
       }
-      // For "mine" filter, use the logged-in user's Jira identity
       const jiraUsername = userId && userSettingsQueries
         ? (userSettingsQueries.get(userId, 'jira_username') ?? undefined)
         : undefined;
@@ -77,19 +78,19 @@ export function createTaskRoutes(
   // GET /api/tasks/service-desk/attention — tickets that need attention (scope=mine|all)
   router.get('/service-desk/attention', async (req, res) => {
     try {
-      // Gate: user must have Jira enabled in their personal settings
       const userId = (req as any).user?.id as number | undefined;
-      const userJiraEnabled = userId && userSettingsQueries
-        ? userSettingsQueries.get(userId, 'jira_enabled') === 'true'
-        : false;
-      if (!userJiraEnabled) {
-        res.json({ ok: true, data: [] });
-        return;
-      }
-
       const scope = (req.query.scope as string) || 'all';
+
       let tickets;
       if (scope === 'mine') {
+        // "mine" requires personal Jira config
+        const userJiraEnabled = userId && userSettingsQueries
+          ? userSettingsQueries.get(userId, 'jira_enabled') === 'true'
+          : false;
+        if (!userJiraEnabled) {
+          res.json({ ok: true, data: [] });
+          return;
+        }
         const jiraUsername = userId && userSettingsQueries
           ? (userSettingsQueries.get(userId, 'jira_username') ?? undefined)
           : undefined;
