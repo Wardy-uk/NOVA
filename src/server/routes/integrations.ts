@@ -3,10 +3,14 @@ import { z } from 'zod';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
 import type { SettingsQueries } from '../db/settings-store.js';
+import type { UserSettingsQueries } from '../db/queries.js';
 import { McpClientManager } from '../services/mcp-client.js';
 import { INTEGRATIONS, buildMcpConfig } from '../services/integrations.js';
 import type { Dynamics365Service } from '../services/dynamics365.js';
 import type { IntegrationStatus, McpServerStatus } from '../../shared/types.js';
+
+// Admin-only integrations: credentials stay in global settings.json
+const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'sso']);
 
 const execFileAsync = promisify(execFile);
 
@@ -28,6 +32,7 @@ let d365LoginPending = false;
 export function createIntegrationRoutes(
   mcpManager: McpClientManager,
   settingsQueries: SettingsQueries,
+  userSettingsQueries: UserSettingsQueries,
   uvxCommand: string,
   getD365Service: () => Dynamics365Service | null,
   onSettingsChange?: (key: string) => void
@@ -48,9 +53,11 @@ export function createIntegrationRoutes(
     }
   }
 
-  // GET /api/integrations — list all with masked creds + status
-  router.get('/', async (_req, res) => {
-    const settings = settingsQueries.getAll();
+  // GET /api/integrations — list all with masked creds + status (per-user)
+  router.get('/', async (req, res) => {
+    const userId = (req as any).user?.id as number | undefined;
+    const globalSettings = settingsQueries.getAll();
+    const userSettings = userId ? userSettingsQueries.getAllForUser(userId) : {};
     const mcpStatuses = mcpManager.getStatus();
 
     const results: IntegrationStatus[] = [];
@@ -58,9 +65,13 @@ export function createIntegrationRoutes(
     for (const integ of INTEGRATIONS) {
       const mcpInfo = mcpStatuses.find((s) => s.name === integ.id);
       const values: Record<string, string> = {};
+      const isAdminOnly = ADMIN_ONLY_IDS.has(integ.id);
+
+      // Admin-only integrations read from global; personal integrations read from user_settings
+      const source = isAdminOnly ? globalSettings : userSettings;
 
       for (const field of integ.fields) {
-        const raw = settings[field.key] ?? '';
+        const raw = source[field.key] ?? '';
         values[field.key] = field.type === 'password' && raw ? maskToken(raw) : raw;
       }
 
@@ -86,8 +97,8 @@ export function createIntegrationRoutes(
 
       // For credential-only integrations without MCP, derive status from config completeness
       let effectiveMcpStatus: McpServerStatus = d365Status ?? mcpInfo?.status ?? 'disconnected';
-      if (!mcpInfo && !d365Status && integ.authType === 'credentials' && settings[integ.enabledKey] === 'true') {
-        const allRequired = integ.fields.filter(f => f.required).every(f => !!settings[f.key]);
+      if (!mcpInfo && !d365Status && integ.authType === 'credentials' && source[integ.enabledKey] === 'true') {
+        const allRequired = integ.fields.filter(f => f.required).every(f => !!source[f.key]);
         effectiveMcpStatus = allRequired ? 'connected' : 'disconnected';
       }
 
@@ -95,7 +106,9 @@ export function createIntegrationRoutes(
         id: integ.id,
         name: integ.name,
         description: integ.description,
-        enabled: settings[integ.enabledKey] === 'true',
+        enabled: isAdminOnly
+          ? globalSettings[integ.enabledKey] === 'true'
+          : (userSettings[integ.enabledKey] ?? globalSettings[integ.enabledKey]) === 'true',
         fields: integ.fields,
         values,
         mcpStatus: effectiveMcpStatus,
@@ -112,7 +125,7 @@ export function createIntegrationRoutes(
 
   // PUT /api/integrations/:id — save credentials + reconnect
   router.put('/:id', async (req, res) => {
-    const integId = req.params.id;
+    const integId = String(req.params.id);
     const integ = INTEGRATIONS.find((i) => i.id === integId);
     if (!integ) {
       res.status(404).json({ ok: false, error: 'Unknown integration' });
@@ -126,15 +139,43 @@ export function createIntegrationRoutes(
     }
 
     const { enabled, credentials } = parsed.data;
+    const userId = (req as any).user?.id as number | undefined;
+    const isAdminOnly = ADMIN_ONLY_IDS.has(integId);
 
-    // Save enabled flag
-    settingsQueries.set(integ.enabledKey, String(enabled));
+    if (isAdminOnly) {
+      // Admin-only: save to global settings
+      settingsQueries.set(integ.enabledKey, String(enabled));
+      for (const field of integ.fields) {
+        const newValue = credentials[field.key];
+        if (newValue !== undefined && !newValue.includes('****')) {
+          settingsQueries.set(field.key, newValue);
+        }
+      }
+    } else if (userId) {
+      // Personal: save to user_settings
+      userSettingsQueries.set(userId, integ.enabledKey, String(enabled));
+      for (const field of integ.fields) {
+        const newValue = credentials[field.key];
+        if (newValue !== undefined && !newValue.includes('****')) {
+          userSettingsQueries.set(userId, field.key, newValue);
+        }
+      }
 
-    // Save credentials (skip masked values)
-    for (const field of integ.fields) {
-      const newValue = credentials[field.key];
-      if (newValue !== undefined && !newValue.includes('****')) {
-        settingsQueries.set(field.key, newValue);
+      // Seed global settings if empty (so MCP server can connect)
+      const globalSettings = settingsQueries.getAll();
+      if (!globalSettings[integ.enabledKey] || globalSettings[integ.enabledKey] !== 'true') {
+        let hasAnyNewCred = false;
+        for (const field of integ.fields) {
+          const newValue = credentials[field.key];
+          if (newValue && !newValue.includes('****') && !globalSettings[field.key]) {
+            settingsQueries.set(field.key, newValue);
+            hasAnyNewCred = true;
+          }
+        }
+        if (hasAnyNewCred && enabled) {
+          settingsQueries.set(integ.enabledKey, 'true');
+          console.log(`[Integrations] Seeding system ${integId} credentials from user ${userId}`);
+        }
       }
     }
 

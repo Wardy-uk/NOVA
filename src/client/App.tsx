@@ -67,7 +67,7 @@ const AREAS: Record<Area, AreaDef> = {
     label: 'Service Desk',
     defaultView: 'tickets',
     tabs: [
-      { view: 'tickets', label: 'Tickets' },
+      { view: 'tickets', label: 'My Tickets' },
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
       { view: 'attention', label: 'Needs Attention' },

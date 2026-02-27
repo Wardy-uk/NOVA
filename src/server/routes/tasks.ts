@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { TaskQueries, MilestoneQueries } from '../db/queries.js';
+import type { TaskQueries, MilestoneQueries, UserSettingsQueries } from '../db/queries.js';
 import type { TaskAggregator, SdFilter } from '../services/aggregator.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
 import { evaluateAttention } from '../services/jira-sla.js';
@@ -8,6 +8,7 @@ export function createTaskRoutes(
   taskQueries: TaskQueries,
   aggregator: TaskAggregator,
   milestoneQueries?: MilestoneQueries,
+  userSettingsQueries?: UserSettingsQueries,
 ): Router {
   const router = Router();
 
@@ -31,7 +32,12 @@ export function createTaskRoutes(
         res.status(400).json({ ok: false, error: 'filter must be mine, unassigned, or all' });
         return;
       }
-      const tickets = await aggregator.fetchServiceDeskTickets(filter as SdFilter);
+      // For "mine" filter, use the logged-in user's Jira identity
+      const userId = (req as any).user?.id as number | undefined;
+      const jiraUsername = userId && userSettingsQueries
+        ? (userSettingsQueries.get(userId, 'jira_username') ?? undefined)
+        : undefined;
+      const tickets = await aggregator.fetchServiceDeskTickets(filter as SdFilter, jiraUsername);
       // Map to task-like objects for the frontend
       const mapped = tickets.map((t) => ({
         id: `jira:${t.source_id}`,
@@ -60,10 +66,10 @@ export function createTaskRoutes(
     }
   });
 
-  // GET /api/tasks/service-desk/attention — tickets assigned to me that need attention
+  // GET /api/tasks/service-desk/attention — ALL tickets that need attention (not user-scoped)
   router.get('/service-desk/attention', async (_req, res) => {
     try {
-      const tickets = await aggregator.fetchServiceDeskTickets('mine');
+      const tickets = await aggregator.fetchServiceDeskTickets('all');
       const now = new Date();
 
       const attentionTickets = tickets

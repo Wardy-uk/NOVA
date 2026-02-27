@@ -721,7 +721,7 @@ export class TaskAggregator {
   }
 
   /** Live Jira search for Service Desk with ownership filter. Returns normalized tasks (not persisted). */
-  async fetchServiceDeskTickets(filter: SdFilter = 'mine'): Promise<NormalizedTask[]> {
+  async fetchServiceDeskTickets(filter: SdFilter = 'mine', userJiraIdentity?: string): Promise<NormalizedTask[]> {
     if (!this.mcp.isConnected('jira')) return [];
 
     const sdProject = this.settingsQueries?.get('jira_sd_project');
@@ -731,7 +731,12 @@ export class TaskAggregator {
     // Build JQL based on filter
     const parts: string[] = [];
     if (filter === 'mine') {
-      parts.push('assignee = currentUser()');
+      // Use explicit identity when available (per-user scoping), else fall back to MCP account
+      if (userJiraIdentity) {
+        parts.push(`assignee = "${userJiraIdentity}"`);
+      } else {
+        parts.push('assignee = currentUser()');
+      }
     } else if (filter === 'unassigned') {
       parts.push('assignee IS EMPTY');
     }

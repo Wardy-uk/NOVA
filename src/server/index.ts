@@ -224,7 +224,7 @@ async function main() {
 
   // Protected API routes
   app.use('/api', authMiddleware(jwtSecret));
-  app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries));
+  app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries, userSettingsQueries, (key) => {
     // Restart sync timers when interval settings change
@@ -232,7 +232,7 @@ async function main() {
     // Rebuild D365 service when credentials change
     if (key.startsWith('d365_')) buildD365Service();
   }));
-  app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, uvxCommand, () => d365Service, (key) => {
+  app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, userSettingsQueries, uvxCommand, () => d365Service, (key) => {
     if (key.startsWith('d365_')) buildD365Service();
   }));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
