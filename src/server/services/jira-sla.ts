@@ -78,13 +78,15 @@ export function isOverdueUpdate(issue: Record<string, unknown>, now: Date = new 
   if (nextUpdate && nextUpdate.getTime() > now.getTime()) return false;
 
   // 4. Agent Last Updated — if updated today, not overdue
+  //    If this field has never been set, the ticket isn't tracked for agent updates
+  //    so we should NOT flag it as overdue.
   const lastUpdated = toDate(field(issue, 'customfield_14081'));
-  if (lastUpdated) {
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    if (lastUpdated.getTime() >= startOfToday.getTime() && lastUpdated.getTime() < startOfTomorrow.getTime()) {
-      return false;
-    }
+  if (!lastUpdated) return false; // not tracked — skip
+
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  if (lastUpdated.getTime() >= startOfToday.getTime() && lastUpdated.getTime() < startOfTomorrow.getTime()) {
+    return false;
   }
 
   // All conditions passed — overdue
