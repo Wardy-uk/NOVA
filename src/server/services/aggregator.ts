@@ -474,83 +474,62 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
     let boardIds: string[] = [];
 
     if (boardIdsEnv) {
-      boardIds = boardIdsEnv.split(',').map((id) => id.trim()).filter(Boolean);
+      boardIds = boardIdsEnv.split(',').map((id) => id.trim().replace(/^board-/, '')).filter(Boolean);
       console.log(`[mondayAdapter] Using configured board IDs: ${boardIds.join(', ')}`);
     } else {
       console.log('[mondayAdapter] No board IDs configured, attempting auto-discovery...');
 
-      // Try list_boards first (most direct)
-      if (availableTools.includes('list_boards')) {
-        console.log('[mondayAdapter] Trying list_boards tool...');
+      // Helper: strip "board-" prefix from IDs (MCP returns "board-12345")
+      const stripPrefix = (id: string) => id.replace(/^board-/, '');
+
+      // Strategy 1: get_user_context — favorites + relevantBoards (user's actual boards)
+      if (availableTools.includes('get_user_context')) {
+        console.log('[mondayAdapter] Trying get_user_context (favorites)...');
         try {
-          const listResult = (await mcp.callTool('monday', 'list_boards', {})) as {
+          const ctxResult = (await mcp.callTool('monday', 'get_user_context', {})) as {
             content?: Array<{ text?: string }>;
           };
-          const listText = listResult?.content?.[0]?.text ?? '';
-          console.log('[mondayAdapter] list_boards response (first 2000):', listText.slice(0, 2000));
-          const parsed = JSON.parse(listText);
-          const boards = Array.isArray(parsed) ? parsed : parsed.boards ?? parsed.data?.boards ?? [];
-          boardIds = boards.map((b: Record<string, unknown>) => String(b.id));
-          console.log(`[mondayAdapter] list_boards found ${boardIds.length} boards: ${boardIds.join(', ')}`);
+          const ctxText = ctxResult?.content?.[0]?.text ?? '';
+          const ctxParsed = JSON.parse(ctxText);
+
+          // Collect from favorites (type=Board) + relevantBoards, deduplicate
+          const favBoards = (ctxParsed.favorites ?? [])
+            .filter((f: Record<string, unknown>) => f.type === 'Board')
+            .map((f: Record<string, unknown>) => stripPrefix(String(f.id)));
+          const relevant = (ctxParsed.relevantBoards ?? [])
+            .map((b: Record<string, unknown>) => stripPrefix(String(b.id)));
+          boardIds = [...new Set([...favBoards, ...relevant])];
+          console.log(`[mondayAdapter] get_user_context: ${favBoards.length} favorites, ${relevant.length} relevant => ${boardIds.length} unique boards: ${boardIds.join(', ')}`);
         } catch (e) {
-          console.warn('[mondayAdapter] list_boards failed:', e instanceof Error ? e.message : e);
+          console.warn('[mondayAdapter] get_user_context failed:', e instanceof Error ? e.message : e);
         }
       }
 
-      // Fallback: search tool
-      // Write debug responses to file for diagnostics
-      const fs = await import('fs');
-      const debugPath = 'monday-debug.json';
-      const debugData: Record<string, unknown> = {};
-
+      // Strategy 2: search — fallback if no favorites, skip subitems boards, cap at 25
       if (boardIds.length === 0 && availableTools.includes('search')) {
-        console.log('[mondayAdapter] Trying search tool...');
+        console.log('[mondayAdapter] Trying search tool (fallback)...');
         try {
           const searchResult = (await mcp.callTool('monday', 'search', {
             query: '*',
             searchType: 'BOARD',
           })) as { content?: Array<{ text?: string }> };
           const searchText = searchResult?.content?.[0]?.text ?? '';
-          debugData.searchRaw = searchText;
-          console.log(`[mondayAdapter] search response length: ${searchText.length}`);
-
           const parsed = JSON.parse(searchText);
-          debugData.searchParsed = parsed;
-          const boards = Array.isArray(parsed) ? parsed : parsed.boards ?? parsed.data?.boards ?? [];
-          boardIds = boards.map((b: Record<string, unknown>) => String(b.id));
-          console.log(`[mondayAdapter] search found ${boardIds.length} boards`);
+
+          // Response shape: { results: [...] }
+          const results = parsed.results ?? parsed.boards ?? (Array.isArray(parsed) ? parsed : []);
+          boardIds = results
+            .filter((b: Record<string, unknown>) => {
+              const title = String(b.title ?? b.name ?? '').toLowerCase();
+              return !title.startsWith('subitems of');
+            })
+            .slice(0, 25)
+            .map((b: Record<string, unknown>) => stripPrefix(String(b.id)));
+          console.log(`[mondayAdapter] search: ${results.length} total => ${boardIds.length} boards (filtered subitems, capped at 25)`);
         } catch (e) {
           console.warn('[mondayAdapter] search parse failed:', e instanceof Error ? e.message : e);
-          debugData.searchError = e instanceof Error ? e.message : String(e);
         }
       }
-
-      // Fallback: get_user_context
-      if (boardIds.length === 0 && availableTools.includes('get_user_context')) {
-        console.log('[mondayAdapter] Trying get_user_context...');
-        try {
-          const ctxResult = (await mcp.callTool('monday', 'get_user_context', {})) as {
-            content?: Array<{ text?: string }>;
-          };
-          const ctxText = ctxResult?.content?.[0]?.text ?? '';
-          debugData.userContextRaw = ctxText;
-          console.log(`[mondayAdapter] get_user_context response length: ${ctxText.length}`);
-          const ctxParsed = JSON.parse(ctxText);
-          debugData.userContextParsed = ctxParsed;
-          const boards = ctxParsed.boards ?? ctxParsed.data?.boards ?? ctxParsed.account?.boards ?? [];
-          boardIds = (Array.isArray(boards) ? boards : []).map((b: Record<string, unknown>) => String(b.id));
-          console.log(`[mondayAdapter] get_user_context found ${boardIds.length} boards`);
-        } catch (e) {
-          console.warn('[mondayAdapter] get_user_context failed:', e instanceof Error ? e.message : e);
-          debugData.userContextError = e instanceof Error ? e.message : String(e);
-        }
-      }
-
-      // Write debug file
-      try {
-        fs.writeFileSync(debugPath, JSON.stringify(debugData, null, 2));
-        console.log(`[mondayAdapter] Debug data written to ${debugPath}`);
-      } catch { /* ignore */ }
     }
 
     console.log(`[mondayAdapter] Final board IDs (${boardIds.length}): ${boardIds.join(', ')}`);
