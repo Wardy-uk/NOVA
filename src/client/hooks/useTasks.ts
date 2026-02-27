@@ -58,11 +58,12 @@ export function useTasks() {
   );
 
   useEffect(() => {
-    fetchTasks();
+    // Sync all sources on first load, then fetch
+    syncTasks();
     // Poll for task updates every 30s (picks up auto-sync changes)
     const interval = setInterval(fetchTasks, 30_000);
     return () => clearInterval(interval);
-  }, [fetchTasks]);
+  }, [fetchTasks, syncTasks]);
 
   return { tasks, loading, error, syncing, fetchTasks, syncTasks, updateTask };
 }
