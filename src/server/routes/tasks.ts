@@ -100,22 +100,23 @@ export function createTaskRoutes(
       }
       const now = new Date();
 
-      // Debug: attach field shape diagnostics to response
-      const _debugSamples = tickets.slice(0, 3).map((t) => {
+      // Diagnostic: log field shape for first 3 tickets to trace why overdue_update fires
+      for (const t of tickets.slice(0, 3)) {
         const issue = (t.raw_data ?? {}) as Record<string, unknown>;
         const fields = issue.fields as Record<string, unknown> | undefined;
-        return {
-          key: t.source_id,
-          hasRawData: !!t.raw_data,
-          hasFieldsObj: !!fields,
-          topKeys: Object.keys(issue).slice(0, 20),
-          status: issue.status ?? fields?.status ?? 'MISSING',
+        const statusRaw = issue.status ?? fields?.status;
+        const statusName = typeof statusRaw === 'string' ? statusRaw : (statusRaw as any)?.name;
+        console.log(`[Attention DEBUG] ${t.source_id}:`, JSON.stringify({
+          topLevelKeys: Object.keys(issue).slice(0, 15),
+          hasFields: !!fields,
+          fieldsKeys: fields ? Object.keys(fields).filter(k => k.startsWith('custom') || k === 'status' || k === 'created').slice(0, 10) : [],
+          status: statusName ?? 'MISSING',
           created: issue.created ?? fields?.created ?? 'MISSING',
           cf14081: issue.customfield_14081 ?? fields?.customfield_14081 ?? 'MISSING',
           cf14185: issue.customfield_14185 ?? fields?.customfield_14185 ?? 'MISSING',
-          cf14048_type: issue.customfield_14048 ? typeof issue.customfield_14048 : (fields?.customfield_14048 ? `fields.${typeof fields.customfield_14048}` : 'MISSING'),
-        };
-      });
+          cf14048: issue.customfield_14048 ? 'PRESENT' : (fields?.customfield_14048 ? 'IN_FIELDS' : 'MISSING'),
+        }));
+      }
 
       const attentionTickets = tickets
         .map((t) => {
@@ -137,7 +138,6 @@ export function createTaskRoutes(
         due_date: t.due_date ?? null,
         sla_breach_at: t.sla_breach_at ?? null,
         category: t.category ?? null,
-        raw_data: t.raw_data ?? null,
         pinned: false,
         snoozed_until: null,
         created_at: new Date().toISOString(),
@@ -146,7 +146,7 @@ export function createTaskRoutes(
       }));
 
       console.log(`[ServiceDesk] Attention: ${attentionTickets.length}/${tickets.length} tickets need attention`);
-      res.json({ ok: true, data: mapped, _debug: { totalTickets: tickets.length, attentionCount: attentionTickets.length, samples: _debugSamples } });
+      res.json({ ok: true, data: mapped, total: tickets.length });
     } catch (err) {
       res.status(500).json({
         ok: false,

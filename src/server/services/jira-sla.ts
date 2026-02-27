@@ -28,11 +28,19 @@ function toDate(v: unknown): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-/** Read a field from a Jira issue, checking both flat and nested (fields.*) shapes. */
+/** Read a field from a Jira issue, checking both flat and nested (fields.*) shapes.
+ *  Also unwraps the {value: ...} wrapper that the MCP Jira tool returns for custom fields. */
 function field(issue: Record<string, unknown>, key: string): unknown {
-  if (issue[key] !== undefined) return issue[key];
-  const fields = issue.fields as Record<string, unknown> | undefined;
-  return fields?.[key] ?? undefined;
+  let val = issue[key];
+  if (val === undefined) {
+    const fields = issue.fields as Record<string, unknown> | undefined;
+    val = fields?.[key];
+  }
+  // Unwrap {value: X} wrapper from MCP Jira custom fields
+  if (val && typeof val === 'object' && !Array.isArray(val) && 'value' in (val as Record<string, unknown>)) {
+    val = (val as Record<string, unknown>).value;
+  }
+  return val ?? undefined;
 }
 
 /** Extract and normalise the Jira status name string. */

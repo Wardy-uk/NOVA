@@ -24,7 +24,6 @@ What's working:
   - Deployed: IIS + NSSM on Windows Server, git-based deploys via deploy.ps1
 
 What's not fully working:
-  - SharePoint sync — needs Azure admin consent for Sites.Read.All scope [BLOCKED]
   - Monday.com syncs 0 tasks — connection ok but needs board IDs or search tuning
   - MS365 To-Do sync errors — MCP returning non-JSON for some lists
 
@@ -34,11 +33,7 @@ Deploy: .\deploy\deploy.ps1 -Branch nova-codex (on server C:\Nurtur\NOVA)
 
 === BLOCKERS (waiting on external action) ===
 
-BLOCK1. SharePoint sync — MS365 MCP needs Sites.Read.All scope
-        Azure admin must consent to the org-mode permissions for the MS365 MCP app registration.
-        Once approved: logout + login from Settings > MS365, then "Pull from SP" on Delivery page.
-
-BLOCK2. Monday.com syncs 0 tasks
+BLOCK1. Monday.com syncs 0 tasks
         Connection works (46 tools), but no tasks pulled. Needs board IDs configured in
         Settings > Monday.com, or the adapter's search query tuned.
 
@@ -55,11 +50,16 @@ BUG2. MS365 To-Do sync errors — MCP returning non-JSON for some lists
    (user will supply logic)
 
 
+=== CLEANUP ===
+
+- Remove temporary debug endpoint `/api/debug/attention-fields` from index.ts (added for SLA field diagnosis)
+
 === QUICK WINS (small effort, visible impact) ===
 
 - Dashboard KPIs — add Onboarding metrics (milestone progress, overdue milestones, onboarding runs)
 - My Focus auto-population — tickets over SLA or overdue update auto-appear
 - Delivery kanban board — drag cards between status columns
+- Auto-deploy watcher — PowerShell polling script (git fetch + compare, run deploy.ps1), Task Scheduler every 2-5 mins
 
 
 === TIER 1: Daily workflow enhancements ===
@@ -118,6 +118,7 @@ BUG2. MS365 To-Do sync errors — MCP returning non-JSON for some lists
 
 COMPLETED (recent first)
 ---------
+[DONE] SharePoint sync pull working — fixed site URL format + download URL fetch (was decoding JSON metadata as base64)
 [DONE] SSO primary login — Microsoft sign-in button at top, local password form below
 [DONE] Tour expanded — step descriptions now list specific tabs within each area
 [DONE] Milestones merged into Onboarding tab — removed standalone admin Milestones tab
