@@ -65,12 +65,13 @@ export function createSettingsRoutes(
       res.status(400).json({ ok: false, error: parsed.error.message });
       return;
     }
-    if (req.params.key === 'openai_api_key' && !parsed.data.value.trim()) {
+    const key = String(req.params.key);
+    if (key === 'openai_api_key' && !parsed.data.value.trim()) {
       res.status(400).json({ ok: false, error: 'OpenAI API key cannot be empty.' });
       return;
     }
-    settingsQueries.set(req.params.key, parsed.data.value);
-    onSettingChanged?.(req.params.key);
+    settingsQueries.set(key, parsed.data.value);
+    onSettingChanged?.(key);
     res.json({ ok: true });
   });
 

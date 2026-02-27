@@ -104,7 +104,7 @@ export function createMilestoneRoutes(
   });
 
   router.get('/templates/:id', (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const tmpl = milestoneQueries.getTemplateById(id);
     if (!tmpl) { res.status(404).json({ ok: false, error: 'Template not found' }); return; }
@@ -119,7 +119,7 @@ export function createMilestoneRoutes(
   });
 
   router.put('/templates/:id', writeGuard, (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const parsed = TemplateUpdateSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
@@ -129,7 +129,7 @@ export function createMilestoneRoutes(
   });
 
   router.delete('/templates/:id', writeGuard, (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     milestoneQueries.deleteTemplate(id);
     res.json({ ok: true });
@@ -166,7 +166,7 @@ export function createMilestoneRoutes(
   });
 
   router.delete('/matrix/:saleTypeId', writeGuard, (req, res) => {
-    const saleTypeId = parseInt(req.params.saleTypeId, 10);
+    const saleTypeId = parseInt(String(req.params.saleTypeId), 10);
     if (isNaN(saleTypeId)) { res.status(400).json({ ok: false, error: 'Invalid saleTypeId' }); return; }
     milestoneQueries.deleteMatrixRow(saleTypeId);
     res.json({ ok: true });
@@ -188,7 +188,7 @@ export function createMilestoneRoutes(
   // ── Delivery Milestone Instances ──
 
   router.get('/delivery/:deliveryId', (req, res) => {
-    const deliveryId = parseInt(req.params.deliveryId, 10);
+    const deliveryId = parseInt(String(req.params.deliveryId), 10);
     if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
     res.json({ ok: true, data: milestoneQueries.getByDelivery(deliveryId) });
   });
@@ -220,7 +220,7 @@ export function createMilestoneRoutes(
   });
 
   router.post('/delivery/:deliveryId/create', writeGuard, (req, res) => {
-    const deliveryId = parseInt(req.params.deliveryId, 10);
+    const deliveryId = parseInt(String(req.params.deliveryId), 10);
     if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
 
     // Check if milestones already exist
@@ -246,7 +246,7 @@ export function createMilestoneRoutes(
   // ── Single milestone update (catch-all /:id — must be LAST) ──
 
   router.put('/:id', writeGuard, (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const parsed = MilestoneUpdateSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
@@ -278,7 +278,7 @@ export function createMilestoneRoutes(
   });
 
   router.delete('/delivery/:deliveryId', writeGuard, (req, res) => {
-    const deliveryId = parseInt(req.params.deliveryId, 10);
+    const deliveryId = parseInt(String(req.params.deliveryId), 10);
     if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
 
     const count = milestoneQueries.deleteByDelivery(deliveryId);

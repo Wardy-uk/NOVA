@@ -224,13 +224,14 @@ export class McpClientManager {
           throw new Error(`Server "${serverName}" reconnection failed after call error: ${server.lastError}`);
         }
 
-        if (!server.client) {
+        const reconnectedClient = this.servers.get(serverName)?.client;
+        if (!reconnectedClient) {
           throw new Error(`Server "${serverName}" reconnected but client is null`);
         }
 
         // Retry once
         console.log(`[MCP] ${serverName}: Retrying ${toolName} after reconnect...`);
-        return server.client.callTool({ name: toolName, arguments: args });
+        return reconnectedClient.callTool({ name: toolName, arguments: args });
       }
       throw err;
     }

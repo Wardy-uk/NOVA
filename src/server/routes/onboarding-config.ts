@@ -33,7 +33,7 @@ export function createOnboardingConfigRoutes(
   });
 
   router.put('/ticket-groups/:id', writeGuard, (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       name: z.string().min(1).optional(),
       sort_order: z.number().optional(),
@@ -45,7 +45,7 @@ export function createOnboardingConfigRoutes(
   });
 
   router.delete('/ticket-groups/:id', writeGuard, (req, res) => {
-    configQueries.deleteTicketGroup(parseInt(req.params.id, 10));
+    configQueries.deleteTicketGroup(parseInt(String(req.params.id), 10));
     res.json({ ok: true });
   });
 
@@ -67,7 +67,7 @@ export function createOnboardingConfigRoutes(
   });
 
   router.put('/sale-types/:id', writeGuard, (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       name: z.string().min(1).optional(),
       sort_order: z.number().optional(),
@@ -79,7 +79,7 @@ export function createOnboardingConfigRoutes(
   });
 
   router.delete('/sale-types/:id', writeGuard, (req, res) => {
-    configQueries.deleteSaleType(parseInt(req.params.id, 10));
+    configQueries.deleteSaleType(parseInt(String(req.params.id), 10));
     res.json({ ok: true });
   });
 
@@ -106,7 +106,7 @@ export function createOnboardingConfigRoutes(
   });
 
   router.put('/capabilities/:id', writeGuard, (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       name: z.string().min(1).optional(),
       code: z.string().optional(),
@@ -120,19 +120,19 @@ export function createOnboardingConfigRoutes(
   });
 
   router.delete('/capabilities/:id', writeGuard, (req, res) => {
-    configQueries.deleteCapability(parseInt(req.params.id, 10));
+    configQueries.deleteCapability(parseInt(String(req.params.id), 10));
     res.json({ ok: true });
   });
 
   // ── Items ──
 
   router.get('/capabilities/:id/items', (req, res) => {
-    const capId = parseInt(req.params.id, 10);
+    const capId = parseInt(String(req.params.id), 10);
     res.json({ ok: true, data: configQueries.getItemsForCapability(capId) });
   });
 
   router.post('/capabilities/:id/items', writeGuard, (req, res) => {
-    const capId = parseInt(req.params.id, 10);
+    const capId = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       name: z.string().min(1),
       is_bolt_on: z.boolean().optional(),
@@ -144,7 +144,7 @@ export function createOnboardingConfigRoutes(
   });
 
   router.put('/items/:id', writeGuard, (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       name: z.string().min(1).optional(),
       is_bolt_on: z.number().min(0).max(1).optional(),
@@ -157,7 +157,7 @@ export function createOnboardingConfigRoutes(
   });
 
   router.delete('/items/:id', writeGuard, (req, res) => {
-    configQueries.deleteItem(parseInt(req.params.id, 10));
+    configQueries.deleteItem(parseInt(String(req.params.id), 10));
     res.json({ ok: true });
   });
 
@@ -177,7 +177,7 @@ export function createOnboardingConfigRoutes(
       })),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    configQueries.batchUpdateMatrix(parsed.data.updates);
+    configQueries.batchUpdateMatrix(parsed.data.updates as { sale_type_id: number; capability_id: number; enabled: boolean; notes?: string }[]);
     res.json({ ok: true });
   });
 

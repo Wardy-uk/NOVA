@@ -433,7 +433,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
     });
 
     router.put('/entries/:id', writeGuard, (req, res) => {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
       const updated = deliveryQueries.update(id, req.body);
       if (!updated) { res.status(404).json({ ok: false, error: 'Entry not found' }); return; }
@@ -441,7 +441,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
     });
 
     router.delete('/entries/:id', writeGuard, (req, res) => {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
       const deleted = deliveryQueries.delete(id);
       if (!deleted) { res.status(404).json({ ok: false, error: 'Entry not found' }); return; }
