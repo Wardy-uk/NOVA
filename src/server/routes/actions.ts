@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { TaskQueries, UserSettingsQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { getNextActions, getAiActionsDebugLog, recordAiActionsDebug } from '../services/ai-actions.js';
+import { filterTasksByAllowedSources } from '../utils/source-filter.js';
 
 export function createActionRoutes(
   taskQueries: TaskQueries,
@@ -27,12 +28,20 @@ export function createActionRoutes(
 
   router.post('/suggest', async (req, res) => {
     try {
+      const userId = (req as any).user?.id as number | undefined;
+      const userRole = (req as any).user?.role as string | undefined;
       const sourceParam = (req.query.source as string | undefined) ?? 'all';
       const sources = sourceParam === 'all' ? null : sourceParam.split(',').filter(Boolean);
       const provider = settingsQueries.get('ai_provider') ?? 'openai';
-      const taskCount = !sources
-        ? taskQueries.getAll().length
-        : taskQueries.getAll().filter((t) => sources.includes(t.source)).length;
+
+      // Get all tasks scoped to this user's enabled integrations
+      let allUserTasks = filterTasksByAllowedSources(
+        taskQueries.getAll(), userId, userRole, userSettingsQueries, settingsQueries
+      );
+      // Then apply the source query-param filter on top
+      if (sources) allUserTasks = allUserTasks.filter((t) => sources.includes(t.source));
+
+      const taskCount = allUserTasks.length;
       recordAiActionsDebug(
         `[request] source=${sourceParam} provider=${provider} taskCount=${taskCount}`
       );
@@ -59,9 +68,7 @@ export function createActionRoutes(
       const countStr = settingsQueries.get('ai_action_count') ?? '10';
       const count = parseInt(countStr, 10) || 5;
 
-      const tasks = !sources
-        ? taskQueries.getAll()
-        : taskQueries.getAll().filter((t) => sources.includes(t.source));
+      const tasks = allUserTasks;
       if (tasks.length === 0) {
         recordAiActionsDebug('[info] no tasks for requested source');
         res.json({ ok: true, data: { suggestions: [] } });

@@ -4,38 +4,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { TaskAggregator, SdFilter } from '../services/aggregator.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
 import { evaluateAttention } from '../services/jira-sla.js';
-
-/** Build the set of task sources a user is allowed to see.
- *  Per-user settings are checked first. Only admin users fall back to global settings
- *  (since they configured the global integrations). Non-admin users must explicitly
- *  enable integrations in their own My Settings to see tasks from those sources. */
-function getAllowedSources(
-  userId: number | undefined,
-  userRole: string | undefined,
-  userSettingsQueries?: UserSettingsQueries,
-  settingsQueries?: SettingsQueries,
-): Set<string> {
-  const allowed = new Set(['milestone', 'manual']);
-  if (!userId) return allowed;
-
-  const check = (key: string): boolean => {
-    const userVal = userSettingsQueries?.get(userId, key);
-    if (userVal !== undefined && userVal !== null) return userVal === 'true';
-    // Only admins fall back to global (they configured the global integrations)
-    if (userRole === 'admin') return settingsQueries?.get(key) === 'true';
-    return false;
-  };
-
-  if (check('jira_enabled')) allowed.add('jira');
-  if (check('msgraph_enabled')) {
-    allowed.add('planner');
-    allowed.add('todo');
-    allowed.add('calendar');
-    allowed.add('email');
-  }
-  if (check('monday_enabled')) allowed.add('monday');
-  return allowed;
-}
+import { getAllowedSources } from '../utils/source-filter.js';
 
 /** Check if Jira is enabled for this user (per-user first, admin falls back to global). */
 function isJiraEnabled(
