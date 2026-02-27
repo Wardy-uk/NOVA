@@ -460,47 +460,87 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
   serverName: 'monday',
 
   async fetch(mcp: McpClientManager): Promise<FetchResult> {
-    if (!mcp.isConnected('monday')) return { tasks: [], ok: false };
+    if (!mcp.isConnected('monday')) {
+      console.log('[mondayAdapter] Not connected, skipping');
+      return { tasks: [], ok: false };
+    }
+
+    // Log available tools for diagnostics
+    const availableTools = mcp.getServerTools('monday');
+    console.log(`[mondayAdapter] Available tools (${availableTools.length}):`, availableTools.join(', '));
 
     // 1. Get boards (optionally filtered by settings)
     const boardIdsEnv = settingsQueries?.get('monday_board_ids') ?? process.env.MONDAY_BOARD_IDS;
-    let boardIds: string[];
+    let boardIds: string[] = [];
 
     if (boardIdsEnv) {
       boardIds = boardIdsEnv.split(',').map((id) => id.trim()).filter(Boolean);
+      console.log(`[mondayAdapter] Using configured board IDs: ${boardIds.join(', ')}`);
     } else {
-      // Use search tool to find boards
-      const searchResult = (await mcp.callTool('monday', 'search', {
-        query: '*',
-        searchType: 'BOARD',
-      })) as { content?: Array<{ text?: string }> };
-      const searchText = searchResult?.content?.[0]?.text;
-      if (!searchText) return { tasks: [], ok: false };
+      console.log('[mondayAdapter] No board IDs configured, attempting auto-discovery...');
 
-      try {
-        const parsed = JSON.parse(searchText);
-        const boards = Array.isArray(parsed) ? parsed : parsed.boards ?? parsed.data?.boards ?? [];
-        boardIds = boards.map((b: Record<string, unknown>) => String(b.id));
-      } catch {
-        // search may return markdown/text — try to extract board IDs from get_board_info
-        // Fallback: try get_board_info without a board ID to list boards
-        console.warn('[mondayAdapter] Could not parse search response, trying get_user_context');
+      // Try list_boards first (most direct)
+      if (availableTools.includes('list_boards')) {
+        console.log('[mondayAdapter] Trying list_boards tool...');
+        try {
+          const listResult = (await mcp.callTool('monday', 'list_boards', {})) as {
+            content?: Array<{ text?: string }>;
+          };
+          const listText = listResult?.content?.[0]?.text ?? '';
+          console.log('[mondayAdapter] list_boards response (first 2000):', listText.slice(0, 2000));
+          const parsed = JSON.parse(listText);
+          const boards = Array.isArray(parsed) ? parsed : parsed.boards ?? parsed.data?.boards ?? [];
+          boardIds = boards.map((b: Record<string, unknown>) => String(b.id));
+          console.log(`[mondayAdapter] list_boards found ${boardIds.length} boards: ${boardIds.join(', ')}`);
+        } catch (e) {
+          console.warn('[mondayAdapter] list_boards failed:', e instanceof Error ? e.message : e);
+        }
+      }
+
+      // Fallback: search tool
+      if (boardIds.length === 0 && availableTools.includes('search')) {
+        console.log('[mondayAdapter] Trying search tool...');
+        try {
+          const searchResult = (await mcp.callTool('monday', 'search', {
+            query: '*',
+            searchType: 'BOARD',
+          })) as { content?: Array<{ text?: string }> };
+          const searchText = searchResult?.content?.[0]?.text ?? '';
+          console.log('[mondayAdapter] search response (first 2000):', searchText.slice(0, 2000));
+
+          const parsed = JSON.parse(searchText);
+          const boards = Array.isArray(parsed) ? parsed : parsed.boards ?? parsed.data?.boards ?? [];
+          boardIds = boards.map((b: Record<string, unknown>) => String(b.id));
+          console.log(`[mondayAdapter] search found ${boardIds.length} boards`);
+        } catch (e) {
+          console.warn('[mondayAdapter] search parse failed:', e instanceof Error ? e.message : e);
+        }
+      }
+
+      // Fallback: get_user_context
+      if (boardIds.length === 0 && availableTools.includes('get_user_context')) {
+        console.log('[mondayAdapter] Trying get_user_context...');
         try {
           const ctxResult = (await mcp.callTool('monday', 'get_user_context', {})) as {
             content?: Array<{ text?: string }>;
           };
-          const ctxText = ctxResult?.content?.[0]?.text;
-          if (!ctxText) return { tasks: [], ok: false };
+          const ctxText = ctxResult?.content?.[0]?.text ?? '';
+          console.log('[mondayAdapter] get_user_context response (first 2000):', ctxText.slice(0, 2000));
           const ctxParsed = JSON.parse(ctxText);
-          boardIds = (ctxParsed.boards ?? []).map((b: Record<string, unknown>) => String(b.id));
-        } catch {
-          console.warn('[mondayAdapter] Could not determine board IDs');
-          return { tasks: [], ok: false };
+          const boards = ctxParsed.boards ?? ctxParsed.data?.boards ?? ctxParsed.account?.boards ?? [];
+          boardIds = (Array.isArray(boards) ? boards : []).map((b: Record<string, unknown>) => String(b.id));
+          console.log(`[mondayAdapter] get_user_context found ${boardIds.length} boards`);
+        } catch (e) {
+          console.warn('[mondayAdapter] get_user_context failed:', e instanceof Error ? e.message : e);
         }
       }
     }
 
-    if (boardIds.length === 0) return { tasks: [], ok: true };
+    console.log(`[mondayAdapter] Final board IDs (${boardIds.length}): ${boardIds.join(', ')}`);
+    if (boardIds.length === 0) {
+      console.log('[mondayAdapter] No boards found — returning empty');
+      return { tasks: [], ok: true };
+    }
 
     // 2. For each board, get full data (groups + items in one call)
     const allTasks: NormalizedTask[] = [];
@@ -509,11 +549,13 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
 
     for (const boardId of boardIds) {
       try {
+        console.log(`[mondayAdapter] Fetching board ${boardId}...`);
         const boardResult = (await mcp.callTool('monday', 'get_full_board_data', {
           boardId: Number(boardId),
         })) as { content?: Array<{ text?: string }> };
 
         const boardText = boardResult?.content?.[0]?.text;
+        console.log(`[mondayAdapter] Board ${boardId} response (first 1500):`, (boardText ?? 'null').slice(0, 1500));
         if (!boardText) { hadError = true; continue; }
 
         let boardData: Record<string, unknown>;
@@ -525,6 +567,7 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
           if (jsonMatch) {
             boardData = JSON.parse(jsonMatch[1]);
           } else {
+            console.warn(`[mondayAdapter] Board ${boardId}: Could not parse response as JSON`);
             hadError = true;
             continue;
           }
@@ -532,18 +575,22 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
 
         const boardName = (boardData.name as string) ?? '';
         const groups = (boardData.groups as Array<Record<string, unknown>>) ?? [];
+        console.log(`[mondayAdapter] Board "${boardName}" (${boardId}): ${groups.length} groups`);
 
         // Filter out done/completed groups
         const activeGroups = groups.filter((g) => {
           const title = ((g.title as string) ?? (g.name as string) ?? '').toLowerCase();
           return !title.includes('done') && !title.includes('completed') && !title.includes('closed');
         });
+        console.log(`[mondayAdapter] Board "${boardName}": ${activeGroups.length} active groups (${groups.length - activeGroups.length} filtered as done/completed)`);
 
         hadAnyFetch = true;
         for (const group of activeGroups) {
           const items = (group.items as Array<Record<string, unknown>>)
             ?? (group.items_page as Record<string, unknown>)?.items as Array<Record<string, unknown>>
             ?? [];
+          const groupTitle = (group.title as string) ?? (group.name as string) ?? 'unnamed';
+          console.log(`[mondayAdapter]   Group "${groupTitle}": ${items.length} items`);
           for (const item of items) {
             const columnValues = (item.column_values as Array<Record<string, unknown>>) ?? [];
             allTasks.push({
