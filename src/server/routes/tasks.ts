@@ -100,6 +100,13 @@ export function createTaskRoutes(
       }
       const now = new Date();
 
+      // Debug: log field shape for first 3 tickets to diagnose SLA field paths
+      for (const t of tickets.slice(0, 3)) {
+        const issue = (t.raw_data ?? {}) as Record<string, unknown>;
+        const fields = issue.fields as Record<string, unknown> | undefined;
+        console.log(`[Attention Debug] ${t.source_id} | hasRawData=${!!t.raw_data} | hasFieldsObj=${!!fields} | topKeys=${Object.keys(issue).join(',')} | status=${JSON.stringify(issue.status ?? fields?.status)} | cf14081=${JSON.stringify(issue.customfield_14081 ?? fields?.customfield_14081 ?? 'MISSING')} | cf14185=${JSON.stringify(issue.customfield_14185 ?? fields?.customfield_14185 ?? 'MISSING')} | cf14048=${JSON.stringify(issue.customfield_14048 ?? fields?.customfield_14048 ?? 'MISSING')} | created=${issue.created ?? fields?.created ?? 'MISSING'}`);
+      }
+
       const attentionTickets = tickets
         .map((t) => {
           const issue = (t.raw_data ?? {}) as Record<string, unknown>;
