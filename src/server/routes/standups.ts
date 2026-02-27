@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { TaskQueries, RitualQueries, UserSettingsQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { generateMorningBriefing, generateReplan, generateEndOfDay } from '../services/ai-standup.js';
-import { filterTasksByAllowedSources } from '../utils/source-filter.js';
+import { getAllowedSources, filterTasksByAllowedSources } from '../utils/source-filter.js';
 
 export function createStandupRoutes(
   taskQueries: TaskQueries,
@@ -26,31 +26,32 @@ export function createStandupRoutes(
     return null;
   };
 
-  // Re-enrich task references from stored AI response
-  const enrichTask = (item: { task_id: string }) => {
+  // Re-enrich task references from stored AI response, optionally filtered by allowed sources
+  const enrichTask = (allowedSources?: Set<string>) => (item: { task_id: string }) => {
     const task = taskQueries.getById(item.task_id);
-    return { ...item, task: task ?? null };
+    if (!task || (allowedSources && !allowedSources.has(task.source))) return { ...item, task: null };
+    return { ...item, task };
   };
 
-  const enrichMorning = (raw: Record<string, unknown>, ritualId: number) => ({
+  const enrichMorning = (raw: Record<string, unknown>, ritualId: number, allowed?: Set<string>) => ({
     summary: raw.summary as string,
-    overdue: ((raw.overdue as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
-    due_today: ((raw.due_today as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
-    top_priorities: ((raw.top_priorities as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
-    rolled_over: ((raw.rolled_over as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
+    overdue: ((raw.overdue as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
+    due_today: ((raw.due_today as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
+    top_priorities: ((raw.top_priorities as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
+    rolled_over: ((raw.rolled_over as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
     ritual_id: ritualId,
   });
 
-  const enrichReplan = (raw: Record<string, unknown>, ritualId: number) => ({
+  const enrichReplan = (raw: Record<string, unknown>, ritualId: number, allowed?: Set<string>) => ({
     summary: raw.summary as string,
-    adjusted_priorities: ((raw.adjusted_priorities as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
+    adjusted_priorities: ((raw.adjusted_priorities as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
     ritual_id: ritualId,
   });
 
-  const enrichEod = (raw: Record<string, unknown>, ritualId: number) => ({
+  const enrichEod = (raw: Record<string, unknown>, ritualId: number, allowed?: Set<string>) => ({
     summary: raw.summary as string,
     accomplished: (raw.accomplished as string[]) ?? [],
-    rolling_over: ((raw.rolling_over as Array<{ task_id: string }>) ?? []).map(enrichTask).filter((i) => i.task),
+    rolling_over: ((raw.rolling_over as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
     insights: (raw.insights as string) ?? '',
     ritual_id: ritualId,
   });
@@ -65,9 +66,11 @@ export function createStandupRoutes(
     res.json({ ok: true, data: { rituals, hasMorning, hasReplan, hasEod, date: today() } });
   });
 
-  // Load cached rituals for today, re-enriched with current task data (per-user)
+  // Load cached rituals for today, re-enriched with current task data (per-user, source-filtered)
   router.get('/cached', (req, res) => {
     const userId = (req as any).user?.id as number | undefined;
+    const userRole = (req as any).user?.role as string | undefined;
+    const allowed = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
     const rituals = ritualQueries.getByDate(today(), undefined, userId);
     const result: Record<string, unknown> = {};
 
@@ -76,11 +79,11 @@ export function createStandupRoutes(
       try {
         const raw = JSON.parse(ritual.conversation) as Record<string, unknown>;
         if (ritual.type === 'morning' && !result.morning) {
-          result.morning = enrichMorning(raw, ritual.id);
+          result.morning = enrichMorning(raw, ritual.id, allowed);
         } else if (ritual.type === 'replan' && !result.replan) {
-          result.replan = enrichReplan(raw, ritual.id);
+          result.replan = enrichReplan(raw, ritual.id, allowed);
         } else if (ritual.type === 'eod' && !result.eod) {
-          result.eod = enrichEod(raw, ritual.id);
+          result.eod = enrichEod(raw, ritual.id, allowed);
         }
       } catch { /* skip corrupt data */ }
     }
