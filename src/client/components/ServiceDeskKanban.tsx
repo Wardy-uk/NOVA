@@ -443,7 +443,7 @@ function KanbanCard({
         {/* Due date */}
         {task.due_date && (
           <span className={`text-[10px] ${isOverdue ? 'text-red-400' : 'text-neutral-500'}`}>
-            {new Date(task.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+            Due: {new Date(task.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
           </span>
         )}
 

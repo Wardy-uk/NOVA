@@ -160,12 +160,12 @@ export function TaskCard({ task, onUpdate, onClick }: Props) {
           )}
           {meta.Created && (
             <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${getAgeColor(meta.Created)}`}>
-              {meta.Created}
+              Created: {meta.Created}
             </span>
           )}
           {meta.Assignee && (
             <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-neutral-700 text-neutral-300">
-              {meta.Assignee}
+              Assignee: {meta.Assignee}
             </span>
           )}
         </div>
