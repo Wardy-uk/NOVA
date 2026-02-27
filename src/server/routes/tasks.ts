@@ -1,14 +1,43 @@
 import { Router } from 'express';
 import type { TaskQueries, MilestoneQueries, UserSettingsQueries } from '../db/queries.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import type { TaskAggregator, SdFilter } from '../services/aggregator.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
 import { evaluateAttention } from '../services/jira-sla.js';
+
+/** Build the set of task sources a user is allowed to see.
+ *  Checks per-user settings first, falls back to global (same logic as integrations route). */
+function getAllowedSources(
+  userId: number | undefined,
+  userSettingsQueries?: UserSettingsQueries,
+  settingsQueries?: SettingsQueries,
+): Set<string> {
+  const allowed = new Set(['milestone', 'manual']);
+  if (!userId) return allowed;
+
+  const check = (key: string): boolean => {
+    const userVal = userSettingsQueries?.get(userId, key);
+    const val = userVal ?? settingsQueries?.get(key);
+    return val === 'true';
+  };
+
+  if (check('jira_enabled')) allowed.add('jira');
+  if (check('msgraph_enabled')) {
+    allowed.add('planner');
+    allowed.add('todo');
+    allowed.add('calendar');
+    allowed.add('email');
+  }
+  if (check('monday_enabled')) allowed.add('monday');
+  return allowed;
+}
 
 export function createTaskRoutes(
   taskQueries: TaskQueries,
   aggregator: TaskAggregator,
   milestoneQueries?: MilestoneQueries,
   userSettingsQueries?: UserSettingsQueries,
+  settingsQueries?: SettingsQueries,
 ): Router {
   const router = Router();
 
@@ -22,19 +51,8 @@ export function createTaskRoutes(
       userId,
     });
 
-    // Scope tasks to sources the user has personally enabled in My Settings
-    // (no fallback to global — if you haven't configured it, you don't see it)
-    const allowedSources = new Set(['milestone', 'manual']);
-    if (userId && userSettingsQueries) {
-      if (userSettingsQueries.get(userId, 'jira_enabled') === 'true') allowedSources.add('jira');
-      if (userSettingsQueries.get(userId, 'msgraph_enabled') === 'true') {
-        allowedSources.add('planner');
-        allowedSources.add('todo');
-        allowedSources.add('calendar');
-        allowedSources.add('email');
-      }
-      if (userSettingsQueries.get(userId, 'monday_enabled') === 'true') allowedSources.add('monday');
-    }
+    // Scope to sources the user has enabled (per-user, falls back to global)
+    const allowedSources = getAllowedSources(userId, userSettingsQueries, settingsQueries);
     const filtered = tasks.filter((t) => allowedSources.has(t.source));
 
     res.json({ ok: true, data: filtered });
@@ -174,20 +192,7 @@ export function createTaskRoutes(
   // GET /api/tasks/stats — must be before /:id
   router.get('/stats', (req, res) => {
     const userId = (req as any).user?.id as number | undefined;
-
-    // Scope stats to sources the user has personally enabled
-    const allowedSources = new Set(['milestone', 'manual']);
-    if (userId && userSettingsQueries) {
-      if (userSettingsQueries.get(userId, 'jira_enabled') === 'true') allowedSources.add('jira');
-      if (userSettingsQueries.get(userId, 'msgraph_enabled') === 'true') {
-        allowedSources.add('planner');
-        allowedSources.add('todo');
-        allowedSources.add('calendar');
-        allowedSources.add('email');
-      }
-      if (userSettingsQueries.get(userId, 'monday_enabled') === 'true') allowedSources.add('monday');
-    }
-
+    const allowedSources = getAllowedSources(userId, userSettingsQueries, settingsQueries);
     const allTasks = taskQueries.getAllIncludingDone().filter((t) => allowedSources.has(t.source));
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];

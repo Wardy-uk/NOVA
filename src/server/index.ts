@@ -276,7 +276,7 @@ async function main() {
 
   // Protected API routes
   app.use('/api', authMiddleware(jwtSecret));
-  app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries));
+  app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries, settingsQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries, userSettingsQueries, (key) => {
     // Restart sync timers when interval settings change
