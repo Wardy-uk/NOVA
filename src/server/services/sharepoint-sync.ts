@@ -2,7 +2,7 @@ import type { McpClientManager } from './mcp-client.js';
 import type { DeliveryQueries, DeliveryEntry } from '../db/queries.js';
 
 // SharePoint location defaults (overridden by settings)
-const DEFAULT_SITE_URL = 'nurturcloud.sharepoint.com/sites/Nurtur';
+const DEFAULT_SITE_URL = 'nurturcloud.sharepoint.com:/sites/Nurtur:';
 const DEFAULT_DRIVE_HINT = 'Documents';
 const DEFAULT_FOLDER_PATH = 'Clients/Tech/!Overview Documents';
 const DEFAULT_FILE_NAME = 'Delivery sheet Master.xlsx';
