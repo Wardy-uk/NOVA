@@ -12,7 +12,7 @@ export function createTaskRoutes(
 ): Router {
   const router = Router();
 
-  // GET /api/tasks — List tasks (per-user focus via user_task_pins)
+  // GET /api/tasks — List tasks (per-user, scoped to integrations the user has enabled)
   router.get('/', (req, res) => {
     const { status, source } = req.query;
     const userId = (req as any).user?.id as number | undefined;
@@ -21,7 +21,23 @@ export function createTaskRoutes(
       source: source as string | undefined,
       userId,
     });
-    res.json({ ok: true, data: tasks });
+
+    // Scope tasks to sources the user has personally enabled in My Settings
+    // (no fallback to global — if you haven't configured it, you don't see it)
+    const allowedSources = new Set(['milestone', 'manual']);
+    if (userId && userSettingsQueries) {
+      if (userSettingsQueries.get(userId, 'jira_enabled') === 'true') allowedSources.add('jira');
+      if (userSettingsQueries.get(userId, 'msgraph_enabled') === 'true') {
+        allowedSources.add('planner');
+        allowedSources.add('todo');
+        allowedSources.add('calendar');
+        allowedSources.add('email');
+      }
+      if (userSettingsQueries.get(userId, 'monday_enabled') === 'true') allowedSources.add('monday');
+    }
+    const filtered = tasks.filter((t) => allowedSources.has(t.source));
+
+    res.json({ ok: true, data: filtered });
   });
 
   // GET /api/tasks/service-desk — live Jira search with ownership filter
