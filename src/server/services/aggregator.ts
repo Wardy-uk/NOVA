@@ -731,11 +731,12 @@ export class TaskAggregator {
     // Build JQL based on filter
     const parts: string[] = [];
     if (filter === 'mine') {
-      // Use explicit identity when available (per-user scoping), else fall back to MCP account
+      // Per-user scoping: require explicit Jira identity, return empty if not configured
       if (userJiraIdentity) {
         parts.push(`assignee = "${userJiraIdentity}"`);
       } else {
-        parts.push('assignee = currentUser()');
+        console.log('[ServiceDesk] No jira_username configured for user — returning empty for "mine" filter');
+        return [];
       }
     } else if (filter === 'unassigned') {
       parts.push('assignee IS EMPTY');
