@@ -171,10 +171,10 @@ export class SharePointSync {
         driveItemId: fileItemId,
       });
       const rawDownload = this.extractText(downloadResp);
-      console.log(`[SP-Sync] Download response length: ${rawDownload.length}, first 200:`, rawDownload.slice(0, 200));
-      const fileContent = this.extractFileContent(downloadResp);
-      console.log(`[SP-Sync] Extracted file content length: ${fileContent?.length ?? 0}`);
-      if (!fileContent) {
+      console.log(`[SP-Sync] Download response (full, ${rawDownload.length} chars):`, rawDownload.slice(0, 5000));
+      const extracted = await this.extractFileContent(downloadResp);
+      console.log(`[SP-Sync] Extracted file content: ${extracted ? `${extracted.content.length} chars via ${extracted.method}` : 'null'}`);
+      if (!extracted) {
         result.errors.push(`Downloaded file content is empty. Raw response (first 500): ${rawDownload.slice(0, 500)}`);
         this._lastResult = result;
         return result;
@@ -182,7 +182,7 @@ export class SharePointSync {
 
       // Step 4: Parse the xlsx
       const XLSX = (await import('xlsx')).default;
-      const buf = Buffer.from(fileContent, 'base64');
+      const buf = Buffer.from(extracted.content, 'base64');
       console.log(`[SP-Sync] Base64 decoded to ${buf.length} bytes`);
       const wb = XLSX.read(buf);
       console.log('[SP-Sync] Parsed workbook with', wb.SheetNames.length, 'sheets:', wb.SheetNames.join(', '));
@@ -475,15 +475,57 @@ export class SharePointSync {
     return null;
   }
 
-  private extractFileContent(response: unknown): string | null {
+  private async extractFileContent(response: unknown): Promise<{ content: string; method: string } | null> {
     const text = this.extractText(response);
-    // The MCP server likely returns base64-encoded content
-    // Try to find a base64 block
+
+    // Strategy 1: JSON with base64 content field
+    try {
+      const parsed = JSON.parse(text);
+
+      // Check for inline base64 content
+      for (const key of ['content', 'data', 'body', 'fileContent', 'file_content']) {
+        if (typeof parsed[key] === 'string' && parsed[key].length > 100) {
+          if (/^[A-Za-z0-9+/=\s]+$/.test(parsed[key].trim())) {
+            return { content: parsed[key].trim(), method: `json.${key}` };
+          }
+        }
+      }
+
+      // Check for download URL — fetch it directly
+      const downloadUrl = parsed['@microsoft.graph.downloadUrl']
+        ?? parsed['downloadUrl']
+        ?? parsed['webUrl']
+        ?? parsed['url'];
+      if (downloadUrl && typeof downloadUrl === 'string' && downloadUrl.startsWith('http')) {
+        console.log('[SP-Sync] Found download URL, fetching directly...');
+        try {
+          const resp = await fetch(downloadUrl);
+          if (resp.ok) {
+            const arrayBuf = await resp.arrayBuffer();
+            const b64 = Buffer.from(arrayBuf).toString('base64');
+            console.log(`[SP-Sync] Direct download: ${arrayBuf.byteLength} bytes`);
+            return { content: b64, method: 'downloadUrl' };
+          } else {
+            console.error(`[SP-Sync] Direct download failed: ${resp.status} ${resp.statusText}`);
+          }
+        } catch (fetchErr) {
+          console.error('[SP-Sync] Direct download error:', fetchErr);
+        }
+      }
+    } catch {
+      // Not JSON — fall through
+    }
+
+    // Strategy 2: Regex for base64 block in text
     const b64Match = text.match(/(?:content|data|base64)["']?\s*[:=]\s*["']?([A-Za-z0-9+/=]{100,})/);
-    if (b64Match) return b64Match[1];
-    // If the whole response looks like base64
-    if (/^[A-Za-z0-9+/=\s]{100,}$/.test(text.trim())) return text.trim();
-    return text.length > 100 ? text : null;
+    if (b64Match) return { content: b64Match[1], method: 'regex' };
+
+    // Strategy 3: Whole response is base64
+    if (/^[A-Za-z0-9+/=\s]{100,}$/.test(text.trim())) {
+      return { content: text.trim(), method: 'raw-base64' };
+    }
+
+    return null;
   }
 
   private extractText(response: unknown): string {
