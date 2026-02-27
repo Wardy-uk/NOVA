@@ -74,7 +74,7 @@ export function createTaskRoutes(
     }
   });
 
-  // GET /api/tasks/service-desk/attention — ALL tickets that need attention (not user-scoped)
+  // GET /api/tasks/service-desk/attention — tickets that need attention (scope=mine|all)
   router.get('/service-desk/attention', async (req, res) => {
     try {
       // Gate: user must have Jira enabled in their personal settings
@@ -86,7 +86,17 @@ export function createTaskRoutes(
         res.json({ ok: true, data: [] });
         return;
       }
-      const tickets = await aggregator.fetchServiceDeskTickets('all');
+
+      const scope = (req.query.scope as string) || 'all';
+      let tickets;
+      if (scope === 'mine') {
+        const jiraUsername = userId && userSettingsQueries
+          ? (userSettingsQueries.get(userId, 'jira_username') ?? undefined)
+          : undefined;
+        tickets = await aggregator.fetchServiceDeskTickets('mine', jiraUsername);
+      } else {
+        tickets = await aggregator.fetchServiceDeskTickets('all');
+      }
       const now = new Date();
 
       const attentionTickets = tickets

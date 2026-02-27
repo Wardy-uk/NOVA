@@ -9,11 +9,12 @@ interface AttentionTask extends Task {
 
 interface Props {
   onUpdateTask: (id: string, updates: Record<string, unknown>) => void;
+  scope?: 'mine' | 'all';
 }
 
 type FilterMode = 'all' | 'overdue_update' | 'sla_breached';
 
-export function NeedsAttentionView({ onUpdateTask }: Props) {
+export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
   const [tasks, setTasks] = useState<AttentionTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +25,7 @@ export function NeedsAttentionView({ onUpdateTask }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/tasks/service-desk/attention');
+      const res = await fetch(`/api/tasks/service-desk/attention?scope=${scope}`);
       const json = await res.json();
       if (json.ok && json.data) {
         setTasks(json.data);
@@ -36,7 +37,7 @@ export function NeedsAttentionView({ onUpdateTask }: Props) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scope]);
 
   useEffect(() => { fetchAttention(); }, [fetchAttention]);
 

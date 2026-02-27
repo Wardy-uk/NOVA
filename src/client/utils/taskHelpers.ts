@@ -1,6 +1,6 @@
 import type { Task } from '../../shared/types.js';
 
-export type OwnershipFilter = 'mine' | 'unassigned' | 'all';
+export type OwnershipFilter = 'unassigned' | 'all' | 'all-breached' | null;
 
 /** Extract assignee name from task description metadata line "Assignee: ..." */
 export function getAssignee(task: Task): string {

@@ -70,7 +70,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'tickets', label: 'My Tickets' },
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
-      { view: 'attention', label: 'Needs Attention' },
+      { view: 'attention', label: 'My Breached' },
     ],
   },
   onboarding: {
@@ -148,8 +148,11 @@ export function App() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [sdFilter, setSdFilter] = useState<OwnershipFilter>(() => {
-    if (typeof window === 'undefined') return 'mine';
-    return (window.localStorage.getItem('nova_sd_filter') as OwnershipFilter) || 'mine';
+    if (typeof window === 'undefined') return null;
+    const stored = window.localStorage.getItem('nova_sd_filter');
+    // Migrate old 'mine' value to null (left tab shows user's own tickets)
+    if (!stored || stored === 'mine') return null;
+    return stored as OwnershipFilter;
   });
   const userMenuRef = useRef<HTMLDivElement>(null);
   const standupChecked = useRef(false);
@@ -264,27 +267,30 @@ export function App() {
 
   // Persist SD filter
   useEffect(() => {
-    if (typeof window !== 'undefined') window.localStorage.setItem('nova_sd_filter', sdFilter);
+    if (typeof window !== 'undefined') window.localStorage.setItem('nova_sd_filter', sdFilter ?? '');
   }, [sdFilter]);
 
   // Navigate helper — used by child components
   const navigate = (v: string) => setView(v as View);
 
-  // Service Desk: fetch tickets from live Jira search with ownership filter
+  // Service Desk: fetch tickets from live Jira search
+  // Left tabs (sdFilter=null) use 'mine', right pills use their specific filter
   const [sdTasks, setSdTasks] = useState<typeof tasks>([]);
   const [sdLoading, setSdLoading] = useState(false);
+  const sdApiFilter = sdFilter === null ? 'mine' : sdFilter;
   useEffect(() => {
     if (!auth.isAuthenticated) return;
+    // Don't fetch ticket list for 'all-breached' — NeedsAttentionView handles its own fetch
+    if (sdApiFilter === 'all-breached') return;
     let active = true;
     setSdLoading(true);
-    fetch(`/api/tasks/service-desk?filter=${sdFilter}`)
+    fetch(`/api/tasks/service-desk?filter=${sdApiFilter}`)
       .then((r) => r.json())
       .then((json) => {
         if (!active) return;
         if (json.ok && json.data) {
           setSdTasks(json.data);
         } else {
-          // Fallback: use locally synced Jira tasks for 'mine'
           setSdTasks(tasks.filter((t) => t.source === 'jira'));
         }
       })
@@ -293,7 +299,7 @@ export function App() {
       })
       .finally(() => { if (active) setSdLoading(false); });
     return () => { active = false; };
-  }, [sdFilter, auth.isAuthenticated, tasks]);
+  }, [sdApiFilter, auth.isAuthenticated, tasks]);
 
   // Auth gate
   if (auth.initializing) {
@@ -459,9 +465,9 @@ export function App() {
               {getVisibleTabs(currentArea).map((tab) => (
                 <button
                   key={tab.view}
-                  onClick={() => setView(tab.view)}
+                  onClick={() => { setView(tab.view); if (currentArea === 'servicedesk') setSdFilter(null); }}
                   className={`px-3 py-1 text-xs rounded transition-colors ${
-                    view === tab.view
+                    view === tab.view && sdFilter === null
                       ? 'bg-[#363d47] text-neutral-100 font-medium'
                       : 'text-neutral-500 hover:text-neutral-300 hover:bg-[#363d47]/50'
                   }`}
@@ -470,17 +476,17 @@ export function App() {
                 </button>
               ))}
 
-              {/* Service Desk ownership filter */}
-              {currentArea === 'servicedesk' && view !== 'attention' && (
+              {/* Service Desk right-side pills (global views) */}
+              {currentArea === 'servicedesk' && (
                 <div className="ml-auto flex items-center gap-1">
                   {([
-                    { value: 'mine' as OwnershipFilter, label: 'My Tickets' },
                     { value: 'unassigned' as OwnershipFilter, label: 'Unassigned' },
                     { value: 'all' as OwnershipFilter, label: 'All Tickets' },
+                    { value: 'all-breached' as OwnershipFilter, label: 'All Breached' },
                   ]).map((opt) => (
                     <button
                       key={opt.value}
-                      onClick={() => setSdFilter(opt.value)}
+                      onClick={() => setSdFilter(sdFilter === opt.value ? null : opt.value)}
                       className={`px-2.5 py-1 text-[11px] rounded-full transition-colors ${
                         sdFilter === opt.value
                           ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
@@ -490,9 +496,11 @@ export function App() {
                       {opt.label}
                     </button>
                   ))}
-                  <span className="text-[10px] text-neutral-500 ml-2">
-                    {sdTasks.length} ticket{sdTasks.length !== 1 ? 's' : ''}
-                  </span>
+                  {sdFilter && sdFilter !== 'all-breached' && (
+                    <span className="text-[10px] text-neutral-500 ml-2">
+                      {sdTasks.length} ticket{sdTasks.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -528,8 +536,11 @@ export function App() {
             <StandupView onUpdateTask={updateTask} onNavigate={navigate} />
           )}
 
-          {/* Service Desk */}
-          {view === 'tickets' && (
+          {/* Service Desk — right pill overrides left tab content */}
+          {currentArea === 'servicedesk' && sdFilter === 'all-breached' && (
+            <NeedsAttentionView onUpdateTask={updateTask} scope="all" />
+          )}
+          {currentArea === 'servicedesk' && sdFilter && sdFilter !== 'all-breached' && (
             <>
               {error && (
                 <div className="mb-4 p-3 bg-red-950/50 border border-red-900 rounded text-red-400 text-sm">
@@ -539,14 +550,24 @@ export function App() {
               <TaskList tasks={sdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
             </>
           )}
-          {view === 'kanban' && (
+          {view === 'tickets' && !sdFilter && (
+            <>
+              {error && (
+                <div className="mb-4 p-3 bg-red-950/50 border border-red-900 rounded text-red-400 text-sm">
+                  {error}
+                </div>
+              )}
+              <TaskList tasks={sdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
+            </>
+          )}
+          {view === 'kanban' && !sdFilter && (
             <ServiceDeskKanban tasks={sdTasks} onUpdateTask={updateTask} />
           )}
-          {view === 'sd-calendar' && (
+          {view === 'sd-calendar' && !sdFilter && (
             <ServiceDeskCalendar tasks={sdTasks} onUpdateTask={updateTask} />
           )}
-          {view === 'attention' && (
-            <NeedsAttentionView onUpdateTask={updateTask} />
+          {view === 'attention' && !sdFilter && (
+            <NeedsAttentionView onUpdateTask={updateTask} scope="mine" />
           )}
 
           {/* Onboarding */}
