@@ -11,7 +11,16 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'jira_url', label: 'Jira URL', type: 'url', placeholder: 'https://yourorg.atlassian.net', required: true },
       { key: 'jira_username', label: 'Email', type: 'text', placeholder: 'you@company.com', required: true },
       { key: 'jira_token', label: 'API Token', type: 'password', placeholder: 'From id.atlassian.com/manage-profile/security/api-tokens', required: true },
-      { key: 'jira_sd_project', label: 'Service Desk Project', type: 'text', placeholder: 'e.g. NT (for Unassigned / All filters)', required: false },
+    ],
+  },
+  {
+    id: 'jira-servicedesk',
+    name: 'Service Desk Config',
+    description: 'Global Service Desk filters. Controls which Jira project and tiers appear across all users.',
+    enabledKey: 'jira_sd_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'jira_sd_project', label: 'Project Key', type: 'text', placeholder: 'e.g. NT', required: false },
       { key: 'jira_sd_tiers', label: 'Exclude Tiers', type: 'text', placeholder: 'e.g. Development (comma-separated tiers to hide)', required: false },
     ],
   },

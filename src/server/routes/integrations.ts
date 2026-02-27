@@ -10,7 +10,7 @@ import type { Dynamics365Service } from '../services/dynamics365.js';
 import type { IntegrationStatus, McpServerStatus } from '../../shared/types.js';
 
 // Admin-only integrations: credentials stay in global settings.json
-const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'sso']);
+const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso']);
 
 const execFileAsync = promisify(execFile);
 
