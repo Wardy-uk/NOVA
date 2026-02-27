@@ -543,6 +543,9 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
     let hadAnyFetch = false;
     let hadError = false;
 
+    // Write first board response to file for debugging
+    let debugWritten = false;
+
     for (const boardId of boardIds) {
       try {
         console.log(`[mondayAdapter] Fetching board ${boardId}...`);
@@ -551,8 +554,24 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
         })) as { content?: Array<{ text?: string }> };
 
         const boardText = boardResult?.content?.[0]?.text;
-        console.log(`[mondayAdapter] Board ${boardId} response (first 1500):`, (boardText ?? 'null').slice(0, 1500));
-        if (!boardText) { hadError = true; continue; }
+        const boardLen = boardText?.length ?? 0;
+        console.log(`[mondayAdapter] Board ${boardId} response length: ${boardLen}`);
+
+        // Write first board response to file for format analysis
+        if (!debugWritten) {
+          try {
+            const fs = await import('fs');
+            fs.writeFileSync('monday-board-debug.json', JSON.stringify({
+              boardId,
+              responseLength: boardLen,
+              rawText: boardText?.slice(0, 10000) ?? null,
+              parsed: boardText ? (() => { try { return JSON.parse(boardText); } catch { return 'PARSE_FAILED'; } })() : null,
+            }, null, 2));
+            debugWritten = true;
+          } catch { /* ignore */ }
+        }
+
+        if (!boardText) { console.warn(`[mondayAdapter] Board ${boardId}: empty response`); hadError = true; continue; }
 
         let boardData: Record<string, unknown>;
         try {
