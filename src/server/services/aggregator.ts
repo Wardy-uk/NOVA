@@ -498,6 +498,11 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
       }
 
       // Fallback: search tool
+      // Write debug responses to file for diagnostics
+      const fs = await import('fs');
+      const debugPath = 'monday-debug.json';
+      const debugData: Record<string, unknown> = {};
+
       if (boardIds.length === 0 && availableTools.includes('search')) {
         console.log('[mondayAdapter] Trying search tool...');
         try {
@@ -506,14 +511,17 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
             searchType: 'BOARD',
           })) as { content?: Array<{ text?: string }> };
           const searchText = searchResult?.content?.[0]?.text ?? '';
-          console.log('[mondayAdapter] search response (first 2000):', searchText.slice(0, 2000));
+          debugData.searchRaw = searchText;
+          console.log(`[mondayAdapter] search response length: ${searchText.length}`);
 
           const parsed = JSON.parse(searchText);
+          debugData.searchParsed = parsed;
           const boards = Array.isArray(parsed) ? parsed : parsed.boards ?? parsed.data?.boards ?? [];
           boardIds = boards.map((b: Record<string, unknown>) => String(b.id));
           console.log(`[mondayAdapter] search found ${boardIds.length} boards`);
         } catch (e) {
           console.warn('[mondayAdapter] search parse failed:', e instanceof Error ? e.message : e);
+          debugData.searchError = e instanceof Error ? e.message : String(e);
         }
       }
 
@@ -525,15 +533,24 @@ function createMondayAdapter(settingsQueries?: SettingsQueries): SourceAdapter {
             content?: Array<{ text?: string }>;
           };
           const ctxText = ctxResult?.content?.[0]?.text ?? '';
-          console.log('[mondayAdapter] get_user_context response (first 2000):', ctxText.slice(0, 2000));
+          debugData.userContextRaw = ctxText;
+          console.log(`[mondayAdapter] get_user_context response length: ${ctxText.length}`);
           const ctxParsed = JSON.parse(ctxText);
+          debugData.userContextParsed = ctxParsed;
           const boards = ctxParsed.boards ?? ctxParsed.data?.boards ?? ctxParsed.account?.boards ?? [];
           boardIds = (Array.isArray(boards) ? boards : []).map((b: Record<string, unknown>) => String(b.id));
           console.log(`[mondayAdapter] get_user_context found ${boardIds.length} boards`);
         } catch (e) {
           console.warn('[mondayAdapter] get_user_context failed:', e instanceof Error ? e.message : e);
+          debugData.userContextError = e instanceof Error ? e.message : String(e);
         }
       }
+
+      // Write debug file
+      try {
+        fs.writeFileSync(debugPath, JSON.stringify(debugData, null, 2));
+        console.log(`[mondayAdapter] Debug data written to ${debugPath}`);
+      } catch { /* ignore */ }
     }
 
     console.log(`[mondayAdapter] Final board IDs (${boardIds.length}): ${boardIds.join(', ')}`);
