@@ -725,6 +725,7 @@ export class TaskAggregator {
     if (!this.mcp.isConnected('jira')) return [];
 
     const sdProject = this.settingsQueries?.get('jira_sd_project');
+    const sdTiers = this.settingsQueries?.get('jira_sd_tiers');
     const jiraBaseUrl = this.settingsQueries?.get('jira_url') ?? undefined;
 
     // Build JQL based on filter
@@ -740,12 +741,19 @@ export class TaskAggregator {
       parts.push(`project = ${sdProject}`);
     }
 
+    // Tier filter — primarily useful for 'unassigned' to scope to relevant queues
+    if (sdTiers && filter !== 'mine') {
+      const tierValues = sdTiers.split(',').map(t => `"${t.trim()}"`).join(', ');
+      parts.push(`"Current Tier" IN (${tierValues})`);
+    }
+
     parts.push('status NOT IN (Done, Closed, Resolved)');
     const jql = parts.join(' AND ') + ' ORDER BY priority DESC, updated DESC';
+    console.log(`[ServiceDesk] JQL (${filter}): ${jql}`);
 
     const result = (await this.mcp.callTool('jira', 'jira_search', {
       jql,
-      limit: 100,
+      limit: 200,
       fields: 'summary,status,priority,description,assignee,created,duedate,requestType,queue,"Agent Next Update","Last Agent Public Comment"',
       expand: 'sla',
     })) as { content?: Array<{ text?: string }> };
