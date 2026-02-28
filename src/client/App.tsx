@@ -54,11 +54,11 @@ const DEFAULT_AREA_ACCESS: AreaAccess = {
 const AREAS: Record<Area, AreaDef> = {
   command: {
     label: 'My NOVA',
-    defaultView: 'daily',
+    defaultView: 'focus',
     tabs: [
+      { view: 'focus', label: 'My Focus' },
       { view: 'daily', label: 'Dashboard' },
       { view: 'nova', label: 'Ask N.O.V.A' },
-      { view: 'focus', label: 'My Focus' },
       { view: 'tasks', label: 'Tasks' },
       { view: 'standup', label: 'Standup' },
     ],
@@ -134,7 +134,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 export function App() {
-  const [view, setView] = useState<View>('daily');
+  const [view, setView] = useState<View>('focus');
   const auth = useAuth();
   const { tasks, loading, error, syncing, updateTask } = useTasks();
   const health = useHealth();
@@ -355,7 +355,10 @@ export function App() {
           <div className="flex items-center justify-between">
             {/* Left: logo + area tabs */}
             <div className="flex items-center gap-4">
-              <h1 className="text-lg font-bold tracking-tight font-[var(--font-heading)]">
+              <h1
+                className="text-lg font-bold tracking-tight font-[var(--font-heading)] cursor-pointer"
+                onClick={() => setView('focus')}
+              >
                 <span className="text-[#5ec1ca]">N.O.V.A</span>
               </h1>
 
