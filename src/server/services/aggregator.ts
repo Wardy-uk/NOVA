@@ -261,25 +261,41 @@ const todoAdapter: SourceAdapter = {
       const parsed = JSON.parse(listsText);
       lists = Array.isArray(parsed) ? parsed : parsed.value ?? [];
     } catch {
+      console.warn('[todoAdapter] Could not parse task lists response:', listsText.substring(0, 200));
       return { tasks: [], ok: false };
     }
+
+    console.log(`[todoAdapter] Found ${lists.length} To-Do list(s): ${lists.map((l: Record<string, unknown>) => l.displayName).join(', ')}`);
 
     // Fetch tasks from each list
     const allTasks: NormalizedTask[] = [];
     let hadAnyFetch = false;
     let hadError = false;
     for (const list of lists) {
+      const listName = String(list.displayName ?? list.id);
       try {
         const tasksResult = (await mcp.callTool('msgraph', 'list-todo-tasks', {
           taskListId: String(list.id),
         })) as { content?: Array<{ text?: string }> };
 
         const tasksText = tasksResult?.content?.[0]?.text;
-        if (!tasksText) continue;
+        if (!tasksText) {
+          console.log(`[todoAdapter] List "${listName}": empty response (no text content)`);
+          continue;
+        }
+
+        // Check if the response looks like JSON before parsing
+        const trimmed = tasksText.trimStart();
+        if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) {
+          console.warn(`[todoAdapter] List "${listName}": non-JSON response (${tasksText.length} chars): ${tasksText.substring(0, 150)}`);
+          hadError = true;
+          continue;
+        }
 
         const parsed = JSON.parse(tasksText);
         const tasks = Array.isArray(parsed) ? parsed : parsed.value ?? [];
         hadAnyFetch = true;
+        console.log(`[todoAdapter] List "${listName}": ${tasks.length} task(s) fetched`);
 
         for (const t of tasks) {
           if ((t.status as string) === 'completed') continue;
@@ -297,10 +313,11 @@ const todoAdapter: SourceAdapter = {
         }
       } catch (err) {
         hadError = true;
-        console.warn(`[todoAdapter] Error fetching list ${list.displayName}:`, err);
+        console.warn(`[todoAdapter] List "${listName}": error —`, err instanceof Error ? err.message : err);
       }
     }
 
+    console.log(`[todoAdapter] Sync complete: ${allTasks.length} task(s), hadAnyFetch=${hadAnyFetch}, hadError=${hadError}`);
     return { tasks: allTasks, ok: hadAnyFetch && !hadError };
   },
 };

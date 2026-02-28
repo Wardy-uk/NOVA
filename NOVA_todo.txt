@@ -6,25 +6,11 @@ TO DO
 (empty)
 
 
-=== PLAN: 28 Feb 2026 ===
-
-1. [DONE] Cleanup debug artifacts
-2. [DONE] Fix BUG6: Kanban drag-and-drop transition auto-select + Jira sync
-3. [DONE] Fix BUG5: MS365 transient sources retry after 10s
-4. [DONE] Onboarding ticket creation UI — Create Tickets tab in Admin > Onboarding
-5. [DONE] Data persistence safeguards — atomic writes, daily backups, startup recovery
-6. [DONE] Version number in status bar — v1.0.0 shown next to Status in footer
-7. [DONE] Auto-deploy watcher — PowerShell polling script (deploy/auto-deploy.ps1)
-
-8. Stretch goals (if time permits)
-   - Correlate Jira tickets with onboarding tasks
-   - Chat to NOVA conversational AI (scope/design only)
-
-
-=== CURRENT STATUS (27 Feb 2026) ===
+=== CURRENT STATUS (28 Feb 2026) ===
 
 N.O.V.A is deployed to a Windows Server VM at https://nova.nurtur.tech, served via
 IIS reverse proxy to a Node.js backend managed by NSSM as a Windows Service.
+Current version: v1.0.1 | Branch: nova-codex
 
 What's working:
   - Express + React/Vite + SQLite stack, JWT auth with Entra SSO option
@@ -47,7 +33,8 @@ What's working:
   - Security: helmet headers, login rate limiting, debug endpoints admin-gated
   - Interactive tour overlay for new users
   - Feedback system with admin reply and create-task-from-feedback
-  - Deployed: IIS + NSSM on Windows Server, git-based deploys via deploy.ps1, auto-deploy watcher available
+  - Version + git hash in status bar, auto-incremented per deploy
+  - Deployed: IIS + NSSM on Windows Server, git-based deploys via deploy.ps1
 
 What's not fully working:
   - Monday.com syncs 0 tasks — connection ok but needs board IDs or search tuning
@@ -55,7 +42,6 @@ What's not fully working:
   - MS365 Planner/Email/Calendar may not populate after server restart — auto-sync fires but
     MCP connection may not be ready; works after manual sync from Settings
 
-Current branch: nova-codex
 Deploy: .\deploy\deploy.ps1 -Branch nova-codex (on server C:\Nurtur\NOVA)
 
 
@@ -71,19 +57,14 @@ BLOCK1. Monday.com syncs 0 tasks
 BUG2. MS365 To-Do sync errors — MCP returning non-JSON for some lists
       [todoAdapter] Error fetching list Tasks/Flagged Emails: SyntaxError "MCP error" is not valid JSON
 
-BUG5. MS365 Planner/Email/Calendar show 0 tasks after server restart
-      Auto-sync fires on first page load but transient sources don't populate.
-      Likely MCP not connected yet when sync runs. Manual sync from Settings works.
-
-BUG6. Kanban drag-and-drop transition doesn't auto-select or sync to Jira
-      Dragging a ticket to a new status column (e.g. "Waiting for Assignee") shows the
-      transition modal but doesn't pre-select the matching transition. The transition
-      also doesn't save/sync back to Jira — ticket stays in old status.
-
 
 === DO NEXT (high priority) ===
 
-1. Jira SLA prioritisation — tickets over SLA or overdue an update should be prioritised
+1. Configure auto-deploy on server — register deploy/auto-deploy.ps1 as a Windows
+   Scheduled Task (every 3 mins, run as SYSTEM). Script exists, just needs Task Scheduler
+   registration on the server.
+
+2. Jira SLA prioritisation — tickets over SLA or overdue an update should be prioritised
    (user will supply logic). SLA timer and attention endpoint already exist.
 
 
@@ -155,8 +136,8 @@ BUG6. Kanban drag-and-drop transition doesn't auto-select or sync to Jira
 
 COMPLETED (recent first)
 ---------
-[DONE] Auto-deploy watcher — deploy/auto-deploy.ps1 polls git every 3m, deploys on new commits (Task Scheduler)
-[DONE] Version number in status bar — v1.0.0 next to Status in footer, injected at build time via Vite define
+[DONE] Version + git hash in status bar — v1.0.1 (abc1234) in footer, auto-incremented per deploy
+[DONE] Auto-deploy watcher script — deploy/auto-deploy.ps1 polls git every 3m, deploys on new commits
 [DONE] Data persistence safeguards — atomic writes (temp+rename), daily backups (7-day rotation), startup corruption recovery from backups, auto-save reduced to 15s
 [DONE] Onboarding ticket creation UI — Create Tickets tab in Admin > Onboarding with sale type dropdown, customer name, ref auto-suggest, due date, dry-run preview, result display, recent runs table
 [DONE] BUG5 fix — retry transient source sync after 10s if MCP not ready on restart
