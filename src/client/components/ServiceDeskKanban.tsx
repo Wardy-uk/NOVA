@@ -13,6 +13,7 @@ import {
 interface Props {
   tasks: Task[];
   onUpdateTask: (id: string, updates: Record<string, unknown>) => void;
+  onRefresh?: () => void;
 }
 
 type GroupBy = 'status' | 'date';
@@ -133,7 +134,7 @@ interface JiraTransition {
   to?: { name?: string; statusCategory?: { name?: string } };
 }
 
-export function ServiceDeskKanban({ tasks, onUpdateTask }: Props) {
+export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [groupBy, setGroupBy] = useState<GroupBy>('date');
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -350,8 +351,9 @@ export function ServiceDeskKanban({ tasks, onUpdateTask }: Props) {
         <TransitionModal
           pending={pendingTransition}
           onConfirm={() => {
-            onUpdateTask(pendingTransition.task.id, {});
             setPendingTransition(null);
+            // Re-fetch SD tickets from Jira so the card moves to the new column
+            onRefresh?.();
           }}
           onCancel={() => setPendingTransition(null)}
         />
@@ -509,12 +511,47 @@ function TransitionModal({
 
         setTransitions(txns);
 
-        // Auto-select the best matching transition for the target column
+        // Auto-select the best matching transition for the target column.
+        // Try multiple matching strategies: exact status match, column label match, word overlap.
         const targetStatuses = new Set(targetColumn.jiraStatuses);
-        const best = txns.find((t) => {
-          const toName = t.to?.name?.toLowerCase() ?? t.name?.toLowerCase() ?? '';
-          return targetStatuses.has(toName);
-        });
+        const targetLabel = targetColumn.label.toLowerCase();
+
+        const scoreMatch = (txn: JiraTransition): number => {
+          const toName = (txn.to?.name ?? '').toLowerCase();
+          const txnName = (txn.name ?? '').toLowerCase();
+
+          // Exact match on target status name → best
+          if (toName && targetStatuses.has(toName)) return 100;
+          if (txnName && targetStatuses.has(txnName)) return 90;
+
+          // Match against column label (e.g. "Waiting on Agent")
+          if (toName === targetLabel) return 85;
+          if (txnName === targetLabel) return 80;
+
+          // Partial/contains match (e.g. "waiting" in both)
+          if (toName && targetLabel.includes(toName)) return 60;
+          if (toName && toName.includes(targetLabel)) return 60;
+          if (txnName && targetLabel.includes(txnName)) return 50;
+          if (txnName && txnName.includes(targetLabel)) return 50;
+
+          // Word overlap (e.g. "waiting" + "agent" overlap)
+          const targetWords = new Set(targetLabel.split(/\s+/));
+          const toWords = toName.split(/\s+/).filter(Boolean);
+          const nameWords = txnName.split(/\s+/).filter(Boolean);
+          const toOverlap = toWords.filter((w) => targetWords.has(w)).length;
+          const nameOverlap = nameWords.filter((w) => targetWords.has(w)).length;
+          const maxOverlap = Math.max(toOverlap, nameOverlap);
+          if (maxOverlap >= 2) return 30 + maxOverlap * 5;
+
+          return 0;
+        };
+
+        let bestScore = 0;
+        let best: JiraTransition | null = null;
+        for (const txn of txns) {
+          const score = scoreMatch(txn);
+          if (score > bestScore) { bestScore = score; best = txn; }
+        }
         if (best) setSelectedTransition(best.id);
 
         setLoading(false);

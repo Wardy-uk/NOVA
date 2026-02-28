@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Component, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useCallback, Component, type ReactNode } from 'react';
 import { TaskList } from './components/TaskList.js';
 import { SettingsView } from './components/SettingsView.js';
 import { StandupView } from './components/StandupView.js';
@@ -280,43 +280,38 @@ export function App() {
   const sdApiFilter = sdFilter === null ? 'mine' : sdFilter;
   const sdInitialDone = useRef(false);
   const lastSdJson = useRef('');
+
+  // Stable SD fetch function — callable from effects and child components
+  const refreshSdTasks = useCallback(() => {
+    fetch(`/api/tasks/service-desk?filter=${sdApiFilter}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.ok && json.data) {
+          const serialized = JSON.stringify(json.data);
+          if (serialized !== lastSdJson.current) {
+            lastSdJson.current = serialized;
+            setSdTasks(json.data);
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!sdInitialDone.current) {
+          setSdLoading(false);
+          sdInitialDone.current = true;
+        }
+      });
+  }, [sdApiFilter]);
+
   useEffect(() => {
     if (!auth.isAuthenticated) return;
     if (sdApiFilter === 'all-breached') return;
-    let active = true;
-    // Only show loading on first fetch or filter change, not background refreshes
     if (!sdInitialDone.current) setSdLoading(true);
     lastSdJson.current = ''; // Reset on filter change so new data always applies
-    const doFetch = () => {
-      fetch(`/api/tasks/service-desk?filter=${sdApiFilter}`)
-        .then((r) => r.json())
-        .then((json) => {
-          if (!active) return;
-          if (json.ok && json.data) {
-            const serialized = JSON.stringify(json.data);
-            if (serialized !== lastSdJson.current) {
-              lastSdJson.current = serialized;
-              setSdTasks(json.data);
-            }
-          } else {
-            setSdTasks(tasks.filter((t) => t.source === 'jira'));
-          }
-        })
-        .catch(() => {
-          if (active) setSdTasks(tasks.filter((t) => t.source === 'jira'));
-        })
-        .finally(() => {
-          if (active && !sdInitialDone.current) {
-            setSdLoading(false);
-            sdInitialDone.current = true;
-          }
-        });
-    };
-    doFetch();
-    // Background refresh every 60s — silent, no loading spinner
-    const interval = setInterval(doFetch, 60_000);
-    return () => { active = false; clearInterval(interval); };
-  }, [sdApiFilter, auth.isAuthenticated, tasks]);
+    refreshSdTasks();
+    const interval = setInterval(refreshSdTasks, 60_000);
+    return () => clearInterval(interval);
+  }, [sdApiFilter, auth.isAuthenticated, refreshSdTasks]);
 
   // Auth gate
   if (auth.initializing) {
@@ -578,7 +573,7 @@ export function App() {
             </>
           )}
           {view === 'kanban' && !sdFilter && (
-            <ServiceDeskKanban tasks={sdTasks} onUpdateTask={updateTask} />
+            <ServiceDeskKanban tasks={sdTasks} onUpdateTask={updateTask} onRefresh={refreshSdTasks} />
           )}
           {view === 'sd-calendar' && !sdFilter && (
             <ServiceDeskCalendar tasks={sdTasks} onUpdateTask={updateTask} />

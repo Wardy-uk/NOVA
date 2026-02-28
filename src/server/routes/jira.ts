@@ -179,7 +179,15 @@ export function createJiraRoutes(
         results.comment = parseToolResult(result);
       }
 
-      if (transition && transitionTool) {
+      if (transition) {
+        if (!transitionTool) {
+          res.status(501).json({
+            ok: false,
+            error: 'Jira transition tool not available. Available tools: ' + tools.filter(t => t.includes('transition')).join(', '),
+            tools,
+          });
+          return;
+        }
         const result = await callWithFallback(mcpManager, transitionTool, [
           { issue_key: key, transition_id: transition },
           { issueKey: key, transitionId: transition },
