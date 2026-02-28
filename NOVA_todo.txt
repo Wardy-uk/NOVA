@@ -14,20 +14,19 @@ TO DO
    - Remove debug button + copyDebug handler from DailyStatsView.tsx
    - Commit, push, deploy
 
-2. Fix BUG5: MS365 transient sources empty after restart (~30 min)
+2. Fix BUG6: Kanban drag-and-drop transition (~30 min)
+   - Auto-select the transition matching the target column
+   - Ensure transition actually syncs back to Jira
+   - Core workflow bug — kanban is broken without this
+
+3. Fix BUG5: MS365 transient sources empty after restart (~30 min)
    - Auto-sync fires before MCP is connected — Planner/Email/Calendar return 0
    - Options: delay sync until MCP ready, or retry sync after short delay if 0 results
    - Affects every deploy/restart for all users
 
-3. Jira SLA prioritisation — DO NEXT #1 (main work, needs user input on rules)
-   - Foundation exists: SLA timer on cards, attention endpoint, jira-sla service
-   - Define prioritisation logic: auto-focus over-SLA tickets, sort/highlight in
-     My Tickets, surface overdue updates on dashboard
-   - Discuss rules at start of day before implementing
-
-4. Correlate Jira tickets with onboarding tasks (triage, if time permits)
-   - Scope TBD — link SD tickets to onboarding deliveries? Show related tickets
-     on delivery detail? Auto-tag?
+4. Stretch goals (if time permits)
+   - Correlate Jira tickets with onboarding tasks
+   - Chat to NOVA conversational AI (scope/design only)
 
 
 === CURRENT STATUS (27 Feb 2026) ===
@@ -83,6 +82,11 @@ BUG5. MS365 Planner/Email/Calendar show 0 tasks after server restart
       Auto-sync fires on first page load but transient sources don't populate.
       Likely MCP not connected yet when sync runs. Manual sync from Settings works.
 
+BUG6. Kanban drag-and-drop transition doesn't auto-select or sync to Jira
+      Dragging a ticket to a new status column (e.g. "Waiting for Assignee") shows the
+      transition modal but doesn't pre-select the matching transition. The transition
+      also doesn't save/sync back to Jira — ticket stays in old status.
+
 
 === DO NEXT (high priority) ===
 
@@ -92,13 +96,10 @@ BUG5. MS365 Planner/Email/Calendar show 0 tasks after server restart
 
 === CLEANUP ===
 
-- Remove temporary debug endpoint `/api/debug/attention-fields` from index.ts
-- Remove `_debug` field from `GET /api/tasks` response in tasks.ts
-- Remove debug button + copyDebug handler from DailyStatsView.tsx
+(none pending)
 
 === QUICK WINS (small effort, visible impact) ===
 
-- Soft outline around all task cards — subtle border for visual separation
 - Dashboard KPIs — add Onboarding metrics (milestone progress, overdue milestones, onboarding runs)
 - My Focus auto-population — tickets over SLA or overdue update auto-appear
 - Delivery kanban board — drag cards between status columns
@@ -107,43 +108,45 @@ BUG5. MS365 Planner/Email/Calendar show 0 tasks after server restart
 
 === TIER 1: Daily workflow enhancements ===
 
-2. Correlate Jira tickets with onboarding tasks — link SD tickets to deliveries, show related
+2. Chat to NOVA — conversational AI to ask questions about your tasks (e.g. "what's overdue?",
+   "summarise my Jira tickets", "what should I focus on?")
+3. Correlate Jira tickets with onboarding tasks — link SD tickets to deliveries, show related
    tickets on delivery detail, auto-tag by customer
-3. Add CRM integration partners list to onboarding — validate for ticket creation
-4. Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
+4. Add CRM integration partners list to onboarding — validate for ticket creation
+5. Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
 
 
 === TIER 2: Onboarding ticket automation ===
 
-5. Ticket creation UI — form in Admin > Onboarding to trigger POST /api/onboarding/create-tickets
+6. Ticket creation UI — form in Admin > Onboarding to trigger POST /api/onboarding/create-tickets
    - sale type dropdown, customer name, onboarding ref, due date
    - dry-run preview before live execution
    - show result (parent key + child keys) or error
-6. Jira settings for ticket creation — configure request type field IDs in Admin > Integrations
-7. Onboarding run history UI — view past runs (status, parent/child keys, errors)
+7. Jira settings for ticket creation — configure request type field IDs in Admin > Integrations
+8. Onboarding run history UI — view past runs (status, parent/child keys, errors)
 
 
 === TIER 3: Platform maturity ===
 
-8.  Review architecture/infrastructure for supporting 50+ users
+9.  Review architecture/infrastructure for supporting 50+ users
     - sql.js in-memory limitations, MCP connection pooling, concurrent requests
     - Session management at scale, database migration path (sql.js → better-sqlite3 or PostgreSQL)
-9.  Customer 360 timeline — unified per-customer view across deliveries, CRM, Jira, onboarding, emails
-10. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls (in-app + email digest)
-11. Team workload view — onboarder/assignee load heatmap across deliveries + Jira
-12. Activity audit log — who changed what and when (append-only table, Admin timeline view)
-13. Jira OAuth device-code flow — replace email+token with "Sign in with Atlassian"
-14. [ONGOING] Documentation — keep help page updated as features change
+10. Customer 360 timeline — unified per-customer view across deliveries, CRM, Jira, onboarding, emails
+11. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls (in-app + email digest)
+12. Team workload view — onboarder/assignee load heatmap across deliveries + Jira
+13. Activity audit log — who changed what and when (append-only table, Admin timeline view)
+14. Jira OAuth device-code flow — replace email+token with "Sign in with Atlassian"
+15. [ONGOING] Documentation — keep help page updated as features change
 
 
 === TIER 4: Nice to have ===
 
-15. Email attachments — list/get/add attachments on messages
-16. Multi-calendar support — list-calendars route exists, needs UI
-17. Workflows for tickets and deliveries
-18. Jira move-team automation (move ticket to a different Jira project)
-19. Browse mail folders — route exists (GET /api/o365/mail/folders), needs UI
-20. Browse specific planner plans — get-planner-plan, list-plan-tasks
+16. Email attachments — list/get/add attachments on messages
+17. Multi-calendar support — list-calendars route exists, needs UI
+18. Workflows for tickets and deliveries
+19. Jira move-team automation (move ticket to a different Jira project)
+20. Browse mail folders — route exists (GET /api/o365/mail/folders), needs UI
+21. Browse specific planner plans — get-planner-plan, list-plan-tasks
 
 
 === FUTURE CONSIDERATION ===
@@ -163,6 +166,7 @@ BUG5. MS365 Planner/Email/Calendar show 0 tasks after server restart
 
 COMPLETED (recent first)
 ---------
+[DONE] Soft outline around all task cards — subtle border-[#3a424d]/40 for visual separation
 [DONE] Date/assignee labels on ticket cards — "Created:", "Assignee:", "Due:" prefixes on badges
 [DONE] Background refresh no longer closes drawers — skip setState when data unchanged (JSON compare)
 [DONE] Per-user task scoping — cached standup enrichment filtered by allowed sources

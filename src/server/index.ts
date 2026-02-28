@@ -222,58 +222,6 @@ async function main() {
   }
   buildD365Service();
 
-  // TEMPORARY: debug attention evaluation (remove after debugging)
-  app.get('/api/debug/attention-fields', async (_req, res) => {
-    const { evaluateAttention, isOverdueUpdate } = await import('./services/jira-sla.js');
-    try {
-      const tickets = await aggregator.fetchServiceDeskTickets('all');
-      const now = new Date();
-
-      // Trace first 10 tickets with full field breakdown
-      const traces = tickets.slice(0, 15).map((t) => {
-        const issue = (t.raw_data ?? {}) as Record<string, unknown>;
-        const result = evaluateAttention(issue, now);
-
-        // Manually read fields to trace why
-        const statusRaw = issue.status;
-        const statusName = typeof statusRaw === 'string' ? statusRaw : (statusRaw as any)?.name;
-        const cf81 = issue.customfield_14081;
-        const cf85 = issue.customfield_14185;
-        // After unwrap by field()
-        const cf81Val = cf81 && typeof cf81 === 'object' && 'value' in (cf81 as any) ? (cf81 as any).value : cf81;
-        const cf85Val = cf85 && typeof cf85 === 'object' && 'value' in (cf85 as any) ? (cf85 as any).value : cf85;
-
-        return {
-          key: t.source_id,
-          status: statusName,
-          created: issue.created,
-          agentLastUpdated: cf81Val,
-          agentNextUpdate: cf85Val,
-          needsAttention: result.needsAttention,
-          reasons: result.reasons,
-        };
-      });
-
-      const allResults = tickets.map((t) => {
-        const issue = (t.raw_data ?? {}) as Record<string, unknown>;
-        return evaluateAttention(issue, now);
-      });
-      const attention = allResults.filter(r => r.needsAttention);
-      const notFlagged = tickets.filter((t, i) => !allResults[i].needsAttention).slice(0, 5).map(t => t.source_id);
-
-      res.json({
-        total: tickets.length,
-        attentionCount: attention.length,
-        overdueCount: attention.filter(r => r.reasons.includes('overdue_update')).length,
-        slaBreachedCount: attention.filter(r => r.reasons.includes('sla_breached')).length,
-        notFlaggedSample: notFlagged,
-        traces,
-      });
-    } catch (err) {
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
   // Protected API routes
   app.use('/api', authMiddleware(jwtSecret));
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries, settingsQueries));
