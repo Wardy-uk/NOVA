@@ -19,7 +19,7 @@ const SECTIONS: Section[] = [
     title: 'My NOVA',
     content: [
       'Your home dashboard showing at-a-glance KPIs: total tasks, overdue count, due today/this week, completion rate, and average task age. Breakdowns by source, status, and category are also shown.',
-      'Ask N.O.V.A — type a question or request and the AI assistant will analyse your tasks and provide suggestions. Use the source selector to choose which integrations to include in the analysis.',
+      'NOVA Insights — type a question or request and the AI assistant will analyse your tasks and provide suggestions. Use the source selector to choose which integrations to include in the analysis.',
       'Chat — a conversational AI tab for natural-language questions about your workload. Ask things like "what\'s overdue?" or "summarise my week". Conversations persist until you reset them.',
       'Team Load — a workload overview showing active deliveries, pending milestones, overdue milestones, and open tickets per team member. Colour-coded cells highlight where the team is stretched.',
       'The morning standup triggers automatically on your first visit each day. It analyses your tasks and prepares a prioritised briefing.',

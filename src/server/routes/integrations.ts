@@ -172,9 +172,9 @@ export function createIntegrationRoutes(
             hasAnyNewCred = true;
           }
         }
-        if (hasAnyNewCred && enabled) {
+        if ((hasAnyNewCred || integ.fields.length === 0) && enabled) {
           settingsQueries.set(integ.enabledKey, 'true');
-          console.log(`[Integrations] Seeding system ${integId} credentials from user ${userId}`);
+          console.log(`[Integrations] Seeding system ${integId} config from user ${userId}`);
         }
       }
     }

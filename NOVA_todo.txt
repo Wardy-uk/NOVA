@@ -1,6 +1,7 @@
 N.O.V.A — TO DO
 ================
 
+
 === CURRENT STATUS (28 Feb 2026) ===
 
 Deployed at https://nova.nurtur.tech | v1.1.0 | Branch: nova-codex
@@ -19,11 +20,33 @@ Deploy: .\deploy\deploy.ps1 -Branch nova-codex (on server C:\Nurtur\NOVA)
 Completed items: see NOVA_completed.txt
 
 
-=== DO NEXT: Tuning (BA session with user) ===
+=== DONE (28 Feb 2026) ===
+
+[x] 28. BUG FIX: MS365 not showing entries — global settings not seeded for
+    no-field integrations (msgraph). Fixed global seeding logic in
+    integrations.ts so MCP restarts correctly after reboot.
+[x] 29. Renamed "Ask N.O.V.A" → "NOVA Insights" — tab label, help page,
+    tour overlay, debug panel all updated.
+
+
+=== DO NEXT ===
 
 8.  Jira SLA prioritisation — tickets over SLA or overdue an update should be
     prioritised. SLA timer and attention endpoint already exist. Needs user to
     define the rules (which fields, thresholds, priority weights).
+
+27. Jira onboarding ticket creation 410 fix — Atlassian returns 410 Gone when
+    creating Service Request issues via REST API v3. Switch to creating normal
+    tickets (standard issue type, no request type field). Admin Jira service
+    account credentials also need configuring before this will work.
+
+30. Link D365 account number to delivery entries — associate a Dynamics 365
+    account record with an onboarding delivery item for cross-referencing.
+    Schema migration + interface added. UI autocomplete linkage still needed.
+
+31. Milestone ticket creation button — on delivery milestone tasks where the
+    action is to create a Jira ticket, add an inline button to raise the
+    ticket directly from the milestone row.
 
 
 === TIER 2: Feature additions ===

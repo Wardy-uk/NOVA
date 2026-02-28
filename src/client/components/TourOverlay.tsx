@@ -11,7 +11,7 @@ const TOUR_STEPS: TourStep[] = [
   {
     target: '[data-area="command"]',
     title: 'My NOVA',
-    description: 'Your command centre hub. Tabs: Dashboard (KPIs & charts), Ask NOVA (AI assistant), Chat (conversational AI), My Focus (priority tasks & starred deliveries), Standup (AI morning briefing), and Team Load (per-person workload overview).',
+    description: 'Your command centre hub. Tabs: Dashboard (KPIs & charts), NOVA Insights (AI analysis), Chat (conversational AI), My Focus (priority tasks & starred deliveries), Standup (AI morning briefing), and Team Load (per-person workload overview).',
     position: 'bottom',
   },
   {

@@ -458,6 +458,7 @@ export interface DeliveryEntry {
   incremental: number | null;
   licence_fee: number | null;
   sale_type: string | null;
+  crm_customer_id: number | null;
   is_starred: number;
   star_scope: 'me' | 'all';
   starred_by: number | null;

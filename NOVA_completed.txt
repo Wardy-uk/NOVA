@@ -2,6 +2,11 @@ N.O.V.A — COMPLETED ITEMS
 ==========================
 (moved from NOVA_todo.txt on 28 Feb 2026)
 
+=== Quick fixes (28 Feb 2026) ===
+
+[DONE] Item 28: BUG FIX — MS365 Planner/Email/Calendar not showing entries. Global settings not seeded for no-field integrations. Fixed seeding logic in integrations.ts.
+[DONE] Item 29: Renamed "Ask N.O.V.A" → "NOVA Insights" — tab label, help page, tour, debug panel
+
 === v1.1.0 — Tier 1 + Tier 2 (28 Feb 2026) ===
 
 [DONE] Item 9: Chat to NOVA — conversational AI chat tab in My NOVA (GPT-4o-mini, context-aware, conversation persistence)

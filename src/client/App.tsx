@@ -62,7 +62,7 @@ const AREAS: Record<Area, AreaDef> = {
     tabs: [
       { view: 'focus', label: 'My Focus' },
       { view: 'daily', label: 'Dashboard' },
-      { view: 'nova', label: 'Ask N.O.V.A' },
+      { view: 'nova', label: 'NOVA Insights' },
       { view: 'tasks', label: 'Tasks' },
       { view: 'standup', label: 'Standup' },
       { view: 'team-workload', label: 'Team Load' },
@@ -689,7 +689,7 @@ function DebugView({
         <div className="text-xs text-neutral-500 uppercase tracking-wider mb-2">API Debug (AI Actions)</div>
         <pre className="text-[11px] text-neutral-300 overflow-auto max-h-[260px] whitespace-pre-wrap">
           {apiDebug.length === 0
-            ? 'No AI debug entries yet. Run Ask N.O.V.A to populate.'
+            ? 'No AI debug entries yet. Run NOVA Insights to populate.'
             : apiDebug.map((e) => `${e.ts}  ${e.text}`).join('\n\n')}
         </pre>
         <div className="mt-3 text-[11px] text-neutral-400 whitespace-pre-wrap">
