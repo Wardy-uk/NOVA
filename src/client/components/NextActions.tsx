@@ -153,6 +153,16 @@ export function NextActions({ onUpdateTask }: Props) {
             Recommendation Sources
           </div>
           <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => { setSourceFilter(new Set(ALL_SOURCE_VALUES)); setSuggestions([]); setActiveIndex(null); }}
+              className={`px-2.5 py-1 text-[11px] rounded-full transition-colors ${
+                isAllSelected
+                  ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                  : 'bg-[#272C33] text-neutral-400 hover:bg-[#363d47]'
+              }`}
+            >
+              All Tasks
+            </button>
             {SOURCES.map((opt) => {
               const isActive = sourceFilter.has(opt.value);
               const dotColors: Record<string, string> = {
@@ -165,14 +175,14 @@ export function NextActions({ onUpdateTask }: Props) {
                   key={opt.value}
                   onClick={() => handleSourceToggle(opt.value)}
                   className={`px-2.5 py-1 text-[11px] rounded-full transition-colors flex items-center gap-1.5 ${
-                    isActive
+                    isActive && !isAllSelected
                       ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
                       : 'bg-[#272C33] text-neutral-400 hover:bg-[#363d47]'
                   }`}
                 >
                   <div
                     className="w-1.5 h-1.5 rounded-full"
-                    style={{ backgroundColor: isActive ? '#272C33' : (dotColors[opt.value] ?? '#6b7280') }}
+                    style={{ backgroundColor: isActive && !isAllSelected ? '#272C33' : (dotColors[opt.value] ?? '#6b7280') }}
                   />
                   {opt.label}
                 </button>
