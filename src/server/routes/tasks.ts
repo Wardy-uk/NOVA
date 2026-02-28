@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { TaskQueries, MilestoneQueries, UserSettingsQueries } from '../db/queries.js';
+import type { TaskQueries, MilestoneQueries, OnboardingRunQueries, UserSettingsQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { TaskAggregator, SdFilter } from '../services/aggregator.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
@@ -40,6 +40,7 @@ export function createTaskRoutes(
   milestoneQueries?: MilestoneQueries,
   userSettingsQueries?: UserSettingsQueries,
   settingsQueries?: SettingsQueries,
+  onboardingRunQueries?: OnboardingRunQueries,
 ): Router {
   const router = Router();
 
@@ -244,6 +245,10 @@ export function createTaskRoutes(
     const done = byStatus['done'] ?? 0;
     const avgAgeDays = activeCount > 0 ? Math.round(totalAgeMs / activeCount / 86400000) : 0;
 
+    // Onboarding metrics — milestone summary + recent runs
+    const milestoneSummary = milestoneQueries?.getSummary() ?? null;
+    const recentRuns = onboardingRunQueries?.getRecent(5) ?? [];
+
     res.json({
       ok: true,
       data: {
@@ -251,6 +256,18 @@ export function createTaskRoutes(
         overdue, dueToday, dueThisWeek, completedToday, completedThisWeek,
         completionRate: total > 0 ? Math.round((done / total) * 100) : 0,
         avgAgeDays, highPriorityOpen, slaBreach,
+        onboarding: {
+          milestones: milestoneSummary,
+          recentRuns: recentRuns.map((r) => ({
+            id: r.id,
+            ref: r.onboarding_ref,
+            status: r.status,
+            parentKey: r.parent_key,
+            createdCount: r.created_count,
+            dryRun: r.dry_run === 1,
+            createdAt: r.created_at,
+          })),
+        },
       },
     });
   });

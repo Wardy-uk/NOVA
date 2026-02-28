@@ -1,6 +1,16 @@
 import { useState, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
 
+interface OnboardingRunSummary {
+  id: number;
+  ref: string;
+  status: string;
+  parentKey: string | null;
+  createdCount: number;
+  dryRun: boolean;
+  createdAt: string;
+}
+
 interface Stats {
   total: number;
   active: number;
@@ -16,6 +26,10 @@ interface Stats {
   avgAgeDays: number;
   highPriorityOpen: number;
   slaBreach: number;
+  onboarding?: {
+    milestones: { total: number; pending: number; in_progress: number; complete: number; overdue: number } | null;
+    recentRuns: OnboardingRunSummary[];
+  };
 }
 
 const SOURCE_META: Record<string, { label: string; color: string }> = {
@@ -59,6 +73,18 @@ function ProgressBar({ label, count, total, color }: {
       <span className="text-xs text-neutral-300 w-12 text-right font-mono">{count}</span>
     </div>
   );
+}
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(diff)) return '';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 export function DailyStatsView({ tasks, onNavigate }: { tasks: Task[]; onNavigate?: (view: string) => void }) {
@@ -178,6 +204,75 @@ export function DailyStatsView({ tasks, onNavigate }: { tasks: Task[]; onNavigat
           ))}
         </div>
       </div>
+
+      {/* Onboarding Milestones */}
+      {stats.onboarding?.milestones && stats.onboarding.milestones.total > 0 && (() => {
+        const ms = stats.onboarding!.milestones!;
+        const pctComplete = ms.total > 0 ? Math.round((ms.complete / ms.total) * 100) : 0;
+        return (
+          <div className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold">
+                Onboarding Milestones
+              </h3>
+              <span className="text-xs text-neutral-400">{pctComplete}% complete</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+              <KpiCard value={ms.overdue} label="Overdue" color={ms.overdue > 0 ? 'text-red-400' : 'text-green-400'} />
+              <KpiCard value={ms.in_progress} label="In Progress" color="text-[#5ec1ca]" />
+              <KpiCard value={ms.pending} label="Pending" color="text-amber-300" />
+              <KpiCard value={ms.complete} label="Complete" color="text-green-400" />
+            </div>
+            {/* Progress bar */}
+            <div className="h-3 bg-[#272C33] rounded-full overflow-hidden border border-[#3a424d] flex">
+              {ms.complete > 0 && (
+                <div className="h-full bg-green-500" style={{ width: `${(ms.complete / ms.total) * 100}%` }} />
+              )}
+              {ms.in_progress > 0 && (
+                <div className="h-full bg-[#5ec1ca]" style={{ width: `${(ms.in_progress / ms.total) * 100}%` }} />
+              )}
+              {ms.overdue > 0 && (
+                <div className="h-full bg-red-500" style={{ width: `${(ms.overdue / ms.total) * 100}%` }} />
+              )}
+            </div>
+            <div className="flex gap-4 mt-2 text-[10px] text-neutral-500">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Complete</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#5ec1ca] inline-block" /> In Progress</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Overdue</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-300 inline-block" /> Pending</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Recent Onboarding Runs */}
+      {stats.onboarding?.recentRuns && stats.onboarding.recentRuns.length > 0 && (
+        <div className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
+          <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold mb-3">
+            Recent Onboarding Runs
+          </h3>
+          <div className="space-y-1.5">
+            {stats.onboarding.recentRuns.map((run) => (
+              <div key={run.id} className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    run.status === 'success' ? 'bg-green-400' :
+                    run.status === 'error' ? 'bg-red-500' :
+                    run.status === 'partial' ? 'bg-amber-400' : 'bg-neutral-500'
+                  }`} />
+                  <span className="text-neutral-200 font-mono">{run.ref}</span>
+                  {run.parentKey && <span className="text-neutral-500">{run.parentKey}</span>}
+                  {run.dryRun && <span className="text-amber-500 text-[10px]">(dry run)</span>}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-neutral-400">{run.createdCount} tickets</span>
+                  <span className="text-neutral-500">{timeAgo(run.createdAt)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
