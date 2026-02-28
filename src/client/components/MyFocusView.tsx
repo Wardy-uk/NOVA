@@ -36,6 +36,18 @@ interface DeliveryEntry {
   next_milestone: NextMilestone | null;
 }
 
+interface AttentionTicket {
+  id: string;
+  source: string;
+  source_id: string;
+  source_url: string | null;
+  title: string;
+  status: string;
+  priority: number;
+  due_date: string | null;
+  attention_reasons: string[];
+}
+
 interface Props {
   tasks: Task[];
   onUpdateTask: (id: string, updates: Record<string, unknown>) => void;
@@ -59,13 +71,21 @@ export function MyFocusView({ tasks, onUpdateTask }: Props) {
   const focused = useMemo(() => tasks.filter((t) => t.is_pinned), [tasks]);
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<DeliveryEntry[]>([]);
+  const [attentionTickets, setAttentionTickets] = useState<AttentionTicket[]>([]);
 
-  // Fetch my-focus delivery entries
+  // Fetch my-focus delivery entries + attention tickets
   useEffect(() => {
     fetch('/api/delivery/entries/my-focus')
       .then((r) => r.json())
       .then((json) => {
         if (json.ok && Array.isArray(json.data)) setDeliveries(json.data);
+      })
+      .catch(() => {});
+
+    fetch('/api/tasks/service-desk/attention?scope=mine')
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.ok && Array.isArray(json.data)) setAttentionTickets(json.data);
       })
       .catch(() => {});
   }, []);
@@ -92,7 +112,7 @@ export function MyFocusView({ tasks, onUpdateTask }: Props) {
     month: 'long',
   });
 
-  const isEmpty = focused.length === 0 && deliveries.length === 0;
+  const isEmpty = focused.length === 0 && deliveries.length === 0 && attentionTickets.length === 0;
 
   return (
     <div>
@@ -133,6 +153,62 @@ export function MyFocusView({ tasks, onUpdateTask }: Props) {
                     onClick={() => openDrawer(task.id)}
                   />
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Needs Attention — auto-populated from SLA/overdue data */}
+          {attentionTickets.length > 0 && (
+            <div className="border border-red-900/60 rounded-lg bg-[#2f353d] px-5 py-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs text-red-400 uppercase tracking-widest font-semibold">
+                  Needs Attention
+                </h3>
+                <span className="text-xs text-neutral-500">
+                  {attentionTickets.length} {attentionTickets.length === 1 ? 'ticket' : 'tickets'}
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {attentionTickets.map((ticket) => {
+                  const hasSla = ticket.attention_reasons.includes('sla_breached');
+                  const hasOverdue = ticket.attention_reasons.includes('overdue_update');
+                  return (
+                    <a
+                      key={ticket.id}
+                      href={ticket.source_url ?? undefined}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block px-3 py-2.5 rounded-md bg-[#272C33] border border-[#3a424d] hover:border-neutral-500 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`text-sm shrink-0 ${hasSla ? 'text-red-400' : 'text-amber-400'}`} title={ticket.attention_reasons.join(', ')}>
+                          {hasSla ? '\u26A0' : '\u23F0'}
+                        </span>
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-[#0052CC] text-white shrink-0">
+                          {ticket.source_id}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm text-neutral-100 truncate">{ticket.title}</div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {hasSla && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
+                              SLA Breached
+                            </span>
+                          )}
+                          {hasOverdue && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">
+                              Overdue Update
+                            </span>
+                          )}
+                        </div>
+                        <span className={`text-[11px] font-medium shrink-0 ${statusColor(ticket.status)}`}>
+                          {ticket.status}
+                        </span>
+                      </div>
+                    </a>
+                  );
+                })}
               </div>
             </div>
           )}

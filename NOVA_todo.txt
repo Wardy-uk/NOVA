@@ -8,7 +8,7 @@ N.O.V.A — TO DO
 
 === CURRENT STATUS (28 Feb 2026) ===
 
-Deployed at https://nova.nurtur.tech | v1.0.3 | Branch: nova-codex
+Deployed at https://nova.nurtur.tech | v1.0.4 | Branch: nova-codex
 IIS reverse proxy → Node.js (NSSM) on Windows Server VM
 
 6 areas: My NOVA, Service Desk, Onboarding, Delivery, CRM, Admin
@@ -27,8 +27,8 @@ Completed items: see NOVA_completed.txt
 1. [DONE] Dashboard KPIs — onboarding metrics added to Command Centre
    (milestone progress bar, overdue/pending/in-progress/complete, recent runs)
 
-2. My Focus auto-population — tickets over SLA or overdue update auto-appear
-   (uses existing attention/SLA data, just needs to feed into My Focus)
+2. [DONE] My Focus auto-population — tickets needing attention auto-appear
+   (SLA breached + overdue update tickets from Service Desk shown in My Focus)
 
 3. Delivery kanban board — drag cards between status columns
    (similar pattern to Service Desk kanban, but for delivery entries)
