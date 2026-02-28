@@ -7,8 +7,35 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../../../');
 const DATA_DIR = process.env.DATA_DIR || PROJECT_ROOT;
 const DB_PATH = path.join(DATA_DIR, 'daypilot.db');
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const MAX_BACKUPS = 7;
 
 let db: Database | null = null;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function tryRestoreFromBackup(SQL: any): Database | null {
+  if (!fs.existsSync(BACKUP_DIR)) return null;
+
+  const backups = fs.readdirSync(BACKUP_DIR)
+    .filter(f => f.startsWith('daypilot.db.') && f.endsWith('.bak'))
+    .sort()
+    .reverse(); // newest first
+
+  for (const backupFile of backups) {
+    try {
+      const backupPath = path.join(BACKUP_DIR, backupFile);
+      const buffer = fs.readFileSync(backupPath);
+      if (buffer.length === 0) continue;
+      const testDb = new SQL.Database(buffer);
+      testDb.exec('SELECT COUNT(*) FROM sqlite_master'); // integrity check
+      console.log(`[N.O.V.A] Successfully loaded backup: ${backupFile}`);
+      return testDb;
+    } catch {
+      console.warn(`[N.O.V.A] Backup ${backupFile} is corrupt, trying next...`);
+    }
+  }
+  return null;
+}
 
 export async function getDb(): Promise<Database> {
   if (db) return db;
@@ -17,12 +44,28 @@ export async function getDb(): Promise<Database> {
 
   // Load existing database file if it exists
   if (fs.existsSync(DB_PATH)) {
-    const buffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
+    try {
+      const buffer = fs.readFileSync(DB_PATH);
+      if (buffer.length === 0) throw new Error('Database file is empty');
+      db = new SQL.Database(buffer);
+      db.exec('SELECT COUNT(*) FROM sqlite_master'); // integrity check
+      return db;
+    } catch (err) {
+      console.error('[N.O.V.A] Main database file is corrupt or empty:', err instanceof Error ? err.message : err);
+      db = null;
+      // Try loading from most recent backup
+      const restored = tryRestoreFromBackup(SQL);
+      if (restored) {
+        db = restored;
+        console.log('[N.O.V.A] Restored database from backup');
+        saveDb(); // write restored DB as the main file
+        return db;
+      }
+      console.error('[N.O.V.A] No valid backups found. Starting with fresh database.');
+    }
   }
 
+  db = new SQL.Database();
   return db;
 }
 
@@ -30,7 +73,52 @@ export function saveDb(): void {
   if (!db) return;
   const data = db.export();
   const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
+
+  // Atomic write: write to temp file, then rename
+  const tmpPath = DB_PATH + '.tmp';
+  try {
+    fs.writeFileSync(tmpPath, buffer);
+    fs.renameSync(tmpPath, DB_PATH);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    throw err;
+  }
+}
+
+export function createBackup(): string | null {
+  if (!fs.existsSync(DB_PATH)) return null;
+
+  if (!fs.existsSync(BACKUP_DIR)) {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  }
+
+  const dateStr = new Date().toISOString().split('T')[0];
+  const backupPath = path.join(BACKUP_DIR, `daypilot.db.${dateStr}.bak`);
+
+  // Skip if today's backup already exists
+  if (fs.existsSync(backupPath)) return backupPath;
+
+  try {
+    fs.copyFileSync(DB_PATH, backupPath);
+    console.log(`[Backup] Created daily backup: ${backupPath}`);
+
+    // Rotate: delete oldest backups beyond MAX_BACKUPS
+    const backups = fs.readdirSync(BACKUP_DIR)
+      .filter(f => f.startsWith('daypilot.db.') && f.endsWith('.bak'))
+      .sort()
+      .reverse();
+
+    for (let i = MAX_BACKUPS; i < backups.length; i++) {
+      const oldPath = path.join(BACKUP_DIR, backups[i]);
+      fs.unlinkSync(oldPath);
+      console.log(`[Backup] Rotated out old backup: ${backups[i]}`);
+    }
+
+    return backupPath;
+  } catch (err) {
+    console.error('[Backup] Failed to create backup:', err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 export function initializeSchema(database: Database): void {

@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { getDb, initializeSchema, saveDb } from './db/schema.js';
+import { getDb, initializeSchema, saveDb, createBackup } from './db/schema.js';
 import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries } from './db/queries.js';
 import { FileUserQueries } from './db/user-store.js';
 import { FileSettingsQueries } from './db/settings-store.js';
@@ -471,20 +471,29 @@ async function main() {
     });
   });
 
-  // Periodic auto-save: flush in-memory sql.js database to disk every 30s
+  // Periodic auto-save: flush in-memory sql.js database to disk every 15s
   const autoSaveTimer = setInterval(() => {
     try { saveDb(); } catch (err) {
       console.error('[AutoSave] Failed:', err instanceof Error ? err.message : err);
     }
-  }, 30_000);
+  }, 15_000);
 
   // Also save after the initial auto-seed completes
   saveDb();
+
+  // Daily backup: check hourly, create one backup per day (7-day rotation)
+  createBackup();
+  const backupTimer = setInterval(() => {
+    try { createBackup(); } catch (err) {
+      console.error('[Backup] Timer error:', err instanceof Error ? err.message : err);
+    }
+  }, 60 * 60 * 1000);
 
   // Graceful shutdown
   const shutdown = async () => {
     console.log('[N.O.V.A] Shutting down...');
     clearInterval(autoSaveTimer);
+    clearInterval(backupTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     watcher.stop();
     try { saveDb(); console.log('[N.O.V.A] Database saved to disk'); } catch (err) {

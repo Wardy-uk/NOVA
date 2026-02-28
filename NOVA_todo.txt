@@ -3,28 +3,20 @@ TO DO
 
 --- triage ---
 
-(empty — all triaged)
+(empty)
 
 
 === PLAN: 28 Feb 2026 ===
 
-1. Cleanup debug artifacts (~5 min)
-   - Remove `/api/debug/attention-fields` endpoint from index.ts
-   - Remove `_debug` field from GET /api/tasks response in tasks.ts
-   - Remove debug button + copyDebug handler from DailyStatsView.tsx
-   - Commit, push, deploy
+1. [DONE] Cleanup debug artifacts
+2. [DONE] Fix BUG6: Kanban drag-and-drop transition auto-select + Jira sync
+3. [DONE] Fix BUG5: MS365 transient sources retry after 10s
+4. [DONE] Onboarding ticket creation UI — Create Tickets tab in Admin > Onboarding
+5. [DONE] Data persistence safeguards — atomic writes, daily backups, startup recovery
+6. [DONE] Version number in status bar — v1.0.0 shown next to Status in footer
+7. [DONE] Auto-deploy watcher — PowerShell polling script (deploy/auto-deploy.ps1)
 
-2. Fix BUG6: Kanban drag-and-drop transition (~30 min)
-   - Auto-select the transition matching the target column
-   - Ensure transition actually syncs back to Jira
-   - Core workflow bug — kanban is broken without this
-
-3. Fix BUG5: MS365 transient sources empty after restart (~30 min)
-   - Auto-sync fires before MCP is connected — Planner/Email/Calendar return 0
-   - Options: delay sync until MCP ready, or retry sync after short delay if 0 results
-   - Affects every deploy/restart for all users
-
-4. Stretch goals (if time permits)
+8. Stretch goals (if time permits)
    - Correlate Jira tickets with onboarding tasks
    - Chat to NOVA conversational AI (scope/design only)
 
@@ -46,7 +38,8 @@ What's working:
   - Service Desk: live Jira search for My/Unassigned/All filters, kanban drag-and-drop transitions,
     Current Tier (customfield_12981) and Assignee shown on all ticket displays
   - Delivery milestones (30-day model) with auto-creation, checklist tracking, task surfacing
-  - Onboarding ticket orchestrator — idempotent, resume-safe, dry-run capable
+  - Onboarding ticket orchestrator — idempotent, resume-safe, dry-run capable, UI in Admin > Onboarding
+  - Data persistence — atomic writes, daily backups (7-day rotation), automatic corruption recovery
   - Multi-user with role-based access, per-user settings/AI keys (self-serve in My Settings)
   - Email send/reply/forward, calendar create/edit, SharePoint sync push/pull
   - Session-only MS365 data — transient tasks purged on server restart, auto-sync on first load
@@ -54,7 +47,7 @@ What's working:
   - Security: helmet headers, login rate limiting, debug endpoints admin-gated
   - Interactive tour overlay for new users
   - Feedback system with admin reply and create-task-from-feedback
-  - Deployed: IIS + NSSM on Windows Server, git-based deploys via deploy.ps1
+  - Deployed: IIS + NSSM on Windows Server, git-based deploys via deploy.ps1, auto-deploy watcher available
 
 What's not fully working:
   - Monday.com syncs 0 tasks — connection ok but needs board IDs or search tuning
@@ -103,7 +96,6 @@ BUG6. Kanban drag-and-drop transition doesn't auto-select or sync to Jira
 - Dashboard KPIs — add Onboarding metrics (milestone progress, overdue milestones, onboarding runs)
 - My Focus auto-population — tickets over SLA or overdue update auto-appear
 - Delivery kanban board — drag cards between status columns
-- Auto-deploy watcher — PowerShell polling script (git fetch + compare, run deploy.ps1), Task Scheduler every 2-5 mins
 
 
 === TIER 1: Daily workflow enhancements ===
@@ -118,12 +110,9 @@ BUG6. Kanban drag-and-drop transition doesn't auto-select or sync to Jira
 
 === TIER 2: Onboarding ticket automation ===
 
-6. Ticket creation UI — form in Admin > Onboarding to trigger POST /api/onboarding/create-tickets
-   - sale type dropdown, customer name, onboarding ref, due date
-   - dry-run preview before live execution
-   - show result (parent key + child keys) or error
+6. [DONE] Ticket creation UI — Create Tickets tab in Admin > Onboarding
 7. Jira settings for ticket creation — configure request type field IDs in Admin > Integrations
-8. Onboarding run history UI — view past runs (status, parent/child keys, errors)
+8. [DONE] Onboarding run history — recent runs table shown in Create Tickets tab
 
 
 === TIER 3: Platform maturity ===
@@ -166,6 +155,13 @@ BUG6. Kanban drag-and-drop transition doesn't auto-select or sync to Jira
 
 COMPLETED (recent first)
 ---------
+[DONE] Auto-deploy watcher — deploy/auto-deploy.ps1 polls git every 3m, deploys on new commits (Task Scheduler)
+[DONE] Version number in status bar — v1.0.0 next to Status in footer, injected at build time via Vite define
+[DONE] Data persistence safeguards — atomic writes (temp+rename), daily backups (7-day rotation), startup corruption recovery from backups, auto-save reduced to 15s
+[DONE] Onboarding ticket creation UI — Create Tickets tab in Admin > Onboarding with sale type dropdown, customer name, ref auto-suggest, due date, dry-run preview, result display, recent runs table
+[DONE] BUG5 fix — retry transient source sync after 10s if MCP not ready on restart
+[DONE] BUG6 fix — kanban drag transition auto-selects matching status, errors if tool missing, re-fetches after transition
+[DONE] Cleanup — removed debug endpoint, _debug field, and debug button
 [DONE] Soft outline around all task cards — subtle border-[#3a424d]/40 for visual separation
 [DONE] Date/assignee labels on ticket cards — "Created:", "Assignee:", "Due:" prefixes on badges
 [DONE] Background refresh no longer closes drawers — skip setState when data unchanged (JSON compare)

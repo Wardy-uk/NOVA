@@ -1589,6 +1589,21 @@ export class OnboardingRunQueries {
     saveDb();
     return true;
   }
+
+  getMaxRefNumber(prefix: string): number {
+    const stmt = this.db.prepare(
+      `SELECT onboarding_ref FROM onboarding_runs WHERE onboarding_ref LIKE ? ORDER BY onboarding_ref DESC LIMIT 1`
+    );
+    stmt.bind([`${prefix}%`]);
+    let max = 0;
+    if (stmt.step()) {
+      const ref = (stmt.getAsObject() as Record<string, unknown>).onboarding_ref as string;
+      const numPart = parseInt(ref.substring(prefix.length), 10);
+      if (!isNaN(numPart) && numPart > max) max = numPart;
+    }
+    stmt.free();
+    return max;
+  }
 }
 
 // ---------- Milestone Templates & Delivery Milestones ----------

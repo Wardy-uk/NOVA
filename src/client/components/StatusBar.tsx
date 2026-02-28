@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { HealthResponse } from '../../shared/types.js';
 
+declare const __APP_VERSION__: string;
+
 interface SyncStatus {
   lastAutoSync: string | null;
   intervalMinutes: number;
@@ -111,7 +113,7 @@ export function StatusBar({ health }: Props) {
         )}
         {health && (
           <span>
-            Uptime: {Math.floor(health.uptime / 60)}m | {health.status}
+            Uptime: {Math.floor(health.uptime / 60)}m | {health.status} | v{__APP_VERSION__}
           </span>
         )}
       </div>

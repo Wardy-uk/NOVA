@@ -53,6 +53,15 @@ export function createOnboardingRoutes(
     });
   });
 
+  // GET /api/onboarding/next-ref — suggest next onboarding reference
+  router.get('/next-ref', (req, res) => {
+    const prefix = ((req.query.prefix as string) || 'BYM').toUpperCase();
+    const maxNum = runQueries.getMaxRefNumber(prefix);
+    const next = maxNum + 1;
+    const suggestedRef = `${prefix}${String(next).padStart(4, '0')}`;
+    res.json({ ok: true, data: { prefix, nextNumber: next, suggestedRef } });
+  });
+
   // GET /api/onboarding/runs — list recent runs
   router.get('/runs', (req, res) => {
     const limit = parseInt(req.query.limit as string, 10) || 20;

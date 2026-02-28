@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-type Tab = 'sale-types' | 'capabilities' | 'matrix' | 'items' | 'ticket-groups';
+type Tab = 'sale-types' | 'capabilities' | 'matrix' | 'items' | 'ticket-groups' | 'create-tickets';
 
 interface TicketGroup { id: number; name: string; sort_order: number; active: number; }
 interface SaleType { id: number; name: string; sort_order: number; active: number; jira_tickets_required?: number; }
@@ -203,12 +203,92 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
     loadMatrix();
   };
 
+  // ── Create Tickets state ──
+  const [ctSaleType, setCtSaleType] = useState('');
+  const [ctCustomerName, setCtCustomerName] = useState('');
+  const [ctOnboardingRef, setCtOnboardingRef] = useState('');
+  const [ctDueDate, setCtDueDate] = useState('');
+  const [ctDryRun, setCtDryRun] = useState(true);
+  const [ctSubmitting, setCtSubmitting] = useState(false);
+  const [ctResult, setCtResult] = useState<null | {
+    parentKey: string;
+    childKeys: string[];
+    createdCount: number;
+    linkedCount: number;
+    existing: boolean;
+    dryRun: boolean;
+    details?: { parentSummary: string; childSummaries: string[] };
+  }>(null);
+  const [ctError, setCtError] = useState<string | null>(null);
+  const [ctRuns, setCtRuns] = useState<Array<{
+    id: number; onboarding_ref: string; status: string; parent_key: string | null;
+    child_keys: string | null; created_count: number; dry_run: number; created_at: string;
+  }>>([]);
+
+  const loadRuns = useCallback(async () => {
+    try {
+      const res = await fetch('/api/onboarding/runs?limit=10');
+      const json = await res.json();
+      if (json.ok) setCtRuns(json.data);
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadNextRef = useCallback(async () => {
+    try {
+      const res = await fetch('/api/onboarding/next-ref?prefix=BYM');
+      const json = await res.json();
+      if (json.ok && json.data?.suggestedRef) {
+        setCtOnboardingRef(json.data.suggestedRef);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleCreateTickets = async () => {
+    if (!ctSaleType || !ctCustomerName.trim() || !ctOnboardingRef.trim() || !ctDueDate) return;
+    setCtSubmitting(true);
+    setCtResult(null);
+    setCtError(null);
+    try {
+      const url = `/api/onboarding/create-tickets${ctDryRun ? '?dryRun=true' : ''}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          saleType: ctSaleType,
+          customer: { name: ctCustomerName.trim() },
+          onboardingRef: ctOnboardingRef.trim(),
+          targetDueDate: ctDueDate,
+          config: {},
+        }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setCtResult(json.data);
+        loadRuns();
+      } else {
+        setCtError(json.error || 'Request failed');
+      }
+    } catch (err) {
+      setCtError(err instanceof Error ? err.message : 'Network error');
+    }
+    setCtSubmitting(false);
+  };
+
+  useEffect(() => {
+    if (tab === 'create-tickets') {
+      loadRuns();
+      if (!ctOnboardingRef) loadNextRef();
+    }
+  }, [tab, loadRuns, loadNextRef, ctOnboardingRef]);
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'matrix', label: 'Matrix' },
     { key: 'sale-types', label: 'Sale Types' },
     { key: 'ticket-groups', label: 'Ticket Groups' },
     { key: 'capabilities', label: 'Capabilities' },
     { key: 'items', label: 'Items' },
+    ...(!readOnly ? [{ key: 'create-tickets' as Tab, label: 'Create Tickets' }] : []),
   ];
 
   return (
@@ -543,6 +623,144 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
               </>
             )}
             {!selectedCapId && <div className="text-center text-neutral-500 text-xs py-4">Select a capability to {readOnly ? 'view' : 'manage'} its items.</div>}
+          </div>
+        )}
+
+        {tab === 'create-tickets' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Sale Type</label>
+                <select
+                  value={ctSaleType}
+                  onChange={e => setCtSaleType(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 focus:border-[#5ec1ca] focus:outline-none"
+                >
+                  <option value="">Select sale type...</option>
+                  {saleTypes.filter(st => st.active).map(st => (
+                    <option key={st.id} value={st.name}>{st.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Customer Name</label>
+                <input
+                  value={ctCustomerName}
+                  onChange={e => setCtCustomerName(e.target.value)}
+                  placeholder="e.g. Acme Properties"
+                  className="w-full px-3 py-2 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500 focus:border-[#5ec1ca] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Onboarding Ref</label>
+                <input
+                  value={ctOnboardingRef}
+                  onChange={e => setCtOnboardingRef(e.target.value)}
+                  placeholder="e.g. BYM0042"
+                  className="w-full px-3 py-2 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-500 focus:border-[#5ec1ca] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Target Due Date</label>
+                <input
+                  type="date"
+                  value={ctDueDate}
+                  onChange={e => setCtDueDate(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 focus:border-[#5ec1ca] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-xs text-neutral-300 cursor-pointer">
+                <input type="checkbox" checked={ctDryRun} onChange={e => setCtDryRun(e.target.checked)}
+                  className="accent-[#5ec1ca]" />
+                Dry Run (preview only, no tickets created)
+              </label>
+              <button
+                onClick={handleCreateTickets}
+                disabled={ctSubmitting || !ctSaleType || !ctCustomerName.trim() || !ctOnboardingRef.trim() || !ctDueDate}
+                className={`px-4 py-2 text-xs rounded font-semibold transition-colors disabled:opacity-50 ${
+                  ctDryRun
+                    ? 'bg-amber-600 text-white hover:bg-amber-500'
+                    : 'bg-green-600 text-white hover:bg-green-500'
+                }`}
+              >
+                {ctSubmitting ? 'Working...' : ctDryRun ? 'Preview Tickets' : 'Create Tickets in Jira'}
+              </button>
+            </div>
+
+            {ctError && (
+              <div className="p-3 text-xs rounded bg-red-950/50 text-red-400 border border-red-900">
+                {ctError}
+              </div>
+            )}
+
+            {ctResult && (
+              <div className={`p-4 rounded border ${ctResult.dryRun ? 'bg-amber-950/30 border-amber-800' : 'bg-green-950/30 border-green-800'}`}>
+                <h4 className="text-xs font-semibold mb-2 text-neutral-200">
+                  {ctResult.dryRun ? 'Dry Run Preview' : 'Tickets Created Successfully'}
+                </h4>
+                <div className="text-xs text-neutral-300 space-y-1">
+                  <p>Parent: <span className="text-[#5ec1ca] font-mono">{ctResult.parentKey}</span>
+                    {ctResult.details?.parentSummary && <span className="text-neutral-500 ml-2">{ctResult.details.parentSummary}</span>}
+                  </p>
+                  <p>Children: {ctResult.childKeys.length} ticket(s)</p>
+                  {ctResult.details?.childSummaries?.map((s, i) => (
+                    <p key={i} className="ml-4 text-neutral-400">
+                      <span className="text-[#5ec1ca] font-mono">{ctResult.childKeys[i] || '(preview)'}</span>: {s}
+                    </p>
+                  ))}
+                  {!ctResult.dryRun && (
+                    <p className="mt-2 text-neutral-400">
+                      Created: {ctResult.createdCount} | Linked: {ctResult.linkedCount}
+                      {ctResult.existing && <span className="text-amber-400 ml-2">(parent already existed)</span>}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {ctRuns.length > 0 && (
+              <div>
+                <h4 className="text-xs font-semibold text-neutral-400 mb-2">Recent Runs</h4>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-neutral-500 border-b border-[#3a424d]">
+                      <th className="text-left py-1.5 px-2">Ref</th>
+                      <th className="text-left py-1.5 px-2">Status</th>
+                      <th className="text-left py-1.5 px-2">Parent</th>
+                      <th className="text-center py-1.5 px-2">Children</th>
+                      <th className="text-center py-1.5 px-2">Dry Run</th>
+                      <th className="text-left py-1.5 px-2">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ctRuns.map(run => (
+                      <tr key={run.id} className="border-b border-[#3a424d]/50">
+                        <td className="py-1 px-2 text-neutral-200 font-mono">{run.onboarding_ref}</td>
+                        <td className="py-1 px-2">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                            run.status === 'success' ? 'bg-green-900/50 text-green-400' :
+                            run.status === 'error' ? 'bg-red-900/50 text-red-400' :
+                            run.status === 'partial' ? 'bg-amber-900/50 text-amber-400' :
+                            'bg-neutral-700 text-neutral-400'
+                          }`}>{run.status}</span>
+                        </td>
+                        <td className="py-1 px-2 text-[#5ec1ca] font-mono">{run.parent_key || '-'}</td>
+                        <td className="py-1 px-2 text-center text-neutral-400">
+                          {run.child_keys ? (() => { try { return JSON.parse(run.child_keys).length; } catch { return 0; } })() : 0}
+                        </td>
+                        <td className="py-1 px-2 text-center">
+                          {run.dry_run ? <span className="text-amber-400 text-[10px]">yes</span> : <span className="text-neutral-500 text-[10px]">no</span>}
+                        </td>
+                        <td className="py-1 px-2 text-neutral-500">{new Date(run.created_at).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -1,7 +1,9 @@
 node_modules/
 dist/
 daypilot.db
+daypilot.db.tmp
 daypilot.db.backup-*
+backups/
 .env
 standups/
 reflections/
