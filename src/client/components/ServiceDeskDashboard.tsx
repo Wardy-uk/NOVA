@@ -37,7 +37,7 @@ export function ServiceDeskDashboard() {
   if (!data) return null;
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6 max-w-5xl mx-auto">
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
         <KpiCard value={data.totalOpen} label="Total Open" color="#5ec1ca" />
