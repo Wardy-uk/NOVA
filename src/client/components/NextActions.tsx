@@ -180,13 +180,13 @@ export function NextActions({ onUpdateTask }: Props) {
             })}
           </div>
         </div>
-        {/* Ask NOVA button (right, centered, bordered) */}
+        {/* NOVA Insights button (right, centered, bordered) */}
         <button
           onClick={suggest}
           disabled={loading}
           className="px-8 py-3 text-sm font-bold bg-[#5ec1ca] hover:bg-[#4db0b9] text-[#272C33] rounded-lg border-2 border-[#4ba8b0] transition-colors disabled:opacity-50 shrink-0 self-center"
         >
-          Ask N.O.V.A
+          NOVA Insights
         </button>
       </div>
 
