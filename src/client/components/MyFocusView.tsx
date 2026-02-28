@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TaskCard } from './TaskCard.js';
 import { TaskDrawer } from './TaskDrawer.js';
+import { OnboardingWorkflow } from './OnboardingWorkflow.js';
 
 interface MilestoneSummary {
   overdueCount: number;
@@ -281,18 +282,16 @@ export function MyFocusView({ tasks, onUpdateTask }: Props) {
                         </div>
                       </div>
 
+                      {/* Workflow stepper (compact) */}
+                      {ms && ms.totalCount > 0 && (
+                        <div className="mt-2">
+                          <OnboardingWorkflow deliveryId={d.id} compact />
+                        </div>
+                      )}
+
                       {/* Milestone progress row */}
                       {ms && ms.totalCount > 0 && (
-                        <div className="mt-2 flex items-center gap-2">
-                          <div className="flex-1 h-1 bg-[#1f242b] rounded-full overflow-hidden">
-                            <div
-                              className="h-full rounded-full transition-all"
-                              style={{
-                                width: `${progress}%`,
-                                backgroundColor: progress === 100 ? '#22c55e' : ms.overdueCount > 0 ? '#ef4444' : '#5ec1ca',
-                              }}
-                            />
-                          </div>
+                        <div className="mt-1.5 flex items-center gap-2">
                           <span className="text-[10px] text-neutral-500 shrink-0">
                             {ms.completeCount}/{ms.totalCount}
                           </span>

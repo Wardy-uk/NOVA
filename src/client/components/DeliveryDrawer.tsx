@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { OnboardingWorkflow } from './OnboardingWorkflow.js';
 
 interface DbEntry {
   id: number;
@@ -508,6 +509,13 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
               className={`${inputCls} resize-none`}
             />
           </div>
+
+          {/* ── Onboarding Workflow Stepper ── */}
+          {entry && !isNew && milestones.length > 0 && (
+            <div className="border border-[#3a424d] rounded-lg bg-[#272C33] p-3">
+              <OnboardingWorkflow deliveryId={entry.id} />
+            </div>
+          )}
 
           {/* ── Delivery Milestones ── */}
           {entry && !isNew && (

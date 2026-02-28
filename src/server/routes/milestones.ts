@@ -2,12 +2,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { MilestoneQueries, DeliveryQueries, TaskQueries } from '../db/queries.js';
 import { requireRole } from '../middleware/auth.js';
+import type { MilestoneWorkflowEngine } from '../services/milestone-workflow.js';
 
 const TemplateCreateSchema = z.object({
   name: z.string().min(1),
   day_offset: z.number().int(),
   sort_order: z.number().int().optional(),
   checklist_json: z.string().optional(),
+  lead_days: z.number().int().min(0).optional(),
 });
 
 const TemplateUpdateSchema = z.object({
@@ -15,6 +17,7 @@ const TemplateUpdateSchema = z.object({
   day_offset: z.number().int().optional(),
   sort_order: z.number().int().optional(),
   checklist_json: z.string().optional(),
+  lead_days: z.number().int().min(0).optional(),
   active: z.number().int().min(0).max(1).optional(),
 });
 
@@ -40,7 +43,7 @@ function calculateMilestonePriority(targetDate: string | null, status: string): 
 }
 
 /** Sync a single milestone instance to the tasks table */
-function syncMilestoneToTask(
+export function syncMilestoneToTask(
   milestone: { id: number; delivery_id: number; template_id: number; template_name: string; target_date: string | null; status: string },
   account: string,
   taskQueries: TaskQueries,
@@ -73,7 +76,7 @@ export function syncDeliveryMilestonesToTasks(
   }
 }
 
-/** Re-sync all active milestone tasks (recalculates priorities based on current date) */
+/** Re-sync active milestone tasks that have been workflow-created (recalculates priorities based on current date) */
 export function resyncAllMilestoneTasks(
   milestoneQueries: MilestoneQueries,
   taskQueries: TaskQueries,
@@ -82,6 +85,8 @@ export function resyncAllMilestoneTasks(
   let synced = 0;
   for (const m of all) {
     if (m.status === 'complete') continue;
+    // Only resync milestones that have had their task created (progressive workflow)
+    if ((m as any).workflow_task_created === 0) continue;
     syncMilestoneToTask(m, m.account, taskQueries);
     synced++;
   }
@@ -92,6 +97,7 @@ export function createMilestoneRoutes(
   milestoneQueries: MilestoneQueries,
   deliveryQueries: DeliveryQueries,
   taskQueries: TaskQueries,
+  workflowEngine?: MilestoneWorkflowEngine,
 ): Router {
   const router = Router();
   const writeGuard = requireRole('admin', 'editor');
@@ -272,9 +278,68 @@ export function createMilestoneRoutes(
       if (entry) {
         syncMilestoneToTask(milestone, entry.account, taskQueries);
       }
+
+      // Trigger next milestone evaluation when completing
+      if (parsed.data.status === 'complete' && workflowEngine) {
+        workflowEngine.onMilestoneCompleted(id).catch(err => {
+          console.error('[Milestones] Workflow trigger failed:', err instanceof Error ? err.message : err);
+        });
+      }
     }
 
     res.json({ ok: true, data: milestone });
+  });
+
+  // ── Template ↔ Ticket Group Linking ──
+
+  router.get('/template-groups', (_req, res) => {
+    res.json({ ok: true, data: milestoneQueries.getAllTemplateTicketGroupMappings() });
+  });
+
+  router.get('/templates/:id/ticket-groups', (req, res) => {
+    const id = parseInt(String(req.params.id), 10);
+    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+    res.json({ ok: true, data: milestoneQueries.getTemplateTicketGroups(id) });
+  });
+
+  router.put('/templates/:id/ticket-groups', writeGuard, (req, res) => {
+    const id = parseInt(String(req.params.id), 10);
+    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+    const { ticketGroupIds } = req.body;
+    if (!Array.isArray(ticketGroupIds)) { res.status(400).json({ ok: false, error: 'ticketGroupIds must be an array' }); return; }
+    milestoneQueries.setTemplateTicketGroups(id, ticketGroupIds);
+    res.json({ ok: true, data: milestoneQueries.getTemplateTicketGroups(id) });
+  });
+
+  // ── Workflow status for a delivery ──
+
+  router.get('/delivery/:deliveryId/workflow', (req, res) => {
+    const deliveryId = parseInt(String(req.params.deliveryId), 10);
+    if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
+    const milestones = milestoneQueries.getByDelivery(deliveryId);
+    // Enrich with linked ticket group info
+    const enriched = milestones.map(m => ({
+      ...m,
+      linked_ticket_groups: milestoneQueries.getTemplateTicketGroups(m.template_id),
+      jira_keys: m.jira_keys ? JSON.parse(m.jira_keys) : [],
+    }));
+    res.json({ ok: true, data: enriched });
+  });
+
+  // ── Manual workflow trigger ──
+
+  router.post('/workflow/evaluate', writeGuard, async (_req, res) => {
+    if (!workflowEngine) {
+      res.status(503).json({ ok: false, error: 'Workflow engine not available' });
+      return;
+    }
+    try {
+      const result = await workflowEngine.evaluateAll();
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      console.error('[Milestones] Manual workflow evaluation failed:', err);
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Evaluation failed' });
+    }
   });
 
   router.delete('/delivery/:deliveryId', writeGuard, (req, res) => {

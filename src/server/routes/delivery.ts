@@ -178,7 +178,7 @@ function loadWorkbook(): Record<string, SheetResult> & { _lastModified: string }
 import type { DeliveryQueries, MilestoneQueries, TaskQueries } from '../db/queries.js';
 import type { SharePointSync } from '../services/sharepoint-sync.js';
 import type { AreaAccessGuard } from '../middleware/auth.js';
-import { syncDeliveryMilestonesToTasks } from './milestones.js';
+import { syncMilestoneToTask, syncDeliveryMilestonesToTasks } from './milestones.js';
 
 export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync, milestoneQueries?: MilestoneQueries, taskQueries?: TaskQueries, requireAreaAccess?: AreaAccessGuard): Router {
   const router = Router();
@@ -302,10 +302,15 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       });
 
       // Auto-create milestones if we have a start date
+      // Only create a task for the first milestone (day 0) — the workflow engine handles the rest progressively
       if (milestoneQueries && taskQueries && order_date) {
         try {
-          milestoneQueries.createForDelivery(id, order_date, sale_type ?? undefined);
-          syncDeliveryMilestonesToTasks(id, account, milestoneQueries, taskQueries);
+          const milestones = milestoneQueries.createForDelivery(id, order_date, sale_type ?? undefined);
+          if (milestones.length > 0) {
+            const first = milestones[0];
+            syncMilestoneToTask(first, account, taskQueries);
+            milestoneQueries.markWorkflowTaskCreated(first.id);
+          }
         } catch (err) {
           console.error('[Delivery] Milestone auto-creation failed:', err instanceof Error ? err.message : err);
         }

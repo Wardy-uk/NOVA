@@ -41,6 +41,7 @@ import { SharePointSync } from './services/sharepoint-sync.js';
 import { Dynamics365Service } from './services/dynamics365.js';
 import { createDynamics365Routes } from './routes/dynamics365.js';
 import { EntraSsoService } from './services/entra-sso.js';
+import { MilestoneWorkflowEngine } from './services/milestone-workflow.js';
 
 dotenv.config();
 
@@ -241,7 +242,8 @@ async function main() {
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
   const spSync = new SharePointSync(mcpManager, deliveryQueries, () => settingsQueries.getAll());
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess));
-  app.use('/api/milestones', createMilestoneRoutes(milestoneQueries, deliveryQueries, taskQueries));
+  // Milestone routes — wired with workflow engine after buildOrchestrator is defined (see below)
+  // app.use('/api/milestones', ...) is registered after buildOrchestrator
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
@@ -319,6 +321,13 @@ async function main() {
     return new OnboardingOrchestrator(client, onboardingConfigQueries, onboardingRunQueries, () => settingsQueries.getAll());
   }
   app.use('/api/onboarding', createOnboardingRoutes(buildOrchestrator, buildJiraClient, onboardingRunQueries));
+
+  // Milestone workflow engine — evaluates milestones and creates tasks/tickets progressively
+  const workflowEngine = new MilestoneWorkflowEngine(
+    milestoneQueries, deliveryQueries, taskQueries, onboardingConfigQueries,
+    buildOrchestrator, (msg) => console.log(msg),
+  );
+  app.use('/api/milestones', createMilestoneRoutes(milestoneQueries, deliveryQueries, taskQueries, workflowEngine));
 
   // 6. OneDrive file watcher (Power Automate bridge)
   const watcher = new OneDriveWatcher(taskQueries, settingsQueries);
@@ -450,10 +459,31 @@ async function main() {
   };
 
   // Initial full sync 5s after startup (let MCP connections establish), then start per-source timers
-  setTimeout(() => {
-    runFullSync();
+  setTimeout(async () => {
+    await runFullSync();
     startSyncTimers();
+    // Run initial workflow evaluation after sync
+    try {
+      const wfResult = await workflowEngine.evaluateAll();
+      if (wfResult.tasksCreated > 0 || wfResult.ticketsCreated > 0) {
+        console.log(`[Startup] Workflow: ${wfResult.tasksCreated} tasks, ${wfResult.ticketsCreated} tickets created`);
+      }
+    } catch (err) {
+      console.error('[Startup] Workflow evaluation failed:', err instanceof Error ? err.message : err);
+    }
   }, 5000);
+
+  // Milestone workflow evaluation every 15 minutes
+  const workflowTimer = setInterval(async () => {
+    try {
+      const result = await workflowEngine.evaluateAll();
+      if (result.tasksCreated > 0 || result.ticketsCreated > 0) {
+        console.log(`[Workflow] Scheduled: ${result.tasksCreated} tasks, ${result.ticketsCreated} tickets created`);
+      }
+    } catch (err) {
+      console.error('[Workflow] Scheduled evaluation failed:', err instanceof Error ? err.message : err);
+    }
+  }, 15 * 60 * 1000);
 
   // Expose last sync time + per-source intervals
   app.get('/api/sync/status', (_req, res) => {
@@ -494,6 +524,7 @@ async function main() {
     console.log('[N.O.V.A] Shutting down...');
     clearInterval(autoSaveTimer);
     clearInterval(backupTimer);
+    clearInterval(workflowTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     watcher.stop();
     try { saveDb(); console.log('[N.O.V.A] Database saved to disk'); } catch (err) {

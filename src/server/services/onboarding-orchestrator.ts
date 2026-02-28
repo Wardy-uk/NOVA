@@ -87,7 +87,7 @@ export class OnboardingOrchestrator {
     };
   }
 
-  async execute(payload: OnboardingPayload, options?: { dryRun?: boolean; userId?: number }): Promise<OnboardingResult> {
+  async execute(payload: OnboardingPayload, options?: { dryRun?: boolean; userId?: number; filterGroupIds?: number[] }): Promise<OnboardingResult> {
     const { onboardingRef } = payload;
     const dryRun = options?.dryRun ?? false;
     const prefix = `[Onboarding:${onboardingRef}]`;
@@ -114,10 +114,21 @@ export class OnboardingOrchestrator {
     }
 
     // 3. Resolve matrix — returns ticket groups, each with their X'd capabilities
-    const ticketGroups = this.configQueries.resolveForSaleType(payload.saleType);
+    let ticketGroups = this.configQueries.resolveForSaleType(payload.saleType);
     if (ticketGroups.length === 0) {
       throw new Error(`No capabilities found for sale type "${payload.saleType}". Check the onboarding configuration.`);
     }
+
+    // Filter to specific groups if requested (milestone workflow creates tickets per-stage)
+    if (options?.filterGroupIds && options.filterGroupIds.length > 0) {
+      const filterSet = new Set(options.filterGroupIds);
+      ticketGroups = ticketGroups.filter(g => g.ticketGroupId != null && filterSet.has(g.ticketGroupId));
+      if (ticketGroups.length === 0) {
+        this.log(`${prefix} No matching ticket groups after filter — skipping`);
+        return { parentKey: '', childKeys: [], createdCount: 0, linkedCount: 0, existing: false, dryRun };
+      }
+    }
+
     this.log(`${prefix} Resolved ${ticketGroups.length} ticket groups for "${payload.saleType}"`);
 
     // 4. Build summaries — one child ticket per ticket group

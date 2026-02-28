@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 
-type Tab = 'sale-types' | 'capabilities' | 'matrix' | 'items' | 'ticket-groups' | 'create-tickets';
+type Tab = 'sale-types' | 'capabilities' | 'matrix' | 'items' | 'ticket-groups' | 'milestone-links' | 'create-tickets';
 
 interface TicketGroup { id: number; name: string; sort_order: number; active: number; }
 interface SaleType { id: number; name: string; sort_order: number; active: number; jira_tickets_required?: number; }
 interface Capability { id: number; name: string; code: string | null; ticket_group_id: number | null; ticket_group_name?: string; sort_order: number; active: number; item_count?: number; }
 interface MatrixCell { sale_type_id: number; capability_id: number; enabled: number; notes: string | null; }
 interface CapItem { id: number; capability_id: number; name: string; is_bolt_on: number; sort_order: number; active: number; }
+
+interface MilestoneTemplate { id: number; name: string; day_offset: number; sort_order: number; lead_days: number; active: number; }
+interface TemplateTgMapping { template_id: number; ticket_group_id: number; }
 
 const BASE = '/api/onboarding/config';
 
@@ -29,6 +32,8 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
   const [items, setItems] = useState<CapItem[]>([]);
   const [selectedCapId, setSelectedCapId] = useState<number | null>(null);
   const [matrixSaleTypeFilter, setMatrixSaleTypeFilter] = useState<number | null>(null);
+  const [milestoneTemplates, setMilestoneTemplates] = useState<MilestoneTemplate[]>([]);
+  const [templateTgMappings, setTemplateTgMappings] = useState<TemplateTgMapping[]>([]);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
@@ -57,6 +62,22 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
     setItems(await api<CapItem[]>(`/capabilities/${capId}/items`));
   }, []);
 
+  const loadMilestoneTemplates = useCallback(async () => {
+    try {
+      const res = await fetch('/api/milestones/templates');
+      const json = await res.json();
+      if (json.ok) setMilestoneTemplates(json.data);
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadTemplateTgMappings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/milestones/template-groups');
+      const json = await res.json();
+      if (json.ok) setTemplateTgMappings(json.data);
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     loadMatrix();
   }, [loadMatrix]);
@@ -64,6 +85,14 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
   useEffect(() => {
     if (tab === 'items' && selectedCapId) loadItems(selectedCapId);
   }, [tab, selectedCapId, loadItems]);
+
+  useEffect(() => {
+    if (tab === 'milestone-links') {
+      loadMilestoneTemplates();
+      loadTemplateTgMappings();
+      loadTicketGroups();
+    }
+  }, [tab, loadMilestoneTemplates, loadTemplateTgMappings, loadTicketGroups]);
 
   // ── Import xlsx ──
   const handleImport = async () => {
@@ -288,6 +317,7 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
     { key: 'ticket-groups', label: 'Ticket Groups' },
     { key: 'capabilities', label: 'Capabilities' },
     { key: 'items', label: 'Items' },
+    { key: 'milestone-links', label: 'Milestone Links' },
     ...(!readOnly ? [{ key: 'create-tickets' as Tab, label: 'Create Tickets' }] : []),
   ];
 
@@ -626,6 +656,37 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
           </div>
         )}
 
+        {tab === 'milestone-links' && (
+          <MilestoneLinkGrid
+            templates={milestoneTemplates}
+            ticketGroups={ticketGroups}
+            mappings={templateTgMappings}
+            readOnly={readOnly}
+            onToggleLink={async (templateId, tgId, linked) => {
+              const current = templateTgMappings
+                .filter(m => m.template_id === templateId)
+                .map(m => m.ticket_group_id);
+              const updated = linked
+                ? [...current, tgId]
+                : current.filter(id => id !== tgId);
+              await fetch(`/api/milestones/templates/${templateId}/ticket-groups`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticketGroupIds: updated }),
+              });
+              loadTemplateTgMappings();
+            }}
+            onUpdateLeadDays={async (templateId, days) => {
+              await fetch(`/api/milestones/templates/${templateId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lead_days: days }),
+              });
+              loadMilestoneTemplates();
+            }}
+          />
+        )}
+
         {tab === 'create-tickets' && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -898,6 +959,118 @@ function MatrixGrid({
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ── Milestone Link Grid sub-component ──
+
+function MilestoneLinkGrid({
+  templates,
+  ticketGroups,
+  mappings,
+  readOnly,
+  onToggleLink,
+  onUpdateLeadDays,
+}: {
+  templates: MilestoneTemplate[];
+  ticketGroups: TicketGroup[];
+  mappings: TemplateTgMapping[];
+  readOnly: boolean;
+  onToggleLink: (templateId: number, tgId: number, linked: boolean) => void;
+  onUpdateLeadDays: (templateId: number, days: number) => void;
+}) {
+  const activeTemplates = templates.filter(t => t.active).sort((a, b) => a.sort_order - b.sort_order);
+  const activeGroups = ticketGroups.filter(tg => tg.active).sort((a, b) => a.sort_order - b.sort_order);
+
+  const isLinked = (templateId: number, tgId: number) =>
+    mappings.some(m => m.template_id === templateId && m.ticket_group_id === tgId);
+
+  if (activeTemplates.length === 0) {
+    return <div className="text-center text-neutral-500 text-xs py-8">No milestone templates found. Create templates in Admin &rarr; Milestones.</div>;
+  }
+
+  if (activeGroups.length === 0) {
+    return <div className="text-center text-neutral-500 text-xs py-8">No ticket groups found. Add ticket groups first.</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-neutral-400">
+        Link milestone templates to ticket groups. When a milestone approaches its target date (minus lead days), the workflow engine will create tasks and Jira tickets for the linked groups.
+      </p>
+      <div className="overflow-auto">
+        <table className="text-[11px] border-collapse w-full">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-[#2f353d]">
+              <th className="sticky left-0 z-20 bg-[#2f353d] text-left px-2 py-2 text-neutral-500 min-w-[180px] border-b border-r border-[#3a424d]">
+                Milestone Template
+              </th>
+              <th className="px-2 py-2 text-neutral-500 text-center border-b border-[#3a424d] w-20">
+                Day
+              </th>
+              <th className="px-2 py-2 text-neutral-500 text-center border-b border-[#3a424d] w-24">
+                Lead Days
+              </th>
+              {activeGroups.map(tg => (
+                <th
+                  key={tg.id}
+                  className="px-1 py-2 text-center text-purple-300 font-normal border-b border-[#3a424d] min-w-[80px]"
+                >
+                  {tg.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {activeTemplates.map(tmpl => (
+              <tr key={tmpl.id} className="hover:bg-[#363d47]/50 border-b border-[#3a424d]/50">
+                <td className="sticky left-0 bg-[#2f353d] px-2 py-1.5 text-neutral-200 border-r border-[#3a424d] whitespace-nowrap">
+                  {tmpl.name}
+                </td>
+                <td className="px-2 py-1.5 text-center text-neutral-400">
+                  {tmpl.day_offset >= 0 ? `+${tmpl.day_offset}` : tmpl.day_offset}
+                </td>
+                <td className="px-2 py-1.5 text-center">
+                  {readOnly ? (
+                    <span className="text-neutral-300">{tmpl.lead_days}</span>
+                  ) : (
+                    <input
+                      type="number"
+                      min={0}
+                      max={30}
+                      value={tmpl.lead_days}
+                      onChange={e => {
+                        const v = parseInt(e.target.value, 10);
+                        if (!isNaN(v) && v >= 0) onUpdateLeadDays(tmpl.id, v);
+                      }}
+                      className="w-14 px-1.5 py-0.5 text-xs text-center bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 focus:border-[#5ec1ca] focus:outline-none"
+                    />
+                  )}
+                </td>
+                {activeGroups.map(tg => {
+                  const linked = isLinked(tmpl.id, tg.id);
+                  return (
+                    <td
+                      key={tg.id}
+                      onClick={readOnly ? undefined : () => onToggleLink(tmpl.id, tg.id, !linked)}
+                      className={`text-center border border-[#3a424d]/30 transition-colors ${
+                        readOnly ? '' : 'cursor-pointer'
+                      } ${
+                        linked
+                          ? `bg-[#5ec1ca]/20 text-[#5ec1ca]${readOnly ? '' : ' hover:bg-[#5ec1ca]/30'}`
+                          : readOnly ? '' : 'hover:bg-[#363d47]/50'
+                      }`}
+                    >
+                      {linked ? '\u2713' : ''}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

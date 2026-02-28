@@ -1614,6 +1614,7 @@ export interface MilestoneTemplate {
   day_offset: number;
   sort_order: number;
   checklist_json: string;
+  lead_days: number;
   active: number;
   created_at: string;
   updated_at: string;
@@ -1629,8 +1630,20 @@ export interface DeliveryMilestone {
   status: string;
   checklist_state_json: string;
   notes: string | null;
+  workflow_task_created: number;
+  workflow_tickets_created: number;
+  jira_keys: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface WorkflowReadyMilestone extends DeliveryMilestone {
+  lead_days: number;
+  account: string;
+  product: string;
+  sale_type: string | null;
+  onboarding_id: string | null;
+  onboarder: string | null;
 }
 
 export class MilestoneQueries {
@@ -1668,13 +1681,14 @@ export class MilestoneQueries {
     return id;
   }
 
-  updateTemplate(id: number, updates: Partial<Pick<MilestoneTemplate, 'name' | 'day_offset' | 'sort_order' | 'checklist_json' | 'active'>>): boolean {
+  updateTemplate(id: number, updates: Partial<Pick<MilestoneTemplate, 'name' | 'day_offset' | 'sort_order' | 'checklist_json' | 'lead_days' | 'active'>>): boolean {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
     if (updates.day_offset !== undefined) { fields.push('day_offset = ?'); params.push(updates.day_offset); }
     if (updates.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(updates.sort_order); }
     if (updates.checklist_json !== undefined) { fields.push('checklist_json = ?'); params.push(updates.checklist_json); }
+    if (updates.lead_days !== undefined) { fields.push('lead_days = ?'); params.push(updates.lead_days); }
     if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
     if (fields.length === 0) return false;
     fields.push(`updated_at = datetime('now')`);
@@ -1926,6 +1940,100 @@ export class MilestoneQueries {
     }
     stmt.free();
     return result;
+  }
+
+  // ── Workflow: Template ↔ Ticket Group Linking ──
+
+  getTemplateTicketGroups(templateId: number): number[] {
+    const stmt = this.db.prepare(
+      `SELECT ticket_group_id FROM milestone_template_ticket_groups WHERE template_id = ? ORDER BY ticket_group_id`
+    );
+    stmt.bind([templateId]);
+    const ids: number[] = [];
+    while (stmt.step()) {
+      ids.push((stmt.getAsObject() as Record<string, unknown>).ticket_group_id as number);
+    }
+    stmt.free();
+    return ids;
+  }
+
+  setTemplateTicketGroups(templateId: number, ticketGroupIds: number[]): void {
+    this.db.run(`DELETE FROM milestone_template_ticket_groups WHERE template_id = ?`, [templateId]);
+    for (const gid of ticketGroupIds) {
+      this.db.run(
+        `INSERT INTO milestone_template_ticket_groups (template_id, ticket_group_id) VALUES (?, ?)`,
+        [templateId, gid]
+      );
+    }
+    saveDb();
+  }
+
+  getAllTemplateTicketGroupMappings(): Array<{ template_id: number; ticket_group_id: number }> {
+    const stmt = this.db.prepare(`SELECT template_id, ticket_group_id FROM milestone_template_ticket_groups`);
+    const results: Array<{ template_id: number; ticket_group_id: number }> = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as { template_id: number; ticket_group_id: number });
+    stmt.free();
+    return results;
+  }
+
+  // ── Workflow: Progressive Task Creation ──
+
+  /** Find milestones within lead_days of their target_date that haven't had tasks created yet */
+  getMilestonesReadyForWorkflow(): WorkflowReadyMilestone[] {
+    const stmt = this.db.prepare(`
+      SELECT dm.*, mt.lead_days, de.account, de.product, de.sale_type, de.onboarding_id, de.onboarder
+      FROM delivery_milestones dm
+      JOIN milestone_templates mt ON dm.template_id = mt.id
+      JOIN delivery_entries de ON dm.delivery_id = de.id
+      WHERE dm.status != 'complete'
+        AND dm.workflow_task_created = 0
+        AND dm.target_date IS NOT NULL
+        AND date(dm.target_date, '-' || COALESCE(mt.lead_days, 3) || ' days') <= date('now')
+      ORDER BY dm.target_date ASC
+    `);
+    const results: WorkflowReadyMilestone[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as WorkflowReadyMilestone);
+    stmt.free();
+    return results;
+  }
+
+  markWorkflowTaskCreated(milestoneId: number): void {
+    this.db.run(
+      `UPDATE delivery_milestones SET workflow_task_created = 1, updated_at = datetime('now') WHERE id = ?`,
+      [milestoneId]
+    );
+    saveDb();
+  }
+
+  markWorkflowTicketsCreated(milestoneId: number, jiraKeys: string[]): void {
+    this.db.run(
+      `UPDATE delivery_milestones SET workflow_tickets_created = 1, jira_keys = ?, updated_at = datetime('now') WHERE id = ?`,
+      [JSON.stringify(jiraKeys), milestoneId]
+    );
+    saveDb();
+  }
+
+  /** Get the next milestone for a delivery after a given sort_order */
+  getNextMilestoneForDelivery(deliveryId: number, afterTemplateId: number): (DeliveryMilestone & { lead_days: number }) | undefined {
+    const stmt = this.db.prepare(`
+      SELECT dm.*, mt.lead_days
+      FROM delivery_milestones dm
+      JOIN milestone_templates mt ON dm.template_id = mt.id
+      WHERE dm.delivery_id = ?
+        AND dm.status != 'complete'
+        AND dm.workflow_task_created = 0
+        AND mt.sort_order > (SELECT sort_order FROM milestone_templates WHERE id = ?)
+      ORDER BY mt.sort_order ASC
+      LIMIT 1
+    `);
+    stmt.bind([deliveryId, afterTemplateId]);
+    if (stmt.step()) {
+      const m = stmt.getAsObject() as unknown as DeliveryMilestone & { lead_days: number };
+      stmt.free();
+      return m;
+    }
+    stmt.free();
+    return undefined;
   }
 }
 
