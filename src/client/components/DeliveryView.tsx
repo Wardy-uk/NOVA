@@ -1021,7 +1021,10 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
           defaultProduct={activeTab ?? ''}
           prefill={xlsxPrefill}
           onClose={() => { setDrawerEntryId(null); setDrawerIsNew(false); setXlsxPrefill(null); }}
-          onSaved={() => refreshDbEntries()}
+          onSaved={(product) => {
+            refreshDbEntries();
+            if (product) setActiveTab(product);
+          }}
           onDeleted={(id) => {
             setDbEntries((prev) => prev.filter((e) => e.id !== id));
             setDrawerEntryId(null);

@@ -82,7 +82,7 @@ interface Props {
   defaultProduct: string;
   prefill?: Record<string, string> | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (product?: string) => void;
   onDeleted: (id: number) => void;
   onStarToggled: (id: number) => void;
 }
@@ -218,7 +218,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
       const json = await resp.json();
       if (!json.ok) throw new Error(json.error ?? 'Save failed');
       setSuccess(isNew ? 'Created' : 'Updated');
-      onSaved();
+      onSaved(form.product.trim());
       setTimeout(() => setSuccess(null), 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
