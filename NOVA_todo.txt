@@ -22,64 +22,52 @@ Deploy: .\deploy\deploy.ps1 -Branch nova-codex (on server C:\Nurtur\NOVA)
 Completed items: see NOVA_completed.txt
 
 
-=== DO NEXT: Quick Wins ===
-
-1. [DONE] Dashboard KPIs — onboarding metrics added to Command Centre
-   (milestone progress bar, overdue/pending/in-progress/complete, recent runs)
-
-2. [DONE] My Focus auto-population — tickets needing attention auto-appear
-   (SLA breached + overdue update tickets from Service Desk shown in My Focus)
-
-3. Delivery kanban board — drag cards between status columns
-   (similar pattern to Service Desk kanban, but for delivery entries)
-
-
 === DO NEXT: Tuning (BA session with user) ===
 
-4. Jira SLA prioritisation — tickets over SLA or overdue an update should be
+1. Jira SLA prioritisation — tickets over SLA or overdue an update should be
    prioritised. SLA timer and attention endpoint already exist. Needs user to
    define the rules (which fields, thresholds, priority weights).
 
-5. Configure auto-deploy on server — register deploy/auto-deploy.ps1 as a
+2. Configure auto-deploy on server — register deploy/auto-deploy.ps1 as a
    Windows Scheduled Task. Script exists, just needs Task Scheduler setup.
 
 
 === TIER 1: Daily workflow enhancements ===
 
-6.  Chat to NOVA — conversational AI to ask questions about your tasks
+3.  Chat to NOVA — conversational AI to ask questions about your tasks
     ("what's overdue?", "summarise my Jira tickets", "what should I focus on?")
-7.  Correlate Jira tickets with onboarding tasks — link SD tickets to
+4.  Correlate Jira tickets with onboarding tasks — link SD tickets to
     deliveries, show related tickets on delivery detail, auto-tag by customer
-8.  CRM partners list in onboarding — validate customer for ticket creation
-9.  Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
+5.  CRM partners list in onboarding — validate customer for ticket creation
+6.  Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
 
 
 === TIER 2: Onboarding & automation ===
 
-10. Jira settings for ticket creation — configure request type field IDs
+7.  Jira settings for ticket creation — configure request type field IDs
     in Admin > Integrations
 
 
 === TIER 3: Platform maturity ===
 
-11. Architecture review for 50+ users — sql.js limitations, MCP pooling,
+8.  Architecture review for 50+ users — sql.js limitations, MCP pooling,
     migration path (sql.js → better-sqlite3 or PostgreSQL)
-12. Customer 360 timeline — unified per-customer view across all sources
-13. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls
-14. Team workload view — onboarder/assignee load heatmap
-15. Activity audit log — who changed what and when
-16. Jira OAuth — replace email+token with "Sign in with Atlassian"
-17. Documentation — keep help page updated as features change [ONGOING]
+9.  Customer 360 timeline — unified per-customer view across all sources
+10. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls
+11. Team workload view — onboarder/assignee load heatmap
+12. Activity audit log — who changed what and when
+13. Jira OAuth — replace email+token with "Sign in with Atlassian"
+14. Documentation — keep help page updated as features change [ONGOING]
 
 
 === TIER 4: Nice to have ===
 
-18. Email attachments — list/get/add attachments on messages
-19. Multi-calendar support — list-calendars route exists, needs UI
-20. Workflows for tickets and deliveries
-21. Jira move-team automation (move ticket to a different project)
-22. Browse mail folders — route exists, needs UI
-23. Browse specific planner plans
+15. Email attachments — list/get/add attachments on messages
+16. Multi-calendar support — list-calendars route exists, needs UI
+17. Workflows for tickets and deliveries
+18. Jira move-team automation (move ticket to a different project)
+19. Browse mail folders — route exists, needs UI
+20. Browse specific planner plans
 
 
 === FUTURE CONSIDERATION ===

@@ -2,6 +2,9 @@ N.O.V.A — COMPLETED ITEMS
 ==========================
 (moved from NOVA_todo.txt on 28 Feb 2026)
 
+[DONE] Dashboard KPIs — onboarding metrics (milestone progress, overdue, recent runs) on Command Centre
+[DONE] My Focus auto-population — SLA breached + overdue update tickets auto-appear in My Focus
+[DONE] Delivery kanban — drag-and-drop status board with 5 columns + Table/Kanban toggle
 [DONE] BUG2 closed — To-Do adapter no longer errors; returns 0 lists cleanly (MCP issue resolved itself)
 [DONE] BLOCK1 closed — Monday.com now syncs 22 tasks via auto-discovery (get_user_context, 5 boards)
 [DONE] Version + git hash in status bar — v1.0.1 (abc1234) in footer, auto-incremented per deploy
