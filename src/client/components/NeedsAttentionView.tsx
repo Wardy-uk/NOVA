@@ -92,7 +92,7 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 max-w-5xl mx-auto">
       {/* Summary bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

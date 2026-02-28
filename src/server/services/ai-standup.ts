@@ -77,6 +77,9 @@ export async function generateMorningBriefing(
     yesterdayContext = `\n\nYesterday's planned items were:\n${previousRitual.planned_items}\n\nYesterday's completed items were:\n${previousRitual.completed_items ?? 'None recorded'}\n\nIdentify any tasks that were planned but not completed as "rolled over".`;
   }
 
+  const hour = new Date().getHours();
+  const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+
   const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     temperature: 0.3,
@@ -84,10 +87,10 @@ export async function generateMorningBriefing(
     messages: [
       {
         role: 'system',
-        content: `You are N.O.V.A (Nurtur Operational Virtual Assistant), running a morning standup briefing. Analyse the task list and produce a structured morning briefing. Tasks with source "milestone" are customer onboarding milestones — highlight overdue ones prominently as they impact customer delivery timelines.
+        content: `You are N.O.V.A (Nurtur Operational Virtual Assistant), running a standup briefing. The current time of day is ${timeOfDay}. Analyse the task list and produce a structured briefing. Tasks with source "milestone" are customer onboarding milestones — highlight overdue ones prominently as they impact customer delivery timelines.
 
 Return ONLY a JSON object with these fields:
-- "summary": 2-3 sentence overview of the day ahead. Be direct, professional, slightly motivating.
+- "summary": 2-3 sentence overview starting with an appropriate ${timeOfDay} greeting (e.g. "Good ${timeOfDay}!"). Be direct, professional, slightly motivating.
 - "overdue": array of {"task_id","reason"} for overdue tasks (max 10)
 - "due_today": array of {"task_id","note"} for tasks due today
 - "top_priorities": array of {"task_id","reason"} — your top 5 recommended focus items with short justification
@@ -97,7 +100,7 @@ Use actual task IDs from the data. Keep reasons to 1 sentence each. No markdown,
       },
       {
         role: 'user',
-        content: `Today's date: ${new Date().toISOString().split('T')[0]}\n\nMy ${tasks.length} current tasks:\n${JSON.stringify(compact)}${yesterdayContext}\n\nGenerate my morning briefing.`,
+        content: `Today's date: ${new Date().toISOString().split('T')[0]}\n\nMy ${tasks.length} current tasks:\n${JSON.stringify(compact)}${yesterdayContext}\n\nGenerate my briefing.`,
       },
     ],
   });

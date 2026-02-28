@@ -177,7 +177,7 @@ export function ServiceDeskCalendar({ tasks, onUpdateTask }: Props) {
   const monthLabel = currentMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">

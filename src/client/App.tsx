@@ -61,12 +61,12 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'focus',
     tabs: [
       { view: 'focus', label: 'My Focus' },
-      { view: 'daily', label: 'Dashboard' },
+      { view: 'daily', label: 'My Dashboard' },
       { view: 'nova', label: 'NOVA Insights' },
-      { view: 'tasks', label: 'Tasks' },
-      { view: 'standup', label: 'Standup' },
-      { view: 'team-workload', label: 'Team Load' },
-      { view: 'chat', label: 'Chat' },
+      { view: 'tasks', label: 'My Tasks' },
+      { view: 'standup', label: 'NOVA Briefing' },
+      { view: 'team-workload', label: 'My Team' },
+      { view: 'chat', label: 'My Chat' },
     ],
   },
   servicedesk: {
@@ -571,24 +571,24 @@ export function App() {
             <NeedsAttentionView onUpdateTask={updateTask} scope="all" />
           )}
           {currentArea === 'servicedesk' && sdFilter && sdFilter !== 'all-breached' && (
-            <>
+            <div className="max-w-5xl mx-auto">
               {error && (
                 <div className="mb-4 p-3 bg-red-950/50 border border-red-900 rounded text-red-400 text-sm">
                   {error}
                 </div>
               )}
               <TaskList tasks={sdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
-            </>
+            </div>
           )}
           {view === 'tickets' && !sdFilter && (
-            <>
+            <div className="max-w-5xl mx-auto">
               {error && (
                 <div className="mb-4 p-3 bg-red-950/50 border border-red-900 rounded text-red-400 text-sm">
                   {error}
                 </div>
               )}
               <TaskList tasks={sdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
-            </>
+            </div>
           )}
           {view === 'kanban' && !sdFilter && (
             <ServiceDeskKanban tasks={sdTasks} onUpdateTask={updateTask} onRefresh={refreshSdTasks} />

@@ -1,6 +1,14 @@
 N.O.V.A — TO DO
 ================
 
+--- Triage ---
+
+PLanner, Email and Calender still don't show my tasks
+  → MS365 global seeding bug was fixed (item 28). Needs redeploy + user re-enable.
+
+add a refresh now to all appropriate tabs
+
+moving tickets in Kanban / Status view doiesnt update view or tickets
 
 === CURRENT STATUS (28 Feb 2026) ===
 
@@ -26,7 +34,12 @@ Completed items: see NOVA_completed.txt
     no-field integrations (msgraph). Fixed global seeding logic in
     integrations.ts so MCP restarts correctly after reboot.
 [x] 29. Renamed "Ask N.O.V.A" → "NOVA Insights" — tab label, help page,
-    tour overlay, debug panel all updated.
+    tour overlay, debug panel all updated. Confirmed no remaining references.
+[x] My NOVA tabs renamed: My Dashboard, My Tasks, My Team, My Chat
+[x] Standup → NOVA Briefing — tab renamed, heading updated, AI greeting
+    now time-appropriate (morning/afternoon/evening based on hour).
+[x] Service Desk — all tabs centered (max-w constraints on Dashboard,
+    Kanban, Calendar, Tickets, Breached views).
 
 
 === DO NEXT ===

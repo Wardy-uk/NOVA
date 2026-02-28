@@ -5,7 +5,10 @@ N.O.V.A — COMPLETED ITEMS
 === Quick fixes (28 Feb 2026) ===
 
 [DONE] Item 28: BUG FIX — MS365 Planner/Email/Calendar not showing entries. Global settings not seeded for no-field integrations. Fixed seeding logic in integrations.ts.
-[DONE] Item 29: Renamed "Ask N.O.V.A" → "NOVA Insights" — tab label, help page, tour, debug panel
+[DONE] Item 29: Renamed "Ask N.O.V.A" → "NOVA Insights" — tab label, help page, tour, debug panel. All references confirmed removed.
+[DONE] My NOVA tab rename — Dashboard→My Dashboard, Tasks→My Tasks, Team Load→My Team, Chat→My Chat, Standup→NOVA Briefing
+[DONE] Standup time-appropriate greeting — AI prompt now uses hour-based morning/afternoon/evening instead of always "morning"
+[DONE] Service Desk centering — all tab contents centered with max-width constraints (Dashboard max-w-5xl, Calendar max-w-6xl, Kanban max-w-[1400px], Tickets/Breached max-w-5xl)
 
 === v1.1.0 — Tier 1 + Tier 2 (28 Feb 2026) ===
 

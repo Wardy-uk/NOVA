@@ -266,7 +266,7 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
   };
 
   const modeButtons = [
-    { key: 'morning' as Mode, label: 'Morning', has: hasMorning },
+    { key: 'morning' as Mode, label: 'Briefing', has: hasMorning },
     { key: 'replan' as Mode, label: 'Re-Plan', has: hasReplan },
     { key: 'eod' as Mode, label: 'End of Day', has: hasEod },
   ];
@@ -313,7 +313,7 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
         <div className="border border-[#3a424d] rounded-lg px-5 py-8 bg-[#2f353d] flex flex-col items-center gap-3">
           <div className="w-6 h-6 border-2 border-[#5ec1ca] border-t-transparent rounded-full animate-spin" />
           <p className="text-neutral-400 text-sm">
-            {mode === 'morning' && 'N.O.V.A is preparing your morning briefing...'}
+            {mode === 'morning' && 'N.O.V.A is preparing your briefing...'}
             {mode === 'replan' && 'N.O.V.A is re-assessing your priorities...'}
             {mode === 'eod' && 'N.O.V.A is reviewing your day...'}
           </p>
@@ -325,7 +325,7 @@ export function StandupView({ onUpdateTask, onNavigate }: Props) {
         <>
           {!morning ? (
             <div className="border border-[#3a424d] rounded-lg px-5 py-8 bg-[#2f353d] text-center">
-              <h2 className="text-lg font-semibold text-neutral-100 mb-2">Morning Standup</h2>
+              <h2 className="text-lg font-semibold text-neutral-100 mb-2">NOVA Briefing</h2>
               <p className="text-sm text-neutral-400 mb-4">
                 N.O.V.A will analyse your tasks and prepare a briefing.
               </p>

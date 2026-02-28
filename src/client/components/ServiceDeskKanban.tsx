@@ -242,7 +242,7 @@ export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
   const isStatusMode = groupBy === 'status';
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-[1400px] mx-auto">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">
           Service Desk — Kanban
