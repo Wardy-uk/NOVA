@@ -272,6 +272,14 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       res.json({ ok: true, data: deliveryQueries.getAll(product) });
     });
 
+    router.get('/entries/:id', (req, res) => {
+      const id = parseInt(String(req.params.id), 10);
+      if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      const entry = deliveryQueries.getById(id);
+      if (!entry) { res.status(404).json({ ok: false, error: 'Entry not found' }); return; }
+      res.json({ ok: true, data: entry });
+    });
+
     router.post('/entries', writeGuard, (req, res) => {
       const { product, account, status, onboarder, order_date, go_live_date,
         predicted_delivery, training_date, branches, mrr, incremental, licence_fee, sale_type, is_starred, notes } = req.body;

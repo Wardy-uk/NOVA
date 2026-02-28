@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TaskCard } from './TaskCard.js';
 import { TaskDrawer } from './TaskDrawer.js';
+import { DeliveryDrawer } from './DeliveryDrawer.js';
 import { OnboardingWorkflow } from './OnboardingWorkflow.js';
 
 interface MilestoneSummary {
@@ -73,6 +74,17 @@ export function MyFocusView({ tasks, onUpdateTask }: Props) {
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<DeliveryEntry[]>([]);
   const [attentionTickets, setAttentionTickets] = useState<AttentionTicket[]>([]);
+  const [deliveryDrawerId, setDeliveryDrawerId] = useState<number | null>(null);
+  const [deliveryDrawerEntry, setDeliveryDrawerEntry] = useState<Record<string, unknown> | null>(null);
+
+  // Fetch full entry when delivery drawer opens
+  useEffect(() => {
+    if (deliveryDrawerId == null) { setDeliveryDrawerEntry(null); return; }
+    fetch(`/api/delivery/entries/${deliveryDrawerId}`)
+      .then(r => r.json())
+      .then(json => { if (json.ok && json.data) setDeliveryDrawerEntry(json.data); })
+      .catch(() => {});
+  }, [deliveryDrawerId]);
 
   // Fetch my-focus delivery entries + attention tickets
   useEffect(() => {
@@ -233,7 +245,8 @@ export function MyFocusView({ tasks, onUpdateTask }: Props) {
                   return (
                     <div
                       key={d.id}
-                      className={`px-3 py-2.5 rounded-md bg-[#272C33] border transition-colors ${
+                      onClick={() => setDeliveryDrawerId(d.id)}
+                      className={`px-3 py-2.5 rounded-md bg-[#272C33] border transition-colors cursor-pointer hover:border-neutral-500 ${
                         ms && ms.overdueCount > 0 ? 'border-red-900/60' : 'border-[#3a424d]'
                       }`}
                     >
@@ -334,6 +347,33 @@ export function MyFocusView({ tasks, onUpdateTask }: Props) {
           onNext={nextDrawer}
           onTaskUpdated={() => {
             onUpdateTask(drawerTask.id, {});
+          }}
+        />
+      )}
+
+      {deliveryDrawerEntry && (
+        <DeliveryDrawer
+          entry={deliveryDrawerEntry as any}
+          isNew={false}
+          products={[...new Set(deliveries.map(d => d.product))]}
+          defaultProduct={(deliveryDrawerEntry as any).product ?? ''}
+          onClose={() => setDeliveryDrawerId(null)}
+          onSaved={() => {
+            // Refresh deliveries
+            fetch('/api/delivery/entries/my-focus')
+              .then(r => r.json())
+              .then(json => { if (json.ok && Array.isArray(json.data)) setDeliveries(json.data); })
+              .catch(() => {});
+          }}
+          onDeleted={(id) => {
+            setDeliveries(prev => prev.filter(d => d.id !== id));
+            setDeliveryDrawerId(null);
+          }}
+          onStarToggled={() => {
+            fetch('/api/delivery/entries/my-focus')
+              .then(r => r.json())
+              .then(json => { if (json.ok && Array.isArray(json.data)) setDeliveries(json.data); })
+              .catch(() => {});
           }}
         />
       )}
