@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '../hooks/useAuth.js';
 import { OnboardingWorkflow } from './OnboardingWorkflow.js';
+import { AuditHistory } from './AuditPanel.js';
 
 interface DbEntry {
   id: number;
@@ -29,6 +31,12 @@ interface SaleType {
   active: number;
 }
 
+interface ChildGroup {
+  ticketGroupId: number | null;
+  ticketGroupName: string;
+  summary: string;
+}
+
 interface TicketResult {
   parentKey: string;
   childKeys: string[];
@@ -36,7 +44,7 @@ interface TicketResult {
   linkedCount: number;
   existing: boolean;
   dryRun: boolean;
-  details?: { parentSummary: string; childSummaries: string[] };
+  details?: { parentSummary: string; childSummaries: string[]; childGroups?: ChildGroup[] };
 }
 
 interface Milestone {
@@ -107,17 +115,58 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
   const [milestoneError, setMilestoneError] = useState<string | null>(null);
   const [expandedMilestone, setExpandedMilestone] = useState<number | null>(null);
 
+  // Linked tickets state
+  const [linkedTickets, setLinkedTickets] = useState<{
+    runs: Array<{ id: number; parent_key: string | null; child_keys: string[]; status: string }>;
+    relatedTasks: Array<{ id: string; source_id: string; title: string; status: string; source_url: string | null }>;
+    jiraBaseUrl: string;
+  } | null>(null);
+
   // Ticket creation state
   const [ticketPreview, setTicketPreview] = useState<TicketResult | null>(null);
   const [ticketCreating, setTicketCreating] = useState(false);
   const [ticketResult, setTicketResult] = useState<TicketResult | null>(null);
   const [ticketError, setTicketError] = useState<string | null>(null);
+  const [selectedGroups, setSelectedGroups] = useState<Set<number>>(new Set());
 
-  // Fetch sale types on mount
+  // User autocomplete for onboarder field
+  const auth = useAuth();
+  const [userList, setUserList] = useState<Array<{ id: number; username: string; display_name: string | null; team_id: number | null }>>([]);
+  const [onboarderOpen, setOnboarderOpen] = useState(false);
+
+  // CRM customer autocomplete for account field
+  const [customerList, setCustomerList] = useState<Array<{ id: number; name: string; company: string | null }>>([]);
+  const [accountOpen, setAccountOpen] = useState(false);
+
+  // Milestone-to-ticket-group mapping for gating
+  const [templateGroupMap, setTemplateGroupMap] = useState<Record<number, number[]>>({});
+
+  // Fetch sale types, user list, and template-group mappings on mount
   useEffect(() => {
     fetch('/api/onboarding/config/sale-types')
       .then(r => r.json())
       .then(json => { if (json.ok) setSaleTypes(json.data.filter((st: SaleType) => st.active)); })
+      .catch(() => {});
+    fetch('/api/users/list')
+      .then(r => r.json())
+      .then(json => { if (json.ok) setUserList(json.data); })
+      .catch(() => {});
+    fetch('/api/crm/customers')
+      .then(r => r.json())
+      .then(json => { if (json.ok) setCustomerList(json.data); })
+      .catch(() => {});
+    fetch('/api/milestones/template-groups')
+      .then(r => r.json())
+      .then(json => {
+        if (json.ok && Array.isArray(json.data)) {
+          const map: Record<number, number[]> = {};
+          for (const { template_id, ticket_group_id } of json.data) {
+            if (!map[template_id]) map[template_id] = [];
+            map[template_id].push(ticket_group_id);
+          }
+          setTemplateGroupMap(map);
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -140,11 +189,12 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         notes: entry.notes ?? '',
       });
     } else if (prefill) {
+      const defaultOnboarder = auth.user?.display_name || auth.user?.username || '';
       setForm({
         product: defaultProduct,
         account: prefill.account ?? '',
         status: prefill.status ?? 'Not Started',
-        onboarder: prefill.onboarder ?? '',
+        onboarder: prefill.onboarder || defaultOnboarder,
         order_date: prefill.order_date ?? '',
         go_live_date: prefill.go_live_date ?? '',
         predicted_delivery: prefill.predicted_delivery ?? '',
@@ -157,8 +207,9 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         notes: prefill.notes ?? '',
       });
     } else {
+      const defaultOnboarder = auth.user?.display_name || auth.user?.username || '';
       setForm({
-        product: defaultProduct, account: '', status: 'Not Started', onboarder: '',
+        product: defaultProduct, account: '', status: 'Not Started', onboarder: defaultOnboarder,
         order_date: '', go_live_date: '', predicted_delivery: '', training_date: '',
         branches: '', mrr: '', incremental: '', licence_fee: '', sale_type: '', notes: '',
       });
@@ -172,6 +223,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
     setMilestones([]);
     setMilestoneError(null);
     setExpandedMilestone(null);
+    setLinkedTickets(null);
   }, [entry, isNew, defaultProduct, prefill]);
 
   // Fetch milestones for existing entries
@@ -184,10 +236,20 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
     }
   }, [entry, isNew]);
 
+  // Fetch linked tickets for existing entries
+  useEffect(() => {
+    if (entry && !isNew) {
+      fetch(`/api/delivery/entries/${entry.id}/related-tickets`)
+        .then(r => r.json())
+        .then(json => { if (json.ok) setLinkedTickets(json.data); })
+        .catch(() => {});
+    }
+  }, [entry, isNew]);
+
   const setField = (key: string, val: string) => setForm((f) => ({ ...f, [key]: val }));
 
-  const handleSave = async () => {
-    if (!form.product.trim() || !form.account.trim()) return;
+  const handleSave = async (): Promise<boolean> => {
+    if (!form.product.trim() || !form.account.trim()) return false;
     setSaving(true);
     setError(null);
     try {
@@ -220,11 +282,18 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
       setSuccess(isNew ? 'Created' : 'Updated');
       onSaved(form.product.trim());
       setTimeout(() => setSuccess(null), 1500);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveAndClose = async () => {
+    const ok = await handleSave();
+    if (ok) onClose();
   };
 
   const handleDelete = async () => {
@@ -235,7 +304,38 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
 
   // ── Ticket creation ──
 
-  const canCreateTickets = !!(form.sale_type && form.account.trim() && (entry?.onboarding_id || isNew));
+  const canCreateTickets = !!(form.sale_type && form.account.trim() && entry?.onboarding_id);
+
+  // Determine which ticket groups are unlocked based on milestone progress
+  const unlockedGroupIds = useMemo(() => {
+    // If no mappings or no milestones, all groups are unlocked (don't break existing workflows)
+    if (Object.keys(templateGroupMap).length === 0 || milestones.length === 0) return null;
+    const set = new Set<number>();
+    for (const m of milestones) {
+      if (m.status === 'complete' || m.status === 'in_progress') {
+        const groupIds = templateGroupMap[m.template_id] || [];
+        for (const gid of groupIds) set.add(gid);
+      }
+    }
+    return set;
+  }, [milestones, templateGroupMap]);
+
+  // Map locked group IDs to the milestone name that gates them
+  const lockedGroupMilestone = useMemo((): Record<number, string> => {
+    if (!unlockedGroupIds) return {};
+    const map: Record<number, string> = {};
+    for (const m of milestones) {
+      if (m.status !== 'complete' && m.status !== 'in_progress') {
+        const groupIds = templateGroupMap[m.template_id] || [];
+        for (const gid of groupIds) {
+          if (!unlockedGroupIds.has(gid) && !map[gid]) {
+            map[gid] = m.template_name;
+          }
+        }
+      }
+    }
+    return map;
+  }, [milestones, templateGroupMap, unlockedGroupIds]);
 
   const handleDryRun = async () => {
     if (!canCreateTickets) return;
@@ -260,6 +360,16 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
       const json = await resp.json();
       if (!json.ok) throw new Error(json.error ?? 'Dry run failed');
       setTicketPreview(json.data);
+      // Auto-select only unlocked ticket groups
+      if (json.data?.details?.childGroups) {
+        const allIds = json.data.details.childGroups
+          .filter((g: ChildGroup) => g.ticketGroupId != null)
+          .map((g: ChildGroup) => g.ticketGroupId as number);
+        const selectableIds = unlockedGroupIds
+          ? allIds.filter((id: number) => unlockedGroupIds.has(id))
+          : allIds;
+        setSelectedGroups(new Set(selectableIds));
+      }
     } catch (err) {
       setTicketError(err instanceof Error ? err.message : 'Dry run failed');
     } finally {
@@ -279,6 +389,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         customer: { name: form.account.trim() },
         targetDueDate: form.go_live_date || new Date().toISOString().split('T')[0],
         config: {},
+        filterGroupIds: selectedGroups.size > 0 ? Array.from(selectedGroups) : undefined,
       };
       const resp = await fetch('/api/onboarding/create-tickets', {
         method: 'POST',
@@ -436,9 +547,39 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
 
           {/* Account + Sale Type */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className="relative">
               <label className={labelCls}>Account *</label>
-              <input className={inputCls} value={form.account} onChange={(e) => setField('account', e.target.value)} placeholder="Customer name" />
+              <input
+                className={inputCls}
+                value={form.account}
+                onChange={(e) => { setField('account', e.target.value); setAccountOpen(true); }}
+                onFocus={() => setAccountOpen(true)}
+                onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
+                placeholder="Customer name"
+                autoComplete="off"
+              />
+              {accountOpen && form.account.trim() && (() => {
+                const q = form.account.toLowerCase();
+                const matches = customerList
+                  .filter(c => (c.name.toLowerCase().includes(q) || (c.company ?? '').toLowerCase().includes(q)) && c.name.toLowerCase() !== q)
+                  .slice(0, 8);
+                if (matches.length === 0) return null;
+                return (
+                  <div className="absolute z-10 top-full mt-1 w-full bg-[#272C33] border border-[#3a424d] rounded shadow-lg max-h-40 overflow-auto">
+                    {matches.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => { setField('account', c.name); setAccountOpen(false); }}
+                        className="w-full text-left px-3 py-1.5 text-xs text-neutral-200 hover:bg-[#5ec1ca]/20 transition-colors"
+                      >
+                        {c.name}{c.company ? <span className="text-neutral-500 ml-1">({c.company})</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
             <div>
               <label className={labelCls}>Sale Type</label>
@@ -451,9 +592,39 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
 
           {/* Onboarder */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className="relative">
               <label className={labelCls}>Onboarder</label>
-              <input className={inputCls} value={form.onboarder} onChange={(e) => setField('onboarder', e.target.value)} placeholder="Name" />
+              <input
+                className={inputCls}
+                value={form.onboarder}
+                onChange={(e) => { setField('onboarder', e.target.value); setOnboarderOpen(true); }}
+                onFocus={() => setOnboarderOpen(true)}
+                onBlur={() => setTimeout(() => setOnboarderOpen(false), 150)}
+                placeholder="Name"
+                autoComplete="off"
+              />
+              {onboarderOpen && form.onboarder.trim() && (() => {
+                const q = form.onboarder.toLowerCase();
+                const matches = userList
+                  .filter(u => (u.display_name || u.username).toLowerCase().includes(q) && (u.display_name || u.username).toLowerCase() !== q)
+                  .slice(0, 8);
+                if (matches.length === 0) return null;
+                return (
+                  <div className="absolute z-10 top-full mt-1 w-full bg-[#272C33] border border-[#3a424d] rounded shadow-lg max-h-40 overflow-auto">
+                    {matches.map(u => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => { setField('onboarder', u.display_name || u.username); setOnboarderOpen(false); }}
+                        className="w-full text-left px-3 py-1.5 text-xs text-neutral-200 hover:bg-[#5ec1ca]/20 transition-colors"
+                      >
+                        {u.display_name || u.username}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
             <div />
           </div>
@@ -514,6 +685,73 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
           {entry && !isNew && milestones.length > 0 && (
             <div className="border border-[#3a424d] rounded-lg bg-[#272C33] p-3">
               <OnboardingWorkflow deliveryId={entry.id} />
+            </div>
+          )}
+
+          {/* ── Linked Tickets ── */}
+          {entry && !isNew && linkedTickets && (linkedTickets.runs.length > 0 || linkedTickets.relatedTasks.length > 0) && (
+            <div className="border border-[#3a424d] rounded-lg bg-[#272C33] p-3 space-y-2">
+              <span className="text-xs font-semibold text-neutral-300">Linked Tickets</span>
+
+              {/* Onboarding tickets from runs */}
+              {linkedTickets.runs.filter(r => r.status === 'success').map(run => (
+                <div key={run.id} className="space-y-1">
+                  {run.parent_key && (
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="text-neutral-500">Parent:</span>
+                      <a
+                        href={linkedTickets.jiraBaseUrl ? `${linkedTickets.jiraBaseUrl}/browse/${run.parent_key}` : '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#5ec1ca] hover:underline font-mono"
+                      >
+                        {run.parent_key}
+                      </a>
+                    </div>
+                  )}
+                  {run.child_keys.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span className="text-neutral-500">Children:</span>
+                      {run.child_keys.map(key => (
+                        <a
+                          key={key}
+                          href={linkedTickets.jiraBaseUrl ? `${linkedTickets.jiraBaseUrl}/browse/${key}` : '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#5ec1ca] hover:underline font-mono"
+                        >
+                          {key}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {/* Related SD tickets by account name */}
+              {linkedTickets.relatedTasks.length > 0 && (
+                <div className="space-y-1 pt-1 border-t border-[#3a424d]">
+                  <span className="text-[10px] text-neutral-500">Related SD Tickets</span>
+                  {linkedTickets.relatedTasks.map(t => (
+                    <div key={t.id} className="flex items-center gap-2 text-[11px]">
+                      <a
+                        href={t.source_url ?? '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#5ec1ca] hover:underline font-mono shrink-0"
+                      >
+                        {t.source_id}
+                      </a>
+                      <span className="text-neutral-300 truncate">{t.title}</span>
+                      <span className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[9px] font-semibold ${
+                        t.status === 'done' ? 'bg-green-900/40 text-green-400' :
+                        t.status === 'open' ? 'bg-blue-900/40 text-blue-400' :
+                        'bg-neutral-800 text-neutral-400'
+                      }`}>{t.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -690,6 +928,13 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                 </span>
               </div>
 
+              {/* Save-first message for unsaved entries */}
+              {isNew && !entry?.onboarding_id && (
+                <div className="text-[10px] text-amber-400 bg-amber-950/30 border border-amber-900/40 rounded px-2 py-1.5">
+                  Save the delivery entry first to enable ticket creation.
+                </div>
+              )}
+
               {/* Dry run preview */}
               {ticketPreview && ticketPreview.details && (
                 <div className="space-y-2">
@@ -697,18 +942,86 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                   <div className="text-[11px] text-purple-300 bg-purple-950/30 border border-purple-900/40 rounded px-2 py-1.5">
                     {ticketPreview.details.parentSummary}
                   </div>
-                  {ticketPreview.details.childSummaries.map((s, i) => (
-                    <div key={i} className="text-[11px] text-[#5ec1ca] bg-[#5ec1ca]/10 border border-[#5ec1ca]/20 rounded px-2 py-1.5">
-                      {s}
+                  {/* Select all / deselect all controls */}
+                  {ticketPreview.details.childGroups && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const selectableIds = new Set(
+                            ticketPreview.details!.childGroups!
+                              .filter(g => g.ticketGroupId != null && (unlockedGroupIds === null || unlockedGroupIds.has(g.ticketGroupId!)))
+                              .map(g => g.ticketGroupId as number)
+                          );
+                          setSelectedGroups(selectableIds);
+                        }}
+                        className="text-[10px] text-neutral-400 hover:text-neutral-200 transition-colors"
+                      >Select All</button>
+                      <span className="text-neutral-600">|</span>
+                      <button
+                        onClick={() => setSelectedGroups(new Set())}
+                        className="text-[10px] text-neutral-400 hover:text-neutral-200 transition-colors"
+                      >Deselect All</button>
+                      <span className="text-[10px] text-neutral-500 ml-auto">
+                        {selectedGroups.size}/{ticketPreview.details!.childGroups!.filter(g => g.ticketGroupId != null).length} selected
+                      </span>
                     </div>
-                  ))}
+                  )}
+                  {/* Child ticket list with checkboxes */}
+                  {ticketPreview.details.childGroups
+                    ? ticketPreview.details.childGroups.map((g, i) => {
+                        const isLocked = g.ticketGroupId != null && unlockedGroupIds !== null && !unlockedGroupIds.has(g.ticketGroupId);
+                        const checked = g.ticketGroupId != null ? selectedGroups.has(g.ticketGroupId) : true;
+                        const lockingMilestone = g.ticketGroupId != null ? lockedGroupMilestone[g.ticketGroupId] : undefined;
+                        return (
+                          <label
+                            key={i}
+                            className={`flex items-start gap-2 text-[11px] rounded px-2 py-1.5 ${
+                              isLocked
+                                ? 'text-neutral-500 bg-neutral-800/50 border border-neutral-700/40 cursor-not-allowed opacity-60'
+                                : 'text-[#5ec1ca] bg-[#5ec1ca]/10 border border-[#5ec1ca]/20 cursor-pointer'
+                            }`}
+                          >
+                            {g.ticketGroupId != null && (
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={isLocked}
+                                onChange={() => {
+                                  if (isLocked) return;
+                                  setSelectedGroups(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(g.ticketGroupId!)) next.delete(g.ticketGroupId!);
+                                    else next.add(g.ticketGroupId!);
+                                    return next;
+                                  });
+                                }}
+                                className="mt-0.5 accent-[#5ec1ca]"
+                              />
+                            )}
+                            <span className="flex-1">
+                              {g.summary}
+                              {isLocked && lockingMilestone && (
+                                <span className="block text-[9px] text-amber-500/70 mt-0.5">
+                                  Locked until {lockingMilestone} is completed
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                        );
+                      })
+                    : ticketPreview.details.childSummaries.map((s, i) => (
+                        <div key={i} className="text-[11px] text-[#5ec1ca] bg-[#5ec1ca]/10 border border-[#5ec1ca]/20 rounded px-2 py-1.5">
+                          {s}
+                        </div>
+                      ))
+                  }
                   {entry?.onboarding_id && (
                     <button
                       onClick={handleCreateTickets}
-                      disabled={ticketCreating}
+                      disabled={ticketCreating || selectedGroups.size === 0}
                       className="w-full px-3 py-2 text-xs rounded bg-green-700 text-white hover:bg-green-600 disabled:opacity-50 transition-colors font-semibold"
                     >
-                      {ticketCreating ? 'Creating...' : `Create ${ticketPreview.details.childSummaries.length + 1} Tickets in Jira`}
+                      {ticketCreating ? 'Creating...' : `Create ${selectedGroups.size > 0 ? selectedGroups.size + 1 : ticketPreview.details.childSummaries.length + 1} Tickets in Jira`}
                     </button>
                   )}
                   {!entry?.onboarding_id && (
@@ -769,6 +1082,11 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
               {entry.mrr != null && <div>MRR: {formatCurrency(entry.mrr)}</div>}
             </div>
           )}
+
+          {/* Audit History */}
+          {entry && !isNew && (
+            <AuditHistory entityType="delivery" entityId={String(entry.id)} />
+          )}
         </div>
 
         {/* Footer */}
@@ -779,6 +1097,13 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
             className="px-4 py-2 text-sm bg-[#5ec1ca] text-[#272C33] font-semibold rounded hover:bg-[#4db0b9] transition-colors disabled:opacity-50"
           >
             {saving ? 'Saving...' : isNew ? 'Create' : 'Update'}
+          </button>
+          <button
+            onClick={handleSaveAndClose}
+            disabled={saving || !form.product.trim() || !form.account.trim()}
+            className="px-4 py-2 text-sm text-[#5ec1ca] font-semibold rounded hover:bg-[#5ec1ca]/20 border border-[#5ec1ca]/40 transition-colors disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save & Close'}
           </button>
           <button
             onClick={onClose}

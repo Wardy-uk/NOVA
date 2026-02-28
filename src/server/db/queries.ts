@@ -49,6 +49,20 @@ export class TaskQueries {
     return tasks;
   }
 
+  searchByTitle(query: string, source?: string, limit: number = 20): Task[] {
+    let sql = `SELECT * FROM tasks WHERE title LIKE ?`;
+    const params: (string | number)[] = [`%${query}%`];
+    if (source) { sql += ` AND source = ?`; params.push(source); }
+    sql += ` ORDER BY updated_at DESC LIMIT ?`;
+    params.push(limit);
+    const stmt = this.db.prepare(sql);
+    stmt.bind(params);
+    const tasks: Task[] = [];
+    while (stmt.step()) tasks.push(this.rowToTask(stmt.getAsObject() as Record<string, unknown>));
+    stmt.free();
+    return tasks;
+  }
+
   getAllIncludingDone(): Task[] {
     const stmt = this.db.prepare(`SELECT * FROM tasks ORDER BY updated_at DESC`);
     const tasks: Task[] = [];

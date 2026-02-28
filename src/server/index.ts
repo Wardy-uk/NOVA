@@ -42,6 +42,14 @@ import { Dynamics365Service } from './services/dynamics365.js';
 import { createDynamics365Routes } from './routes/dynamics365.js';
 import { EntraSsoService } from './services/entra-sso.js';
 import { MilestoneWorkflowEngine } from './services/milestone-workflow.js';
+import { AuditQueries } from './db/audit.js';
+import { createAuditRoutes } from './routes/audit.js';
+import { createTeamRoutes } from './routes/team.js';
+import { createChatRoutes } from './routes/chat.js';
+import { JiraOAuthService } from './services/jira-oauth.js';
+import { NotificationQueries } from './db/notifications.js';
+import { NotificationEngine } from './services/notification-engine.js';
+import { createNotificationRoutes } from './routes/notifications.js';
 
 dotenv.config();
 
@@ -70,6 +78,9 @@ async function main() {
   const onboardingConfigQueries = new OnboardingConfigQueries(db);
   const onboardingRunQueries = new OnboardingRunQueries(db);
   const milestoneQueries = new MilestoneQueries(db);
+  const auditQueries = new AuditQueries(db);
+  const notificationQueries = new NotificationQueries(db);
+  const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries);
 
   // Purge transient MS365 data from previous session
   const purgedCount = taskQueries.deleteTransientTasks();
@@ -190,6 +201,7 @@ async function main() {
 
   // Entra SSO service
   const ssoService = new EntraSsoService(() => settingsQueries.getAll());
+  const jiraOAuthService = new JiraOAuthService(() => settingsQueries.getAll());
 
   // Area access guard for custom role-based route protection
   const requireAreaAccess = createAreaAccessGuard(() => {
@@ -203,7 +215,7 @@ async function main() {
   // Public API routes (no auth required)
   app.post('/api/auth/login', loginLimiter);
   app.post('/api/auth/register', loginLimiter);
-  app.use('/api/auth', createAuthRoutes(userQueries, jwtSecret, ssoService, settingsQueries));
+  app.use('/api/auth', createAuthRoutes(userQueries, jwtSecret, ssoService, settingsQueries, jiraOAuthService, userSettingsQueries));
 
   // Debug endpoints are registered after auth middleware below (admin-only)
 
@@ -225,6 +237,19 @@ async function main() {
 
   // Protected API routes
   app.use('/api', authMiddleware(jwtSecret));
+
+  // Lightweight user list — any authenticated user
+  app.get('/api/users/list', (_req, res) => {
+    const users = userQueries.getAll();
+    const list = users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      display_name: u.display_name,
+      team_id: (u as any).team_id ?? null,
+    }));
+    res.json({ ok: true, data: list });
+  });
+
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries, settingsQueries, onboardingRunQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries, userSettingsQueries, (key) => {
@@ -241,7 +266,7 @@ async function main() {
   app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
   const spSync = new SharePointSync(mcpManager, deliveryQueries, () => settingsQueries.getAll());
-  app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess));
+  app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess, auditQueries, onboardingRunQueries, settingsQueries));
   // Milestone routes — wired with workflow engine after buildOrchestrator is defined (see below)
   // app.use('/api/milestones', ...) is registered after buildOrchestrator
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
@@ -249,6 +274,10 @@ async function main() {
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries));
+  app.use('/api/audit', createAuditRoutes(auditQueries));
+  app.use('/api/team', createTeamRoutes(deliveryQueries, milestoneQueries, taskQueries, userQueries));
+  app.use('/api/notifications', createNotificationRoutes(notificationQueries, notificationEngine));
+  app.use('/api/chat', createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
 
   // DELETE /api/data/source/:source — purge local records for a given integration source
   app.delete('/api/data/source/:source', (req, res) => {

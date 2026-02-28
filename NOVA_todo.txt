@@ -1,18 +1,15 @@
 N.O.V.A — TO DO
 ================
 
---- triage ---
-
-(empty)
-
-
 === CURRENT STATUS (28 Feb 2026) ===
 
-Deployed at https://nova.nurtur.tech | v1.0.4 | Branch: nova-codex
+Deployed at https://nova.nurtur.tech | v1.1.0 | Branch: nova-codex
 IIS reverse proxy → Node.js (NSSM) on Windows Server VM
 
 6 areas: My NOVA, Service Desk, Onboarding, Delivery, CRM, Admin
 5 MCP integrations: Jira, MS365, Monday.com, D365, OneDrive
+Milestone workflow engine: progressive task/ticket creation on lead-day triggers
+AI chat, notifications, audit log, team workload, SD dashboard, Jira OAuth
 0 bugs | 0 blockers | Monday.com syncing 22 tasks across 5 boards
 
 Known limitation:
@@ -24,50 +21,31 @@ Completed items: see NOVA_completed.txt
 
 === DO NEXT: Tuning (BA session with user) ===
 
-1. Jira SLA prioritisation — tickets over SLA or overdue an update should be
-   prioritised. SLA timer and attention endpoint already exist. Needs user to
-   define the rules (which fields, thresholds, priority weights).
-
-2. Configure auto-deploy on server — register deploy/auto-deploy.ps1 as a
-   Windows Scheduled Task. Script exists, just needs Task Scheduler setup.
+8.  Jira SLA prioritisation — tickets over SLA or overdue an update should be
+    prioritised. SLA timer and attention endpoint already exist. Needs user to
+    define the rules (which fields, thresholds, priority weights).
 
 
-=== TIER 1: Daily workflow enhancements ===
+=== TIER 2: Feature additions ===
 
-3.  Chat to NOVA — conversational AI to ask questions about your tasks
-    ("what's overdue?", "summarise my Jira tickets", "what should I focus on?")
-4.  Correlate Jira tickets with onboarding tasks — link SD tickets to
-    deliveries, show related tickets on delivery detail, auto-tag by customer
-5.  CRM partners list in onboarding — validate customer for ticket creation
-6.  Service Desk Dashboard — distinct customers, tickets over SLA, overdue updates
-
-
-=== TIER 2: Onboarding & automation ===
-
-7.  Jira settings for ticket creation — configure request type field IDs
-    in Admin > Integrations
+25. Managers overview — management summary tab on each main area (activity,
+    status, team performance). Partially addressed by Team Load + SD Dashboard
+    but needs broader coverage across Onboarding and Delivery areas.
+26. Delivery completion tracker — "Delivered Today / This Week / This Month"
+    summary cards or section on the delivery page.
 
 
 === TIER 3: Platform maturity ===
 
-8.  Architecture review for 50+ users — sql.js limitations, MCP pooling,
+13. Architecture review for 50+ users — sql.js limitations, MCP pooling,
     migration path (sql.js → better-sqlite3 or PostgreSQL)
-9.  Customer 360 timeline — unified per-customer view across all sources
-10. Notifications & alerts — SLA breaches, delivery dates, onboarding stalls
-11. Team workload view — onboarder/assignee load heatmap
-12. Activity audit log — who changed what and when
-13. Jira OAuth — replace email+token with "Sign in with Atlassian"
-14. Documentation — keep help page updated as features change [ONGOING]
-
-
-=== TIER 4: Nice to have ===
-
-15. Email attachments — list/get/add attachments on messages
-16. Multi-calendar support — list-calendars route exists, needs UI
-17. Workflows for tickets and deliveries
-18. Jira move-team automation (move ticket to a different project)
-19. Browse mail folders — route exists, needs UI
-20. Browse specific planner plans
+14. Customer 360 timeline — unified per-customer view across all sources
+19. Email attachments — list/get/add attachments on messages
+20. Multi-calendar support — list-calendars route exists, needs UI
+21. Workflows for tickets and deliveries
+22. Jira move-team automation (move ticket to a different project)
+23. Browse mail folders — route exists, needs UI
+24. Browse specific planner plans
 
 
 === FUTURE CONSIDERATION ===

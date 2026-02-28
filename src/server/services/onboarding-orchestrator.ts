@@ -25,6 +25,7 @@ export interface OnboardingResult {
   details?: {
     parentSummary: string;
     childSummaries: string[];
+    childGroups?: Array<{ ticketGroupId: number | null; ticketGroupName: string; summary: string }>;
   };
 }
 
@@ -146,7 +147,15 @@ export class OnboardingOrchestrator {
         linkedCount: 0,
         existing: false,
         dryRun: true,
-        details: { parentSummary: pSummary, childSummaries },
+        details: {
+          parentSummary: pSummary,
+          childSummaries,
+          childGroups: ticketGroups.map((group, i) => ({
+            ticketGroupId: group.ticketGroupId,
+            ticketGroupName: group.ticketGroupName,
+            summary: childSummaries[i],
+          })),
+        },
       };
     }
 

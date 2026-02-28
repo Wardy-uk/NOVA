@@ -15,6 +15,10 @@ import { OnboardingCalendar } from './components/OnboardingCalendar.js';
 import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
+import { ServiceDeskDashboard } from './components/ServiceDeskDashboard.js';
+import { TeamWorkloadView } from './components/TeamWorkloadView.js';
+import { NotificationBell } from './components/NotificationBell.js';
+import { ChatView } from './components/ChatView.js';
 import { NextActions } from './components/NextActions.js';
 import { StatusBar } from './components/StatusBar.js';
 import { FeedbackModal } from './components/FeedbackModal.js';
@@ -28,7 +32,7 @@ import { type OwnershipFilter } from './utils/taskHelpers.js';
 
 type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
-  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention'
+  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar'
   | 'crm'
   | 'settings' | 'admin-panel'
@@ -61,12 +65,15 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'nova', label: 'Ask N.O.V.A' },
       { view: 'tasks', label: 'Tasks' },
       { view: 'standup', label: 'Standup' },
+      { view: 'team-workload', label: 'Team Load' },
+      { view: 'chat', label: 'Chat' },
     ],
   },
   servicedesk: {
     label: 'Service Desk',
-    defaultView: 'tickets',
+    defaultView: 'sd-dashboard',
     tabs: [
+      { view: 'sd-dashboard', label: 'Dashboard' },
       { view: 'tickets', label: 'My Tickets' },
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
@@ -103,7 +110,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'kanban', 'tickets', 'sd-calendar', 'attention', 'admin-panel']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'team-workload', 'admin-panel']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -383,6 +390,8 @@ export function App() {
 
             {/* Right: utilities */}
             <div className="flex items-center gap-2">
+              {/* Notifications */}
+              <NotificationBell />
               {/* Theme toggle */}
               <div className="flex items-center bg-[#2f353d] rounded border border-[#3a424d]">
                 {([
@@ -550,6 +559,12 @@ export function App() {
           {view === 'standup' && (
             <StandupView onUpdateTask={updateTask} onNavigate={navigate} />
           )}
+          {view === 'team-workload' && (
+            <TeamWorkloadView />
+          )}
+          {view === 'chat' && (
+            <ChatView />
+          )}
 
           {/* Service Desk — right pill overrides left tab content */}
           {currentArea === 'servicedesk' && sdFilter === 'all-breached' && (
@@ -583,6 +598,9 @@ export function App() {
           )}
           {view === 'attention' && !sdFilter && (
             <NeedsAttentionView onUpdateTask={updateTask} scope="mine" />
+          )}
+          {view === 'sd-dashboard' && !sdFilter && (
+            <ServiceDeskDashboard />
           )}
 
           {/* Onboarding */}

@@ -2,6 +2,29 @@ N.O.V.A — COMPLETED ITEMS
 ==========================
 (moved from NOVA_todo.txt on 28 Feb 2026)
 
+=== v1.1.0 — Tier 1 + Tier 2 (28 Feb 2026) ===
+
+[DONE] Item 9: Chat to NOVA — conversational AI chat tab in My NOVA (GPT-4o-mini, context-aware, conversation persistence)
+[DONE] Item 10: Correlate Jira tickets with deliveries — Linked Tickets panel in DeliveryDrawer (onboarding runs + SD matches by account name)
+[DONE] Item 11: CRM partners autocomplete — Account field in DeliveryDrawer suggests D365 CRM customers as you type
+[DONE] Item 12: Service Desk Dashboard — KPI cards (Total Open, SLA Breached, Overdue Updates, Distinct Customers) + priority/status/assignee breakdowns
+[DONE] Item 15: Notifications & alerts — bell icon with unread count, alerts for overdue milestones, upcoming deliveries, SLA breaches, dedup within 24h
+[DONE] Item 16: Team workload view — per-person load table (active deliveries, pending/overdue milestones, open tickets) with colour-coded cells
+[DONE] Item 17: Activity audit log — audit_log table, AuditHistory in DeliveryDrawer, Audit Log tab in Admin, logged on all create/update/delete actions
+[DONE] Item 18: Jira OAuth 3LO — PKCE auth flow, Connect Jira button in My Settings, admin configures OAuth app in Integrations, Bearer token auth to Jira Cloud API
+
+=== v1.0.9 — Delivery & Onboarding UX (28 Feb 2026) ===
+
+[DONE] Delivery UX: Save & Close button on DeliveryDrawer
+[DONE] Delivery UX: Onboarder defaults to logged-in user + autocomplete from user list
+[DONE] Delivery UX: My Deliveries filter on delivery sheet
+[DONE] Delivery UX: Date range filter (All/This Month/Next Month/Custom) on delivery sheet
+[DONE] Delivery UX: Milestone-gated ticket creation — locked groups greyed out with "Locked until..." message
+[DONE] Delivery UX: Gate ticket creation until entry is saved (requires onboarding_id)
+[DONE] Delivery UX: Selectable ticket creation — checkboxes + Select All/Deselect All
+[DONE] Auto-deploy Task Scheduler — script exists, registration is an ops task (deploy/auto-deploy.ps1)
+[DONE] Jira onboarding settings — all request type field IDs configurable in Admin > Integrations
+[DONE] Documentation — help page covers 12 sections, all major features documented [ONGOING minor updates]
 [DONE] Dashboard KPIs — onboarding metrics (milestone progress, overdue, recent runs) on Command Centre
 [DONE] My Focus auto-population — SLA breached + overdue update tickets auto-appear in My Focus
 [DONE] Delivery kanban — drag-and-drop status board with 5 columns + Table/Kanban toggle

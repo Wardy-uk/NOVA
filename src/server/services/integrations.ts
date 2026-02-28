@@ -84,6 +84,17 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'sso_client_secret', label: 'Client Secret', type: 'password', placeholder: 'Azure AD app registration client secret', required: true },
     ],
   },
+  {
+    id: 'jira-oauth',
+    name: 'Jira OAuth',
+    description: 'Jira Cloud OAuth 3LO. Users connect their own Jira account. Configure app credentials from developer.atlassian.com.',
+    enabledKey: 'jira_oauth_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'jira_oauth_client_id', label: 'OAuth Client ID', type: 'text', placeholder: 'From Atlassian developer console', required: true },
+      { key: 'jira_oauth_client_secret', label: 'OAuth Client Secret', type: 'password', placeholder: 'From Atlassian developer console', required: true },
+    ],
+  },
 ];
 
 export interface McpServerConfig {

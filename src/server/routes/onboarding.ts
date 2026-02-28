@@ -26,9 +26,12 @@ export function createOnboardingRoutes(
 
     const dryRun = req.query.dryRun === 'true';
     const userId = (req as any).user?.id;
+    const filterGroupIds = Array.isArray(req.body.filterGroupIds)
+      ? req.body.filterGroupIds.filter((id: unknown) => typeof id === 'number')
+      : undefined;
 
     try {
-      const result = await orchestrator.execute(parsed.data, { dryRun, userId });
+      const result = await orchestrator.execute(parsed.data, { dryRun, userId, filterGroupIds });
       res.json({ ok: true, data: result });
     } catch (err) {
       console.error('[Onboarding] create-tickets error:', err);

@@ -10,19 +10,20 @@ A single-pane-of-glass operational dashboard that aggregates tasks, tickets, ema
 | Backend | Express v5 (Node.js), TypeScript |
 | Database | sql.js (WASM SQLite, in-memory with file persistence) |
 | Integrations | MCP SDK (Jira, MS365, Monday.com), Dataverse API (D365) |
-| AI | OpenAI GPT-4o-mini (standups, next-action suggestions) |
-| Auth | JWT + bcrypt, optional Entra ID SSO |
+| AI | OpenAI GPT-4o-mini (standups, next-action suggestions, chat) |
+| Auth | JWT + bcrypt, optional Entra ID SSO, Jira OAuth 3LO |
 
 ## Features
 
 | Area | Description |
 |------|-------------|
-| **My NOVA** | Dashboard with AI standup rituals, task prioritisation, next actions |
-| **Service Desk** | Kanban board with Jira drag-and-drop transitions, calendar view, ownership filters |
+| **My NOVA** | Dashboard with AI standup rituals, conversational chat, task prioritisation, team workload view |
+| **Service Desk** | Dashboard KPIs, Kanban with Jira drag-and-drop transitions, calendar view, ownership filters |
 | **Onboarding** | Ticket automation matrix, bulk Jira ticket creation, milestone calendar |
-| **Delivery** | Pipeline tracker with milestones (30-day model), xlsx/SharePoint sync |
+| **Delivery** | Pipeline tracker with milestones, linked tickets, CRM autocomplete, xlsx/SharePoint sync |
 | **CRM** | Dynamics 365 account management with RAG status reviews |
-| **Admin** | Users, teams, roles, permissions, integrations, milestones, onboarding config, feedback |
+| **Admin** | Users, teams, roles, permissions, audit log, integrations, milestones, onboarding config, feedback |
+| **Notifications** | Bell icon with alerts for SLA breaches, overdue milestones, upcoming deliveries |
 
 ## Integrations
 
@@ -59,8 +60,8 @@ On first load, you'll be prompted to create an admin account.
 
 Integration credentials are configured through the UI:
 
-- **My Settings** -- Personal integrations (Jira, MS365, Monday.com), AI key override
-- **Admin > Integrations** -- Global integrations (D365, SSO, Jira service account)
+- **My Settings** -- Personal integrations (Jira, MS365, Monday.com), Jira OAuth, AI key override
+- **Admin > Integrations** -- Global integrations (D365, SSO, Jira service account, Jira OAuth app)
 - **Admin > AI Keys** -- Global OpenAI API key
 
 ### Environment Variables
@@ -78,7 +79,7 @@ Integration credentials are configured through the UI:
 src/
   client/
     App.tsx                   # Root component, area routing, auth gate
-    components/               # 30+ React components
+    components/               # 35+ React components
     hooks/                    # useTasks, useAuth, useTheme, useIntegrations
     utils/                    # Task helpers, formatters
   server/
@@ -87,10 +88,12 @@ src/
     db/
       schema.ts               # DDL, migrations, indexes, seed data
       queries.ts              # Query classes (Tasks, Rituals, Settings, Delivery, CRM, Users, Feedback)
+      audit.ts                # Audit log queries
+      notifications.ts        # Notification queries
     routes/
-      auth.ts                 # Login, register, SSO (Entra ID)
-      tasks.ts                # Task CRUD, stats, service desk search
-      delivery.ts             # Delivery pipeline, xlsx import, SharePoint sync
+      auth.ts                 # Login, register, SSO (Entra ID), Jira OAuth 3LO
+      tasks.ts                # Task CRUD, stats, service desk search, SD dashboard
+      delivery.ts             # Delivery pipeline, xlsx import, SharePoint sync, linked tickets
       dynamics365.ts           # D365 CRM sync, purge & re-sync
       milestones.ts           # Delivery milestone management
       onboarding.ts           # Jira ticket orchestration
@@ -99,6 +102,10 @@ src/
       settings.ts             # User and global settings
       admin.ts                # User/team/role management
       crm.ts                  # CRM customers + reviews
+      team.ts                 # Team workload aggregation
+      notifications.ts        # Notification CRUD + check
+      chat.ts                 # Conversational AI chat
+      audit.ts                # Activity audit log
       standups.ts             # AI standup rituals
       actions.ts              # AI next-action suggestions
     services/
@@ -108,8 +115,11 @@ src/
       integrations.ts         # Integration definitions + MCP config
       ai-actions.ts           # OpenAI task analysis
       ai-standup.ts           # OpenAI standup generation
-      jira-client.ts          # Direct Jira REST v3 (onboarding automation)
+      jira-client.ts          # Direct Jira REST v3 (onboarding automation, OAuth bearer)
+      jira-oauth.ts           # Jira OAuth 3LO service (PKCE)
       entra-sso.ts            # Entra ID SSO auth flow
+      chat-service.ts         # Conversational AI with context-aware prompts
+      notification-engine.ts  # Notification generation (SLA, milestones, deliveries)
 deploy/
   deploy.ps1                  # Git pull + build + restart service
   install-service.ps1         # NSSM Windows Service setup
@@ -144,6 +154,8 @@ Uses `sql.js` (SQLite compiled to WASM). The database file `daypilot.db` is stor
 | `onboarding_capability_items` | Capability sub-items |
 | `onboarding_ticket_groups` | Jira ticket groupings |
 | `onboarding_runs` | Ticket creation run history |
+| `audit_log` | Activity audit trail (entity, action, user, changes) |
+| `notifications` | User notifications (SLA breach, overdue, upcoming) |
 
 Schema migrations run automatically on startup via `ALTER TABLE` wrapped in try/catch.
 

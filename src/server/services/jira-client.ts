@@ -10,6 +10,11 @@ export interface JiraClientConfig {
   apiToken: string;  // API token from id.atlassian.com
 }
 
+export interface JiraOAuthClientConfig {
+  cloudId: string;       // Atlassian cloud ID
+  accessToken: string;   // OAuth Bearer token
+}
+
 export class JiraApiError extends Error {
   constructor(
     public statusCode: number,
@@ -106,9 +111,16 @@ export class JiraRestClient {
   private authHeader: string;
   private baseUrl: string;
 
-  constructor(config: JiraClientConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/+$/, '');
-    this.authHeader = 'Basic ' + Buffer.from(`${config.email}:${config.apiToken}`).toString('base64');
+  constructor(config: JiraClientConfig | JiraOAuthClientConfig) {
+    if ('cloudId' in config) {
+      // OAuth 3LO — use Atlassian API gateway
+      this.baseUrl = `https://api.atlassian.com/ex/jira/${config.cloudId}`;
+      this.authHeader = `Bearer ${config.accessToken}`;
+    } else {
+      // Basic auth (email + API token)
+      this.baseUrl = config.baseUrl.replace(/\/+$/, '');
+      this.authHeader = 'Basic ' + Buffer.from(`${config.email}:${config.apiToken}`).toString('base64');
+    }
   }
 
   private async request<T>(

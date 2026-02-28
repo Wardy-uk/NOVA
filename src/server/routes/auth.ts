@@ -6,6 +6,8 @@ type UserQueries = FileUserQueries;
 import { authMiddleware, type AuthPayload } from '../middleware/auth.js';
 import type { EntraSsoService } from '../services/entra-sso.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
+import type { JiraOAuthService } from '../services/jira-oauth.js';
+import type { UserSettingsQueries } from '../db/queries.js';
 
 function signToken(user: { id: number; username: string; role: string }, secret: string): string {
   return jwt.sign({ id: user.id, username: user.username, role: user.role }, secret, { expiresIn: '7d' });
@@ -44,6 +46,8 @@ export function createAuthRoutes(
   jwtSecret: string,
   ssoService: EntraSsoService,
   settingsQueries: FileSettingsQueries,
+  jiraOAuthService?: JiraOAuthService,
+  userSettingsQueries?: UserSettingsQueries,
 ): Router {
   const router = Router();
 
@@ -274,6 +278,80 @@ export function createAuthRoutes(
     }
 
     res.json({ ok: true, data: { roles, areaAccess } });
+  });
+
+  // ── Jira OAuth 3LO ──
+
+  // GET /api/auth/jira/status — check if OAuth is configured and user is connected
+  router.get('/jira/status', authMiddleware(jwtSecret), (req, res) => {
+    const userId = (req as any).user?.id as number;
+    const configured = jiraOAuthService?.isConfigured() ?? false;
+    let connected = false;
+    if (configured && userId && userSettingsQueries) {
+      connected = !!userSettingsQueries.get(userId, 'jira_access_token');
+    }
+    res.json({ ok: true, configured, connected });
+  });
+
+  // GET /api/auth/jira/login — initiate OAuth flow
+  router.get('/jira/login', authMiddleware(jwtSecret), (req, res) => {
+    const userId = (req as any).user?.id as number;
+    if (!jiraOAuthService?.isConfigured()) {
+      res.status(400).json({ ok: false, error: 'Jira OAuth not configured. Set client ID and secret in Admin > Integrations.' });
+      return;
+    }
+
+    const baseUrl = process.env.FRONTEND_URL ? `http://localhost:3001` : `${req.protocol}://${req.get('host')}`;
+    const redirectUri = `${baseUrl}/api/auth/jira/callback`;
+    const authUrl = jiraOAuthService.getAuthUrl(redirectUri, userId);
+    res.json({ ok: true, url: authUrl });
+  });
+
+  // GET /api/auth/jira/callback — handle Atlassian callback
+  router.get('/jira/callback', async (req, res) => {
+    const frontendUrl = process.env.FRONTEND_URL || '';
+    try {
+      const { code, state, error: oauthError } = req.query;
+
+      if (oauthError || !code || !state) {
+        res.redirect(`${frontendUrl}/?jira_error=${encodeURIComponent(String(oauthError || 'Missing code or state'))}`);
+        return;
+      }
+
+      if (!jiraOAuthService || !userSettingsQueries) {
+        res.redirect(`${frontendUrl}/?jira_error=${encodeURIComponent('Jira OAuth not configured')}`);
+        return;
+      }
+
+      const baseUrl = process.env.FRONTEND_URL ? `http://localhost:3001` : `${req.protocol}://${req.get('host')}`;
+      const redirectUri = `${baseUrl}/api/auth/jira/callback`;
+
+      const result = await jiraOAuthService.exchangeCode(String(code), String(state), redirectUri);
+      const userId = result.userId;
+
+      // Store tokens in user_settings
+      userSettingsQueries.set(userId, 'jira_access_token', result.accessToken);
+      userSettingsQueries.set(userId, 'jira_refresh_token', result.refreshToken);
+      userSettingsQueries.set(userId, 'jira_cloud_id', result.cloudId);
+      userSettingsQueries.set(userId, 'jira_site_url', result.siteUrl);
+
+      res.redirect(`${frontendUrl}/#jira_connected=true`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Jira OAuth failed';
+      res.redirect(`${frontendUrl}/?jira_error=${encodeURIComponent(msg)}`);
+    }
+  });
+
+  // DELETE /api/auth/jira/disconnect — remove stored tokens
+  router.delete('/jira/disconnect', authMiddleware(jwtSecret), (req, res) => {
+    const userId = (req as any).user?.id as number;
+    if (userId && userSettingsQueries) {
+      userSettingsQueries.delete(userId, 'jira_access_token');
+      userSettingsQueries.delete(userId, 'jira_refresh_token');
+      userSettingsQueries.delete(userId, 'jira_cloud_id');
+      userSettingsQueries.delete(userId, 'jira_site_url');
+    }
+    res.json({ ok: true });
   });
 
   return router;

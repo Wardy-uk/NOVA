@@ -457,6 +457,39 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_milestone_tmpl_tg ON milestone_template_ticket_groups(template_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_milestone_tg_tmpl ON milestone_template_ticket_groups(ticket_group_id)`);
 
+  // Audit log — who changed what and when
+  database.run(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      changes_json TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)`);
+
+  // Notifications — alerts for SLA breaches, overdue milestones, etc.
+  database.run(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT,
+      entity_type TEXT,
+      entity_id TEXT,
+      read_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read_at)`);
+  database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_dedup ON notifications(user_id, type, entity_id) WHERE read_at IS NULL`);
+
   // Milestone sale type matrix: day offsets per sale type per template
   database.run(`
     CREATE TABLE IF NOT EXISTS milestone_sale_type_offsets (

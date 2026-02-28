@@ -175,12 +175,14 @@ function loadWorkbook(): Record<string, SheetResult> & { _lastModified: string }
   return Object.assign({}, sheets, { _lastModified: lastModified });
 }
 
-import type { DeliveryQueries, MilestoneQueries, TaskQueries } from '../db/queries.js';
+import type { DeliveryQueries, MilestoneQueries, TaskQueries, OnboardingRunQueries } from '../db/queries.js';
 import type { SharePointSync } from '../services/sharepoint-sync.js';
 import type { AreaAccessGuard } from '../middleware/auth.js';
 import { syncMilestoneToTask, syncDeliveryMilestonesToTasks } from './milestones.js';
+import type { AuditQueries } from '../db/audit.js';
+import type { FileSettingsQueries } from '../db/settings-store.js';
 
-export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync, milestoneQueries?: MilestoneQueries, taskQueries?: TaskQueries, requireAreaAccess?: AreaAccessGuard): Router {
+export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync, milestoneQueries?: MilestoneQueries, taskQueries?: TaskQueries, requireAreaAccess?: AreaAccessGuard, auditQueries?: AuditQueries, onboardingRunQueries?: OnboardingRunQueries, settingsQueries?: FileSettingsQueries): Router {
   const router = Router();
 
   // Pre-load on startup (non-blocking to avoid slowing boot)
@@ -324,6 +326,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
         }
       }
 
+      auditQueries?.log(userId ?? 0, 'delivery', String(id), 'create', { product, account, status });
       res.json({ ok: true, data: deliveryQueries.getById(id) });
     });
 
@@ -450,6 +453,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
       const updated = deliveryQueries.update(id, req.body);
       if (!updated) { res.status(404).json({ ok: false, error: 'Entry not found' }); return; }
+      auditQueries?.log((req as any).user?.id ?? 0, 'delivery', String(id), 'update', req.body);
       res.json({ ok: true, data: deliveryQueries.getById(id) });
     });
 
@@ -458,7 +462,48 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
       const deleted = deliveryQueries.delete(id);
       if (!deleted) { res.status(404).json({ ok: false, error: 'Entry not found' }); return; }
+      auditQueries?.log((req as any).user?.id ?? 0, 'delivery', String(id), 'delete');
       res.json({ ok: true });
+    });
+  }
+
+  // Related tickets for a delivery entry
+  if (deliveryQueries && onboardingRunQueries) {
+    router.get('/entries/:id/related-tickets', (req, res) => {
+      const id = parseInt(String(req.params.id), 10);
+      if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      const entry = deliveryQueries.getById(id);
+      if (!entry) { res.status(404).json({ ok: false, error: 'Entry not found' }); return; }
+
+      const jiraBaseUrl = settingsQueries?.get('jira_ob_url') ?? '';
+
+      // 1. Onboarding tickets from runs
+      let runs: Array<{ id: number; parent_key: string | null; child_keys: string[]; status: string; created_at: string }> = [];
+      if (entry.onboarding_id) {
+        const rawRuns = onboardingRunQueries.getAllByRef(entry.onboarding_id);
+        runs = rawRuns.map(r => ({
+          id: r.id,
+          parent_key: r.parent_key,
+          child_keys: r.child_keys ? JSON.parse(r.child_keys) : [],
+          status: r.status,
+          created_at: r.created_at,
+        }));
+      }
+
+      // 2. Related SD tickets matched by account name
+      let relatedTasks: Array<{ id: string; source_id: string; title: string; status: string; source_url: string | null }> = [];
+      if (entry.account && taskQueries) {
+        const matched = taskQueries.searchByTitle(entry.account, 'jira', 20);
+        relatedTasks = matched.map(t => ({
+          id: t.id,
+          source_id: t.source_id ?? '',
+          title: t.title,
+          status: t.status,
+          source_url: t.source_url ?? null,
+        }));
+      }
+
+      res.json({ ok: true, data: { runs, relatedTasks, jiraBaseUrl } });
     });
   }
 

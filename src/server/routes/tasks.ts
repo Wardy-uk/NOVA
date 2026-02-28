@@ -184,6 +184,72 @@ export function createTaskRoutes(
     }
   });
 
+  // GET /api/tasks/service-desk/dashboard — aggregated dashboard KPIs
+  router.get('/service-desk/dashboard', async (_req, res) => {
+    try {
+      const tickets = await aggregator.fetchServiceDeskTickets('all');
+      const now = new Date();
+
+      let slaBreached = 0;
+      let overdueUpdates = 0;
+      const byStatus: Record<string, number> = {};
+      const byPriority: Record<string, number> = {};
+      const byAssignee: Record<string, number> = {};
+      const customers = new Set<string>();
+      let totalAgeDays = 0;
+
+      for (const t of tickets) {
+        const issue = (t.raw_data ?? {}) as Record<string, unknown>;
+        const result = evaluateAttention(issue, now);
+        if (result.reasons.includes('sla_breached')) slaBreached++;
+        if (result.reasons.includes('overdue_update')) overdueUpdates++;
+
+        const status = t.status ?? 'unknown';
+        byStatus[status] = (byStatus[status] ?? 0) + 1;
+
+        const prio = t.priority ?? 50;
+        const prioLabel = prio >= 80 ? 'High' : prio >= 50 ? 'Medium' : 'Low';
+        byPriority[prioLabel] = (byPriority[prioLabel] ?? 0) + 1;
+
+        // Extract assignee from raw_data
+        const fields = (issue.fields as Record<string, unknown>) ?? issue;
+        const assigneeObj = fields.assignee as Record<string, unknown> | undefined;
+        const assigneeName = (assigneeObj?.displayName as string) ?? (assigneeObj?.name as string) ?? 'Unassigned';
+        byAssignee[assigneeName] = (byAssignee[assigneeName] ?? 0) + 1;
+
+        // Extract customer/reporter org
+        const reporter = fields.reporter as Record<string, unknown> | undefined;
+        const orgName = (reporter?.displayName as string) ?? (reporter?.emailAddress as string);
+        if (orgName) customers.add(orgName);
+
+        // Age calculation
+        const created = (fields.created as string) ?? (issue.created as string);
+        if (created) {
+          const ageMs = now.getTime() - new Date(created).getTime();
+          totalAgeDays += ageMs / (1000 * 60 * 60 * 24);
+        }
+      }
+
+      res.json({
+        ok: true,
+        data: {
+          totalOpen: tickets.length,
+          slaBreached,
+          overdueUpdates,
+          distinctCustomers: customers.size,
+          avgAgeDays: tickets.length > 0 ? Math.round(totalAgeDays / tickets.length) : 0,
+          byStatus,
+          byPriority,
+          byAssignee: Object.entries(byAssignee)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, count]) => ({ name, count })),
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Dashboard fetch failed' });
+    }
+  });
+
   // GET /api/tasks/stats — must be before /:id
   router.get('/stats', (req, res) => {
     const userId = (req as any).user?.id as number | undefined;

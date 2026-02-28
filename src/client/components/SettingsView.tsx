@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useIntegrations } from '../hooks/useIntegrations.js';
 import { useAuth } from '../hooks/useAuth.js';
 import { IntegrationCard } from './IntegrationCard.js';
@@ -5,7 +6,7 @@ import { PABridgeCard } from './PABridgeCard.js';
 import { AISettingsCard } from './AISettingsCard.js';
 
 // Global/service-account integrations managed in Admin (not user-facing)
-const ADMIN_ONLY_INTEGRATIONS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso']);
+const ADMIN_ONLY_INTEGRATIONS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth']);
 
 // Map integration IDs to the data source(s) they populate locally
 const INTEGRATION_SOURCES: Record<string, string[]> = {
@@ -67,6 +68,8 @@ export function SettingsView() {
         />
       ))}
 
+      <JiraOAuthCard />
+
       <h2 className="text-xs text-neutral-500 uppercase tracking-widest mb-4 mt-8">
         Power Automate Bridge
       </h2>
@@ -76,6 +79,73 @@ export function SettingsView() {
         AI Preferences
       </h2>
       <AISettingsCard />
+    </div>
+  );
+}
+
+function JiraOAuthCard() {
+  const [status, setStatus] = useState<{ configured: boolean; connected: boolean } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/auth/jira/status')
+      .then(r => r.json())
+      .then(json => { if (json.ok) setStatus(json); })
+      .catch(() => {});
+  }, []);
+
+  if (!status?.configured) return null;
+
+  const connect = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/jira/login');
+      const json = await res.json();
+      if (json.ok && json.url) {
+        window.location.href = json.url;
+      }
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  const disconnect = async () => {
+    await fetch('/api/auth/jira/disconnect', { method: 'DELETE' });
+    setStatus({ configured: true, connected: false });
+  };
+
+  return (
+    <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-neutral-200">Jira Account</h3>
+          <p className="text-[10px] text-neutral-500 mt-0.5">
+            {status.connected ? 'Your Jira account is connected via OAuth.' : 'Connect your Jira account for personal ticket access.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {status.connected ? (
+            <>
+              <span className="text-[10px] text-green-400 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400" /> Connected
+              </span>
+              <button
+                onClick={disconnect}
+                className="px-3 py-1.5 text-[10px] text-neutral-400 hover:text-red-400 transition-colors border border-[#3a424d] rounded"
+              >
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={connect}
+              disabled={loading}
+              className="px-3 py-1.5 text-xs bg-[#5ec1ca] text-[#272C33] font-semibold rounded hover:bg-[#4db0b9] transition-colors disabled:opacity-50"
+            >
+              {loading ? 'Connecting...' : 'Connect Jira'}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

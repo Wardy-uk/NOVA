@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { OnboardingConfigView } from './OnboardingConfigView.js';
+import { AuditLogView } from './AuditPanel.js';
 
 interface UserRow {
   id: number;
@@ -18,7 +19,7 @@ interface Team {
   description: string | null;
 }
 
-type Tab = 'users' | 'teams' | 'ai-keys' | 'integrations' | 'onboarding' | 'permissions' | 'feedback';
+type Tab = 'users' | 'teams' | 'ai-keys' | 'integrations' | 'onboarding' | 'permissions' | 'feedback' | 'audit-log';
 
 interface FeedbackItem {
   id: number;
@@ -166,7 +167,7 @@ export function AdminView() {
       const res = await fetch('/api/integrations');
       const json = await res.json();
       if (json.ok) {
-        const ADMIN_ONLY = new Set(['jira-onboarding', 'jira-servicedesk', 'sso']);
+        const ADMIN_ONLY = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth']);
         const withFields = (json.data as IntegrationConfig[]).filter(i => ADMIN_ONLY.has(i.id));
         setIntegrations(withFields);
         const vals: Record<string, Record<string, string>> = {};
@@ -643,7 +644,7 @@ export function AdminView() {
 
       {/* Tabs */}
       <div className="flex items-center gap-2">
-        {([['users', 'Users'], ['teams', 'Teams'], ['onboarding', 'Onboarding'], ['ai-keys', 'AI Keys'], ['integrations', 'Integrations'], ['permissions', 'Permissions'], ['feedback', 'Feedback']] as const).map(([key, label]) => (
+        {([['users', 'Users'], ['teams', 'Teams'], ['onboarding', 'Onboarding'], ['ai-keys', 'AI Keys'], ['integrations', 'Integrations'], ['permissions', 'Permissions'], ['feedback', 'Feedback'], ['audit-log', 'Audit Log']] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => { setTab(key); clearMessages(); }}
@@ -1378,6 +1379,11 @@ export function AdminView() {
             </>
           )}
         </div>
+      )}
+
+      {/* Audit Log Tab */}
+      {tab === 'audit-log' && (
+        <AuditLogView />
       )}
     </div>
   );

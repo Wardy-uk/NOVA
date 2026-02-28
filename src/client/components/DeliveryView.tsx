@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '../hooks/useAuth.js';
 import { DeliveryDrawer } from './DeliveryDrawer.js';
 import { DeliveryKanban } from './DeliveryKanban.js';
 
@@ -82,6 +83,18 @@ function formatCurrency(value: number | null): string {
   return `£${value.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
+function getMonthRange(offset: number): [string, string] {
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+  return [first.toISOString().split('T')[0], last.toISOString().split('T')[0]];
+}
+
+function isInDateRange(dateStr: string | null, from: string, to: string): boolean {
+  if (!dateStr) return false;
+  return dateStr >= from && dateStr <= to;
+}
+
 function KpiCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="bg-[#2f353d] rounded-lg border border-[#3a424d] p-3 flex flex-col">
@@ -159,7 +172,12 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
   const [editingCell, setEditingCell] = useState<{ id: number; column: string } | null>(null);
   const [editValue, setEditValue] = useState('');
   const [novaOnly, setNovaOnly] = useState(false);
+  const [myOnly, setMyOnly] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
+  const [dateFilter, setDateFilter] = useState<'all' | 'this-month' | 'next-month' | 'custom'>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const auth = useAuth();
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -516,6 +534,13 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
   const dbAccountsForTab = new Set(
     dbEntries.filter((e) => e.product === activeTab).map((e) => e.account)
   );
+  const myName = (auth.user?.display_name || auth.user?.username || '').toLowerCase();
+  const effectiveDateRange: [string, string] | null = (() => {
+    if (dateFilter === 'all') return null;
+    if (dateFilter === 'this-month') return getMonthRange(0);
+    if (dateFilter === 'next-month') return getMonthRange(1);
+    return dateFrom && dateTo ? [dateFrom, dateTo] : null;
+  })();
   const filteredRows = currentSheet
     ? currentSheet.rows.filter((r) => {
         // Hide xlsx row if a DB entry exists for same product+account
@@ -524,6 +549,8 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
         if (novaOnly) return false;
         const rowStatus = (r.status || '').toLowerCase().trim();
         if (excludeStatuses.has(rowStatus)) return false;
+        if (myOnly && myName && !(r.onboarder ?? '').toLowerCase().includes(myName)) return false;
+        if (effectiveDateRange && !isInDateRange(r.goLiveDate, effectiveDateRange[0], effectiveDateRange[1]) && !isInDateRange(r.predictedDelivery, effectiveDateRange[0], effectiveDateRange[1])) return false;
         if (search) {
           const q = search.toLowerCase();
           return r.account.toLowerCase().includes(q) || (r.onboarder ?? '').toLowerCase().includes(q) || (r.notes ?? '').toLowerCase().includes(q);
@@ -537,6 +564,12 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
     if (e.product !== activeTab) return false;
     const s = (e.status || '').toLowerCase().trim();
     if (excludeStatuses.size > 0 && excludeStatuses.has(s)) return false;
+    if (myOnly && myName && !(e.onboarder ?? '').toLowerCase().includes(myName)) return false;
+    if (effectiveDateRange && !isInDateRange(e.go_live_date, effectiveDateRange[0], effectiveDateRange[1]) && !isInDateRange(e.predicted_delivery, effectiveDateRange[0], effectiveDateRange[1])) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!e.account.toLowerCase().includes(q) && !(e.onboarder ?? '').toLowerCase().includes(q) && !(e.notes ?? '').toLowerCase().includes(q)) return false;
+    }
     return true;
   }) : [];
   // DB entries for products not in xlsx
@@ -729,6 +762,17 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
             })}
             <div className="ml-auto flex items-center gap-2">
               <button
+                onClick={() => setMyOnly(!myOnly)}
+                className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                  myOnly
+                    ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                    : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47]'
+                }`}
+                title="Show only deliveries assigned to me"
+              >
+                My Deliveries
+              </button>
+              <button
                 onClick={() => setNovaOnly(!novaOnly)}
                 className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
                   novaOnly
@@ -745,6 +789,50 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
                 className="bg-[#2f353d] text-neutral-300 text-[11px] rounded px-2.5 py-1 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-48 placeholder:text-neutral-600"
               />
             </div>
+          </div>
+        </div>
+        {/* Date filter */}
+        <div>
+          <div className="text-[10px] text-neutral-600 uppercase tracking-wider mb-1.5">Date Filter</div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(['all', 'this-month', 'next-month', 'custom'] as const).map((mode) => {
+              const label = mode === 'all' ? 'All Dates' : mode === 'this-month' ? 'This Month' : mode === 'next-month' ? 'Next Month' : 'Custom';
+              return (
+                <button
+                  key={mode}
+                  onClick={() => setDateFilter(mode)}
+                  className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                    dateFilter === mode
+                      ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                      : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47]'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+            {dateFilter === 'custom' && (
+              <div className="flex items-center gap-1.5 ml-2">
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="bg-[#2f353d] text-neutral-300 text-[10px] rounded px-2 py-0.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors"
+                />
+                <span className="text-neutral-600 text-[10px]">to</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="bg-[#2f353d] text-neutral-300 text-[10px] rounded px-2 py-0.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors"
+                />
+              </div>
+            )}
+            {effectiveDateRange && (
+              <span className="text-[10px] text-neutral-500 ml-2">
+                {effectiveDateRange[0]} &mdash; {effectiveDateRange[1]}
+              </span>
+            )}
           </div>
         </div>
       </div>

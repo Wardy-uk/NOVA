@@ -11,13 +11,13 @@ const TOUR_STEPS: TourStep[] = [
   {
     target: '[data-area="command"]',
     title: 'My NOVA',
-    description: 'Your command centre hub. Tabs: Dashboard (KPIs & charts), Ask NOVA (AI assistant for task suggestions), My Focus (priority tasks & starred deliveries), and Standup (AI morning briefing, mid-day replan, end-of-day review).',
+    description: 'Your command centre hub. Tabs: Dashboard (KPIs & charts), Ask NOVA (AI assistant), Chat (conversational AI), My Focus (priority tasks & starred deliveries), Standup (AI morning briefing), and Team Load (per-person workload overview).',
     position: 'bottom',
   },
   {
     target: '[data-area="servicedesk"]',
     title: 'Service Desk',
-    description: 'View and manage Jira service desk tickets. Tabs: Tickets (sortable list with ownership filters), Kanban (drag cards between columns to transition in Jira), and Calendar (monthly view with drag-to-reschedule).',
+    description: 'View and manage Jira service desk tickets. Tabs: Dashboard (KPI overview with SLA & assignee breakdowns), Tickets (sortable list with ownership filters), Kanban (drag cards between columns to transition in Jira), and Calendar (monthly view with drag-to-reschedule).',
     position: 'bottom',
   },
   {
@@ -35,7 +35,7 @@ const TOUR_STEPS: TourStep[] = [
   {
     target: '[data-tour="user-menu"]',
     title: 'Settings & Admin',
-    description: 'My Settings for personal integrations and AI key. Admin panel for users, teams, roles, permissions, and onboarding config. Plus the Help guide and Feedback form.',
+    description: 'My Settings for personal integrations, Jira OAuth, and AI key. Admin panel for users, teams, roles, permissions, audit log, and onboarding config. The notification bell shows alerts for overdue milestones and SLA breaches. Plus the Help guide and Feedback form.',
     position: 'left',
   },
 ];
