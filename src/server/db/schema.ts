@@ -442,8 +442,6 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_milestones_status ON delivery_milestones(status)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_milestones_target ON delivery_milestones(target_date)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_milestone_templates_active ON milestone_templates(active, sort_order)`);
-  database.run(`CREATE INDEX IF NOT EXISTS idx_milestone_tmpl_tg ON milestone_template_ticket_groups(template_id)`);
-  database.run(`CREATE INDEX IF NOT EXISTS idx_milestone_tg_tmpl ON milestone_template_ticket_groups(ticket_group_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_milestones_workflow ON delivery_milestones(workflow_task_created, status)`);
 
   // Milestone-to-ticket-group linking: which ticket groups trigger at which milestone stage
@@ -456,6 +454,8 @@ export function initializeSchema(database: Database): void {
       FOREIGN KEY (ticket_group_id) REFERENCES onboarding_ticket_groups(id) ON DELETE CASCADE
     )
   `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_milestone_tmpl_tg ON milestone_template_ticket_groups(template_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_milestone_tg_tmpl ON milestone_template_ticket_groups(ticket_group_id)`);
 
   // Milestone sale type matrix: day offsets per sale type per template
   database.run(`
