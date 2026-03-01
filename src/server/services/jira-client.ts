@@ -252,6 +252,22 @@ export class JiraRestClient {
     return this.request<Record<string, unknown>>('GET', `issue/${issueKey}/editmeta`);
   }
 
+  /** Get allowed options for a custom field via the field context API.
+   *  Works for fields not exposed in editmeta/transition screens. */
+  async getFieldOptions(fieldId: string): Promise<Array<{ value: string; id: string }>> {
+    try {
+      const ctxData = await this.request<Record<string, unknown>>('GET', `field/${fieldId}/context`);
+      const contexts = (ctxData as any)?.values as Array<{ id: string }> | undefined;
+      if (!contexts || contexts.length === 0) return [];
+      const optData = await this.request<Record<string, unknown>>(
+        'GET', `field/${fieldId}/context/${contexts[0].id}/option`
+      );
+      return ((optData as any)?.values as Array<{ value: string; id: string }>) ?? [];
+    } catch {
+      return [];
+    }
+  }
+
   /** Get available transitions with their field screens (allowedValues for each transition) */
   async getTransitionsWithFields(issueKey: string): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>(

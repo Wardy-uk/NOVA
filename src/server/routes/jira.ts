@@ -273,6 +273,22 @@ export function createJiraRoutes(
           } catch (editErr) {
             console.warn(`[Jira] editmeta for ${key} failed:`, editErr instanceof Error ? editErr.message : editErr);
           }
+
+          // 3. Direct field context API — fallback for option fields not found above
+          for (const optField of OPTION_FIELDS) {
+            if (fieldOptions[optField]) continue; // already have options
+            try {
+              const opts = await restClient.getFieldOptions(optField);
+              if (opts.length > 0) {
+                fieldOptions[optField] = opts.map((v) => ({ value: v.value, id: v.id }));
+                console.log(`[Jira] field context for ${optField}: ${opts.length} options`);
+              }
+            } catch (fieldErr) {
+              console.warn(`[Jira] field context for ${optField} failed:`, fieldErr instanceof Error ? fieldErr.message : fieldErr);
+            }
+          }
+
+          console.log(`[Jira] final fieldOptions for ${key}: ${JSON.stringify(Object.keys(fieldOptions))}`);
         }
       } catch (outerErr) {
         console.warn(`[Jira] field options for ${key} failed:`, outerErr instanceof Error ? outerErr.message : outerErr);
