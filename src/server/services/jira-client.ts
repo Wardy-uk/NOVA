@@ -240,11 +240,28 @@ export class JiraRestClient {
     await this.request<void>('PUT', `issue/${issueKey}`, { fields });
   }
 
-  /** Transition an issue to a new status */
-  async transitionIssue(issueKey: string, transitionId: string): Promise<void> {
-    await this.request<void>('POST', `issue/${issueKey}/transitions`, {
+  /** Transition an issue to a new status, optionally including fields and comment
+   *  in the same request (required by transition validators). */
+  async transitionIssue(
+    issueKey: string,
+    transitionId: string,
+    options?: {
+      fields?: Record<string, unknown>;
+      comment?: { body: object; visibility?: { type: string; value: string } };
+    }
+  ): Promise<void> {
+    const payload: Record<string, unknown> = {
       transition: { id: transitionId },
-    });
+    };
+    if (options?.fields && Object.keys(options.fields).length > 0) {
+      payload.fields = options.fields;
+    }
+    if (options?.comment) {
+      payload.update = {
+        comment: [{ add: options.comment }],
+      };
+    }
+    await this.request<void>('POST', `issue/${issueKey}/transitions`, payload);
   }
 
   /** Get editable field metadata for an issue (allowed values etc.) */

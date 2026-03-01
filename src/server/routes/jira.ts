@@ -318,60 +318,80 @@ export function createJiraRoutes(
     const results: Record<string, unknown> = {};
 
     try {
-      // 1. Update fields — prefer REST, fall back to MCP
-      if (fields && Object.keys(fields).length > 0) {
-        if (restClient) {
-          const formatted = formatFieldsForRest(fields);
-          console.log(`[Jira] Updating fields on ${key} via REST:`, JSON.stringify(formatted));
-          await restClient.updateFields(key, formatted);
-          results.update = { ok: true };
-        } else {
-          const tools = mcpManager.getServerTools('jira');
-          const updateTool = pickTool(tools, 'updateIssue');
-          if (updateTool) {
-            const result = await callWithFallback(mcpManager, updateTool, [
-              { issue_key: key, fields: JSON.stringify(fields) },
-            ]);
-            results.update = parseToolResult(result);
-          } else {
-            console.warn(`[Jira] No REST client or MCP update tool — fields not updated for ${key}`);
-          }
-        }
-      }
+      // When transitioning, bundle fields + comment INTO the transition request
+      // so Jira validators see everything in one atomic operation.
+      if (transition && restClient) {
+        const transId = String(transition);
+        const formatted = fields && Object.keys(fields).length > 0
+          ? formatFieldsForRest(fields)
+          : undefined;
 
-      // 2. Add comment — prefer REST (supports visibility), fall back to MCP (public only)
-      if (comment) {
-        if (restClient) {
+        // Build comment body for the transition request
+        let transitionComment: { body: object; visibility?: { type: string; value: string } } | undefined;
+        if (comment?.trim()) {
+          const commentBody = {
+            type: 'doc', version: 1,
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: comment.trim() }] }],
+          };
           const visibility = commentVisibility === 'internal'
             ? { type: 'role', value: getSettings?.()?.jira_internal_comment_role || 'Service Desk Team' }
             : undefined;
-          console.log(`[Jira] Adding ${commentVisibility ?? 'public'} comment on ${key} via REST`);
-          results.comment = await restClient.addComment(key, comment, visibility ? { visibility } : undefined);
-        } else {
-          const tools = mcpManager.getServerTools('jira');
-          const commentTool = pickTool(tools, 'addComment');
-          if (commentTool) {
-            if (commentVisibility === 'internal') {
-              console.warn(`[Jira] No REST client — internal comment on ${key} will be posted as public via MCP`);
-            }
-            const result = await callWithFallback(mcpManager, commentTool, [
-              { issue_key: key, body: comment },
-            ]);
-            results.comment = parseToolResult(result);
+          transitionComment = { body: commentBody, ...(visibility ? { visibility } : {}) };
+        }
+
+        console.log(`[Jira] Transitioning ${key} to ${transId} via REST (fields: ${formatted ? Object.keys(formatted).join(',') : 'none'}, comment: ${transitionComment ? commentVisibility : 'none'})`);
+        await restClient.transitionIssue(key, transId, {
+          fields: formatted,
+          comment: transitionComment,
+        });
+        results.transition = { ok: true };
+        if (formatted) results.update = { ok: true };
+        if (transitionComment) results.comment = { ok: true };
+      } else {
+        // No transition — update fields and comment separately
+
+        // 1. Update fields — prefer REST, fall back to MCP
+        if (fields && Object.keys(fields).length > 0) {
+          if (restClient) {
+            const formatted = formatFieldsForRest(fields);
+            console.log(`[Jira] Updating fields on ${key} via REST:`, JSON.stringify(formatted));
+            await restClient.updateFields(key, formatted);
+            results.update = { ok: true };
           } else {
-            console.warn(`[Jira] No REST client or MCP comment tool — comment not posted for ${key}`);
+            const tools = mcpManager.getServerTools('jira');
+            const updateTool = pickTool(tools, 'updateIssue');
+            if (updateTool) {
+              const result = await callWithFallback(mcpManager, updateTool, [
+                { issue_key: key, fields: JSON.stringify(fields) },
+              ]);
+              results.update = parseToolResult(result);
+            }
           }
         }
-      }
 
-      // 3. Transition — prefer REST, fall back to MCP
-      if (transition) {
-        const transId = String(transition);
-        if (restClient) {
-          console.log(`[Jira] Transitioning ${key} to ${transId} via REST`);
-          await restClient.transitionIssue(key, transId);
-          results.transition = { ok: true };
-        } else {
+        // 2. Add comment — prefer REST (supports visibility), fall back to MCP
+        if (comment) {
+          if (restClient) {
+            const visibility = commentVisibility === 'internal'
+              ? { type: 'role', value: getSettings?.()?.jira_internal_comment_role || 'Service Desk Team' }
+              : undefined;
+            console.log(`[Jira] Adding ${commentVisibility ?? 'public'} comment on ${key} via REST`);
+            results.comment = await restClient.addComment(key, comment, visibility ? { visibility } : undefined);
+          } else {
+            const tools = mcpManager.getServerTools('jira');
+            const commentTool = pickTool(tools, 'addComment');
+            if (commentTool) {
+              const result = await callWithFallback(mcpManager, commentTool, [
+                { issue_key: key, body: comment },
+              ]);
+              results.comment = parseToolResult(result);
+            }
+          }
+        }
+
+        // 3. Transition (no REST client — MCP fallback)
+        if (transition) {
+          const transId = String(transition);
           const tools = mcpManager.getServerTools('jira');
           const transitionTool = pickTool(tools, 'transitionIssue');
           if (transitionTool) {
