@@ -11,7 +11,7 @@ A single-pane-of-glass operational dashboard that aggregates tasks, tickets, ema
 | Database | sql.js (WASM SQLite, in-memory with file persistence) |
 | Integrations | MCP SDK (Jira, MS365, Monday.com), Dataverse API (D365) |
 | AI | OpenAI GPT-4o-mini (standups, next-action suggestions, chat) |
-| Auth | JWT + bcrypt, optional Entra ID SSO, Jira OAuth 3LO |
+| Auth | JWT + bcrypt, optional Entra ID SSO, Jira OAuth 3LO, self-service password reset |
 
 ## Features
 
@@ -22,7 +22,7 @@ A single-pane-of-glass operational dashboard that aggregates tasks, tickets, ema
 | **Onboarding** | Ticket automation matrix, bulk Jira ticket creation, milestone calendar |
 | **Delivery** | Pipeline tracker with milestones, linked tickets, CRM autocomplete, xlsx/SharePoint sync |
 | **CRM** | Dynamics 365 account management with RAG status reviews |
-| **Admin** | Users, teams, roles, permissions, audit log, integrations, milestones, onboarding config, feedback |
+| **Admin** | Users (invite, bulk import), teams, roles, permissions, audit log, integrations, milestones, onboarding config, feedback |
 | **Notifications** | Bell icon with alerts for SLA breaches, overdue milestones, upcoming deliveries |
 
 ## Integrations
@@ -91,7 +91,7 @@ src/
       audit.ts                # Audit log queries
       notifications.ts        # Notification queries
     routes/
-      auth.ts                 # Login, register, SSO (Entra ID), Jira OAuth 3LO
+      auth.ts                 # Login, register, SSO (Entra ID), Jira OAuth 3LO, password reset
       tasks.ts                # Task CRUD, stats, service desk search, SD dashboard
       delivery.ts             # Delivery pipeline, xlsx import, SharePoint sync, linked tickets
       dynamics365.ts           # D365 CRM sync, purge & re-sync
@@ -100,7 +100,7 @@ src/
       onboarding-config.ts    # Onboarding matrix configuration
       feedback.ts             # User feedback with admin reply
       settings.ts             # User and global settings
-      admin.ts                # User/team/role management
+      admin.ts                # User/team/role management, invite, bulk import
       crm.ts                  # CRM customers + reviews
       team.ts                 # Team workload aggregation
       notifications.ts        # Notification CRUD + check
@@ -117,6 +117,8 @@ src/
       ai-standup.ts           # OpenAI standup generation
       jira-client.ts          # Direct Jira REST v3 (onboarding automation, OAuth bearer)
       jira-oauth.ts           # Jira OAuth 3LO service (PKCE)
+      email.ts                # Standalone email service (direct MX / optional SMTP relay)
+      email-templates.ts      # Branded HTML email templates (invite, password reset)
       entra-sso.ts            # Entra ID SSO auth flow
       chat-service.ts         # Conversational AI with context-aware prompts
       notification-engine.ts  # Notification generation (SLA, milestones, deliveries)

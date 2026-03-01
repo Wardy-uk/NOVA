@@ -9,7 +9,7 @@ N.O.V.A — TO DO
 
 === CURRENT STATUS (1 Mar 2026) ===
 
-Deployed at https://nova.nurtur.tech | v1.1.0 | Branch: nova-codex
+Deployed at https://nova.nurtur.tech | v1.1.6 | Branch: nova-codex
 IIS reverse proxy → Node.js (NSSM) on Windows Server VM
 
 6 areas: My NOVA, Service Desk, Onboarding, Delivery, CRM, Admin
@@ -27,8 +27,11 @@ Completed items: see NOVA_completed.txt
 
 === DONE (1 Mar 2026) ===
 
-- Invite user function — sends email invite via O365 (Admin > Users > Invite button)
+- Invite user function — sends email invite (Admin > Users > Invite button)
 - Import / mass add users — Excel/CSV upload in Admin > Users > Import Users
+- Standalone email service — direct MX delivery, no external SMTP required
+- Branded HTML email templates — dark theme matching N.O.V.A UI
+- Self-service password reset — forgot password link on login, 1h email token
 
 (moved to NOVA_completed.txt)
 

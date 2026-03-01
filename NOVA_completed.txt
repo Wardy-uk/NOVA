@@ -2,6 +2,23 @@ N.O.V.A — COMPLETED ITEMS
 ==========================
 (moved from NOVA_todo.txt)
 
+=== 1 Mar 2026 (session 3) ===
+
+[DONE] Invite user — Admin > Users per-row "Invite" button sends branded HTML email with
+    username, login URL, temp password (if bulk), and SSO note. Uses standalone EmailService.
+[DONE] Import / mass add users — Admin > Users "Import Users" button opens modal with
+    xlsx/csv file picker, client-side parsing (fuzzy column matching), preview table, optional
+    "send invites" checkbox. Calls POST /api/admin/users/bulk. Shows created/skipped/invited.
+[DONE] Standalone email service — services/email.ts uses nodemailer with direct MX delivery
+    (dns.resolveMx → connect to recipient's mail server on port 25). No external SMTP provider
+    needed. Optional relay mode if smtp_host is configured. Integration card in Admin > Email.
+[DONE] Branded HTML email templates — services/email-templates.ts with wrap(), button(),
+    inviteHtml(), passwordResetHtml(). Dark theme (#1e2228 bg, #2f353d card, #5ec1ca accent).
+[DONE] Self-service password reset — POST /api/auth/forgot-password (email lookup, 1h token,
+    branded reset email), POST /api/auth/reset-password (token validation, bcrypt hash).
+    LoginView: "Forgot password?" link, email input form, reset form from ?reset_token= URL.
+    In-memory token store with automatic expiry pruning. Anti-enumeration (always returns ok).
+
 === 1 Mar 2026 (session 2) ===
 
 [DONE] Triage: Credential rules — confirmed already implemented correctly. Per-user OAuth for

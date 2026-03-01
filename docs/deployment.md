@@ -479,6 +479,28 @@ If you're running behind a reverse proxy with a different public URL than `local
 - If a local user already exists with the same email, the account is linked to Entra on first SSO login. The user can then only sign in via Microsoft.
 - SSO-only users (no password hash) cannot use the local username/password login form.
 
+### Email (Invites & Password Reset)
+
+NOVA includes a built-in email service for sending user invite emails and self-service password reset links. Configure it in **Admin > Integrations > Email**.
+
+**Minimum setup:** Set a **From Address** (e.g. `noreply@nurtur.tech`). The service sends emails directly to the recipient's mail server by resolving MX DNS records — no external SMTP provider is needed.
+
+**Optional SMTP relay:** If your network blocks outbound port 25, or you prefer routing through a relay, configure the SMTP Host, Port, Username, and Password fields.
+
+**Password reset flow:**
+1. User clicks "Forgot password?" on the login page
+2. Enters their email address → server sends a reset link (valid for 1 hour)
+3. User clicks the link → enters a new password
+4. Token is consumed, password is updated
+
+Reset tokens are stored in memory and cleared on server restart. The endpoint always returns success to prevent email enumeration.
+
+**Testing:** Use the "Send Test Email" button in Admin > Integrations > Email to verify delivery.
+
+**Port 25 note:** Direct MX delivery uses port 25 (SMTP). Some cloud providers (Azure, AWS) block outbound port 25 by default. If emails aren't arriving, either:
+- Configure an SMTP relay (e.g. Microsoft 365, SendGrid, Mailgun)
+- Request port 25 unblock from your cloud provider
+
 ### Custom Roles
 
 NOVA uses a custom role system for per-area access control. Roles are managed in **Admin > Permissions**:

@@ -110,10 +110,11 @@ const SECTIONS: Section[] = [
     title: 'Admin',
     content: [
       'The Admin page is accessible to admin users only, via the user menu in the top-right corner.',
-      'Users tab — view all registered users, change roles (admin/editor/viewer), assign users to teams, reset passwords, and delete accounts.',
+      'Users tab — view all registered users, change roles (admin/editor/viewer), assign users to teams, reset passwords, delete accounts, and send invite emails. The "Invite" button next to each user sends a branded email with their login details and sign-in link.',
+      'Import Users — click "Import Users" in the Users tab to bulk-create accounts from an Excel (.xlsx) or CSV file. Upload the file, preview parsed users (username, display name, email, role), optionally send invite emails, then import. Duplicate usernames are skipped.',
       'Teams tab — create and manage teams. Assign users to teams for future team-scoped features.',
       'AI Keys tab — manage the global OpenAI API key used by all users. Individual users can set a personal API key override in My Settings > AI Preferences, which takes priority over the global key.',
-      'Integrations tab — configure global/service-account integrations: Jira (Onboarding) service account for automated ticket creation, Entra ID SSO for Microsoft single sign-on, and Jira OAuth app credentials for personal Jira connections. Personal integrations (Jira, M365, Monday, D365) are managed by each user in My Settings.',
+      'Integrations tab — configure global/service-account integrations: Jira (Onboarding) service account for automated ticket creation, Entra ID SSO for Microsoft single sign-on, Jira OAuth app credentials for personal Jira connections, and Email (built-in SMTP for invites and password resets). Personal integrations (Jira, M365, Monday, D365) are managed by each user in My Settings.',
       'Milestones tab — configure delivery milestone templates (day offsets, checklists) used when onboarding new customers.',
       'Onboarding tab — manage the onboarding matrix, sale types, ticket groups, capabilities, and items for Jira ticket automation.',
       'Permissions tab — create custom roles with per-area access levels (hidden/view/edit) for My NOVA, Service Desk, Onboarding, and Account Management.',
@@ -203,6 +204,25 @@ const SECTIONS: Section[] = [
       'User Connection — once configured by the admin, each user sees a "Jira Account" card in My Settings. Click "Connect Jira" to sign in with your Atlassian account. After authorising, your Jira account is linked.',
       'The OAuth connection uses PKCE (Proof Key for Code Exchange) for security. Tokens are refreshed automatically when they expire.',
       'Basic auth (email + API token) continues to work as a fallback. Users who prefer API tokens can keep using the existing Jira integration card.',
+    ],
+  },
+  {
+    title: 'Password Reset',
+    content: [
+      'Self-service password reset is available on the login page. Click "Forgot password?" to enter your email address. A reset link is sent to your inbox (valid for 1 hour).',
+      'The reset email contains a branded link that takes you directly to the password reset form. Enter a new password (min 6 characters) and confirm it to complete the reset.',
+      'For security, the "Forgot password" form always shows a success message regardless of whether the email exists. This prevents attackers from discovering which emails are registered.',
+      'Password reset requires the Email integration to be configured in Admin > Integrations > Email. At minimum, a From address must be set. The built-in email service sends directly to the recipient\'s mail server — no external SMTP provider is needed.',
+      'Admins can also reset any user\'s password manually from Admin > Users using the Reset Password button.',
+    ],
+  },
+  {
+    title: 'Email Service',
+    content: [
+      'N.O.V.A includes a built-in email service for sending invite emails and password reset links. Configure it in Admin > Integrations > Email.',
+      'The only required field is "From Address" (e.g. noreply@nurtur.tech). Emails are sent directly to the recipient\'s mail server by resolving MX DNS records — no external SMTP provider or Microsoft 365 is needed.',
+      'Optionally, configure an SMTP relay (host, port, username, password) if your network requires outbound email to go through a specific server.',
+      'Use the "Send Test Email" button in Admin > Integrations > Email to verify your configuration is working.',
     ],
   },
   {
