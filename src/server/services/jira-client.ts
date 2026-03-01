@@ -216,6 +216,25 @@ export class JiraRestClient {
     );
   }
 
+  /** Add a comment with optional visibility (internal notes for JSM) */
+  async addComment(
+    issueKey: string,
+    bodyText: string,
+    options?: { visibility?: { type: string; value: string } }
+  ): Promise<unknown> {
+    const payload: Record<string, unknown> = {
+      body: {
+        type: 'doc',
+        version: 1,
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: bodyText }] }],
+      },
+    };
+    if (options?.visibility) {
+      payload.visibility = options.visibility;
+    }
+    return this.request<unknown>('POST', `issue/${issueKey}/comment`, payload);
+  }
+
   /** Get issue link types available on the instance */
   async getLinkTypes(): Promise<{ issueLinkTypes: Array<{ id: string; name: string; inward: string; outward: string }> }> {
     return this.request<{ issueLinkTypes: Array<{ id: string; name: string; inward: string; outward: string }> }>(

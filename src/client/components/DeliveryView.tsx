@@ -54,6 +54,7 @@ interface DbEntry {
   incremental: number | null;
   licence_fee: number | null;
   sale_type: string | null;
+  crm_customer_id: number | null;
   is_starred: number;
   star_scope: 'me' | 'all';
   starred_by: number | null;
@@ -186,6 +187,23 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
     deliveredThisMonth: { count: number; mrr: number };
     totalActive: number;
   } | null>(null);
+
+  // CRM customer lookup for account numbers
+  const [crmLookup, setCrmLookup] = useState<Record<number, string>>({});
+  useEffect(() => {
+    fetch('/api/crm/customers')
+      .then(r => r.json())
+      .then(json => {
+        if (json.ok) {
+          const map: Record<number, string> = {};
+          for (const c of json.data) {
+            if (c.account_number) map[c.id] = c.account_number;
+          }
+          setCrmLookup(map);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -915,7 +933,12 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
                     {'\u2605'}
                   </button>
                   <div className="min-w-0 flex-1">
-                    <div className="text-[11px] text-neutral-200 font-medium truncate">{entry.account}</div>
+                    <div className="text-[11px] text-neutral-200 font-medium truncate">
+                      {entry.account}
+                      {entry.crm_customer_id && crmLookup[entry.crm_customer_id] && (
+                        <span className="text-[9px] text-neutral-500 font-mono ml-1.5">{crmLookup[entry.crm_customer_id]}</span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       {entry.onboarding_id && (
                         <span className="text-[9px] text-[#5ec1ca] font-mono">{entry.onboarding_id}</span>
@@ -1058,6 +1081,9 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
                       <td className="px-3 py-2 text-[10px] text-[#5ec1ca] font-mono whitespace-nowrap">{entry.onboarding_id ?? '-'}</td>
                       <td className="px-3 py-2 text-neutral-200 font-medium whitespace-nowrap">
                         {editableCell('account', entry.account)}
+                        {entry.crm_customer_id && crmLookup[entry.crm_customer_id] && (
+                          <span className="ml-1 text-[9px] text-neutral-500 font-mono">{crmLookup[entry.crm_customer_id]}</span>
+                        )}
                         <span className="ml-1.5 text-[9px] text-[#5ec1ca] uppercase">nova</span>
                       </td>
                       <td className="px-3 py-2">{editableCell('status', entry.status)}</td>

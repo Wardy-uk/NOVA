@@ -404,6 +404,7 @@ export function initializeSchema(database: Database): void {
     ['delivery_milestones', 'workflow_tickets_created INTEGER DEFAULT 0'],
     ['delivery_milestones', 'jira_keys TEXT'],
     ['delivery_entries', 'crm_customer_id INTEGER'],
+    ['crm_customers', 'account_number TEXT'],
   ];
   // Data migration: consolidate 'user' role → 'viewer'
   try { database.run(`UPDATE users SET role = 'viewer' WHERE role = 'user'`); } catch { /* ignore */ }

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { TaskQueries } from '../db/queries.js';
 import type { McpClientManager } from '../services/mcp-client.js';
+import type { JiraRestClient } from '../services/jira-client.js';
 import { getLastJiraSearchText } from '../services/aggregator.js';
 
 const JIRA_TOOL_CANDIDATES = {
@@ -8,7 +9,7 @@ const JIRA_TOOL_CANDIDATES = {
   updateIssue: ['jira_update_issue', 'jira_update_issue_fields'],
   addComment: ['jira_add_comment', 'jira_create_comment'],
   listTransitions: ['jira_get_transitions', 'jira_list_transitions'],
-  transitionIssue: ['jira_transition_issue', 'jira_do_transition'],
+  transitionIssue: ['jira_transition_issue', 'jira_do_transition', 'jira_transition'],
   createIssue: ['jira_create_issue', 'jira_create'],
   searchIssues: ['jira_search', 'jira_search_issues', 'searchJiraIssuesUsingJql'],
   getProjects: ['jira_get_projects', 'getVisibleJiraProjects', 'getVisibleJiraProjectsList'],
@@ -45,6 +46,14 @@ async function callWithFallback(
   for (const args of argsList) {
     try {
       const result = await mcp.callTool('jira', toolName, args);
+      // MCP tools can return isError: true without throwing
+      const obj = result as { isError?: boolean; content?: Array<{ text?: string }> };
+      if (obj?.isError) {
+        const errText = obj.content?.[0]?.text ?? 'MCP tool returned error';
+        console.warn(`[Jira] ${toolName} returned isError with args ${JSON.stringify(args)}: ${errText}`);
+        lastError = new Error(errText);
+        continue; // try next arg variant
+      }
       return result;
     } catch (err) {
       lastError = err;
@@ -55,7 +64,9 @@ async function callWithFallback(
 
 export function createJiraRoutes(
   mcpManager: McpClientManager,
-  taskQueries: TaskQueries
+  taskQueries: TaskQueries,
+  getJiraClient?: () => JiraRestClient | null,
+  getSettings?: () => Record<string, string>
 ): Router {
   const router = Router();
 
@@ -140,9 +151,10 @@ export function createJiraRoutes(
     const commentTool = pickTool(tools, 'addComment');
     const transitionTool = pickTool(tools, 'transitionIssue');
 
-    const { fields, comment, transition } = req.body as {
+    const { fields, comment, commentVisibility, transition } = req.body as {
       fields?: Record<string, unknown>;
       comment?: string;
+      commentVisibility?: 'internal' | 'public';
       transition?: string;
     };
 
@@ -168,15 +180,45 @@ export function createJiraRoutes(
         results.update = parseToolResult(result);
       }
 
-      if (comment && commentTool) {
-        const result = await callWithFallback(mcpManager, commentTool, [
-          { issue_key: key, body: comment },
-          { issueKey: key, body: comment },
-          { key, body: comment },
-          { issue_key: key, comment },
-          { issueKey: key, comment },
-        ]);
-        results.comment = parseToolResult(result);
+      if (comment) {
+        // Use direct REST API for internal comments (visibility support)
+        // or when no MCP comment tool is available
+        if (commentVisibility === 'internal' && getJiraClient) {
+          const client = getJiraClient();
+          if (client) {
+            const role = getSettings?.()?.jira_internal_comment_role || 'Service Desk Team';
+            const result = await client.addComment(key, comment, {
+              visibility: { type: 'role', value: role },
+            });
+            results.comment = result;
+          } else {
+            // Fall back to MCP without visibility
+            console.warn('[Jira] No REST client available for internal comment, using MCP (no visibility)');
+            if (commentTool) {
+              const result = await callWithFallback(mcpManager, commentTool, [
+                { issue_key: key, body: comment },
+                { issueKey: key, body: comment },
+              ]);
+              results.comment = parseToolResult(result);
+            }
+          }
+        } else if (commentTool) {
+          // Public comment via MCP
+          const result = await callWithFallback(mcpManager, commentTool, [
+            { issue_key: key, body: comment },
+            { issueKey: key, body: comment },
+            { key, body: comment },
+            { issue_key: key, comment },
+            { issueKey: key, comment },
+          ]);
+          results.comment = parseToolResult(result);
+        } else if (getJiraClient) {
+          // No MCP comment tool — use REST API
+          const client = getJiraClient();
+          if (client) {
+            results.comment = await client.addComment(key, comment);
+          }
+        }
       }
 
       if (transition) {
@@ -188,6 +230,7 @@ export function createJiraRoutes(
           });
           return;
         }
+        console.log(`[Jira] Transitioning ${key} with tool=${transitionTool}, transition_id=${transition}`);
         const result = await callWithFallback(mcpManager, transitionTool, [
           { issue_key: key, transition_id: transition },
           { issueKey: key, transitionId: transition },
@@ -195,7 +238,9 @@ export function createJiraRoutes(
           { issueKey: key, transition: transition },
           { issueIdOrKey: key, transitionId: transition },
         ]);
-        results.transition = parseToolResult(result);
+        const parsed = parseToolResult(result);
+        console.log(`[Jira] Transition result for ${key}:`, JSON.stringify(parsed).slice(0, 500));
+        results.transition = parsed;
       }
 
       res.json({ ok: true, data: results });

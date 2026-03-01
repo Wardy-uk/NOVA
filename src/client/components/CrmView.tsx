@@ -16,6 +16,7 @@ interface CrmCustomer {
   contract_start: string | null;
   contract_end: string | null;
   dynamics_id: string | null;
+  account_number: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -561,6 +562,9 @@ export function CrmView({ canWrite = false }: { canWrite?: boolean }) {
                             <span className="px-1.5 py-0.5 text-[8px] font-semibold uppercase rounded bg-blue-500/15 text-blue-400 border border-blue-500/20 flex-shrink-0">
                               D365
                             </span>
+                          )}
+                          {c.account_number && (
+                            <span className="text-[10px] text-neutral-500 font-mono flex-shrink-0">{c.account_number}</span>
                           )}
                         </div>
                         <div className="text-[10px] text-neutral-500 truncate">

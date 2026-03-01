@@ -139,7 +139,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
   const [onboarderOpen, setOnboarderOpen] = useState(false);
 
   // CRM customer autocomplete for account field
-  const [customerList, setCustomerList] = useState<Array<{ id: number; name: string; company: string | null }>>([]);
+  const [customerList, setCustomerList] = useState<Array<{ id: number; name: string; company: string | null; account_number: string | null }>>([]);
   const [accountOpen, setAccountOpen] = useState(false);
   const [crmCustomerId, setCrmCustomerId] = useState<number | null>(null);
 
@@ -599,7 +599,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
               {accountOpen && form.account.trim() && (() => {
                 const q = form.account.toLowerCase();
                 const matches = customerList
-                  .filter(c => (c.name.toLowerCase().includes(q) || (c.company ?? '').toLowerCase().includes(q)) && c.name.toLowerCase() !== q)
+                  .filter(c => (c.name.toLowerCase().includes(q) || (c.company ?? '').toLowerCase().includes(q) || (c.account_number ?? '').toLowerCase().includes(q)) && c.name.toLowerCase() !== q)
                   .slice(0, 8);
                 if (matches.length === 0) return null;
                 return (
@@ -612,7 +612,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                         onClick={() => { setField('account', c.name); setAccountOpen(false); setCrmCustomerId(c.id); }}
                         className="w-full text-left px-3 py-1.5 text-xs text-neutral-200 hover:bg-[#5ec1ca]/20 transition-colors"
                       >
-                        {c.name}{c.company ? <span className="text-neutral-500 ml-1">({c.company})</span> : null}
+                        {c.name}{c.account_number ? <span className="text-neutral-500 font-mono ml-1">{c.account_number}</span> : null}{c.company ? <span className="text-neutral-500 ml-1">({c.company})</span> : null}
                       </button>
                     ))}
                   </div>

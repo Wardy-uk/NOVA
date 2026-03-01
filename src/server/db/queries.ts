@@ -716,6 +716,7 @@ export interface CrmCustomer {
   contract_start: string | null;
   contract_end: string | null;
   dynamics_id: string | null;
+  account_number: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -768,11 +769,11 @@ export class CrmQueries {
 
   createCustomer(c: Omit<CrmCustomer, 'id' | 'created_at' | 'updated_at'>): number {
     this.db.run(
-      `INSERT INTO crm_customers (name, company, sector, mrr, owner, rag_status, next_review_date, contract_start, contract_end, dynamics_id, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO crm_customers (name, company, sector, mrr, owner, rag_status, next_review_date, contract_start, contract_end, dynamics_id, account_number, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [c.name, c.company ?? null, c.sector ?? null, c.mrr ?? null, c.owner ?? null,
        c.rag_status ?? 'green', c.next_review_date ?? null, c.contract_start ?? null,
-       c.contract_end ?? null, c.dynamics_id ?? null, c.notes ?? null]
+       c.contract_end ?? null, c.dynamics_id ?? null, c.account_number ?? null, c.notes ?? null]
     );
     const result = this.db.exec('SELECT last_insert_rowid() as id');
     const id = (result[0]?.values[0]?.[0] as number) ?? 0;

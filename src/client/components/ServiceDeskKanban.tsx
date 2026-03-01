@@ -504,6 +504,7 @@ function TransitionModal({
   const [error, setError] = useState<string | null>(null);
   const [selectedTransition, setSelectedTransition] = useState<string | null>(null);
   const [comment, setComment] = useState('');
+  const [commentType, setCommentType] = useState<'internal' | 'public'>('internal');
   const [saving, setSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -596,7 +597,10 @@ function TransitionModal({
 
     try {
       const body: Record<string, unknown> = { transition: selectedTransition };
-      if (comment.trim()) body.comment = comment.trim();
+      if (comment.trim()) {
+        body.comment = comment.trim();
+        body.commentVisibility = commentType;
+      }
 
       const res = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}`, {
         method: 'PATCH',
@@ -681,9 +685,28 @@ function TransitionModal({
 
               {/* Comment */}
               <div>
-                <label className="block text-[11px] text-neutral-400 mb-1">
-                  Comment <span className="text-neutral-600">(optional)</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] text-neutral-400">
+                    Comment <span className="text-neutral-600">(optional)</span>
+                  </label>
+                  <div className="flex gap-1">
+                    {(['internal', 'public'] as const).map(type => (
+                      <button
+                        key={type}
+                        onClick={() => setCommentType(type)}
+                        className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                          commentType === type
+                            ? type === 'internal'
+                              ? 'bg-amber-500/20 text-amber-400 font-medium'
+                              : 'bg-green-500/20 text-green-400 font-medium'
+                            : 'text-neutral-600 hover:text-neutral-400'
+                        }`}
+                      >
+                        {type === 'internal' ? 'Internal' : 'Public'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <textarea
                   ref={textareaRef}
                   value={comment}

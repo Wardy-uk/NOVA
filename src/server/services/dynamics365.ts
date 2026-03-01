@@ -26,6 +26,7 @@ interface D365Config {
 interface D365Account {
   accountid: string;
   name: string | null;
+  accountnumber: string | null;
   revenue: number | null;
   telephone1: string | null;
   emailaddress1: string | null;
@@ -237,7 +238,7 @@ export class Dynamics365Service {
     d365Debug(`WhoAmI userId: ${userId}`);
 
     const result = await this.fetch<{ value: D365Account[] }>('accounts', {
-      $select: 'accountid,name,revenue,telephone1,emailaddress1,industrycode,statecode,statuscode,_ownerid_value,createdon,modifiedon',
+      $select: 'accountid,name,accountnumber,revenue,telephone1,emailaddress1,industrycode,statecode,statuscode,_ownerid_value,createdon,modifiedon',
       $orderby: 'name asc',
       $top: String(top),
       $filter: `statecode eq 0 and _ownerid_value eq '${userId}'`,
@@ -295,6 +296,7 @@ export class Dynamics365Service {
         company: accountName,
         mrr: acct.revenue ?? null,
         dynamics_id: acct.accountid,
+        account_number: acct.accountnumber ?? null,
       };
 
       if (existing) {

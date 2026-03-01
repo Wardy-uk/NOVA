@@ -263,7 +263,7 @@ async function main() {
   }));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
-  app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries));
+  app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries, buildJiraClient, () => settingsQueries.getAll()));
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
   const spSync = new SharePointSync(mcpManager, deliveryQueries, () => settingsQueries.getAll());
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess, auditQueries, onboardingRunQueries, settingsQueries));

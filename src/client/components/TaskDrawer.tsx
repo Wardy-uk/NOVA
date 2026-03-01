@@ -258,12 +258,14 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
     }
   };
 
+  const [pendingCommentVisibility, setPendingCommentVisibility] = useState<'internal' | 'public' | null>(null);
+
   const handleTransitionConfirm = () => {
     if (!transitionModal) return;
     setTransition(String(transitionModal.transition.id ?? transitionModal.transition.name ?? ''));
     if (transitionComment.trim()) {
-      const prefix = transitionCommentType === 'internal' ? '[Internal] ' : '';
-      setComment(prefix + transitionComment.trim());
+      setComment(transitionComment.trim());
+      setPendingCommentVisibility(transitionCommentType);
     }
     setTransitionModal(null);
     setTimeout(() => {
@@ -338,7 +340,10 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
 
       const body: Record<string, unknown> = {};
       if (Object.keys(fieldsPayload).length > 0) body.fields = fieldsPayload;
-      if (comment.trim()) body.comment = comment.trim();
+      if (comment.trim()) {
+        body.comment = comment.trim();
+        if (pendingCommentVisibility) body.commentVisibility = pendingCommentVisibility;
+      }
       if (transition) body.transition = transition;
 
       if (Object.keys(body).length === 0) {
@@ -356,6 +361,7 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
       setSuccess('Saved to Jira');
       setComment('');
       setTransition('');
+      setPendingCommentVisibility(null);
 
       // Refresh issue data + comments
       const refresh = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}`);
