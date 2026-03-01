@@ -1,16 +1,23 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import type { TeamQueries, UserSettingsQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { FileUserQueries } from '../db/user-store.js';
 type UserQueries = FileUserQueries;
 import { requireRole } from '../middleware/auth.js';
+import type { McpClientManager } from '../services/mcp-client.js';
+
+function generateTempPassword(): string {
+  return crypto.randomBytes(9).toString('base64url').slice(0, 12);
+}
 
 export function createAdminRoutes(
   userQueries: UserQueries,
   teamQueries: TeamQueries,
   userSettingsQueries: UserSettingsQueries,
   settingsQueries: SettingsQueries,
+  mcpManager?: McpClientManager,
 ): Router {
   const router = Router();
   router.use(requireRole('admin'));
@@ -136,6 +143,148 @@ export function createAdminRoutes(
 
     userQueries.delete(id);
     res.json({ ok: true });
+  });
+
+  // ---- Invite ----
+
+  /** Send invite email to an existing user via O365 send-mail */
+  router.post('/users/:id/invite', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const user = userQueries.getById(id);
+    if (!user) { res.status(404).json({ ok: false, error: 'User not found' }); return; }
+    if (!user.email) { res.status(400).json({ ok: false, error: 'User has no email address' }); return; }
+
+    if (!mcpManager) {
+      res.status(501).json({ ok: false, error: 'Email service not available (MCP not configured)' });
+      return;
+    }
+    const tools = mcpManager.getServerTools('msgraph');
+    if (!tools.includes('send-mail')) {
+      res.status(501).json({ ok: false, error: 'send-mail tool not available' });
+      return;
+    }
+
+    const ssoEnabled = settingsQueries.get('sso_enabled') === 'true';
+    const frontendUrl = (process.env.FRONTEND_URL || `https://${req.headers.host}`).replace(/\/+$/, '');
+
+    const body = [
+      `Hi ${user.display_name || user.username},`,
+      '',
+      `You've been invited to N.O.V.A (Nurtur Operational Virtual Assistant).`,
+      '',
+      `Your username is: ${user.username}`,
+      '',
+      ssoEnabled
+        ? `Sign in with your Microsoft account at: ${frontendUrl}`
+        : `Sign in at: ${frontendUrl}`,
+      '',
+      ssoEnabled
+        ? 'Click "Sign in with Microsoft" on the login page to get started.'
+        : 'Use the username above and the temporary password provided by your administrator.',
+      '',
+      'Regards,',
+      'N.O.V.A',
+    ].join('\n');
+
+    try {
+      await mcpManager.callTool('msgraph', 'send-mail', {
+        to: user.email,
+        subject: "You've been invited to N.O.V.A",
+        body,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to send invite' });
+    }
+  });
+
+  // ---- Bulk import ----
+
+  /** Bulk-create users from a JSON array */
+  router.post('/users/bulk', async (req, res) => {
+    const { users: incoming, sendInvites } = req.body as {
+      users: Array<{ username: string; display_name?: string; email?: string; role?: string }>;
+      sendInvites?: boolean;
+    };
+
+    if (!Array.isArray(incoming) || incoming.length === 0) {
+      res.status(400).json({ ok: false, error: 'users array is required' });
+      return;
+    }
+
+    // Resolve valid roles
+    const rawRoles = settingsQueries.get('custom_roles');
+    let customRoleIds: string[] = [];
+    try {
+      if (rawRoles) customRoleIds = (JSON.parse(rawRoles) as Array<{ id: string }>).map(r => r.id);
+    } catch { /* ignore */ }
+    const allValidRoles = ['admin', ...customRoleIds];
+    const defaultRole = customRoleIds.includes('viewer') ? 'viewer' : customRoleIds[0] || 'viewer';
+
+    const ssoEnabled = settingsQueries.get('sso_enabled') === 'true';
+    const frontendUrl = (process.env.FRONTEND_URL || `https://${req.headers.host}`).replace(/\/+$/, '');
+    const canSendMail = mcpManager && mcpManager.getServerTools('msgraph').includes('send-mail');
+
+    let created = 0;
+    let invited = 0;
+    const skipped: string[] = [];
+
+    for (const entry of incoming) {
+      if (!entry.username?.trim()) { skipped.push('(empty username)'); continue; }
+      const normalizedUsername = entry.username.trim().toLowerCase();
+
+      if (userQueries.getByUsername(normalizedUsername)) {
+        skipped.push(normalizedUsername);
+        continue;
+      }
+
+      const tempPassword = generateTempPassword();
+      const role = entry.role && allValidRoles.includes(entry.role) ? entry.role : defaultRole;
+      const hash = await bcrypt.hash(tempPassword, 10);
+
+      const userId = userQueries.create({
+        username: normalizedUsername,
+        display_name: entry.display_name?.trim() || normalizedUsername,
+        email: entry.email?.trim() || undefined,
+        password_hash: hash,
+        role,
+      });
+      created++;
+
+      // Send invite email if requested
+      if (sendInvites && canSendMail && entry.email?.trim()) {
+        try {
+          const body = [
+            `Hi ${entry.display_name?.trim() || normalizedUsername},`,
+            '',
+            `You've been invited to N.O.V.A (Nurtur Operational Virtual Assistant).`,
+            '',
+            `Your username is: ${normalizedUsername}`,
+            `Your temporary password is: ${tempPassword}`,
+            '',
+            ssoEnabled
+              ? `Sign in at: ${frontendUrl} — you can also use "Sign in with Microsoft".`
+              : `Sign in at: ${frontendUrl}`,
+            '',
+            'Please change your password after your first login.',
+            '',
+            'Regards,',
+            'N.O.V.A',
+          ].join('\n');
+
+          await mcpManager!.callTool('msgraph', 'send-mail', {
+            to: entry.email.trim(),
+            subject: "You've been invited to N.O.V.A",
+            body,
+          });
+          invited++;
+        } catch (err) {
+          console.error(`[Admin] Failed to send invite to ${entry.email}:`, err instanceof Error ? err.message : err);
+        }
+      }
+    }
+
+    res.json({ ok: true, data: { created, skipped, invited } });
   });
 
   // ---- Teams ----

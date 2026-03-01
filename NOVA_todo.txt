@@ -6,6 +6,7 @@ N.O.V.A — TO DO
 (empty)
 
 
+
 === CURRENT STATUS (1 Mar 2026) ===
 
 Deployed at https://nova.nurtur.tech | v1.1.0 | Branch: nova-codex
@@ -25,6 +26,9 @@ Completed items: see NOVA_completed.txt
 
 
 === DONE (1 Mar 2026) ===
+
+- Invite user function — sends email invite via O365 (Admin > Users > Invite button)
+- Import / mass add users — Excel/CSV upload in Admin > Users > Import Users
 
 (moved to NOVA_completed.txt)
 

@@ -271,7 +271,7 @@ async function main() {
   // app.use('/api/milestones', ...) is registered after buildOrchestrator
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/o365', createO365Routes(mcpManager));
-  app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
+  app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries, mcpManager));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries));
   app.use('/api/audit', createAuditRoutes(auditQueries));

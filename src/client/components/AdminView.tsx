@@ -134,6 +134,15 @@ export function AdminView() {
   const [feedbackFilter, setFeedbackFilter] = useState<string>('all');
   const [feedbackLoading, setFeedbackLoading] = useState(false);
 
+  // Invite state
+  const [invitingUserId, setInvitingUserId] = useState<number | null>(null);
+
+  // Import users state
+  const [showImportUsers, setShowImportUsers] = useState(false);
+  const [importPreview, setImportPreview] = useState<Array<{ username: string; display_name: string; email: string; role: string }>>([]);
+  const [importSendInvites, setImportSendInvites] = useState(true);
+  const [importLoading, setImportLoading] = useState(false);
+
   const clearMessages = () => { setError(null); setSuccess(null); };
 
   const fetchData = useCallback(async () => {
@@ -383,6 +392,85 @@ export function AdminView() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Create failed');
     }
+  };
+
+  const inviteUser = async (id: number) => {
+    clearMessages();
+    setInvitingUserId(id);
+    try {
+      const res = await fetch(`/api/admin/users/${id}/invite`, { method: 'POST' });
+      const json = await res.json();
+      if (json.ok) {
+        setSuccess('Invite email sent');
+      } else {
+        setError(json.error || 'Failed to send invite');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send invite');
+    }
+    setInvitingUserId(null);
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const XLSX = (await import('xlsx')).default;
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        const wb = XLSX.read(data, { type: 'array' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+        const parsed = rows.map((row) => {
+          const get = (keys: string[]) => {
+            for (const k of keys) {
+              const val = row[k] ?? row[k.toLowerCase()] ?? row[k.toUpperCase()];
+              if (val != null) return String(val).trim();
+            }
+            return '';
+          };
+          return {
+            username: get(['username', 'Username', 'user', 'User']),
+            display_name: get(['display_name', 'Display Name', 'name', 'Name', 'Full Name']),
+            email: get(['email', 'Email', 'Email Address', 'e-mail']),
+            role: get(['role', 'Role']) || 'viewer',
+          };
+        }).filter((r) => r.username);
+        setImportPreview(parsed);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to parse file');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const runBulkImport = async () => {
+    clearMessages();
+    setImportLoading(true);
+    try {
+      const res = await fetch('/api/admin/users/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users: importPreview, sendInvites: importSendInvites }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        const d = json.data as { created: number; skipped: string[]; invited: number };
+        let msg = `${d.created} user(s) created`;
+        if (d.skipped.length > 0) msg += `, ${d.skipped.length} skipped (duplicates)`;
+        if (d.invited > 0) msg += `, ${d.invited} invite(s) sent`;
+        setSuccess(msg);
+        setShowImportUsers(false);
+        setImportPreview([]);
+        fetchData();
+      } else {
+        setError(json.error || 'Import failed');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed');
+    }
+    setImportLoading(false);
   };
 
   const resetPassword = async (id: number, username: string) => {
@@ -662,13 +750,19 @@ export function AdminView() {
       {/* Users Tab */}
       {tab === 'users' && (
         <div className="space-y-4">
-          {/* Add User toggle + form */}
-          <div className="flex items-center">
+          {/* Add User / Import Users buttons */}
+          <div className="flex items-center gap-2">
             <button
               onClick={() => { setShowAddUser(true); setNewUser({ username: '', password: '', display_name: '', email: '', role: 'viewer' }); }}
               className="px-4 py-2 bg-[#5ec1ca] text-[#272C33] font-semibold rounded text-sm hover:bg-[#4db0b9] transition-colors"
             >
               + Add User
+            </button>
+            <button
+              onClick={() => { setShowImportUsers(true); setImportPreview([]); setImportSendInvites(true); }}
+              className="px-4 py-2 bg-[#2f353d] text-neutral-300 border border-[#3a424d] rounded text-sm hover:bg-[#363d47] transition-colors"
+            >
+              Import Users
             </button>
           </div>
           {showAddUser && (
@@ -723,6 +817,65 @@ export function AdminView() {
             </div>
           )}
 
+          {/* Import Users modal */}
+          {showImportUsers && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowImportUsers(false)}>
+              <div className="bg-[#2f353d] border border-[#3a424d] rounded-lg p-6 w-full max-w-2xl shadow-xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-sm font-semibold text-neutral-100 mb-4">Import Users</h3>
+                {importPreview.length === 0 ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-neutral-400">Upload an Excel or CSV file with columns: <span className="text-neutral-200">username</span>, <span className="text-neutral-200">name</span> (or display_name), <span className="text-neutral-200">email</span>, <span className="text-neutral-200">role</span> (optional).</p>
+                    <input type="file" accept=".xlsx,.xls,.csv" onChange={handleImportFile}
+                      className="block w-full text-sm text-neutral-400 file:mr-3 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-[#5ec1ca] file:text-[#272C33] hover:file:bg-[#4db0b9] file:cursor-pointer" />
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-xs text-neutral-400 mb-2">{importPreview.length} user(s) found. Review before importing:</div>
+                    <div className="overflow-auto flex-1 border border-[#3a424d] rounded mb-3">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-[#3a424d] text-neutral-500 uppercase tracking-wider">
+                            <th className="text-left px-3 py-2">Username</th>
+                            <th className="text-left px-3 py-2">Display Name</th>
+                            <th className="text-left px-3 py-2">Email</th>
+                            <th className="text-left px-3 py-2">Role</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.map((row, i) => (
+                            <tr key={i} className="border-b border-[#3a424d]/50">
+                              <td className="px-3 py-1.5 text-neutral-200">{row.username}</td>
+                              <td className="px-3 py-1.5 text-neutral-400">{row.display_name || '-'}</td>
+                              <td className="px-3 py-1.5 text-neutral-400">{row.email || '-'}</td>
+                              <td className="px-3 py-1.5 text-neutral-400">{row.role}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer select-none mb-3">
+                      <input type="checkbox" checked={importSendInvites} onChange={(e) => setImportSendInvites(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded border-[#3a424d] bg-[#272C33] accent-[#5ec1ca]" />
+                      <span className="text-xs text-neutral-400">Send invite emails to users with email addresses</span>
+                    </label>
+                  </>
+                )}
+                <div className="flex items-center justify-end gap-2 mt-2">
+                  <button onClick={() => { setShowImportUsers(false); setImportPreview([]); }}
+                    className="px-4 py-2 text-sm text-neutral-400 hover:text-neutral-200 transition-colors">
+                    Cancel
+                  </button>
+                  {importPreview.length > 0 && (
+                    <button onClick={runBulkImport} disabled={importLoading}
+                      className="px-4 py-2 bg-[#5ec1ca] text-[#272C33] font-semibold rounded text-sm hover:bg-[#4db0b9] transition-colors disabled:opacity-40">
+                      {importLoading ? 'Importing...' : `Import ${importPreview.length} User(s)`}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
         <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -771,6 +924,16 @@ export function AdminView() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      {user.email && (
+                        <button
+                          onClick={() => inviteUser(user.id)}
+                          disabled={invitingUserId === user.id}
+                          className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-[#5ec1ca] transition-colors disabled:opacity-40"
+                          title="Send invite email"
+                        >
+                          {invitingUserId === user.id ? 'Sending...' : 'Invite'}
+                        </button>
+                      )}
                       <button
                         onClick={() => resetPassword(user.id, user.username)}
                         className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-amber-400 transition-colors"
