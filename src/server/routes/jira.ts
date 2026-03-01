@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { TaskQueries, UserSettingsQueries } from '../db/queries.js';
 import type { McpClientManager } from '../services/mcp-client.js';
-import { JiraRestClient } from '../services/jira-client.js';
+import { JiraRestClient, JiraApiError } from '../services/jira-client.js';
 import { getLastJiraSearchText } from '../services/aggregator.js';
 
 const JIRA_TOOL_CANDIDATES = {
@@ -270,10 +270,15 @@ export function createJiraRoutes(
 
       res.json({ ok: true, data: results });
     } catch (err) {
-      console.error(`[Jira] PATCH ${key} failed:`, err instanceof Error ? err.message : err);
+      const detail = err instanceof JiraApiError
+        ? JSON.stringify(err.body, null, 2)
+        : err instanceof Error ? err.message : String(err);
+      console.error(`[Jira] PATCH ${key} failed:`, detail);
       res.status(500).json({
         ok: false,
-        error: err instanceof Error ? err.message : 'Failed to update issue',
+        error: err instanceof JiraApiError
+          ? `Jira API ${err.statusCode}: ${JSON.stringify(err.body)}`
+          : err instanceof Error ? err.message : 'Failed to update issue',
       });
     }
   });
