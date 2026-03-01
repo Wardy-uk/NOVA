@@ -516,56 +516,60 @@ function getJiraFieldDisplay(raw: unknown, key: string): string | null {
   return String(val);
 }
 
-interface TransitionField {
-  label: string;
-  key: string;
-  value: string | null; // null = not set
-  type: 'field' | 'comment'; // comment = special handling
+/** Check if a Jira field is an option-type (has {value:..., id:...} shape). */
+function isOptionField(raw: unknown, key: string): boolean {
+  const val = getJiraField(raw, key);
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return false;
+  return 'value' in (val as Record<string, unknown>);
 }
 
-function evaluateTransitionFields(
+/** Required fields shown in the transition modal. */
+const TRANSITION_FIELDS: Array<{
+  key: string;
+  label: string;
+  inputType: 'text' | 'date' | 'textarea';
+}> = [
+  { key: 'customfield_13183', label: 'Nurtur Product',        inputType: 'text' },
+  { key: 'customfield_14527', label: 'Product Sub Category',  inputType: 'text' },
+  { key: 'customfield_13184', label: 'TL;DR',                 inputType: 'textarea' },
+  { key: 'duedate',           label: 'Due Date',              inputType: 'date' },
+  { key: 'customfield_14185', label: 'Agent Next Update',     inputType: 'date' },
+];
+
+/** Build initial field values from raw issue data. */
+function initFieldValues(raw: unknown): Record<string, string> {
+  const vals: Record<string, string> = {};
+  for (const f of TRANSITION_FIELDS) {
+    vals[f.key] = getJiraFieldDisplay(raw, f.key) ?? '';
+  }
+  return vals;
+}
+
+/** Compute Jira-compatible field update payload (only changed fields). */
+function buildFieldUpdates(
   raw: unknown,
-  comment: string,
-  commentType: 'internal' | 'public',
-): TransitionField[] {
-  return [
-    {
-      label: 'Nurtur Product',
-      key: 'customfield_13183',
-      value: getJiraFieldDisplay(raw, 'customfield_13183'),
-      type: 'field',
-    },
-    {
-      label: 'Product Sub Category',
-      key: 'customfield_14527',
-      value: getJiraFieldDisplay(raw, 'customfield_14527'),
-      type: 'field',
-    },
-    {
-      label: 'TL;DR',
-      key: 'customfield_13184',
-      value: getJiraFieldDisplay(raw, 'customfield_13184'),
-      type: 'field',
-    },
-    {
-      label: 'Due Date',
-      key: 'duedate',
-      value: getJiraFieldDisplay(raw, 'duedate'),
-      type: 'field',
-    },
-    {
-      label: 'Agent Next Update',
-      key: 'customfield_14185',
-      value: getJiraFieldDisplay(raw, 'customfield_14185'),
-      type: 'field',
-    },
-    {
-      label: 'Public Comment',
-      key: '_comment',
-      value: comment.trim() && commentType === 'public' ? 'Adding below' : null,
-      type: 'comment',
-    },
-  ];
+  edited: Record<string, string>,
+): Record<string, unknown> | null {
+  const updates: Record<string, unknown> = {};
+  let hasChanges = false;
+
+  for (const f of TRANSITION_FIELDS) {
+    const original = getJiraFieldDisplay(raw, f.key) ?? '';
+    const current = edited[f.key]?.trim() ?? '';
+    if (current === original) continue;
+    hasChanges = true;
+
+    if (f.inputType === 'date') {
+      updates[f.key] = current || null;
+    } else if (isOptionField(raw, f.key)) {
+      // Option fields must be sent as { value: "..." }
+      updates[f.key] = current ? { value: current } : null;
+    } else {
+      updates[f.key] = current || null;
+    }
+  }
+
+  return hasChanges ? updates : null;
 }
 
 // ── Transition Modal ──
@@ -587,16 +591,21 @@ function TransitionModal({
   const [commentType, setCommentType] = useState<'internal' | 'public'>('internal');
   const [saving, setSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
+    initFieldValues(pending.task.raw_data),
+  );
 
   const { issueKey, targetColumn, task } = pending;
   const currentStatus = getOriginalJiraStatus(task);
 
-  // Evaluate required transition fields
-  const transitionFields = useMemo(
-    () => evaluateTransitionFields(task.raw_data, comment, commentType),
-    [task.raw_data, comment, commentType],
-  );
-  const missingCount = transitionFields.filter((f) => !f.value).length;
+  // Count empty required fields (excludes comment — that's separate)
+  const emptyFieldCount = TRANSITION_FIELDS.filter((f) => !fieldValues[f.key]?.trim()).length;
+  const hasPublicComment = comment.trim() && commentType === 'public';
+  const missingCount = emptyFieldCount + (hasPublicComment ? 0 : 1);
+
+  const updateField = useCallback((key: string, value: string) => {
+    setFieldValues((prev) => ({ ...prev, [key]: value }));
+  }, []);
 
   // Fetch available transitions on mount
   useEffect(() => {
@@ -684,6 +693,11 @@ function TransitionModal({
 
     try {
       const body: Record<string, unknown> = { transition: selectedTransition };
+
+      // Include changed field values
+      const fieldUpdates = buildFieldUpdates(task.raw_data, fieldValues);
+      if (fieldUpdates) body.fields = fieldUpdates;
+
       if (comment.trim()) {
         body.comment = comment.trim();
         body.commentVisibility = commentType;
@@ -709,7 +723,7 @@ function TransitionModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
       <div
-        className="bg-[#2f353d] border border-[#3a424d] rounded-lg shadow-xl w-full max-w-md mx-4"
+        className="bg-[#2f353d] border border-[#3a424d] rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -718,7 +732,7 @@ function TransitionModal({
         </div>
 
         {/* Body */}
-        <div className="px-5 py-4 space-y-4">
+        <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Ticket info */}
           <div>
             <div className="text-xs text-[#5ec1ca] font-mono">{issueKey}</div>
@@ -770,7 +784,7 @@ function TransitionModal({
                 </div>
               </div>
 
-              {/* Required fields checklist */}
+              {/* Required fields */}
               <div>
                 <label className="block text-[11px] text-neutral-400 mb-1.5">
                   Required fields
@@ -778,25 +792,45 @@ function TransitionModal({
                     <span className="ml-1.5 text-amber-400">({missingCount} missing)</span>
                   )}
                 </label>
-                <div className="bg-[#272C33] border border-[#3a424d] rounded px-3 py-2 space-y-1">
-                  {transitionFields.map((f) => {
-                    const isSet = !!f.value;
-                    const isComment = f.type === 'comment';
+                <div className="space-y-2">
+                  {TRANSITION_FIELDS.map((f) => {
+                    const val = fieldValues[f.key] ?? '';
+                    const isEmpty = !val.trim();
+                    const inputCls = `w-full bg-[#272C33] border rounded px-2.5 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-[#5ec1ca]/50 ${
+                      isEmpty ? 'border-amber-900/50' : 'border-[#3a424d]'
+                    }`;
                     return (
-                      <div key={f.key} className="flex items-start gap-2 text-xs">
-                        <span className={`mt-0.5 flex-shrink-0 ${isSet ? 'text-green-400' : isComment ? 'text-amber-400' : 'text-red-400'}`}>
-                          {isSet ? '\u2713' : isComment ? '\u25CB' : '\u2717'}
-                        </span>
-                        <span className={`flex-shrink-0 w-[140px] ${isSet ? 'text-neutral-400' : 'text-neutral-200 font-medium'}`}>
-                          {f.label}
-                        </span>
-                        <span className={`truncate ${isSet ? 'text-neutral-500' : isComment ? 'text-amber-400/70' : 'text-red-400/70'}`}>
-                          {isSet
-                            ? f.key === 'duedate' || f.key === 'customfield_14185'
-                              ? new Date(f.value!).toLocaleDateString()
-                              : f.value!.length > 40 ? f.value!.slice(0, 40) + '\u2026' : f.value!
-                            : isComment ? 'Add a public comment below' : 'Not set'}
-                        </span>
+                      <div key={f.key}>
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className={`text-[10px] ${isEmpty ? 'text-amber-400' : 'text-green-400'}`}>
+                            {isEmpty ? '\u25CB' : '\u2713'}
+                          </span>
+                          <label className="text-[11px] text-neutral-400">{f.label}</label>
+                        </div>
+                        {f.inputType === 'textarea' ? (
+                          <textarea
+                            value={val}
+                            onChange={(e) => updateField(f.key, e.target.value)}
+                            placeholder={`Enter ${f.label.toLowerCase()}...`}
+                            rows={2}
+                            className={`${inputCls} resize-none`}
+                          />
+                        ) : f.inputType === 'date' ? (
+                          <input
+                            type="date"
+                            value={val ? val.slice(0, 10) : ''}
+                            onChange={(e) => updateField(f.key, e.target.value)}
+                            className={inputCls}
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            value={val}
+                            onChange={(e) => updateField(f.key, e.target.value)}
+                            placeholder={`Enter ${f.label.toLowerCase()}...`}
+                            className={inputCls}
+                          />
+                        )}
                       </div>
                     );
                   })}
@@ -806,8 +840,11 @@ function TransitionModal({
               {/* Comment */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] text-neutral-400">
-                    Comment {missingCount > 0 ? <span className="text-amber-400">(public comment recommended)</span> : <span className="text-neutral-600">(optional)</span>}
+                  <label className="text-[11px] text-neutral-400 flex items-center gap-1.5">
+                    <span className={`text-[10px] ${hasPublicComment ? 'text-green-400' : 'text-amber-400'}`}>
+                      {hasPublicComment ? '\u2713' : '\u25CB'}
+                    </span>
+                    Public Comment
                   </label>
                   <div className="flex gap-1">
                     {(['internal', 'public'] as const).map(type => (
@@ -857,7 +894,7 @@ function TransitionModal({
         <div className="px-5 py-3 border-t border-[#3a424d] space-y-2">
           {missingCount > 0 && !loading && transitions.length > 0 && (
             <div className="text-[10px] text-amber-400 bg-amber-900/15 border border-amber-900/25 rounded px-2.5 py-1.5">
-              {missingCount} required field{missingCount > 1 ? 's' : ''} not set — update in Jira before transitioning
+              {missingCount} required field{missingCount > 1 ? 's' : ''} not set — fill in above or update in Jira
             </div>
           )}
           <div className="flex items-center justify-between">
