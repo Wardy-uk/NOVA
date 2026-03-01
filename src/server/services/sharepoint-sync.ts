@@ -227,6 +227,7 @@ export class SharePointSync {
             incremental: row.incremental ?? null,
             licence_fee: row.licenceFee ?? null,
             sale_type: null,
+            crm_customer_id: null,
             is_starred: 0,
             star_scope: 'me',
             starred_by: null,

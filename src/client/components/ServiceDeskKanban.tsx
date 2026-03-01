@@ -140,6 +140,9 @@ export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingTransition, setPendingTransition] = useState<PendingTransition | null>(null);
 
+  // Optimistic moves: taskId → target column key (survives until Jira index catches up)
+  const [optimisticMoves, setOptimisticMoves] = useState<Map<string, string>>(new Map());
+
   // Tasks are pre-filtered to Jira by parent component
   const jiraTasks = tasks;
 
@@ -149,7 +152,8 @@ export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
     for (const col of FIXED_COLUMNS) columnMap.set(col.key, []);
 
     for (const task of jiraTasks) {
-      const colKey = getFixedColumnKey(task);
+      // Use optimistic column if set, otherwise derive from Jira status
+      const colKey = optimisticMoves.get(task.id) ?? getFixedColumnKey(task);
       if (colKey && columnMap.has(colKey)) {
         columnMap.get(colKey)!.push(task);
       }
@@ -169,7 +173,7 @@ export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
     }
 
     return FIXED_COLUMNS.map((col) => [col.key, columnMap.get(col.key)!] as [string, Task[]]);
-  }, [jiraTasks]);
+  }, [jiraTasks, optimisticMoves]);
 
   // Date-based columns
   const dateColumns = useMemo(() => {
@@ -351,9 +355,28 @@ export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
         <TransitionModal
           pending={pendingTransition}
           onConfirm={() => {
+            const { task, targetColumn } = pendingTransition;
             setPendingTransition(null);
-            // Re-fetch SD tickets from Jira so the card moves to the new column
-            onRefresh?.();
+
+            // Optimistic: move card to target column immediately
+            setOptimisticMoves(prev => {
+              const next = new Map(prev);
+              next.set(task.id, targetColumn.key);
+              return next;
+            });
+
+            // Delay refresh to let Jira's search index catch up (2s)
+            setTimeout(() => {
+              onRefresh?.();
+              // Clear optimistic override 1s after refresh arrives
+              setTimeout(() => {
+                setOptimisticMoves(prev => {
+                  const next = new Map(prev);
+                  next.delete(task.id);
+                  return next;
+                });
+              }, 1000);
+            }, 2000);
           }}
           onCancel={() => setPendingTransition(null)}
         />

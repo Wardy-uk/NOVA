@@ -5,7 +5,7 @@ N.O.V.A — TO DO
 
 (empty)
 
-=== CURRENT STATUS (28 Feb 2026) ===
+=== CURRENT STATUS (1 Mar 2026) ===
 
 Deployed at https://nova.nurtur.tech | v1.1.0 | Branch: nova-codex
 IIS reverse proxy → Node.js (NSSM) on Windows Server VM
@@ -23,44 +23,24 @@ Deploy: .\deploy\deploy.ps1 -Branch nova-codex (on server C:\Nurtur\NOVA)
 Completed items: see NOVA_completed.txt
 
 
-=== DONE (28 Feb 2026) ===
+=== DONE (1 Mar 2026) ===
 
-[x] 28. BUG FIX: MS365 not showing entries — global settings not seeded for
-    no-field integrations (msgraph). Fixed global seeding logic in
-    integrations.ts so MCP restarts correctly after reboot.
-[x] 29. Renamed "Ask N.O.V.A" → "NOVA Insights" — tab label, help page,
-    tour overlay, debug panel all updated. Confirmed no remaining references.
-[x] My NOVA tabs renamed: My Dashboard, My Tasks, My Team, My Chat
-[x] Standup → NOVA Briefing — tab renamed, heading updated, AI greeting
-    now time-appropriate (morning/afternoon/evening based on hour).
-[x] Service Desk — all tabs centered (max-w constraints on Dashboard,
-    Kanban, Calendar, Tickets, Breached views).
-[x] NOVA Insights button — renamed "Ask N.O.V.A" button in NextActions.
-[x] NOVA Insights — added "All Tasks" button to source filter.
-[x] Planner/Email/Calendar not showing — code fix deployed (item 28), ops
-    task only (redeploy + user re-enable msgraph).
-[x] 27. Jira 410 fix — DEFAULT_CONFIG changed from 'Service Request' to
-    'Support', request type field emptied, settings.json defaulted from
-    real ticket JSON. Falls back to personal Jira creds when no service
-    account configured.
+[x] 32. BUG FIX: SD Kanban drag snaps back — optimistic local state update so
+    card moves immediately on drag, with 2s delayed refresh for Jira eventual
+    consistency. Card stays in target column after refresh.
+[x] 30. D365 account link — wired crm_customer_id through client form (autocomplete
+    select sets ID, manual typing clears it), save body, server POST/INSERT.
+    "Linked to CRM" indicator shows when CRM customer selected.
+[x] 31. Milestone ticket creation button — POST /:id/create-tickets endpoint
+    creates Jira tickets for linked ticket groups. UI shows "Create Tickets"
+    button on milestones with linked groups, or Jira key badges when created.
 
 
 === DO NEXT ===
 
-32. BUG: SD Kanban drag doesn't update view or tickets — drag-and-drop may
-    fail silently or not refresh the local state after Jira transition.
-
 8.  Jira SLA prioritisation — tickets over SLA or overdue an update should be
     prioritised. SLA timer and attention endpoint already exist. Needs user to
     define the rules (which fields, thresholds, priority weights).
-
-30. Link D365 account number to delivery entries — associate a Dynamics 365
-    account record with an onboarding delivery item for cross-referencing.
-    Schema migration + interface added. UI autocomplete linkage still needed.
-
-31. Milestone ticket creation button — on delivery milestone tasks where the
-    action is to create a Jira ticket, add an inline button to raise the
-    ticket directly from the milestone row.
 
 
 === TIER 2: Feature additions ===

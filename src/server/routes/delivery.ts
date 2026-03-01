@@ -284,7 +284,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
 
     router.post('/entries', writeGuard, (req, res) => {
       const { product, account, status, onboarder, order_date, go_live_date,
-        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, sale_type, is_starred, notes } = req.body;
+        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, sale_type, crm_customer_id, is_starred, notes } = req.body;
       if (!product || !account) {
         res.status(400).json({ ok: false, error: 'product and account are required' });
         return;
@@ -307,6 +307,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
         branches: branches ?? null, mrr: mrr ?? null,
         incremental: incremental ?? null, licence_fee: licence_fee ?? null,
         sale_type: sale_type ?? null,
+        crm_customer_id: crm_customer_id ?? null,
         is_starred: is_starred ?? 0, star_scope, starred_by: is_starred ? userId : null,
         notes,
       });
@@ -372,6 +373,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
               incremental: row.incremental ?? null,
               licence_fee: row.licenceFee ?? null,
               sale_type: null,
+              crm_customer_id: null,
               is_starred: 0,
               star_scope: 'me',
               starred_by: null,

@@ -356,7 +356,7 @@ async function main() {
     milestoneQueries, deliveryQueries, taskQueries, onboardingConfigQueries,
     buildOrchestrator, (msg) => console.log(msg),
   );
-  app.use('/api/milestones', createMilestoneRoutes(milestoneQueries, deliveryQueries, taskQueries, workflowEngine));
+  app.use('/api/milestones', createMilestoneRoutes(milestoneQueries, deliveryQueries, taskQueries, workflowEngine, buildOrchestrator));
 
   // 6. OneDrive file watcher (Power Automate bridge)
   const watcher = new OneDriveWatcher(taskQueries, settingsQueries);

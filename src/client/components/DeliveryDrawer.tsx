@@ -19,6 +19,7 @@ interface DbEntry {
   incremental: number | null;
   licence_fee: number | null;
   sale_type: string | null;
+  crm_customer_id: number | null;
   is_starred: number;
   notes: string | null;
   created_at: string;
@@ -57,6 +58,9 @@ interface Milestone {
   status: string;
   checklist_state_json: string;
   notes: string | null;
+  workflow_tickets_created?: number;
+  jira_keys?: string[];
+  linked_ticket_groups?: Array<{ ticket_group_id: number; [key: string]: unknown }>;
 }
 
 const STATUSES = ['Not Started', 'WIP', 'In Progress', 'On Hold', 'Complete', 'Dead', 'Back to Sales'];
@@ -137,6 +141,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
   // CRM customer autocomplete for account field
   const [customerList, setCustomerList] = useState<Array<{ id: number; name: string; company: string | null }>>([]);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [crmCustomerId, setCrmCustomerId] = useState<number | null>(null);
 
   // Milestone-to-ticket-group mapping for gating
   const [templateGroupMap, setTemplateGroupMap] = useState<Record<number, number[]>>({});
@@ -188,6 +193,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         sale_type: entry.sale_type ?? '',
         notes: entry.notes ?? '',
       });
+      setCrmCustomerId(entry.crm_customer_id ?? null);
     } else if (prefill) {
       const defaultOnboarder = auth.user?.display_name || auth.user?.username || '';
       setForm({
@@ -224,12 +230,13 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
     setMilestoneError(null);
     setExpandedMilestone(null);
     setLinkedTickets(null);
+    if (!entry || isNew) setCrmCustomerId(null);
   }, [entry, isNew, defaultProduct, prefill]);
 
-  // Fetch milestones for existing entries
+  // Fetch milestones (enriched with ticket group + jira_keys data) for existing entries
   useEffect(() => {
     if (entry && !isNew) {
-      fetch(`/api/milestones/delivery/${entry.id}`)
+      fetch(`/api/milestones/delivery/${entry.id}/workflow`)
         .then(r => r.json())
         .then(json => { if (json.ok) setMilestones(json.data); })
         .catch(() => {});
@@ -267,6 +274,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         incremental: form.incremental ? parseFloat(form.incremental) : null,
         licence_fee: form.licence_fee ? parseFloat(form.licence_fee) : null,
         sale_type: form.sale_type || null,
+        crm_customer_id: crmCustomerId,
         notes: form.notes.trim() || null,
       };
 
@@ -460,6 +468,36 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
     } catch { /* ignore */ }
   };
 
+  // Per-milestone ticket creation
+  const [milestoneTicketLoading, setMilestoneTicketLoading] = useState<number | null>(null);
+  const [milestoneTicketError, setMilestoneTicketError] = useState<string | null>(null);
+
+  const handleMilestoneCreateTickets = async (milestoneId: number) => {
+    setMilestoneTicketLoading(milestoneId);
+    setMilestoneTicketError(null);
+    try {
+      const resp = await fetch(`/api/milestones/${milestoneId}/create-tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error ?? 'Ticket creation failed');
+      // Update milestone in local state with new jira_keys
+      setMilestones(prev => prev.map(m => {
+        if (m.id !== milestoneId) return m;
+        return {
+          ...m,
+          workflow_tickets_created: 1,
+          jira_keys: json.data.childKeys ?? [],
+        };
+      }));
+    } catch (err) {
+      setMilestoneTicketError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setMilestoneTicketLoading(null);
+    }
+  };
+
   const handleDeleteMilestones = async () => {
     if (!entry || !confirm('Delete all milestones for this delivery?')) return;
     try {
@@ -552,7 +590,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
               <input
                 className={inputCls}
                 value={form.account}
-                onChange={(e) => { setField('account', e.target.value); setAccountOpen(true); }}
+                onChange={(e) => { setField('account', e.target.value); setAccountOpen(true); setCrmCustomerId(null); }}
                 onFocus={() => setAccountOpen(true)}
                 onBlur={() => setTimeout(() => setAccountOpen(false), 150)}
                 placeholder="Customer name"
@@ -571,7 +609,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                         key={c.id}
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => { setField('account', c.name); setAccountOpen(false); }}
+                        onClick={() => { setField('account', c.name); setAccountOpen(false); setCrmCustomerId(c.id); }}
                         className="w-full text-left px-3 py-1.5 text-xs text-neutral-200 hover:bg-[#5ec1ca]/20 transition-colors"
                       >
                         {c.name}{c.company ? <span className="text-neutral-500 ml-1">({c.company})</span> : null}
@@ -580,6 +618,12 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                   </div>
                 );
               })()}
+              {crmCustomerId && (
+                <div className="mt-1 text-[10px] text-emerald-400 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+                  Linked to CRM
+                </div>
+              )}
             </div>
             <div>
               <label className={labelCls}>Sale Type</label>
@@ -849,6 +893,30 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                               </span>
                             )}
                           </div>
+
+                          {/* Milestone ticket creation button / Jira key badges */}
+                          {m.linked_ticket_groups && m.linked_ticket_groups.length > 0 && (
+                            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                              {m.jira_keys && m.jira_keys.length > 0 ? (
+                                m.jira_keys.map(key => (
+                                  <span key={key} className="text-[9px] px-1.5 py-0.5 rounded bg-[#0052CC]/20 text-[#5ec1ca] font-mono">
+                                    {key}
+                                  </span>
+                                ))
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleMilestoneCreateTickets(m.id); }}
+                                  disabled={milestoneTicketLoading === m.id}
+                                  className="text-[10px] px-2 py-0.5 rounded bg-[#5ec1ca]/15 text-[#5ec1ca] hover:bg-[#5ec1ca]/25 disabled:opacity-50 transition-colors border border-[#5ec1ca]/30"
+                                >
+                                  {milestoneTicketLoading === m.id ? 'Creating...' : 'Create Tickets'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {milestoneTicketError && milestoneTicketLoading === null && (
+                            <div className="mt-1 text-[10px] text-red-400">{milestoneTicketError}</div>
+                          )}
 
                           {/* Expandable checklist */}
                           {expandedMilestone === m.id && (() => {

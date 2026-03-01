@@ -589,8 +589,8 @@ export class DeliveryQueries {
     const onboardingId = entry.onboarding_id || this.getNextOnboardingId(entry.product);
     this.db.run(
       `INSERT INTO delivery_entries (onboarding_id, product, account, status, onboarder, order_date, go_live_date,
-        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, sale_type, is_starred, star_scope, starred_by, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        predicted_delivery, training_date, branches, mrr, incremental, licence_fee, sale_type, crm_customer_id, is_starred, star_scope, starred_by, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         onboardingId,
         entry.product, entry.account, entry.status ?? '',
@@ -599,6 +599,7 @@ export class DeliveryQueries {
         entry.branches ?? null,
         entry.mrr ?? null, entry.incremental ?? null, entry.licence_fee ?? null,
         entry.sale_type ?? null,
+        entry.crm_customer_id ?? null,
         entry.is_starred ?? 0, entry.star_scope ?? 'all', entry.starred_by ?? null,
         entry.notes ?? null,
       ]

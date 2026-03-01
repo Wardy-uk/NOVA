@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { MilestoneQueries, DeliveryQueries, TaskQueries } from '../db/queries.js';
 import { requireRole } from '../middleware/auth.js';
 import type { MilestoneWorkflowEngine } from '../services/milestone-workflow.js';
+import type { OnboardingOrchestrator } from '../services/onboarding-orchestrator.js';
 
 const TemplateCreateSchema = z.object({
   name: z.string().min(1),
@@ -98,6 +99,7 @@ export function createMilestoneRoutes(
   deliveryQueries: DeliveryQueries,
   taskQueries: TaskQueries,
   workflowEngine?: MilestoneWorkflowEngine,
+  getOrchestrator?: () => OnboardingOrchestrator | null,
 ): Router {
   const router = Router();
   const writeGuard = requireRole('admin', 'editor');
@@ -247,6 +249,59 @@ export function createMilestoneRoutes(
     syncDeliveryMilestonesToTasks(deliveryId, entry.account, milestoneQueries, taskQueries);
 
     res.json({ ok: true, data: milestones });
+  });
+
+  // ── Create Jira tickets for a milestone's linked ticket groups ──
+
+  router.post('/:id/create-tickets', writeGuard, async (req, res) => {
+    const id = parseInt(String(req.params.id), 10);
+    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+
+    const milestone = milestoneQueries.getMilestoneById(id);
+    if (!milestone) { res.status(404).json({ ok: false, error: 'Milestone not found' }); return; }
+
+    const entry = deliveryQueries.getById(milestone.delivery_id);
+    if (!entry) { res.status(404).json({ ok: false, error: 'Delivery entry not found' }); return; }
+    if (!entry.onboarding_id) { res.status(400).json({ ok: false, error: 'Delivery entry has no onboarding ID' }); return; }
+    if (!entry.sale_type) { res.status(400).json({ ok: false, error: 'Delivery entry has no sale type' }); return; }
+
+    const linkedGroups = milestoneQueries.getTemplateTicketGroups(milestone.template_id);
+    if (linkedGroups.length === 0) {
+      res.status(400).json({ ok: false, error: 'No ticket groups linked to this milestone template' });
+      return;
+    }
+
+    if (!getOrchestrator) {
+      res.status(503).json({ ok: false, error: 'Ticket orchestrator not available' });
+      return;
+    }
+    const orchestrator = getOrchestrator();
+    if (!orchestrator) {
+      res.status(503).json({ ok: false, error: 'Jira credentials not configured' });
+      return;
+    }
+
+    try {
+      const filterGroupIds = linkedGroups.map((g: any) => g.ticket_group_id ?? g.id);
+      const result = await orchestrator.execute({
+        schemaVersion: 1,
+        onboardingRef: entry.onboarding_id,
+        saleType: entry.sale_type,
+        customer: { name: entry.account },
+        targetDueDate: entry.go_live_date || new Date().toISOString().split('T')[0],
+        config: {},
+      }, { userId: (req as any).user?.id, filterGroupIds });
+
+      // Mark milestone as having tickets created and store Jira keys
+      if (result.childKeys.length > 0) {
+        milestoneQueries.markWorkflowTicketsCreated(id, result.childKeys);
+      }
+
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      console.error(`[Milestones] Ticket creation for milestone ${id} failed:`, err);
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Ticket creation failed' });
+    }
   });
 
   // ── Single milestone update (catch-all /:id — must be LAST) ──
