@@ -24,11 +24,72 @@ export function createAdminRoutes(
   const emailService = new EmailService(() => settingsQueries.getAll());
 
   /** Send an email via SMTP */
-  async function sendEmail(to: string, subject: string, text: string): Promise<void> {
+  async function sendEmail(to: string, subject: string, text: string, html?: string): Promise<void> {
     if (!emailService.isConfigured()) {
-      throw new Error('SMTP not configured. Set up SMTP in Admin > Integrations.');
+      throw new Error('Email not configured. Set up Email in Admin > Integrations.');
     }
-    await emailService.send({ to, subject, text });
+    await emailService.send({ to, subject, text, html });
+  }
+
+  /** Build branded HTML email */
+  function buildInviteHtml(opts: {
+    name: string;
+    username: string;
+    tempPassword?: string;
+    loginUrl: string;
+    ssoEnabled: boolean;
+  }): string {
+    const { name, username, tempPassword, loginUrl, ssoEnabled } = opts;
+    const credentialsRow = tempPassword
+      ? `<tr>
+           <td style="padding:4px 0;color:#a0a0a0;font-size:13px;width:140px">Temporary password</td>
+           <td style="padding:4px 0;color:#e5e5e5;font-size:13px;font-family:monospace">${tempPassword}</td>
+         </tr>`
+      : '';
+    const ssoNote = ssoEnabled
+      ? '<p style="margin:0 0 16px;color:#a0a0a0;font-size:13px">You can also click <strong style="color:#e5e5e5">Sign in with Microsoft</strong> on the login page.</p>'
+      : '';
+    const passwordNote = tempPassword
+      ? '<p style="margin:0 0 16px;color:#a0a0a0;font-size:13px">Please change your password after your first login.</p>'
+      : '';
+
+    return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#1e2228;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background-color:#1e2228;padding:40px 16px">
+<tr><td align="center">
+<table width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%">
+  <!-- Header -->
+  <tr><td style="padding:0 0 24px;text-align:center">
+    <span style="font-size:22px;font-weight:700;letter-spacing:1px;color:#5ec1ca">N.O.V.A</span>
+    <br><span style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:2px">Nurtur Operational Virtual Assistant</span>
+  </td></tr>
+  <!-- Card -->
+  <tr><td style="background-color:#2f353d;border:1px solid #3a424d;border-radius:12px;padding:32px">
+    <p style="margin:0 0 20px;color:#e5e5e5;font-size:15px">Hi ${name},</p>
+    <p style="margin:0 0 20px;color:#a0a0a0;font-size:13px">You've been invited to <strong style="color:#e5e5e5">N.O.V.A</strong>. Here are your login details:</p>
+    <!-- Credentials table -->
+    <table cellpadding="0" cellspacing="0" style="margin:0 0 20px;background-color:#272C33;border:1px solid #3a424d;border-radius:8px;padding:12px 16px;width:100%">
+      <tr>
+        <td style="padding:4px 0;color:#a0a0a0;font-size:13px;width:140px">Username</td>
+        <td style="padding:4px 0;color:#5ec1ca;font-size:13px;font-weight:600">${username}</td>
+      </tr>
+      ${credentialsRow}
+    </table>
+    ${passwordNote}${ssoNote}
+    <!-- CTA button -->
+    <table cellpadding="0" cellspacing="0" width="100%"><tr><td align="center" style="padding:4px 0 8px">
+      <a href="${loginUrl}" style="display:inline-block;background-color:#5ec1ca;color:#272C33;font-size:14px;font-weight:600;text-decoration:none;padding:12px 32px;border-radius:8px">Sign In to N.O.V.A</a>
+    </td></tr></table>
+  </td></tr>
+  <!-- Footer -->
+  <tr><td style="padding:20px 0 0;text-align:center">
+    <span style="font-size:11px;color:#4b5563">Nurtur Limited</span>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
   }
 
   // ---- Users ----
@@ -166,28 +227,18 @@ export function createAdminRoutes(
     const ssoEnabled = settingsQueries.get('sso_enabled') === 'true';
     const frontendUrl = (process.env.FRONTEND_URL || `https://${req.headers.host}`).replace(/\/+$/, '');
 
-    const text = [
-      `Hi ${user.display_name || user.username},`,
-      '',
-      `You've been invited to N.O.V.A (Nurtur Operational Virtual Assistant).`,
-      '',
-      `Your username is: ${user.username}`,
-      '',
-      ssoEnabled
-        ? `Sign in with your Microsoft account at: ${frontendUrl}`
-        : `Sign in at: ${frontendUrl}`,
-      '',
-      ssoEnabled
-        ? 'Click "Sign in with Microsoft" on the login page to get started.'
-        : 'Use the username above and the temporary password provided by your administrator.',
-      '',
-      'Regards,',
-      'N.O.V.A',
-    ].join('\n');
+    const displayName = user.display_name || user.username;
+    const text = `Hi ${displayName},\n\nYou've been invited to N.O.V.A.\n\nUsername: ${user.username}\nSign in at: ${frontendUrl}\n\nRegards,\nN.O.V.A`;
+    const html = buildInviteHtml({
+      name: displayName,
+      username: user.username,
+      loginUrl: frontendUrl,
+      ssoEnabled,
+    });
 
     try {
       console.log(`[Admin] Sending invite to ${user.email} (smtp: ${emailService.isConfigured()})`);
-      await sendEmail(user.email, "You've been invited to N.O.V.A", text);
+      await sendEmail(user.email, "You've been invited to N.O.V.A", text, html);
       console.log(`[Admin] Invite sent to ${user.email}`);
       res.json({ ok: true });
     } catch (err) {
@@ -258,25 +309,17 @@ export function createAdminRoutes(
       // Send invite email if requested
       if (sendInvites && entry.email?.trim()) {
         try {
-          const text = [
-            `Hi ${entry.display_name?.trim() || normalizedUsername},`,
-            '',
-            `You've been invited to N.O.V.A (Nurtur Operational Virtual Assistant).`,
-            '',
-            `Your username is: ${normalizedUsername}`,
-            `Your temporary password is: ${tempPassword}`,
-            '',
-            ssoEnabled
-              ? `Sign in at: ${frontendUrl} — you can also use "Sign in with Microsoft".`
-              : `Sign in at: ${frontendUrl}`,
-            '',
-            'Please change your password after your first login.',
-            '',
-            'Regards,',
-            'N.O.V.A',
-          ].join('\n');
+          const displayName = entry.display_name?.trim() || normalizedUsername;
+          const text = `Hi ${displayName},\n\nYou've been invited to N.O.V.A.\n\nUsername: ${normalizedUsername}\nTemporary password: ${tempPassword}\nSign in at: ${frontendUrl}\n\nPlease change your password after your first login.\n\nRegards,\nN.O.V.A`;
+          const html = buildInviteHtml({
+            name: displayName,
+            username: normalizedUsername,
+            tempPassword,
+            loginUrl: frontendUrl,
+            ssoEnabled,
+          });
 
-          await sendEmail(entry.email.trim(), "You've been invited to N.O.V.A", text);
+          await sendEmail(entry.email.trim(), "You've been invited to N.O.V.A", text, html);
           invited++;
         } catch (err) {
           console.error(`[Admin] Failed to send invite to ${entry.email}:`, err instanceof Error ? err.message : err);
