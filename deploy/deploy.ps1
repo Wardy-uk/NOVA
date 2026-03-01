@@ -31,6 +31,7 @@ try {
 
     # ── Pull latest code ─────────────────────────────────────────────────────
     Write-Host "[1/4] Pulling latest from origin/$Branch..." -ForegroundColor Yellow
+    git checkout -- package-lock.json 2>$null
     git pull origin $Branch
     if ($LASTEXITCODE -ne 0) { throw "git pull failed" }
     Write-Host ""
