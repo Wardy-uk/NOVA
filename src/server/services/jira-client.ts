@@ -235,6 +235,18 @@ export class JiraRestClient {
     return this.request<unknown>('POST', `issue/${issueKey}/comment`, payload);
   }
 
+  /** Update fields on an existing issue */
+  async updateFields(issueKey: string, fields: Record<string, unknown>): Promise<void> {
+    await this.request<void>('PUT', `issue/${issueKey}`, { fields });
+  }
+
+  /** Transition an issue to a new status */
+  async transitionIssue(issueKey: string, transitionId: string): Promise<void> {
+    await this.request<void>('POST', `issue/${issueKey}/transitions`, {
+      transition: { id: transitionId },
+    });
+  }
+
   /** Get issue link types available on the instance */
   async getLinkTypes(): Promise<{ issueLinkTypes: Array<{ id: string; name: string; inward: string; outward: string }> }> {
     return this.request<{ issueLinkTypes: Array<{ id: string; name: string; inward: string; outward: string }> }>(

@@ -168,10 +168,8 @@ export function createJiraRoutes(
 
   router.patch('/issues/:key', async (req, res) => {
     const key = req.params.key;
-    const tools = mcpManager.getServerTools('jira');
-    const updateTool = pickTool(tools, 'updateIssue');
-    const commentTool = pickTool(tools, 'addComment');
-    const transitionTool = pickTool(tools, 'transitionIssue');
+    const userId = (req as any).user?.id as number | undefined;
+    const restClient = getClientForUser(userId);
 
     const { fields, comment, commentVisibility, transition } = req.body as {
       fields?: Record<string, unknown>;
@@ -180,77 +178,78 @@ export function createJiraRoutes(
       transition?: string;
     };
 
-    if (!updateTool && !commentTool && !transitionTool) {
-      res.status(501).json({
-        ok: false,
-        error: 'No Jira update tools available',
-        tools,
-      });
-      return;
-    }
-
     const results: Record<string, unknown> = {};
 
     try {
-      if (fields && updateTool) {
-        // mcp-atlassian update_issue expects: issue_key (str) + fields (JSON string)
-        const fieldsStr = JSON.stringify(fields);
-        const result = await callWithFallback(mcpManager, updateTool, [
-          { issue_key: key, fields: fieldsStr },
-        ]);
-        results.update = parseToolResult(result);
-      }
-
-      if (comment) {
-        const userId = (req as any).user?.id as number | undefined;
-        const restClient = getClientForUser(userId);
-
-        if (commentVisibility === 'internal' && restClient) {
-          // Internal comment — must use REST API for visibility support
-          const role = getSettings?.()?.jira_internal_comment_role || 'Service Desk Team';
-          results.comment = await restClient.addComment(key, comment, {
-            visibility: { type: 'role', value: role },
-          });
-        } else if (commentTool) {
-          // Public comment via MCP
-          const result = await callWithFallback(mcpManager, commentTool, [
-            { issue_key: key, body: comment },
-            { issueKey: key, body: comment },
-            { key, body: comment },
-            { issue_key: key, comment },
-            { issueKey: key, comment },
-          ]);
-          results.comment = parseToolResult(result);
-        } else if (restClient) {
-          // No MCP comment tool — use REST API (public)
-          results.comment = await restClient.addComment(key, comment);
+      // 1. Update fields — prefer REST, fall back to MCP
+      if (fields && Object.keys(fields).length > 0) {
+        if (restClient) {
+          console.log(`[Jira] Updating fields on ${key} via REST:`, Object.keys(fields));
+          await restClient.updateFields(key, fields);
+          results.update = { ok: true };
         } else {
-          console.warn('[Jira] No comment tool or REST client available — comment not posted');
+          const tools = mcpManager.getServerTools('jira');
+          const updateTool = pickTool(tools, 'updateIssue');
+          if (updateTool) {
+            const result = await callWithFallback(mcpManager, updateTool, [
+              { issue_key: key, fields: JSON.stringify(fields) },
+            ]);
+            results.update = parseToolResult(result);
+          } else {
+            console.warn(`[Jira] No REST client or MCP update tool — fields not updated for ${key}`);
+          }
         }
       }
 
-      if (transition) {
-        if (!transitionTool) {
-          res.status(501).json({
-            ok: false,
-            error: 'Jira transition tool not available. Available tools: ' + tools.filter(t => t.includes('transition')).join(', '),
-            tools,
-          });
-          return;
+      // 2. Add comment — prefer REST (supports visibility), fall back to MCP (public only)
+      if (comment) {
+        if (restClient) {
+          const visibility = commentVisibility === 'internal'
+            ? { type: 'role', value: getSettings?.()?.jira_internal_comment_role || 'Service Desk Team' }
+            : undefined;
+          console.log(`[Jira] Adding ${commentVisibility ?? 'public'} comment on ${key} via REST`);
+          results.comment = await restClient.addComment(key, comment, visibility ? { visibility } : undefined);
+        } else {
+          const tools = mcpManager.getServerTools('jira');
+          const commentTool = pickTool(tools, 'addComment');
+          if (commentTool) {
+            if (commentVisibility === 'internal') {
+              console.warn(`[Jira] No REST client — internal comment on ${key} will be posted as public via MCP`);
+            }
+            const result = await callWithFallback(mcpManager, commentTool, [
+              { issue_key: key, body: comment },
+            ]);
+            results.comment = parseToolResult(result);
+          } else {
+            console.warn(`[Jira] No REST client or MCP comment tool — comment not posted for ${key}`);
+          }
         }
+      }
+
+      // 3. Transition — prefer REST, fall back to MCP
+      if (transition) {
         const transId = String(transition);
-        console.log(`[Jira] Transitioning ${key} with tool=${transitionTool}, transition_id=${transId}`);
-        // transition_issue expects exactly: issue_key (str) + transition_id (str)
-        const result = await callWithFallback(mcpManager, transitionTool, [
-          { issue_key: key, transition_id: transId },
-        ]);
-        const parsed = parseToolResult(result);
-        console.log(`[Jira] Transition result for ${key}:`, JSON.stringify(parsed).slice(0, 500));
-        results.transition = parsed;
+        if (restClient) {
+          console.log(`[Jira] Transitioning ${key} to ${transId} via REST`);
+          await restClient.transitionIssue(key, transId);
+          results.transition = { ok: true };
+        } else {
+          const tools = mcpManager.getServerTools('jira');
+          const transitionTool = pickTool(tools, 'transitionIssue');
+          if (transitionTool) {
+            const result = await callWithFallback(mcpManager, transitionTool, [
+              { issue_key: key, transition_id: transId },
+            ]);
+            results.transition = parseToolResult(result);
+          } else {
+            throw new Error('No REST client or MCP transition tool available');
+          }
+        }
       }
 
       res.json({ ok: true, data: results });
     } catch (err) {
+      console.error(`[Jira] PATCH ${key} failed:`, err instanceof Error ? err.message : err);
       res.status(500).json({
         ok: false,
         error: err instanceof Error ? err.message : 'Failed to update issue',
