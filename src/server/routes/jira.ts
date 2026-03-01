@@ -6,7 +6,7 @@ import { getLastJiraSearchText } from '../services/aggregator.js';
 
 const JIRA_TOOL_CANDIDATES = {
   getIssue: ['jira_get_issue', 'jira_get_issue_by_key', 'jira_issue_get'],
-  updateIssue: ['jira_update_issue', 'jira_update_issue_fields'],
+  updateIssue: ['update_issue', 'jira_update_issue', 'jira_update_issue_fields'],
   addComment: ['jira_add_comment', 'jira_create_comment'],
   listTransitions: ['jira_get_transitions', 'jira_list_transitions'],
   transitionIssue: ['transition_issue', 'jira_transition_issue', 'jira_do_transition', 'jira_transition'],
@@ -193,11 +193,10 @@ export function createJiraRoutes(
 
     try {
       if (fields && updateTool) {
+        // mcp-atlassian update_issue expects: issue_key (str) + fields (JSON string)
+        const fieldsStr = JSON.stringify(fields);
         const result = await callWithFallback(mcpManager, updateTool, [
-          { issue_key: key, fields },
-          { issueKey: key, fields },
-          { key, fields },
-          { issueIdOrKey: key, fields },
+          { issue_key: key, fields: fieldsStr },
         ]);
         results.update = parseToolResult(result);
       }
