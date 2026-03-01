@@ -9,7 +9,7 @@ const JIRA_TOOL_CANDIDATES = {
   updateIssue: ['jira_update_issue', 'jira_update_issue_fields'],
   addComment: ['jira_add_comment', 'jira_create_comment'],
   listTransitions: ['jira_get_transitions', 'jira_list_transitions'],
-  transitionIssue: ['jira_transition_issue', 'jira_do_transition', 'jira_transition'],
+  transitionIssue: ['jira_transition_issue', 'jira_do_transition', 'jira_transition', 'transition_issue'],
   createIssue: ['jira_create_issue', 'jira_create'],
   searchIssues: ['jira_search', 'jira_search_issues', 'searchJiraIssuesUsingJql'],
   getProjects: ['jira_get_projects', 'getVisibleJiraProjects', 'getVisibleJiraProjectsList'],
@@ -43,19 +43,22 @@ async function callWithFallback(
   argsList: Array<Record<string, unknown>>
 ): Promise<unknown> {
   let lastError: unknown;
-  for (const args of argsList) {
+  for (let i = 0; i < argsList.length; i++) {
+    const args = argsList[i];
     try {
+      console.log(`[Jira] callWithFallback ${toolName} attempt ${i + 1}/${argsList.length}: ${JSON.stringify(Object.keys(args))}`);
       const result = await mcp.callTool('jira', toolName, args);
       // MCP tools can return isError: true without throwing
       const obj = result as { isError?: boolean; content?: Array<{ text?: string }> };
       if (obj?.isError) {
         const errText = obj.content?.[0]?.text ?? 'MCP tool returned error';
-        console.warn(`[Jira] ${toolName} returned isError with args ${JSON.stringify(args)}: ${errText}`);
+        console.warn(`[Jira] ${toolName} attempt ${i + 1} isError: ${errText.slice(0, 300)}`);
         lastError = new Error(errText);
         continue; // try next arg variant
       }
       return result;
     } catch (err) {
+      console.warn(`[Jira] ${toolName} attempt ${i + 1} threw: ${err instanceof Error ? err.message.slice(0, 300) : err}`);
       lastError = err;
     }
   }
@@ -230,13 +233,13 @@ export function createJiraRoutes(
           });
           return;
         }
-        console.log(`[Jira] Transitioning ${key} with tool=${transitionTool}, transition_id=${transition}`);
+        const transId = String(transition);
+        console.log(`[Jira] Transitioning ${key} with tool=${transitionTool}, transition_id=${transId}`);
         const result = await callWithFallback(mcpManager, transitionTool, [
-          { issue_key: key, transition_id: transition },
-          { issueKey: key, transitionId: transition },
-          { key, transitionId: transition },
-          { issueKey: key, transition: transition },
-          { issueIdOrKey: key, transitionId: transition },
+          { issue_key: key, transition_id: transId },
+          { issueKey: key, transitionId: transId },
+          { key, transition_id: transId },
+          { issueKey: key, transition: transId },
         ]);
         const parsed = parseToolResult(result);
         console.log(`[Jira] Transition result for ${key}:`, JSON.stringify(parsed).slice(0, 500));
