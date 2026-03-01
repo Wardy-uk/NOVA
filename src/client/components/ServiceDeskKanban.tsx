@@ -525,13 +525,6 @@ function getJiraFieldDisplay(raw: unknown, key: string): string | null {
   return null;
 }
 
-/** Check if a Jira field is an option-type (has {value:..., id:...} shape). */
-function isOptionField(raw: unknown, key: string): boolean {
-  const val = getJiraField(raw, key);
-  if (!val || typeof val !== 'object' || Array.isArray(val)) return false;
-  return 'value' in (val as Record<string, unknown>);
-}
-
 /** Required fields shown in the transition modal. */
 const TRANSITION_FIELDS: Array<{
   key: string;
@@ -567,15 +560,8 @@ function buildFieldUpdates(
     const current = edited[f.key]?.trim() ?? '';
     if (current === original) continue;
     hasChanges = true;
-
-    if (f.inputType === 'date') {
-      updates[f.key] = current || null;
-    } else if (isOptionField(raw, f.key)) {
-      // Option fields must be sent as { value: "..." }
-      updates[f.key] = current ? { value: current } : null;
-    } else {
-      updates[f.key] = current || null;
-    }
+    // MCP update_issue expects all field values as plain strings
+    updates[f.key] = current || null;
   }
 
   return hasChanges ? updates : null;
