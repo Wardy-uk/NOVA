@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import type { FileUserQueries } from '../db/user-store.js';
@@ -8,6 +9,18 @@ import type { EntraSsoService } from '../services/entra-sso.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { JiraOAuthService } from '../services/jira-oauth.js';
 import type { UserSettingsQueries } from '../db/queries.js';
+import { EmailService } from '../services/email.js';
+import { passwordResetHtml } from '../services/email-templates.js';
+
+// In-memory reset tokens — cleared on restart, 1h TTL
+const resetTokens = new Map<string, { userId: number; expiresAt: number }>();
+
+function pruneExpiredTokens() {
+  const now = Date.now();
+  for (const [token, data] of resetTokens) {
+    if (data.expiresAt < now) resetTokens.delete(token);
+  }
+}
 
 function signToken(user: { id: number; username: string; role: string }, secret: string): string {
   return jwt.sign({ id: user.id, username: user.username, role: user.role }, secret, { expiresIn: '7d' });
@@ -139,6 +152,85 @@ export function createAuthRoutes(
   router.get('/status', (_req, res) => {
     const count = userQueries.count();
     res.json({ ok: true, data: { hasUsers: count > 0 } });
+  });
+
+  // ── Password Reset ──
+
+  const emailService = new EmailService(() => settingsQueries.getAll());
+
+  // POST /api/auth/forgot-password — public, sends reset email
+  router.post('/forgot-password', async (req, res) => {
+    const { email } = req.body;
+    // Always return success to prevent email enumeration
+    if (!email?.trim()) {
+      res.json({ ok: true });
+      return;
+    }
+
+    const user = userQueries.getByEmail(email.trim().toLowerCase());
+    if (!user || (user.auth_provider === 'entra' && !user.password_hash)) {
+      // SSO-only or unknown — silently succeed
+      res.json({ ok: true });
+      return;
+    }
+
+    if (!emailService.isConfigured()) {
+      res.status(503).json({ ok: false, error: 'Email is not configured. Contact your administrator.' });
+      return;
+    }
+
+    // Generate token
+    pruneExpiredTokens();
+    const token = crypto.randomBytes(32).toString('hex');
+    resetTokens.set(token, { userId: user.id, expiresAt: Date.now() + 60 * 60 * 1000 });
+
+    const frontendUrl = (process.env.FRONTEND_URL || `https://${req.headers.host}`).replace(/\/+$/, '');
+    const resetUrl = `${frontendUrl}/?reset_token=${token}`;
+    const displayName = user.display_name || user.username;
+
+    try {
+      const text = `Hi ${displayName},\n\nA password reset was requested for your N.O.V.A account.\n\nReset your password: ${resetUrl}\n\nThis link expires in 1 hour. If you didn't request this, ignore this email.\n\nRegards,\nN.O.V.A`;
+      const html = passwordResetHtml({ name: displayName, resetUrl });
+      await emailService.send({ to: user.email!, subject: 'N.O.V.A — Password Reset', text, html });
+      console.log(`[Auth] Password reset email sent to ${user.email}`);
+    } catch (err) {
+      console.error(`[Auth] Failed to send reset email:`, err instanceof Error ? err.message : err);
+    }
+
+    res.json({ ok: true });
+  });
+
+  // POST /api/auth/reset-password — public, consumes token and sets new password
+  router.post('/reset-password', async (req, res) => {
+    const { token, password } = req.body;
+    if (!token || !password) {
+      res.status(400).json({ ok: false, error: 'Token and password are required' });
+      return;
+    }
+    if (password.length < 6) {
+      res.status(400).json({ ok: false, error: 'Password must be at least 6 characters' });
+      return;
+    }
+
+    pruneExpiredTokens();
+    const data = resetTokens.get(token);
+    if (!data) {
+      res.status(400).json({ ok: false, error: 'Invalid or expired reset link. Please request a new one.' });
+      return;
+    }
+
+    const user = userQueries.getById(data.userId);
+    if (!user) {
+      res.status(400).json({ ok: false, error: 'User not found' });
+      return;
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+    userQueries.update(user.id, { password_hash: hash });
+    resetTokens.delete(token);
+    console.log(`[Auth] Password reset completed for user ${user.username}`);
+
+    res.json({ ok: true });
   });
 
   // GET /api/auth/me — requires valid token
