@@ -9,7 +9,7 @@ const JIRA_TOOL_CANDIDATES = {
   updateIssue: ['jira_update_issue', 'jira_update_issue_fields'],
   addComment: ['jira_add_comment', 'jira_create_comment'],
   listTransitions: ['jira_get_transitions', 'jira_list_transitions'],
-  transitionIssue: ['jira_transition_issue', 'jira_do_transition', 'jira_transition', 'transition_issue'],
+  transitionIssue: ['transition_issue', 'jira_transition_issue', 'jira_do_transition', 'jira_transition'],
   createIssue: ['jira_create_issue', 'jira_create'],
   searchIssues: ['jira_search', 'jira_search_issues', 'searchJiraIssuesUsingJql'],
   getProjects: ['jira_get_projects', 'getVisibleJiraProjects', 'getVisibleJiraProjectsList'],
@@ -235,11 +235,9 @@ export function createJiraRoutes(
         }
         const transId = String(transition);
         console.log(`[Jira] Transitioning ${key} with tool=${transitionTool}, transition_id=${transId}`);
+        // transition_issue expects exactly: issue_key (str) + transition_id (str)
         const result = await callWithFallback(mcpManager, transitionTool, [
           { issue_key: key, transition_id: transId },
-          { issueKey: key, transitionId: transId },
-          { key, transition_id: transId },
-          { issueKey: key, transition: transId },
         ]);
         const parsed = parseToolResult(result);
         console.log(`[Jira] Transition result for ${key}:`, JSON.stringify(parsed).slice(0, 500));
