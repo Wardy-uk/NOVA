@@ -1,18 +1,21 @@
 /**
- * Standalone email service — sends directly via MX lookup by default.
- * No external SMTP provider required.
+ * Standalone email service — sends directly to recipient's mail server
+ * by resolving MX records. No external provider needed.
  *
- * If smtp_host is configured in settings, uses that relay instead.
- * Otherwise does direct delivery (resolves recipient MX records).
+ * If smtp_host is set, uses that as a relay instead.
  *
- * Settings keys (all optional for direct mode):
+ * Settings keys:
  *   smtp_from  — sender address (required)
- *   smtp_host  — relay host (optional; omit for direct delivery)
- *   smtp_port  — relay port (default 587)
- *   smtp_user  — relay auth user
- *   smtp_pass  — relay auth password
+ *   smtp_host  — relay host (optional; omit for direct MX delivery)
+ *   smtp_port  — relay port (default 25 for direct, 587 for relay)
+ *   smtp_user  — relay auth user (optional)
+ *   smtp_pass  — relay auth password (optional)
  */
 import nodemailer from 'nodemailer';
+import dns from 'dns';
+import { promisify } from 'util';
+
+const resolveMx = promisify(dns.resolveMx);
 
 export interface EmailOptions {
   to: string;
@@ -28,34 +31,27 @@ export class EmailService {
     this.getSettings = settingsGetter;
   }
 
-  /** Check if at minimum a from address is configured */
   isConfigured(): boolean {
     const s = this.getSettings();
     return !!(s.smtp_from?.trim());
   }
 
-  private createTransport() {
-    const s = this.getSettings();
-    const host = s.smtp_host?.trim();
-
-    if (host) {
-      // Relay mode — use configured SMTP server
-      const port = parseInt(s.smtp_port || '587', 10);
-      return nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: s.smtp_user?.trim()
-          ? { user: s.smtp_user, pass: s.smtp_pass }
-          : undefined,
-      });
+  /** Resolve the MX host for a recipient's domain */
+  private async resolveMxHost(email: string): Promise<string> {
+    const domain = email.split('@')[1];
+    if (!domain) throw new Error(`Invalid email: ${email}`);
+    try {
+      const records = await resolveMx(domain);
+      if (!records || records.length === 0) {
+        // No MX records — fall back to A record (the domain itself)
+        return domain;
+      }
+      // Sort by priority (lowest = highest priority) and pick the best
+      records.sort((a, b) => a.priority - b.priority);
+      return records[0].exchange;
+    } catch (err) {
+      throw new Error(`DNS MX lookup failed for ${domain}: ${err instanceof Error ? err.message : err}`);
     }
-
-    // Direct mode — resolve MX records and deliver directly
-    return nodemailer.createTransport({
-      direct: true,
-      name: s.smtp_from?.split('@')[1] || 'localhost',
-    } as any);
   }
 
   async send(opts: EmailOptions): Promise<void> {
@@ -64,7 +60,38 @@ export class EmailService {
     }
     const s = this.getSettings();
     const from = s.smtp_from.trim();
-    const transport = this.createTransport();
+    const relayHost = s.smtp_host?.trim();
+
+    let host: string;
+    let port: number;
+    let auth: { user: string; pass: string } | undefined;
+    let secure: boolean;
+
+    if (relayHost) {
+      // Relay mode
+      host = relayHost;
+      port = parseInt(s.smtp_port || '587', 10);
+      secure = port === 465;
+      auth = s.smtp_user?.trim() ? { user: s.smtp_user, pass: s.smtp_pass } : undefined;
+    } else {
+      // Direct MX delivery
+      host = await this.resolveMxHost(opts.to);
+      port = 25;
+      secure = false;
+      auth = undefined;
+      console.log(`[Email] Direct delivery to ${opts.to} via MX host: ${host}`);
+    }
+
+    const transport = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth,
+      tls: { rejectUnauthorized: false },
+      // Identify ourselves with the sender's domain
+      name: from.split('@')[1] || 'localhost',
+    });
+
     await transport.sendMail({
       from,
       to: opts.to,
@@ -74,7 +101,6 @@ export class EmailService {
     });
   }
 
-  /** Test the email config by sending a test message */
   async sendTest(to: string): Promise<{ ok: boolean; error?: string }> {
     try {
       await this.send({
