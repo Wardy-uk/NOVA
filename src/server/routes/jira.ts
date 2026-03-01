@@ -71,13 +71,30 @@ const OPTION_FIELDS = new Set([
   'customfield_12981',  // Current Tier
 ]);
 
+// Jira rich-text fields — REST API requires Atlassian Document Format (ADF)
+const ADF_FIELDS = new Set([
+  'customfield_13184',  // TL;DR
+  'description',
+]);
+
+/** Wrap a plain string in minimal ADF document format. */
+function toAdf(text: string): object {
+  return {
+    version: 1,
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+  };
+}
+
 /** Format field values for the Jira REST API.
- *  Option fields get wrapped as { value: "..." }, others pass through as-is. */
+ *  Option fields → { value: "..." }, ADF fields → doc format, others → as-is. */
 function formatFieldsForRest(fields: Record<string, unknown>): Record<string, unknown> {
   const formatted: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(fields)) {
     if (val && typeof val === 'string' && OPTION_FIELDS.has(key)) {
       formatted[key] = { value: val };
+    } else if (val && typeof val === 'string' && ADF_FIELDS.has(key)) {
+      formatted[key] = toAdf(val);
     } else {
       formatted[key] = val;
     }
