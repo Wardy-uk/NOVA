@@ -85,6 +85,20 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
     ],
   },
   {
+    id: 'smtp',
+    name: 'Email (SMTP)',
+    description: 'SMTP email for user invites and notifications. Works with any email provider (M365, Gmail, etc).',
+    enabledKey: 'smtp_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'smtp_host', label: 'SMTP Host', type: 'text', placeholder: 'e.g. smtp.office365.com', required: true },
+      { key: 'smtp_port', label: 'Port', type: 'text', placeholder: '587', required: false },
+      { key: 'smtp_user', label: 'Username / Email', type: 'text', placeholder: 'you@company.com', required: true },
+      { key: 'smtp_pass', label: 'Password / App Password', type: 'password', placeholder: 'SMTP password or app password', required: true },
+      { key: 'smtp_from', label: 'From Address', type: 'text', placeholder: 'noreply@company.com (defaults to username)', required: false },
+    ],
+  },
+  {
     id: 'jira-oauth',
     name: 'Jira OAuth',
     description: 'Jira Cloud OAuth 3LO. Users connect their own Jira account. Configure app credentials from developer.atlassian.com.',

@@ -7,6 +7,7 @@ import type { FileUserQueries } from '../db/user-store.js';
 type UserQueries = FileUserQueries;
 import { requireRole } from '../middleware/auth.js';
 import type { McpClientManager } from '../services/mcp-client.js';
+import { EmailService } from '../services/email.js';
 
 function generateTempPassword(): string {
   return crypto.randomBytes(9).toString('base64url').slice(0, 12);
@@ -21,6 +22,23 @@ export function createAdminRoutes(
 ): Router {
   const router = Router();
   router.use(requireRole('admin'));
+
+  const emailService = new EmailService(() => settingsQueries.getAll());
+
+  /** Send an email — tries SMTP first, falls back to MCP send-mail */
+  async function sendEmail(to: string, subject: string, text: string): Promise<void> {
+    // Prefer SMTP (built-in, no MCP dependency)
+    if (emailService.isConfigured()) {
+      await emailService.send({ to, subject, text });
+      return;
+    }
+    // Fallback: MCP send-mail
+    if (mcpManager && mcpManager.getServerTools('msgraph').includes('send-mail')) {
+      await mcpManager.callTool('msgraph', 'send-mail', { to, subject, body: text });
+      return;
+    }
+    throw new Error('No email provider configured. Set up SMTP in Admin > Integrations, or connect Microsoft 365.');
+  }
 
   // ---- Users ----
 
@@ -147,27 +165,17 @@ export function createAdminRoutes(
 
   // ---- Invite ----
 
-  /** Send invite email to an existing user via O365 send-mail */
+  /** Send invite email to an existing user via SMTP or MCP fallback */
   router.post('/users/:id/invite', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const user = userQueries.getById(id);
     if (!user) { res.status(404).json({ ok: false, error: 'User not found' }); return; }
     if (!user.email) { res.status(400).json({ ok: false, error: 'User has no email address' }); return; }
 
-    if (!mcpManager) {
-      res.status(501).json({ ok: false, error: 'Email service not available (MCP not configured)' });
-      return;
-    }
-    const tools = mcpManager.getServerTools('msgraph');
-    if (!tools.includes('send-mail')) {
-      res.status(501).json({ ok: false, error: 'send-mail tool not available' });
-      return;
-    }
-
     const ssoEnabled = settingsQueries.get('sso_enabled') === 'true';
     const frontendUrl = (process.env.FRONTEND_URL || `https://${req.headers.host}`).replace(/\/+$/, '');
 
-    const body = [
+    const text = [
       `Hi ${user.display_name || user.username},`,
       '',
       `You've been invited to N.O.V.A (Nurtur Operational Virtual Assistant).`,
@@ -187,15 +195,20 @@ export function createAdminRoutes(
     ].join('\n');
 
     try {
-      await mcpManager.callTool('msgraph', 'send-mail', {
-        to: user.email,
-        subject: "You've been invited to N.O.V.A",
-        body,
-      });
+      console.log(`[Admin] Sending invite to ${user.email} (smtp: ${emailService.isConfigured()})`);
+      await sendEmail(user.email, "You've been invited to N.O.V.A", text);
+      console.log(`[Admin] Invite sent to ${user.email}`);
       res.json({ ok: true });
     } catch (err) {
+      console.error(`[Admin] Invite failed for ${user.email}:`, err instanceof Error ? err.message : err);
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to send invite' });
     }
+  });
+
+  /** Verify SMTP connection */
+  router.post('/email/test', async (_req, res) => {
+    const result = await emailService.verify();
+    res.json({ ok: result.ok, error: result.error });
   });
 
   // ---- Bulk import ----
@@ -223,8 +236,6 @@ export function createAdminRoutes(
 
     const ssoEnabled = settingsQueries.get('sso_enabled') === 'true';
     const frontendUrl = (process.env.FRONTEND_URL || `https://${req.headers.host}`).replace(/\/+$/, '');
-    const canSendMail = mcpManager && mcpManager.getServerTools('msgraph').includes('send-mail');
-
     let created = 0;
     let invited = 0;
     const skipped: string[] = [];
@@ -242,7 +253,7 @@ export function createAdminRoutes(
       const role = entry.role && allValidRoles.includes(entry.role) ? entry.role : defaultRole;
       const hash = await bcrypt.hash(tempPassword, 10);
 
-      const userId = userQueries.create({
+      userQueries.create({
         username: normalizedUsername,
         display_name: entry.display_name?.trim() || normalizedUsername,
         email: entry.email?.trim() || undefined,
@@ -252,9 +263,9 @@ export function createAdminRoutes(
       created++;
 
       // Send invite email if requested
-      if (sendInvites && canSendMail && entry.email?.trim()) {
+      if (sendInvites && entry.email?.trim()) {
         try {
-          const body = [
+          const text = [
             `Hi ${entry.display_name?.trim() || normalizedUsername},`,
             '',
             `You've been invited to N.O.V.A (Nurtur Operational Virtual Assistant).`,
@@ -272,11 +283,7 @@ export function createAdminRoutes(
             'N.O.V.A',
           ].join('\n');
 
-          await mcpManager!.callTool('msgraph', 'send-mail', {
-            to: entry.email.trim(),
-            subject: "You've been invited to N.O.V.A",
-            body,
-          });
+          await sendEmail(entry.email.trim(), "You've been invited to N.O.V.A", text);
           invited++;
         } catch (err) {
           console.error(`[Admin] Failed to send invite to ${entry.email}:`, err instanceof Error ? err.message : err);

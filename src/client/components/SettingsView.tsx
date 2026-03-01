@@ -6,7 +6,7 @@ import { PABridgeCard } from './PABridgeCard.js';
 import { AISettingsCard } from './AISettingsCard.js';
 
 // Global/service-account integrations managed in Admin (not user-facing)
-const ADMIN_ONLY_INTEGRATIONS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth']);
+const ADMIN_ONLY_INTEGRATIONS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp']);
 
 // Map integration IDs to the data source(s) they populate locally
 const INTEGRATION_SOURCES: Record<string, string[]> = {
