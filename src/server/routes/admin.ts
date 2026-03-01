@@ -6,7 +6,6 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { FileUserQueries } from '../db/user-store.js';
 type UserQueries = FileUserQueries;
 import { requireRole } from '../middleware/auth.js';
-import type { McpClientManager } from '../services/mcp-client.js';
 import { EmailService } from '../services/email.js';
 
 function generateTempPassword(): string {
@@ -18,26 +17,18 @@ export function createAdminRoutes(
   teamQueries: TeamQueries,
   userSettingsQueries: UserSettingsQueries,
   settingsQueries: SettingsQueries,
-  mcpManager?: McpClientManager,
 ): Router {
   const router = Router();
   router.use(requireRole('admin'));
 
   const emailService = new EmailService(() => settingsQueries.getAll());
 
-  /** Send an email — tries SMTP first, falls back to MCP send-mail */
+  /** Send an email via SMTP */
   async function sendEmail(to: string, subject: string, text: string): Promise<void> {
-    // Prefer SMTP (built-in, no MCP dependency)
-    if (emailService.isConfigured()) {
-      await emailService.send({ to, subject, text });
-      return;
+    if (!emailService.isConfigured()) {
+      throw new Error('SMTP not configured. Set up SMTP in Admin > Integrations.');
     }
-    // Fallback: MCP send-mail
-    if (mcpManager && mcpManager.getServerTools('msgraph').includes('send-mail')) {
-      await mcpManager.callTool('msgraph', 'send-mail', { to, subject, body: text });
-      return;
-    }
-    throw new Error('No email provider configured. Set up SMTP in Admin > Integrations, or connect Microsoft 365.');
+    await emailService.send({ to, subject, text });
   }
 
   // ---- Users ----
