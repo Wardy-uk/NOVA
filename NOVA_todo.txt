@@ -34,6 +34,14 @@ Completed items: see NOVA_completed.txt
 [x] 31. Milestone ticket creation button — POST /:id/create-tickets endpoint
     creates Jira tickets for linked ticket groups. UI shows "Create Tickets"
     button on milestones with linked groups, or Jira key badges when created.
+[x] 25. Managers overview — Onboarding Overview tab with KPI cards (active
+    deliveries, MRR, milestones overdue), milestone health bars, product
+    breakdown table, manager workload table, recent ticket runs feed.
+[x] 26. Delivery completion tracker — KPI cards on Delivery page showing
+    Delivered Today / This Week / This Month (with MRR) and Active Pipeline.
+[x] 33. Manual refresh button — refresh icon on all area sub-tab bars
+    (My NOVA, Onboarding, CRM, SD). Dispatches nova-refresh event to child
+    components. Spinner animation while refreshing.
 
 
 === DO NEXT ===
@@ -43,16 +51,25 @@ Completed items: see NOVA_completed.txt
     define the rules (which fields, thresholds, priority weights).
 
 
+=== TECHINCAL DEBT ===
+
+1.  Lock down global settings exposure — restrict `GET /api/settings` to admin
+    or return a redacted subset; never expose `jwt_secret` or integration creds.
+2.  Role-guard integrations endpoints — only admin can modify admin-only
+    integrations (SSO, Jira onboarding, Service Desk config); validate updates.
+3.  Fix production SPA fallback route — replace invalid `{*path}` with Express
+    wildcard to ensure SPA loads in prod.
+4.  Jira OAuth base URL resolution — correct redirect base when `FRONTEND_URL`
+    is set to avoid localhost callbacks in prod.
+5.  Remove sensitive debug logging — Jira attention debug logs and Monday board
+    debug file should be behind an explicit debug flag.
+6.  Settings/users file-store durability — add locking or move to DB-backed
+    persistence to prevent concurrent write loss.
+
+
 === TIER 2: Feature additions ===
 
-25. Managers overview — management summary tab on each main area (activity,
-    status, team performance). Partially addressed by Team Load + SD Dashboard
-    but needs broader coverage across Onboarding and Delivery areas.
-26. Delivery completion tracker — "Delivered Today / This Week / This Month"
-    summary cards or section on the delivery page.
-33. Add manual refresh button to appropriate tabs (My Focus, Tasks, SD tabs,
-    Delivery, CRM). Silent background refresh already exists — just expose
-    a manual trigger.
+(empty)
 
 
 === TIER 3: Platform maturity ===

@@ -269,6 +269,123 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
       }
     });
 
+    router.get('/entries/completion-summary', (_req, res) => {
+      const entries = deliveryQueries.getAll();
+      const today = new Date().toISOString().split('T')[0];
+      const now = new Date();
+      const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7).toISOString().split('T')[0];
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+
+      let todayCount = 0, todayMrr = 0;
+      let weekCount = 0, weekMrr = 0;
+      let monthCount = 0, monthMrr = 0;
+      let totalActive = 0;
+
+      for (const e of entries) {
+        const lower = (e.status || '').toLowerCase();
+        if (lower === 'complete') {
+          const gld = e.go_live_date ?? '';
+          if (gld === today) { todayCount++; todayMrr += e.mrr ?? 0; }
+          if (gld >= weekAgo) { weekCount++; weekMrr += e.mrr ?? 0; }
+          if (gld >= monthStart) { monthCount++; monthMrr += e.mrr ?? 0; }
+        } else if (!['dead', 'back to sales'].includes(lower)) {
+          totalActive++;
+        }
+      }
+
+      res.json({
+        ok: true,
+        data: {
+          deliveredToday: { count: todayCount, mrr: todayMrr },
+          deliveredThisWeek: { count: weekCount, mrr: weekMrr },
+          deliveredThisMonth: { count: monthCount, mrr: monthMrr },
+          totalActive,
+        },
+      });
+    });
+
+    // Onboarding managers overview / dashboard
+    router.get('/onboarding-dashboard', (_req, res) => {
+      const entries = deliveryQueries.getAll();
+      const milestoneSummary = milestoneQueries?.getSummary() ?? { total: 0, pending: 0, in_progress: 0, complete: 0, overdue: 0 };
+      const recentRuns = onboardingRunQueries?.getRecent(10) ?? [];
+
+      // Aggregate by status
+      const byStatus: Record<string, number> = {};
+      // Aggregate by product
+      const byProduct: Record<string, { active: number; complete: number; mrr: number }> = {};
+      // Aggregate by onboarder
+      const byOnboarder: Record<string, { active: number; complete: number; overdue: number }> = {};
+
+      let totalActive = 0, totalComplete = 0, totalDead = 0, totalMrr = 0;
+
+      const today = new Date().toISOString().split('T')[0];
+
+      for (const e of entries) {
+        const lower = (e.status || '').toLowerCase();
+        byStatus[e.status || 'Unknown'] = (byStatus[e.status || 'Unknown'] || 0) + 1;
+
+        const prod = e.product || 'Other';
+        if (!byProduct[prod]) byProduct[prod] = { active: 0, complete: 0, mrr: 0 };
+
+        const mgr = e.onboarder || 'Unassigned';
+        if (!byOnboarder[mgr]) byOnboarder[mgr] = { active: 0, complete: 0, overdue: 0 };
+
+        if (lower === 'complete') {
+          totalComplete++;
+          byProduct[prod].complete++;
+          byOnboarder[mgr].complete++;
+        } else if (['dead', 'back to sales'].includes(lower)) {
+          totalDead++;
+        } else {
+          totalActive++;
+          totalMrr += e.mrr ?? 0;
+          byProduct[prod].active++;
+          byProduct[prod].mrr += e.mrr ?? 0;
+          byOnboarder[mgr].active++;
+          // Overdue = has a go_live_date in the past and still active
+          if (e.go_live_date && e.go_live_date < today) {
+            byOnboarder[mgr].overdue++;
+          }
+        }
+      }
+
+      // Sort products and onboarders by active count descending
+      const productBreakdown = Object.entries(byProduct)
+        .map(([name, d]) => ({ name, ...d }))
+        .sort((a, b) => b.active - a.active);
+
+      const onboarderBreakdown = Object.entries(byOnboarder)
+        .filter(([, d]) => d.active > 0 || d.complete > 0)
+        .map(([name, d]) => ({ name, ...d }))
+        .sort((a, b) => b.active - a.active);
+
+      // Recent runs summary
+      const runsSummary = recentRuns.slice(0, 5).map(r => ({
+        ref: r.onboarding_ref,
+        status: r.status,
+        created_count: r.created_count,
+        parent_key: r.parent_key,
+        created_at: r.created_at,
+      }));
+
+      res.json({
+        ok: true,
+        data: {
+          totalActive,
+          totalComplete,
+          totalDead,
+          totalMrr,
+          totalEntries: entries.length,
+          milestones: milestoneSummary,
+          byStatus,
+          productBreakdown,
+          onboarderBreakdown,
+          recentRuns: runsSummary,
+        },
+      });
+    });
+
     router.get('/entries', (req, res) => {
       const product = req.query.product as string | undefined;
       res.json({ ok: true, data: deliveryQueries.getAll(product) });

@@ -190,6 +190,13 @@ export function CrmView({ canWrite = false }: { canWrite?: boolean }) {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Listen for manual refresh from App-level button
+  useEffect(() => {
+    const handler = () => { loadData(); };
+    window.addEventListener('nova-refresh', handler);
+    return () => window.removeEventListener('nova-refresh', handler);
+  }, [loadData]);
+
   const loadReviews = async (customerId: number) => {
     const resp = await fetch(`/api/crm/customers/${customerId}/reviews`);
     const json = await resp.json();

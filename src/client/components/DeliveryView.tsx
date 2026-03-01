@@ -179,6 +179,14 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
   const [dateTo, setDateTo] = useState('');
   const auth = useAuth();
 
+  // Completion tracker data
+  const [completionData, setCompletionData] = useState<{
+    deliveredToday: { count: number; mrr: number };
+    deliveredThisWeek: { count: number; mrr: number };
+    deliveredThisMonth: { count: number; mrr: number };
+    totalActive: number;
+  } | null>(null);
+
   const loadData = useCallback(() => {
     setLoading(true);
     Promise.all([
@@ -211,10 +219,27 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Fetch completion tracker on load and after saves
+  const loadCompletion = useCallback(() => {
+    fetch('/api/delivery/entries/completion-summary')
+      .then(r => r.json())
+      .then(json => { if (json.ok) setCompletionData(json.data); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => { loadCompletion(); }, [loadCompletion]);
+
+  // Listen for manual refresh from App-level button
+  useEffect(() => {
+    const handler = () => { loadData(); loadCompletion(); };
+    window.addEventListener('nova-refresh', handler);
+    return () => window.removeEventListener('nova-refresh', handler);
+  }, [loadData, loadCompletion]);
+
   const refreshDbEntries = async () => {
     const dbResp = await fetch('/api/delivery/entries');
     const dbJson = await dbResp.json();
     if (dbJson.ok) setDbEntries(dbJson.data);
+    loadCompletion();
   };
 
   const handleDelete = async (id: number) => {
@@ -689,13 +714,23 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
       )}
 
       {/* Summary KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
         <KpiCard label="Total Customers" value={kpi.totalCustomers} />
         <KpiCard label="Total MRR" value={formatCurrency(kpi.totalMrr)} />
         <KpiCard label="WIP" value={kpi.totalWip} sub="Active deliveries" />
         <KpiCard label="Complete" value={kpi.totalComplete} />
         <KpiCard label="NOVA Entries" value={kpi.novaEntries} sub="Local additions" />
       </div>
+
+      {/* Completion Tracker */}
+      {completionData && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <KpiCard label="Delivered Today" value={completionData.deliveredToday.count} sub={completionData.deliveredToday.mrr > 0 ? formatCurrency(completionData.deliveredToday.mrr) + ' MRR' : undefined} />
+          <KpiCard label="This Week" value={completionData.deliveredThisWeek.count} sub={completionData.deliveredThisWeek.mrr > 0 ? formatCurrency(completionData.deliveredThisWeek.mrr) + ' MRR' : undefined} />
+          <KpiCard label="This Month" value={completionData.deliveredThisMonth.count} sub={completionData.deliveredThisMonth.mrr > 0 ? formatCurrency(completionData.deliveredThisMonth.mrr) + ' MRR' : undefined} />
+          <KpiCard label="Active Pipeline" value={completionData.totalActive} sub="Not complete/dead" />
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mb-4 space-y-2">

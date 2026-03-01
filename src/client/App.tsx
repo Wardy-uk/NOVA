@@ -12,6 +12,7 @@ import { HelpView } from './components/HelpView.js';
 import { AdminView } from './components/AdminView.js';
 import { OnboardingConfigView } from './components/OnboardingConfigView.js';
 import { OnboardingCalendar } from './components/OnboardingCalendar.js';
+import { OnboardingDashboard } from './components/OnboardingDashboard.js';
 import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
@@ -33,7 +34,7 @@ import { type OwnershipFilter } from './utils/taskHelpers.js';
 type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
-  | 'delivery' | 'onboarding-config' | 'ob-calendar'
+  | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard'
   | 'crm'
   | 'settings' | 'admin-panel'
   | 'help' | 'debug';
@@ -84,6 +85,7 @@ const AREAS: Record<Area, AreaDef> = {
     label: 'Onboarding',
     defaultView: 'delivery',
     tabs: [
+      { view: 'ob-dashboard', label: 'Overview' },
       { view: 'delivery', label: 'Delivery' },
       { view: 'ob-calendar', label: 'Milestones' },
       { view: 'onboarding-config', label: 'Onboarding Matrix' },
@@ -110,7 +112,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'team-workload', 'admin-panel']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'team-workload', 'admin-panel']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -143,7 +145,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 export function App() {
   const [view, setView] = useState<View>('focus');
   const auth = useAuth();
-  const { tasks, loading, error, syncing, updateTask } = useTasks();
+  const { tasks, loading, error, syncing, fetchTasks, updateTask } = useTasks();
   const health = useHealth();
   const { theme, setTheme } = useTheme();
   const { showTour, startTour, closeTour, checkFirstVisit } = useTour();
@@ -319,6 +321,23 @@ export function App() {
     const interval = setInterval(refreshSdTasks, 60_000);
     return () => clearInterval(interval);
   }, [sdApiFilter, auth.isAuthenticated, refreshSdTasks]);
+
+  // Manual refresh for current area
+  const [refreshing, setRefreshing] = useState(false);
+  const handleManualRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      if (currentArea === 'command') {
+        await fetchTasks();
+      } else if (currentArea === 'servicedesk') {
+        refreshSdTasks();
+      }
+      // Onboarding and CRM views manage their own data — dispatching a custom event lets them know
+      window.dispatchEvent(new Event('nova-refresh'));
+    } catch { /* ignore */ }
+    // Brief timeout so spinner is visible
+    setTimeout(() => setRefreshing(false), 500);
+  }, [currentArea, fetchTasks, refreshSdTasks]);
 
   // Auth gate
   if (auth.initializing) {
@@ -525,6 +544,28 @@ export function App() {
                       {sdTasks.length} ticket{sdTasks.length !== 1 ? 's' : ''}
                     </span>
                   )}
+                  <button
+                    onClick={handleManualRefresh}
+                    disabled={refreshing}
+                    className="px-2 py-1 text-[11px] text-neutral-500 hover:text-[#5ec1ca] transition-colors disabled:opacity-50 flex items-center gap-1 ml-2"
+                    title="Refresh data"
+                  >
+                    <span className={`inline-block text-xs ${refreshing ? 'animate-spin' : ''}`}>{'\u21BB'}</span>
+                  </button>
+                </div>
+              )}
+              {/* Manual refresh button (non-SD areas) */}
+              {currentArea !== 'servicedesk' && (
+                <div className="ml-auto">
+                  <button
+                    onClick={handleManualRefresh}
+                    disabled={refreshing}
+                    className="px-2 py-1 text-[11px] text-neutral-500 hover:text-[#5ec1ca] transition-colors disabled:opacity-50 flex items-center gap-1"
+                    title="Refresh data"
+                  >
+                    <span className={`inline-block text-xs ${refreshing ? 'animate-spin' : ''}`}>{'\u21BB'}</span>
+                    {refreshing ? 'Refreshing...' : 'Refresh'}
+                  </button>
                 </div>
               )}
             </div>
@@ -604,6 +645,9 @@ export function App() {
           )}
 
           {/* Onboarding */}
+          {view === 'ob-dashboard' && (
+            <OnboardingDashboard />
+          )}
           {view === 'delivery' && (
             <DeliveryView canWrite={areaAccess.onboarding === 'edit'} />
           )}
