@@ -65,6 +65,26 @@ async function callWithFallback(
   throw lastError ?? new Error('Unknown Jira tool error');
 }
 
+// Jira option-type custom fields — REST API requires { value: "..." } wrapping
+const OPTION_FIELDS = new Set([
+  'customfield_13183',  // Nurtur Product
+  'customfield_12981',  // Current Tier
+]);
+
+/** Format field values for the Jira REST API.
+ *  Option fields get wrapped as { value: "..." }, others pass through as-is. */
+function formatFieldsForRest(fields: Record<string, unknown>): Record<string, unknown> {
+  const formatted: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(fields)) {
+    if (val && typeof val === 'string' && OPTION_FIELDS.has(key)) {
+      formatted[key] = { value: val };
+    } else {
+      formatted[key] = val;
+    }
+  }
+  return formatted;
+}
+
 export function createJiraRoutes(
   mcpManager: McpClientManager,
   taskQueries: TaskQueries,
@@ -184,8 +204,9 @@ export function createJiraRoutes(
       // 1. Update fields — prefer REST, fall back to MCP
       if (fields && Object.keys(fields).length > 0) {
         if (restClient) {
-          console.log(`[Jira] Updating fields on ${key} via REST:`, Object.keys(fields));
-          await restClient.updateFields(key, fields);
+          const formatted = formatFieldsForRest(fields);
+          console.log(`[Jira] Updating fields on ${key} via REST:`, JSON.stringify(formatted));
+          await restClient.updateFields(key, formatted);
           results.update = { ok: true };
         } else {
           const tools = mcpManager.getServerTools('jira');
