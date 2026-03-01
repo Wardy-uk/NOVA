@@ -502,18 +502,27 @@ function getJiraField(raw: unknown, key: string): unknown {
   return val ?? undefined;
 }
 
-/** Extract displayable value from a Jira field (handles option objects, strings, dates). */
+/** Extract displayable string from a Jira field.
+ *  Recursively unwraps {value: X} wrappers (MCP Jira wraps custom fields this way)
+ *  and option objects ({value: "...", id: "..."}). Never returns "[object Object]". */
 function getJiraFieldDisplay(raw: unknown, key: string): string | null {
-  const val = getJiraField(raw, key);
+  let val: unknown = getJiraField(raw, key);
   if (!val) return null;
-  if (typeof val === 'string') return val;
-  if (typeof val === 'object' && val !== null) {
+
+  // Recursively unwrap object wrappers
+  while (val && typeof val === 'object' && !Array.isArray(val)) {
     const obj = val as Record<string, unknown>;
-    if (obj.value) return String(obj.value);
-    if (obj.name) return String(obj.name);
-    if (obj.displayName) return String(obj.displayName);
+    if (typeof obj.value === 'string') return obj.value;
+    if (typeof obj.name === 'string') return obj.name;
+    if (typeof obj.displayName === 'string') return obj.displayName;
+    // Unwrap one level of {value: {...}} wrapper
+    if (obj.value && typeof obj.value === 'object') { val = obj.value; continue; }
+    return null; // unrecognised object shape — don't return "[object Object]"
   }
-  return String(val);
+
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return String(val);
+  return null;
 }
 
 /** Check if a Jira field is an option-type (has {value:..., id:...} shape). */
@@ -598,10 +607,10 @@ function TransitionModal({
   const { issueKey, targetColumn, task } = pending;
   const currentStatus = getOriginalJiraStatus(task);
 
-  // Count empty required fields (excludes comment — that's separate)
+  // Count empty required fields
   const emptyFieldCount = TRANSITION_FIELDS.filter((f) => !fieldValues[f.key]?.trim()).length;
-  const hasPublicComment = comment.trim() && commentType === 'public';
-  const missingCount = emptyFieldCount + (hasPublicComment ? 0 : 1);
+  const hasComment = !!comment.trim();
+  const missingCount = emptyFieldCount + (hasComment ? 0 : 1);
 
   const updateField = useCallback((key: string, value: string) => {
     setFieldValues((prev) => ({ ...prev, [key]: value }));
@@ -841,10 +850,10 @@ function TransitionModal({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[11px] text-neutral-400 flex items-center gap-1.5">
-                    <span className={`text-[10px] ${hasPublicComment ? 'text-green-400' : 'text-amber-400'}`}>
-                      {hasPublicComment ? '\u2713' : '\u25CB'}
+                    <span className={`text-[10px] ${hasComment ? 'text-green-400' : 'text-amber-400'}`}>
+                      {hasComment ? '\u2713' : '\u25CB'}
                     </span>
-                    Public Comment
+                    Comment <span className="text-neutral-600">(required)</span>
                   </label>
                   <div className="flex gap-1">
                     {(['internal', 'public'] as const).map(type => (
@@ -870,7 +879,9 @@ function TransitionModal({
                   onChange={(e) => setComment(e.target.value)}
                   placeholder="Add a comment to the transition..."
                   rows={2}
-                  className="w-full bg-[#272C33] border border-[#3a424d] rounded px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-[#5ec1ca]/50 resize-none"
+                  className={`w-full bg-[#272C33] border rounded px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-[#5ec1ca]/50 resize-none ${
+                    hasComment ? 'border-[#3a424d]' : 'border-amber-900/50'
+                  }`}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                       e.preventDefault();
@@ -911,9 +922,9 @@ function TransitionModal({
               </button>
               <button
                 onClick={handleConfirm}
-                disabled={saving || !selectedTransition || loading}
+                disabled={saving || !selectedTransition || loading || !hasComment}
                 className={`px-4 py-1.5 text-xs rounded font-semibold transition-colors disabled:opacity-50 flex items-center gap-1.5 ${
-                  missingCount > 0
+                  emptyFieldCount > 0
                     ? 'bg-amber-500 text-[#272C33] hover:bg-amber-400'
                     : 'bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9]'
                 }`}
@@ -923,7 +934,7 @@ function TransitionModal({
                     <span className="inline-block w-3 h-3 border-2 border-[#272C33]/30 border-t-[#272C33] rounded-full animate-spin" />
                     Transitioning...
                   </>
-                ) : missingCount > 0 ? (
+                ) : emptyFieldCount > 0 ? (
                   'Transition Anyway'
                 ) : (
                   'Transition in Jira'
