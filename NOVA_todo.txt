@@ -3,12 +3,7 @@ N.O.V.A — TO DO
 
 --- Triage ---
 
-PLanner, Email and Calender still don't show my tasks
-  → MS365 global seeding bug was fixed (item 28). Needs redeploy + user re-enable.
-
-add a refresh now to all appropriate tabs
-
-moving tickets in Kanban / Status view doiesnt update view or tickets
+(empty)
 
 === CURRENT STATUS (28 Feb 2026) ===
 
@@ -40,18 +35,24 @@ Completed items: see NOVA_completed.txt
     now time-appropriate (morning/afternoon/evening based on hour).
 [x] Service Desk — all tabs centered (max-w constraints on Dashboard,
     Kanban, Calendar, Tickets, Breached views).
+[x] NOVA Insights button — renamed "Ask N.O.V.A" button in NextActions.
+[x] NOVA Insights — added "All Tasks" button to source filter.
+[x] Planner/Email/Calendar not showing — code fix deployed (item 28), ops
+    task only (redeploy + user re-enable msgraph).
+[x] 27. Jira 410 fix — DEFAULT_CONFIG changed from 'Service Request' to
+    'Support', request type field emptied, settings.json defaulted from
+    real ticket JSON. Falls back to personal Jira creds when no service
+    account configured.
 
 
 === DO NEXT ===
 
+32. BUG: SD Kanban drag doesn't update view or tickets — drag-and-drop may
+    fail silently or not refresh the local state after Jira transition.
+
 8.  Jira SLA prioritisation — tickets over SLA or overdue an update should be
     prioritised. SLA timer and attention endpoint already exist. Needs user to
     define the rules (which fields, thresholds, priority weights).
-
-27. Jira onboarding ticket creation 410 fix — Atlassian returns 410 Gone when
-    creating Service Request issues via REST API v3. Switch to creating normal
-    tickets (standard issue type, no request type field). Admin Jira service
-    account credentials also need configuring before this will work.
 
 30. Link D365 account number to delivery entries — associate a Dynamics 365
     account record with an onboarding delivery item for cross-referencing.
@@ -69,6 +70,9 @@ Completed items: see NOVA_completed.txt
     but needs broader coverage across Onboarding and Delivery areas.
 26. Delivery completion tracker — "Delivered Today / This Week / This Month"
     summary cards or section on the delivery page.
+33. Add manual refresh button to appropriate tabs (My Focus, Tasks, SD tabs,
+    Delivery, CRM). Silent background refresh already exists — just expose
+    a manual trigger.
 
 
 === TIER 3: Platform maturity ===

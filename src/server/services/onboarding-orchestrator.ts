@@ -41,8 +41,8 @@ export interface OnboardingConfig {
 
 const DEFAULT_CONFIG: OnboardingConfig = {
   projectKey: 'NT',
-  issueTypeName: 'Service Request',
-  requestTypeField: 'customfield_10010',
+  issueTypeName: 'Support',
+  requestTypeField: '',
   deliveryQaRequestTypeId: '',
   onboardingRequestTypeId: '',
   linkTypeName: 'Blocks',
@@ -77,13 +77,20 @@ export class OnboardingOrchestrator {
 
   private refreshConfig(): void {
     const s = this.settingsGetter();
+    // Use first defined key (including empty string — empty means "none")
+    const pick = (...keys: (string | undefined)[]): string => {
+      for (const k of keys) {
+        if (k !== undefined) return k;
+      }
+      return '';
+    };
     this.config = {
-      projectKey: s.jira_ob_project || s.jira_onboarding_project || DEFAULT_CONFIG.projectKey,
-      issueTypeName: s.jira_ob_issue_type || s.jira_onboarding_issue_type || DEFAULT_CONFIG.issueTypeName,
-      requestTypeField: s.jira_ob_request_type_field || s.jira_request_type_field || DEFAULT_CONFIG.requestTypeField,
-      deliveryQaRequestTypeId: s.jira_ob_rt_qa_id || s.jira_rt_delivery_qa_id || '',
-      onboardingRequestTypeId: s.jira_ob_rt_onboarding_id || s.jira_rt_onboarding_id || '',
-      linkTypeName: s.jira_ob_link_type || s.jira_link_type_name || DEFAULT_CONFIG.linkTypeName,
+      projectKey: pick(s.jira_ob_project, s.jira_onboarding_project) || DEFAULT_CONFIG.projectKey,
+      issueTypeName: pick(s.jira_ob_issue_type, s.jira_onboarding_issue_type) || DEFAULT_CONFIG.issueTypeName,
+      requestTypeField: pick(s.jira_ob_request_type_field, s.jira_request_type_field),
+      deliveryQaRequestTypeId: pick(s.jira_ob_rt_qa_id, s.jira_rt_delivery_qa_id),
+      onboardingRequestTypeId: pick(s.jira_ob_rt_onboarding_id, s.jira_rt_onboarding_id),
+      linkTypeName: pick(s.jira_ob_link_type, s.jira_link_type_name) || DEFAULT_CONFIG.linkTypeName,
       defaultPriority: DEFAULT_CONFIG.defaultPriority,
     };
   }
