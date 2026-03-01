@@ -3,8 +3,9 @@ N.O.V.A — TO DO
 
 --- Triage ---
 
-(empty)
-
+enhance permissions 
+   global admin
+   team admin
 
 
 === CURRENT STATUS (1 Mar 2026) ===
