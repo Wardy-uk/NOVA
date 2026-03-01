@@ -86,16 +86,16 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
   },
   {
     id: 'smtp',
-    name: 'Email (SMTP)',
-    description: 'SMTP email for user invites and notifications. Works with any email provider (M365, Gmail, etc).',
+    name: 'Email',
+    description: 'Built-in email for invites and notifications. Only a From address is needed — sends directly. Optionally add an SMTP relay.',
     enabledKey: 'smtp_enabled',
     authType: 'credentials',
     fields: [
-      { key: 'smtp_host', label: 'SMTP Host', type: 'text', placeholder: 'e.g. smtp.office365.com', required: true },
+      { key: 'smtp_from', label: 'From Address', type: 'text', placeholder: 'noreply@nurtur.tech', required: true },
+      { key: 'smtp_host', label: 'SMTP Relay (optional)', type: 'text', placeholder: 'Leave blank for direct delivery', required: false },
       { key: 'smtp_port', label: 'Port', type: 'text', placeholder: '587', required: false },
-      { key: 'smtp_user', label: 'Username / Email', type: 'text', placeholder: 'you@company.com', required: true },
-      { key: 'smtp_pass', label: 'Password / App Password', type: 'password', placeholder: 'SMTP password or app password', required: true },
-      { key: 'smtp_from', label: 'From Address', type: 'text', placeholder: 'noreply@company.com (defaults to username)', required: false },
+      { key: 'smtp_user', label: 'Relay Username', type: 'text', placeholder: 'Only if using a relay', required: false },
+      { key: 'smtp_pass', label: 'Relay Password', type: 'password', placeholder: 'Only if using a relay', required: false },
     ],
   },
   {

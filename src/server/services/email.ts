@@ -1,11 +1,18 @@
 /**
- * Built-in SMTP email service using nodemailer.
- * Reads SMTP config from settings; works independently of MS365 MCP.
+ * Standalone email service — sends directly via MX lookup by default.
+ * No external SMTP provider required.
  *
- * Settings keys: smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from
+ * If smtp_host is configured in settings, uses that relay instead.
+ * Otherwise does direct delivery (resolves recipient MX records).
+ *
+ * Settings keys (all optional for direct mode):
+ *   smtp_from  — sender address (required)
+ *   smtp_host  — relay host (optional; omit for direct delivery)
+ *   smtp_port  — relay port (default 587)
+ *   smtp_user  — relay auth user
+ *   smtp_pass  — relay auth password
  */
 import nodemailer from 'nodemailer';
-import type { SettingsQueries } from '../db/settings-store.js';
 
 export interface EmailOptions {
   to: string;
@@ -21,32 +28,42 @@ export class EmailService {
     this.getSettings = settingsGetter;
   }
 
-  /** Check if SMTP is configured */
+  /** Check if at minimum a from address is configured */
   isConfigured(): boolean {
     const s = this.getSettings();
-    return !!(s.smtp_host?.trim() && s.smtp_user?.trim() && s.smtp_pass?.trim());
+    return !!(s.smtp_from?.trim());
   }
 
   private createTransport() {
     const s = this.getSettings();
-    const port = parseInt(s.smtp_port || '587', 10);
+    const host = s.smtp_host?.trim();
+
+    if (host) {
+      // Relay mode — use configured SMTP server
+      const port = parseInt(s.smtp_port || '587', 10);
+      return nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: s.smtp_user?.trim()
+          ? { user: s.smtp_user, pass: s.smtp_pass }
+          : undefined,
+      });
+    }
+
+    // Direct mode — resolve MX records and deliver directly
     return nodemailer.createTransport({
-      host: s.smtp_host,
-      port,
-      secure: port === 465,
-      auth: {
-        user: s.smtp_user,
-        pass: s.smtp_pass,
-      },
-    });
+      direct: true,
+      name: s.smtp_from?.split('@')[1] || 'localhost',
+    } as any);
   }
 
   async send(opts: EmailOptions): Promise<void> {
     if (!this.isConfigured()) {
-      throw new Error('SMTP not configured. Set smtp_host, smtp_user, and smtp_pass in Admin > Integrations.');
+      throw new Error('Email not configured. Set a From address in Admin > Integrations > Email.');
     }
     const s = this.getSettings();
-    const from = s.smtp_from?.trim() || s.smtp_user;
+    const from = s.smtp_from.trim();
     const transport = this.createTransport();
     await transport.sendMail({
       from,
@@ -57,14 +74,14 @@ export class EmailService {
     });
   }
 
-  /** Verify SMTP connection without sending */
-  async verify(): Promise<{ ok: boolean; error?: string }> {
-    if (!this.isConfigured()) {
-      return { ok: false, error: 'SMTP not configured' };
-    }
+  /** Test the email config by sending a test message */
+  async sendTest(to: string): Promise<{ ok: boolean; error?: string }> {
     try {
-      const transport = this.createTransport();
-      await transport.verify();
+      await this.send({
+        to,
+        subject: 'N.O.V.A — Test Email',
+        text: 'This is a test email from N.O.V.A. If you received this, email is working.',
+      });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };

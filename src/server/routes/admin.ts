@@ -196,10 +196,12 @@ export function createAdminRoutes(
     }
   });
 
-  /** Verify SMTP connection */
-  router.post('/email/test', async (_req, res) => {
-    const result = await emailService.verify();
-    res.json({ ok: result.ok, error: result.error });
+  /** Send a test email */
+  router.post('/email/test', async (req, res) => {
+    const { to } = req.body;
+    if (!to?.trim()) { res.status(400).json({ ok: false, error: 'to address required' }); return; }
+    const result = await emailService.sendTest(to.trim());
+    res.json(result);
   });
 
   // ---- Bulk import ----
