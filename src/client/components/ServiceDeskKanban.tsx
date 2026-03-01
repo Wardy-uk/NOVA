@@ -104,11 +104,21 @@ function getFixedColumnKey(task: Task): string | null {
 
   if (DONE_STATUSES.has(lower)) return null;
 
-  // Match by original Jira status
+  // 1. Exact match by original Jira status
   const colKey = STATUS_TO_COLUMN.get(lower);
   if (colKey) return colKey;
 
-  // Fallback: match by normalized status
+  // 2. Fuzzy match — check if status contains key words from column statuses
+  if (lower.includes('progress') || lower.includes('review') || lower.includes('development'))
+    return 'wip';
+  if ((lower.includes('waiting') || lower.includes('pending')) && (lower.includes('agent') || lower.includes('support')))
+    return 'waiting-agent';
+  if ((lower.includes('waiting') || lower.includes('pending')) && (lower.includes('customer') || lower.includes('requestor')))
+    return 'waiting-requestor';
+  if ((lower.includes('waiting') || lower.includes('escalat')) && (lower.includes('partner') || lower.includes('third')))
+    return 'waiting-partner';
+
+  // 3. Fallback: match by normalized status
   const normKey = NORMALIZED_TO_COLUMN.get(task.status);
   if (normKey) return normKey;
 
@@ -365,18 +375,18 @@ export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
               return next;
             });
 
-            // Delay refresh to let Jira's search index catch up (2s)
+            // Delay refresh to let Jira's search index catch up (5s)
             setTimeout(() => {
               onRefresh?.();
-              // Clear optimistic override 1s after refresh arrives
+              // Clear optimistic override 3s after refresh arrives
               setTimeout(() => {
                 setOptimisticMoves(prev => {
                   const next = new Map(prev);
                   next.delete(task.id);
                   return next;
                 });
-              }, 1000);
-            }, 2000);
+              }, 3000);
+            }, 5000);
           }}
           onCancel={() => setPendingTransition(null)}
         />
@@ -529,9 +539,9 @@ function getJiraFieldDisplay(raw: unknown, key: string): string | null {
 const TRANSITION_FIELDS: Array<{
   key: string;
   label: string;
-  inputType: 'text' | 'date' | 'textarea';
+  inputType: 'text' | 'date' | 'textarea' | 'select';
 }> = [
-  { key: 'customfield_13183', label: 'Nurtur Product',        inputType: 'text' },
+  { key: 'customfield_13183', label: 'Nurtur Product',        inputType: 'select' },
   { key: 'customfield_14527', label: 'Product Sub Category',  inputType: 'text' },
   { key: 'customfield_13184', label: 'TL;DR',                 inputType: 'textarea' },
   { key: 'duedate',           label: 'Due Date',              inputType: 'date' },
@@ -589,6 +599,7 @@ function TransitionModal({
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     initFieldValues(pending.task.raw_data),
   );
+  const [fieldOptions, setFieldOptions] = useState<Record<string, string[]>>({});
 
   const { issueKey, targetColumn, task } = pending;
   const currentStatus = getOriginalJiraStatus(task);
@@ -601,6 +612,30 @@ function TransitionModal({
   const updateField = useCallback((key: string, value: string) => {
     setFieldValues((prev) => ({ ...prev, [key]: value }));
   }, []);
+
+  // Fetch field options (for dropdowns) on mount
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}/editmeta`);
+        const json = await res.json();
+        if (!active || !json.ok) return;
+        const fields = json.data?.fields ?? json.data ?? {};
+        const opts: Record<string, string[]> = {};
+        for (const f of TRANSITION_FIELDS) {
+          if (f.inputType !== 'select') continue;
+          const meta = (fields as Record<string, unknown>)[f.key] as Record<string, unknown> | undefined;
+          const allowed = meta?.allowedValues as Array<Record<string, unknown>> | undefined;
+          if (allowed) {
+            opts[f.key] = allowed.map((v) => (v.value as string) ?? (v.name as string) ?? String(v.id)).filter(Boolean);
+          }
+        }
+        if (active) setFieldOptions(opts);
+      } catch { /* non-critical — text input fallback */ }
+    })();
+    return () => { active = false; };
+  }, [issueKey]);
 
   // Fetch available transitions on mount
   useEffect(() => {
@@ -802,7 +837,18 @@ function TransitionModal({
                           </span>
                           <label className="text-[11px] text-neutral-400">{f.label}</label>
                         </div>
-                        {f.inputType === 'textarea' ? (
+                        {f.inputType === 'select' && fieldOptions[f.key]?.length ? (
+                          <select
+                            value={val}
+                            onChange={(e) => updateField(f.key, e.target.value)}
+                            className={inputCls}
+                          >
+                            <option value="">Select {f.label.toLowerCase()}...</option>
+                            {fieldOptions[f.key].map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        ) : f.inputType === 'textarea' ? (
                           <textarea
                             value={val}
                             onChange={(e) => updateField(f.key, e.target.value)}

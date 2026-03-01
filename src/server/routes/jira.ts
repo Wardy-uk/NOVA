@@ -173,6 +173,25 @@ export function createJiraRoutes(
     }
   });
 
+  router.get('/issues/:key/editmeta', async (req, res) => {
+    const key = req.params.key;
+    const userId = (req as any).user?.id as number | undefined;
+    const restClient = getClientForUser(userId);
+    if (!restClient) {
+      res.status(501).json({ ok: false, error: 'No Jira REST client available' });
+      return;
+    }
+    try {
+      const meta = await restClient.getEditMeta(key);
+      res.json({ ok: true, data: meta });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to fetch edit metadata',
+      });
+    }
+  });
+
   router.get('/issues/:key/transitions', async (req, res) => {
     const key = req.params.key;
     const tools = mcpManager.getServerTools('jira');

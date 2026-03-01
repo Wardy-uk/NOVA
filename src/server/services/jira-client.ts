@@ -247,6 +247,11 @@ export class JiraRestClient {
     });
   }
 
+  /** Get editable field metadata for an issue (allowed values etc.) */
+  async getEditMeta(issueKey: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('GET', `issue/${issueKey}/editmeta`);
+  }
+
   /** Get issue link types available on the instance */
   async getLinkTypes(): Promise<{ issueLinkTypes: Array<{ id: string; name: string; inward: string; outward: string }> }> {
     return this.request<{ issueLinkTypes: Array<{ id: string; name: string; inward: string; outward: string }> }>(
