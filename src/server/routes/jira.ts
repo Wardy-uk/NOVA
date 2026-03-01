@@ -224,9 +224,12 @@ export function createJiraRoutes(
       try {
         const userId = (req as any).user?.id as number | undefined;
         const restClient = getClientForUser(userId);
+        console.log(`[Jira] editmeta: restClient=${restClient ? 'YES' : 'NO'}, userId=${userId}`);
         if (restClient) {
           const meta = await restClient.getEditMeta(key);
+          console.log(`[Jira] editmeta raw response type: ${typeof meta}, keys: ${meta ? Object.keys(meta).join(',') : 'null'}`);
           const fields = (meta as Record<string, unknown>)?.fields as Record<string, Record<string, unknown>> | undefined;
+          console.log(`[Jira] editmeta fields: ${fields ? Object.keys(fields).length + ' keys, includes 13183: ' + ('customfield_13183' in fields) : 'null/undefined'}`);
           if (fields) {
             fieldOptions = {};
             for (const [fieldKey, fieldMeta] of Object.entries(fields)) {
@@ -238,7 +241,7 @@ export function createJiraRoutes(
                 })).filter((v) => v.value);
               }
             }
-            console.log(`[Jira] editmeta for ${key}: ${Object.keys(fieldOptions).length} fields with options`);
+            console.log(`[Jira] editmeta for ${key}: ${Object.keys(fieldOptions).length} fields with options — ${JSON.stringify(Object.keys(fieldOptions))}`);
           }
         }
       } catch (editErr) {

@@ -663,7 +663,7 @@ function TransitionModal({
       try {
         const res = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}/transitions`);
         const json = await res.json();
-        console.log('[TransitionModal] transitions response keys:', Object.keys(json), 'fieldOptions:', json.fieldOptions ? Object.keys(json.fieldOptions) : 'NONE');
+        console.log('[TransitionModal] fieldOptions:', JSON.stringify(json.fieldOptions));
         if (!active) return;
         if (!json.ok) { setError(json.error ?? 'Failed to fetch transitions'); setLoading(false); return; }
 
