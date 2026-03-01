@@ -176,15 +176,20 @@ export function createJiraRoutes(
   router.get('/issues/:key/editmeta', async (req, res) => {
     const key = req.params.key;
     const userId = (req as any).user?.id as number | undefined;
+    console.log(`[Jira] editmeta request for ${key}, userId=${userId}`);
     const restClient = getClientForUser(userId);
     if (!restClient) {
+      console.warn(`[Jira] editmeta for ${key}: No REST client available (userId=${userId})`);
       res.status(501).json({ ok: false, error: 'No Jira REST client available' });
       return;
     }
     try {
       const meta = await restClient.getEditMeta(key);
+      const fieldKeys = meta?.fields ? Object.keys(meta.fields as object) : [];
+      console.log(`[Jira] editmeta for ${key}: ${fieldKeys.length} fields — keys: ${fieldKeys.slice(0, 15).join(', ')}${fieldKeys.length > 15 ? '...' : ''}`);
       res.json({ ok: true, data: meta });
     } catch (err) {
+      console.error(`[Jira] editmeta for ${key} failed:`, err instanceof Error ? err.message : err);
       res.status(500).json({
         ok: false,
         error: err instanceof Error ? err.message : 'Failed to fetch edit metadata',
@@ -213,7 +218,34 @@ export function createJiraRoutes(
         { id: key },
         { issueIdOrKey: key },
       ]);
-      res.json({ ok: true, data: parseToolResult(result) });
+
+      // Also fetch editmeta for field option dropdowns (best-effort)
+      let fieldOptions: Record<string, Array<{ value: string; id?: string }>> | undefined;
+      try {
+        const userId = (req as any).user?.id as number | undefined;
+        const restClient = getClientForUser(userId);
+        if (restClient) {
+          const meta = await restClient.getEditMeta(key);
+          const fields = (meta as Record<string, unknown>)?.fields as Record<string, Record<string, unknown>> | undefined;
+          if (fields) {
+            fieldOptions = {};
+            for (const [fieldKey, fieldMeta] of Object.entries(fields)) {
+              const allowed = fieldMeta?.allowedValues as Array<Record<string, unknown>> | undefined;
+              if (allowed && allowed.length > 0) {
+                fieldOptions[fieldKey] = allowed.map((v) => ({
+                  value: (v.value as string) ?? (v.name as string) ?? String(v.id),
+                  id: v.id as string | undefined,
+                })).filter((v) => v.value);
+              }
+            }
+            console.log(`[Jira] editmeta for ${key}: ${Object.keys(fieldOptions).length} fields with options`);
+          }
+        }
+      } catch (editErr) {
+        console.warn(`[Jira] editmeta for ${key} failed (non-critical):`, editErr instanceof Error ? editErr.message : editErr);
+      }
+
+      res.json({ ok: true, data: parseToolResult(result), fieldOptions });
     } catch (err) {
       res.status(500).json({
         ok: false,

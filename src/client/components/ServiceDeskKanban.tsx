@@ -149,9 +149,45 @@ export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
   const [groupBy, setGroupBy] = useState<GroupBy>('date');
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [pendingTransition, setPendingTransition] = useState<PendingTransition | null>(null);
+  const pollRef = useRef<{ interval: ReturnType<typeof setInterval>; timeout: ReturnType<typeof setTimeout> } | null>(null);
 
   // Optimistic moves: taskId → target column key (survives until Jira index catches up)
   const [optimisticMoves, setOptimisticMoves] = useState<Map<string, string>>(new Map());
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current.interval);
+        clearTimeout(pollRef.current.timeout);
+      }
+    };
+  }, []);
+
+  // Auto-clear optimistic overrides once Jira's search index reflects the new status
+  useEffect(() => {
+    if (optimisticMoves.size === 0) return;
+    setOptimisticMoves((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const [taskId, targetCol] of prev) {
+        const t = tasks.find((x) => x.id === taskId);
+        if (!t) { next.delete(taskId); changed = true; continue; }
+        // If the live Jira status now maps to the target column, the index has caught up
+        if (getFixedColumnKey(t) === targetCol) {
+          next.delete(taskId);
+          changed = true;
+        }
+      }
+      // Stop polling once all overrides are resolved
+      if (changed && next.size === 0 && pollRef.current) {
+        clearInterval(pollRef.current.interval);
+        clearTimeout(pollRef.current.timeout);
+        pollRef.current = null;
+      }
+      return changed ? next : prev;
+    });
+  }, [tasks, optimisticMoves]);
 
   // Tasks are pre-filtered to Jira by parent component
   const jiraTasks = tasks;
@@ -375,18 +411,25 @@ export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
               return next;
             });
 
-            // Delay refresh to let Jira's search index catch up (5s)
-            setTimeout(() => {
-              onRefresh?.();
-              // Clear optimistic override 3s after refresh arrives
-              setTimeout(() => {
-                setOptimisticMoves(prev => {
-                  const next = new Map(prev);
-                  next.delete(task.id);
-                  return next;
-                });
-              }, 3000);
-            }, 5000);
+            // Refresh periodically until Jira's search index catches up.
+            // The useEffect above auto-clears the optimistic override once the
+            // live status matches the target column.
+            if (pollRef.current) {
+              clearInterval(pollRef.current.interval);
+              clearTimeout(pollRef.current.timeout);
+            }
+            setTimeout(() => onRefresh?.(), 5000);
+            const interval = setInterval(() => onRefresh?.(), 10000);
+            const timeout = setTimeout(() => {
+              clearInterval(interval);
+              pollRef.current = null;
+              setOptimisticMoves(prev => {
+                const next = new Map(prev);
+                next.delete(task.id);
+                return next;
+              });
+            }, 90000);
+            pollRef.current = { interval, timeout };
           }}
           onCancel={() => setPendingTransition(null)}
         />
@@ -613,31 +656,7 @@ function TransitionModal({
     setFieldValues((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  // Fetch field options (for dropdowns) on mount
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const res = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}/editmeta`);
-        const json = await res.json();
-        if (!active || !json.ok) return;
-        const fields = json.data?.fields ?? json.data ?? {};
-        const opts: Record<string, string[]> = {};
-        for (const f of TRANSITION_FIELDS) {
-          if (f.inputType !== 'select') continue;
-          const meta = (fields as Record<string, unknown>)[f.key] as Record<string, unknown> | undefined;
-          const allowed = meta?.allowedValues as Array<Record<string, unknown>> | undefined;
-          if (allowed) {
-            opts[f.key] = allowed.map((v) => (v.value as string) ?? (v.name as string) ?? String(v.id)).filter(Boolean);
-          }
-        }
-        if (active) setFieldOptions(opts);
-      } catch { /* non-critical — text input fallback */ }
-    })();
-    return () => { active = false; };
-  }, [issueKey]);
-
-  // Fetch available transitions on mount
+  // Fetch available transitions (+ field options for dropdowns) on mount
   useEffect(() => {
     let active = true;
     (async () => {
@@ -703,6 +722,17 @@ function TransitionModal({
           if (score > bestScore) { bestScore = score; best = txn; }
         }
         if (best) setSelectedTransition(best.id);
+
+        // Extract field options piggybacked on the transitions response
+        if (json.fieldOptions && typeof json.fieldOptions === 'object') {
+          const opts: Record<string, string[]> = {};
+          for (const [fieldKey, values] of Object.entries(json.fieldOptions as Record<string, Array<{ value: string }>>)) {
+            if (Array.isArray(values) && values.length > 0) {
+              opts[fieldKey] = values.map((v) => v.value).filter(Boolean);
+            }
+          }
+          if (Object.keys(opts).length > 0) setFieldOptions(opts);
+        }
 
         setLoading(false);
       } catch (err) {
