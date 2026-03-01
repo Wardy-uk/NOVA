@@ -4,7 +4,9 @@ import { TaskCard } from './TaskCard.js';
 import { TaskDrawer } from './TaskDrawer.js';
 
 interface AttentionTask extends Task {
-  attention_reasons: ('overdue_update' | 'sla_breached')[];
+  attention_reasons: ('overdue_update' | 'sla_breached' | 'sla_approaching')[];
+  urgency_score: number;
+  sla_remaining_ms: number | null;
 }
 
 interface Props {
@@ -12,7 +14,23 @@ interface Props {
   scope?: 'mine' | 'all';
 }
 
-type FilterMode = 'all' | 'overdue_update' | 'sla_breached';
+type FilterMode = 'all' | 'overdue_update' | 'sla_breached' | 'sla_approaching';
+
+/** Format milliseconds into a human-readable remaining time string. */
+function formatRemaining(ms: number): string {
+  if (ms <= 0) return '0m';
+  const hours = Math.floor(ms / (60 * 60 * 1000));
+  const minutes = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+/** Get urgency colour classes based on score. */
+function urgencyColor(score: number): string {
+  if (score >= 70) return 'bg-red-500';
+  if (score >= 40) return 'bg-amber-500';
+  return 'bg-neutral-500';
+}
 
 export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
   const [tasks, setTasks] = useState<AttentionTask[]>([]);
@@ -44,6 +62,7 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
   // Counts
   const overdueCount = useMemo(() => tasks.filter(t => t.attention_reasons.includes('overdue_update')).length, [tasks]);
   const slaCount = useMemo(() => tasks.filter(t => t.attention_reasons.includes('sla_breached')).length, [tasks]);
+  const approachingCount = useMemo(() => tasks.filter(t => t.attention_reasons.includes('sla_approaching')).length, [tasks]);
 
   // Filtered list
   const filtered = useMemo(() => {
@@ -51,14 +70,9 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
     return tasks.filter(t => t.attention_reasons.includes(filterMode));
   }, [tasks, filterMode]);
 
-  // Sort: SLA breached first, then by priority desc
+  // Sort by urgency score descending (server also sorts, client fallback)
   const sorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
-      const aHasSla = a.attention_reasons.includes('sla_breached') ? 1 : 0;
-      const bHasSla = b.attention_reasons.includes('sla_breached') ? 1 : 0;
-      if (aHasSla !== bHasSla) return bHasSla - aHasSla;
-      return (b.priority ?? 50) - (a.priority ?? 50);
-    });
+    return [...filtered].sort((a, b) => (b.urgency_score ?? 0) - (a.urgency_score ?? 0));
   }, [filtered]);
 
   // Drawer navigation
@@ -113,6 +127,11 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
                   {slaCount} SLA breached
                 </span>
               )}
+              {approachingCount > 0 && (
+                <span className="px-2 py-0.5 rounded bg-orange-900/50 text-orange-300">
+                  {approachingCount} SLA approaching
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -125,6 +144,7 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
                 { value: 'all' as FilterMode, label: 'All' },
                 { value: 'overdue_update' as FilterMode, label: 'Overdue Updates' },
                 { value: 'sla_breached' as FilterMode, label: 'SLA Breached' },
+                { value: 'sla_approaching' as FilterMode, label: 'SLA Approaching' },
               ]).map((opt) => (
                 <button
                   key={opt.value}
@@ -175,11 +195,22 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
         <div className="space-y-1">
           {sorted.map((task) => (
             <div key={task.id}>
-              {/* Attention badges */}
+              {/* Urgency + attention badges */}
               <div className="flex items-center gap-1.5 pl-12 mb-0.5">
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${urgencyColor(task.urgency_score ?? 0)}`}
+                  title={`Urgency: ${task.urgency_score ?? 0}`} />
+                <span className="text-[10px] text-neutral-500 tabular-nums">
+                  {task.urgency_score ?? 0}
+                </span>
                 {task.attention_reasons.includes('sla_breached') && (
                   <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-red-600 text-red-100">
                     SLA Breached
+                  </span>
+                )}
+                {task.attention_reasons.includes('sla_approaching') && (
+                  <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-orange-600 text-orange-100">
+                    SLA Approaching{task.sla_remaining_ms != null && task.sla_remaining_ms > 0
+                      ? ` — ${formatRemaining(task.sla_remaining_ms)}` : ''}
                   </span>
                 )}
                 {task.attention_reasons.includes('overdue_update') && (

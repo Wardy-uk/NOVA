@@ -150,10 +150,11 @@ export function createTaskRoutes(
       const attentionTickets = tickets
         .map((t) => {
           const issue = (t.raw_data ?? {}) as Record<string, unknown>;
-          const result = evaluateAttention(issue, now);
+          const result = evaluateAttention(issue, now, t.priority ?? 50);
           return { ticket: t, attention: result };
         })
-        .filter(({ attention }) => attention.needsAttention);
+        .filter(({ attention }) => attention.needsAttention)
+        .sort((a, b) => b.attention.urgencyScore - a.attention.urgencyScore);
 
       const mapped = attentionTickets.map(({ ticket: t, attention }) => ({
         id: `jira:${t.source_id}`,
@@ -172,6 +173,8 @@ export function createTaskRoutes(
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         attention_reasons: attention.reasons,
+        urgency_score: attention.urgencyScore,
+        sla_remaining_ms: attention.slaRemainingMs,
       }));
 
       console.log(`[ServiceDesk] Attention: ${attentionTickets.length}/${tickets.length} tickets need attention`);

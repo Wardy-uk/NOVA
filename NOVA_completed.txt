@@ -1,6 +1,33 @@
 N.O.V.A — COMPLETED ITEMS
 ==========================
-(moved from NOVA_todo.txt on 28 Feb 2026)
+(moved from NOVA_todo.txt)
+
+=== 1 Mar 2026 ===
+
+[DONE] Item 8: Jira SLA prioritisation — weighted urgency scoring (0-100) combining
+    5 factors: SLA breached (30pts), SLA approaching (20pts scaled), overdue update
+    (25pts), priority (15pts), ticket age (10pts). New 'sla_approaching' reason for
+    tickets <2h from breach. Attention view sorted by score, colour-coded urgency dots,
+    SLA Approaching filter pill and badge with remaining time.
+[DONE] Item 32: BUG FIX — SD Kanban drag snaps back. Optimistic local state update so
+    card moves immediately on drag, with 2s delayed refresh for Jira eventual consistency.
+[DONE] Item 30: D365 account link — wired crm_customer_id through client form, save body,
+    server POST/INSERT. "Linked to CRM" indicator shows when CRM customer selected.
+[DONE] Item 31: Milestone ticket creation button — POST /:id/create-tickets endpoint
+    creates Jira tickets for linked ticket groups. UI shows "Create Tickets" button on
+    milestones with linked groups, or Jira key badges when created.
+[DONE] Item 25: Managers overview — Onboarding Overview tab with KPI cards, milestone
+    health bars, product breakdown table, manager workload table, recent ticket runs feed.
+[DONE] Item 26: Delivery completion tracker — KPI cards on Delivery page showing
+    Delivered Today / This Week / This Month (with MRR) and Active Pipeline.
+[DONE] Item 33: Manual refresh button — refresh icon on all area sub-tab bars.
+    Dispatches nova-refresh event to child components. Spinner animation while refreshing.
+[DONE] T1: Kanban transition fix — callWithFallback now detects MCP isError responses.
+    Widened tool candidates. Added debug logging for transition calls.
+[DONE] T2: Comment public/internal — direct Jira REST API for internal notes (role-based
+    visibility). Public/internal toggle on Kanban transition modal and TaskDrawer.
+[DONE] T3: D365 account number everywhere — fetched from Dataverse, stored in
+    crm_customers, displayed on CRM cards, Delivery autocomplete, and Delivery table rows.
 
 === Quick fixes (28 Feb 2026) ===
 

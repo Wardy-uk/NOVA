@@ -10,14 +10,18 @@
  *   customfield_14048 — SLA Resolution (array of SLA cycle objects)
  */
 
-export type AttentionReason = 'overdue_update' | 'sla_breached';
+export type AttentionReason = 'overdue_update' | 'sla_breached' | 'sla_approaching';
 
 export interface AttentionResult {
   needsAttention: boolean;
   reasons: AttentionReason[];
+  urgencyScore: number;          // 0-100 weighted urgency
+  slaRemainingMs: number | null; // ms remaining on SLA (null = no SLA, negative = breached)
 }
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 // ── Helpers ──
 
@@ -150,6 +154,91 @@ export function isResolutionSlaBreached(issue: Record<string, unknown>): boolean
 }
 
 /**
+ * Extract remaining milliseconds from the ongoing SLA cycle.
+ * Returns null if no SLA data, negative if breached.
+ */
+export function getSlaRemainingMs(issue: Record<string, unknown>): number | null {
+  const raw = field(issue, 'customfield_14048');
+  if (!raw) return null;
+
+  const slaList: Array<Record<string, unknown>> = Array.isArray(raw) ? raw : [raw];
+
+  for (const sla of slaList) {
+    if (!sla || typeof sla !== 'object') continue;
+    const ongoing = sla.ongoingCycle as Record<string, unknown> | undefined;
+    if (ongoing) {
+      const remaining = ongoing.remainingTime as Record<string, unknown> | undefined;
+      if (remaining && typeof remaining.millis === 'number') {
+        return remaining.millis;
+      }
+      // If breached flag but no millis, return -1 to signal breach
+      if (ongoing.breached === true) return -1;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns true when the SLA is approaching breach (positive remaining < 2 hours).
+ */
+export function isSlaNearBreach(issue: Record<string, unknown>): boolean {
+  const remaining = getSlaRemainingMs(issue);
+  if (remaining === null) return false;
+  return remaining > 0 && remaining < TWO_HOURS_MS;
+}
+
+/**
+ * Compute a weighted urgency score (0-100) combining five factors.
+ *
+ * | Factor          | Max | Logic                                              |
+ * |-----------------|-----|----------------------------------------------------|
+ * | SLA Breached    |  30 | +30 if resolution SLA breached                     |
+ * | SLA Approaching |  20 | Scaled 0-20 by remaining time (2h→0, 0→20)        |
+ * | Overdue Update  |  25 | +25 if agent update is overdue                     |
+ * | Priority        |  15 | Scaled from numeric priority (15-95 → 0-15)       |
+ * | Ticket Age      |  10 | Scaled 0-10 by days since created (0d=0, 7d+=10)  |
+ */
+export function computeUrgencyScore(
+  issue: Record<string, unknown>,
+  priority: number = 50,
+  now: Date = new Date(),
+): number {
+  let score = 0;
+
+  // Factor 1: SLA Breached (30 pts)
+  if (isResolutionSlaBreached(issue)) {
+    score += 30;
+  } else {
+    // Factor 2: SLA Approaching (20 pts) — only if not already breached
+    const remaining = getSlaRemainingMs(issue);
+    if (remaining !== null && remaining > 0 && remaining < TWO_HOURS_MS) {
+      // Linear scale: 2h remaining → 0, 0 remaining → 20
+      score += Math.round(((TWO_HOURS_MS - remaining) / TWO_HOURS_MS) * 20);
+    }
+  }
+
+  // Factor 3: Overdue Update (25 pts)
+  if (isOverdueUpdate(issue, now)) {
+    score += 25;
+  }
+
+  // Factor 4: Priority (15 pts) — map 15-95 to 0-15
+  const clampedPriority = Math.max(15, Math.min(95, priority));
+  score += Math.round(((clampedPriority - 15) / 80) * 15);
+
+  // Factor 5: Ticket Age (10 pts) — 0 days=0, 7+ days=10, linear
+  const created = toDate(field(issue, 'created'));
+  if (created) {
+    const ageMs = now.getTime() - created.getTime();
+    const ageDays = Math.max(0, ageMs / (24 * 60 * 60 * 1000));
+    score += Math.round(Math.min(1, ageDays / 7) * 10);
+  }
+
+  return Math.min(100, score);
+}
+
+/**
  * Check if the due date is acceptable (not past end of today).
  *
  * @example Test cases:
@@ -167,16 +256,22 @@ export function dueIsOk(issue: Record<string, unknown>, now: Date = new Date()):
 
 /**
  * Evaluate a Jira issue for all attention reasons.
- * Returns composite result with all triggered reasons.
+ * Returns composite result with all triggered reasons, urgency score, and SLA remaining time.
  */
-export function evaluateAttention(issue: Record<string, unknown>, now: Date = new Date()): AttentionResult {
+export function evaluateAttention(issue: Record<string, unknown>, now: Date = new Date(), priority: number = 50): AttentionResult {
   const reasons: AttentionReason[] = [];
 
   if (isOverdueUpdate(issue, now)) reasons.push('overdue_update');
   if (isResolutionSlaBreached(issue)) reasons.push('sla_breached');
+  if (isSlaNearBreach(issue)) reasons.push('sla_approaching');
+
+  const urgencyScore = computeUrgencyScore(issue, priority, now);
+  const slaRemainingMs = getSlaRemainingMs(issue);
 
   return {
     needsAttention: reasons.length > 0,
     reasons,
+    urgencyScore,
+    slaRemainingMs,
   };
 }
