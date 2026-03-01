@@ -488,6 +488,86 @@ function KanbanCard({
   );
 }
 
+// ── Transition field helpers ──
+
+/** Read a field from raw Jira issue data, checking both flat and nested (fields.*) shapes. */
+function getJiraField(raw: unknown, key: string): unknown {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  let val = obj[key];
+  if (val === undefined) {
+    const fields = obj.fields as Record<string, unknown> | undefined;
+    val = fields?.[key];
+  }
+  return val ?? undefined;
+}
+
+/** Extract displayable value from a Jira field (handles option objects, strings, dates). */
+function getJiraFieldDisplay(raw: unknown, key: string): string | null {
+  const val = getJiraField(raw, key);
+  if (!val) return null;
+  if (typeof val === 'string') return val;
+  if (typeof val === 'object' && val !== null) {
+    const obj = val as Record<string, unknown>;
+    if (obj.value) return String(obj.value);
+    if (obj.name) return String(obj.name);
+    if (obj.displayName) return String(obj.displayName);
+  }
+  return String(val);
+}
+
+interface TransitionField {
+  label: string;
+  key: string;
+  value: string | null; // null = not set
+  type: 'field' | 'comment'; // comment = special handling
+}
+
+function evaluateTransitionFields(
+  raw: unknown,
+  comment: string,
+  commentType: 'internal' | 'public',
+): TransitionField[] {
+  return [
+    {
+      label: 'Nurtur Product',
+      key: 'customfield_13183',
+      value: getJiraFieldDisplay(raw, 'customfield_13183'),
+      type: 'field',
+    },
+    {
+      label: 'Product Sub Category',
+      key: 'customfield_14527',
+      value: getJiraFieldDisplay(raw, 'customfield_14527'),
+      type: 'field',
+    },
+    {
+      label: 'TL;DR',
+      key: 'customfield_13184',
+      value: getJiraFieldDisplay(raw, 'customfield_13184'),
+      type: 'field',
+    },
+    {
+      label: 'Due Date',
+      key: 'duedate',
+      value: getJiraFieldDisplay(raw, 'duedate'),
+      type: 'field',
+    },
+    {
+      label: 'Agent Next Update',
+      key: 'customfield_14185',
+      value: getJiraFieldDisplay(raw, 'customfield_14185'),
+      type: 'field',
+    },
+    {
+      label: 'Public Comment',
+      key: '_comment',
+      value: comment.trim() && commentType === 'public' ? 'Adding below' : null,
+      type: 'comment',
+    },
+  ];
+}
+
 // ── Transition Modal ──
 
 function TransitionModal({
@@ -510,6 +590,13 @@ function TransitionModal({
 
   const { issueKey, targetColumn, task } = pending;
   const currentStatus = getOriginalJiraStatus(task);
+
+  // Evaluate required transition fields
+  const transitionFields = useMemo(
+    () => evaluateTransitionFields(task.raw_data, comment, commentType),
+    [task.raw_data, comment, commentType],
+  );
+  const missingCount = transitionFields.filter((f) => !f.value).length;
 
   // Fetch available transitions on mount
   useEffect(() => {
@@ -683,11 +770,44 @@ function TransitionModal({
                 </div>
               </div>
 
+              {/* Required fields checklist */}
+              <div>
+                <label className="block text-[11px] text-neutral-400 mb-1.5">
+                  Required fields
+                  {missingCount > 0 && (
+                    <span className="ml-1.5 text-amber-400">({missingCount} missing)</span>
+                  )}
+                </label>
+                <div className="bg-[#272C33] border border-[#3a424d] rounded px-3 py-2 space-y-1">
+                  {transitionFields.map((f) => {
+                    const isSet = !!f.value;
+                    const isComment = f.type === 'comment';
+                    return (
+                      <div key={f.key} className="flex items-start gap-2 text-xs">
+                        <span className={`mt-0.5 flex-shrink-0 ${isSet ? 'text-green-400' : isComment ? 'text-amber-400' : 'text-red-400'}`}>
+                          {isSet ? '\u2713' : isComment ? '\u25CB' : '\u2717'}
+                        </span>
+                        <span className={`flex-shrink-0 w-[140px] ${isSet ? 'text-neutral-400' : 'text-neutral-200 font-medium'}`}>
+                          {f.label}
+                        </span>
+                        <span className={`truncate ${isSet ? 'text-neutral-500' : isComment ? 'text-amber-400/70' : 'text-red-400/70'}`}>
+                          {isSet
+                            ? f.key === 'duedate' || f.key === 'customfield_14185'
+                              ? new Date(f.value!).toLocaleDateString()
+                              : f.value!.length > 40 ? f.value!.slice(0, 40) + '\u2026' : f.value!
+                            : isComment ? 'Add a public comment below' : 'Not set'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Comment */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[11px] text-neutral-400">
-                    Comment <span className="text-neutral-600">(optional)</span>
+                    Comment {missingCount > 0 ? <span className="text-amber-400">(public comment recommended)</span> : <span className="text-neutral-600">(optional)</span>}
                   </label>
                   <div className="flex gap-1">
                     {(['internal', 'public'] as const).map(type => (
@@ -734,32 +854,45 @@ function TransitionModal({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-[#3a424d] flex items-center justify-between">
-          <span className="text-[10px] text-neutral-600">
-            {selectedTxn ? `Transition: ${selectedTxn.name}` : 'Select a transition'}
-          </span>
-          <div className="flex gap-2">
-            <button
-              onClick={onCancel}
-              disabled={saving}
-              className="px-3 py-1.5 text-xs rounded bg-[#272C33] text-neutral-400 hover:text-neutral-200 border border-[#3a424d] hover:border-[#5ec1ca]/50 transition-colors disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleConfirm}
-              disabled={saving || !selectedTransition || loading}
-              className="px-4 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors disabled:opacity-50 flex items-center gap-1.5"
-            >
-              {saving ? (
-                <>
-                  <span className="inline-block w-3 h-3 border-2 border-[#272C33]/30 border-t-[#272C33] rounded-full animate-spin" />
-                  Transitioning...
-                </>
-              ) : (
-                'Transition in Jira'
-              )}
-            </button>
+        <div className="px-5 py-3 border-t border-[#3a424d] space-y-2">
+          {missingCount > 0 && !loading && transitions.length > 0 && (
+            <div className="text-[10px] text-amber-400 bg-amber-900/15 border border-amber-900/25 rounded px-2.5 py-1.5">
+              {missingCount} required field{missingCount > 1 ? 's' : ''} not set — update in Jira before transitioning
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-neutral-600">
+              {selectedTxn ? `Transition: ${selectedTxn.name}` : 'Select a transition'}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={onCancel}
+                disabled={saving}
+                className="px-3 py-1.5 text-xs rounded bg-[#272C33] text-neutral-400 hover:text-neutral-200 border border-[#3a424d] hover:border-[#5ec1ca]/50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={saving || !selectedTransition || loading}
+                className={`px-4 py-1.5 text-xs rounded font-semibold transition-colors disabled:opacity-50 flex items-center gap-1.5 ${
+                  missingCount > 0
+                    ? 'bg-amber-500 text-[#272C33] hover:bg-amber-400'
+                    : 'bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9]'
+                }`}
+              >
+                {saving ? (
+                  <>
+                    <span className="inline-block w-3 h-3 border-2 border-[#272C33]/30 border-t-[#272C33] rounded-full animate-spin" />
+                    Transitioning...
+                  </>
+                ) : missingCount > 0 ? (
+                  'Transition Anyway'
+                ) : (
+                  'Transition in Jira'
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>

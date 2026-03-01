@@ -2,6 +2,15 @@ N.O.V.A — COMPLETED ITEMS
 ==========================
 (moved from NOVA_todo.txt)
 
+=== 1 Mar 2026 (session 2) ===
+
+[DONE] Triage: Credential rules — confirmed already implemented correctly. Per-user OAuth for
+    SD ticket work, global admin creds for onboarding automation.
+[DONE] Triage: Transition field validation — TransitionModal now shows a required-fields
+    checklist before transitioning: Nurtur Product, Sub Category, TL;DR, Due Date, Agent
+    Next Update, Public Comment. Warnings shown with amber highlight, non-blocking "Transition
+    Anyway" button. Missing custom fields added to SD search query.
+
 === 1 Mar 2026 ===
 
 [DONE] Item 8: Jira SLA prioritisation — weighted urgency scoring (0-100) combining

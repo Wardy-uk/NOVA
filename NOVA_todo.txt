@@ -31,7 +31,9 @@ Completed items: see NOVA_completed.txt
 
 === DO NEXT ===
 
-(empty)
+T4. Onboarding ticket status — on each onboarding/delivery item, show what
+    Jira tickets have been created and their live status (batch-fetch from
+    delivery_milestones.jira_keys and onboarding_runs.child_keys)
 
 
 === TECHINCAL DEBT ===
