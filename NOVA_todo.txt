@@ -7,6 +7,8 @@ enhance permissions
    global admin
    team admin
 
+nova insights move nunber of tasks toninckude to this tab not ny settings
+
 
 === CURRENT STATUS (1 Mar 2026) ===
 
