@@ -219,33 +219,63 @@ export function createJiraRoutes(
         { issueIdOrKey: key },
       ]);
 
-      // Also fetch editmeta for field option dropdowns (best-effort)
+      // Fetch field options from REST transitions API (has per-transition field screens)
+      // AND editmeta (has general edit screen fields). Merge both for complete coverage.
       let fieldOptions: Record<string, Array<{ value: string; id?: string }>> | undefined;
       try {
         const userId = (req as any).user?.id as number | undefined;
         const restClient = getClientForUser(userId);
-        console.log(`[Jira] editmeta: restClient=${restClient ? 'YES' : 'NO'}, userId=${userId}`);
         if (restClient) {
-          const meta = await restClient.getEditMeta(key);
-          console.log(`[Jira] editmeta raw response type: ${typeof meta}, keys: ${meta ? Object.keys(meta).join(',') : 'null'}`);
-          const fields = (meta as Record<string, unknown>)?.fields as Record<string, Record<string, unknown>> | undefined;
-          console.log(`[Jira] editmeta fields: ${fields ? Object.keys(fields).length + ' keys, includes 13183: ' + ('customfield_13183' in fields) : 'null/undefined'}`);
-          if (fields) {
-            fieldOptions = {};
-            for (const [fieldKey, fieldMeta] of Object.entries(fields)) {
-              const allowed = fieldMeta?.allowedValues as Array<Record<string, unknown>> | undefined;
-              if (allowed && allowed.length > 0) {
-                fieldOptions[fieldKey] = allowed.map((v) => ({
-                  value: (v.value as string) ?? (v.name as string) ?? String(v.id),
-                  id: v.id as string | undefined,
-                })).filter((v) => v.value);
+          fieldOptions = {};
+
+          // 1. Transition fields — includes fields only available during transitions
+          try {
+            const txnData = await restClient.getTransitionsWithFields(key);
+            const txns = (txnData as Record<string, unknown>)?.transitions as Array<Record<string, unknown>> | undefined;
+            if (txns) {
+              for (const txn of txns) {
+                const txnFields = txn.fields as Record<string, Record<string, unknown>> | undefined;
+                if (!txnFields) continue;
+                for (const [fieldKey, fieldMeta] of Object.entries(txnFields)) {
+                  if (fieldOptions[fieldKey]) continue; // already have options for this field
+                  const allowed = fieldMeta?.allowedValues as Array<Record<string, unknown>> | undefined;
+                  if (allowed && allowed.length > 0) {
+                    fieldOptions[fieldKey] = allowed.map((v) => ({
+                      value: (v.value as string) ?? (v.name as string) ?? String(v.id),
+                      id: v.id as string | undefined,
+                    })).filter((v) => v.value);
+                  }
+                }
               }
             }
-            console.log(`[Jira] editmeta for ${key}: ${Object.keys(fieldOptions).length} fields with options — ${JSON.stringify(Object.keys(fieldOptions))}`);
+            console.log(`[Jira] transition fields for ${key}: ${Object.keys(fieldOptions).length} fields with options — ${JSON.stringify(Object.keys(fieldOptions))}`);
+          } catch (txnErr) {
+            console.warn(`[Jira] transition fields for ${key} failed:`, txnErr instanceof Error ? txnErr.message : txnErr);
+          }
+
+          // 2. Editmeta fields — includes fields editable on the standard edit screen
+          try {
+            const meta = await restClient.getEditMeta(key);
+            const fields = (meta as Record<string, unknown>)?.fields as Record<string, Record<string, unknown>> | undefined;
+            if (fields) {
+              for (const [fieldKey, fieldMeta] of Object.entries(fields)) {
+                if (fieldOptions[fieldKey]) continue; // transition fields take priority
+                const allowed = fieldMeta?.allowedValues as Array<Record<string, unknown>> | undefined;
+                if (allowed && allowed.length > 0) {
+                  fieldOptions[fieldKey] = allowed.map((v) => ({
+                    value: (v.value as string) ?? (v.name as string) ?? String(v.id),
+                    id: v.id as string | undefined,
+                  })).filter((v) => v.value);
+                }
+              }
+              console.log(`[Jira] editmeta for ${key}: total ${Object.keys(fieldOptions).length} fields with options`);
+            }
+          } catch (editErr) {
+            console.warn(`[Jira] editmeta for ${key} failed:`, editErr instanceof Error ? editErr.message : editErr);
           }
         }
-      } catch (editErr) {
-        console.warn(`[Jira] editmeta for ${key} failed (non-critical):`, editErr instanceof Error ? editErr.message : editErr);
+      } catch (outerErr) {
+        console.warn(`[Jira] field options for ${key} failed:`, outerErr instanceof Error ? outerErr.message : outerErr);
       }
 
       res.json({ ok: true, data: parseToolResult(result), fieldOptions });

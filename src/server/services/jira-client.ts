@@ -252,6 +252,13 @@ export class JiraRestClient {
     return this.request<Record<string, unknown>>('GET', `issue/${issueKey}/editmeta`);
   }
 
+  /** Get available transitions with their field screens (allowedValues for each transition) */
+  async getTransitionsWithFields(issueKey: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      'GET', `issue/${issueKey}/transitions?expand=transitions.fields`
+    );
+  }
+
   /** Get issue link types available on the instance */
   async getLinkTypes(): Promise<{ issueLinkTypes: Array<{ id: string; name: string; inward: string; outward: string }> }> {
     return this.request<{ issueLinkTypes: Array<{ id: string; name: string; inward: string; outward: string }> }>(
