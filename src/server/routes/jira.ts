@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import type { TaskQueries } from '../db/queries.js';
+import type { TaskQueries, UserSettingsQueries } from '../db/queries.js';
 import type { McpClientManager } from '../services/mcp-client.js';
-import type { JiraRestClient } from '../services/jira-client.js';
+import { JiraRestClient } from '../services/jira-client.js';
 import { getLastJiraSearchText } from '../services/aggregator.js';
 
 const JIRA_TOOL_CANDIDATES = {
@@ -69,8 +69,27 @@ export function createJiraRoutes(
   mcpManager: McpClientManager,
   taskQueries: TaskQueries,
   getJiraClient?: () => JiraRestClient | null,
-  getSettings?: () => Record<string, string>
+  getSettings?: () => Record<string, string>,
+  userSettingsQueries?: UserSettingsQueries
 ): Router {
+  /** Build a JiraRestClient for the requesting user — tries global client first,
+   *  then per-user OAuth tokens. */
+  function getClientForUser(userId?: number): JiraRestClient | null {
+    // 1. Try global / onboarding client
+    const globalClient = getJiraClient?.() ?? null;
+    if (globalClient) return globalClient;
+
+    // 2. Try per-user OAuth tokens
+    if (userId && userSettingsQueries) {
+      const cloudId = userSettingsQueries.get(userId, 'jira_cloud_id');
+      const accessToken = userSettingsQueries.get(userId, 'jira_access_token');
+      if (cloudId && accessToken) {
+        return new JiraRestClient({ cloudId, accessToken });
+      }
+    }
+
+    return null;
+  }
   const router = Router();
 
   router.get('/tools', (_req, res) => {
@@ -184,27 +203,15 @@ export function createJiraRoutes(
       }
 
       if (comment) {
-        // Use direct REST API for internal comments (visibility support)
-        // or when no MCP comment tool is available
-        if (commentVisibility === 'internal' && getJiraClient) {
-          const client = getJiraClient();
-          if (client) {
-            const role = getSettings?.()?.jira_internal_comment_role || 'Service Desk Team';
-            const result = await client.addComment(key, comment, {
-              visibility: { type: 'role', value: role },
-            });
-            results.comment = result;
-          } else {
-            // Fall back to MCP without visibility
-            console.warn('[Jira] No REST client available for internal comment, using MCP (no visibility)');
-            if (commentTool) {
-              const result = await callWithFallback(mcpManager, commentTool, [
-                { issue_key: key, body: comment },
-                { issueKey: key, body: comment },
-              ]);
-              results.comment = parseToolResult(result);
-            }
-          }
+        const userId = (req as any).user?.id as number | undefined;
+        const restClient = getClientForUser(userId);
+
+        if (commentVisibility === 'internal' && restClient) {
+          // Internal comment — must use REST API for visibility support
+          const role = getSettings?.()?.jira_internal_comment_role || 'Service Desk Team';
+          results.comment = await restClient.addComment(key, comment, {
+            visibility: { type: 'role', value: role },
+          });
         } else if (commentTool) {
           // Public comment via MCP
           const result = await callWithFallback(mcpManager, commentTool, [
@@ -215,12 +222,11 @@ export function createJiraRoutes(
             { issueKey: key, comment },
           ]);
           results.comment = parseToolResult(result);
-        } else if (getJiraClient) {
-          // No MCP comment tool — use REST API
-          const client = getJiraClient();
-          if (client) {
-            results.comment = await client.addComment(key, comment);
-          }
+        } else if (restClient) {
+          // No MCP comment tool — use REST API (public)
+          results.comment = await restClient.addComment(key, comment);
+        } else {
+          console.warn('[Jira] No comment tool or REST client available — comment not posted');
         }
       }
 
