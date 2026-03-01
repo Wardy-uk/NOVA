@@ -663,6 +663,7 @@ function TransitionModal({
       try {
         const res = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}/transitions`);
         const json = await res.json();
+        console.log('[TransitionModal] transitions response keys:', Object.keys(json), 'fieldOptions:', json.fieldOptions ? Object.keys(json.fieldOptions) : 'NONE');
         if (!active) return;
         if (!json.ok) { setError(json.error ?? 'Failed to fetch transitions'); setLoading(false); return; }
 
@@ -724,6 +725,7 @@ function TransitionModal({
         if (best) setSelectedTransition(best.id);
 
         // Extract field options piggybacked on the transitions response
+        let gotOptions = false;
         if (json.fieldOptions && typeof json.fieldOptions === 'object') {
           const opts: Record<string, string[]> = {};
           for (const [fieldKey, values] of Object.entries(json.fieldOptions as Record<string, Array<{ value: string }>>)) {
@@ -731,7 +733,34 @@ function TransitionModal({
               opts[fieldKey] = values.map((v) => v.value).filter(Boolean);
             }
           }
-          if (Object.keys(opts).length > 0) setFieldOptions(opts);
+          if (Object.keys(opts).length > 0) {
+            setFieldOptions(opts);
+            gotOptions = true;
+          }
+        }
+
+        // Fallback: fetch editmeta separately if transitions didn't include options
+        if (!gotOptions && active) {
+          try {
+            const metaRes = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}/editmeta`);
+            const metaJson = await metaRes.json();
+            console.log('[TransitionModal] editmeta fallback status:', metaRes.status, 'ok:', metaJson.ok);
+            if (metaJson.ok) {
+              const fields = metaJson.data?.fields ?? metaJson.data ?? {};
+              const opts: Record<string, string[]> = {};
+              for (const f of TRANSITION_FIELDS) {
+                if (f.inputType !== 'select') continue;
+                const meta = (fields as Record<string, unknown>)[f.key] as Record<string, unknown> | undefined;
+                const allowed = meta?.allowedValues as Array<Record<string, unknown>> | undefined;
+                if (allowed && allowed.length > 0) {
+                  opts[f.key] = allowed.map((v) => (v.value as string) ?? (v.name as string) ?? String(v.id)).filter(Boolean);
+                }
+              }
+              if (active && Object.keys(opts).length > 0) setFieldOptions(opts);
+            }
+          } catch (metaErr) {
+            console.warn('[TransitionModal] editmeta fallback failed:', metaErr);
+          }
         }
 
         setLoading(false);
