@@ -551,7 +551,8 @@ export function App() {
                   {([
                     { value: 'unassigned' as OwnershipFilter, label: 'Unassigned' },
                     { value: 'problems' as OwnershipFilter, label: 'Problem Tickets' },
-                    { value: 'all' as OwnershipFilter, label: 'All Tickets' },
+                    { value: 'all' as OwnershipFilter, label: 'All Tickets List' },
+                    { value: 'all-kanban' as OwnershipFilter, label: 'All Tickets Kanban' },
                     { value: 'all-breached' as OwnershipFilter, label: 'All Breached' },
                   ]).map((opt) => (
                     <button
@@ -566,7 +567,7 @@ export function App() {
                       {opt.label}
                     </button>
                   ))}
-                  {sdFilter && sdFilter !== 'all-breached' && sdFilter !== 'problems' && (
+                  {sdFilter && sdFilter !== 'all-breached' && sdFilter !== 'problems' && sdFilter !== 'all-kanban' && (
                     <span className="text-[10px] text-neutral-500 ml-2">
                       {filteredSdTasks.length} ticket{filteredSdTasks.length !== 1 ? 's' : ''}
                     </span>
@@ -654,7 +655,10 @@ export function App() {
           {currentArea === 'servicedesk' && sdFilter === 'problems' && (
             <ProblemTicketsView />
           )}
-          {currentArea === 'servicedesk' && sdFilter && sdFilter !== 'all-breached' && sdFilter !== 'problems' && (
+          {currentArea === 'servicedesk' && sdFilter === 'all-kanban' && (
+            <ServiceDeskKanban tasks={filteredSdTasks} onUpdateTask={updateTask} onRefresh={refreshSdTasks} />
+          )}
+          {currentArea === 'servicedesk' && sdFilter && sdFilter !== 'all-breached' && sdFilter !== 'problems' && sdFilter !== 'all-kanban' && (
             <div className="max-w-5xl mx-auto">
               {error && (
                 <div className="mb-4 p-3 bg-red-950/50 border border-red-900 rounded text-red-400 text-sm">

@@ -2472,7 +2472,8 @@ export class ProblemTicketQueries {
     const ignoredResult = this.db.exec(`SELECT COUNT(*) FROM problem_ticket_ignores WHERE lifted_at IS NULL`);
     const ignored = (ignoredResult[0]?.values[0]?.[0] as number) ?? 0;
 
-    const lastScanResult = this.db.exec(`SELECT MAX(last_seen) FROM problem_ticket_alerts`);
+    // Read actual scan timestamp from settings (not derived from alert data)
+    const lastScanResult = this.db.exec(`SELECT value FROM settings WHERE key = 'problem_ticket_last_scan'`);
     const lastScan = (lastScanResult[0]?.values[0]?.[0] as string) ?? null;
 
     return { p1, p2, p3, total: p1 + p2 + p3, ignored, lastScan };

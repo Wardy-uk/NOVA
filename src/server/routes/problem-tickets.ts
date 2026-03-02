@@ -64,6 +64,9 @@ export function createProblemTicketRoutes(
         return res.status(503).json({ ok: false, error: 'Scanner not available (no Jira client)' });
       }
       const result = await scanner.scan();
+      if (result.error) {
+        return res.json({ ok: false, error: result.error, data: result });
+      }
       res.json({ ok: true, data: result });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });

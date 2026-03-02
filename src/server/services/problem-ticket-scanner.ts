@@ -41,6 +41,7 @@ interface RuleResult {
 
 interface SettingsAccessor {
   get(key: string): string | null;
+  set(key: string, value: string): void;
 }
 
 interface UserSettingsAccessor {
@@ -385,6 +386,9 @@ export class ProblemTicketScanner {
 
       const duration = Date.now() - start;
       console.log(`[ProblemTicketScanner] Scan complete: ${allIssues.length} tickets, ${alertsCreated} new, ${alertsUpdated} updated, ${resolved} resolved, ${ignoresLifted} ignores lifted (${duration}ms)`);
+
+      // Record scan timestamp (independent of whether alerts were created)
+      this.settings.set('problem_ticket_last_scan', new Date().toISOString());
 
       return {
         scannedTickets: allIssues.length,
