@@ -60,6 +60,7 @@ interface Milestone {
   notes: string | null;
   workflow_tickets_created?: number;
   jira_keys?: string[];
+  assigned_to?: number | null;
   linked_ticket_groups?: Array<{ ticket_group_id: number; [key: string]: unknown }>;
 }
 
@@ -118,6 +119,8 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
   const [milestonesLoading, setMilestonesLoading] = useState(false);
   const [milestoneError, setMilestoneError] = useState<string | null>(null);
   const [expandedMilestone, setExpandedMilestone] = useState<number | null>(null);
+  const [addingKeyForMilestone, setAddingKeyForMilestone] = useState<number | null>(null);
+  const [newKeyValue, setNewKeyValue] = useState('');
 
   // Linked tickets state
   const [linkedTickets, setLinkedTickets] = useState<{
@@ -496,6 +499,63 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
     } finally {
       setMilestoneTicketLoading(null);
     }
+  };
+
+  const handleAddJiraKey = async (milestoneId: number) => {
+    const key = newKeyValue.trim().toUpperCase();
+    if (!key) return;
+    const milestone = milestones.find(m => m.id === milestoneId);
+    if (!milestone) return;
+    const existing = milestone.jira_keys ?? [];
+    if (existing.includes(key)) { setNewKeyValue(''); return; }
+    const updated = [...existing, key];
+    try {
+      const resp = await fetch(`/api/milestones/${milestoneId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jira_keys: JSON.stringify(updated) }),
+      });
+      const json = await resp.json();
+      if (json.ok) {
+        setMilestones(prev => prev.map(m => m.id === milestoneId
+          ? { ...m, jira_keys: updated, workflow_tickets_created: 1 } : m));
+      }
+    } catch { /* ignore */ }
+    setNewKeyValue('');
+    setAddingKeyForMilestone(null);
+  };
+
+  const handleRemoveJiraKey = async (milestoneId: number, keyToRemove: string) => {
+    const milestone = milestones.find(m => m.id === milestoneId);
+    if (!milestone) return;
+    const updated = (milestone.jira_keys ?? []).filter(k => k !== keyToRemove);
+    try {
+      const resp = await fetch(`/api/milestones/${milestoneId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jira_keys: JSON.stringify(updated) }),
+      });
+      const json = await resp.json();
+      if (json.ok) {
+        setMilestones(prev => prev.map(m => m.id === milestoneId
+          ? { ...m, jira_keys: updated } : m));
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleAssignMilestone = async (milestoneId: number, userId: number | null) => {
+    try {
+      const resp = await fetch(`/api/milestones/${milestoneId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assigned_to: userId }),
+      });
+      const json = await resp.json();
+      if (json.ok) {
+        setMilestones(prev => prev.map(m => m.id === milestoneId
+          ? { ...m, assigned_to: userId } : m));
+      }
+    } catch { /* ignore */ }
   };
 
   const handleDeleteMilestones = async () => {
@@ -894,29 +954,74 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                             )}
                           </div>
 
-                          {/* Milestone ticket creation button / Jira key badges */}
-                          {m.linked_ticket_groups && m.linked_ticket_groups.length > 0 && (
-                            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                              {m.jira_keys && m.jira_keys.length > 0 ? (
-                                m.jira_keys.map(key => (
-                                  <span key={key} className="text-[9px] px-1.5 py-0.5 rounded bg-[#0052CC]/20 text-[#5ec1ca] font-mono">
-                                    {key}
-                                  </span>
-                                ))
-                              ) : (
+                          {/* Jira key badges + manual add + ticket creation */}
+                          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                            {m.jira_keys && m.jira_keys.length > 0 && m.jira_keys.map(key => (
+                              <span key={key} className="text-[9px] px-1.5 py-0.5 rounded bg-[#0052CC]/20 text-[#5ec1ca] font-mono inline-flex items-center gap-1 group/badge">
+                                {key}
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); handleMilestoneCreateTickets(m.id); }}
-                                  disabled={milestoneTicketLoading === m.id}
-                                  className="text-[10px] px-2 py-0.5 rounded bg-[#5ec1ca]/15 text-[#5ec1ca] hover:bg-[#5ec1ca]/25 disabled:opacity-50 transition-colors border border-[#5ec1ca]/30"
-                                >
-                                  {milestoneTicketLoading === m.id ? 'Creating...' : 'Create Tickets'}
-                                </button>
-                              )}
-                            </div>
-                          )}
+                                  onClick={(e) => { e.stopPropagation(); handleRemoveJiraKey(m.id, key); }}
+                                  className="opacity-0 group-hover/badge:opacity-100 text-neutral-500 hover:text-red-400 transition-opacity"
+                                  title="Remove key"
+                                >&times;</button>
+                              </span>
+                            ))}
+                            {addingKeyForMilestone === m.id ? (
+                              <form
+                                className="inline-flex items-center gap-1"
+                                onSubmit={(e) => { e.preventDefault(); handleAddJiraKey(m.id); }}
+                              >
+                                <input
+                                  autoFocus
+                                  value={newKeyValue}
+                                  onChange={(e) => setNewKeyValue(e.target.value)}
+                                  onBlur={() => { if (!newKeyValue.trim()) setAddingKeyForMilestone(null); }}
+                                  placeholder="NT-1234"
+                                  className="w-[70px] text-[9px] px-1.5 py-0.5 rounded bg-[#1a1f26] border border-[#3a424d] text-neutral-200 font-mono outline-none focus:border-[#5ec1ca]"
+                                />
+                                <button type="submit" className="text-[10px] text-green-400 hover:text-green-300">&check;</button>
+                                <button type="button" onClick={() => { setNewKeyValue(''); setAddingKeyForMilestone(null); }} className="text-[10px] text-neutral-500 hover:text-red-400">&times;</button>
+                              </form>
+                            ) : (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setAddingKeyForMilestone(m.id); setNewKeyValue(''); }}
+                                className="text-[9px] px-1 py-0.5 rounded border border-dashed border-[#3a424d] text-neutral-500 hover:text-[#5ec1ca] hover:border-[#5ec1ca]/50 transition-colors"
+                                title="Add Jira key"
+                              >+ Key</button>
+                            )}
+                            {/* Create Tickets button — only when linked groups exist and no keys yet */}
+                            {m.linked_ticket_groups && m.linked_ticket_groups.length > 0 && (!m.jira_keys || m.jira_keys.length === 0) && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleMilestoneCreateTickets(m.id); }}
+                                disabled={milestoneTicketLoading === m.id}
+                                className="text-[10px] px-2 py-0.5 rounded bg-[#5ec1ca]/15 text-[#5ec1ca] hover:bg-[#5ec1ca]/25 disabled:opacity-50 transition-colors border border-[#5ec1ca]/30"
+                              >
+                                {milestoneTicketLoading === m.id ? 'Creating...' : 'Create Tickets'}
+                              </button>
+                            )}
+                          </div>
                           {milestoneTicketError && milestoneTicketLoading === null && (
                             <div className="mt-1 text-[10px] text-red-400">{milestoneTicketError}</div>
                           )}
+
+                          {/* Assigned user */}
+                          <div className="mt-1 flex items-center gap-1">
+                            <select
+                              value={m.assigned_to ?? ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                handleAssignMilestone(m.id, val ? parseInt(val, 10) : null);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-[9px] py-0.5 px-1 rounded bg-[#1a1f26] border border-[#3a424d] text-neutral-400 outline-none focus:border-[#5ec1ca] appearance-none cursor-pointer"
+                              title="Assign milestone"
+                            >
+                              <option value="">Onboarder default</option>
+                              {userList.map(u => (
+                                <option key={u.id} value={u.id}>{u.display_name || u.username}</option>
+                              ))}
+                            </select>
+                          </div>
 
                           {/* Expandable checklist */}
                           {expandedMilestone === m.id && (() => {

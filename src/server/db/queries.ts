@@ -146,6 +146,11 @@ export class TaskQueries {
     }
   }
 
+  setTaskUserId(taskId: string, userId: number | null): void {
+    this.db.run(`UPDATE tasks SET user_id = ?, updated_at = datetime('now') WHERE id = ?`, [userId, taskId]);
+    saveDb();
+  }
+
   deleteTransientTasks(): number {
     const countResult = this.db.exec('SELECT COUNT(*) FROM tasks WHERE transient = 1');
     const count = (countResult[0]?.values[0]?.[0] as number) ?? 0;
@@ -1691,6 +1696,7 @@ export interface DeliveryMilestone {
   workflow_task_created: number;
   workflow_tickets_created: number;
   jira_keys: string | null;
+  assigned_to: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -1873,7 +1879,7 @@ export class MilestoneQueries {
     return this.getByDelivery(deliveryId);
   }
 
-  updateMilestone(id: number, updates: Partial<Pick<DeliveryMilestone, 'status' | 'actual_date' | 'checklist_state_json' | 'notes' | 'target_date'>>): boolean {
+  updateMilestone(id: number, updates: Partial<Pick<DeliveryMilestone, 'status' | 'actual_date' | 'checklist_state_json' | 'notes' | 'target_date' | 'jira_keys' | 'assigned_to'>>): boolean {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.status !== undefined) { fields.push('status = ?'); params.push(updates.status); }
@@ -1881,6 +1887,8 @@ export class MilestoneQueries {
     if (updates.checklist_state_json !== undefined) { fields.push('checklist_state_json = ?'); params.push(updates.checklist_state_json); }
     if (updates.notes !== undefined) { fields.push('notes = ?'); params.push(updates.notes); }
     if (updates.target_date !== undefined) { fields.push('target_date = ?'); params.push(updates.target_date); }
+    if (updates.jira_keys !== undefined) { fields.push('jira_keys = ?'); params.push(updates.jira_keys); }
+    if (updates.assigned_to !== undefined) { fields.push('assigned_to = ?'); params.push(updates.assigned_to); }
     if (fields.length === 0) return false;
     fields.push(`updated_at = datetime('now')`);
     params.push(id);

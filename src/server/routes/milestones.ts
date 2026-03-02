@@ -28,6 +28,8 @@ const MilestoneUpdateSchema = z.object({
   checklist_state_json: z.string().optional(),
   notes: z.string().nullable().optional(),
   target_date: z.string().nullable().optional(),
+  jira_keys: z.string().nullable().optional(),
+  assigned_to: z.number().nullable().optional(),
 });
 
 function calculateMilestonePriority(targetDate: string | null, status: string): number {
@@ -92,7 +94,8 @@ export function resyncAllMilestoneTasks(
     if (m.status === 'complete') continue;
     // Only resync milestones that have had their task created (progressive workflow)
     if ((m as any).workflow_task_created === 0) continue;
-    const userId = m.onboarder ? onboarderToUserId?.get(m.onboarder.toLowerCase()) : undefined;
+    const userId = (m as any).assigned_to
+      ?? (m.onboarder ? onboarderToUserId?.get(m.onboarder.toLowerCase()) : undefined);
     syncMilestoneToTask(m, m.account, taskQueries, userId);
     synced++;
   }
@@ -371,12 +374,19 @@ export function createMilestoneRoutes(
     const ok = milestoneQueries.updateMilestone(id, updates as any);
     if (!ok) { res.status(404).json({ ok: false, error: 'Milestone not found' }); return; }
 
-    // Sync updated milestone to task
+    // Sync updated milestone to task (assigned_to takes priority, then onboarder lookup)
     const milestone = milestoneQueries.getMilestoneById(id);
     if (milestone) {
       const entry = deliveryQueries.getById(milestone.delivery_id);
       if (entry) {
-        syncMilestoneToTask(milestone, entry.account, taskQueries);
+        const taskUserId = (milestone as any).assigned_to ?? undefined;
+        syncMilestoneToTask(milestone, entry.account, taskQueries, taskUserId);
+
+        // Force-update task ownership when assigned_to is explicitly changed
+        if (parsed.data.assigned_to !== undefined) {
+          const taskId = `milestone:milestone:${milestone.delivery_id}:${milestone.template_id}`;
+          taskQueries.setTaskUserId(taskId, parsed.data.assigned_to);
+        }
       }
 
       // Trigger next milestone evaluation when completing
