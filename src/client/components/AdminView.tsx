@@ -1072,11 +1072,17 @@ export function AdminView() {
                 <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold">
                   {integ.name}
                 </h3>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                  integ.enabled ? 'bg-green-900/40 text-green-400' : 'bg-[#272C33] text-neutral-600'
-                }`}>
-                  {integ.enabled ? 'Enabled' : 'Disabled'}
-                </span>
+                <button
+                  onClick={() => {
+                    setIntegrations(prev => prev.map(i =>
+                      i.id === integ.id ? { ...i, enabled: !i.enabled } : i
+                    ));
+                  }}
+                  className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${integ.enabled ? 'bg-[#5ec1ca]' : 'bg-neutral-700'}`}
+                  title={integ.enabled ? 'Disable' : 'Enable'}
+                >
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${integ.enabled ? 'left-[18px]' : 'left-0.5'}`} />
+                </button>
               </div>
               <div className="space-y-3">
                 {integ.fields.map((field) => (
