@@ -342,9 +342,13 @@ export function createMilestoneRoutes(
         config: {},
       }, { userId: (req as any).user?.id, filterGroupIds });
 
-      // Mark milestone as having tickets created and store Jira keys
-      if (result.childKeys.length > 0) {
-        milestoneQueries.markWorkflowTicketsCreated(id, result.childKeys);
+      // Mark milestone as having tickets created and store Jira keys (parent + children)
+      const allKeys = [
+        ...(result.parentKey && result.parentKey !== '(dry-run)' ? [result.parentKey] : []),
+        ...result.childKeys,
+      ];
+      if (allKeys.length > 0) {
+        milestoneQueries.markWorkflowTicketsCreated(id, allKeys);
       }
 
       res.json({ ok: true, data: result });

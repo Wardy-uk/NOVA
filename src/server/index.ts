@@ -118,6 +118,13 @@ async function main() {
     }
   }
 
+  // Ensure "Delivery QA" ticket group exists (used for the parent QA ticket)
+  const existingGroups = onboardingConfigQueries.getAllTicketGroups();
+  if (!existingGroups.find(g => g.name === 'Delivery QA')) {
+    onboardingConfigQueries.createTicketGroup('Delivery QA', -1);
+    console.log('[N.O.V.A] Auto-seeded "Delivery QA" ticket group');
+  }
+
   // JWT secret — use env, or persist a random one in settings
   let jwtSecret = process.env.JWT_SECRET ?? settingsQueries.get('jwt_secret');
   if (!jwtSecret) {

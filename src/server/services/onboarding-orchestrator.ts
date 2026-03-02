@@ -131,10 +131,8 @@ export class OnboardingOrchestrator {
     if (options?.filterGroupIds && options.filterGroupIds.length > 0) {
       const filterSet = new Set(options.filterGroupIds);
       ticketGroups = ticketGroups.filter(g => g.ticketGroupId != null && filterSet.has(g.ticketGroupId));
-      if (ticketGroups.length === 0) {
-        this.log(`${prefix} No matching ticket groups after filter — skipping`);
-        return { parentKey: '', childKeys: [], createdCount: 0, linkedCount: 0, existing: false, dryRun };
-      }
+      // If no child groups match but filterGroupIds was provided (e.g. "Delivery QA" parent-only),
+      // continue to create the parent ticket with no children
     }
 
     this.log(`${prefix} Resolved ${ticketGroups.length} ticket groups for "${payload.saleType}"`);
