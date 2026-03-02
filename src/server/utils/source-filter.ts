@@ -1,6 +1,7 @@
 import type { UserSettingsQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { Task } from '../../shared/types.js';
+import { isAdmin } from './role-helpers.js';
 
 /** Build the set of task sources a user is allowed to see.
  *  Per-user settings are checked first. Only admin users fall back to global settings
@@ -18,7 +19,7 @@ export function getAllowedSources(
   const check = (key: string): boolean => {
     const userVal = userSettingsQueries?.get(userId, key);
     if (userVal !== undefined && userVal !== null) return userVal === 'true';
-    if (userRole === 'admin') return settingsQueries?.get(key) === 'true';
+    if (isAdmin(userRole ?? '')) return settingsQueries?.get(key) === 'true';
     return false;
   };
 

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { FeedbackQueries, TaskQueries } from '../db/queries.js';
 import type { FileUserQueries } from '../db/user-store.js';
 import { saveDb } from '../db/schema.js';
+import { isAdmin } from '../utils/role-helpers.js';
 
 export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueries?: TaskQueries, userQueries?: FileUserQueries): Router {
   const router = Router();
@@ -49,7 +50,7 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
   // List all feedback (admin only)
   router.get('/', (req, res) => {
     const role = (req as any).user?.role;
-    if (role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!isAdmin(role ?? '')) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const status = req.query.status as string | undefined;
     const items = feedbackQueries.getAll(status ? { status } : undefined);
@@ -59,7 +60,7 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
   // Reply to feedback (admin only)
   router.post('/:id/reply', (req, res) => {
     const role = (req as any).user?.role;
-    if (role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!isAdmin(role ?? '')) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const id = parseInt(req.params.id, 10);
     const adminUserId = (req as any).user?.id;
@@ -75,7 +76,7 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
   // Create task from feedback (admin only)
   router.post('/:id/to-task', (req, res) => {
     const role = (req as any).user?.role;
-    if (role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!isAdmin(role ?? '')) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
     if (!taskQueries) { res.status(503).json({ ok: false, error: 'Task system not available' }); return; }
 
     const id = parseInt(req.params.id, 10);
@@ -106,7 +107,7 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
   // Update feedback status (admin only)
   router.patch('/:id', (req, res) => {
     const role = (req as any).user?.role;
-    if (role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!isAdmin(role ?? '')) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const id = parseInt(req.params.id, 10);
     const { status } = req.body;
@@ -119,7 +120,7 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
   // Delete feedback (admin only)
   router.delete('/:id', (req, res) => {
     const role = (req as any).user?.role;
-    if (role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!isAdmin(role ?? '')) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     feedbackQueries.delete(parseInt(req.params.id, 10));
     res.json({ ok: true });

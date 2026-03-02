@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 
 export interface AuthPayload {
   id: number;
@@ -23,7 +24,8 @@ export function requireRole(...roles: string[]) {
       res.status(401).json({ ok: false, error: 'Not authenticated' });
       return;
     }
-    if (!roles.includes(req.user.role)) {
+    const userRoles = parseRoles(req.user.role);
+    if (!userRoles.some(r => roles.includes(r))) {
       res.status(403).json({ ok: false, error: 'Insufficient permissions' });
       return;
     }
@@ -52,18 +54,23 @@ export function createAreaAccessGuard(getRoles: () => CustomRole[]) {
         return;
       }
       // Admin always has full access
-      if (req.user.role === 'admin') {
+      if (isAdmin(req.user.role)) {
         next();
         return;
       }
-      const roles = getRoles();
-      const role = roles.find(r => r.id === req.user!.role);
-      if (!role) {
+      const allRoleDefs = getRoles();
+      const userRoleIds = parseRoles(req.user!.role);
+      const matched = allRoleDefs.filter(r => userRoleIds.includes(r.id));
+      if (matched.length === 0) {
         res.status(403).json({ ok: false, error: 'Unknown role' });
         return;
       }
-      const userAccess = role.areas[area] || 'hidden';
-      if ((ACCESS_LEVELS[userAccess] ?? 0) >= (ACCESS_LEVELS[level] ?? 999)) {
+      // Merge: take highest access across all assigned roles
+      let bestAccess = 0;
+      for (const role of matched) {
+        bestAccess = Math.max(bestAccess, ACCESS_LEVELS[role.areas[area] || 'hidden'] ?? 0);
+      }
+      if (bestAccess >= (ACCESS_LEVELS[level] ?? 999)) {
         next();
         return;
       }

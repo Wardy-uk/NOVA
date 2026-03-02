@@ -19,7 +19,7 @@ const INTEGRATION_SOURCES: Record<string, string[]> = {
 export function SettingsView() {
   const { integrations, loading, saveIntegration, reconnect, startLogin, checkLoginStatus, logout, refresh } = useIntegrations();
   const auth = useAuth();
-  const isViewer = auth.user?.role === 'viewer';
+  const isViewer = (auth.user?.role ?? 'viewer').split(',').every(r => r.trim() === 'viewer');
   const userIntegrations = integrations.filter((i) => !ADMIN_ONLY_INTEGRATIONS.has(i.id));
 
   if (loading) {

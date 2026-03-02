@@ -795,12 +795,28 @@ export function AdminView() {
                       className="w-full bg-[#272C33] text-neutral-300 text-sm rounded px-3 py-2 border border-[#3a424d] outline-none focus:border-[#5ec1ca] placeholder:text-neutral-600" />
                   </div>
                   <div>
-                    <label className="block text-xs text-neutral-400 mb-1">Role</label>
-                    <select value={newUser.role}
-                      onChange={(e) => setNewUser(u => ({ ...u, role: e.target.value }))}
-                      className="w-full bg-[#272C33] text-neutral-300 text-sm rounded px-3 py-2 border border-[#3a424d] outline-none focus:border-[#5ec1ca]">
-                      {validRoleIds.map((r) => <option key={r} value={r}>{r === 'admin' ? 'admin' : (customRoles.find(cr => cr.id === r)?.name || r)}</option>)}
-                    </select>
+                    <label className="block text-xs text-neutral-400 mb-1">Roles</label>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {validRoleIds.map((r) => {
+                        const selected = newUser.role.split(',').filter(Boolean);
+                        const checked = selected.includes(r);
+                        const label = r === 'admin' ? 'admin' : (customRoles.find(cr => cr.id === r)?.name || r);
+                        return (
+                          <label key={r} className="flex items-center gap-1.5 cursor-pointer select-none">
+                            <input type="checkbox" checked={checked}
+                              onChange={(e) => {
+                                let next: string[];
+                                if (e.target.checked) { next = [...selected, r]; }
+                                else { next = selected.filter(x => x !== r); }
+                                if (next.length === 0) return;
+                                setNewUser(u => ({ ...u, role: next.join(',') }));
+                              }}
+                              className="w-3.5 h-3.5 rounded accent-[#5ec1ca]" />
+                            <span className="text-xs text-neutral-300">{label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center justify-end gap-2 mt-5">
@@ -917,15 +933,27 @@ export function AdminView() {
                     />
                   </td>
                   <td className="px-4 py-3">
-                    <select
-                      value={user.role}
-                      onChange={(e) => updateUser(user.id, { role: e.target.value })}
-                      className="bg-[#272C33] text-neutral-300 text-xs rounded px-2 py-1 border border-[#3a424d] outline-none focus:border-[#5ec1ca]"
-                    >
-                      {validRoleIds.map((r) => (
-                        <option key={r} value={r}>{r === 'admin' ? 'admin' : (customRoles.find(cr => cr.id === r)?.name || r)}</option>
-                      ))}
-                    </select>
+                    <div className="flex flex-wrap gap-1.5">
+                      {validRoleIds.map((r) => {
+                        const userRoles = user.role.split(',').map(s => s.trim()).filter(Boolean);
+                        const checked = userRoles.includes(r);
+                        const label = r === 'admin' ? 'admin' : (customRoles.find(cr => cr.id === r)?.name || r);
+                        return (
+                          <label key={r} className="flex items-center gap-1 cursor-pointer select-none">
+                            <input type="checkbox" checked={checked}
+                              onChange={(e) => {
+                                let next: string[];
+                                if (e.target.checked) { next = [...userRoles, r]; }
+                                else { next = userRoles.filter(x => x !== r); }
+                                if (next.length === 0) return;
+                                updateUser(user.id, { role: next.join(',') });
+                              }}
+                              className="w-3 h-3 rounded accent-[#5ec1ca]" />
+                            <span className="text-[10px] text-neutral-400">{label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <select

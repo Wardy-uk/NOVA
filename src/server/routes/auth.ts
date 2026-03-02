@@ -31,6 +31,7 @@ function safeUser(u: { id: number; username: string; display_name: string | null
 }
 
 import type { CustomRole } from '../middleware/auth.js';
+import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 
 const DEFAULT_CUSTOM_ROLES: CustomRole[] = [
   { id: 'editor', name: 'Editor', areas: { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit' } },
@@ -45,13 +46,28 @@ function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
   return DEFAULT_CUSTOM_ROLES;
 }
 
-function resolveAreaAccess(role: string, roles: CustomRole[]): Record<string, string> {
-  if (role === 'admin') {
+function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string, string> {
+  const userRoles = parseRoles(roleStr);
+  if (userRoles.includes('admin')) {
     return { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', admin: 'edit' };
   }
-  const def = roles.find(r => r.id === role);
-  if (!def) return { command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view' };
-  return { ...def.areas, admin: 'hidden' };
+  const matched = roles.filter(r => userRoles.includes(r.id));
+  if (matched.length === 0) {
+    return { command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view' };
+  }
+  // Merge: take highest access per area across all assigned roles
+  const RANK: Record<string, number> = { hidden: 0, view: 1, edit: 2 };
+  const RANK_TO_ACCESS = ['hidden', 'view', 'edit'];
+  const allAreas = new Set<string>();
+  for (const r of matched) for (const a of Object.keys(r.areas)) allAreas.add(a);
+  const merged: Record<string, string> = {};
+  for (const area of allAreas) {
+    let best = 0;
+    for (const r of matched) best = Math.max(best, RANK[r.areas[area] || 'hidden'] ?? 0);
+    merged[area] = RANK_TO_ACCESS[best];
+  }
+  merged.admin = 'hidden';
+  return merged;
 }
 
 export function createAuthRoutes(
@@ -117,7 +133,7 @@ export function createAuthRoutes(
       }
       try {
         const payload = jwt.verify(authHeader.slice(7), jwtSecret) as AuthPayload;
-        if (payload.role !== 'admin') {
+        if (!isAdmin(payload.role)) {
           res.status(403).json({ ok: false, error: 'Only admins can create new users' });
           return;
         }

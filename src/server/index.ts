@@ -33,6 +33,7 @@ import { JiraRestClient } from './services/jira-client.js';
 import { OnboardingOrchestrator } from './services/onboarding-orchestrator.js';
 import { authMiddleware, createAreaAccessGuard } from './middleware/auth.js';
 import type { CustomRole } from './middleware/auth.js';
+import { isAdmin } from './utils/role-helpers.js';
 import crypto from 'crypto';
 import { generateMorningBriefing } from './services/ai-standup.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
@@ -307,7 +308,7 @@ async function main() {
 
   // Debug endpoints (admin-only, behind auth)
   app.get('/api/debug/tools', (req, res, next) => {
-    if (req.user?.role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!isAdmin(req.user?.role ?? '')) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
     next();
   }, async (_req, res) => {
     try {
@@ -322,7 +323,7 @@ async function main() {
   });
 
   app.get('/api/debug/sp-probe', (req, res, next) => {
-    if (req.user?.role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!isAdmin(req.user?.role ?? '')) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
     next();
   }, async (req, res) => {
     try {

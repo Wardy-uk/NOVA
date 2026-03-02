@@ -181,7 +181,7 @@ export function App() {
 
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
-    userRole === 'admin'
+    userRole.split(',').map(r => r.trim()).includes('admin')
       ? { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', admin: 'edit' }
       : DEFAULT_AREA_ACCESS,
   );

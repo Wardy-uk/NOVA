@@ -6,6 +6,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { FileUserQueries } from '../db/user-store.js';
 type UserQueries = FileUserQueries;
 import { requireRole } from '../middleware/auth.js';
+import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 import { EmailService } from '../services/email.js';
 import { inviteHtml } from '../services/email-templates.js';
 
@@ -85,27 +86,33 @@ export function createAdminRoutes(
     if (display_name !== undefined) updates.display_name = display_name;
     if (email !== undefined) updates.email = email;
     if (role !== undefined) {
-      // Validate role: must be 'admin' or a custom role ID
+      // Validate each role in comma-separated list
       const rawRoles = settingsQueries.get('custom_roles');
       let customRoleIds: string[] = [];
       try {
         if (rawRoles) customRoleIds = (JSON.parse(rawRoles) as Array<{ id: string }>).map(r => r.id);
       } catch { /* ignore */ }
       const validRoles = ['admin', ...customRoleIds];
-      if (!validRoles.includes(role)) {
-        res.status(400).json({ ok: false, error: `Invalid role. Valid: ${validRoles.join(', ')}` });
+      const requested = parseRoles(role);
+      if (requested.length === 0) {
+        res.status(400).json({ ok: false, error: 'At least one role is required' });
+        return;
+      }
+      const invalid = requested.filter(r => !validRoles.includes(r));
+      if (invalid.length > 0) {
+        res.status(400).json({ ok: false, error: `Invalid role(s): ${invalid.join(', ')}. Valid: ${validRoles.join(', ')}` });
         return;
       }
       // Prevent removing the last admin
-      if (user.role === 'admin' && role !== 'admin') {
+      if (isAdmin(user.role) && !requested.includes('admin')) {
         const allUsers = userQueries.getAll();
-        const adminCount = allUsers.filter((u) => u.role === 'admin').length;
+        const adminCount = allUsers.filter((u) => isAdmin(u.role)).length;
         if (adminCount <= 1) {
           res.status(400).json({ ok: false, error: 'Cannot remove the last admin' });
           return;
         }
       }
-      updates.role = role;
+      updates.role = requested.join(',');
     }
     if (team_id !== undefined) updates.team_id = team_id;
 
@@ -142,9 +149,9 @@ export function createAdminRoutes(
     if (!user) { res.status(404).json({ ok: false, error: 'User not found' }); return; }
 
     // Prevent removing the last admin
-    if (user.role === 'admin') {
+    if (isAdmin(user.role)) {
       const allUsers = userQueries.getAll();
-      const adminCount = allUsers.filter((u) => u.role === 'admin').length;
+      const adminCount = allUsers.filter((u) => isAdmin(u.role)).length;
       if (adminCount <= 1) {
         res.status(400).json({ ok: false, error: 'Cannot delete the last admin' });
         return;
@@ -234,7 +241,13 @@ export function createAdminRoutes(
       }
 
       const tempPassword = generateTempPassword();
-      const role = entry.role && allValidRoles.includes(entry.role) ? entry.role : defaultRole;
+      // Validate each role in comma-separated list
+      let role = defaultRole;
+      if (entry.role) {
+        const entryRoles = parseRoles(entry.role);
+        const allValid = entryRoles.length > 0 && entryRoles.every((r: string) => allValidRoles.includes(r));
+        role = allValid ? entryRoles.join(',') : defaultRole;
+      }
       const hash = await bcrypt.hash(tempPassword, 10);
 
       userQueries.create({
@@ -359,6 +372,10 @@ export function createAdminRoutes(
       }
       if (role.id === 'admin') {
         res.status(400).json({ ok: false, error: 'Cannot define a custom role with id "admin"' });
+        return;
+      }
+      if (role.id.includes(',')) {
+        res.status(400).json({ ok: false, error: 'Role id cannot contain commas' });
         return;
       }
       if (ids.has(role.id)) {
