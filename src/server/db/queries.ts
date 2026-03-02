@@ -213,6 +213,23 @@ export class TaskQueries {
     return count;
   }
 
+  /** Purge tasks not refreshed by a recent sync (stale accumulation cleanup). */
+  purgeUnsyncedTasks(maxAgeDays: number = 2): number {
+    const cutoff = new Date(Date.now() - maxAgeDays * 86400000).toISOString();
+    const countResult = this.db.exec(
+      `SELECT COUNT(*) FROM tasks WHERE source != 'milestone' AND transient = 0 AND (last_synced IS NULL OR last_synced < '${cutoff}')`
+    );
+    const count = (countResult[0]?.values[0]?.[0] as number) ?? 0;
+    if (count > 0) {
+      this.db.run(
+        `DELETE FROM tasks WHERE source != 'milestone' AND transient = 0 AND (last_synced IS NULL OR last_synced < ?)`,
+        [cutoff]
+      );
+      saveDb();
+    }
+    return count;
+  }
+
   update(id: string, updates: TaskUpdate, userId?: number): boolean {
     const fields: string[] = [];
     const params: unknown[] = [];

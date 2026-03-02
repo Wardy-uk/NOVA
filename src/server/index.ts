@@ -514,6 +514,9 @@ async function main() {
   // Initial full sync 5s after startup (let MCP connections establish), then start per-source timers
   setTimeout(async () => {
     await runFullSync();
+    // Purge tasks not refreshed by a recent sync (cleans accumulated stale data)
+    const purged = taskQueries.purgeUnsyncedTasks(2);
+    if (purged > 0) console.log(`[Startup] Purged ${purged} stale tasks not seen in last 2 days`);
     startSyncTimers();
     // Run initial workflow evaluation after sync
     try {
