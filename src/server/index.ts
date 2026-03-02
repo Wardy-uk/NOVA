@@ -372,7 +372,7 @@ async function main() {
     // Refresh Jira client on each scan (credentials may change)
     problemTicketScanner.setJiraClient(buildJiraClient());
     return problemTicketScanner;
-  }));
+  }, () => settingsQueries));
 
   // 6. OneDrive file watcher (Power Automate bridge)
   const watcher = new OneDriveWatcher(taskQueries, settingsQueries);

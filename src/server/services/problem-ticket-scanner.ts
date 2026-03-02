@@ -87,6 +87,10 @@ function computeFingerprint(issue: JiraIssue, commentCount: number, reopened: bo
 
 export class ProblemTicketScanner {
   private scanning = false;
+  public lastResult: ScanResult | null = null;
+
+  /** Whether a scan is currently in progress */
+  get isScanning(): boolean { return this.scanning; }
 
   constructor(
     private jira: JiraRestClient | null,
@@ -391,6 +395,9 @@ export class ProblemTicketScanner {
       // Run sentiment analysis in batches
       await this.runSentimentAnalysis(needsSentiment, config.get('sentiment'));
 
+      // Run missed commitment analysis
+      await this.runCommitmentAnalysis(needsSentiment, config.get('missed_commitment'));
+
       // Mark resolved — alerts not seen in this scan
       const allAlertedKeys = allIssues.filter(i => {
         // Only include issues that scored >= 15
@@ -407,7 +414,7 @@ export class ProblemTicketScanner {
       // Record scan timestamp (independent of whether alerts were created)
       this.settings.set('problem_ticket_last_scan', new Date().toISOString());
 
-      return {
+      const result: ScanResult = {
         scannedTickets: allIssues.length,
         alertsCreated,
         alertsUpdated,
@@ -416,9 +423,11 @@ export class ProblemTicketScanner {
         bySeverity: { P1: severity['P1'] ?? 0, P2: severity['P2'] ?? 0, P3: severity['P3'] ?? 0 },
         durationMs: duration,
       };
+      this.lastResult = result;
+      return result;
     } catch (err: any) {
       console.error('[ProblemTicketScanner] Scan failed:', err.message);
-      return {
+      const result: ScanResult = {
         scannedTickets: 0,
         alertsCreated: 0,
         alertsUpdated: 0,
@@ -428,6 +437,8 @@ export class ProblemTicketScanner {
         durationMs: Date.now() - start,
         error: err.message,
       };
+      this.lastResult = result;
+      return result;
     } finally {
       this.scanning = false;
     }
@@ -554,6 +565,125 @@ Focus on the customer's tone, not the agent's. If no customer comments, score 0.
         }
       } catch (err: any) {
         console.warn(`[ProblemTicketScanner] Sentiment batch failed:`, err.message);
+      }
+    }
+  }
+
+  /** Batch-run LLM analysis to detect missed agent update commitments */
+  private async runCommitmentAnalysis(
+    tickets: Array<{ issue: JiraIssue; reasons: Omit<ProblemTicketAlertReason, 'alert_id'>[] }>,
+    commitmentConfig: ProblemTicketConfigRow | undefined,
+  ): Promise<void> {
+    if (!commitmentConfig?.enabled || !this.jira || tickets.length === 0) return;
+
+    const apiKey = this.settings.get('openai_api_key')?.trim()
+      ?? process.env.OPENAI_API_KEY?.trim()
+      ?? process.env.OPENAI_KEY?.trim();
+
+    if (!apiKey) {
+      console.log('[ProblemTicketScanner] No OpenAI API key — skipping commitment analysis');
+      return;
+    }
+
+    const batchSize = 10;
+    for (let i = 0; i < tickets.length; i += batchSize) {
+      const batch = tickets.slice(i, i + batchSize);
+
+      // Fetch last 10 comments for each ticket (need more context for commitment detection)
+      const ticketComments: Array<{ issueKey: string; comments: string }> = [];
+      for (const { issue } of batch) {
+        try {
+          const comments = await this.jira.getComments(issue.key, 10);
+          const text = comments
+            .map((c: JiraComment) => `[${c.author.displayName} — ${c.created}]: ${adfToText(c.body)}`)
+            .join('\n');
+          if (text.trim()) {
+            ticketComments.push({ issueKey: issue.key, comments: text });
+          }
+        } catch {
+          // Skip if comments fail
+        }
+      }
+
+      if (ticketComments.length === 0) continue;
+
+      try {
+        const prompt = ticketComments
+          .map(tc => `--- ${tc.issueKey} ---\n${tc.comments}`)
+          .join('\n\n');
+
+        const today = new Date().toISOString().slice(0, 10);
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            temperature: 0.2,
+            response_format: { type: 'json_object' },
+            messages: [
+              {
+                role: 'system',
+                content: `You analyze Jira service desk comments for update commitments made by support agents.
+Today's date is ${today}.
+Return JSON: { "results": [{ "issueKey": "...", "commitmentDate": "YYYY-MM-DD" or null, "followedUp": true or false, "quote": "exact phrase from agent" }] }
+Rules:
+- Look for agent promises like "will update by Friday", "get back to you by 15th March", "expect an update by end of week", "I'll have this resolved by tomorrow"
+- Only flag commitments from agents/support staff, not from customers/reporters
+- commitmentDate must be a concrete date (resolve relative dates like "Friday" or "end of week" using the comment timestamp)
+- followedUp = true if a comment from the same agent (or any agent) exists AFTER the commitment date
+- Only flag missed commitments: where commitmentDate is in the past AND followedUp is false
+- If no commitment found or commitment was followed up, set commitmentDate to null`,
+              },
+              { role: 'user', content: prompt },
+            ],
+          }),
+        });
+
+        if (!response.ok) {
+          console.warn(`[ProblemTicketScanner] Commitment API error: ${response.status}`);
+          continue;
+        }
+
+        const data = await response.json() as any;
+        const content = data.choices?.[0]?.message?.content;
+        if (!content) continue;
+
+        const parsed = JSON.parse(content) as {
+          results: Array<{ issueKey: string; commitmentDate: string | null; followedUp: boolean; quote: string }>
+        };
+
+        for (const result of parsed.results ?? []) {
+          if (!result.commitmentDate || result.followedUp) continue;
+
+          // Verify the commitment date is actually in the past
+          if (result.commitmentDate > today) continue;
+
+          const alert = this.queries.getAlertByIssueKey(result.issueKey);
+          if (!alert) continue;
+
+          const newScore = Math.min(100, alert.score + commitmentConfig.weight);
+          const newSeverity = newScore >= 60 ? 'P1' : newScore >= 35 ? 'P2' : 'P3';
+
+          const reasons = alert.reasons ?? [];
+          reasons.push({
+            rule: 'missed_commitment',
+            label: 'Missed Commitment',
+            weight: commitmentConfig.weight,
+            detail: `Promised update by ${result.commitmentDate}${result.quote ? `: "${result.quote}"` : ''}`,
+          });
+
+          this.queries.upsertAlert({
+            ...alert,
+            score: newScore,
+            severity: newSeverity,
+          }, reasons);
+        }
+      } catch (err: any) {
+        console.warn(`[ProblemTicketScanner] Commitment batch failed:`, err.message);
       }
     }
   }

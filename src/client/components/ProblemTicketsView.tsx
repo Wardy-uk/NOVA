@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 
 interface AlertReason {
   rule: string;
@@ -35,6 +35,7 @@ interface Stats {
   total: number;
   ignored: number;
   lastScan: string | null;
+  jiraBaseUrl?: string | null;
 }
 
 interface ConfigRow {
@@ -60,6 +61,7 @@ const RULE_LABELS: Record<string, string> = {
   high_priority: 'High Priority',
   sentiment: 'Negative Sentiment',
   stagnant_status: 'Status Stagnant',
+  missed_commitment: 'Missed Commitment',
 };
 
 function timeAgo(dateStr: string | null): string {
@@ -96,6 +98,7 @@ export function ProblemTicketsView() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set(['P1', 'P2', 'P3']));
+  const [reasonFilter, setReasonFilter] = useState<Set<string>>(new Set());
   const [showIgnoreModal, setShowIgnoreModal] = useState<string | null>(null);
   const [ignoreReason, setIgnoreReason] = useState('');
   const [showConfig, setShowConfig] = useState(false);
@@ -138,6 +141,8 @@ export function ProblemTicketsView() {
 
   const triggerScan = async () => {
     setScanning(true);
+    setError(null);
+    const scanStartedAt = stats?.lastScan ?? null;
     try {
       const res = await fetch('/api/problem-tickets/scan', { method: 'POST' });
       const text = await res.text();
@@ -145,13 +150,40 @@ export function ProblemTicketsView() {
       try { json = JSON.parse(text); } catch { json = { ok: false, error: text.slice(0, 200) }; }
       if (!json.ok) {
         setError(json.error ?? 'Scan failed');
-        return; // Don't reload — scan failed, nothing changed
+        setScanning(false);
+        return;
       }
-      setError(null);
-      await loadData();
+      // Poll stats every 3s until lastScan changes (scan complete) or 90s timeout
+      const pollInterval = 3000;
+      const maxWait = 90000;
+      const startTime = Date.now();
+      const poll = () => {
+        if (Date.now() - startTime > maxWait) {
+          setScanning(false);
+          loadData();
+          return;
+        }
+        fetch('/api/problem-tickets/scan-status')
+          .then(r => r.json())
+          .then(status => {
+            if (status.ok && !status.data.scanning) {
+              // Scan finished — check for errors in the result
+              if (status.data.lastResult?.error) {
+                setError(status.data.lastResult.error);
+              }
+              setScanning(false);
+              loadData();
+            } else {
+              setTimeout(poll, pollInterval);
+            }
+          })
+          .catch(() => {
+            setTimeout(poll, pollInterval);
+          });
+      };
+      setTimeout(poll, pollInterval);
     } catch (err: any) {
       setError(err.message);
-    } finally {
       setScanning(false);
     }
   };
@@ -200,7 +232,36 @@ export function ProblemTicketsView() {
     });
   };
 
-  const filtered = alerts.filter(a => severityFilter.has(a.severity));
+  const toggleReason = (rule: string) => {
+    setReasonFilter(prev => {
+      const next = new Set(prev);
+      if (next.has(rule)) next.delete(rule);
+      else next.add(rule);
+      return next;
+    });
+  };
+
+  const reasonCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const a of alerts) {
+      const seen = new Set<string>();
+      for (const r of a.reasons) {
+        if (!seen.has(r.rule)) {
+          counts[r.rule] = (counts[r.rule] ?? 0) + 1;
+          seen.add(r.rule);
+        }
+      }
+    }
+    return counts;
+  }, [alerts]);
+
+  const jiraBaseUrl = stats?.jiraBaseUrl?.replace(/\/+$/, '') ?? null;
+
+  const filtered = alerts.filter(a => {
+    if (!severityFilter.has(a.severity)) return false;
+    if (reasonFilter.size > 0 && !a.reasons.some(r => reasonFilter.has(r.rule))) return false;
+    return true;
+  });
 
   if (loading) {
     return <div className="text-sm text-neutral-500 py-8 text-center">Loading problem tickets...</div>;
@@ -251,6 +312,38 @@ export function ProblemTicketsView() {
           </button>
         </div>
       </div>
+
+      {/* Reason filter chips */}
+      {Object.keys(reasonCounts).length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {Object.entries(reasonCounts)
+            .sort(([, a], [, b]) => b - a)
+            .map(([rule, count]) => {
+              const active = reasonFilter.has(rule);
+              return (
+                <button
+                  key={rule}
+                  onClick={() => toggleReason(rule)}
+                  className={`px-2 py-1 rounded border text-[11px] transition-all ${
+                    active
+                      ? 'bg-[#5ec1ca]/20 text-[#5ec1ca] border-[#5ec1ca]/40'
+                      : 'bg-[#272C33] text-neutral-500 border-[#3a424d] hover:text-neutral-300'
+                  }`}
+                >
+                  {RULE_LABELS[rule] ?? rule}: {count}
+                </button>
+              );
+            })}
+          {reasonFilter.size > 0 && (
+            <button
+              onClick={() => setReasonFilter(new Set())}
+              className="px-2 py-1 rounded text-[11px] text-neutral-600 hover:text-neutral-400 transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="text-sm text-red-400 bg-red-950/30 border border-red-900 rounded-lg px-3 py-2">
@@ -330,7 +423,19 @@ export function ProblemTicketsView() {
                         </span>
                       </td>
                       <td className="px-3 py-2">
-                        <div className="text-neutral-200 font-medium">{alert.issue_key}</div>
+                        <div className="text-neutral-200 font-medium">
+                          {jiraBaseUrl ? (
+                            <a
+                              href={`${jiraBaseUrl}/browse/${alert.issue_key}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              className="hover:text-[#5ec1ca] transition-colors"
+                            >
+                              {alert.issue_key} ↗
+                            </a>
+                          ) : alert.issue_key}
+                        </div>
                         <div className="text-neutral-500 truncate max-w-[300px]">{alert.summary}</div>
                       </td>
                       <td className="px-3 py-2 hidden sm:table-cell">
@@ -410,6 +515,17 @@ export function ProblemTicketsView() {
 
                             {/* Actions */}
                             <div className="flex gap-2">
+                              {jiraBaseUrl && (
+                                <a
+                                  href={`${jiraBaseUrl}/browse/${alert.issue_key}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={e => e.stopPropagation()}
+                                  className="px-3 py-1 text-xs bg-[#2f353d] text-neutral-300 rounded hover:text-[#5ec1ca] transition-colors"
+                                >
+                                  Open in Jira
+                                </a>
+                              )}
                               <button
                                 onClick={(e) => { e.stopPropagation(); setShowIgnoreModal(alert.issue_key); }}
                                 className="px-3 py-1 text-xs bg-[#363d47] text-neutral-300 rounded hover:bg-[#3a424d] transition-colors"

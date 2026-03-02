@@ -576,6 +576,7 @@ export function initializeSchema(database: Database): void {
       { rule: 'high_priority', weight: 10, threshold_json: '{"priorities":["Highest","High"]}' },
       { rule: 'sentiment', weight: 20, threshold_json: '{"negativeThreshold":-0.3}' },
       { rule: 'stagnant_status', weight: 10, threshold_json: '{"daysThreshold":5}' },
+      { rule: 'missed_commitment', weight: 25, threshold_json: '{}' },
     ];
     for (const d of defaults) {
       database.run(
@@ -584,6 +585,11 @@ export function initializeSchema(database: Database): void {
       );
     }
   }
+
+  // Backfill missed_commitment rule for existing DBs
+  database.run(
+    `INSERT OR IGNORE INTO problem_ticket_config (rule, weight, threshold_json) VALUES ('missed_commitment', 25, '{}')`,
+  );
 
   // Seed default milestone templates from file
   const tmplCount = database.exec('SELECT COUNT(*) as c FROM milestone_templates');

@@ -3,18 +3,8 @@ N.O.V.A — TO DO
 
 --- Triage ---
 
-enhance permissions
-   global admin
-   team admin
+(empty — all items sorted below)
 
-link to Agent database bym-asqlep01.database.windows.net / jira support db — pull back
-   availability, max number of tickets and configure these
-
-toast notifications for tickets "about" to breach — say 30 mins?
-
-getting a reply to feedback should trigger a notification
-
-add Active Now against users who are logged into nova
 
 === CURRENT STATUS (2 Mar 2026) ===
 
@@ -25,7 +15,7 @@ IIS reverse proxy → Node.js (NSSM) on Windows Server VM
 5 MCP integrations: Jira, MS365, Monday.com, D365, OneDrive
 Milestone workflow engine: progressive task/ticket creation on lead-day triggers
 AI chat, notifications, audit log, team workload, SD dashboard, Jira OAuth
-AI Problem Ticket Detection: 9-rule engine + LLM sentiment, P1/P2/P3 queue
+AI Problem Ticket Detection: 10-rule engine + LLM sentiment/commitment, P1/P2/P3 queue
 0 bugs | 0 blockers | Monday.com syncing 22 tasks across 5 boards
 
 Known limitation:
@@ -37,6 +27,22 @@ Completed items: see NOVA_completed.txt
 
 === DONE (2 Mar 2026) ===
 
+- Release notes popup — auto-shows on first load after deployment (version check),
+  accessible via user menu "What's New" and clickable version in status bar
+- Problem tickets: reason count chips with toggle-filter, sorted by count
+- Problem tickets: "Open in Jira" link on issue key + button in expanded row
+- T5: Problem ticket scan non-blocking — POST /scan returns instantly,
+  frontend polls scan-status every 3s until complete, 90s timeout
+- T6: SD Kanban full-width — removed max-w-[1400px], columns use flex-1
+  min-w-[220px] to fill available space, no horizontal scroll
+- New rule: "Missed Commitment" — LLM detects agent date promises in comments,
+  flags when commitment date passed without follow-up (weight 25)
+- Fix notification mark-all-read not persisting — dedup only checked unread,
+  so checkAndCreate recreated same notifications on refresh; now 24h dedup
+- Problem tickets: show all triggered reasons as tags in table, not just top signal
+- Problem tickets: filter JQL same as All Tickets view (jira_sd_project + jira_sd_tiers)
+- Jira REST client: migrate POST /search → /search/jql (Atlassian 410 deprecation),
+  token pagination, redirect/HTML detection, improved error messages
 - Fix problem ticket scan — lastScan derived from alert data (always "never" if
   no alerts), scan errors silently swallowed; now tracks actual scan timestamp
   in settings and surfaces errors to UI
@@ -45,18 +51,6 @@ Completed items: see NOVA_completed.txt
   sending Bearer null → 401 → auto-logout
 - Light mode badge theming — 32 CSS colour tokens, WCAG AA contrast,
   pastel bg + dark text in light mode across TaskCard/SLA/Kanban/Drawer
-- Fix ticket transition ordering — comment added before status change
-- Fix feedback username display — file-based user store lookup
-- NOVA Insights task count — 5/10/15/20 selector on Insights tab
-- My Feedback page — user dropdown, own submissions + replies, hide resolved
-- SD issue type filter — Incidents/Service Requests dropdown in tab bar
-- AI Problem Ticket Detection — rule engine + LLM sentiment, P1/P2/P3 queue
-  with ignore/suppress, "Problem Tickets" pill in Service Desk tab bar
-- Invite user function — sends email invite (Admin > Users > Invite button)
-- Import / mass add users — Excel/CSV upload in Admin > Users > Import Users
-- Standalone email service — direct MX delivery, no external SMTP required
-- Branded HTML email templates — dark theme matching N.O.V.A UI
-- Self-service password reset — forgot password link on login, 1h email token
 
 (moved to NOVA_completed.txt)
 
@@ -66,6 +60,20 @@ Completed items: see NOVA_completed.txt
 T4. Onboarding ticket status — on each onboarding/delivery item, show what
     Jira tickets have been created and their live status (batch-fetch from
     delivery_milestones.jira_keys and onboarding_runs.child_keys)
+
+=== TIER 1: Quick wins / high-value ===
+
+1.  Add problem ticket count to Service Desk > Dashboard KPI cards
+2.  Toast notifications for SLA breach warning (~30 mins before breach)
+3.  Feedback reply notification — reply from admin triggers a user notification
+
+
+=== TIER 2: Feature additions ===
+
+6.  Enhanced permissions — global admin + team admin roles
+7.  Active Now indicator — show which users are currently logged into NOVA
+8.  Agent database link — connect to bym-asqlep01.database.windows.net /
+    Jira support DB; pull back agent availability, max tickets, configure these
 
 
 === TECHINCAL DEBT ===
@@ -83,11 +91,6 @@ TD5.  Remove sensitive debug logging — Jira attention debug logs and Monday bo
 TD6.  Settings/users file-store durability — add locking or move to DB-backed
     persistence to prevent concurrent write loss.
 TD7.  Architecture review (50+ users) — see `docs/architecture-review.md`.
-
-
-=== TIER 2: Feature additions ===
-
-(empty)
 
 
 === TIER 3: Platform maturity ===

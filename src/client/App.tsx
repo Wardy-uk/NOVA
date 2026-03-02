@@ -26,11 +26,14 @@ import { ChatView } from './components/ChatView.js';
 import { NextActions } from './components/NextActions.js';
 import { StatusBar } from './components/StatusBar.js';
 import { FeedbackModal } from './components/FeedbackModal.js';
+import { ReleaseNotesModal } from './components/ReleaseNotesModal.js';
 import { TourOverlay, useTour } from './components/TourOverlay.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
 import { type OwnershipFilter } from './utils/taskHelpers.js';
+
+declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
@@ -159,6 +162,7 @@ export function App() {
   const [spDebugLoading, setSpDebugLoading] = useState(false);
   const [d365Debug, setD365Debug] = useState<Array<{ ts: string; text: string }>>([]);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [sdFilter, setSdFilter] = useState<OwnershipFilter>(() => {
     if (typeof window === 'undefined') return null;
@@ -197,6 +201,20 @@ export function App() {
   useEffect(() => {
     if (auth.isAuthenticated) checkFirstVisit();
   }, [auth.isAuthenticated, checkFirstVisit]);
+
+  // Auto-show release notes on new version
+  useEffect(() => {
+    if (!auth.isAuthenticated) return;
+    const seen = localStorage.getItem('nova_release_notes_seen');
+    if (seen !== __APP_VERSION__) setShowReleaseNotes(true);
+  }, [auth.isAuthenticated]);
+
+  // Listen for release notes event (from StatusBar version click)
+  useEffect(() => {
+    const handler = () => setShowReleaseNotes(true);
+    window.addEventListener('nova-show-release-notes', handler);
+    return () => window.removeEventListener('nova-show-release-notes', handler);
+  }, []);
 
   // Auto-trigger standup on first visit if no morning ritual today
   useEffect(() => {
@@ -500,6 +518,12 @@ export function App() {
                       My Feedback
                     </button>
                     <button
+                      onClick={() => { setShowReleaseNotes(true); setShowUserMenu(false); }}
+                      className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
+                    >
+                      What's New
+                    </button>
+                    <button
                       onClick={() => { startTour(); setShowUserMenu(false); }}
                       className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
                     >
@@ -749,6 +773,7 @@ export function App() {
         <StatusBar health={health} />
       </div>
       {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
+      {showReleaseNotes && <ReleaseNotesModal onClose={() => setShowReleaseNotes(false)} />}
       <TourOverlay show={showTour} onClose={closeTour} />
     </ErrorBoundary>
   );

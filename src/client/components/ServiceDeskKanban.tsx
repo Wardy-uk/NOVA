@@ -292,7 +292,7 @@ export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
   const isStatusMode = groupBy === 'status';
 
   return (
-    <div className="space-y-4 max-w-[1400px] mx-auto">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">
           Service Desk — Kanban
@@ -339,7 +339,7 @@ export function ServiceDeskKanban({ tasks, onUpdateTask, onRefresh }: Props) {
           return (
             <div
               key={key}
-              className={`flex-shrink-0 w-72 bg-[#2f353d] border rounded-lg flex flex-col transition-colors ${
+              className={`flex-1 min-w-[220px] bg-[#2f353d] border rounded-lg flex flex-col transition-colors ${
                 isDragTarget && isStatusMode
                   ? 'border-[#5ec1ca] bg-[#5ec1ca]/5'
                   : 'border-[#3a424d]'

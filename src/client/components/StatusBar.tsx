@@ -114,7 +114,14 @@ export function StatusBar({ health }: Props) {
         )}
         {health && (
           <span>
-            Uptime: {Math.floor(health.uptime / 60)}m | {health.status} | v{__APP_VERSION__} ({__GIT_HASH__})
+            Uptime: {Math.floor(health.uptime / 60)}m | {health.status} |{' '}
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('nova-show-release-notes'))}
+              className="hover:text-[#5ec1ca] transition-colors cursor-pointer"
+              title="View release notes"
+            >
+              v{__APP_VERSION__} ({__GIT_HASH__})
+            </button>
           </span>
         )}
       </div>

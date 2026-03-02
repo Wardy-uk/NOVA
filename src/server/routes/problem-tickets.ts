@@ -6,6 +6,7 @@ import { requireRole } from '../middleware/auth.js';
 export function createProblemTicketRoutes(
   queries: ProblemTicketQueries,
   getScanner: () => ProblemTicketScanner | null,
+  getSettings?: () => { get(key: string): string | null } | null,
 ): Router {
   const router = Router();
 
@@ -28,7 +29,8 @@ export function createProblemTicketRoutes(
   router.get('/stats', (_req, res) => {
     try {
       const stats = queries.getStats();
-      res.json({ ok: true, data: stats });
+      const jiraBaseUrl = getSettings?.()?.get('jira_url') ?? null;
+      res.json({ ok: true, data: { ...stats, jiraBaseUrl } });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -56,18 +58,34 @@ export function createProblemTicketRoutes(
     }
   });
 
-  // POST /scan — trigger on-demand scan
-  router.post('/scan', async (_req, res) => {
+  // POST /scan — trigger on-demand scan (fire-and-forget, non-blocking)
+  router.post('/scan', (_req, res) => {
     try {
       const scanner = getScanner();
       if (!scanner) {
         return res.status(503).json({ ok: false, error: 'Scanner not available (no Jira client)' });
       }
-      const result = await scanner.scan();
-      if (result.error) {
-        return res.json({ ok: false, error: result.error, data: result });
+      if (scanner.isScanning) {
+        return res.json({ ok: true, status: 'already_scanning' });
       }
-      res.json({ ok: true, data: result });
+      // Fire scan in background — don't await
+      scanner.scan().catch(err => {
+        console.error('[ProblemTickets] Background scan error:', err.message);
+      });
+      res.json({ ok: true, status: 'scanning' });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /scan-status — poll scan progress
+  router.get('/scan-status', (_req, res) => {
+    try {
+      const scanner = getScanner();
+      if (!scanner) {
+        return res.json({ ok: true, data: { scanning: false, lastResult: null } });
+      }
+      res.json({ ok: true, data: { scanning: scanner.isScanning, lastResult: scanner.lastResult } });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }
