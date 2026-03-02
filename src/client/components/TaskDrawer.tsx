@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '../../shared/types.js';
 
 const SOURCE_COLORS: Record<string, { bg: string; text: string; label: string }> = {
-  jira: { bg: 'bg-blue-900/50', text: 'text-blue-300', label: 'Jira' },
-  planner: { bg: 'bg-green-900/50', text: 'text-green-300', label: 'Planner' },
-  todo: { bg: 'bg-purple-900/50', text: 'text-purple-300', label: 'To-Do' },
-  calendar: { bg: 'bg-amber-900/50', text: 'text-amber-300', label: 'Calendar' },
-  email: { bg: 'bg-red-900/50', text: 'text-red-300', label: 'Email' },
-  monday: { bg: 'bg-orange-900/50', text: 'text-orange-300', label: 'Monday' },
-  milestone: { bg: 'bg-emerald-900/50', text: 'text-emerald-300', label: 'Onboarding' },
+  jira: { bg: 'bg-badge-info-muted', text: 'text-on-badge-info-muted', label: 'Jira' },
+  planner: { bg: 'bg-badge-emerald-muted', text: 'text-on-badge-emerald-muted', label: 'Planner' },
+  todo: { bg: 'bg-badge-purple-muted', text: 'text-on-badge-purple-muted', label: 'To-Do' },
+  calendar: { bg: 'bg-badge-warning-muted', text: 'text-on-badge-warning-muted', label: 'Calendar' },
+  email: { bg: 'bg-badge-danger-muted', text: 'text-on-badge-danger-muted', label: 'Email' },
+  monday: { bg: 'bg-badge-warning-muted', text: 'text-on-badge-warning-muted', label: 'Monday' },
+  milestone: { bg: 'bg-badge-emerald-muted', text: 'text-on-badge-emerald-muted', label: 'Onboarding' },
 };
 
 const JIRA_PRIORITIES = ['Highest', 'High', 'Medium', 'Low', 'Lowest'];

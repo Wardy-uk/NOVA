@@ -28,12 +28,9 @@ export function MyFeedbackView() {
   const [loading, setLoading] = useState(true);
   const [hideResolved, setHideResolved] = useState(true);
 
-  const token = localStorage.getItem('nova_token');
-  const headers = { 'Authorization': `Bearer ${token}` };
-
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/feedback/mine?hideResolved=${hideResolved}`, { headers });
+      const res = await fetch(`/api/feedback/mine?hideResolved=${hideResolved}`);
       const json = await res.json();
       if (json.ok) setItems(json.data);
     } catch { /* ignore */ }

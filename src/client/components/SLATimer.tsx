@@ -39,9 +39,9 @@ export function SLATimer({ breachAt }: Props) {
   }, [breachAt]);
 
   const colors = {
-    ok: 'text-neutral-400',
-    warning: 'text-amber-400',
-    danger: 'text-red-400 font-semibold animate-pulse',
+    ok: 'text-sla-timer-ok',
+    warning: 'text-sla-timer-warn',
+    danger: 'text-sla-timer-danger font-semibold animate-pulse',
   };
 
   return (

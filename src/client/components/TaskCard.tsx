@@ -52,28 +52,28 @@ function getDescriptionText(description: string | null): string | null {
 
 function getStatusColor(status: string): string {
   const s = status.toLowerCase();
-  if (s.includes('done') || s.includes('closed') || s.includes('resolved')) return 'bg-green-600 text-green-100';
-  if (s.includes('progress') || s.includes('review') || s.includes('working')) return 'bg-blue-600 text-blue-100';
-  if (s.includes('waiting') || s.includes('hold') || s.includes('blocked')) return 'bg-amber-600 text-amber-100';
-  return 'bg-neutral-600 text-neutral-200';
+  if (s.includes('done') || s.includes('closed') || s.includes('resolved')) return 'bg-badge-success text-on-badge-success';
+  if (s.includes('progress') || s.includes('review') || s.includes('working')) return 'bg-badge-info text-on-badge-info';
+  if (s.includes('waiting') || s.includes('hold') || s.includes('blocked')) return 'bg-badge-warning text-on-badge-warning';
+  return 'bg-badge-neutral text-on-badge-neutral';
 }
 
 function getPriorityColor(priority: string): string {
   const p = priority.toLowerCase();
-  if (p.includes('critical') || p.includes('highest') || p.includes('blocker')) return 'bg-red-600 text-red-100';
-  if (p.includes('high')) return 'bg-orange-600 text-orange-100';
-  if (p.includes('medium') || p.includes('normal')) return 'bg-amber-600 text-amber-100';
-  if (p.includes('low') || p.includes('lowest')) return 'bg-green-600 text-green-100';
-  return 'bg-neutral-600 text-neutral-200';
+  if (p.includes('critical') || p.includes('highest') || p.includes('blocker')) return 'bg-badge-danger text-on-badge-danger';
+  if (p.includes('high')) return 'bg-badge-orange text-on-badge-orange';
+  if (p.includes('medium') || p.includes('normal')) return 'bg-badge-warning text-on-badge-warning';
+  if (p.includes('low') || p.includes('lowest')) return 'bg-badge-success text-on-badge-success';
+  return 'bg-badge-neutral text-on-badge-neutral';
 }
 
 function getAgeColor(dateStr: string): string {
   const created = new Date(dateStr);
-  if (isNaN(created.getTime())) return 'bg-neutral-600 text-neutral-200';
+  if (isNaN(created.getTime())) return 'bg-badge-neutral text-on-badge-neutral';
   const days = (Date.now() - created.getTime()) / (1000 * 60 * 60 * 24);
-  if (days <= 2) return 'bg-green-600 text-green-100';
-  if (days <= 5) return 'bg-amber-600 text-amber-100';
-  return 'bg-red-600 text-red-100';
+  if (days <= 2) return 'bg-badge-success text-on-badge-success';
+  if (days <= 5) return 'bg-badge-warning text-on-badge-warning';
+  return 'bg-badge-danger text-on-badge-danger';
 }
 
 function getDueDateInfo(dateStr: string): { label: string; className: string } {
@@ -91,13 +91,13 @@ function getDueDateInfo(dateStr: string): { label: string; className: string } {
     const abs = Math.abs(diffDays);
     return {
       label: `Overdue ${abs}d — ${formatted}`,
-      className: 'text-red-400 font-semibold',
+      className: 'text-status-overdue font-semibold',
     };
   }
-  if (diffDays === 0) return { label: `Due today`, className: 'text-amber-400 font-semibold' };
-  if (diffDays === 1) return { label: `Due tomorrow`, className: 'text-amber-300' };
-  if (diffDays <= 3) return { label: `Due in ${diffDays}d — ${formatted}`, className: 'text-yellow-400/80' };
-  return { label: `Due: ${formatted}`, className: 'text-neutral-600' };
+  if (diffDays === 0) return { label: `Due today`, className: 'text-status-due-today font-semibold' };
+  if (diffDays === 1) return { label: `Due tomorrow`, className: 'text-status-due-today' };
+  if (diffDays <= 3) return { label: `Due in ${diffDays}d — ${formatted}`, className: 'text-status-due-soon' };
+  return { label: `Due: ${formatted}`, className: 'text-status-ok' };
 }
 
 export function TaskCard({ task, onUpdate, onClick }: Props) {
@@ -154,7 +154,7 @@ export function TaskCard({ task, onUpdate, onClick }: Props) {
             </span>
           )}
           {tier && (
-            <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-indigo-900/40 text-indigo-300" title={tier}>
+            <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-badge-indigo-muted text-on-badge-indigo-muted" title={tier}>
               {tier}
             </span>
           )}
@@ -164,7 +164,7 @@ export function TaskCard({ task, onUpdate, onClick }: Props) {
             </span>
           )}
           {meta.Assignee && (
-            <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-neutral-700 text-neutral-300">
+            <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-badge-neutral text-on-badge-neutral">
               Assignee: {meta.Assignee}
             </span>
           )}

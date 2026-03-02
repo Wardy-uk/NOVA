@@ -12,6 +12,9 @@ link to Agent database bym-asqlep01.database.windows.net / jira support db — p
 
 toast notifications for tickets "about" to breach — say 30 mins?
 
+[BUG] trying to access some menus now forces log out eg Service Desk, My Feedback
+
+add Active Now against users who are logged into nova
 
 === CURRENT STATUS (1 Mar 2026) ===
 

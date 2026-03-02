@@ -484,9 +484,9 @@ function KanbanCard({
       <div className="flex items-center gap-2 flex-wrap">
         {/* Priority indicator */}
         <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-          priority >= 80 ? 'bg-red-900/40 text-red-400' :
-          priority >= 60 ? 'bg-amber-900/40 text-amber-400' :
-          'bg-[#363d47] text-neutral-500'
+          priority >= 80 ? 'bg-badge-danger-muted text-on-badge-danger-muted' :
+          priority >= 60 ? 'bg-badge-warning-muted text-on-badge-warning-muted' :
+          'bg-badge-neutral-muted text-on-badge-neutral-muted'
         }`}>
           P{priority >= 80 ? '1' : priority >= 60 ? '2' : priority >= 40 ? '3' : '4'}
         </span>
@@ -513,21 +513,21 @@ function KanbanCard({
 
         {/* Tier badge */}
         {tier && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 truncate max-w-[100px]" title={tier}>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-badge-indigo-muted text-on-badge-indigo-muted truncate max-w-[100px]" title={tier}>
             {tier}
           </span>
         )}
 
         {/* Due date */}
         {task.due_date && (
-          <span className={`text-[10px] ${isOverdue ? 'text-red-400' : 'text-neutral-500'}`}>
+          <span className={`text-[10px] ${isOverdue ? 'text-status-overdue' : 'text-neutral-500'}`}>
             Due: {new Date(task.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
           </span>
         )}
 
         {/* SLA breach indicator */}
         {isSlaBreached && (
-          <span className="text-[10px] text-red-400 font-semibold">SLA</span>
+          <span className="text-[10px] text-sla-timer-danger font-semibold">SLA</span>
         )}
       </div>
 

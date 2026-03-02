@@ -16,6 +16,47 @@
   --color-monday: #FF6D00;
   --color-sla-danger: #EF4444;
   --color-sla-warning: #F59E0B;
+
+  /* ── Badge colours (solid) ── */
+  --color-badge-success: #16a34a;
+  --color-on-badge-success: #dcfce7;
+  --color-badge-info: #2563eb;
+  --color-on-badge-info: #dbeafe;
+  --color-badge-warning: #d97706;
+  --color-on-badge-warning: #fef3c7;
+  --color-badge-danger: #dc2626;
+  --color-on-badge-danger: #fee2e2;
+  --color-badge-orange: #ea580c;
+  --color-on-badge-orange: #ffedd5;
+  --color-badge-neutral: #525252;
+  --color-on-badge-neutral: #e5e5e5;
+
+  /* ── Badge colours (muted/subtle) ── */
+  --color-badge-danger-muted: rgba(127, 29, 29, 0.4);
+  --color-on-badge-danger-muted: #f87171;
+  --color-badge-warning-muted: rgba(120, 53, 15, 0.4);
+  --color-on-badge-warning-muted: #fbbf24;
+  --color-badge-info-muted: rgba(30, 58, 138, 0.4);
+  --color-on-badge-info-muted: #60a5fa;
+  --color-badge-neutral-muted: rgba(64, 64, 64, 0.4);
+  --color-on-badge-neutral-muted: #a3a3a3;
+  --color-badge-indigo-muted: rgba(49, 46, 129, 0.4);
+  --color-on-badge-indigo-muted: #a5b4fc;
+  --color-badge-purple-muted: rgba(76, 29, 149, 0.4);
+  --color-on-badge-purple-muted: #c4b5fd;
+  --color-badge-emerald-muted: rgba(6, 78, 59, 0.4);
+  --color-on-badge-emerald-muted: #6ee7b7;
+
+  /* ── Status text colours (inline, not badge bg) ── */
+  --color-status-overdue: #f87171;
+  --color-status-due-today: #fbbf24;
+  --color-status-due-soon: #facc15;
+  --color-status-ok: #9ca3af;
+
+  /* ── SLA timer ── */
+  --color-sla-timer-ok: #9ca3af;
+  --color-sla-timer-warn: #fbbf24;
+  --color-sla-timer-danger: #f87171;
 }
 
 /* Light mode overrides */
@@ -26,6 +67,47 @@ html.light {
   --color-surface-overlay: #edf0f3;
   --color-border: #d4d9e0;
   --color-border-strong: #b0b8c4;
+
+  /* ── Solid badges: pastel bg + dark text (WCAG AA) ── */
+  --color-badge-success: #dcfce7;
+  --color-on-badge-success: #166534;
+  --color-badge-info: #dbeafe;
+  --color-on-badge-info: #1e40af;
+  --color-badge-warning: #fef3c7;
+  --color-on-badge-warning: #92400e;
+  --color-badge-danger: #fee2e2;
+  --color-on-badge-danger: #991b1b;
+  --color-badge-orange: #ffedd5;
+  --color-on-badge-orange: #9a3412;
+  --color-badge-neutral: #e5e7eb;
+  --color-on-badge-neutral: #374151;
+
+  /* ── Muted badges ── */
+  --color-badge-danger-muted: rgba(254, 202, 202, 0.5);
+  --color-on-badge-danger-muted: #b91c1c;
+  --color-badge-warning-muted: rgba(253, 230, 138, 0.5);
+  --color-on-badge-warning-muted: #b45309;
+  --color-badge-info-muted: rgba(191, 219, 254, 0.5);
+  --color-on-badge-info-muted: #1d4ed8;
+  --color-badge-neutral-muted: rgba(209, 213, 219, 0.5);
+  --color-on-badge-neutral-muted: #6b7280;
+  --color-badge-indigo-muted: rgba(199, 210, 254, 0.5);
+  --color-on-badge-indigo-muted: #4338ca;
+  --color-badge-purple-muted: rgba(221, 214, 254, 0.5);
+  --color-on-badge-purple-muted: #6d28d9;
+  --color-badge-emerald-muted: rgba(167, 243, 208, 0.5);
+  --color-on-badge-emerald-muted: #047857;
+
+  /* ── Status text ── */
+  --color-status-overdue: #dc2626;
+  --color-status-due-today: #d97706;
+  --color-status-due-soon: #ca8a04;
+  --color-status-ok: #6b7280;
+
+  /* ── SLA timer ── */
+  --color-sla-timer-ok: #6b7280;
+  --color-sla-timer-warn: #d97706;
+  --color-sla-timer-danger: #dc2626;
 }
 
 html.light body {

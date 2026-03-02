@@ -100,14 +100,13 @@ export function ProblemTicketsView() {
   const [ignoreReason, setIgnoreReason] = useState('');
   const [showConfig, setShowConfig] = useState(false);
 
-  const token = localStorage.getItem('nova_token');
-  const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const jsonHeaders = { 'Content-Type': 'application/json' };
 
   const loadData = useCallback(async () => {
     try {
       const [alertsRes, statsRes] = await Promise.all([
-        fetch('/api/problem-tickets', { headers }),
-        fetch('/api/problem-tickets/stats', { headers }),
+        fetch('/api/problem-tickets'),
+        fetch('/api/problem-tickets/stats'),
       ]);
       const alertsJson = await alertsRes.json();
       const statsJson = await statsRes.json();
@@ -123,7 +122,7 @@ export function ProblemTicketsView() {
 
   const loadConfig = useCallback(async () => {
     try {
-      const res = await fetch('/api/problem-tickets/config', { headers });
+      const res = await fetch('/api/problem-tickets/config');
       const json = await res.json();
       if (json.ok) setConfig(json.data);
     } catch { /* ignore */ }
@@ -140,7 +139,7 @@ export function ProblemTicketsView() {
   const triggerScan = async () => {
     setScanning(true);
     try {
-      const res = await fetch('/api/problem-tickets/scan', { method: 'POST', headers });
+      const res = await fetch('/api/problem-tickets/scan', { method: 'POST' });
       const json = await res.json();
       if (!json.ok) setError(json.error);
       await loadData();
@@ -155,7 +154,7 @@ export function ProblemTicketsView() {
     try {
       await fetch(`/api/problem-tickets/${issueKey}/ignore`, {
         method: 'POST',
-        headers,
+        headers: jsonHeaders,
         body: JSON.stringify({ reason: ignoreReason || null }),
       });
       setShowIgnoreModal(null);
@@ -170,7 +169,7 @@ export function ProblemTicketsView() {
     try {
       await fetch(`/api/problem-tickets/config/${rule}`, {
         method: 'PUT',
-        headers,
+        headers: jsonHeaders,
         body: JSON.stringify(updates),
       });
       await loadConfig();
