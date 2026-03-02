@@ -861,4 +861,19 @@ export class TaskAggregator {
     }
     return results;
   }
+
+  /** Sync only sources the user has enabled (prevents shared MCP leaking to other users). */
+  async syncAllForUser(userId: number | undefined, allowedSources: Set<string>): Promise<
+    { source: string; count: number; error?: string }[]
+  > {
+    const results = [];
+    for (const adapter of this.adapters) {
+      if (!allowedSources.has(adapter.source)) {
+        results.push({ source: adapter.source, count: 0 });
+        continue;
+      }
+      results.push(await this.syncSource(adapter.source, userId));
+    }
+    return results;
+  }
 }

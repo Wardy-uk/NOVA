@@ -394,11 +394,13 @@ export function createTaskRoutes(
     res.json({ ok: true, data: taskQueries.getById(req.params.id) });
   });
 
-  // POST /api/tasks/sync — Trigger manual sync (all sources)
+  // POST /api/tasks/sync — Trigger manual sync (only sources this user has enabled)
   router.post('/sync', async (req, res) => {
     try {
       const userId = (req as any).user?.id as number | undefined;
-      const results = await aggregator.syncAll(userId);
+      const userRole = (req as any).user?.role as string | undefined;
+      const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
+      const results = await aggregator.syncAllForUser(userId, allowedSources);
       res.json({ ok: true, data: results });
     } catch (err) {
       res.status(500).json({
@@ -415,8 +417,14 @@ export function createTaskRoutes(
       res.status(400).json({ ok: false, error: `Unknown source: ${source}` });
       return;
     }
+    const userId = (req as any).user?.id as number | undefined;
+    const userRole = (req as any).user?.role as string | undefined;
+    const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
+    if (!allowedSources.has(source)) {
+      res.json({ ok: true, data: { source, count: 0 } });
+      return;
+    }
     try {
-      const userId = (req as any).user?.id as number | undefined;
       const result = await aggregator.syncSource(source, userId);
       res.json({ ok: true, data: result });
     } catch (err) {

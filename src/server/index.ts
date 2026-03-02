@@ -93,6 +93,18 @@ async function main() {
 
   // Re-sync milestone task priorities on startup
   resyncAllMilestoneTasks(milestoneQueries, taskQueries);
+  // Assign any orphaned tasks (including new milestones) to primary admin
+  {
+    const adminUser = userQueries.getAll().find(u => u.role.split(',').map(r => r.trim()).includes('admin'));
+    if (adminUser) {
+      const result = db.exec(`SELECT COUNT(*) FROM tasks WHERE user_id IS NULL`);
+      const orphanCount = (result[0]?.values[0]?.[0] as number) ?? 0;
+      if (orphanCount > 0) {
+        db.run(`UPDATE tasks SET user_id = ? WHERE user_id IS NULL`, [adminUser.id]);
+        console.log(`[Startup] Assigned ${orphanCount} orphaned tasks to admin (user ${adminUser.id})`);
+      }
+    }
+  }
   saveDb();
 
   // Auto-seed onboarding matrix from xlsx if tables are empty
@@ -514,9 +526,6 @@ async function main() {
   // Initial full sync 5s after startup (let MCP connections establish), then start per-source timers
   setTimeout(async () => {
     await runFullSync();
-    // Purge tasks not refreshed by a recent sync (cleans accumulated stale data)
-    const purged = taskQueries.purgeUnsyncedTasks(2);
-    if (purged > 0) console.log(`[Startup] Purged ${purged} stale tasks not seen in last 2 days`);
     startSyncTimers();
     // Run initial workflow evaluation after sync
     try {

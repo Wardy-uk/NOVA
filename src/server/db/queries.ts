@@ -11,7 +11,7 @@ export class TaskQueries {
     if (useUserPins) {
       sql = `SELECT t.*, CASE WHEN p.task_id IS NOT NULL THEN 1 ELSE 0 END as is_pinned
              FROM tasks t LEFT JOIN user_task_pins p ON t.id = p.task_id AND p.user_id = ?
-             WHERE (t.user_id = ? OR t.user_id IS NULL)`;
+             WHERE t.user_id = ?`;
     } else {
       sql = `SELECT * FROM tasks WHERE 1=1`;
     }
@@ -65,7 +65,7 @@ export class TaskQueries {
 
   getAllIncludingDone(userId?: number): Task[] {
     const sql = userId != null
-      ? `SELECT * FROM tasks WHERE (user_id = ? OR user_id IS NULL) ORDER BY updated_at DESC`
+      ? `SELECT * FROM tasks WHERE user_id = ? ORDER BY updated_at DESC`
       : `SELECT * FROM tasks ORDER BY updated_at DESC`;
     const stmt = this.db.prepare(sql);
     if (userId != null) stmt.bind([userId]);
@@ -165,7 +165,7 @@ export class TaskQueries {
     if (source === 'milestone') return 0;
 
     // Build user scope clause: only delete tasks belonging to this user (or unowned)
-    const userClause = options?.userId != null ? ` AND (user_id = ? OR user_id IS NULL)` : '';
+    const userClause = options?.userId != null ? ` AND user_id = ?` : '';
     const userParams: number[] = options?.userId != null ? [options.userId] : [];
 
     if (freshIds.length === 0) {
@@ -388,7 +388,7 @@ export class RitualQueries {
       params.push(type);
     }
     if (userId != null) {
-      sql += ` AND (user_id = ? OR user_id IS NULL)`;
+      sql += ` AND user_id = ?`;
       params.push(userId);
     }
     sql += ` ORDER BY created_at DESC`;
