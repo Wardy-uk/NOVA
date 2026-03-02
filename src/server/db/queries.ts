@@ -313,6 +313,23 @@ export class TaskQueries {
     return count;
   }
 
+  /** Get tasks with SLA breach within the next N minutes (for proactive warnings). */
+  getTasksWithUpcomingSla(withinMinutes = 30): Task[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM tasks
+       WHERE status NOT IN ('done', 'dismissed')
+         AND sla_breach_at IS NOT NULL
+         AND sla_breach_at > datetime('now')
+         AND sla_breach_at <= datetime('now', '+${withinMinutes} minutes')`
+    );
+    const tasks: Task[] = [];
+    while (stmt.step()) {
+      tasks.push(this.rowToTask(stmt.getAsObject() as Record<string, unknown>));
+    }
+    stmt.free();
+    return tasks;
+  }
+
   private rowToTask(row: Record<string, unknown>): Task {
     return {
       id: row.id as string,

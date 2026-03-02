@@ -6,6 +6,7 @@ interface DashboardData {
   overdueUpdates: number;
   distinctCustomers: number;
   avgAgeDays: number;
+  problemTickets?: { p1: number; p2: number; p3: number; total: number };
   byStatus: Record<string, number>;
   byPriority: Record<string, number>;
   byAssignee: Array<{ name: string; count: number }>;
@@ -39,12 +40,13 @@ export function ServiceDeskDashboard() {
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
         <KpiCard value={data.totalOpen} label="Total Open" color="#5ec1ca" />
         <KpiCard value={data.slaBreached} label="SLA Breached" color={data.slaBreached > 0 ? '#ef4444' : '#22c55e'} />
         <KpiCard value={data.overdueUpdates} label="Overdue Updates" color={data.overdueUpdates > 0 ? '#f59e0b' : '#22c55e'} />
         <KpiCard value={data.distinctCustomers} label="Customers" color="#5ec1ca" />
         <KpiCard value={data.avgAgeDays} label="Avg Age (days)" color="#5ec1ca" suffix="d" />
+        <KpiCard value={data.problemTickets?.total ?? 0} label="Problem Tickets" color={(data.problemTickets?.total ?? 0) > 0 ? '#ef4444' : '#22c55e'} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -84,7 +84,7 @@ async function main() {
   const milestoneQueries = new MilestoneQueries(db);
   const auditQueries = new AuditQueries(db);
   const notificationQueries = new NotificationQueries(db);
-  const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries);
+  const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries, taskQueries);
   const problemTicketQueries = new ProblemTicketQueries(db);
 
   // Purge transient MS365 data from previous session
@@ -262,7 +262,7 @@ async function main() {
     res.json({ ok: true, data: list });
   });
 
-  app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries, settingsQueries, onboardingRunQueries));
+  app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries, settingsQueries, onboardingRunQueries, problemTicketQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries, userSettingsQueries, (key) => {
     // Restart sync timers when interval settings change
@@ -285,7 +285,7 @@ async function main() {
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
-  app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries, userQueries));
+  app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries, userQueries, notificationQueries));
   app.use('/api/audit', createAuditRoutes(auditQueries));
   app.use('/api/team', createTeamRoutes(deliveryQueries, milestoneQueries, taskQueries, userQueries));
   app.use('/api/notifications', createNotificationRoutes(notificationQueries, notificationEngine));

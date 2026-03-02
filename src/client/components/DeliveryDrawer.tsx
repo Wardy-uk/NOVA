@@ -130,6 +130,9 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
     jiraBaseUrl: string;
   } | null>(null);
 
+  // Live Jira status for key badges
+  const [jiraStatuses, setJiraStatuses] = useState<Record<string, { status: string; statusCategory: string; assignee: string | null }>>({});
+
   // Ticket creation state
   const [ticketPreview, setTicketPreview] = useState<TicketResult | null>(null);
   const [ticketCreating, setTicketCreating] = useState(false);
@@ -256,6 +259,30 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         .catch(() => {});
     }
   }, [entry, isNew]);
+
+  // Fetch live Jira statuses for all linked keys
+  useEffect(() => {
+    const allKeys: string[] = [];
+    for (const m of milestones) {
+      if (m.jira_keys) allKeys.push(...m.jira_keys);
+    }
+    if (linkedTickets) {
+      for (const run of linkedTickets.runs) {
+        if (run.parent_key) allKeys.push(run.parent_key);
+        allKeys.push(...run.child_keys);
+      }
+    }
+    const unique = [...new Set(allKeys)];
+    if (unique.length === 0) return;
+    fetch('/api/jira/batch-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys: unique }),
+    })
+      .then(r => r.json())
+      .then(json => { if (json.ok) setJiraStatuses(json.data); })
+      .catch(() => {});
+  }, [milestones, linkedTickets]);
 
   const setField = (key: string, val: string) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -801,33 +828,46 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
               {/* Onboarding tickets from runs */}
               {linkedTickets.runs.filter(r => r.status === 'success').map(run => (
                 <div key={run.id} className="space-y-1">
-                  {run.parent_key && (
-                    <div className="flex items-center gap-2 text-[11px]">
-                      <span className="text-neutral-500">Parent:</span>
-                      <a
-                        href={linkedTickets.jiraBaseUrl ? `${linkedTickets.jiraBaseUrl}/browse/${run.parent_key}` : '#'}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#5ec1ca] hover:underline font-mono"
-                      >
-                        {run.parent_key}
-                      </a>
-                    </div>
-                  )}
-                  {run.child_keys.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                      <span className="text-neutral-500">Children:</span>
-                      {run.child_keys.map(key => (
+                  {run.parent_key && (() => {
+                    const ps = jiraStatuses[run.parent_key];
+                    const dotCls = ps ? (ps.statusCategory === 'done' ? 'bg-green-400' : ps.statusCategory === 'indeterminate' ? 'bg-amber-400' : 'bg-neutral-500') : '';
+                    return (
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <span className="text-neutral-500">Parent:</span>
+                        {ps && <span className={`w-1.5 h-1.5 rounded-full ${dotCls} shrink-0`} />}
                         <a
-                          key={key}
-                          href={linkedTickets.jiraBaseUrl ? `${linkedTickets.jiraBaseUrl}/browse/${key}` : '#'}
+                          href={linkedTickets.jiraBaseUrl ? `${linkedTickets.jiraBaseUrl}/browse/${run.parent_key}` : '#'}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-[#5ec1ca] hover:underline font-mono"
+                          title={ps ? `${ps.status}${ps.assignee ? ` — ${ps.assignee}` : ''}` : run.parent_key!}
                         >
-                          {key}
+                          {run.parent_key}
                         </a>
-                      ))}
+                      </div>
+                    );
+                  })()}
+                  {run.child_keys.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span className="text-neutral-500">Children:</span>
+                      {run.child_keys.map(key => {
+                        const cs = jiraStatuses[key];
+                        const dotCls = cs ? (cs.statusCategory === 'done' ? 'bg-green-400' : cs.statusCategory === 'indeterminate' ? 'bg-amber-400' : 'bg-neutral-500') : '';
+                        return (
+                          <span key={key} className="inline-flex items-center gap-1">
+                            {cs && <span className={`w-1.5 h-1.5 rounded-full ${dotCls} shrink-0`} />}
+                            <a
+                              href={linkedTickets.jiraBaseUrl ? `${linkedTickets.jiraBaseUrl}/browse/${key}` : '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[#5ec1ca] hover:underline font-mono"
+                              title={cs ? `${cs.status}${cs.assignee ? ` — ${cs.assignee}` : ''}` : key}
+                            >
+                              {key}
+                            </a>
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -959,16 +999,29 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                           {!!m.tickets_enabled && (
                             <>
                               <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                                {m.jira_keys && m.jira_keys.length > 0 && m.jira_keys.map(key => (
-                                  <span key={key} className="text-[9px] px-1.5 py-0.5 rounded bg-[#0052CC]/20 text-[#5ec1ca] font-mono inline-flex items-center gap-1 group/badge">
-                                    {key}
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleRemoveJiraKey(m.id, key); }}
-                                      className="opacity-0 group-hover/badge:opacity-100 text-neutral-500 hover:text-red-400 transition-opacity"
-                                      title="Remove key"
-                                    >&times;</button>
-                                  </span>
-                                ))}
+                                {m.jira_keys && m.jira_keys.length > 0 && m.jira_keys.map(key => {
+                                  const js = jiraStatuses[key];
+                                  const dotColor = js
+                                    ? js.statusCategory === 'done' ? 'bg-green-400'
+                                    : js.statusCategory === 'indeterminate' ? 'bg-amber-400'
+                                    : 'bg-neutral-500'
+                                    : '';
+                                  return (
+                                    <span
+                                      key={key}
+                                      className="text-[9px] px-1.5 py-0.5 rounded bg-[#0052CC]/20 text-[#5ec1ca] font-mono inline-flex items-center gap-1 group/badge"
+                                      title={js ? `${js.status}${js.assignee ? ` — ${js.assignee}` : ''}` : key}
+                                    >
+                                      {js && <span className={`w-1.5 h-1.5 rounded-full ${dotColor} shrink-0`} />}
+                                      {key}
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleRemoveJiraKey(m.id, key); }}
+                                        className="opacity-0 group-hover/badge:opacity-100 text-neutral-500 hover:text-red-400 transition-opacity"
+                                        title="Remove key"
+                                      >&times;</button>
+                                    </span>
+                                  );
+                                })}
                                 {addingKeyForMilestone === m.id ? (
                                   <form
                                     className="inline-flex items-center gap-1"

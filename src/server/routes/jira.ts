@@ -570,6 +570,55 @@ export function createJiraRoutes(
     }
   });
 
+  // Batch Jira status lookup — returns status info for multiple keys at once
+  router.post('/batch-status', async (req, res) => {
+    const { keys } = req.body as { keys?: string[] };
+    if (!keys || !Array.isArray(keys) || keys.length === 0) {
+      res.json({ ok: true, data: {} });
+      return;
+    }
+    // Cap at 50 keys per request (JQL IN clause limit)
+    const trimmed = keys.slice(0, 50);
+
+    const userId = (req as any).user?.id as number | undefined;
+    const client = getClientForUser(userId);
+    if (!client) {
+      res.status(501).json({ ok: false, error: 'No Jira client available' });
+      return;
+    }
+
+    try {
+      const jql = `key IN (${trimmed.map(k => `"${k}"`).join(',')})`;
+      const result = await client.searchJql(jql, ['summary', 'status', 'priority', 'assignee'], trimmed.length);
+      const statuses: Record<string, {
+        status: string;
+        statusCategory: string;
+        summary: string;
+        assignee: string | null;
+        priority: string | null;
+      }> = {};
+      for (const issue of result.issues) {
+        const fields = issue.fields ?? {};
+        const statusObj = fields.status as { name?: string; statusCategory?: { name?: string; key?: string } } | undefined;
+        const assigneeObj = fields.assignee as { displayName?: string } | undefined;
+        const priorityObj = fields.priority as { name?: string } | undefined;
+        statuses[issue.key] = {
+          status: statusObj?.name ?? 'Unknown',
+          statusCategory: statusObj?.statusCategory?.key ?? statusObj?.statusCategory?.name ?? 'undefined',
+          summary: (fields.summary as string) ?? '',
+          assignee: assigneeObj?.displayName ?? null,
+          priority: priorityObj?.name ?? null,
+        };
+      }
+      res.json({ ok: true, data: statuses });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Batch status fetch failed',
+      });
+    }
+  });
+
   // Search users (for assignee picker)
   router.get('/users/search', async (req, res) => {
     const query = (req.query.query as string ?? '').trim();

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { TaskQueries, MilestoneQueries, OnboardingRunQueries, UserSettingsQueries } from '../db/queries.js';
+import type { TaskQueries, MilestoneQueries, OnboardingRunQueries, UserSettingsQueries, ProblemTicketQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { TaskAggregator, SdFilter } from '../services/aggregator.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
@@ -41,6 +41,7 @@ export function createTaskRoutes(
   userSettingsQueries?: UserSettingsQueries,
   settingsQueries?: SettingsQueries,
   onboardingRunQueries?: OnboardingRunQueries,
+  problemTicketQueries?: ProblemTicketQueries,
 ): Router {
   const router = Router();
 
@@ -233,6 +234,12 @@ export function createTaskRoutes(
         }
       }
 
+      // Problem ticket stats
+      const ptStats = problemTicketQueries?.getStats();
+      const problemTickets = ptStats
+        ? { p1: ptStats.p1, p2: ptStats.p2, p3: ptStats.p3, total: ptStats.total }
+        : { p1: 0, p2: 0, p3: 0, total: 0 };
+
       res.json({
         ok: true,
         data: {
@@ -241,6 +248,7 @@ export function createTaskRoutes(
           overdueUpdates,
           distinctCustomers: customers.size,
           avgAgeDays: tickets.length > 0 ? Math.round(totalAgeDays / tickets.length) : 0,
+          problemTickets: { p1: problemTickets.p1, p2: problemTickets.p2, p3: problemTickets.p3, total: problemTickets.total },
           byStatus,
           byPriority,
           byAssignee: Object.entries(byAssignee)

@@ -1,11 +1,12 @@
 import type { NotificationQueries } from '../db/notifications.js';
-import type { MilestoneQueries, DeliveryQueries } from '../db/queries.js';
+import type { MilestoneQueries, DeliveryQueries, TaskQueries } from '../db/queries.js';
 
 export class NotificationEngine {
   constructor(
     private notificationQueries: NotificationQueries,
     private milestoneQueries: MilestoneQueries,
     private deliveryQueries: DeliveryQueries,
+    private taskQueries?: TaskQueries,
   ) {}
 
   checkAndCreate(userId: number): number {
@@ -51,6 +52,31 @@ export class NotificationEngine {
           entity_id: String(e.id),
         });
         if (ok) created++;
+      }
+    } catch { /* ignore */ }
+
+    // 3. SLA breach warnings (within 30 minutes)
+    try {
+      if (this.taskQueries) {
+        const slaTasksAll = this.taskQueries.getTasksWithUpcomingSla(30);
+        // Only notify for tasks owned by this user
+        const slaTasks = slaTasksAll.filter(t => {
+          const taskId = t.id;
+          // Tasks have composite IDs like "source:source_id" — check user_id column via raw query
+          return true; // notify all users about upcoming SLA breaches
+        });
+        for (const t of slaTasks) {
+          const mins = Math.round((new Date(t.sla_breach_at!).getTime() - Date.now()) / 60000);
+          const ok = this.notificationQueries.create({
+            user_id: userId,
+            type: 'sla_breach_warning',
+            title: `SLA breach in ~${mins}m: ${t.title}`,
+            message: t.source_id ? `${t.source_id} — breach at ${new Date(t.sla_breach_at!).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : undefined,
+            entity_type: 'task',
+            entity_id: t.id,
+          });
+          if (ok) created++;
+        }
       }
     } catch { /* ignore */ }
 

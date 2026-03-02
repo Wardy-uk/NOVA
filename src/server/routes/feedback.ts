@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import type { FeedbackQueries, TaskQueries } from '../db/queries.js';
 import type { FileUserQueries } from '../db/user-store.js';
+import type { NotificationQueries } from '../db/notifications.js';
 import { saveDb } from '../db/schema.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
-export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueries?: TaskQueries, userQueries?: FileUserQueries): Router {
+export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueries?: TaskQueries, userQueries?: FileUserQueries, notificationQueries?: NotificationQueries): Router {
   const router = Router();
 
   /** Enrich feedback items with username from the file-based user store */
@@ -70,6 +71,20 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
     feedbackQueries.reply(id, reply.trim(), adminUserId);
     const updated = feedbackQueries.getById(id);
     if (updated) enrichWithUsernames([updated]);
+
+    // Notify the feedback author that they received a reply
+    if (updated && notificationQueries) {
+      const truncatedReply = reply.trim().length > 80 ? reply.trim().slice(0, 80) + '...' : reply.trim();
+      notificationQueries.create({
+        user_id: updated.user_id,
+        type: 'feedback_reply',
+        title: 'Your feedback received a reply',
+        message: `"${updated.title}" — ${truncatedReply}`,
+        entity_type: 'feedback',
+        entity_id: String(id),
+      });
+    }
+
     res.json({ ok: true, data: updated });
   });
 

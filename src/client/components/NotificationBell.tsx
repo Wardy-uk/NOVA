@@ -13,9 +13,11 @@ interface NotificationItem {
 
 const TYPE_ICONS: Record<string, string> = {
   sla_breach: '\u26A0',
+  sla_breach_warning: '\u26A0\uFE0F',
   overdue_update: '\u23F0',
   milestone_overdue: '\u{1F6A9}',
   delivery_due_soon: '\u{1F4C5}',
+  feedback_reply: '\u{1F4AC}',
 };
 
 function timeAgo(dateStr: string): string {
