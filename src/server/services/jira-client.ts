@@ -211,7 +211,7 @@ export class JiraRestClient {
     };
     if (options?.startAt) body.startAt = options.startAt;
     if (options?.expand?.length) body.expand = options.expand;
-    return this.request<JiraSearchResult>('POST', 'search', body);
+    return this.request<JiraSearchResult>('POST', 'search/jql', body);
   }
 
   async getIssue(issueKey: string, fields?: string[]): Promise<JiraIssue | null> {
