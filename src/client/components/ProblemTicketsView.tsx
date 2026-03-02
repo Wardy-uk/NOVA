@@ -140,7 +140,9 @@ export function ProblemTicketsView() {
     setScanning(true);
     try {
       const res = await fetch('/api/problem-tickets/scan', { method: 'POST' });
-      const json = await res.json();
+      const text = await res.text();
+      let json: any;
+      try { json = JSON.parse(text); } catch { json = { ok: false, error: text.slice(0, 200) }; }
       if (!json.ok) {
         setError(json.error ?? 'Scan failed');
         return; // Don't reload — scan failed, nothing changed

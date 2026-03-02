@@ -149,6 +149,7 @@ export class JiraRestClient {
     retries = 2
   ): Promise<T> {
     const url = `${this.baseUrl}/rest/api/3/${path}`;
+    console.log(`[JiraClient] ${method} ${url}`);
     const opts: RequestInit = {
       method,
       headers: {
@@ -161,7 +162,12 @@ export class JiraRestClient {
       opts.body = JSON.stringify(body);
     }
 
-    const res = await fetch(url, opts);
+    const res = await fetch(url, { ...opts, redirect: 'manual' });
+
+    // Redirect — Jira is sending us to a login page (auth failure)
+    if (res.status >= 300 && res.status < 400) {
+      throw new JiraApiError(res.status, 'Redirect', `Jira redirected to ${res.headers.get('location')} — check credentials`, false);
+    }
 
     // Rate limit handling
     if (res.status === 429 && retries > 0) {
@@ -182,6 +188,13 @@ export class JiraRestClient {
     }
 
     const responseBody = await res.text();
+    const contentType = res.headers.get('content-type') ?? '';
+
+    // HTML response — Jira returned an error/login page, not JSON
+    if (contentType.includes('text/html') || responseBody.trimStart().startsWith('<!DOCTYPE')) {
+      throw new JiraApiError(res.status, res.statusText, `Unexpected HTML response from ${url} (status ${res.status})`, false);
+    }
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(responseBody);
