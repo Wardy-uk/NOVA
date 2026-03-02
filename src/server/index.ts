@@ -50,6 +50,9 @@ import { JiraOAuthService } from './services/jira-oauth.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
 import { createNotificationRoutes } from './routes/notifications.js';
+import { ProblemTicketQueries } from './db/queries.js';
+import { ProblemTicketScanner } from './services/problem-ticket-scanner.js';
+import { createProblemTicketRoutes } from './routes/problem-tickets.js';
 
 dotenv.config();
 
@@ -81,6 +84,7 @@ async function main() {
   const auditQueries = new AuditQueries(db);
   const notificationQueries = new NotificationQueries(db);
   const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries);
+  const problemTicketQueries = new ProblemTicketQueries(db);
 
   // Purge transient MS365 data from previous session
   const purgedCount = taskQueries.deleteTransientTasks();
@@ -358,6 +362,18 @@ async function main() {
   );
   app.use('/api/milestones', createMilestoneRoutes(milestoneQueries, deliveryQueries, taskQueries, workflowEngine, buildOrchestrator));
 
+  // Problem Ticket Scanner — AI + rule-based detection
+  const problemTicketScanner = new ProblemTicketScanner(
+    buildJiraClient(),
+    problemTicketQueries,
+    settingsQueries,
+  );
+  app.use('/api/problem-tickets', createProblemTicketRoutes(problemTicketQueries, () => {
+    // Refresh Jira client on each scan (credentials may change)
+    problemTicketScanner.setJiraClient(buildJiraClient());
+    return problemTicketScanner;
+  }));
+
   // 6. OneDrive file watcher (Power Automate bridge)
   const watcher = new OneDriveWatcher(taskQueries, settingsQueries);
   watcher.start();
@@ -514,6 +530,24 @@ async function main() {
     }
   }, 15 * 60 * 1000);
 
+  // Problem Ticket Scanner: every 15 minutes + initial scan after 30s
+  const ptScanTimer = setInterval(async () => {
+    try {
+      problemTicketScanner.setJiraClient(buildJiraClient());
+      await problemTicketScanner.scan();
+    } catch (err) {
+      console.error('[ProblemTicketScanner] Scheduled scan failed:', err instanceof Error ? err.message : err);
+    }
+  }, 15 * 60 * 1000);
+  setTimeout(async () => {
+    try {
+      problemTicketScanner.setJiraClient(buildJiraClient());
+      await problemTicketScanner.scan();
+    } catch (err) {
+      console.error('[ProblemTicketScanner] Initial scan failed:', err instanceof Error ? err.message : err);
+    }
+  }, 30_000);
+
   // Expose last sync time + per-source intervals
   app.get('/api/sync/status', (_req, res) => {
     const globalMinutes = parseInt(settingsQueries.get('refresh_interval_minutes') ?? '5', 10) || 5;
@@ -554,6 +588,7 @@ async function main() {
     clearInterval(autoSaveTimer);
     clearInterval(backupTimer);
     clearInterval(workflowTimer);
+    clearInterval(ptScanTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     watcher.stop();
     try { saveDb(); console.log('[N.O.V.A] Database saved to disk'); } catch (err) {

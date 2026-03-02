@@ -14,6 +14,7 @@ import { OnboardingConfigView } from './components/OnboardingConfigView.js';
 import { OnboardingCalendar } from './components/OnboardingCalendar.js';
 import { OnboardingDashboard } from './components/OnboardingDashboard.js';
 import { OverdueDeliveriesView } from './components/OverdueDeliveriesView.js';
+import { ProblemTicketsView } from './components/ProblemTicketsView.js';
 import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
@@ -526,6 +527,7 @@ export function App() {
                 <div className="ml-auto flex items-center gap-1">
                   {([
                     { value: 'unassigned' as OwnershipFilter, label: 'Unassigned' },
+                    { value: 'problems' as OwnershipFilter, label: 'Problem Tickets' },
                     { value: 'all' as OwnershipFilter, label: 'All Tickets' },
                     { value: 'all-breached' as OwnershipFilter, label: 'All Breached' },
                   ]).map((opt) => (
@@ -613,7 +615,10 @@ export function App() {
           {currentArea === 'servicedesk' && sdFilter === 'all-breached' && (
             <NeedsAttentionView onUpdateTask={updateTask} scope="all" />
           )}
-          {currentArea === 'servicedesk' && sdFilter && sdFilter !== 'all-breached' && (
+          {currentArea === 'servicedesk' && sdFilter === 'problems' && (
+            <ProblemTicketsView />
+          )}
+          {currentArea === 'servicedesk' && sdFilter && sdFilter !== 'all-breached' && sdFilter !== 'problems' && (
             <div className="max-w-5xl mx-auto">
               {error && (
                 <div className="mb-4 p-3 bg-red-950/50 border border-red-900 rounded text-red-400 text-sm">

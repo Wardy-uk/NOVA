@@ -55,6 +55,20 @@ export interface JiraIssueLink {
   outwardIssue?: { key: string };
 }
 
+export interface JiraComment {
+  id: string;
+  author: { displayName: string; emailAddress?: string };
+  body: unknown;
+  created: string;
+  updated: string;
+}
+
+export interface JiraCommentPage {
+  comments: JiraComment[];
+  total: number;
+  maxResults: number;
+}
+
 // ── ADF helpers ──
 
 interface AdfSection {
@@ -184,12 +198,20 @@ export class JiraRestClient {
 
   // ── Public methods ──
 
-  async searchJql(jql: string, fields?: string[], maxResults = 50): Promise<JiraSearchResult> {
-    return this.request<JiraSearchResult>('POST', 'search', {
+  async searchJql(
+    jql: string,
+    fields?: string[],
+    maxResults = 50,
+    options?: { startAt?: number; expand?: string[] }
+  ): Promise<JiraSearchResult> {
+    const body: Record<string, unknown> = {
       jql,
       fields: fields ?? ['summary', 'status', 'issuetype', 'issuelinks', 'priority', 'duedate'],
       maxResults,
-    });
+    };
+    if (options?.startAt) body.startAt = options.startAt;
+    if (options?.expand?.length) body.expand = options.expand;
+    return this.request<JiraSearchResult>('POST', 'search', body);
   }
 
   async getIssue(issueKey: string, fields?: string[]): Promise<JiraIssue | null> {
@@ -297,5 +319,13 @@ export class JiraRestClient {
     return this.request<{ issueLinkTypes: Array<{ id: string; name: string; inward: string; outward: string }> }>(
       'GET', 'issueLinkType'
     );
+  }
+
+  /** Get comments for an issue, newest first */
+  async getComments(issueKey: string, maxResults = 5): Promise<JiraComment[]> {
+    const result = await this.request<JiraCommentPage>(
+      'GET', `issue/${issueKey}/comment?orderBy=-created&maxResults=${maxResults}`
+    );
+    return result?.comments ?? [];
   }
 }

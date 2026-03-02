@@ -2179,3 +2179,329 @@ export class SettingsQueries {
     return result;
   }
 }
+
+// ── Problem Ticket Detection Queries ──
+
+export interface ProblemTicketAlert {
+  id: number;
+  issue_key: string;
+  project_key: string;
+  summary: string;
+  status: string | null;
+  priority: string | null;
+  assignee: string | null;
+  reporter: string | null;
+  created_at: string | null;
+  severity: string;
+  score: number;
+  fingerprint: string;
+  first_seen: string;
+  last_seen: string;
+  resolved_at: string | null;
+  sla_remaining_ms: number | null;
+  sentiment_score: number | null;
+  sentiment_summary: string | null;
+  scan_id: string;
+  reasons?: ProblemTicketAlertReason[];
+}
+
+export interface ProblemTicketAlertReason {
+  rule: string;
+  label: string;
+  weight: number;
+  detail: string | null;
+}
+
+export interface ProblemTicketIgnore {
+  id: number;
+  issue_key: string;
+  ignored_by: string;
+  reason: string | null;
+  fingerprint_at_ignore: string;
+  ignored_at: string;
+  lifted_at: string | null;
+  lifted_reason: string | null;
+}
+
+export interface ProblemTicketConfigRow {
+  rule: string;
+  enabled: boolean;
+  weight: number;
+  threshold_json: string;
+}
+
+export class ProblemTicketQueries {
+  constructor(private db: Database) {}
+
+  upsertAlert(
+    alert: Omit<ProblemTicketAlert, 'id' | 'first_seen' | 'last_seen' | 'resolved_at' | 'reasons'>,
+    reasons: Omit<ProblemTicketAlertReason, 'alert_id'>[]
+  ): number {
+    // Upsert the alert
+    this.db.run(`
+      INSERT INTO problem_ticket_alerts
+        (issue_key, project_key, summary, status, priority, assignee, reporter,
+         created_at, severity, score, fingerprint, sla_remaining_ms,
+         sentiment_score, sentiment_summary, scan_id, last_seen)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(issue_key) DO UPDATE SET
+        project_key = excluded.project_key,
+        summary = excluded.summary,
+        status = excluded.status,
+        priority = excluded.priority,
+        assignee = excluded.assignee,
+        reporter = excluded.reporter,
+        created_at = excluded.created_at,
+        severity = excluded.severity,
+        score = excluded.score,
+        fingerprint = excluded.fingerprint,
+        sla_remaining_ms = excluded.sla_remaining_ms,
+        sentiment_score = excluded.sentiment_score,
+        sentiment_summary = excluded.sentiment_summary,
+        scan_id = excluded.scan_id,
+        last_seen = datetime('now'),
+        resolved_at = NULL
+    `, [
+      alert.issue_key, alert.project_key, alert.summary, alert.status,
+      alert.priority, alert.assignee, alert.reporter, alert.created_at,
+      alert.severity, alert.score, alert.fingerprint, alert.sla_remaining_ms,
+      alert.sentiment_score, alert.sentiment_summary, alert.scan_id,
+    ]);
+
+    // Get the alert id
+    const idResult = this.db.exec(`SELECT id FROM problem_ticket_alerts WHERE issue_key = '${alert.issue_key.replace(/'/g, "''")}'`);
+    const alertId = idResult[0]?.values[0]?.[0] as number;
+
+    // Replace reasons
+    this.db.run(`DELETE FROM problem_ticket_alert_reasons WHERE alert_id = ?`, [alertId]);
+    for (const r of reasons) {
+      this.db.run(
+        `INSERT INTO problem_ticket_alert_reasons (alert_id, rule, label, weight, detail) VALUES (?, ?, ?, ?, ?)`,
+        [alertId, r.rule, r.label, r.weight, r.detail ?? null]
+      );
+    }
+
+    saveDb();
+    return alertId;
+  }
+
+  getActiveAlerts(filters?: { severity?: string; projectKey?: string }): ProblemTicketAlert[] {
+    let sql = `
+      SELECT a.*
+      FROM problem_ticket_alerts a
+      WHERE a.resolved_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM problem_ticket_ignores i
+          WHERE i.issue_key = a.issue_key
+            AND i.lifted_at IS NULL
+            AND i.fingerprint_at_ignore = a.fingerprint
+        )
+    `;
+    const params: unknown[] = [];
+    if (filters?.severity) {
+      sql += ` AND a.severity = ?`;
+      params.push(filters.severity);
+    }
+    if (filters?.projectKey) {
+      sql += ` AND a.project_key = ?`;
+      params.push(filters.projectKey);
+    }
+    sql += ` ORDER BY a.score DESC, a.last_seen DESC`;
+
+    const stmt = this.db.prepare(sql);
+    if (params.length) stmt.bind(params as any[]);
+    const alerts: ProblemTicketAlert[] = [];
+
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      const alert = this.rowToAlert(row);
+      alert.reasons = this.getReasonsForAlert(alert.id);
+      alerts.push(alert);
+    }
+    stmt.free();
+    return alerts;
+  }
+
+  getAlertByIssueKey(issueKey: string): ProblemTicketAlert | null {
+    const stmt = this.db.prepare(`SELECT * FROM problem_ticket_alerts WHERE issue_key = ?`);
+    stmt.bind([issueKey]);
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      stmt.free();
+      const alert = this.rowToAlert(row);
+      alert.reasons = this.getReasonsForAlert(alert.id);
+      return alert;
+    }
+    stmt.free();
+    return null;
+  }
+
+  private getReasonsForAlert(alertId: number): ProblemTicketAlertReason[] {
+    const stmt = this.db.prepare(`SELECT rule, label, weight, detail FROM problem_ticket_alert_reasons WHERE alert_id = ? ORDER BY weight DESC`);
+    stmt.bind([alertId]);
+    const reasons: ProblemTicketAlertReason[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      reasons.push({
+        rule: row.rule as string,
+        label: row.label as string,
+        weight: row.weight as number,
+        detail: (row.detail as string) ?? null,
+      });
+    }
+    stmt.free();
+    return reasons;
+  }
+
+  insertIgnore(issueKey: string, ignoredBy: string, reason: string | null, fingerprint: string): void {
+    this.db.run(
+      `INSERT INTO problem_ticket_ignores (issue_key, ignored_by, reason, fingerprint_at_ignore) VALUES (?, ?, ?, ?)`,
+      [issueKey, ignoredBy, reason, fingerprint]
+    );
+    saveDb();
+  }
+
+  getIgnoresForIssue(issueKey: string): ProblemTicketIgnore[] {
+    const stmt = this.db.prepare(`SELECT * FROM problem_ticket_ignores WHERE issue_key = ? ORDER BY ignored_at DESC`);
+    stmt.bind([issueKey]);
+    const ignores: ProblemTicketIgnore[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      ignores.push({
+        id: row.id as number,
+        issue_key: row.issue_key as string,
+        ignored_by: row.ignored_by as string,
+        reason: (row.reason as string) ?? null,
+        fingerprint_at_ignore: row.fingerprint_at_ignore as string,
+        ignored_at: row.ignored_at as string,
+        lifted_at: (row.lifted_at as string) ?? null,
+        lifted_reason: (row.lifted_reason as string) ?? null,
+      });
+    }
+    stmt.free();
+    return ignores;
+  }
+
+  liftIgnore(issueKey: string, reason: string): void {
+    this.db.run(
+      `UPDATE problem_ticket_ignores SET lifted_at = datetime('now'), lifted_reason = ? WHERE issue_key = ? AND lifted_at IS NULL`,
+      [reason, issueKey]
+    );
+    saveDb();
+  }
+
+  getConfig(): ProblemTicketConfigRow[] {
+    const stmt = this.db.prepare(`SELECT * FROM problem_ticket_config ORDER BY rule`);
+    const rows: ProblemTicketConfigRow[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      rows.push({
+        rule: row.rule as string,
+        enabled: (row.enabled as number) === 1,
+        weight: row.weight as number,
+        threshold_json: (row.threshold_json as string) ?? '{}',
+      });
+    }
+    stmt.free();
+    return rows;
+  }
+
+  updateConfig(rule: string, updates: { enabled?: boolean; weight?: number; threshold_json?: string }): void {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (updates.enabled !== undefined) { sets.push('enabled = ?'); params.push(updates.enabled ? 1 : 0); }
+    if (updates.weight !== undefined) { sets.push('weight = ?'); params.push(updates.weight); }
+    if (updates.threshold_json !== undefined) { sets.push('threshold_json = ?'); params.push(updates.threshold_json); }
+    if (sets.length === 0) return;
+    params.push(rule);
+    this.db.run(`UPDATE problem_ticket_config SET ${sets.join(', ')} WHERE rule = ?`, params as any[]);
+    saveDb();
+  }
+
+  markResolved(activeIssueKeys: string[]): number {
+    if (activeIssueKeys.length === 0) {
+      // All alerts should be resolved
+      const result = this.db.exec(`SELECT COUNT(*) FROM problem_ticket_alerts WHERE resolved_at IS NULL`);
+      const count = (result[0]?.values[0]?.[0] as number) ?? 0;
+      if (count > 0) {
+        this.db.run(`UPDATE problem_ticket_alerts SET resolved_at = datetime('now') WHERE resolved_at IS NULL`);
+        saveDb();
+      }
+      return count;
+    }
+    const placeholders = activeIssueKeys.map(() => '?').join(',');
+    const result = this.db.exec(`SELECT COUNT(*) FROM problem_ticket_alerts WHERE resolved_at IS NULL AND issue_key NOT IN (${placeholders})`, activeIssueKeys as any);
+    const count = (result[0]?.values[0]?.[0] as number) ?? 0;
+    if (count > 0) {
+      this.db.run(
+        `UPDATE problem_ticket_alerts SET resolved_at = datetime('now') WHERE resolved_at IS NULL AND issue_key NOT IN (${placeholders})`,
+        activeIssueKeys as any
+      );
+      saveDb();
+    }
+    return count;
+  }
+
+  getStats(): { p1: number; p2: number; p3: number; total: number; ignored: number; lastScan: string | null } {
+    const counts = this.db.exec(`
+      SELECT severity, COUNT(*) as cnt
+      FROM problem_ticket_alerts
+      WHERE resolved_at IS NULL
+      GROUP BY severity
+    `);
+    let p1 = 0, p2 = 0, p3 = 0;
+    for (const row of counts[0]?.values ?? []) {
+      if (row[0] === 'P1') p1 = row[1] as number;
+      else if (row[0] === 'P2') p2 = row[1] as number;
+      else if (row[0] === 'P3') p3 = row[1] as number;
+    }
+
+    const ignoredResult = this.db.exec(`SELECT COUNT(*) FROM problem_ticket_ignores WHERE lifted_at IS NULL`);
+    const ignored = (ignoredResult[0]?.values[0]?.[0] as number) ?? 0;
+
+    const lastScanResult = this.db.exec(`SELECT MAX(last_seen) FROM problem_ticket_alerts`);
+    const lastScan = (lastScanResult[0]?.values[0]?.[0] as string) ?? null;
+
+    return { p1, p2, p3, total: p1 + p2 + p3, ignored, lastScan };
+  }
+
+  cleanupOld(daysToKeep = 30): number {
+    const result = this.db.exec(
+      `SELECT COUNT(*) FROM problem_ticket_alerts WHERE resolved_at IS NOT NULL AND resolved_at < datetime('now', '-' || ? || ' days')`,
+      [daysToKeep]
+    );
+    const count = (result[0]?.values[0]?.[0] as number) ?? 0;
+    if (count > 0) {
+      this.db.run(
+        `DELETE FROM problem_ticket_alerts WHERE resolved_at IS NOT NULL AND resolved_at < datetime('now', '-' || ? || ' days')`,
+        [daysToKeep]
+      );
+      saveDb();
+    }
+    return count;
+  }
+
+  private rowToAlert(row: Record<string, unknown>): ProblemTicketAlert {
+    return {
+      id: row.id as number,
+      issue_key: row.issue_key as string,
+      project_key: row.project_key as string,
+      summary: row.summary as string,
+      status: (row.status as string) ?? null,
+      priority: (row.priority as string) ?? null,
+      assignee: (row.assignee as string) ?? null,
+      reporter: (row.reporter as string) ?? null,
+      created_at: (row.created_at as string) ?? null,
+      severity: row.severity as string,
+      score: row.score as number,
+      fingerprint: row.fingerprint as string,
+      first_seen: row.first_seen as string,
+      last_seen: row.last_seen as string,
+      resolved_at: (row.resolved_at as string) ?? null,
+      sla_remaining_ms: (row.sla_remaining_ms as number) ?? null,
+      sentiment_score: (row.sentiment_score as number) ?? null,
+      sentiment_summary: (row.sentiment_summary as string) ?? null,
+      scan_id: row.scan_id as string,
+    };
+  }
+}

@@ -1,6 +1,6 @@
 import type { Task } from '../../shared/types.js';
 
-export type OwnershipFilter = 'unassigned' | 'all' | 'all-breached' | null;
+export type OwnershipFilter = 'unassigned' | 'all' | 'all-breached' | 'problems' | null;
 
 /** Extract Current Tier from raw_data.customfield_12981 */
 export function getTier(task: Task): string | null {

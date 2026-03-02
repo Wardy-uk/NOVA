@@ -504,6 +504,87 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  // ── Problem Ticket Detection tables ──
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS problem_ticket_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      issue_key TEXT NOT NULL UNIQUE,
+      project_key TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      status TEXT,
+      priority TEXT,
+      assignee TEXT,
+      reporter TEXT,
+      created_at TEXT,
+      severity TEXT NOT NULL,
+      score INTEGER NOT NULL,
+      fingerprint TEXT NOT NULL,
+      first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT,
+      sla_remaining_ms INTEGER,
+      sentiment_score REAL,
+      sentiment_summary TEXT,
+      scan_id TEXT NOT NULL
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS problem_ticket_alert_reasons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      alert_id INTEGER NOT NULL REFERENCES problem_ticket_alerts(id) ON DELETE CASCADE,
+      rule TEXT NOT NULL,
+      label TEXT NOT NULL,
+      weight INTEGER NOT NULL,
+      detail TEXT
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS problem_ticket_ignores (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      issue_key TEXT NOT NULL,
+      ignored_by TEXT NOT NULL,
+      reason TEXT,
+      fingerprint_at_ignore TEXT NOT NULL,
+      ignored_at TEXT NOT NULL DEFAULT (datetime('now')),
+      lifted_at TEXT,
+      lifted_reason TEXT
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS problem_ticket_config (
+      rule TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      weight INTEGER NOT NULL,
+      threshold_json TEXT
+    )
+  `);
+
+  // Seed default problem ticket config
+  const ptcCount = database.exec('SELECT COUNT(*) as c FROM problem_ticket_config');
+  if ((ptcCount[0]?.values[0]?.[0] as number) === 0) {
+    const defaults: Array<{ rule: string; weight: number; threshold_json: string }> = [
+      { rule: 'sla_breached', weight: 30, threshold_json: '{}' },
+      { rule: 'sla_near', weight: 20, threshold_json: '{"hoursThreshold":2}' },
+      { rule: 'stale_comms', weight: 15, threshold_json: '{"daysThreshold":3}' },
+      { rule: 'ticket_age', weight: 10, threshold_json: '{"daysThreshold":7}' },
+      { rule: 'ping_pong', weight: 15, threshold_json: '{"reassignThreshold":3,"windowHours":48}' },
+      { rule: 'reopened', weight: 10, threshold_json: '{}' },
+      { rule: 'high_priority', weight: 10, threshold_json: '{"priorities":["Highest","High"]}' },
+      { rule: 'sentiment', weight: 20, threshold_json: '{"negativeThreshold":-0.3}' },
+      { rule: 'stagnant_status', weight: 10, threshold_json: '{"daysThreshold":5}' },
+    ];
+    for (const d of defaults) {
+      database.run(
+        'INSERT INTO problem_ticket_config (rule, weight, threshold_json) VALUES (?, ?, ?)',
+        [d.rule, d.weight, d.threshold_json]
+      );
+    }
+  }
+
   // Seed default milestone templates from file
   const tmplCount = database.exec('SELECT COUNT(*) as c FROM milestone_templates');
   if ((tmplCount[0]?.values[0]?.[0] as number) === 0) {
