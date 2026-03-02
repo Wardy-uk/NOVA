@@ -306,7 +306,7 @@ export function ProblemTicketsView() {
                 <th className="text-left px-3 py-2 hidden sm:table-cell">Status</th>
                 <th className="text-left px-3 py-2 hidden md:table-cell">Assignee</th>
                 <th className="text-center px-3 py-2">Score</th>
-                <th className="text-left px-3 py-2">Top Signal</th>
+                <th className="text-left px-3 py-2">Reasons</th>
                 <th className="text-center px-3 py-2 hidden sm:table-cell">Age</th>
                 <th className="text-center px-3 py-2 hidden md:table-cell">SLA</th>
                 <th className="text-center px-2 py-2 w-10"></th>
@@ -316,7 +316,6 @@ export function ProblemTicketsView() {
               {filtered.map(alert => {
                 const style = SEVERITY_STYLES[alert.severity] ?? SEVERITY_STYLES.P3;
                 const isExpanded = expanded.has(alert.issue_key);
-                const topReason = alert.reasons?.[0];
                 const sla = slaDisplay(alert.sla_remaining_ms);
 
                 return (
@@ -351,7 +350,15 @@ export function ProblemTicketsView() {
                           <span className="text-neutral-400 text-[10px] w-6">{alert.score}</span>
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-neutral-400">{topReason?.label ?? '-'}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {alert.reasons?.length ? alert.reasons.map((r, i) => (
+                            <span key={i} className="inline-block px-1.5 py-0.5 rounded text-[10px] bg-[#272C33] text-neutral-400" title={r.detail ?? undefined}>
+                              {r.label}
+                            </span>
+                          )) : <span className="text-neutral-500">-</span>}
+                        </div>
+                      </td>
                       <td className="px-3 py-2 text-center text-neutral-500 hidden sm:table-cell">{daysOpen(alert.created_at)}</td>
                       <td className="px-3 py-2 text-center hidden md:table-cell">
                         <span className={sla.className}>{sla.text}</span>

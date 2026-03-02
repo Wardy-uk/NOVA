@@ -118,17 +118,34 @@ export class ProblemTicketScanner {
       const config = new Map<string, ProblemTicketConfigRow>();
       for (const row of configRows) config.set(row.rule, row);
 
-      // Determine project filter
-      const projectFilter = this.settings.get('problem_ticket_projects')
-        ?? this.settings.get('jira_onboarding_project')
-        ?? '';
-      const projects = projectFilter.split(',').map(p => p.trim()).filter(Boolean);
-      const projectClause = projects.length > 0
-        ? `project IN (${projects.map(p => `"${p}"`).join(',')}) AND `
-        : '';
+      // Build JQL — same filters as the All Tickets SD view
+      const parts: string[] = [];
+
+      // Project filter (prefer SD project, fallback to problem_ticket_projects/onboarding)
+      const sdProject = this.settings.get('jira_sd_project');
+      if (sdProject) {
+        parts.push(`project = ${sdProject}`);
+      } else {
+        const projectFilter = this.settings.get('problem_ticket_projects')
+          ?? this.settings.get('jira_onboarding_project')
+          ?? '';
+        const projects = projectFilter.split(',').map(p => p.trim()).filter(Boolean);
+        if (projects.length > 0) {
+          parts.push(`project IN (${projects.map(p => `"${p}"`).join(',')})`);
+        }
+      }
+
+      // Tier exclusion filter (same as SD view)
+      const sdTiers = this.settings.get('jira_sd_tiers');
+      if (sdTiers) {
+        const tierValues = sdTiers.split(',').map(t => `"${t.trim()}"`).join(', ');
+        parts.push(`"Current Tier" NOT IN (${tierValues})`);
+      }
+
+      parts.push('status NOT IN (Done, Closed, Resolved)');
 
       // Fetch all open tickets with pagination
-      const jql = `${projectClause}statusCategory != Done ORDER BY created DESC`;
+      const jql = parts.join(' AND ') + ' ORDER BY created DESC';
       const fields = [
         'summary', 'status', 'priority', 'assignee', 'reporter', 'created', 'updated',
         'comment', 'issuelinks',
