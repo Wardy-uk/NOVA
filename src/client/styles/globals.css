@@ -20,10 +20,12 @@
 
 /* Light mode overrides */
 html.light {
+  --color-surface-deep: #e8ecf0;
   --color-surface: #f5f7f9;
   --color-surface-raised: #ffffff;
   --color-surface-overlay: #edf0f3;
   --color-border: #d4d9e0;
+  --color-border-strong: #b0b8c4;
 }
 
 html.light body {
@@ -31,20 +33,48 @@ html.light body {
   color: #1a1f26;
 }
 
-/* Tailwind utility overrides for light mode */
+/* Tailwind utility overrides for light mode — backgrounds */
+html.light .bg-\[\#1f242b\] { background-color: var(--color-surface-deep); }
 html.light .bg-\[\#272C33\] { background-color: var(--color-surface); }
+html.light .bg-\[\#2a2f36\] { background-color: #f0f2f5; }
 html.light .bg-\[\#2f353d\] { background-color: var(--color-surface-raised); }
 html.light .bg-\[\#363d47\] { background-color: var(--color-surface-overlay); }
+html.light .bg-\[\#3a424d\] { background-color: var(--color-border); }
+
+/* Borders */
 html.light .border-\[\#3a424d\] { border-color: var(--color-border); }
+html.light .border-\[\#272C33\] { border-color: var(--color-border-strong); }
+html.light .border-\[\#3a424d\]\/50 { border-color: rgba(212, 217, 224, 0.5); }
+html.light .border-\[\#272C33\]\/30 { border-color: rgba(176, 184, 196, 0.3); }
+html.light .border-b-\[\#3a424d\] { border-bottom-color: var(--color-border); }
+html.light .border-t-\[\#272C33\] { border-top-color: var(--color-border-strong); }
+html.light .divide-\[\#3a424d\] > :not(:last-child) { border-color: var(--color-border); }
+
+/* Text — neutral shades */
 html.light .text-neutral-100 { color: #1a1f26; }
 html.light .text-neutral-200 { color: #2d3440; }
 html.light .text-neutral-300 { color: #4a5568; }
 html.light .text-neutral-400 { color: #6b7280; }
 html.light .text-neutral-500 { color: #9ca3af; }
 html.light .text-neutral-600 { color: #b0b8c4; }
+
+/* Hover — backgrounds */
+html.light .hover\:bg-\[\#2f353d\]:hover { background-color: var(--color-surface-raised); }
 html.light .hover\:bg-\[\#363d47\]:hover { background-color: var(--color-surface-overlay); }
+html.light .hover\:bg-\[\#3a424d\]:hover { background-color: #c8cdd4; }
+
+/* Hover — text */
 html.light .hover\:text-neutral-200:hover { color: #2d3440; }
 html.light .hover\:text-neutral-300:hover { color: #4a5568; }
+html.light .hover\:text-neutral-100:hover { color: #1a1f26; }
+
+/* Placeholder text */
+html.light .placeholder\:text-neutral-600::placeholder { color: #9ca3af; }
+html.light .placeholder-neutral-600::placeholder { color: #9ca3af; }
+
+/* Focus borders — keep brand color but slightly muted in light */
+html.light .focus\:border-\[\#5ec1ca\]:focus { border-color: #4ba8b0; }
+html.light .focus\:border-\[\#5ec1ca\]\/50:focus { border-color: rgba(75, 168, 176, 0.5); }
 
 body {
   font-family: var(--font-sans);
