@@ -37,6 +37,7 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  const [unassignedOnly, setUnassignedOnly] = useState(false);
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
 
   const fetchAttention = useCallback(async () => {
@@ -64,11 +65,16 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
   const slaCount = useMemo(() => tasks.filter(t => t.attention_reasons.includes('sla_breached')).length, [tasks]);
   const approachingCount = useMemo(() => tasks.filter(t => t.attention_reasons.includes('sla_approaching')).length, [tasks]);
 
+  // Unassigned count
+  const unassignedCount = useMemo(() => tasks.filter(t => t.description?.startsWith('Assignee: Unassigned')).length, [tasks]);
+
   // Filtered list
   const filtered = useMemo(() => {
-    if (filterMode === 'all') return tasks;
-    return tasks.filter(t => t.attention_reasons.includes(filterMode));
-  }, [tasks, filterMode]);
+    let result = tasks;
+    if (filterMode !== 'all') result = result.filter(t => t.attention_reasons.includes(filterMode));
+    if (unassignedOnly) result = result.filter(t => t.description?.startsWith('Assignee: Unassigned'));
+    return result;
+  }, [tasks, filterMode, unassignedOnly]);
 
   // Sort by urgency score descending (server also sorts, client fallback)
   const sorted = useMemo(() => {
@@ -158,6 +164,18 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
                   {opt.label}
                 </button>
               ))}
+              {unassignedCount > 0 && (
+                <button
+                  onClick={() => setUnassignedOnly(p => !p)}
+                  className={`px-2.5 py-1 text-[11px] rounded-full transition-colors border ${
+                    unassignedOnly
+                      ? 'bg-[#5ec1ca]/20 text-[#5ec1ca] border-[#5ec1ca]/40 font-semibold'
+                      : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] border-transparent'
+                  }`}
+                >
+                  Unassigned ({unassignedCount})
+                </button>
+              )}
             </div>
           )}
 
