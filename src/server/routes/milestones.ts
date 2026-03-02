@@ -207,7 +207,8 @@ export function createMilestoneRoutes(
 
   router.post('/backfill', writeGuard, (req, res) => {
     try {
-      const allEntries = deliveryQueries.getAll();
+      const { product, saleType } = req.body as { product?: string; saleType?: string };
+      const allEntries = deliveryQueries.getAll(product);
       let created = 0;
       let skipped = 0;
       const results: Array<{ id: number; account: string; milestones: number }> = [];
@@ -216,14 +217,25 @@ export function createMilestoneRoutes(
         const existing = milestoneQueries.getByDelivery(entry.id);
         if (existing.length > 0) { skipped++; continue; }
 
-        const startDate = entry.order_date || new Date().toISOString().split('T')[0];
-        const milestones = milestoneQueries.createForDelivery(entry.id, startDate);
+        // Parse order_date — handle DD/MM/YYYY, YYYY-MM-DD, or fallback to today
+        let startDate = new Date().toISOString().split('T')[0];
+        if (entry.order_date) {
+          const ddmmyyyy = entry.order_date.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$/);
+          if (ddmmyyyy) {
+            startDate = `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+          } else if (/^\d{4}-\d{2}-\d{2}/.test(entry.order_date)) {
+            startDate = entry.order_date.split('T')[0];
+          }
+        }
+
+        const effectiveSaleType = saleType ?? entry.sale_type ?? undefined;
+        const milestones = milestoneQueries.createForDelivery(entry.id, startDate, effectiveSaleType);
         syncDeliveryMilestonesToTasks(entry.id, entry.account, milestoneQueries, taskQueries);
         created++;
         results.push({ id: entry.id, account: entry.account, milestones: milestones.length });
       }
 
-      console.log(`[Milestones] Backfill: created for ${created} deliveries, skipped ${skipped} (already had milestones)`);
+      console.log(`[Milestones] Backfill${product ? ` (product=${product})` : ''}: created for ${created} deliveries, skipped ${skipped} (already had milestones)`);
       res.json({ ok: true, data: { created, skipped, total: allEntries.length, results } });
     } catch (err) {
       console.error('[Milestones] Backfill error:', err);
