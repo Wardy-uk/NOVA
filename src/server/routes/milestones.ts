@@ -197,6 +197,21 @@ export function createMilestoneRoutes(
     res.json({ ok: true, data: milestoneQueries.getOverdueDeliveries() });
   });
 
+  router.post('/complete-matching', writeGuard, (req, res) => {
+    const { deliveryStatus, product } = req.body as { deliveryStatus?: string; product?: string };
+    if (!deliveryStatus) {
+      res.status(400).json({ ok: false, error: 'deliveryStatus is required' });
+      return;
+    }
+    try {
+      const result = milestoneQueries.completeMatchingDeliveries(deliveryStatus, product);
+      console.log(`[Milestones] complete-matching: ${result.milestones} milestones across ${result.deliveries} deliveries (status="${deliveryStatus}", product=${product ?? 'all'})`);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
   // ── Delivery Milestone Instances ──
 
   router.get('/delivery/:deliveryId', (req, res) => {

@@ -1977,6 +1977,45 @@ export class MilestoneQueries {
     return results;
   }
 
+  /** Mark all milestones as complete for deliveries whose status matches (case-insensitive).
+   *  Optionally filter by product. Returns count of milestones updated. */
+  completeMatchingDeliveries(deliveryStatus: string, product?: string): { deliveries: number; milestones: number } {
+    const productClause = product ? ` AND de.product = ?` : '';
+    const params: (string)[] = [deliveryStatus];
+    if (product) params.push(product);
+
+    // Count affected
+    const countStmt = this.db.prepare(`
+      SELECT COUNT(DISTINCT de.id) as deliveries, COUNT(dm.id) as milestones
+      FROM delivery_milestones dm
+      JOIN delivery_entries de ON dm.delivery_id = de.id
+      WHERE LOWER(de.status) = LOWER(?) ${productClause}
+        AND dm.status != 'complete'
+    `);
+    countStmt.bind(params);
+    let deliveries = 0, milestones = 0;
+    if (countStmt.step()) {
+      const row = countStmt.getAsObject() as Record<string, unknown>;
+      deliveries = (row.deliveries as number) ?? 0;
+      milestones = (row.milestones as number) ?? 0;
+    }
+    countStmt.free();
+
+    if (milestones === 0) return { deliveries: 0, milestones: 0 };
+
+    // Update
+    this.db.run(`
+      UPDATE delivery_milestones SET status = 'complete', actual_date = date('now'), updated_at = datetime('now')
+      WHERE status != 'complete'
+        AND delivery_id IN (
+          SELECT de.id FROM delivery_entries de
+          WHERE LOWER(de.status) = LOWER(?) ${productClause}
+        )
+    `, params);
+    saveDb();
+    return { deliveries, milestones };
+  }
+
   /** Get the next non-complete milestone per delivery, ordered by target_date ASC */
   getNextPendingByDelivery(deliveryIds: number[]): Map<number, { name: string; target_date: string; status: string }> {
     const result = new Map<number, { name: string; target_date: string; status: string }>();

@@ -180,6 +180,7 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
   const [dateTo, setDateTo] = useState('');
   const [bfRunning, setBfRunning] = useState(false);
   const [bfResult, setBfResult] = useState<string | null>(null);
+  const [cmRunning, setCmRunning] = useState(false);
   const auth = useAuth();
 
   // Completion tracker data
@@ -447,6 +448,32 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
       setBfResult(`Error: ${err instanceof Error ? err.message : 'Failed'}`);
     } finally {
       setBfRunning(false);
+    }
+  };
+
+  const handleCompleteMatching = async () => {
+    if (!activeTab) return;
+    setCmRunning(true);
+    setBfResult(null);
+    try {
+      const resp = await fetch('/api/milestones/complete-matching', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deliveryStatus: 'complete', product: activeTab }),
+      });
+      const json = await resp.json();
+      if (json.ok) {
+        const { deliveries, milestones } = json.data;
+        setBfResult(milestones > 0
+          ? `Marked ${milestones} milestones complete across ${deliveries} delivered ${activeTab} entries`
+          : `No milestones to update — all already complete`);
+      } else {
+        setBfResult(`Error: ${json.error}`);
+      }
+    } catch (err) {
+      setBfResult(`Error: ${err instanceof Error ? err.message : 'Failed'}`);
+    } finally {
+      setCmRunning(false);
     }
   };
 
@@ -723,6 +750,14 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
                 title={`Create milestones for all ${activeTab ?? ''} deliveries that don't have them yet`}
               >
                 {bfRunning ? 'Backfilling...' : `Backfill ${activeTab ?? ''} Milestones`}
+              </button>
+              <button
+                onClick={handleCompleteMatching}
+                disabled={cmRunning || !activeTab}
+                className="px-3 py-2 text-xs rounded bg-[#2f353d] text-green-400 hover:bg-[#363d47] hover:text-green-300 border border-green-500/30 transition-colors disabled:opacity-50"
+                title={`Mark all milestones complete for ${activeTab ?? ''} deliveries with status "Complete"`}
+              >
+                {cmRunning ? 'Updating...' : `Complete ${activeTab ?? ''} Milestones`}
               </button>
               <button
                 onClick={() => { setXlsxPrefill(null); setDrawerEntryId(null); setDrawerIsNew(true); }}
