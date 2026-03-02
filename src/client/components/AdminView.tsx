@@ -892,10 +892,30 @@ export function AdminView() {
               {users.map((user) => (
                 <tr key={user.id} className="border-b border-[#3a424d]/50 hover:bg-[#363d47] transition-colors">
                   <td className="px-4 py-3">
-                    <div className="text-neutral-200">{user.display_name || user.username}</div>
+                    <input
+                      type="text"
+                      defaultValue={user.display_name || ''}
+                      placeholder={user.username}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (v !== (user.display_name || '')) updateUser(user.id, { display_name: v || user.username });
+                      }}
+                      className="bg-transparent text-neutral-200 text-sm border-b border-transparent hover:border-[#3a424d] focus:border-[#5ec1ca] outline-none w-full"
+                    />
                     <div className="text-[10px] text-neutral-500">@{user.username}</div>
                   </td>
-                  <td className="px-4 py-3 text-neutral-400">{user.email || '-'}</td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="email"
+                      defaultValue={user.email || ''}
+                      placeholder="Add email..."
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (v !== (user.email || '')) updateUser(user.id, { email: v });
+                      }}
+                      className="bg-transparent text-neutral-400 text-sm border-b border-transparent hover:border-[#3a424d] focus:border-[#5ec1ca] outline-none w-full placeholder:text-neutral-600"
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <select
                       value={user.role}
