@@ -11,12 +11,12 @@ export class TaskQueries {
     if (useUserPins) {
       sql = `SELECT t.*, CASE WHEN p.task_id IS NOT NULL THEN 1 ELSE 0 END as is_pinned
              FROM tasks t LEFT JOIN user_task_pins p ON t.id = p.task_id AND p.user_id = ?
-             WHERE 1=1`;
+             WHERE (t.user_id = ? OR t.user_id IS NULL)`;
     } else {
       sql = `SELECT * FROM tasks WHERE 1=1`;
     }
     const params: (string | number)[] = [];
-    if (useUserPins) params.push(filters!.userId!);
+    if (useUserPins) { params.push(filters!.userId!); params.push(filters!.userId!); }
 
     if (filters?.status) {
       sql += ` AND ${useUserPins ? 't.' : ''}status = ?`;
@@ -63,8 +63,12 @@ export class TaskQueries {
     return tasks;
   }
 
-  getAllIncludingDone(): Task[] {
-    const stmt = this.db.prepare(`SELECT * FROM tasks ORDER BY updated_at DESC`);
+  getAllIncludingDone(userId?: number): Task[] {
+    const sql = userId != null
+      ? `SELECT * FROM tasks WHERE (user_id = ? OR user_id IS NULL) ORDER BY updated_at DESC`
+      : `SELECT * FROM tasks ORDER BY updated_at DESC`;
+    const stmt = this.db.prepare(sql);
+    if (userId != null) stmt.bind([userId]);
     const tasks: Task[] = [];
     while (stmt.step()) {
       tasks.push(this.rowToTask(stmt.getAsObject() as Record<string, unknown>));
@@ -99,12 +103,13 @@ export class TaskQueries {
     category?: string;
     raw_data?: unknown;
     transient?: boolean;
+    user_id?: number;
   }, options?: { deferSave?: boolean }): void {
     const id = `${task.source}:${task.source_id}`;
     this.db.run(
       `INSERT INTO tasks (id, source, source_id, source_url, title, description,
-        status, priority, due_date, sla_breach_at, category, raw_data, transient, last_synced, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        status, priority, due_date, sla_breach_at, category, raw_data, transient, user_id, last_synced, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
       ON CONFLICT(id) DO UPDATE SET
         source_url = excluded.source_url,
         title = excluded.title,
@@ -116,6 +121,7 @@ export class TaskQueries {
         category = excluded.category,
         raw_data = excluded.raw_data,
         transient = excluded.transient,
+        user_id = COALESCE(excluded.user_id, tasks.user_id),
         last_synced = datetime('now'),
         updated_at = datetime('now')`,
       [
@@ -132,6 +138,7 @@ export class TaskQueries {
         task.category ?? null,
         task.raw_data ? JSON.stringify(task.raw_data) : null,
         task.transient ? 1 : 0,
+        task.user_id ?? null,
       ]
     );
     if (!options?.deferSave) {
@@ -152,19 +159,23 @@ export class TaskQueries {
   deleteStaleBySource(
     source: string,
     freshIds: string[],
-    options?: { allowEmpty?: boolean; deferSave?: boolean }
+    options?: { allowEmpty?: boolean; deferSave?: boolean; userId?: number }
   ): number {
     // Milestone tasks are managed by the milestone system, not external sync
     if (source === 'milestone') return 0;
+
+    // Build user scope clause: only delete tasks belonging to this user (or unowned)
+    const userClause = options?.userId != null ? ` AND (user_id = ? OR user_id IS NULL)` : '';
+    const userParams: number[] = options?.userId != null ? [options.userId] : [];
 
     if (freshIds.length === 0) {
       if (!options?.allowEmpty) {
         return 0;
       }
 
-      // No fresh tasks — delete all for this source
-      const countStmt = this.db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE source = ?`);
-      countStmt.bind([source]);
+      // No fresh tasks — delete all for this source (scoped to user)
+      const countStmt = this.db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE source = ?${userClause}`);
+      countStmt.bind([source, ...userParams]);
       let count = 0;
       if (countStmt.step()) {
         const row = countStmt.getAsObject() as Record<string, unknown>;
@@ -172,7 +183,7 @@ export class TaskQueries {
       }
       countStmt.free();
 
-      this.db.run(`DELETE FROM tasks WHERE source = ?`, [source]);
+      this.db.run(`DELETE FROM tasks WHERE source = ?${userClause}`, [source, ...userParams]);
       if (!options?.deferSave) {
         saveDb();
       }
@@ -180,9 +191,9 @@ export class TaskQueries {
     }
     const placeholders = freshIds.map(() => '?').join(',');
     const countStmt = this.db.prepare(
-      `SELECT COUNT(*) as c FROM tasks WHERE source = ? AND id NOT IN (${placeholders})`
+      `SELECT COUNT(*) as c FROM tasks WHERE source = ? AND id NOT IN (${placeholders})${userClause}`
     );
-    countStmt.bind([source, ...freshIds]);
+    countStmt.bind([source, ...freshIds, ...userParams]);
     let count = 0;
     if (countStmt.step()) {
       const row = countStmt.getAsObject() as Record<string, unknown>;
@@ -192,8 +203,8 @@ export class TaskQueries {
 
     if (count > 0) {
       this.db.run(
-        `DELETE FROM tasks WHERE source = ? AND id NOT IN (${placeholders})`,
-        [source, ...freshIds]
+        `DELETE FROM tasks WHERE source = ? AND id NOT IN (${placeholders})${userClause}`,
+        [source, ...freshIds, ...userParams]
       );
       if (!options?.deferSave) {
         saveDb();

@@ -787,8 +787,8 @@ export class TaskAggregator {
     return parseJiraSearchResults(text, jiraBaseUrl);
   }
 
-  /** Sync a single source by name. Returns result with count and optional error. */
-  async syncSource(sourceName: string): Promise<{ source: string; count: number; error?: string }> {
+  /** Sync a single source by name. userId tags synced tasks with the owning user. */
+  async syncSource(sourceName: string, userId?: number): Promise<{ source: string; count: number; error?: string }> {
     const adapter = this.adapters.find((a) => a.source === sourceName);
     if (!adapter) return { source: sourceName, count: 0, error: 'Unknown source' };
 
@@ -804,7 +804,7 @@ export class TaskAggregator {
       const freshIds: string[] = [];
       const isTransient = TRANSIENT_SOURCES.has(adapter.source);
       for (const task of tasks) {
-        this.taskQueries.upsertFromSource({ ...task, transient: isTransient }, { deferSave: true });
+        this.taskQueries.upsertFromSource({ ...task, transient: isTransient, user_id: userId }, { deferSave: true });
         freshIds.push(`${task.source}:${task.source_id}`);
         didChange = true;
       }
@@ -824,6 +824,7 @@ export class TaskAggregator {
           removed = this.taskQueries.deleteStaleBySource(adapter.source, freshIds, {
             allowEmpty: canPurgeAll,
             deferSave: true,
+            userId,
           });
         }
       }
@@ -835,7 +836,8 @@ export class TaskAggregator {
 
       console.log(
         `[Aggregator] ${adapter.source}: Synced ${tasks.length} tasks` +
-        (removed > 0 ? `, removed ${removed} stale` : '')
+        (removed > 0 ? `, removed ${removed} stale` : '') +
+        (userId ? ` (user ${userId})` : '')
       );
       return { source: adapter.source, count: tasks.length };
     } catch (err) {
@@ -850,12 +852,12 @@ export class TaskAggregator {
     return this.adapters.map((a) => a.source);
   }
 
-  async syncAll(): Promise<
+  async syncAll(userId?: number): Promise<
     { source: string; count: number; error?: string }[]
   > {
     const results = [];
     for (const adapter of this.adapters) {
-      results.push(await this.syncSource(adapter.source));
+      results.push(await this.syncSource(adapter.source, userId));
     }
     return results;
   }

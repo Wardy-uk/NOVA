@@ -258,7 +258,7 @@ export function createTaskRoutes(
     const userId = (req as any).user?.id as number | undefined;
     const userRole = (req as any).user?.role as string | undefined;
     const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
-    const allTasks = taskQueries.getAllIncludingDone().filter((t) => allowedSources.has(t.source));
+    const allTasks = taskQueries.getAllIncludingDone(userId).filter((t) => allowedSources.has(t.source));
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -395,9 +395,10 @@ export function createTaskRoutes(
   });
 
   // POST /api/tasks/sync — Trigger manual sync (all sources)
-  router.post('/sync', async (_req, res) => {
+  router.post('/sync', async (req, res) => {
     try {
-      const results = await aggregator.syncAll();
+      const userId = (req as any).user?.id as number | undefined;
+      const results = await aggregator.syncAll(userId);
       res.json({ ok: true, data: results });
     } catch (err) {
       res.status(500).json({
@@ -415,7 +416,8 @@ export function createTaskRoutes(
       return;
     }
     try {
-      const result = await aggregator.syncSource(source);
+      const userId = (req as any).user?.id as number | undefined;
+      const result = await aggregator.syncSource(source, userId);
       res.json({ ok: true, data: result });
     } catch (err) {
       res.status(500).json({

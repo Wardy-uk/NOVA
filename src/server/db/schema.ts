@@ -405,6 +405,7 @@ export function initializeSchema(database: Database): void {
     ['delivery_milestones', 'jira_keys TEXT'],
     ['delivery_entries', 'crm_customer_id INTEGER'],
     ['crm_customers', 'account_number TEXT'],
+    ['tasks', 'user_id INTEGER'],
   ];
   // Data migration: consolidate 'user' role → 'viewer'
   try { database.run(`UPDATE users SET role = 'viewer' WHERE role = 'user'`); } catch { /* ignore */ }
@@ -445,6 +446,7 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_milestones_target ON delivery_milestones(target_date)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_milestone_templates_active ON milestone_templates(active, sort_order)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_milestones_workflow ON delivery_milestones(workflow_task_created, status)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id)`);
 
   // Milestone-to-ticket-group linking: which ticket groups trigger at which milestone stage
   database.run(`
