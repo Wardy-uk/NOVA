@@ -178,6 +178,8 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
   const [dateFilter, setDateFilter] = useState<'all' | 'this-month' | 'next-month' | 'custom'>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [bfRunning, setBfRunning] = useState(false);
+  const [bfResult, setBfResult] = useState<string | null>(null);
   const auth = useAuth();
 
   // Completion tracker data
@@ -421,6 +423,30 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
       setSyncResult({ ok: false, message: err instanceof Error ? err.message : 'Network error' });
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleBackfillMilestones = async () => {
+    if (!activeTab) return;
+    setBfRunning(true);
+    setBfResult(null);
+    try {
+      const resp = await fetch('/api/milestones/backfill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product: activeTab, saleType: activeTab }),
+      });
+      const json = await resp.json();
+      if (json.ok) {
+        const { created, skipped } = json.data;
+        setBfResult(`Created milestones for ${created} deliveries (${skipped} already had milestones)`);
+      } else {
+        setBfResult(`Error: ${json.error}`);
+      }
+    } catch (err) {
+      setBfResult(`Error: ${err instanceof Error ? err.message : 'Failed'}`);
+    } finally {
+      setBfRunning(false);
     }
   };
 
@@ -691,6 +717,14 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
                 {syncing === 'pull' ? 'Importing...' : 'Import xlsx to DB'}
               </button>
               <button
+                onClick={handleBackfillMilestones}
+                disabled={bfRunning || !activeTab}
+                className="px-3 py-2 text-xs rounded bg-[#2f353d] text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 border border-[#3a424d] transition-colors disabled:opacity-50"
+                title={`Create milestones for all ${activeTab ?? ''} deliveries that don't have them yet`}
+              >
+                {bfRunning ? 'Backfilling...' : `Backfill ${activeTab ?? ''} Milestones`}
+              </button>
+              <button
                 onClick={() => { setXlsxPrefill(null); setDrawerEntryId(null); setDrawerIsNew(true); }}
                 className="px-4 py-2 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors"
               >
@@ -728,6 +762,17 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
         }`}>
           {syncResult.message}
           <button onClick={() => setSyncResult(null)} className="ml-3 text-neutral-500 hover:text-neutral-300">x</button>
+        </div>
+      )}
+
+      {bfResult && (
+        <div className={`mb-4 px-4 py-2 rounded text-xs border ${
+          bfResult.startsWith('Error')
+            ? 'bg-red-950/50 border-red-900 text-red-400'
+            : 'bg-green-950/50 border-green-900 text-green-400'
+        }`}>
+          {bfResult}
+          <button onClick={() => setBfResult(null)} className="ml-3 text-neutral-500 hover:text-neutral-300">x</button>
         </div>
       )}
 

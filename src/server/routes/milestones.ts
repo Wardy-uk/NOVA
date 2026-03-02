@@ -257,9 +257,18 @@ export function createMilestoneRoutes(
     const entry = deliveryQueries.getById(deliveryId);
     if (!entry) { res.status(404).json({ ok: false, error: 'Delivery entry not found' }); return; }
 
-    // Use order_date as start, fallback to today
-    const startDate = entry.order_date || new Date().toISOString().split('T')[0];
-    const milestones = milestoneQueries.createForDelivery(deliveryId, startDate);
+    // Use order_date as start, fallback to today — handle DD/MM/YYYY format
+    let startDate = new Date().toISOString().split('T')[0];
+    if (entry.order_date) {
+      const ddmmyyyy = entry.order_date.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$/);
+      if (ddmmyyyy) {
+        startDate = `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+      } else if (/^\d{4}-\d{2}-\d{2}/.test(entry.order_date)) {
+        startDate = entry.order_date.split('T')[0];
+      }
+    }
+    const saleType = (req.body as { saleType?: string })?.saleType ?? entry.sale_type ?? entry.product ?? undefined;
+    const milestones = milestoneQueries.createForDelivery(deliveryId, startDate, saleType);
 
     // Sync to tasks
     syncDeliveryMilestonesToTasks(deliveryId, entry.account, milestoneQueries, taskQueries);

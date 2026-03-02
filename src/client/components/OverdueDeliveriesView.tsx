@@ -15,12 +15,6 @@ interface OverdueDelivery {
   oldest_overdue_date: string;
 }
 
-interface BackfillResult {
-  created: number;
-  skipped: number;
-  total: number;
-}
-
 function daysLate(dateStr: string): number {
   const target = new Date(dateStr + 'T00:00:00');
   const now = new Date();
@@ -32,15 +26,6 @@ export function OverdueDeliveriesView() {
   const [data, setData] = useState<OverdueDelivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Backfill state
-  const [products, setProducts] = useState<string[]>([]);
-  const [saleTypes, setSaleTypes] = useState<Array<{ id: number; name: string }>>([]);
-  const [bfProduct, setBfProduct] = useState('');
-  const [bfSaleType, setBfSaleType] = useState('');
-  const [bfRunning, setBfRunning] = useState(false);
-  const [bfResult, setBfResult] = useState<BackfillResult | null>(null);
-  const [bfError, setBfError] = useState<string | null>(null);
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -56,57 +41,11 @@ export function OverdueDeliveriesView() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Load products and sale types for backfill dropdowns
-  useEffect(() => {
-    fetch('/api/delivery/entries')
-      .then(r => r.json())
-      .then(json => {
-        if (json.ok && json.data) {
-          const prods = [...new Set((json.data as Array<{ product: string }>).map(e => e.product))].sort();
-          setProducts(prods);
-        }
-      })
-      .catch(() => {});
-    fetch('/api/onboarding/config/sale-types')
-      .then(r => r.json())
-      .then(json => {
-        if (json.ok && json.data) setSaleTypes(json.data);
-      })
-      .catch(() => {});
-  }, []);
-
   useEffect(() => {
     const handler = () => { loadData(); };
     window.addEventListener('nova-refresh', handler);
     return () => window.removeEventListener('nova-refresh', handler);
   }, [loadData]);
-
-  const handleBackfill = async () => {
-    setBfRunning(true);
-    setBfResult(null);
-    setBfError(null);
-    try {
-      const body: Record<string, string> = {};
-      if (bfProduct) body.product = bfProduct;
-      if (bfSaleType) body.saleType = bfSaleType;
-      const res = await fetch('/api/milestones/backfill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (json.ok) {
-        setBfResult(json.data);
-        loadData(); // refresh the table
-      } else {
-        setBfError(json.error ?? 'Backfill failed');
-      }
-    } catch (err) {
-      setBfError(err instanceof Error ? err.message : 'Backfill failed');
-    } finally {
-      setBfRunning(false);
-    }
-  };
 
   if (loading) {
     return <div className="text-sm text-neutral-500 py-8 text-center">Loading overdue deliveries...</div>;
@@ -128,51 +67,6 @@ export function OverdueDeliveriesView() {
         <div className="bg-[#2f353d] rounded-lg border border-[#3a424d] p-3">
           <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Total Overdue Milestones</div>
           <div className="text-xl font-bold text-red-400">{totalOverdueMilestones}</div>
-        </div>
-      </div>
-
-      {/* Backfill milestones */}
-      <div className="bg-[#2f353d] rounded-lg border border-[#3a424d] p-4">
-        <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-3">Apply Milestones</div>
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="block text-[10px] text-neutral-500 mb-1">Product</label>
-            <select
-              value={bfProduct}
-              onChange={(e) => setBfProduct(e.target.value)}
-              className="bg-[#272C33] border border-[#3a424d] rounded px-2 py-1.5 text-xs text-neutral-200"
-            >
-              <option value="">All products</option>
-              {products.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[10px] text-neutral-500 mb-1">Sale Type (for day offsets)</label>
-            <select
-              value={bfSaleType}
-              onChange={(e) => setBfSaleType(e.target.value)}
-              className="bg-[#272C33] border border-[#3a424d] rounded px-2 py-1.5 text-xs text-neutral-200"
-            >
-              <option value="">Default offsets</option>
-              {saleTypes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-            </select>
-          </div>
-          <button
-            onClick={handleBackfill}
-            disabled={bfRunning}
-            className="px-4 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50 transition-colors"
-          >
-            {bfRunning ? 'Running...' : 'Backfill Milestones'}
-          </button>
-          {bfResult && (
-            <span className="text-xs text-green-400">
-              Created for {bfResult.created} deliveries, skipped {bfResult.skipped} (already had milestones)
-            </span>
-          )}
-          {bfError && <span className="text-xs text-red-400">{bfError}</span>}
-        </div>
-        <div className="text-[10px] text-neutral-600 mt-2">
-          Only applies to deliveries with no existing milestones. Existing milestones are never modified or deleted.
         </div>
       </div>
 
