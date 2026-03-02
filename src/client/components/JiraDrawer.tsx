@@ -7,6 +7,14 @@ interface Transition {
   to?: { name?: string };
 }
 
+interface TransitionFieldInfo {
+  key: string;
+  name: string;
+  required: boolean;
+  type: string;
+  allowedValues?: Array<{ value: string; id?: string }>;
+}
+
 interface JiraComment {
   id: string;
   body: string;
@@ -59,6 +67,8 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
   } | null>(null);
   const [transitionComment, setTransitionComment] = useState('');
   const [transitionCommentType, setTransitionCommentType] = useState<'internal' | 'public'>('internal');
+  const [transitionFieldsLog, setTransitionFieldsLog] = useState<Record<string, TransitionFieldInfo[]>>({});
+  const [showFieldsLog, setShowFieldsLog] = useState(false);
 
   const fields = useMemo(() => {
     const fieldsObj = (issue?.fields as Record<string, unknown> | undefined) ?? {};
@@ -122,6 +132,9 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
           const data = transitionsJson.data;
           const list = Array.isArray(data) ? data : data?.transitions ?? data?.value ?? [];
           setTransitions(list as Transition[]);
+          if (transitionsJson.transitionFields) {
+            setTransitionFieldsLog(transitionsJson.transitionFields);
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load Jira data');
@@ -356,6 +369,65 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* Transition fields log */}
+          {Object.keys(transitionFieldsLog).length > 0 && (
+            <div>
+              <button
+                onClick={() => setShowFieldsLog(!showFieldsLog)}
+                className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-neutral-500 hover:text-neutral-300 transition-colors"
+              >
+                <span className="text-[10px]">{showFieldsLog ? '\u25BC' : '\u25B6'}</span>
+                Transition Fields ({Object.keys(transitionFieldsLog).length} transitions)
+              </button>
+              {showFieldsLog && (
+                <div className="mt-2 space-y-2 max-h-72 overflow-auto">
+                  {Object.entries(transitionFieldsLog).map(([txnKey, txnFields]) => {
+                    const [txnId, ...nameParts] = txnKey.split(':');
+                    const txnName = nameParts.join(':');
+                    const required = txnFields.filter((f) => f.required);
+                    const optional = txnFields.filter((f) => !f.required);
+                    return (
+                      <div key={txnKey} className="px-3 py-2 rounded bg-[#272C33] border border-[#3a424d]">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-xs font-semibold text-neutral-100">{txnName}</span>
+                          <span className="text-[10px] text-neutral-600">id: {txnId}</span>
+                          {required.length > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/40 text-red-400 font-medium">
+                              {required.length} required
+                            </span>
+                          )}
+                          {txnFields.length === 0 && (
+                            <span className="text-[10px] text-neutral-600">no fields</span>
+                          )}
+                        </div>
+                        {txnFields.length > 0 && (
+                          <div className="space-y-1">
+                            {[...required, ...optional].map((f) => (
+                              <div key={f.key} className="flex items-start gap-2 text-[11px]">
+                                <span className={`shrink-0 w-1.5 h-1.5 rounded-full mt-1.5 ${f.required ? 'bg-red-400' : 'bg-neutral-600'}`} />
+                                <div className="min-w-0">
+                                  <span className="text-neutral-300 font-medium">{f.name}</span>
+                                  <span className="text-neutral-600 ml-1.5">({f.key})</span>
+                                  <span className="text-neutral-600 ml-1.5">{f.type}</span>
+                                  {f.required && <span className="text-red-400 ml-1.5 font-medium">required</span>}
+                                  {f.allowedValues && f.allowedValues.length > 0 && (
+                                    <div className="text-neutral-500 mt-0.5 pl-1">
+                                      values: {f.allowedValues.map((v) => v.value).join(', ')}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

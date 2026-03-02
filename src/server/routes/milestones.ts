@@ -193,6 +193,10 @@ export function createMilestoneRoutes(
     res.json({ ok: true, data: milestoneQueries.getSummary() });
   });
 
+  router.get('/overdue-deliveries', (_req, res) => {
+    res.json({ ok: true, data: milestoneQueries.getOverdueDeliveries() });
+  });
+
   // ── Delivery Milestone Instances ──
 
   router.get('/delivery/:deliveryId', (req, res) => {

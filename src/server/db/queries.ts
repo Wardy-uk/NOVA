@@ -1928,6 +1928,55 @@ export class MilestoneQueries {
     return { total: 0, pending: 0, in_progress: 0, complete: 0, overdue: 0 };
   }
 
+  /** Deliveries that have at least one overdue (non-complete, past target_date) milestone.
+   *  Returns delivery info + overdue count + oldest overdue milestone name/date. */
+  getOverdueDeliveries(): Array<{
+    delivery_id: number; onboarding_id: string | null; account: string; product: string;
+    onboarder: string | null; status: string; go_live_date: string | null;
+    overdue_count: number; total_count: number; complete_count: number;
+    oldest_overdue_name: string; oldest_overdue_date: string;
+  }> {
+    const stmt = this.db.prepare(`
+      SELECT
+        de.id as delivery_id, de.onboarding_id, de.account, de.product,
+        de.onboarder, de.status, de.go_live_date,
+        COUNT(*) as total_count,
+        SUM(CASE WHEN dm.status = 'complete' THEN 1 ELSE 0 END) as complete_count,
+        SUM(CASE WHEN dm.status != 'complete' AND dm.target_date < date('now') THEN 1 ELSE 0 END) as overdue_count,
+        (SELECT dm2.template_name FROM delivery_milestones dm2
+         WHERE dm2.delivery_id = de.id AND dm2.status != 'complete' AND dm2.target_date < date('now')
+         ORDER BY dm2.target_date ASC LIMIT 1) as oldest_overdue_name,
+        (SELECT dm2.target_date FROM delivery_milestones dm2
+         WHERE dm2.delivery_id = de.id AND dm2.status != 'complete' AND dm2.target_date < date('now')
+         ORDER BY dm2.target_date ASC LIMIT 1) as oldest_overdue_date
+      FROM delivery_milestones dm
+      JOIN delivery_entries de ON dm.delivery_id = de.id
+      GROUP BY de.id
+      HAVING overdue_count > 0
+      ORDER BY overdue_count DESC, oldest_overdue_date ASC
+    `);
+    const results: Array<any> = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      results.push({
+        delivery_id: row.delivery_id as number,
+        onboarding_id: (row.onboarding_id as string) ?? null,
+        account: (row.account as string) ?? '',
+        product: (row.product as string) ?? '',
+        onboarder: (row.onboarder as string) ?? null,
+        status: (row.status as string) ?? '',
+        go_live_date: (row.go_live_date as string) ?? null,
+        overdue_count: (row.overdue_count as number) ?? 0,
+        total_count: (row.total_count as number) ?? 0,
+        complete_count: (row.complete_count as number) ?? 0,
+        oldest_overdue_name: (row.oldest_overdue_name as string) ?? '',
+        oldest_overdue_date: (row.oldest_overdue_date as string) ?? '',
+      });
+    }
+    stmt.free();
+    return results;
+  }
+
   /** Get the next non-complete milestone per delivery, ordered by target_date ASC */
   getNextPendingByDelivery(deliveryIds: number[]): Map<number, { name: string; target_date: string; status: string }> {
     const result = new Map<number, { name: string; target_date: string; status: string }>();

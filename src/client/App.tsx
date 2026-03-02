@@ -13,6 +13,7 @@ import { AdminView } from './components/AdminView.js';
 import { OnboardingConfigView } from './components/OnboardingConfigView.js';
 import { OnboardingCalendar } from './components/OnboardingCalendar.js';
 import { OnboardingDashboard } from './components/OnboardingDashboard.js';
+import { OverdueDeliveriesView } from './components/OverdueDeliveriesView.js';
 import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
@@ -34,7 +35,7 @@ import { type OwnershipFilter } from './utils/taskHelpers.js';
 type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
-  | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard'
+  | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm'
   | 'settings' | 'admin-panel'
   | 'help' | 'debug';
@@ -87,6 +88,7 @@ const AREAS: Record<Area, AreaDef> = {
     tabs: [
       { view: 'ob-dashboard', label: 'Overview' },
       { view: 'delivery', label: 'Delivery' },
+      { view: 'ob-overdue', label: 'Overdue' },
       { view: 'ob-calendar', label: 'Milestones' },
       { view: 'onboarding-config', label: 'Onboarding Matrix' },
     ],
@@ -112,7 +114,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'team-workload', 'admin-panel']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'team-workload', 'admin-panel']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -650,6 +652,9 @@ export function App() {
           )}
           {view === 'delivery' && (
             <DeliveryView canWrite={areaAccess.onboarding === 'edit'} />
+          )}
+          {view === 'ob-overdue' && (
+            <OverdueDeliveriesView />
           )}
           {view === 'ob-calendar' && (
             <OnboardingCalendar />

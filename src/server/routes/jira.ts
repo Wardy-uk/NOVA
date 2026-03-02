@@ -221,12 +221,18 @@ export function createJiraRoutes(
 
       // Fetch field options from REST transitions API (has per-transition field screens)
       // AND editmeta (has general edit screen fields). Merge both for complete coverage.
+      // Also build per-transition field metadata for the UI debug log.
       let fieldOptions: Record<string, Array<{ value: string; id?: string }>> | undefined;
+      let transitionFields: Record<string, Array<{
+        key: string; name: string; required: boolean; type: string;
+        allowedValues?: Array<{ value: string; id?: string }>;
+      }>> | undefined;
       try {
         const userId = (req as any).user?.id as number | undefined;
         const restClient = getClientForUser(userId);
         if (restClient) {
           fieldOptions = {};
+          transitionFields = {};
 
           // 1. Transition fields — includes fields only available during transitions
           try {
@@ -234,18 +240,37 @@ export function createJiraRoutes(
             const txns = (txnData as Record<string, unknown>)?.transitions as Array<Record<string, unknown>> | undefined;
             if (txns) {
               for (const txn of txns) {
+                const txnName = (txn.name as string) ?? String(txn.id);
+                const txnId = String(txn.id);
                 const txnFields = txn.fields as Record<string, Record<string, unknown>> | undefined;
-                if (!txnFields) continue;
-                for (const [fieldKey, fieldMeta] of Object.entries(txnFields)) {
-                  if (fieldOptions[fieldKey]) continue; // already have options for this field
-                  const allowed = fieldMeta?.allowedValues as Array<Record<string, unknown>> | undefined;
-                  if (allowed && allowed.length > 0) {
-                    fieldOptions[fieldKey] = allowed.map((v) => ({
-                      value: (v.value as string) ?? (v.name as string) ?? String(v.id),
-                      id: v.id as string | undefined,
-                    })).filter((v) => v.value);
+
+                // Build per-transition field list
+                const fieldList: typeof transitionFields[string] = [];
+                if (txnFields) {
+                  for (const [fieldKey, fieldMeta] of Object.entries(txnFields)) {
+                    const schema = fieldMeta?.schema as Record<string, unknown> | undefined;
+                    const fieldEntry: typeof fieldList[number] = {
+                      key: fieldKey,
+                      name: (fieldMeta?.name as string) ?? fieldKey,
+                      required: !!(fieldMeta?.required),
+                      type: (schema?.type as string) ?? (schema?.custom as string) ?? 'unknown',
+                    };
+                    const allowed = fieldMeta?.allowedValues as Array<Record<string, unknown>> | undefined;
+                    if (allowed && allowed.length > 0) {
+                      const mapped = allowed.map((v) => ({
+                        value: (v.value as string) ?? (v.name as string) ?? String(v.id),
+                        id: v.id as string | undefined,
+                      })).filter((v) => v.value);
+                      fieldEntry.allowedValues = mapped;
+                      // Also populate top-level fieldOptions
+                      if (!fieldOptions![fieldKey]) {
+                        fieldOptions![fieldKey] = mapped;
+                      }
+                    }
+                    fieldList.push(fieldEntry);
                   }
                 }
+                transitionFields[`${txnId}:${txnName}`] = fieldList;
               }
             }
             console.log(`[Jira] transition fields for ${key}: ${Object.keys(fieldOptions).length} fields with options — ${JSON.stringify(Object.keys(fieldOptions))}`);
@@ -294,7 +319,7 @@ export function createJiraRoutes(
         console.warn(`[Jira] field options for ${key} failed:`, outerErr instanceof Error ? outerErr.message : outerErr);
       }
 
-      res.json({ ok: true, data: parseToolResult(result), fieldOptions });
+      res.json({ ok: true, data: parseToolResult(result), fieldOptions, transitionFields });
     } catch (err) {
       res.status(500).json({
         ok: false,
@@ -318,13 +343,43 @@ export function createJiraRoutes(
     const results: Record<string, unknown> = {};
 
     try {
-      // When transitioning, bundle fields + comment INTO the transition request
-      // so Jira validators see everything in one atomic operation.
+      // When transitioning, only send fields that are on the transition screen.
+      // Fields not on the screen are sent as a separate update afterwards.
       if (transition && restClient) {
         const transId = String(transition);
-        const formatted = fields && Object.keys(fields).length > 0
-          ? formatFieldsForRest(fields)
-          : undefined;
+
+        // Discover which fields the transition screen accepts
+        let screenFields: Set<string> | null = null;
+        try {
+          const txnData = await restClient.getTransitionsWithFields(key);
+          const txns = (txnData as Record<string, unknown>)?.transitions as Array<Record<string, unknown>> | undefined;
+          const match = txns?.find((t) => String(t.id) === transId);
+          if (match?.fields) {
+            screenFields = new Set(Object.keys(match.fields as Record<string, unknown>));
+          }
+        } catch (e) {
+          console.warn(`[Jira] Could not fetch transition screen fields for ${key}:`, e instanceof Error ? e.message : e);
+        }
+
+        // Split fields into those on the transition screen vs those that need a separate update
+        let transitionFormatted: Record<string, unknown> | undefined;
+        let remainingFields: Record<string, unknown> | undefined;
+        if (fields && Object.keys(fields).length > 0) {
+          if (screenFields) {
+            const onScreen: Record<string, unknown> = {};
+            const offScreen: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(fields)) {
+              if (screenFields.has(k)) onScreen[k] = v;
+              else offScreen[k] = v;
+            }
+            if (Object.keys(onScreen).length > 0) transitionFormatted = formatFieldsForRest(onScreen);
+            if (Object.keys(offScreen).length > 0) remainingFields = offScreen;
+            console.log(`[Jira] Transition ${transId} screen fields: [${[...screenFields].join(',')}], sending: [${Object.keys(onScreen).join(',')}], deferred: [${Object.keys(offScreen).join(',')}]`);
+          } else {
+            // Couldn't determine screen fields — send all (best effort)
+            transitionFormatted = formatFieldsForRest(fields);
+          }
+        }
 
         // Build comment body for the transition request
         let transitionComment: { body: object; visibility?: { type: string; value: string } } | undefined;
@@ -339,14 +394,27 @@ export function createJiraRoutes(
           transitionComment = { body: commentBody, ...(visibility ? { visibility } : {}) };
         }
 
-        console.log(`[Jira] Transitioning ${key} to ${transId} via REST (fields: ${formatted ? Object.keys(formatted).join(',') : 'none'}, comment: ${transitionComment ? commentVisibility : 'none'})`);
+        console.log(`[Jira] Transitioning ${key} to ${transId} via REST (fields: ${transitionFormatted ? Object.keys(transitionFormatted).join(',') : 'none'}, comment: ${transitionComment ? commentVisibility : 'none'})`);
         await restClient.transitionIssue(key, transId, {
-          fields: formatted,
+          fields: transitionFormatted,
           comment: transitionComment,
         });
         results.transition = { ok: true };
-        if (formatted) results.update = { ok: true };
+        if (transitionFormatted) results.update = { ok: true };
         if (transitionComment) results.comment = { ok: true };
+
+        // Send deferred fields as a separate update (not on transition screen)
+        if (remainingFields && Object.keys(remainingFields).length > 0) {
+          try {
+            const formatted = formatFieldsForRest(remainingFields);
+            console.log(`[Jira] Updating deferred fields on ${key} via REST:`, JSON.stringify(formatted));
+            await restClient.updateFields(key, formatted);
+            results.deferredUpdate = { ok: true, fields: Object.keys(remainingFields) };
+          } catch (deferErr) {
+            console.warn(`[Jira] Deferred field update on ${key} failed:`, deferErr instanceof Error ? deferErr.message : deferErr);
+            results.deferredUpdate = { ok: false, error: deferErr instanceof Error ? deferErr.message : String(deferErr) };
+          }
+        }
       } else {
         // No transition — update fields and comment separately
 
