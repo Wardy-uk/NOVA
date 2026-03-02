@@ -259,7 +259,7 @@ export function createAuthRoutes(
       }
       // Build redirect URI pointing to the backend callback route
       const settings = settingsQueries.getAll();
-      const baseUrl = settings.sso_base_url || `http://localhost:${process.env.PORT ?? '3001'}`;
+      const baseUrl = settings.sso_base_url || `https://${_req.get('host')}`;
       const redirectUri = `${baseUrl}/api/auth/sso/callback`;
       const url = await ssoService.getLoginUrl(redirectUri);
       res.json({ ok: true, data: { url } });
@@ -289,7 +289,7 @@ export function createAuthRoutes(
 
       // Reconstruct the same redirect URI used in getLoginUrl
       const settings = settingsQueries.getAll();
-      const baseUrl = settings.sso_base_url || `http://localhost:${process.env.PORT ?? '3001'}`;
+      const baseUrl = settings.sso_base_url || `https://${req.get('host')}`;
       const redirectUri = `${baseUrl}/api/auth/sso/callback`;
 
       const claims = await ssoService.handleCallback(

@@ -82,6 +82,7 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'sso_tenant_id', label: 'Tenant ID', type: 'text', placeholder: 'Azure AD directory (tenant) ID', required: true },
       { key: 'sso_client_id', label: 'Client ID', type: 'text', placeholder: 'Azure AD app registration client ID', required: true },
       { key: 'sso_client_secret', label: 'Client Secret', type: 'password', placeholder: 'Azure AD app registration client secret', required: true },
+      { key: 'sso_base_url', label: 'Base URL', type: 'url', placeholder: 'https://nova.nurtur.tech (auto-detected if blank)', required: false },
     ],
   },
   {

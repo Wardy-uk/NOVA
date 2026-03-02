@@ -6,6 +6,8 @@ N.O.V.A — TO DO
 (empty — all items sorted below)
 
 
+ability to manually add ticket ids to delivery items where these have been created before NOVA 
+
 === CURRENT STATUS (2 Mar 2026) ===
 
 Deployed at https://nova.nurtur.tech | v1.1.6 | Branch: nova-codex
