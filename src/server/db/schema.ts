@@ -409,6 +409,14 @@ export function initializeSchema(database: Database): void {
   ];
   // Data migration: consolidate 'user' role → 'viewer'
   try { database.run(`UPDATE users SET role = 'viewer' WHERE role = 'user'`); } catch { /* ignore */ }
+  // Data migration: assign orphaned tasks to the first admin user
+  try {
+    const adminRow = database.exec(`SELECT id FROM users WHERE role LIKE '%admin%' ORDER BY id LIMIT 1`);
+    const adminId = adminRow[0]?.values[0]?.[0] as number | undefined;
+    if (adminId) {
+      database.run(`UPDATE tasks SET user_id = ? WHERE user_id IS NULL`, [adminId]);
+    }
+  } catch { /* ignore */ }
   for (const [table, colDef] of migrations) {
     try {
       database.run(`ALTER TABLE ${table} ADD COLUMN ${colDef}`);
