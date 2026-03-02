@@ -121,7 +121,7 @@ export class TaskQueries {
         category = excluded.category,
         raw_data = excluded.raw_data,
         transient = excluded.transient,
-        user_id = COALESCE(excluded.user_id, tasks.user_id),
+        user_id = COALESCE(tasks.user_id, excluded.user_id),
         last_synced = datetime('now'),
         updated_at = datetime('now')`,
       [

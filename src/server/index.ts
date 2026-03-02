@@ -442,9 +442,16 @@ async function main() {
     }
   };
 
+  // Resolve primary admin user ID for background sync ownership
+  const primaryAdminId = (() => {
+    const users = userQueries.getAll();
+    const admin = users.find(u => u.role.split(',').map(r => r.trim()).includes('admin'));
+    return admin?.id ?? 1;
+  })();
+
   const runFullSync = async () => {
     try {
-      const results = await aggregator.syncAll();
+      const results = await aggregator.syncAll(primaryAdminId);
       const now = new Date().toISOString();
       lastAutoSync = now;
       for (const r of results) lastSourceSync[r.source] = now;
@@ -480,7 +487,7 @@ async function main() {
         source,
         setInterval(async () => {
           try {
-            const result = await aggregator.syncSource(source);
+            const result = await aggregator.syncSource(source, primaryAdminId);
             const now = new Date().toISOString();
             lastAutoSync = now;
             lastSourceSync[source] = now;
