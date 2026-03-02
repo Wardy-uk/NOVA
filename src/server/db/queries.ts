@@ -1126,6 +1126,19 @@ export class FeedbackQueries {
     return id;
   }
 
+  getByUser(userId: number, filters?: { hideResolved?: boolean }): Feedback[] {
+    let sql = `SELECT * FROM feedback WHERE user_id = ?`;
+    const params: (string | number)[] = [userId];
+    if (filters?.hideResolved) { sql += ` AND status != 'resolved'`; }
+    sql += ` ORDER BY created_at DESC`;
+    const stmt = this.db.prepare(sql);
+    stmt.bind(params);
+    const results: Feedback[] = [];
+    while (stmt.step()) { results.push(stmt.getAsObject() as unknown as Feedback); }
+    stmt.free();
+    return results;
+  }
+
   getAll(filters?: { status?: string }): (Feedback & { username?: string })[] {
     let sql = `SELECT f.*, u.username FROM feedback f LEFT JOIN users u ON f.user_id = u.id WHERE 1=1`;
     const params: string[] = [];

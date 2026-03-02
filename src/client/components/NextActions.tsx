@@ -56,6 +56,16 @@ function loadSavedSources(): Set<string> {
   return new Set(ALL_SOURCE_VALUES);
 }
 
+function loadSavedCount(): number {
+  if (typeof window === 'undefined') return 10;
+  const saved = window.localStorage.getItem('nova_insights_count');
+  if (saved) {
+    const n = parseInt(saved, 10);
+    if (n >= 1 && n <= 25) return n;
+  }
+  return 10;
+}
+
 export function NextActions({ onUpdateTask }: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -63,6 +73,7 @@ export function NextActions({ onUpdateTask }: Props) {
   const [dismissed, setDismissed] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [sourceFilter, setSourceFilter] = useState<Set<string>>(loadSavedSources);
+  const [taskCount, setTaskCount] = useState(loadSavedCount);
 
   const isAllSelected = sourceFilter.size === ALL_SOURCE_VALUES.size;
 
@@ -71,9 +82,10 @@ export function NextActions({ onUpdateTask }: Props) {
     setError(null);
     setDismissed(false);
     try {
-      const query = isAllSelected
-        ? ''
-        : `?source=${encodeURIComponent([...sourceFilter].join(','))}`;
+      const params = new URLSearchParams();
+      if (!isAllSelected) params.set('source', [...sourceFilter].join(','));
+      params.set('count', String(taskCount));
+      const query = params.toString() ? `?${params}` : '';
       const res = await fetch(`/api/actions/suggest${query}`, { method: 'POST' });
       const json = await res.json();
       if (typeof window !== 'undefined') {
@@ -125,6 +137,11 @@ export function NextActions({ onUpdateTask }: Props) {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('nova_source_filter', JSON.stringify([...sourceFilter]));
   }, [sourceFilter]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('nova_insights_count', String(taskCount));
+  }, [taskCount]);
 
   const handleAction = (id: string, updates: Record<string, unknown>) => {
     onUpdateTask(id, updates);
@@ -188,6 +205,22 @@ export function NextActions({ onUpdateTask }: Props) {
                 </button>
               );
             })}
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-[11px] text-neutral-500">Tasks to include:</span>
+            {[5, 10, 15, 20].map(n => (
+              <button
+                key={n}
+                onClick={() => { setTaskCount(n); setSuggestions([]); setActiveIndex(null); }}
+                className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
+                  taskCount === n
+                    ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
+                    : 'bg-[#272C33] text-neutral-400 hover:bg-[#363d47]'
+                }`}
+              >
+                {n}
+              </button>
+            ))}
           </div>
         </div>
         {/* NOVA Insights button (right, centered, bordered) */}

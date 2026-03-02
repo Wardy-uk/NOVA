@@ -381,27 +381,22 @@ export function createJiraRoutes(
           }
         }
 
-        // Build comment body for the transition request
-        let transitionComment: { body: object; visibility?: { type: string; value: string } } | undefined;
+        // Add comment BEFORE the transition so it appears before the status change
         if (comment?.trim()) {
-          const commentBody = {
-            type: 'doc', version: 1,
-            content: [{ type: 'paragraph', content: [{ type: 'text', text: comment.trim() }] }],
-          };
           const visibility = commentVisibility === 'internal'
             ? { type: 'role', value: getSettings?.()?.jira_internal_comment_role || 'Service Desk Team' }
             : undefined;
-          transitionComment = { body: commentBody, ...(visibility ? { visibility } : {}) };
+          console.log(`[Jira] Adding comment to ${key} before transition (${commentVisibility})`);
+          await restClient.addComment(key, comment.trim(), visibility ? { visibility } : undefined);
+          results.comment = { ok: true };
         }
 
-        console.log(`[Jira] Transitioning ${key} to ${transId} via REST (fields: ${transitionFormatted ? Object.keys(transitionFormatted).join(',') : 'none'}, comment: ${transitionComment ? commentVisibility : 'none'})`);
+        console.log(`[Jira] Transitioning ${key} to ${transId} via REST (fields: ${transitionFormatted ? Object.keys(transitionFormatted).join(',') : 'none'})`);
         await restClient.transitionIssue(key, transId, {
           fields: transitionFormatted,
-          comment: transitionComment,
         });
         results.transition = { ok: true };
         if (transitionFormatted) results.update = { ok: true };
-        if (transitionComment) results.comment = { ok: true };
 
         // Send deferred fields as a separate update (not on transition screen)
         if (remainingFields && Object.keys(remainingFields).length > 0) {

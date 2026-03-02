@@ -15,6 +15,7 @@ import { OnboardingCalendar } from './components/OnboardingCalendar.js';
 import { OnboardingDashboard } from './components/OnboardingDashboard.js';
 import { OverdueDeliveriesView } from './components/OverdueDeliveriesView.js';
 import { ProblemTicketsView } from './components/ProblemTicketsView.js';
+import { MyFeedbackView } from './components/MyFeedbackView.js';
 import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
@@ -38,11 +39,11 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm'
-  | 'settings' | 'admin-panel'
+  | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
 // Standalone views that don't belong to any area (no sub-tab bar)
-const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel']);
+const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel', 'my-feedback']);
 
 interface AreaDef {
   label: string;
@@ -166,6 +167,7 @@ export function App() {
     if (!stored || stored === 'mine') return null;
     return stored as OwnershipFilter;
   });
+  const [sdIssueTypeFilter, setSdIssueTypeFilter] = useState<string | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const standupChecked = useRef(false);
 
@@ -325,6 +327,21 @@ export function App() {
     return () => clearInterval(interval);
   }, [sdApiFilter, auth.isAuthenticated, refreshSdTasks]);
 
+  // Extract issue types from SD tasks and apply filter
+  const getIssueType = (task: typeof tasks[0]): string => {
+    const rd = task.raw_data as Record<string, unknown> | null;
+    if (!rd) return 'Unknown';
+    const fields = rd.fields as Record<string, unknown> | undefined;
+    const it = fields?.issuetype ?? rd.issuetype;
+    if (it && typeof it === 'object') return (it as any).name ?? 'Unknown';
+    if (typeof it === 'string') return it;
+    return 'Unknown';
+  };
+  const sdIssueTypes = Array.from(new Set(sdTasks.map(getIssueType))).filter(t => t !== 'Unknown').sort();
+  const filteredSdTasks = sdIssueTypeFilter
+    ? sdTasks.filter(t => getIssueType(t) === sdIssueTypeFilter)
+    : sdTasks;
+
   // Manual refresh for current area
   const [refreshing, setRefreshing] = useState(false);
   const handleManualRefresh = useCallback(async () => {
@@ -477,6 +494,12 @@ export function App() {
                       Send Feedback
                     </button>
                     <button
+                      onClick={() => { setView('my-feedback'); setShowUserMenu(false); }}
+                      className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
+                    >
+                      My Feedback
+                    </button>
+                    <button
                       onClick={() => { startTour(); setShowUserMenu(false); }}
                       className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
                     >
@@ -543,10 +566,23 @@ export function App() {
                       {opt.label}
                     </button>
                   ))}
-                  {sdFilter && sdFilter !== 'all-breached' && (
+                  {sdFilter && sdFilter !== 'all-breached' && sdFilter !== 'problems' && (
                     <span className="text-[10px] text-neutral-500 ml-2">
-                      {sdTasks.length} ticket{sdTasks.length !== 1 ? 's' : ''}
+                      {filteredSdTasks.length} ticket{filteredSdTasks.length !== 1 ? 's' : ''}
                     </span>
+                  )}
+                  {/* Issue type filter dropdown */}
+                  {sdIssueTypes.length > 1 && sdFilter !== 'problems' && (
+                    <select
+                      value={sdIssueTypeFilter ?? ''}
+                      onChange={e => setSdIssueTypeFilter(e.target.value || null)}
+                      className="ml-2 px-2 py-1 text-[11px] rounded bg-[#2f353d] text-neutral-400 border border-[#3a424d] focus:outline-none focus:border-[#5ec1ca]"
+                    >
+                      <option value="">All Types</option>
+                      {sdIssueTypes.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
                   )}
                   <button
                     onClick={handleManualRefresh}
@@ -625,7 +661,7 @@ export function App() {
                   {error}
                 </div>
               )}
-              <TaskList tasks={sdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
+              <TaskList tasks={filteredSdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
             </div>
           )}
           {view === 'tickets' && !sdFilter && (
@@ -635,14 +671,14 @@ export function App() {
                   {error}
                 </div>
               )}
-              <TaskList tasks={sdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
+              <TaskList tasks={filteredSdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
             </div>
           )}
           {view === 'kanban' && !sdFilter && (
-            <ServiceDeskKanban tasks={sdTasks} onUpdateTask={updateTask} onRefresh={refreshSdTasks} />
+            <ServiceDeskKanban tasks={filteredSdTasks} onUpdateTask={updateTask} onRefresh={refreshSdTasks} />
           )}
           {view === 'sd-calendar' && !sdFilter && (
-            <ServiceDeskCalendar tasks={sdTasks} onUpdateTask={updateTask} />
+            <ServiceDeskCalendar tasks={filteredSdTasks} onUpdateTask={updateTask} />
           )}
           {view === 'attention' && !sdFilter && (
             <NeedsAttentionView onUpdateTask={updateTask} scope="mine" />
@@ -679,6 +715,9 @@ export function App() {
           )}
           {view === 'admin-panel' && (
             <AdminView />
+          )}
+          {view === 'my-feedback' && (
+            <MyFeedbackView />
           )}
 
           {/* Standalone views */}

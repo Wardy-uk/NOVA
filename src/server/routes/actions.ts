@@ -65,8 +65,10 @@ export function createActionRoutes(
         return;
       }
 
+      // Allow client-side override via query param, else use global setting
+      const queryCount = req.query.count ? parseInt(req.query.count as string, 10) : NaN;
       const countStr = settingsQueries.get('ai_action_count') ?? '10';
-      const count = parseInt(countStr, 10) || 5;
+      const count = (!isNaN(queryCount) && queryCount >= 1 && queryCount <= 25) ? queryCount : (parseInt(countStr, 10) || 5);
 
       const tasks = allUserTasks;
       if (tasks.length === 0) {

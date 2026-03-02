@@ -1,9 +1,22 @@
 import { Router } from 'express';
 import type { FeedbackQueries, TaskQueries } from '../db/queries.js';
+import type { FileUserQueries } from '../db/user-store.js';
 import { saveDb } from '../db/schema.js';
 
-export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueries?: TaskQueries): Router {
+export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueries?: TaskQueries, userQueries?: FileUserQueries): Router {
   const router = Router();
+
+  /** Enrich feedback items with username from the file-based user store */
+  function enrichWithUsernames<T extends { user_id: number; username?: string }>(items: T[]): T[] {
+    if (!userQueries) return items;
+    for (const item of items) {
+      if (!item.username) {
+        const user = userQueries.getById(item.user_id);
+        if (user) item.username = user.display_name || user.username;
+      }
+    }
+    return items;
+  }
 
   // Submit feedback (any authenticated user)
   router.post('/', (req, res) => {
@@ -24,6 +37,15 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
     res.json({ ok: true, data: { id } });
   });
 
+  // Get current user's own feedback
+  router.get('/mine', (req, res) => {
+    const userId = (req as any).user?.id;
+    if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
+    const hideResolved = req.query.hideResolved === 'true';
+    const items = feedbackQueries.getByUser(userId, { hideResolved });
+    res.json({ ok: true, data: items });
+  });
+
   // List all feedback (admin only)
   router.get('/', (req, res) => {
     const role = (req as any).user?.role;
@@ -31,7 +53,7 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
 
     const status = req.query.status as string | undefined;
     const items = feedbackQueries.getAll(status ? { status } : undefined);
-    res.json({ ok: true, data: items });
+    res.json({ ok: true, data: enrichWithUsernames(items) });
   });
 
   // Reply to feedback (admin only)
@@ -46,6 +68,7 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
 
     feedbackQueries.reply(id, reply.trim(), adminUserId);
     const updated = feedbackQueries.getById(id);
+    if (updated) enrichWithUsernames([updated]);
     res.json({ ok: true, data: updated });
   });
 

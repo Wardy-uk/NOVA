@@ -3,11 +3,14 @@ N.O.V.A — TO DO
 
 --- Triage ---
 
-enhance permissions 
+enhance permissions
    global admin
    team admin
 
-nova insights move nunber of tasks toninckude to this tab not ny settings
+link to Agent database bym-asqlep01.database.windows.net / jira support db — pull back
+   availability, max number of tickets and configure these
+
+toast notifications for tickets "about" to breach — say 30 mins?
 
 
 === CURRENT STATUS (1 Mar 2026) ===
@@ -28,8 +31,10 @@ Deploy: .\deploy\deploy.ps1 -Branch nova-codex (on server C:\Nurtur\NOVA)
 Completed items: see NOVA_completed.txt
 
 
-=== DONE (1 Mar 2026) ===
+=== DONE (2 Mar 2026) ===
 
+- AI Problem Ticket Detection — rule engine + LLM sentiment, P1/P2/P3 queue
+  with ignore/suppress, "Problem Tickets" pill in Service Desk tab bar
 - Invite user function — sends email invite (Admin > Users > Invite button)
 - Import / mass add users — Excel/CSV upload in Admin > Users > Import Users
 - Standalone email service — direct MX delivery, no external SMTP required
@@ -40,6 +45,16 @@ Completed items: see NOVA_completed.txt
 
 
 === DO NEXT ===
+
+B1. [Bug] Ticket transition ordering — status change should be last action,
+    comment should be added first (currently reversed)
+B2. [Bug] Feedback shows "User #3" not username — join display name in query
+P1. [Priority] NOVA Insights — move 'number of tasks to include' setting from
+    My Settings to the Insights tab itself
+P2. [Priority] Move Feedback to user dropdown — own page, user sees their
+    submissions + replies, filter to hide resolved
+P3. [Priority] SD sort/filter by issue type — add Incidents / Service Requests
+    category filter to Unassigned/Breached views
 
 T4. Onboarding ticket status — on each onboarding/delivery item, show what
     Jira tickets have been created and their live status (batch-fetch from
