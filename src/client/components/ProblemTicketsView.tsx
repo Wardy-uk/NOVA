@@ -141,8 +141,11 @@ export function ProblemTicketsView() {
     try {
       const res = await fetch('/api/problem-tickets/scan', { method: 'POST' });
       const json = await res.json();
-      if (!json.ok) setError(json.error ?? 'Scan failed');
-      else setError(null);
+      if (!json.ok) {
+        setError(json.error ?? 'Scan failed');
+        return; // Don't reload — scan failed, nothing changed
+      }
+      setError(null);
       await loadData();
     } catch (err: any) {
       setError(err.message);
