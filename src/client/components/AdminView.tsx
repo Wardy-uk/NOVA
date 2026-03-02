@@ -43,6 +43,7 @@ interface MilestoneTemplate {
   sort_order: number;
   checklist_json: string;
   active: number;
+  tickets_enabled: number;
 }
 
 interface SaleType {
@@ -1823,6 +1824,7 @@ function MilestonesTab({
                 <th className="text-left px-4 py-2.5">Name</th>
                 <th className="text-center px-3 py-2.5 w-[100px]">Default Day</th>
                 <th className="text-center px-3 py-2.5 w-[70px]">Order</th>
+                <th className="text-center px-3 py-2.5 w-[70px]">Tickets</th>
                 <th className="text-center px-3 py-2.5 w-[70px]">Active</th>
                 <th className="text-right px-4 py-2.5 w-[120px]">Actions</th>
               </tr>
@@ -1856,6 +1858,16 @@ function MilestonesTab({
                     ) : (
                       tmpl.sort_order
                     )}
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    <button
+                      onClick={() => updateMilestoneTemplate(tmpl.id, { tickets_enabled: tmpl.tickets_enabled ? 0 : 1 })}
+                      className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                        tmpl.tickets_enabled ? 'bg-blue-900/40 text-blue-400 hover:bg-blue-900/60' : 'bg-[#272C33] text-neutral-600 hover:text-neutral-400'
+                      }`}
+                    >
+                      {tmpl.tickets_enabled ? 'On' : 'Off'}
+                    </button>
                   </td>
                   <td className="px-3 py-2.5 text-center">
                     <button

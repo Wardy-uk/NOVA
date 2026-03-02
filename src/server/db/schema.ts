@@ -407,6 +407,7 @@ export function initializeSchema(database: Database): void {
     ['crm_customers', 'account_number TEXT'],
     ['tasks', 'user_id INTEGER'],
     ['delivery_milestones', 'assigned_to INTEGER'],
+    ['milestone_templates', 'tickets_enabled INTEGER DEFAULT 0'],
   ];
   // Data migration: consolidate 'user' role → 'viewer'
   try { database.run(`UPDATE users SET role = 'viewer' WHERE role = 'user'`); } catch { /* ignore */ }

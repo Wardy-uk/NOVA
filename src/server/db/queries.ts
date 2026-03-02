@@ -1679,6 +1679,7 @@ export interface MilestoneTemplate {
   checklist_json: string;
   lead_days: number;
   active: number;
+  tickets_enabled: number;
   created_at: string;
   updated_at: string;
 }
@@ -1745,7 +1746,7 @@ export class MilestoneQueries {
     return id;
   }
 
-  updateTemplate(id: number, updates: Partial<Pick<MilestoneTemplate, 'name' | 'day_offset' | 'sort_order' | 'checklist_json' | 'lead_days' | 'active'>>): boolean {
+  updateTemplate(id: number, updates: Partial<Pick<MilestoneTemplate, 'name' | 'day_offset' | 'sort_order' | 'checklist_json' | 'lead_days' | 'active' | 'tickets_enabled'>>): boolean {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
@@ -1754,6 +1755,7 @@ export class MilestoneQueries {
     if (updates.checklist_json !== undefined) { fields.push('checklist_json = ?'); params.push(updates.checklist_json); }
     if (updates.lead_days !== undefined) { fields.push('lead_days = ?'); params.push(updates.lead_days); }
     if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
+    if (updates.tickets_enabled !== undefined) { fields.push('tickets_enabled = ?'); params.push(updates.tickets_enabled); }
     if (fields.length === 0) return false;
     fields.push(`updated_at = datetime('now')`);
     params.push(id);

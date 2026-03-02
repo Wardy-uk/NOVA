@@ -8,7 +8,7 @@ interface Capability { id: number; name: string; code: string | null; ticket_gro
 interface MatrixCell { sale_type_id: number; capability_id: number; enabled: number; notes: string | null; }
 interface CapItem { id: number; capability_id: number; name: string; is_bolt_on: number; sort_order: number; active: number; }
 
-interface MilestoneTemplate { id: number; name: string; day_offset: number; sort_order: number; lead_days: number; active: number; }
+interface MilestoneTemplate { id: number; name: string; day_offset: number; sort_order: number; lead_days: number; active: number; tickets_enabled: number; }
 interface TemplateTgMapping { template_id: number; ticket_group_id: number; }
 
 const BASE = '/api/onboarding/config';

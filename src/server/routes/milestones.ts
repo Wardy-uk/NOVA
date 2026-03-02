@@ -11,6 +11,7 @@ const TemplateCreateSchema = z.object({
   sort_order: z.number().int().optional(),
   checklist_json: z.string().optional(),
   lead_days: z.number().int().min(0).optional(),
+  tickets_enabled: z.number().int().min(0).max(1).optional(),
 });
 
 const TemplateUpdateSchema = z.object({
@@ -20,6 +21,7 @@ const TemplateUpdateSchema = z.object({
   checklist_json: z.string().optional(),
   lead_days: z.number().int().min(0).optional(),
   active: z.number().int().min(0).max(1).optional(),
+  tickets_enabled: z.number().int().min(0).max(1).optional(),
 });
 
 const MilestoneUpdateSchema = z.object({
@@ -427,12 +429,16 @@ export function createMilestoneRoutes(
     const deliveryId = parseInt(String(req.params.deliveryId), 10);
     if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
     const milestones = milestoneQueries.getByDelivery(deliveryId);
-    // Enrich with linked ticket group info
-    const enriched = milestones.map(m => ({
-      ...m,
-      linked_ticket_groups: milestoneQueries.getTemplateTicketGroups(m.template_id),
-      jira_keys: m.jira_keys ? JSON.parse(m.jira_keys) : [],
-    }));
+    // Enrich with linked ticket group info + template flags
+    const enriched = milestones.map(m => {
+      const template = milestoneQueries.getTemplateById(m.template_id);
+      return {
+        ...m,
+        linked_ticket_groups: milestoneQueries.getTemplateTicketGroups(m.template_id),
+        jira_keys: m.jira_keys ? JSON.parse(m.jira_keys) : [],
+        tickets_enabled: template?.tickets_enabled ?? 0,
+      };
+    });
     res.json({ ok: true, data: enriched });
   });
 
