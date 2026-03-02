@@ -91,20 +91,15 @@ async function main() {
   const purgedCount = taskQueries.deleteTransientTasks();
   if (purgedCount > 0) console.log(`[Startup] Purged ${purgedCount} transient tasks from previous session`);
 
-  // Re-sync milestone task priorities on startup
-  resyncAllMilestoneTasks(milestoneQueries, taskQueries);
-  // Assign any orphaned tasks (including new milestones) to primary admin
-  {
-    const adminUser = userQueries.getAll().find(u => u.role.split(',').map(r => r.trim()).includes('admin'));
-    if (adminUser) {
-      const result = db.exec(`SELECT COUNT(*) FROM tasks WHERE user_id IS NULL`);
-      const orphanCount = (result[0]?.values[0]?.[0] as number) ?? 0;
-      if (orphanCount > 0) {
-        db.run(`UPDATE tasks SET user_id = ? WHERE user_id IS NULL`, [adminUser.id]);
-        console.log(`[Startup] Assigned ${orphanCount} orphaned tasks to admin (user ${adminUser.id})`);
-      }
-    }
+  // Build onboarder name → user ID lookup for milestone ownership
+  const onboarderToUserId = new Map<string, number>();
+  for (const u of userQueries.getAll()) {
+    onboarderToUserId.set(u.username.toLowerCase(), u.id);
+    if (u.display_name) onboarderToUserId.set(u.display_name.toLowerCase(), u.id);
   }
+
+  // Re-sync milestone task priorities on startup (with per-onboarder ownership)
+  resyncAllMilestoneTasks(milestoneQueries, taskQueries, onboarderToUserId);
   saveDb();
 
   // Auto-seed onboarding matrix from xlsx if tables are empty

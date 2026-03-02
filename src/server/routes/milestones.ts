@@ -48,6 +48,7 @@ export function syncMilestoneToTask(
   milestone: { id: number; delivery_id: number; template_id: number; template_name: string; target_date: string | null; status: string },
   account: string,
   taskQueries: TaskQueries,
+  userId?: number,
 ) {
   const statusMap: Record<string, string> = { pending: 'open', in_progress: 'in_progress', complete: 'done' };
   const sourceId = `milestone:${milestone.delivery_id}:${milestone.template_id}`;
@@ -61,6 +62,7 @@ export function syncMilestoneToTask(
     priority: calculateMilestonePriority(milestone.target_date, milestone.status),
     due_date: milestone.target_date ?? undefined,
     category: 'project',
+    user_id: userId,
   }, { deferSave: true });
 }
 
@@ -70,10 +72,11 @@ export function syncDeliveryMilestonesToTasks(
   account: string,
   milestoneQueries: MilestoneQueries,
   taskQueries: TaskQueries,
+  userId?: number,
 ) {
   const milestones = milestoneQueries.getByDelivery(deliveryId);
   for (const m of milestones) {
-    syncMilestoneToTask(m, account, taskQueries);
+    syncMilestoneToTask(m, account, taskQueries, userId);
   }
 }
 
@@ -81,6 +84,7 @@ export function syncDeliveryMilestonesToTasks(
 export function resyncAllMilestoneTasks(
   milestoneQueries: MilestoneQueries,
   taskQueries: TaskQueries,
+  onboarderToUserId?: Map<string, number>,
 ) {
   const all = milestoneQueries.getAllWithDelivery();
   let synced = 0;
@@ -88,7 +92,8 @@ export function resyncAllMilestoneTasks(
     if (m.status === 'complete') continue;
     // Only resync milestones that have had their task created (progressive workflow)
     if ((m as any).workflow_task_created === 0) continue;
-    syncMilestoneToTask(m, m.account, taskQueries);
+    const userId = m.onboarder ? onboarderToUserId?.get(m.onboarder.toLowerCase()) : undefined;
+    syncMilestoneToTask(m, m.account, taskQueries, userId);
     synced++;
   }
   console.log(`[Milestones] Re-synced ${synced} active milestone tasks`);
