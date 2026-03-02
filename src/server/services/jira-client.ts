@@ -22,7 +22,10 @@ export class JiraApiError extends Error {
     public body: unknown,
     public retryable: boolean = false
   ) {
-    super(`Jira API ${statusCode}: ${statusText}`);
+    const detail = body && typeof body === 'object'
+      ? (body as any).errorMessages?.join('; ') || (body as any).message || JSON.stringify(body).slice(0, 200)
+      : String(body).slice(0, 200);
+    super(`Jira API ${statusCode}: ${statusText} — ${detail}`);
     this.name = 'JiraApiError';
   }
 }
@@ -40,6 +43,8 @@ export interface JiraSearchResult {
   issues: JiraIssue[];
   total: number;
   maxResults: number;
+  nextPageToken?: string;
+  isLast?: boolean;
 }
 
 export interface JiraCreatedIssue {
@@ -202,15 +207,15 @@ export class JiraRestClient {
     jql: string,
     fields?: string[],
     maxResults = 50,
-    options?: { startAt?: number; expand?: string[] }
+    options?: { nextPageToken?: string; expand?: string[] }
   ): Promise<JiraSearchResult> {
     const body: Record<string, unknown> = {
       jql,
       fields: fields ?? ['summary', 'status', 'issuetype', 'issuelinks', 'priority', 'duedate'],
       maxResults,
     };
-    if (options?.startAt) body.startAt = options.startAt;
-    if (options?.expand?.length) body.expand = options.expand;
+    if (options?.nextPageToken) body.nextPageToken = options.nextPageToken;
+    if (options?.expand?.length) body.expand = options.expand.join(',');
     return this.request<JiraSearchResult>('POST', 'search/jql', body);
   }
 

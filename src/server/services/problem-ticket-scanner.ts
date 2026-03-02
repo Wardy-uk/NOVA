@@ -136,17 +136,17 @@ export class ProblemTicketScanner {
       ];
 
       const allIssues: JiraIssue[] = [];
-      let startAt = 0;
+      let nextPageToken: string | undefined;
       const pageSize = 100;
 
       while (true) {
         const result = await this.jira.searchJql(jql, fields, pageSize, {
-          startAt,
+          nextPageToken,
           expand: ['changelog'],
         });
         allIssues.push(...result.issues);
-        if (allIssues.length >= result.total || result.issues.length === 0) break;
-        startAt += result.issues.length;
+        if (result.isLast !== false || result.issues.length === 0 || !result.nextPageToken) break;
+        nextPageToken = result.nextPageToken;
       }
 
       console.log(`[ProblemTicketScanner] Scanning ${allIssues.length} open tickets...`);
