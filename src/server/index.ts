@@ -201,27 +201,33 @@ async function main() {
   );
 
   // 3. Aggregator
-  // Global Jira REST client builder — defined here so aggregator can use it.
-  // Reads settings on each call so credential changes take effect immediately.
-  function buildJiraClient(): JiraRestClient | null {
+  // Onboarding/Admin Jira client — uses Admin > Jira (Global) credentials only.
+  // For ticket creation, service desk shared views, problem scanner.
+  function buildOnboardingJiraClient(): JiraRestClient | null {
     const s = settingsQueries.getAll();
-    // Prefer dedicated global/onboarding credentials (Admin > Jira Global)
-    if (s.jira_ob_enabled === 'true' && s.jira_ob_email && s.jira_ob_token) {
-      // Direct org URL preferred (avoids api.atlassian.com gateway scope restrictions)
-      if (s.jira_ob_url) {
-        return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
-      }
-      // Fallback to Cloud ID → api.atlassian.com gateway
-      if (s.jira_ob_cloud_id) {
-        return new JiraRestClient({ cloudId: s.jira_ob_cloud_id, email: s.jira_ob_email, apiToken: s.jira_ob_token });
-      }
+    if (s.jira_ob_enabled !== 'true' || !s.jira_ob_email || !s.jira_ob_token) return null;
+    if (s.jira_ob_url) {
+      return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
     }
-    // Fallback to personal Jira creds (direct URL only)
-    if (s.jira_enabled !== 'true' || !s.jira_url || !s.jira_username || !s.jira_token) return null;
-    return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
+    if (s.jira_ob_cloud_id) {
+      return new JiraRestClient({ cloudId: s.jira_ob_cloud_id, email: s.jira_ob_email, apiToken: s.jira_ob_token });
+    }
+    return null;
   }
 
-  const aggregator = new TaskAggregator(mcpManager, taskQueries, settingsQueries, buildJiraClient);
+  // Service desk Jira client — uses seeded personal creds from global settings.
+  // Used by aggregator for service desk searches (filter=mine/all/unassigned).
+  function buildServiceDeskJiraClient(): JiraRestClient | null {
+    const s = settingsQueries.getAll();
+    // Use seeded personal creds (jira_url/jira_username/jira_token in global settings)
+    if (s.jira_enabled === 'true' && s.jira_url && s.jira_username && s.jira_token) {
+      return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
+    }
+    // Fallback to onboarding creds for service desk
+    return buildOnboardingJiraClient();
+  }
+
+  const aggregator = new TaskAggregator(mcpManager, taskQueries, settingsQueries, buildServiceDeskJiraClient);
 
   // 4. Express app
   const app = express();
@@ -299,10 +305,10 @@ async function main() {
   }));
   app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, userSettingsQueries, uvxCommand, () => d365Service, (key) => {
     if (key.startsWith('d365_')) buildD365Service();
-  }, buildJiraClient));
+  }, buildOnboardingJiraClient));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
-  app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries, buildJiraClient, () => settingsQueries.getAll(), userSettingsQueries));
+  app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries));
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
   const spSync = new SharePointSync(mcpManager, deliveryQueries, () => settingsQueries.getAll());
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess, auditQueries, onboardingRunQueries, settingsQueries));
@@ -372,13 +378,13 @@ async function main() {
     }
   });
 
-  // Onboarding ticket orchestrator — uses global buildJiraClient (defined above)
+  // Onboarding ticket orchestrator — uses Admin > Jira (Global) credentials
   function buildOrchestrator(): OnboardingOrchestrator | null {
-    const client = buildJiraClient();
+    const client = buildOnboardingJiraClient();
     if (!client) return null;
     return new OnboardingOrchestrator(client, onboardingConfigQueries, onboardingRunQueries, () => settingsQueries.getAll());
   }
-  app.use('/api/onboarding', createOnboardingRoutes(buildOrchestrator, buildJiraClient, onboardingRunQueries));
+  app.use('/api/onboarding', createOnboardingRoutes(buildOrchestrator, buildOnboardingJiraClient, onboardingRunQueries));
 
   // Milestone workflow engine — evaluates milestones and creates tasks/tickets progressively
   const workflowEngine = new MilestoneWorkflowEngine(
@@ -389,13 +395,13 @@ async function main() {
 
   // Problem Ticket Scanner — AI + rule-based detection
   const problemTicketScanner = new ProblemTicketScanner(
-    buildJiraClient(),
+    buildOnboardingJiraClient(),
     problemTicketQueries,
     settingsQueries,
   );
   app.use('/api/problem-tickets', createProblemTicketRoutes(problemTicketQueries, () => {
     // Refresh Jira client on each scan (credentials may change)
-    problemTicketScanner.setJiraClient(buildJiraClient());
+    problemTicketScanner.setJiraClient(buildOnboardingJiraClient());
     return problemTicketScanner;
   }, () => settingsQueries));
 
@@ -565,7 +571,7 @@ async function main() {
   // Problem Ticket Scanner: every 15 minutes + initial scan after 30s
   const ptScanTimer = setInterval(async () => {
     try {
-      problemTicketScanner.setJiraClient(buildJiraClient());
+      problemTicketScanner.setJiraClient(buildOnboardingJiraClient());
       await problemTicketScanner.scan();
     } catch (err) {
       console.error('[ProblemTicketScanner] Scheduled scan failed:', err instanceof Error ? err.message : err);
@@ -573,7 +579,7 @@ async function main() {
   }, 15 * 60 * 1000);
   setTimeout(async () => {
     try {
-      problemTicketScanner.setJiraClient(buildJiraClient());
+      problemTicketScanner.setJiraClient(buildOnboardingJiraClient());
       await problemTicketScanner.scan();
     } catch (err) {
       console.error('[ProblemTicketScanner] Initial scan failed:', err instanceof Error ? err.message : err);
