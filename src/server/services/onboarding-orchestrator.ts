@@ -207,7 +207,6 @@ export class OnboardingOrchestrator {
           issuetype: { name: this.config.issueTypeName },
           summary: pSummary,
           description: parentDesc,
-          priority: { name: this.config.defaultPriority },
           duedate: payload.targetDueDate,
         };
 
@@ -270,7 +269,6 @@ export class OnboardingOrchestrator {
             issuetype: { name: this.config.issueTypeName },
             summary: cSummary,
             description: buildAdfDescription(descSections),
-            priority: { name: this.config.defaultPriority },
             duedate: payload.targetDueDate,
           };
 
