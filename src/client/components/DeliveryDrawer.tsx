@@ -995,8 +995,8 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                             )}
                           </div>
 
-                          {/* Jira key badges + manual add + ticket creation (only when tickets_enabled on template) */}
-                          {!!m.tickets_enabled && (
+                          {/* Jira key badges + manual add + ticket creation (when tickets_enabled OR ticket groups linked) */}
+                          {(!!m.tickets_enabled || (m.linked_ticket_groups && m.linked_ticket_groups.length > 0)) && (
                             <>
                               <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                                 {m.jira_keys && m.jira_keys.length > 0 && m.jira_keys.map(key => {
