@@ -209,9 +209,15 @@ async function main() {
     if (s.jira_ob_enabled === 'true' && s.jira_ob_url && s.jira_ob_email && s.jira_ob_token) {
       return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
     }
-    // Fallback to global Jira creds
-    if (s.jira_enabled !== 'true' || !s.jira_url || !s.jira_username || !s.jira_token) return null;
-    return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
+    // Global Jira creds — prefer Cloud ID (api.atlassian.com) over direct URL
+    if (s.jira_enabled !== 'true' || !s.jira_username || !s.jira_token) return null;
+    if (s.jira_cloud_id) {
+      return new JiraRestClient({ cloudId: s.jira_cloud_id, email: s.jira_username, apiToken: s.jira_token });
+    }
+    if (s.jira_url) {
+      return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
+    }
+    return null;
   }
 
   const aggregator = new TaskAggregator(mcpManager, taskQueries, settingsQueries, buildJiraClient);

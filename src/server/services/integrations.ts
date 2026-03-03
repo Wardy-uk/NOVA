@@ -4,11 +4,12 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
   {
     id: 'jira',
     name: 'Jira',
-    description: 'Atlassian Jira Cloud. Syncs assigned issues with SLA data.',
+    description: 'Atlassian Jira Cloud via api.atlassian.com. Uses Basic auth (email + API token).',
     enabledKey: 'jira_enabled',
     authType: 'credentials',
     fields: [
-      { key: 'jira_url', label: 'Jira URL', type: 'url', placeholder: 'https://yourorg.atlassian.net', required: true },
+      { key: 'jira_cloud_id', label: 'Cloud ID', type: 'text', placeholder: 'From admin.atlassian.com → your org → Settings → Cloud ID', required: true },
+      { key: 'jira_url', label: 'Jira URL (for browse links)', type: 'url', placeholder: 'https://yourorg.atlassian.net', required: false },
       { key: 'jira_username', label: 'Email', type: 'text', placeholder: 'you@company.com', required: true },
       { key: 'jira_token', label: 'API Token', type: 'password', placeholder: 'From id.atlassian.com/manage-profile/security/api-tokens', required: true },
     ],

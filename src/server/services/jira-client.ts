@@ -15,6 +15,12 @@ export interface JiraOAuthClientConfig {
   accessToken: string;   // OAuth Bearer token
 }
 
+export interface JiraCloudBasicConfig {
+  cloudId: string;       // Atlassian cloud ID
+  email: string;         // Jira account email
+  apiToken: string;      // API token from id.atlassian.com
+}
+
 export class JiraApiError extends Error {
   constructor(
     public statusCode: number,
@@ -130,15 +136,21 @@ export class JiraRestClient {
   private authHeader: string;
   private baseUrl: string;
 
-  constructor(config: JiraClientConfig | JiraOAuthClientConfig) {
-    if ('cloudId' in config) {
-      // OAuth 3LO — use Atlassian API gateway
+  constructor(config: JiraClientConfig | JiraOAuthClientConfig | JiraCloudBasicConfig) {
+    if ('cloudId' in config && 'accessToken' in config) {
+      // OAuth 3LO — use Atlassian API gateway with Bearer token
       this.baseUrl = `https://api.atlassian.com/ex/jira/${config.cloudId}`;
       this.authHeader = `Bearer ${config.accessToken}`;
-    } else {
-      // Basic auth (email + API token)
+    } else if ('cloudId' in config && 'email' in config) {
+      // Cloud Basic — use Atlassian API gateway with Basic auth
+      this.baseUrl = `https://api.atlassian.com/ex/jira/${config.cloudId}`;
+      this.authHeader = 'Basic ' + Buffer.from(`${config.email}:${config.apiToken}`).toString('base64');
+    } else if ('baseUrl' in config) {
+      // Direct Basic auth (email + API token) to org URL
       this.baseUrl = config.baseUrl.replace(/\/+$/, '');
       this.authHeader = 'Basic ' + Buffer.from(`${config.email}:${config.apiToken}`).toString('base64');
+    } else {
+      throw new Error('Invalid JiraRestClient config');
     }
   }
 
