@@ -3,10 +3,12 @@ N.O.V.A — TO DO
 
 --- Triage ---
 
-(empty — all items sorted below)
+[URGENT BUG] Some users see my to do's
 
 
 ability to manually add ticket ids to delivery items where these have been created before NOVA 
+
+ability to assign milestone tasks to users - by default should be onboarding owner, but allow to be changed
 
 === CURRENT STATUS (2 Mar 2026) ===
 
@@ -72,6 +74,11 @@ T4. Onboarding ticket status — on each onboarding/delivery item, show what
 
 === TIER 2: Feature additions ===
 
+5.  Jira OAuth login for personal Jira — replace manual email/API token in
+    My Settings with "Connect Jira" button using Atlassian OAuth 2.0 (3LO).
+    Users click Connect → redirected to Atlassian (Microsoft SSO auto-kicks in)
+    → callback stores per-user tokens. Requires OAuth app at developer.atlassian.com.
+    Admin card for app credentials already exists (jira-oauth integration).
 6.  Enhanced permissions — global admin + team admin roles
 7.  Active Now indicator — show which users are currently logged into NOVA
 8.  Agent database link — connect to bym-asqlep01.database.windows.net /
