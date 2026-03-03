@@ -215,6 +215,8 @@ export class JiraRestClient {
     }
 
     if (!res.ok) {
+      console.error(`[JiraClient] ${method} ${url} → ${res.status} ${res.statusText}`, JSON.stringify(parsed).slice(0, 500));
+      if (body) console.error(`[JiraClient] Request body:`, JSON.stringify(body).slice(0, 500));
       throw new JiraApiError(
         res.status,
         res.statusText,
