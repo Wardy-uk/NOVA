@@ -201,7 +201,20 @@ async function main() {
   );
 
   // 3. Aggregator
-  const aggregator = new TaskAggregator(mcpManager, taskQueries, settingsQueries);
+  // Global Jira REST client builder — defined here so aggregator can use it.
+  // Reads settings on each call so credential changes take effect immediately.
+  function buildJiraClient(): JiraRestClient | null {
+    const s = settingsQueries.getAll();
+    // Prefer dedicated onboarding credentials
+    if (s.jira_ob_enabled === 'true' && s.jira_ob_url && s.jira_ob_email && s.jira_ob_token) {
+      return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
+    }
+    // Fallback to global Jira creds
+    if (s.jira_enabled !== 'true' || !s.jira_url || !s.jira_username || !s.jira_token) return null;
+    return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
+  }
+
+  const aggregator = new TaskAggregator(mcpManager, taskQueries, settingsQueries, buildJiraClient);
 
   // 4. Express app
   const app = express();
@@ -352,17 +365,7 @@ async function main() {
     }
   });
 
-  // Onboarding ticket orchestrator — lazy JiraRestClient from settings
-  function buildJiraClient(): JiraRestClient | null {
-    const s = settingsQueries.getAll();
-    // Prefer dedicated onboarding credentials
-    if (s.jira_ob_enabled === 'true' && s.jira_ob_url && s.jira_ob_email && s.jira_ob_token) {
-      return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
-    }
-    // Fallback to personal Jira creds
-    if (s.jira_enabled !== 'true' || !s.jira_url || !s.jira_username || !s.jira_token) return null;
-    return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
-  }
+  // Onboarding ticket orchestrator — uses global buildJiraClient (defined above)
   function buildOrchestrator(): OnboardingOrchestrator | null {
     const client = buildJiraClient();
     if (!client) return null;
@@ -375,7 +378,7 @@ async function main() {
     milestoneQueries, deliveryQueries, taskQueries, onboardingConfigQueries,
     buildOrchestrator, (msg) => console.log(msg),
   );
-  app.use('/api/milestones', createMilestoneRoutes(milestoneQueries, deliveryQueries, taskQueries, workflowEngine, buildOrchestrator));
+  app.use('/api/milestones', createMilestoneRoutes(milestoneQueries, deliveryQueries, taskQueries, workflowEngine, buildOrchestrator, onboardingConfigQueries));
 
   // Problem Ticket Scanner — AI + rule-based detection
   const problemTicketScanner = new ProblemTicketScanner(

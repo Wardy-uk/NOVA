@@ -589,13 +589,14 @@ export function createJiraRoutes(
 
     try {
       const jql = `key IN (${trimmed.map(k => `"${k}"`).join(',')})`;
-      const result = await client.searchJql(jql, ['summary', 'status', 'priority', 'assignee'], trimmed.length);
+      const result = await client.searchJql(jql, ['summary', 'status', 'priority', 'assignee', 'duedate'], trimmed.length);
       const statuses: Record<string, {
         status: string;
         statusCategory: string;
         summary: string;
         assignee: string | null;
         priority: string | null;
+        duedate: string | null;
       }> = {};
       for (const issue of result.issues) {
         const fields = issue.fields ?? {};
@@ -608,6 +609,7 @@ export function createJiraRoutes(
           summary: (fields.summary as string) ?? '',
           assignee: assigneeObj?.displayName ?? null,
           priority: priorityObj?.name ?? null,
+          duedate: (fields.duedate as string) ?? null,
         };
       }
       res.json({ ok: true, data: statuses });

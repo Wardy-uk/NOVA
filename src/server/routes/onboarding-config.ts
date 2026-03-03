@@ -38,10 +38,16 @@ export function createOnboardingConfigRoutes(
       name: z.string().min(1).optional(),
       sort_order: z.number().optional(),
       active: z.number().min(0).max(1).optional(),
+      display_name: z.string().nullable().optional(),
+      traffic_light_group: z.string().nullable().optional(),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
     configQueries.updateTicketGroup(id, parsed.data);
     res.json({ ok: true });
+  });
+
+  router.get('/traffic-light-groups', (_req, res) => {
+    res.json({ ok: true, data: configQueries.getTrafficLightGroups() });
   });
 
   router.delete('/ticket-groups/:id', writeGuard, (req, res) => {

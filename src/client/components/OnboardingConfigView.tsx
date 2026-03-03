@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 
 type Tab = 'sale-types' | 'capabilities' | 'matrix' | 'items' | 'ticket-groups' | 'milestone-links' | 'create-tickets';
 
-interface TicketGroup { id: number; name: string; sort_order: number; active: number; }
+interface TicketGroup { id: number; name: string; sort_order: number; active: number; display_name: string | null; traffic_light_group: string | null; }
 interface SaleType { id: number; name: string; sort_order: number; active: number; jira_tickets_required?: number; }
 interface Capability { id: number; name: string; code: string | null; ticket_group_id: number | null; ticket_group_name?: string; sort_order: number; active: number; item_count?: number; }
 interface MatrixCell { sale_type_id: number; capability_id: number; enabled: number; notes: string | null; }
@@ -468,8 +468,10 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
               <thead>
                 <tr className="text-neutral-500 border-b border-[#3a424d]">
                   <th className="text-left py-2 px-2">Name</th>
+                  <th className="text-left py-2 px-2 w-28">Display Name</th>
+                  <th className="text-left py-2 px-2 w-32">Traffic Light</th>
                   <th className="text-left py-2 px-2 w-20">Order</th>
-                  <th className="text-center py-2 px-2 w-28">Capabilities</th>
+                  <th className="text-center py-2 px-2 w-24">Capabilities</th>
                   <th className="text-center py-2 px-2 w-20">Active</th>
                   {!readOnly && <th className="text-center py-2 px-2 w-16"></th>}
                 </tr>
@@ -477,9 +479,48 @@ export function OnboardingConfigView({ readOnly = false }: { readOnly?: boolean 
               <tbody>
                 {ticketGroups.map(tg => {
                   const capCount = capabilities.filter(c => c.ticket_group_id === tg.id).length;
+                  const existingTlGroups = [...new Set(ticketGroups.map(g => g.traffic_light_group).filter(Boolean))] as string[];
                   return (
                     <tr key={tg.id} className={`border-b border-[#3a424d]/50 ${!tg.active ? 'opacity-40' : ''}`}>
                       <td className="py-1.5 px-2 text-neutral-200">{tg.name}</td>
+                      <td className="py-1.5 px-2">
+                        {readOnly ? (
+                          <span className="text-neutral-400">{tg.display_name || '-'}</span>
+                        ) : (
+                          <input
+                            defaultValue={tg.display_name || ''}
+                            placeholder={tg.name}
+                            onBlur={e => {
+                              const val = e.target.value.trim() || null;
+                              if (val !== tg.display_name) {
+                                api(`/ticket-groups/${tg.id}`, { method: 'PUT', body: JSON.stringify({ display_name: val }) }).then(loadMatrix);
+                              }
+                            }}
+                            className="w-full px-1.5 py-0.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-600"
+                          />
+                        )}
+                      </td>
+                      <td className="py-1.5 px-2">
+                        {readOnly ? (
+                          <span className="text-neutral-400">{tg.traffic_light_group || '-'}</span>
+                        ) : (
+                          <input
+                            defaultValue={tg.traffic_light_group || ''}
+                            placeholder="e.g. QA, Integrations..."
+                            list={`tl-groups-${tg.id}`}
+                            onBlur={e => {
+                              const val = e.target.value.trim() || null;
+                              if (val !== tg.traffic_light_group) {
+                                api(`/ticket-groups/${tg.id}`, { method: 'PUT', body: JSON.stringify({ traffic_light_group: val }) }).then(loadMatrix);
+                              }
+                            }}
+                            className="w-full px-1.5 py-0.5 text-xs bg-[#272C33] border border-[#3a424d] rounded text-neutral-200 placeholder-neutral-600"
+                          />
+                        )}
+                        <datalist id={`tl-groups-${tg.id}`}>
+                          {existingTlGroups.map(g => <option key={g} value={g} />)}
+                        </datalist>
+                      </td>
                       <td className="py-1.5 px-2 text-neutral-400">{tg.sort_order}</td>
                       <td className="py-1.5 px-2 text-center text-neutral-400">{capCount}</td>
                       <td className="py-1.5 px-2 text-center">

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import type { MilestoneQueries, DeliveryQueries, TaskQueries } from '../db/queries.js';
+import type { MilestoneQueries, DeliveryQueries, TaskQueries, OnboardingConfigQueries } from '../db/queries.js';
 import { requireRole } from '../middleware/auth.js';
 import type { MilestoneWorkflowEngine } from '../services/milestone-workflow.js';
 import type { OnboardingOrchestrator } from '../services/onboarding-orchestrator.js';
@@ -110,6 +110,7 @@ export function createMilestoneRoutes(
   taskQueries: TaskQueries,
   workflowEngine?: MilestoneWorkflowEngine,
   getOrchestrator?: () => OnboardingOrchestrator | null,
+  onboardingConfigQueries?: OnboardingConfigQueries,
 ): Router {
   const router = Router();
   const writeGuard = requireRole('admin', 'editor');
@@ -444,6 +445,63 @@ export function createMilestoneRoutes(
       };
     });
     res.json({ ok: true, data: enriched });
+  });
+
+  // ── Traffic Light Status ──
+
+  // Helper: build traffic light key map for a single delivery
+  function buildTrafficLightMap(deliveryId: number, ticketGroups: Array<{ id: number; traffic_light_group: string | null; display_name: string | null; name: string }>): Record<string, string[]> {
+    const milestones = milestoneQueries.getByDelivery(deliveryId);
+    const map: Record<string, string[]> = {};
+
+    for (const m of milestones) {
+      const linkedGroupIds = milestoneQueries.getTemplateTicketGroups(m.template_id);
+      const jiraKeys: string[] = m.jira_keys ? JSON.parse(m.jira_keys) : [];
+
+      for (const gid of linkedGroupIds) {
+        const group = ticketGroups.find(g => g.id === gid);
+        if (!group?.traffic_light_group) continue;
+        const tag = group.traffic_light_group;
+        if (!map[tag]) map[tag] = [];
+        for (const key of jiraKeys) {
+          if (!map[tag].includes(key)) map[tag].push(key);
+        }
+      }
+    }
+    return map;
+  }
+
+  router.get('/traffic-lights/:deliveryId', (req, res) => {
+    const deliveryId = parseInt(String(req.params.deliveryId), 10);
+    if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
+    if (!onboardingConfigQueries) { res.json({ ok: true, data: {}, groups: [] }); return; }
+
+    const ticketGroups = onboardingConfigQueries.getAllTicketGroups();
+    const map = buildTrafficLightMap(deliveryId, ticketGroups as Array<{ id: number; traffic_light_group: string | null; display_name: string | null; name: string }>);
+    const groups = onboardingConfigQueries.getTrafficLightGroups();
+
+    res.json({ ok: true, data: map, groups });
+  });
+
+  router.get('/traffic-lights-bulk', (req, res) => {
+    if (!onboardingConfigQueries) { res.json({ ok: true, data: {}, groups: [] }); return; }
+
+    const ticketGroups = onboardingConfigQueries.getAllTicketGroups();
+    const groups = onboardingConfigQueries.getTrafficLightGroups();
+    if (groups.length === 0) { res.json({ ok: true, data: {}, groups: [] }); return; }
+
+    // Get all delivery entries that have milestones
+    const entries = deliveryQueries.getAll();
+    const bulk: Record<number, Record<string, string[]>> = {};
+
+    for (const entry of entries) {
+      const map = buildTrafficLightMap(entry.id, ticketGroups as Array<{ id: number; traffic_light_group: string | null; display_name: string | null; name: string }>);
+      // Only include entries that have at least one non-empty traffic light group
+      const hasKeys = Object.values(map).some(keys => keys.length > 0);
+      if (hasKeys) bulk[entry.id] = map;
+    }
+
+    res.json({ ok: true, data: bulk, groups });
   });
 
   // ── Manual workflow trigger ──

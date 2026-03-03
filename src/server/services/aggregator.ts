@@ -1,6 +1,7 @@
 import type { McpClientManager } from './mcp-client.js';
 import type { TaskQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import type { JiraRestClient } from './jira-client.js';
 import { saveDb } from '../db/schema.js';
 
 interface NormalizedTask {
@@ -720,12 +721,15 @@ export type SdFilter = 'mine' | 'unassigned' | 'all';
 
 export class TaskAggregator {
   private adapters: SourceAdapter[];
+  private getJiraClient?: () => JiraRestClient | null;
 
   constructor(
     private mcp: McpClientManager,
     private taskQueries: TaskQueries,
-    private settingsQueries?: SettingsQueries
+    private settingsQueries?: SettingsQueries,
+    getJiraClient?: () => JiraRestClient | null,
   ) {
+    this.getJiraClient = getJiraClient;
     const jiraBaseUrl = settingsQueries?.get('jira_url') ?? undefined;
     this.adapters = [
       createJiraAdapter(jiraBaseUrl),
@@ -739,7 +743,9 @@ export class TaskAggregator {
 
   /** Live Jira search for Service Desk with ownership filter. Returns normalized tasks (not persisted). */
   async fetchServiceDeskTickets(filter: SdFilter = 'mine', userJiraIdentity?: string): Promise<NormalizedTask[]> {
-    if (!this.mcp.isConnected('jira')) return [];
+    const jiraClient = this.getJiraClient?.() ?? null;
+    const hasMcp = this.mcp.isConnected('jira');
+    if (!jiraClient && !hasMcp) return [];
 
     const sdProject = this.settingsQueries?.get('jira_sd_project');
     const sdTiers = this.settingsQueries?.get('jira_sd_tiers');
@@ -774,6 +780,24 @@ export class TaskAggregator {
     const jql = parts.join(' AND ') + ' ORDER BY priority DESC, updated DESC';
     console.log(`[ServiceDesk] JQL (${filter}): ${jql}`);
 
+    // Prefer direct REST client (Basic auth) over MCP
+    if (jiraClient) {
+      try {
+        const SD_FIELDS = ['summary', 'status', 'priority', 'description', 'assignee', 'created', 'duedate',
+          'customfield_12981', 'customfield_14081', 'customfield_14185', 'customfield_14048',
+          'customfield_13183', 'customfield_14527', 'customfield_13184'];
+        const result = await jiraClient.searchJql(jql, SD_FIELDS, 200);
+        return (result.issues ?? []).map(issue => {
+          const flat: Record<string, unknown> = { key: issue.key, id: issue.id, self: issue.self, ...issue.fields };
+          return mapJiraIssue(flat, jiraBaseUrl);
+        });
+      } catch (err) {
+        console.warn(`[ServiceDesk] REST client search failed, ${hasMcp ? 'falling back to MCP' : 'no MCP available'}: ${err instanceof Error ? err.message : err}`);
+        if (!hasMcp) return [];
+      }
+    }
+
+    // Fallback: MCP tool
     const result = (await this.mcp.callTool('jira', 'jira_search', {
       jql,
       limit: 200,

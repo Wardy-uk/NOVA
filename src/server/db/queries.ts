@@ -1251,6 +1251,8 @@ export interface OnboardingTicketGroup {
   name: string;
   sort_order: number;
   active: number;
+  display_name: string | null;
+  traffic_light_group: string | null;
   created_at: string;
 }
 
@@ -1330,12 +1332,14 @@ export class OnboardingConfigQueries {
     return id;
   }
 
-  updateTicketGroup(id: number, updates: { name?: string; sort_order?: number; active?: number }): boolean {
+  updateTicketGroup(id: number, updates: { name?: string; sort_order?: number; active?: number; display_name?: string | null; traffic_light_group?: string | null }): boolean {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
     if (updates.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(updates.sort_order); }
     if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
+    if (updates.display_name !== undefined) { fields.push('display_name = ?'); params.push(updates.display_name); }
+    if (updates.traffic_light_group !== undefined) { fields.push('traffic_light_group = ?'); params.push(updates.traffic_light_group); }
     if (fields.length === 0) return false;
     params.push(id);
     this.db.run(`UPDATE onboarding_ticket_groups SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
@@ -1349,6 +1353,24 @@ export class OnboardingConfigQueries {
     this.db.run(`DELETE FROM onboarding_ticket_groups WHERE id = ?`, [id]);
     saveDb();
     return true;
+  }
+
+  getTrafficLightGroups(): Array<{ tag: string; displayName: string }> {
+    const stmt = this.db.prepare(
+      `SELECT DISTINCT traffic_light_group, display_name FROM onboarding_ticket_groups WHERE traffic_light_group IS NOT NULL AND traffic_light_group != '' ORDER BY traffic_light_group`
+    );
+    const results: Array<{ tag: string; displayName: string }> = [];
+    const seen = new Set<string>();
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      const tag = row.traffic_light_group as string;
+      if (!seen.has(tag)) {
+        seen.add(tag);
+        results.push({ tag, displayName: (row.display_name as string) || tag });
+      }
+    }
+    stmt.free();
+    return results;
   }
 
   // ── Sale Types ──

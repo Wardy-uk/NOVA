@@ -131,7 +131,11 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
   } | null>(null);
 
   // Live Jira status for key badges
-  const [jiraStatuses, setJiraStatuses] = useState<Record<string, { status: string; statusCategory: string; assignee: string | null }>>({});
+  const [jiraStatuses, setJiraStatuses] = useState<Record<string, { status: string; statusCategory: string; assignee: string | null; duedate?: string | null }>>({});
+
+  // Traffic light data for drawer header
+  const [tlData, setTlData] = useState<Record<string, string[]>>({});
+  const [tlGroups, setTlGroups] = useState<Array<{ tag: string; displayName: string }>>([]);
 
   // Ticket creation state
   const [ticketPreview, setTicketPreview] = useState<TicketResult | null>(null);
@@ -256,6 +260,16 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
       fetch(`/api/delivery/entries/${entry.id}/related-tickets`)
         .then(r => r.json())
         .then(json => { if (json.ok) setLinkedTickets(json.data); })
+        .catch(() => {});
+    }
+  }, [entry, isNew]);
+
+  // Fetch traffic light data for this delivery
+  useEffect(() => {
+    if (entry && !isNew) {
+      fetch(`/api/milestones/traffic-lights/${entry.id}`)
+        .then(r => r.json())
+        .then(json => { if (json.ok) { setTlData(json.data); setTlGroups(json.groups || []); } })
         .catch(() => {});
     }
   }, [entry, isNew]);
@@ -625,8 +639,41 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                 </button>
               )}
             </div>
-            <div className="text-sm text-neutral-100 font-semibold truncate">
-              {entry && !isNew ? entry.account : prefill?.account || 'New Delivery Entry'}
+            <div className="text-sm text-neutral-100 font-semibold truncate flex items-center gap-2">
+              <span>{entry && !isNew ? entry.account : prefill?.account || 'New Delivery Entry'}</span>
+              {tlGroups.length > 0 && entry && !isNew && (
+                <div className="flex items-center gap-1">
+                  {tlGroups.map(g => {
+                    const keys = tlData[g.tag] || [];
+                    const today = new Date().toISOString().split('T')[0];
+                    let color = '#6b7280'; // grey
+                    if (keys.length > 0) {
+                      let allDone = true;
+                      let anyOverdue = false;
+                      for (const key of keys) {
+                        const s = jiraStatuses[key];
+                        if (!s) { allDone = false; continue; }
+                        const isDone = s.statusCategory === 'done';
+                        if (!isDone) {
+                          allDone = false;
+                          if (s.duedate && s.duedate < today) anyOverdue = true;
+                        }
+                      }
+                      if (allDone) color = '#22c55e';
+                      else if (anyOverdue) color = '#ef4444';
+                      else color = '#f59e0b';
+                    }
+                    return (
+                      <div
+                        key={g.tag}
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: color }}
+                        title={`${g.displayName}: ${keys.length === 0 ? 'No ticket' : `${keys.length} ticket${keys.length > 1 ? 's' : ''}`}`}
+                      />
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
           <button
