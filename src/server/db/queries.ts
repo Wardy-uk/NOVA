@@ -3070,3 +3070,93 @@ export class SetupExecutionQueries {
     return run;
   }
 }
+
+// ─── Phase 6: Setup Portal Token Queries ──────────────────────────────────
+
+export interface SetupPortalToken {
+  id: number;
+  token: string;
+  delivery_id: number;
+  customer_email: string;
+  customer_name: string | null;
+  expires_at: string;
+  created_at: string;
+  last_accessed: string | null;
+  completed_at: string | null;
+  created_by: number | null;
+  progress_json: string;
+}
+
+export class SetupPortalQueries {
+  constructor(private db: Database) {}
+
+  create(data: { token: string; delivery_id: number; customer_email: string; customer_name?: string; expires_at: string; created_by?: number }): number {
+    this.db.run(
+      `INSERT INTO setup_portal_tokens (token, delivery_id, customer_email, customer_name, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?)`,
+      [data.token, data.delivery_id, data.customer_email, data.customer_name ?? null, data.expires_at, data.created_by ?? null]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    saveDb();
+    return (result[0]?.values[0]?.[0] as number) ?? 0;
+  }
+
+  getByToken(token: string): SetupPortalToken | null {
+    const stmt = this.db.prepare(
+      `SELECT * FROM setup_portal_tokens WHERE token = ? AND expires_at > datetime('now')`
+    );
+    stmt.bind([token]);
+    let row: SetupPortalToken | null = null;
+    if (stmt.step()) row = stmt.getAsObject() as unknown as SetupPortalToken;
+    stmt.free();
+    return row;
+  }
+
+  getByDelivery(deliveryId: number): SetupPortalToken[] {
+    const stmt = this.db.prepare(
+      `SELECT id, token, delivery_id, customer_email, customer_name, expires_at, created_at, last_accessed, completed_at, created_by, progress_json
+       FROM setup_portal_tokens WHERE delivery_id = ? ORDER BY created_at DESC`
+    );
+    stmt.bind([deliveryId]);
+    const rows: SetupPortalToken[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as SetupPortalToken);
+    stmt.free();
+    return rows;
+  }
+
+  updateLastAccessed(token: string): void {
+    this.db.run(
+      `UPDATE setup_portal_tokens SET last_accessed = datetime('now') WHERE token = ?`,
+      [token]
+    );
+    saveDb();
+  }
+
+  updateProgress(token: string, progressJson: string): void {
+    this.db.run(
+      `UPDATE setup_portal_tokens SET progress_json = ? WHERE token = ?`,
+      [progressJson, token]
+    );
+    saveDb();
+  }
+
+  markCompleted(token: string): void {
+    this.db.run(
+      `UPDATE setup_portal_tokens SET completed_at = datetime('now') WHERE token = ?`,
+      [token]
+    );
+    saveDb();
+  }
+
+  revokeToken(id: number): boolean {
+    this.db.run(`DELETE FROM setup_portal_tokens WHERE id = ?`, [id]);
+    saveDb();
+    return this.db.getRowsModified() > 0;
+  }
+
+  deleteExpired(): number {
+    this.db.run(`DELETE FROM setup_portal_tokens WHERE expires_at < datetime('now')`);
+    const deleted = this.db.getRowsModified();
+    if (deleted > 0) saveDb();
+    return deleted;
+  }
+}

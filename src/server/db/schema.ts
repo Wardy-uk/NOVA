@@ -814,6 +814,25 @@ export function initializeSchema(database: Database): void {
   `);
   database.run(`CREATE INDEX IF NOT EXISTS idx_setup_logs_run ON setup_execution_logs(run_id)`);
 
+  // ── Phase 6: Customer Setup Portal Tokens ──
+  database.run(`
+    CREATE TABLE IF NOT EXISTS setup_portal_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token TEXT NOT NULL UNIQUE,
+      delivery_id INTEGER NOT NULL REFERENCES delivery_entries(id) ON DELETE CASCADE,
+      customer_email TEXT NOT NULL,
+      customer_name TEXT,
+      expires_at TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      last_accessed TEXT,
+      completed_at TEXT,
+      created_by INTEGER REFERENCES users(id),
+      progress_json TEXT DEFAULT '{}'
+    )
+  `);
+  database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_setup_token ON setup_portal_tokens(token)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_setup_portal_delivery ON setup_portal_tokens(delivery_id)`);
+
   const defaults: [string, string][] = [
     ['source_weight_jira', '90'],
     ['source_weight_planner', '60'],

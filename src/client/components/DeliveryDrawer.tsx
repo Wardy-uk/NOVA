@@ -6,6 +6,7 @@ import { InstanceSetupPanel } from './InstanceSetupPanel.js';
 import { BranchPanel } from './BranchPanel.js';
 import { BrandSettingsPanel } from './BrandSettingsPanel.js';
 import { LogoPanel } from './LogoPanel.js';
+import { SetupPortalPanel } from './SetupPortalPanel.js';
 
 /** Convert DD/MM/YYYY → YYYY-MM-DD for HTML date inputs. Passes through if already ISO or empty. */
 function toIsoDate(d: string | null | undefined): string {
@@ -993,6 +994,9 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
 
           {/* ── Logos & Images ── */}
           {entry && !isNew && <LogoPanel deliveryId={entry.id} />}
+
+          {/* ── Customer Setup Portal ── */}
+          {entry && !isNew && <SetupPortalPanel deliveryId={entry.id} account={entry.account} />}
 
           {/* ── Delivery Milestones ── */}
           {entry && !isNew && (

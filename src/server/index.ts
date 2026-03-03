@@ -51,7 +51,7 @@ import { JiraOAuthService } from './services/jira-oauth.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
 import { createNotificationRoutes } from './routes/notifications.js';
-import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries } from './db/queries.js';
+import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries } from './db/queries.js';
 import { createInstanceSetupRoutes } from './routes/instance-setup.js';
 import { createBranchRoutes } from './routes/branches.js';
 import { createBrandSettingsRoutes } from './routes/brand-settings.js';
@@ -63,6 +63,7 @@ import { OnboardingToolClient } from './services/obtool-client.js';
 import { SetupOrchestrator } from './services/setup-orchestrator.js';
 import { createAzDoRoutes } from './routes/azdo.js';
 import { createSetupExecutionRoutes } from './routes/setup-execution.js';
+import { createSetupPortalPublicRoutes, createSetupPortalRoutes } from './routes/setup-portal.js';
 
 dotenv.config();
 
@@ -100,6 +101,7 @@ async function main() {
   const brandSettingsQueries = new BrandSettingsQueries(db);
   const logoQueries = new LogoQueries(db);
   const execQueries = new SetupExecutionQueries(db);
+  const portalQueries = new SetupPortalQueries(db);
 
   // Purge transient MS365 data from previous session
   const purgedCount = taskQueries.deleteTransientTasks();
@@ -284,6 +286,16 @@ async function main() {
   app.post('/api/auth/register', loginLimiter);
   app.use('/api/auth', createAuthRoutes(userQueries, jwtSecret, ssoService, settingsQueries, jiraOAuthService, userSettingsQueries));
 
+  // Customer setup portal — public routes (token-validated, no NOVA auth)
+  const portalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { ok: false, error: 'Too many requests. Please try again shortly.' },
+  });
+  app.use('/api/public/setup', portalLimiter, createSetupPortalPublicRoutes(portalQueries, brandSettingsQueries, branchQueries, logoQueries, deliveryQueries));
+
   // Debug endpoints are registered after auth middleware below (admin-only)
 
   // Dynamics 365 — direct Web API with delegated auth (device code flow)
@@ -426,6 +438,7 @@ async function main() {
   app.use('/api/logos', createLogoRoutes(logoQueries));
   app.use('/api/azdo', createAzDoRoutes(() => azdoClient, brandSettingsQueries, logoQueries, deliveryQueries, instanceSetupQueries));
   app.use('/api/setup-execution', createSetupExecutionRoutes(execQueries, () => setupOrchestrator));
+  app.use('/api/setup-portal', createSetupPortalRoutes(portalQueries, deliveryQueries, () => settingsQueries.getAll()));
 
   // Debug endpoints (admin-only, behind auth)
   app.get('/api/debug/tools', (req, res, next) => {
@@ -704,6 +717,16 @@ async function main() {
   // Also save after the initial auto-seed completes
   saveDb();
 
+  // Expired portal token cleanup: every 6 hours
+  const portalCleanupTimer = setInterval(() => {
+    try {
+      const deleted = portalQueries.deleteExpired();
+      if (deleted > 0) console.log(`[SetupPortal] Cleaned up ${deleted} expired tokens`);
+    } catch (err) {
+      console.error('[SetupPortal] Cleanup failed:', err instanceof Error ? err.message : err);
+    }
+  }, 6 * 60 * 60 * 1000);
+
   // Daily backup: check hourly, create one backup per day (7-day rotation)
   createBackup();
   const backupTimer = setInterval(() => {
@@ -719,6 +742,7 @@ async function main() {
     clearInterval(backupTimer);
     clearInterval(workflowTimer);
     clearInterval(ptScanTimer);
+    clearInterval(portalCleanupTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     watcher.stop();
     try { saveDb(); console.log('[N.O.V.A] Database saved to disk'); } catch (err) {

@@ -28,6 +28,7 @@ import { StatusBar } from './components/StatusBar.js';
 import { FeedbackModal } from './components/FeedbackModal.js';
 import { ReleaseNotesModal } from './components/ReleaseNotesModal.js';
 import { TourOverlay, useTour } from './components/TourOverlay.js';
+import { SetupPortal } from './components/SetupPortal.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -162,6 +163,10 @@ function getViewFromHash(): View | null {
 }
 
 export function App() {
+  // Customer setup portal — standalone public page (no NOVA auth)
+  const setupMatch = window.location.pathname.match(/^\/setup\/([a-f0-9]{64})$/);
+  if (setupMatch) return <SetupPortal token={setupMatch[1]} />;
+
   const [view, setViewRaw] = useState<View>(() => getViewFromHash() ?? 'focus');
 
   // Wrap setView to sync hash

@@ -79,3 +79,19 @@ export function passwordResetHtml(opts: {
     <p style="margin:16px 0 0;color:#6b7280;font-size:11px">This link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>
   `);
 }
+
+export function setupPortalHtml(opts: {
+  customerName?: string;
+  accountName: string;
+  portalUrl: string;
+  expiryDays: number;
+}): string {
+  const greeting = opts.customerName ? `Hi ${opts.customerName},` : 'Hello,';
+  return wrap(`
+    <p style="margin:0 0 20px;color:#e5e5e5;font-size:15px">${greeting}</p>
+    <p style="margin:0 0 20px;color:#a0a0a0;font-size:13px">We're setting up <strong style="color:#e5e5e5">${opts.accountName}</strong> and need a few details from you — company info, brand colours, logos, and branch details.</p>
+    <p style="margin:0 0 24px;color:#a0a0a0;font-size:13px">Click the button below to open your setup form. You can save your progress and come back at any time.</p>
+    ${button(opts.portalUrl, 'Complete Your Setup')}
+    <p style="margin:16px 0 0;color:#6b7280;font-size:11px">This link expires in ${opts.expiryDays} days. If you have any questions, reply to this email.</p>
+  `);
+}
