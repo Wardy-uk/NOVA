@@ -729,9 +729,9 @@ export function initializeSchema(database: Database): void {
     console.log(`[N.O.V.A] Seeded ${bymSteps.length} BYM instance setup step templates`);
   }
 
-  // Seed feature flags + default settings
+  // Seed feature flags
   database.run(
-    `INSERT INTO settings (key, value) VALUES ('feature_instance_setup', 'true') ON CONFLICT(key) DO NOTHING`
+    `INSERT INTO settings (key, value) VALUES ('feature_instance_setup', 'true') ON CONFLICT(key) DO UPDATE SET value = 'true'`
   );
 
   const defaults: [string, string][] = [
