@@ -602,12 +602,12 @@ export function initializeSchema(database: Database): void {
     try {
       const seedPath = path.join(PROJECT_ROOT, 'src/server/data/milestone-templates.json');
       const seedData = JSON.parse(fs.readFileSync(seedPath, 'utf-8')) as Array<{
-        name: string; day_offset: number; sort_order: number; checklist: string[];
+        name: string; day_offset: number; sort_order: number; checklist: string[]; tickets_enabled?: boolean;
       }>;
       for (const tmpl of seedData) {
         database.run(
-          `INSERT INTO milestone_templates (name, day_offset, sort_order, checklist_json) VALUES (?, ?, ?, ?)`,
-          [tmpl.name, tmpl.day_offset, tmpl.sort_order, JSON.stringify(tmpl.checklist)]
+          `INSERT INTO milestone_templates (name, day_offset, sort_order, checklist_json, tickets_enabled) VALUES (?, ?, ?, ?, ?)`,
+          [tmpl.name, tmpl.day_offset, tmpl.sort_order, JSON.stringify(tmpl.checklist), tmpl.tickets_enabled ? 1 : 0]
         );
       }
       console.log(`[N.O.V.A] Seeded ${seedData.length} milestone templates from file`);
@@ -615,17 +615,28 @@ export function initializeSchema(database: Database): void {
       console.error('[N.O.V.A] Failed to seed milestone templates:', err instanceof Error ? err.message : err);
     }
   } else {
-    // Backfill checklists for existing templates that have empty checklist_json
+    // Backfill: insert missing templates + update checklists for existing ones
     try {
       const seedPath = path.join(PROJECT_ROOT, 'src/server/data/milestone-templates.json');
       const seedData = JSON.parse(fs.readFileSync(seedPath, 'utf-8')) as Array<{
-        name: string; checklist: string[];
+        name: string; day_offset: number; sort_order: number; checklist: string[]; tickets_enabled?: boolean;
       }>;
       for (const tmpl of seedData) {
-        database.run(
-          `UPDATE milestone_templates SET checklist_json = ? WHERE name = ? AND (checklist_json IS NULL OR checklist_json = '[]')`,
-          [JSON.stringify(tmpl.checklist), tmpl.name]
-        );
+        // Insert if this template name doesn't exist yet
+        const exists = database.exec(`SELECT 1 FROM milestone_templates WHERE name = ?`, [tmpl.name]);
+        if (exists.length === 0 || exists[0].values.length === 0) {
+          database.run(
+            `INSERT INTO milestone_templates (name, day_offset, sort_order, checklist_json, tickets_enabled) VALUES (?, ?, ?, ?, ?)`,
+            [tmpl.name, tmpl.day_offset, tmpl.sort_order, JSON.stringify(tmpl.checklist), tmpl.tickets_enabled ? 1 : 0]
+          );
+          console.log(`[N.O.V.A] Backfilled milestone template: ${tmpl.name}`);
+        } else {
+          // Backfill empty checklists on existing templates
+          database.run(
+            `UPDATE milestone_templates SET checklist_json = ? WHERE name = ? AND (checklist_json IS NULL OR checklist_json = '[]')`,
+            [JSON.stringify(tmpl.checklist), tmpl.name]
+          );
+        }
       }
     } catch { /* ignore — file may not exist */ }
   }

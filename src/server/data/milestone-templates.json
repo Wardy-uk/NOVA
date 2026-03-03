@@ -21,9 +21,20 @@
     ]
   },
   {
+    "name": "Delivery QA",
+    "day_offset": 3,
+    "sort_order": 3,
+    "checklist": [
+      "QA ticket raised in Jira",
+      "Assigned to onboarder",
+      "Linked to delivery entry"
+    ],
+    "tickets_enabled": true
+  },
+  {
     "name": "Welcome Pack Received",
     "day_offset": 7,
-    "sort_order": 3,
+    "sort_order": 4,
     "checklist": [
       "Welcome Pack returned",
       "Assets uploaded to CRM",
@@ -34,7 +45,7 @@
   {
     "name": "Welcome Call Completed",
     "day_offset": 10,
-    "sort_order": 4,
+    "sort_order": 5,
     "checklist": [
       "Welcome Call held",
       "Roles and expectations agreed",
@@ -44,7 +55,7 @@
   {
     "name": "Design Templates Approved",
     "day_offset": 15,
-    "sort_order": 5,
+    "sort_order": 6,
     "checklist": [
       "Templates shared with customer",
       "Feedback received",
@@ -55,7 +66,7 @@
   {
     "name": "System Build Complete",
     "day_offset": 25,
-    "sort_order": 6,
+    "sort_order": 7,
     "checklist": [
       "System build completed",
       "Automations configured",
@@ -67,7 +78,7 @@
   {
     "name": "Training Delivered",
     "day_offset": 28,
-    "sort_order": 7,
+    "sort_order": 8,
     "checklist": [
       "Training session completed",
       "User accounts prepared",
@@ -77,7 +88,7 @@
   {
     "name": "System Live",
     "day_offset": 30,
-    "sort_order": 8,
+    "sort_order": 9,
     "checklist": [
       "User access provided",
       "Customer operational in system",
@@ -87,7 +98,7 @@
   {
     "name": "Billing & Ownership Transfer",
     "day_offset": 32,
-    "sort_order": 9,
+    "sort_order": 10,
     "checklist": [
       "Billing confirmed",
       "Account ownership transferred to CSM",
@@ -97,7 +108,7 @@
   {
     "name": "Final Review & Closure",
     "day_offset": 35,
-    "sort_order": 10,
+    "sort_order": 11,
     "checklist": [
       "All tickets closed",
       "Documentation complete",
