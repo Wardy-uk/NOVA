@@ -109,23 +109,29 @@ export function createJiraRoutes(
   getSettings?: () => Record<string, string>,
   userSettingsQueries?: UserSettingsQueries
 ): Router {
-  /** Build a JiraRestClient for the requesting user — tries global client first,
-   *  then per-user OAuth tokens. */
+  /** Build a JiraRestClient for the requesting user.
+   *  Personal credentials first → then global fallback. */
   function getClientForUser(userId?: number): JiraRestClient | null {
-    // 1. Try global / onboarding client
-    const globalClient = getJiraClient?.() ?? null;
-    if (globalClient) return globalClient;
-
-    // 2. Try per-user OAuth tokens
     if (userId && userSettingsQueries) {
+      // 1. Per-user OAuth tokens (from Jira OAuth login)
       const cloudId = userSettingsQueries.get(userId, 'jira_cloud_id');
       const accessToken = userSettingsQueries.get(userId, 'jira_access_token');
       if (cloudId && accessToken) {
         return new JiraRestClient({ cloudId, accessToken });
       }
+
+      // 2. Per-user Basic auth credentials (from My Settings > Jira)
+      const userEnabled = userSettingsQueries.get(userId, 'jira_enabled');
+      const userUrl = userSettingsQueries.get(userId, 'jira_url');
+      const userEmail = userSettingsQueries.get(userId, 'jira_username');
+      const userToken = userSettingsQueries.get(userId, 'jira_token');
+      if (userEnabled === 'true' && userUrl && userEmail && userToken) {
+        return new JiraRestClient({ baseUrl: userUrl, email: userEmail, apiToken: userToken });
+      }
     }
 
-    return null;
+    // 3. Fall back to global client (Admin > Jira Global)
+    return getJiraClient?.() ?? null;
   }
   const router = Router();
 
