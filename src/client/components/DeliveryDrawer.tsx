@@ -3,6 +3,17 @@ import { useAuth } from '../hooks/useAuth.js';
 import { OnboardingWorkflow } from './OnboardingWorkflow.js';
 import { AuditHistory } from './AuditPanel.js';
 
+/** Convert DD/MM/YYYY → YYYY-MM-DD for HTML date inputs. Passes through if already ISO or empty. */
+function toIsoDate(d: string | null | undefined): string {
+  if (!d) return '';
+  // Already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
+  // DD/MM/YYYY
+  const m = d.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return d;
+}
+
 interface DbEntry {
   id: number;
   onboarding_id: string | null;
@@ -194,10 +205,10 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         account: entry.account,
         status: entry.status || 'Not Started',
         onboarder: entry.onboarder ?? '',
-        order_date: entry.order_date ?? '',
-        go_live_date: entry.go_live_date ?? '',
-        predicted_delivery: entry.predicted_delivery ?? '',
-        training_date: entry.training_date ?? '',
+        order_date: toIsoDate(entry.order_date),
+        go_live_date: toIsoDate(entry.go_live_date),
+        predicted_delivery: toIsoDate(entry.predicted_delivery),
+        training_date: toIsoDate(entry.training_date),
         branches: entry.branches?.toString() ?? '',
         mrr: entry.mrr?.toString() ?? '',
         incremental: entry.incremental?.toString() ?? '',
@@ -213,10 +224,10 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         account: prefill.account ?? '',
         status: prefill.status ?? 'Not Started',
         onboarder: prefill.onboarder || defaultOnboarder,
-        order_date: prefill.order_date ?? '',
-        go_live_date: prefill.go_live_date ?? '',
-        predicted_delivery: prefill.predicted_delivery ?? '',
-        training_date: prefill.training_date ?? '',
+        order_date: toIsoDate(prefill.order_date),
+        go_live_date: toIsoDate(prefill.go_live_date),
+        predicted_delivery: toIsoDate(prefill.predicted_delivery),
+        training_date: toIsoDate(prefill.training_date),
         branches: prefill.branches ?? '',
         mrr: prefill.mrr ?? '',
         incremental: prefill.incremental ?? '',
