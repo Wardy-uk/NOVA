@@ -729,11 +729,6 @@ export function initializeSchema(database: Database): void {
     console.log(`[N.O.V.A] Seeded ${bymSteps.length} BYM instance setup step templates`);
   }
 
-  // Seed feature flags
-  database.run(
-    `INSERT INTO settings (key, value) VALUES ('feature_instance_setup', 'true') ON CONFLICT(key) DO UPDATE SET value = 'true'`
-  );
-
   const defaults: [string, string][] = [
     ['source_weight_jira', '90'],
     ['source_weight_planner', '60'],
