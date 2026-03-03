@@ -26,7 +26,8 @@ export class JiraApiError extends Error {
     public statusCode: number,
     public statusText: string,
     public body: unknown,
-    public retryable: boolean = false
+    public retryable: boolean = false,
+    public requestBody?: unknown,
   ) {
     const detail = body && typeof body === 'object'
       ? (body as any).errorMessages?.join('; ') || (body as any).message || JSON.stringify(body).slice(0, 200)
@@ -216,7 +217,8 @@ export class JiraRestClient {
         res.status,
         res.statusText,
         parsed,
-        res.status === 429 || res.status >= 500
+        res.status === 429 || res.status >= 500,
+        body,
       );
     }
 

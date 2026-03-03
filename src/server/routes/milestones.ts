@@ -362,6 +362,7 @@ export function createMilestoneRoutes(
       if (err instanceof JiraApiError) {
         detail.statusCode = err.statusCode;
         detail.jiraResponse = err.body;
+        detail.requestBody = err.requestBody;
       }
       res.status(500).json({ ok: false, ...detail });
     }
