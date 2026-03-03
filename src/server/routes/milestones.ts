@@ -4,6 +4,7 @@ import type { MilestoneQueries, DeliveryQueries, TaskQueries, OnboardingConfigQu
 import { requireRole } from '../middleware/auth.js';
 import type { MilestoneWorkflowEngine } from '../services/milestone-workflow.js';
 import type { OnboardingOrchestrator } from '../services/onboarding-orchestrator.js';
+import { JiraApiError } from '../services/jira-client.js';
 
 const TemplateCreateSchema = z.object({
   name: z.string().min(1),
@@ -355,7 +356,14 @@ export function createMilestoneRoutes(
       res.json({ ok: true, data: result });
     } catch (err) {
       console.error(`[Milestones] Ticket creation for milestone ${id} failed:`, err);
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Ticket creation failed' });
+      const detail: Record<string, unknown> = {
+        error: err instanceof Error ? err.message : 'Ticket creation failed',
+      };
+      if (err instanceof JiraApiError) {
+        detail.statusCode = err.statusCode;
+        detail.jiraResponse = err.body;
+      }
+      res.status(500).json({ ok: false, ...detail });
     }
   });
 

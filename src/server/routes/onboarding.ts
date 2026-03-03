@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { OnboardingPayloadSchema, type OnboardingOrchestrator } from '../services/onboarding-orchestrator.js';
 import type { JiraRestClient } from '../services/jira-client.js';
+import { JiraApiError } from '../services/jira-client.js';
 import type { OnboardingRunQueries } from '../db/queries.js';
 
 export function createOnboardingRoutes(
@@ -35,7 +36,14 @@ export function createOnboardingRoutes(
       res.json({ ok: true, data: result });
     } catch (err) {
       console.error('[Onboarding] create-tickets error:', err);
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Ticket creation failed' });
+      const detail: Record<string, unknown> = {
+        error: err instanceof Error ? err.message : 'Ticket creation failed',
+      };
+      if (err instanceof JiraApiError) {
+        detail.statusCode = err.statusCode;
+        detail.jiraResponse = err.body;
+      }
+      res.status(500).json({ ok: false, ...detail });
     }
   });
 

@@ -142,6 +142,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
   const [ticketCreating, setTicketCreating] = useState(false);
   const [ticketResult, setTicketResult] = useState<TicketResult | null>(null);
   const [ticketError, setTicketError] = useState<string | null>(null);
+  const [ticketErrorDetail, setTicketErrorDetail] = useState<Record<string, unknown> | null>(null);
   const [selectedGroups, setSelectedGroups] = useState<Set<number>>(new Set());
 
   // User autocomplete for onboarder field
@@ -411,7 +412,12 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         body: JSON.stringify(payload),
       });
       const json = await resp.json();
-      if (!json.ok) throw new Error(json.error ?? 'Dry run failed');
+      if (!json.ok) {
+        setTicketError(json.error ?? 'Dry run failed');
+        if (json.jiraResponse || json.statusCode) setTicketErrorDetail(json);
+        setTicketCreating(false);
+        return;
+      }
       setTicketPreview(json.data);
       // Auto-select only unlocked ticket groups
       if (json.data?.details?.childGroups) {
@@ -425,6 +431,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
       }
     } catch (err) {
       setTicketError(err instanceof Error ? err.message : 'Dry run failed');
+      setTicketErrorDetail(null);
     } finally {
       setTicketCreating(false);
     }
@@ -450,11 +457,17 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         body: JSON.stringify(payload),
       });
       const json = await resp.json();
-      if (!json.ok) throw new Error(json.error ?? 'Ticket creation failed');
+      if (!json.ok) {
+        setTicketError(json.error ?? 'Ticket creation failed');
+        if (json.jiraResponse || json.statusCode) setTicketErrorDetail(json);
+        setTicketCreating(false);
+        return;
+      }
       setTicketResult(json.data);
       setTicketPreview(null);
     } catch (err) {
       setTicketError(err instanceof Error ? err.message : 'Ticket creation failed');
+      setTicketErrorDetail(null);
     } finally {
       setTicketCreating(false);
     }
@@ -526,7 +539,12 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
         headers: { 'Content-Type': 'application/json' },
       });
       const json = await resp.json();
-      if (!json.ok) throw new Error(json.error ?? 'Ticket creation failed');
+      if (!json.ok) {
+        setMilestoneTicketError(json.error ?? 'Ticket creation failed');
+        if (json.jiraResponse || json.statusCode) setTicketErrorDetail(json);
+        setMilestoneTicketLoading(null);
+        return;
+      }
       // Update milestone in local state with new jira_keys
       setMilestones(prev => prev.map(m => {
         if (m.id !== milestoneId) return m;
@@ -1104,7 +1122,17 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                                 )}
                               </div>
                               {milestoneTicketError && milestoneTicketLoading === null && (
-                                <div className="mt-1 text-[10px] text-red-400">{milestoneTicketError}</div>
+                                <div className="mt-1 text-[10px] text-red-400">
+                                  {milestoneTicketError}
+                                  {ticketErrorDetail && (
+                                    <details className="mt-1">
+                                      <summary className="text-red-500 cursor-pointer hover:text-red-300">Show Jira API response</summary>
+                                      <pre className="mt-1 p-2 bg-[#1a1e24] border border-[#3a424d] rounded text-neutral-300 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap">
+{JSON.stringify(ticketErrorDetail, null, 2)}
+                                      </pre>
+                                    </details>
+                                  )}
+                                </div>
                               )}
                             </>
                           )}
@@ -1327,7 +1355,17 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
 
               {/* Error */}
               {ticketError && (
-                <div className="p-2 bg-red-950/50 border border-red-900 rounded text-red-400 text-[11px]">{ticketError}</div>
+                <div className="p-2 bg-red-950/50 border border-red-900 rounded text-red-400 text-[11px]">
+                  <div>{ticketError}</div>
+                  {ticketErrorDetail && (
+                    <details className="mt-1">
+                      <summary className="text-[10px] text-red-500 cursor-pointer hover:text-red-300">Show Jira API response</summary>
+                      <pre className="mt-1 p-2 bg-[#1a1e24] border border-[#3a424d] rounded text-[10px] text-neutral-300 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap">
+{JSON.stringify(ticketErrorDetail, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
               )}
 
               {/* Buttons */}
