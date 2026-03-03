@@ -206,11 +206,13 @@ async function main() {
   function buildOnboardingJiraClient(): JiraRestClient | null {
     const s = settingsQueries.getAll();
     if (s.jira_ob_enabled !== 'true' || !s.jira_ob_email || !s.jira_ob_token) return null;
-    if (s.jira_ob_url) {
-      return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
-    }
+    // Prefer Cloud ID (api.atlassian.com gateway) — jira_ob_url is for browse links only
     if (s.jira_ob_cloud_id) {
       return new JiraRestClient({ cloudId: s.jira_ob_cloud_id, email: s.jira_ob_email, apiToken: s.jira_ob_token });
+    }
+    // Fallback to direct URL if no Cloud ID configured
+    if (s.jira_ob_url) {
+      return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
     }
     return null;
   }
