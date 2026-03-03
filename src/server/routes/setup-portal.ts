@@ -291,7 +291,8 @@ export function createSetupPortalRoutes(
     });
 
     // Build portal URL
-    const baseUrl = settings.sso_base_url || settings.app_base_url || `http://localhost:${process.env.PORT || 3001}`;
+    // Derive base URL: explicit setting > request origin > localhost fallback
+    const baseUrl = settings.sso_base_url || settings.app_base_url || `${req.protocol}://${req.get('host')}`;
     const portalUrl = `${baseUrl}/setup/${token}`;
 
     // Optionally send email
