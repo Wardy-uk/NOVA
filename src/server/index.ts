@@ -205,19 +205,20 @@ async function main() {
   // Reads settings on each call so credential changes take effect immediately.
   function buildJiraClient(): JiraRestClient | null {
     const s = settingsQueries.getAll();
-    // Prefer dedicated onboarding credentials
-    if (s.jira_ob_enabled === 'true' && s.jira_ob_url && s.jira_ob_email && s.jira_ob_token) {
-      return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
+    // Prefer dedicated global/onboarding credentials (Admin > Jira Global)
+    if (s.jira_ob_enabled === 'true' && s.jira_ob_email && s.jira_ob_token) {
+      // Cloud ID → api.atlassian.com gateway (preferred)
+      if (s.jira_ob_cloud_id) {
+        return new JiraRestClient({ cloudId: s.jira_ob_cloud_id, email: s.jira_ob_email, apiToken: s.jira_ob_token });
+      }
+      // Fallback to direct org URL
+      if (s.jira_ob_url) {
+        return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
+      }
     }
-    // Global Jira creds — prefer Cloud ID (api.atlassian.com) over direct URL
-    if (s.jira_enabled !== 'true' || !s.jira_username || !s.jira_token) return null;
-    if (s.jira_cloud_id) {
-      return new JiraRestClient({ cloudId: s.jira_cloud_id, email: s.jira_username, apiToken: s.jira_token });
-    }
-    if (s.jira_url) {
-      return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
-    }
-    return null;
+    // Fallback to personal Jira creds (direct URL only)
+    if (s.jira_enabled !== 'true' || !s.jira_url || !s.jira_username || !s.jira_token) return null;
+    return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
   }
 
   const aggregator = new TaskAggregator(mcpManager, taskQueries, settingsQueries, buildJiraClient);
