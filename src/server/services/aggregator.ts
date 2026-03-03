@@ -1,7 +1,7 @@
 import type { McpClientManager } from './mcp-client.js';
 import type { TaskQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
-import type { JiraRestClient } from './jira-client.js';
+import { JiraRestClient, type JiraIssue } from './jira-client.js';
 import { saveDb } from '../db/schema.js';
 
 interface NormalizedTask {
@@ -27,10 +27,16 @@ interface FetchResult {
   ok: boolean;
 }
 
+export interface SyncContext {
+  /** Per-user Jira REST client — built from user's personal credentials */
+  jiraClient?: JiraRestClient | null;
+  jiraBaseUrl?: string;
+}
+
 interface SourceAdapter {
   source: string;
   serverName: string;
-  fetch(mcp: McpClientManager): Promise<FetchResult>;
+  fetch(mcp: McpClientManager, ctx?: SyncContext): Promise<FetchResult>;
 }
 
 let lastJiraSearchText: string | null = null;
@@ -39,67 +45,38 @@ export function getLastJiraSearchText(): string | null {
   return lastJiraSearchText;
 }
 
-// ---------- Jira Adapter ----------
-function createJiraAdapter(jiraBaseUrl?: string): SourceAdapter {
+// ---------- Jira Adapter (Direct REST — per-user) ----------
+function createJiraAdapter(): SourceAdapter {
   return {
     source: 'jira',
     serverName: 'jira',
 
-    async fetch(mcp: McpClientManager): Promise<FetchResult> {
-      if (!mcp.isConnected('jira')) return { tasks: [], ok: false };
+    async fetch(_mcp: McpClientManager, ctx?: SyncContext): Promise<FetchResult> {
+      const client = ctx?.jiraClient;
+      if (!client) return { tasks: [], ok: false };
 
-      const result = (await mcp.callTool('jira', 'jira_search', {
-        jql: 'assignee = currentUser() AND status NOT IN (Done, Closed, Resolved) ORDER BY priority DESC, updated DESC',
-        limit: 50,
-        fields: 'summary,status,priority,description,assignee,created,duedate,requestType,queue,"Agent Next Update","Last Agent Public Comment"',
-        expand: 'sla',
-      })) as { content?: Array<{ text?: string }> };
-
-      const text = result?.content?.[0]?.text;
-      if (!text) return { tasks: [], ok: false };
-      lastJiraSearchText = text;
-
-      return { tasks: parseJiraSearchResults(text, jiraBaseUrl), ok: true };
+      try {
+        const FIELDS = ['summary', 'status', 'priority', 'description', 'assignee',
+          'created', 'duedate', 'customfield_12981', 'customfield_14081',
+          'customfield_14185', 'customfield_14048', 'customfield_13183',
+          'customfield_14527', 'customfield_13184'];
+        const result = await client.searchJql(
+          'assignee = currentUser() AND status NOT IN (Done, Closed, Resolved) ORDER BY priority DESC, updated DESC',
+          FIELDS,
+          50
+        );
+        const tasks = (result.issues ?? []).map(issue => {
+          const flat: Record<string, unknown> = { key: issue.key, id: issue.id, self: issue.self, ...issue.fields };
+          return mapJiraIssue(flat, ctx?.jiraBaseUrl);
+        });
+        console.log(`[JiraAdapter] REST: fetched ${tasks.length} tasks for currentUser`);
+        return { tasks, ok: true };
+      } catch (err) {
+        console.error(`[JiraAdapter] REST search failed:`, err instanceof Error ? err.message : err);
+        return { tasks: [], ok: false };
+      }
     },
   };
-}
-
-function parseJiraSearchResults(text: string, jiraBaseUrl?: string): NormalizedTask[] {
-  // Try JSON parse first (some tool versions return JSON)
-  try {
-    const data = JSON.parse(text);
-    if (Array.isArray(data)) {
-      return data.map((issue) => mapJiraIssue(issue, jiraBaseUrl));
-    }
-    if (data.issues && Array.isArray(data.issues)) {
-      return data.issues.map((issue: Record<string, unknown>) =>
-        mapJiraIssue(issue, jiraBaseUrl)
-      );
-    }
-  } catch {
-    // Not JSON — parse as markdown/text
-  }
-
-  // Fallback: line-by-line parsing of markdown output
-  const tasks: NormalizedTask[] = [];
-  const lines = text.split('\n');
-  for (const line of lines) {
-    const match = line.match(
-      /\[([A-Z]+-\d+)\]\((https?:\/\/[^)]+)\)\s*[-:]\s*(.+)/
-    );
-    if (match) {
-      tasks.push({
-        source: 'jira',
-        source_id: match[1],
-        source_url: match[2],
-        title: match[3].trim(),
-        status: 'open',
-        priority: 50,
-      });
-    }
-  }
-
-  return tasks;
 }
 
 function mapJiraIssue(issue: Record<string, unknown>, jiraBaseUrl?: string): NormalizedTask {
@@ -730,9 +707,8 @@ export class TaskAggregator {
     getJiraClient?: () => JiraRestClient | null,
   ) {
     this.getJiraClient = getJiraClient;
-    const jiraBaseUrl = settingsQueries?.get('jira_url') ?? undefined;
     this.adapters = [
-      createJiraAdapter(jiraBaseUrl),
+      createJiraAdapter(),
       plannerAdapter,
       todoAdapter,
       calendarAdapter,
@@ -744,17 +720,16 @@ export class TaskAggregator {
   /** Live Jira search for Service Desk with ownership filter. Returns normalized tasks (not persisted). */
   async fetchServiceDeskTickets(filter: SdFilter = 'mine', userJiraIdentity?: string): Promise<NormalizedTask[]> {
     const jiraClient = this.getJiraClient?.() ?? null;
-    const hasMcp = this.mcp.isConnected('jira');
-    if (!jiraClient && !hasMcp) return [];
+    if (!jiraClient) return [];
 
     const sdProject = this.settingsQueries?.get('jira_sd_project');
     const sdTiers = this.settingsQueries?.get('jira_sd_tiers');
-    const jiraBaseUrl = this.settingsQueries?.get('jira_url') ?? undefined;
+    const jiraBaseUrl = this.settingsQueries?.get('jira_ob_url')
+      ?? this.settingsQueries?.get('jira_url') ?? undefined;
 
     // Build JQL based on filter
     const parts: string[] = [];
     if (filter === 'mine') {
-      // Per-user scoping: require explicit Jira identity, return empty if not configured
       if (userJiraIdentity) {
         parts.push(`assignee = "${userJiraIdentity}"`);
       } else {
@@ -764,13 +739,11 @@ export class TaskAggregator {
     } else if (filter === 'unassigned') {
       parts.push('assignee IS EMPTY');
     }
-    // 'all' = no assignee filter
 
     if (sdProject) {
       parts.push(`project = ${sdProject}`);
     }
 
-    // Tier exclusion filter — applied to ALL queries (mine, unassigned, all, attention)
     if (sdTiers) {
       const tierValues = sdTiers.split(',').map(t => `"${t.trim()}"`).join(', ');
       parts.push(`"Current Tier" NOT IN (${tierValues})`);
@@ -780,39 +753,23 @@ export class TaskAggregator {
     const jql = parts.join(' AND ') + ' ORDER BY priority DESC, updated DESC';
     console.log(`[ServiceDesk] JQL (${filter}): ${jql}`);
 
-    // Prefer direct REST client (Basic auth) over MCP
-    if (jiraClient) {
-      try {
-        const SD_FIELDS = ['summary', 'status', 'priority', 'description', 'assignee', 'created', 'duedate',
-          'customfield_12981', 'customfield_14081', 'customfield_14185', 'customfield_14048',
-          'customfield_13183', 'customfield_14527', 'customfield_13184'];
-        const result = await jiraClient.searchJql(jql, SD_FIELDS, 200);
-        return (result.issues ?? []).map(issue => {
-          const flat: Record<string, unknown> = { key: issue.key, id: issue.id, self: issue.self, ...issue.fields };
-          return mapJiraIssue(flat, jiraBaseUrl);
-        });
-      } catch (err) {
-        console.warn(`[ServiceDesk] REST client search failed, ${hasMcp ? 'falling back to MCP' : 'no MCP available'}: ${err instanceof Error ? err.message : err}`);
-        if (!hasMcp) return [];
-      }
+    try {
+      const SD_FIELDS = ['summary', 'status', 'priority', 'description', 'assignee', 'created', 'duedate',
+        'customfield_12981', 'customfield_14081', 'customfield_14185', 'customfield_14048',
+        'customfield_13183', 'customfield_14527', 'customfield_13184'];
+      const result = await jiraClient.searchJql(jql, SD_FIELDS, 200);
+      return (result.issues ?? []).map(issue => {
+        const flat: Record<string, unknown> = { key: issue.key, id: issue.id, self: issue.self, ...issue.fields };
+        return mapJiraIssue(flat, jiraBaseUrl);
+      });
+    } catch (err) {
+      console.warn(`[ServiceDesk] REST search failed: ${err instanceof Error ? err.message : err}`);
+      return [];
     }
-
-    // Fallback: MCP tool
-    const result = (await this.mcp.callTool('jira', 'jira_search', {
-      jql,
-      limit: 200,
-      fields: 'summary,status,priority,description,assignee,created,duedate,requestType,queue,"Agent Next Update","Last Agent Public Comment",customfield_12981,customfield_14081,customfield_14185,customfield_14048,customfield_13183,customfield_14527,customfield_13184',
-      expand: 'sla',
-    })) as { content?: Array<{ text?: string }> };
-
-    const text = result?.content?.[0]?.text;
-    if (!text) return [];
-
-    return parseJiraSearchResults(text, jiraBaseUrl);
   }
 
   /** Sync a single source by name. userId tags synced tasks with the owning user. */
-  async syncSource(sourceName: string, userId?: number): Promise<{ source: string; count: number; error?: string }> {
+  async syncSource(sourceName: string, userId?: number, ctx?: SyncContext): Promise<{ source: string; count: number; error?: string }> {
     const adapter = this.adapters.find((a) => a.source === sourceName);
     if (!adapter) return { source: sourceName, count: 0, error: 'Unknown source' };
 
@@ -823,7 +780,7 @@ export class TaskAggregator {
     }
 
     try {
-      const { tasks, ok } = await adapter.fetch(this.mcp);
+      const { tasks, ok } = await adapter.fetch(this.mcp, ctx);
       let didChange = false;
       const freshIds: string[] = [];
       const isTransient = TRANSIENT_SOURCES.has(adapter.source);
@@ -876,18 +833,18 @@ export class TaskAggregator {
     return this.adapters.map((a) => a.source);
   }
 
-  async syncAll(userId?: number): Promise<
+  async syncAll(userId?: number, ctx?: SyncContext): Promise<
     { source: string; count: number; error?: string }[]
   > {
     const results = [];
     for (const adapter of this.adapters) {
-      results.push(await this.syncSource(adapter.source, userId));
+      results.push(await this.syncSource(adapter.source, userId, ctx));
     }
     return results;
   }
 
   /** Sync only sources the user has enabled (prevents shared MCP leaking to other users). */
-  async syncAllForUser(userId: number | undefined, allowedSources: Set<string>): Promise<
+  async syncAllForUser(userId: number | undefined, allowedSources: Set<string>, ctx?: SyncContext): Promise<
     { source: string; count: number; error?: string }[]
   > {
     const results = [];
@@ -896,7 +853,7 @@ export class TaskAggregator {
         results.push({ source: adapter.source, count: 0 });
         continue;
       }
-      results.push(await this.syncSource(adapter.source, userId));
+      results.push(await this.syncSource(adapter.source, userId, ctx));
     }
     return results;
   }

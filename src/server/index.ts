@@ -308,7 +308,7 @@ async function main() {
   }, buildOnboardingJiraClient));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
-  app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries));
+  app.use('/api/jira', createJiraRoutes(taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries));
   app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
   const spSync = new SharePointSync(mcpManager, deliveryQueries, () => settingsQueries.getAll());
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess, auditQueries, onboardingRunQueries, settingsQueries));
@@ -472,16 +472,27 @@ async function main() {
     }
   };
 
-  // Resolve primary admin user ID for background sync ownership
-  const primaryAdminId = (() => {
+  // Resolve primary admin user for background sync ownership
+  const primaryAdmin = (() => {
     const users = userQueries.getAll();
-    const admin = users.find(u => u.role.split(',').map(r => r.trim()).includes('admin'));
-    return admin?.id ?? 1;
+    return users.find(u => u.role.split(',').map(r => r.trim()).includes('admin'));
   })();
+  const primaryAdminId = primaryAdmin?.id ?? 1;
+  // Background sync builds a per-user Jira REST client from the primary admin's creds
+  function buildBgSyncCtx() {
+    const s = settingsQueries.getAll();
+    if (s.jira_enabled === 'true' && s.jira_url && s.jira_username && s.jira_token) {
+      return {
+        jiraClient: new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token }),
+        jiraBaseUrl: s.jira_url,
+      };
+    }
+    return { jiraClient: null as JiraRestClient | null };
+  }
 
   const runFullSync = async () => {
     try {
-      const results = await aggregator.syncAll(primaryAdminId);
+      const results = await aggregator.syncAll(primaryAdminId, buildBgSyncCtx());
       const now = new Date().toISOString();
       lastAutoSync = now;
       for (const r of results) lastSourceSync[r.source] = now;
@@ -517,7 +528,7 @@ async function main() {
         source,
         setInterval(async () => {
           try {
-            const result = await aggregator.syncSource(source, primaryAdminId);
+            const result = await aggregator.syncSource(source, primaryAdminId, buildBgSyncCtx());
             const now = new Date().toISOString();
             lastAutoSync = now;
             lastSourceSync[source] = now;

@@ -125,16 +125,7 @@ export function buildMcpConfig(
   uvxCommand: string
 ): McpServerConfig | null {
   switch (id) {
-    case 'jira':
-      return {
-        command: uvxCommand,
-        args: ['mcp-atlassian'],
-        env: {
-          JIRA_URL: settings.jira_url ?? '',
-          JIRA_USERNAME: settings.jira_username ?? '',
-          JIRA_API_TOKEN: settings.jira_token ?? '',
-        },
-      };
+    // Jira uses direct REST API (per-user credentials) — no MCP server needed
     case 'msgraph':
       return {
         command: 'npx',

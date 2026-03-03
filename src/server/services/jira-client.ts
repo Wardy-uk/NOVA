@@ -360,4 +360,19 @@ export class JiraRestClient {
     );
     return result?.comments ?? [];
   }
+
+  /** Search for users (for assignee picker) */
+  async searchUsers(query: string, maxResults = 10): Promise<Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrls?: Record<string, string> }>> {
+    return this.request<Array<{ accountId: string; displayName: string; emailAddress?: string; avatarUrls?: Record<string, string> }>>(
+      'GET', `user/search?query=${encodeURIComponent(query)}&maxResults=${maxResults}`
+    ) ?? [];
+  }
+
+  /** Get visible projects */
+  async getProjects(maxResults = 50): Promise<Array<{ id: string; key: string; name: string; projectTypeKey?: string }>> {
+    const result = await this.request<{ values: Array<{ id: string; key: string; name: string; projectTypeKey?: string }> }>(
+      'GET', `project/search?maxResults=${maxResults}`
+    );
+    return result?.values ?? [];
+  }
 }

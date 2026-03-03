@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import type { TaskQueries, MilestoneQueries, OnboardingRunQueries, UserSettingsQueries, ProblemTicketQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
-import type { TaskAggregator, SdFilter } from '../services/aggregator.js';
+import type { TaskAggregator, SdFilter, SyncContext } from '../services/aggregator.js';
+import { JiraRestClient } from '../services/jira-client.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
 import { evaluateAttention } from '../services/jira-sla.js';
 import { getAllowedSources } from '../utils/source-filter.js';
@@ -32,6 +33,33 @@ function getJiraUsername(
   if (userVal) return userVal;
   if (userRole === 'admin') return settingsQueries?.get('jira_username') ?? undefined;
   return undefined;
+}
+
+/** Build a JiraRestClient from the user's personal Jira credentials (My Settings). */
+function buildUserJiraClient(
+  userId: number | undefined,
+  userRole: string | undefined,
+  userSettingsQueries?: UserSettingsQueries,
+  settingsQueries?: SettingsQueries,
+): JiraRestClient | null {
+  if (!userId) return null;
+  // Per-user credentials
+  const url = userSettingsQueries?.get(userId, 'jira_url');
+  const email = userSettingsQueries?.get(userId, 'jira_username');
+  const token = userSettingsQueries?.get(userId, 'jira_token');
+  if (url && email && token) {
+    return new JiraRestClient({ baseUrl: url, email, apiToken: token });
+  }
+  // Admin fallback to global seeded creds
+  if (userRole === 'admin' || (userRole ?? '').includes('admin')) {
+    const gUrl = settingsQueries?.get('jira_url');
+    const gEmail = settingsQueries?.get('jira_username');
+    const gToken = settingsQueries?.get('jira_token');
+    if (gUrl && gEmail && gToken) {
+      return new JiraRestClient({ baseUrl: gUrl, email: gEmail, apiToken: gToken });
+    }
+  }
+  return null;
 }
 
 export function createTaskRoutes(
@@ -425,7 +453,10 @@ export function createTaskRoutes(
       const userId = (req as any).user?.id as number | undefined;
       const userRole = (req as any).user?.role as string | undefined;
       const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
-      const results = await aggregator.syncAllForUser(userId, allowedSources);
+      const jiraClient = buildUserJiraClient(userId, userRole, userSettingsQueries, settingsQueries);
+      const jiraBaseUrl = userSettingsQueries?.get(userId!, 'jira_url') ?? settingsQueries?.get('jira_url') ?? undefined;
+      const ctx: SyncContext = { jiraClient, jiraBaseUrl };
+      const results = await aggregator.syncAllForUser(userId, allowedSources, ctx);
       res.json({ ok: true, data: results });
     } catch (err) {
       res.status(500).json({
@@ -450,7 +481,9 @@ export function createTaskRoutes(
       return;
     }
     try {
-      const result = await aggregator.syncSource(source, userId);
+      const jiraClient = buildUserJiraClient(userId, userRole, userSettingsQueries, settingsQueries);
+      const jiraBaseUrl = userSettingsQueries?.get(userId!, 'jira_url') ?? settingsQueries?.get('jira_url') ?? undefined;
+      const result = await aggregator.syncSource(source, userId, { jiraClient, jiraBaseUrl });
       res.json({ ok: true, data: result });
     } catch (err) {
       res.status(500).json({
