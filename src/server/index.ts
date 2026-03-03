@@ -51,7 +51,8 @@ import { JiraOAuthService } from './services/jira-oauth.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
 import { createNotificationRoutes } from './routes/notifications.js';
-import { ProblemTicketQueries } from './db/queries.js';
+import { ProblemTicketQueries, InstanceSetupQueries } from './db/queries.js';
+import { createInstanceSetupRoutes } from './routes/instance-setup.js';
 import { ProblemTicketScanner } from './services/problem-ticket-scanner.js';
 import { createProblemTicketRoutes } from './routes/problem-tickets.js';
 
@@ -86,6 +87,7 @@ async function main() {
   const notificationQueries = new NotificationQueries(db);
   const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries, taskQueries);
   const problemTicketQueries = new ProblemTicketQueries(db);
+  const instanceSetupQueries = new InstanceSetupQueries(db);
 
   // Purge transient MS365 data from previous session
   const purgedCount = taskQueries.deleteTransientTasks();
@@ -353,6 +355,7 @@ async function main() {
     }
   });
   app.use('/api/onboarding/config', createOnboardingConfigRoutes(onboardingConfigQueries, requireAreaAccess));
+  app.use('/api/instance-setup', createInstanceSetupRoutes(instanceSetupQueries, deliveryQueries));
 
   // Debug endpoints (admin-only, behind auth)
   app.get('/api/debug/tools', (req, res, next) => {

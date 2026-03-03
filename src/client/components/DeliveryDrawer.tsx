@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../hooks/useAuth.js';
 import { OnboardingWorkflow } from './OnboardingWorkflow.js';
 import { AuditHistory } from './AuditPanel.js';
+import { InstanceSetupPanel } from './InstanceSetupPanel.js';
 
 /** Convert DD/MM/YYYY → YYYY-MM-DD for HTML date inputs. Passes through if already ISO or empty. */
 function toIsoDate(d: string | null | undefined): string {
@@ -974,6 +975,11 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                 </div>
               )}
             </div>
+          )}
+
+          {/* ── Instance Setup Checklist ── */}
+          {entry && !isNew && (
+            <InstanceSetupPanel deliveryId={entry.id} product={form.product || entry.product} />
           )}
 
           {/* ── Delivery Milestones ── */}

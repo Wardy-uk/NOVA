@@ -668,6 +668,67 @@ export function initializeSchema(database: Database): void {
     }
   }
 
+  // ── Instance Setup tables (Onboarding.Tool integration) ──
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS instance_setup_step_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product TEXT NOT NULL,
+      step_key TEXT NOT NULL,
+      step_label TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      required INTEGER DEFAULT 1,
+      UNIQUE(product, step_key)
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS instance_setup_steps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_id INTEGER NOT NULL REFERENCES delivery_entries(id) ON DELETE CASCADE,
+      step_key TEXT NOT NULL,
+      step_label TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      result_message TEXT,
+      executed_at TEXT,
+      executed_by INTEGER,
+      UNIQUE(delivery_id, step_key)
+    )
+  `);
+
+  database.run(`CREATE INDEX IF NOT EXISTS idx_setup_steps_delivery ON instance_setup_steps(delivery_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_setup_templates_product ON instance_setup_step_templates(product, sort_order)`);
+
+  // Seed default BYM setup step templates
+  const setupTmplCount = database.exec('SELECT COUNT(*) as c FROM instance_setup_step_templates');
+  if ((setupTmplCount[0]?.values[0]?.[0] as number) === 0) {
+    const bymSteps: Array<{ key: string; label: string; sort: number }> = [
+      { key: 'setupBrands', label: 'Create Brands', sort: 1 },
+      { key: 'setupTemplates', label: 'Confirm Email Templates', sort: 2 },
+      { key: 'setupDirectMail', label: 'Confirm Direct Mail', sort: 3 },
+      { key: 'setupLetterhead', label: 'Confirm Letterhead', sort: 4 },
+      { key: 'setupBranches', label: 'Create Branches', sort: 5 },
+      { key: 'setupDeliveryAddresses', label: 'Create Delivery Addresses', sort: 6 },
+      { key: 'setupUsers', label: 'Create Users', sort: 7 },
+      { key: 'setupRss', label: 'Add RSS Feeds', sort: 8 },
+      { key: 'setupRobocop', label: 'Add Robocop Settings', sort: 9 },
+      { key: 'setupScheduledReports', label: 'Add Scheduled Reports', sort: 10 },
+      { key: 'setupComponents', label: 'Add Email Components', sort: 11 },
+      { key: 'setupAutomatedEmails', label: 'Add Automated Emails', sort: 12 },
+      { key: 'setupBuildMilestones', label: 'Add Build Milestones', sort: 13 },
+      { key: 'setupBuildPortals', label: 'Add Build Portals', sort: 14 },
+      { key: 'setupBuildContent', label: 'Add Build Content', sort: 15 },
+      { key: 'setupMatchToCrm', label: 'Match to CRM', sort: 16 },
+    ];
+    for (const s of bymSteps) {
+      database.run(
+        `INSERT INTO instance_setup_step_templates (product, step_key, step_label, sort_order) VALUES (?, ?, ?, ?)`,
+        ['BYM', s.key, s.label, s.sort]
+      );
+    }
+    console.log(`[N.O.V.A] Seeded ${bymSteps.length} BYM instance setup step templates`);
+  }
+
   // Seed default settings
   const defaults: [string, string][] = [
     ['source_weight_jira', '90'],

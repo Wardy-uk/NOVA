@@ -110,8 +110,9 @@ export function createIntegrationRoutes(
 
       // For credential-only integrations without MCP, derive status from config completeness
       let effectiveMcpStatus: McpServerStatus = d365Status ?? mcpInfo?.status ?? 'disconnected';
-      if (!mcpInfo && !d365Status && integ.authType === 'credentials' && source[integ.enabledKey] === 'true') {
-        const allRequired = integ.fields.filter(f => f.required).every(f => !!source[f.key]);
+      const configSource = isAdminOnly ? globalSettings : userSettings;
+      if (!mcpInfo && !d365Status && integ.authType === 'credentials' && configSource[integ.enabledKey] === 'true') {
+        const allRequired = integ.fields.filter(f => f.required).every(f => !!configSource[f.key]);
         effectiveMcpStatus = allRequired ? 'connected' : 'disconnected';
       }
 

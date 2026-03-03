@@ -2596,3 +2596,160 @@ export class ProblemTicketQueries {
     };
   }
 }
+
+// ── Instance Setup Queries (Onboarding.Tool integration) ──
+
+export interface SetupStepTemplate {
+  id: number;
+  product: string;
+  step_key: string;
+  step_label: string;
+  sort_order: number;
+  required: number;
+}
+
+export interface SetupStep {
+  id: number;
+  delivery_id: number;
+  step_key: string;
+  step_label: string;
+  status: string;
+  result_message: string | null;
+  executed_at: string | null;
+  executed_by: number | null;
+}
+
+export class InstanceSetupQueries {
+  constructor(private db: Database) {}
+
+  // ── Templates ──
+
+  getTemplatesByProduct(product: string): SetupStepTemplate[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM instance_setup_step_templates WHERE product = ? ORDER BY sort_order`
+    );
+    stmt.bind([product]);
+    const results: SetupStepTemplate[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as SetupStepTemplate);
+    stmt.free();
+    return results;
+  }
+
+  getAllTemplates(): SetupStepTemplate[] {
+    const stmt = this.db.prepare(`SELECT * FROM instance_setup_step_templates ORDER BY product, sort_order`);
+    const results: SetupStepTemplate[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as SetupStepTemplate);
+    stmt.free();
+    return results;
+  }
+
+  getDistinctProducts(): string[] {
+    const stmt = this.db.prepare(`SELECT DISTINCT product FROM instance_setup_step_templates ORDER BY product`);
+    const results: string[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      results.push(row.product as string);
+    }
+    stmt.free();
+    return results;
+  }
+
+  createTemplate(data: { product: string; step_key: string; step_label: string; sort_order?: number; required?: number }): number {
+    this.db.run(
+      `INSERT INTO instance_setup_step_templates (product, step_key, step_label, sort_order, required) VALUES (?, ?, ?, ?, ?)`,
+      [data.product, data.step_key, data.step_label, data.sort_order ?? 0, data.required ?? 1]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  updateTemplate(id: number, updates: Partial<Pick<SetupStepTemplate, 'step_label' | 'sort_order' | 'required'>>): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    if (updates.step_label !== undefined) { fields.push('step_label = ?'); params.push(updates.step_label); }
+    if (updates.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(updates.sort_order); }
+    if (updates.required !== undefined) { fields.push('required = ?'); params.push(updates.required); }
+    if (fields.length === 0) return false;
+    params.push(id);
+    this.db.run(`UPDATE instance_setup_step_templates SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
+    saveDb();
+    return true;
+  }
+
+  deleteTemplate(id: number): void {
+    this.db.run(`DELETE FROM instance_setup_step_templates WHERE id = ?`, [id]);
+    saveDb();
+  }
+
+  // ── Per-delivery steps ──
+
+  getByDelivery(deliveryId: number): SetupStep[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM instance_setup_steps WHERE delivery_id = ? ORDER BY step_key`
+    );
+    stmt.bind([deliveryId]);
+    const results: SetupStep[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as SetupStep);
+    stmt.free();
+    return results;
+  }
+
+  /** Initialize steps for a delivery from templates. Returns count of steps created. */
+  initializeSteps(deliveryId: number, product: string): number {
+    const templates = this.getTemplatesByProduct(product);
+    let created = 0;
+    for (const tmpl of templates) {
+      try {
+        this.db.run(
+          `INSERT OR IGNORE INTO instance_setup_steps (delivery_id, step_key, step_label) VALUES (?, ?, ?)`,
+          [deliveryId, tmpl.step_key, tmpl.step_label]
+        );
+        created++;
+      } catch {
+        // already exists — ignore
+      }
+    }
+    if (created > 0) saveDb();
+    return created;
+  }
+
+  updateStepStatus(deliveryId: number, stepKey: string, status: string, resultMessage?: string, executedBy?: number): boolean {
+    const now = ['complete', 'failed'].includes(status) ? new Date().toISOString() : null;
+    this.db.run(
+      `UPDATE instance_setup_steps SET status = ?, result_message = COALESCE(?, result_message), executed_at = COALESCE(?, executed_at), executed_by = COALESCE(?, executed_by) WHERE delivery_id = ? AND step_key = ?`,
+      [status, resultMessage ?? null, now, executedBy ?? null, deliveryId, stepKey]
+    );
+    saveDb();
+    return this.db.getRowsModified() > 0;
+  }
+
+  deleteStepsForDelivery(deliveryId: number): void {
+    this.db.run(`DELETE FROM instance_setup_steps WHERE delivery_id = ?`, [deliveryId]);
+    saveDb();
+  }
+
+  /** Bulk status summary for multiple deliveries */
+  getBulkProgress(deliveryIds: number[]): Record<number, { total: number; complete: number; failed: number }> {
+    if (deliveryIds.length === 0) return {};
+    const placeholders = deliveryIds.map(() => '?').join(',');
+    const stmt = this.db.prepare(
+      `SELECT delivery_id, status, COUNT(*) as cnt FROM instance_setup_steps WHERE delivery_id IN (${placeholders}) GROUP BY delivery_id, status`
+    );
+    stmt.bind(deliveryIds as any);
+    const result: Record<number, { total: number; complete: number; failed: number }> = {};
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      const did = row.delivery_id as number;
+      const status = row.status as string;
+      const cnt = row.cnt as number;
+      if (!result[did]) result[did] = { total: 0, complete: 0, failed: 0 };
+      result[did].total += cnt;
+      if (status === 'complete') result[did].complete += cnt;
+      if (status === 'failed') result[did].failed += cnt;
+    }
+    stmt.free();
+    return result;
+  }
+}
