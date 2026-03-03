@@ -162,7 +162,10 @@ export class JiraRestClient {
     retries = 2
   ): Promise<T> {
     const url = `${this.baseUrl}/rest/api/3/${path}`;
-    console.log(`[JiraClient] ${method} ${url}`);
+    const maskedAuth = this.authHeader.startsWith('Basic ')
+      ? `Basic ${this.authHeader.slice(6, 10)}...${this.authHeader.slice(-4)}`
+      : `Bearer ${this.authHeader.slice(7, 11)}...${this.authHeader.slice(-4)}`;
+    console.log(`[JiraClient] ${method} ${url} [auth: ${maskedAuth}]`);
     const opts: RequestInit = {
       method,
       headers: {
