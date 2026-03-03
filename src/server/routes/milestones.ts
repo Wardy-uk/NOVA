@@ -334,7 +334,8 @@ export function createMilestoneRoutes(
     }
 
     try {
-      const filterGroupIds = linkedGroups.map((g: any) => g.ticket_group_id ?? g.id);
+      // getTemplateTicketGroups returns number[] — use directly
+      const filterGroupIds = linkedGroups;
       const result = await orchestrator.execute({
         schemaVersion: 1,
         onboardingRef: entry.onboarding_id,

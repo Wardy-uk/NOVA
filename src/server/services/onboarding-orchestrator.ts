@@ -106,7 +106,9 @@ export class OnboardingOrchestrator {
     this.log(`${prefix} Starting${dryRun ? ' (DRY RUN)' : ''}...`);
 
     // 2. Check local DB for cached successful run
-    if (!dryRun) {
+    // Skip cache when filterGroupIds provided — milestone-specific creation may add children
+    // to an existing parent, and different milestones create different groups.
+    if (!dryRun && !options?.filterGroupIds?.length) {
       const existing = this.runQueries.getByRef(onboardingRef);
       if (existing && existing.parent_key) {
         this.log(`${prefix} Already completed (run #${existing.id}), returning cached result`);
@@ -130,9 +132,9 @@ export class OnboardingOrchestrator {
     // Filter to specific groups if requested (milestone workflow creates tickets per-stage)
     if (options?.filterGroupIds && options.filterGroupIds.length > 0) {
       const filterSet = new Set(options.filterGroupIds);
+      const before = ticketGroups.length;
       ticketGroups = ticketGroups.filter(g => g.ticketGroupId != null && filterSet.has(g.ticketGroupId));
-      // If no child groups match but filterGroupIds was provided (e.g. "Delivery QA" parent-only),
-      // continue to create the parent ticket with no children
+      this.log(`${prefix} filterGroupIds=[${options.filterGroupIds.join(',')}], groups: ${before} → ${ticketGroups.length} (matched: ${ticketGroups.map(g => `${g.ticketGroupId}:${g.ticketGroupName}`).join(', ')})`);
     }
 
     this.log(`${prefix} Resolved ${ticketGroups.length} ticket groups for "${payload.saleType}"`);
