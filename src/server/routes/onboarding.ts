@@ -43,6 +43,7 @@ export function createOnboardingRoutes(
         detail.statusCode = err.statusCode;
         detail.jiraResponse = err.body;
         detail.requestBody = err.requestBody;
+        detail.requestUrl = (err as any).requestUrl;
       }
       res.status(500).json({ ok: false, ...detail });
     }

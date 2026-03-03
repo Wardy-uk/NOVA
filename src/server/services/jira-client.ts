@@ -216,13 +216,15 @@ export class JiraRestClient {
     if (!res.ok) {
       console.error(`[JiraClient] ${method} ${url} → ${res.status} ${res.statusText}`, JSON.stringify(parsed).slice(0, 500));
       if (body) console.error(`[JiraClient] Request body:`, JSON.stringify(body).slice(0, 500));
-      throw new JiraApiError(
+      const err = new JiraApiError(
         res.status,
         res.statusText,
         parsed,
         res.status === 429 || res.status >= 500,
         body,
       );
+      (err as any).requestUrl = url;
+      throw err;
     }
 
     return parsed as T;
