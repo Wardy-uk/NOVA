@@ -142,6 +142,10 @@ export function AdminView() {
   // Invite state
   const [invitingUserId, setInvitingUserId] = useState<number | null>(null);
 
+  // Feature flags state
+  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
+  const [featureFlagsLoaded, setFeatureFlagsLoaded] = useState(false);
+
   // Import users state
   const [showImportUsers, setShowImportUsers] = useState(false);
   const [importPreview, setImportPreview] = useState<Array<{ username: string; display_name: string; email: string; role: string }>>([]);
@@ -354,7 +358,34 @@ export function AdminView() {
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { fetchData(); fetchAiKeys(); fetchIntegrations(); fetchMilestones(); fetchSaleTypes(); fetchMatrixOffsets(); fetchRoles(); fetchFeedback(); }, [fetchData, fetchAiKeys, fetchIntegrations, fetchMilestones, fetchSaleTypes, fetchMatrixOffsets, fetchRoles, fetchFeedback]);
+  const FEATURE_FLAG_KEYS = ['feature_instance_setup'];
+  const fetchFeatureFlags = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const json = await res.json();
+      if (json.ok) {
+        const flags: Record<string, boolean> = {};
+        for (const key of FEATURE_FLAG_KEYS) {
+          flags[key] = json.data?.[key] === 'true';
+        }
+        setFeatureFlags(flags);
+        setFeatureFlagsLoaded(true);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const toggleFeatureFlag = async (key: string, enabled: boolean) => {
+    try {
+      await fetch(`/api/settings/${key}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: enabled ? 'true' : 'false' }),
+      });
+      setFeatureFlags(prev => ({ ...prev, [key]: enabled }));
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { fetchData(); fetchAiKeys(); fetchIntegrations(); fetchMilestones(); fetchSaleTypes(); fetchMatrixOffsets(); fetchRoles(); fetchFeedback(); fetchFeatureFlags(); }, [fetchData, fetchAiKeys, fetchIntegrations, fetchMilestones, fetchSaleTypes, fetchMatrixOffsets, fetchRoles, fetchFeedback, fetchFeatureFlags]);
 
   const updateUser = async (id: number, updates: Record<string, unknown>) => {
     clearMessages();
@@ -1489,6 +1520,30 @@ export function AdminView() {
               <span className="text-xs text-amber-400">Unsaved changes</span>
             </div>
           )}
+
+          {/* Feature Flags */}
+          <div className="border-t border-[#3a424d] pt-4 mt-4">
+            <h3 className="text-sm font-semibold text-neutral-200 mb-2">Feature Flags</h3>
+            <p className="text-[11px] text-neutral-500 mb-3">Toggle experimental or in-progress features.</p>
+            <div className="space-y-2">
+              {[
+                { key: 'feature_instance_setup', label: 'Instance Setup Tracking', desc: 'Show setup checklist on delivery entries' },
+              ].map(flag => (
+                <div key={flag.key} className="flex items-center justify-between px-3 py-2 rounded bg-[#272C33] border border-[#3a424d]">
+                  <div>
+                    <span className="text-xs text-neutral-200">{flag.label}</span>
+                    <span className="text-[10px] text-neutral-500 ml-2">{flag.desc}</span>
+                  </div>
+                  <button
+                    onClick={() => toggleFeatureFlag(flag.key, !featureFlags[flag.key])}
+                    className={`relative w-9 h-5 rounded-full transition-colors ${featureFlags[flag.key] ? 'bg-[#5ec1ca]' : 'bg-[#3a424d]'}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${featureFlags[flag.key] ? 'translate-x-4' : ''}`} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

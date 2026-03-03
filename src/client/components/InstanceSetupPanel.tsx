@@ -37,6 +37,22 @@ export function InstanceSetupPanel({ deliveryId, product }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(false);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+
+  // Check feature flag
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/settings');
+        const json = await res.json();
+        if (json.ok) {
+          setEnabled(json.data?.feature_instance_setup === 'true');
+        } else {
+          setEnabled(false);
+        }
+      } catch { setEnabled(false); }
+    })();
+  }, []);
 
   const fetchSteps = useCallback(async () => {
     try {
@@ -47,8 +63,11 @@ export function InstanceSetupPanel({ deliveryId, product }: Props) {
   }, [deliveryId]);
 
   useEffect(() => {
-    fetchSteps();
-  }, [fetchSteps]);
+    if (enabled) fetchSteps();
+  }, [fetchSteps, enabled]);
+
+  // Don't render until flag is checked; hide if disabled
+  if (enabled === null || enabled === false) return null;
 
   const handleInitialize = async () => {
     setInitializing(true);
