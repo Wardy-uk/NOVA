@@ -50,9 +50,32 @@ function compactify(tasks: Task[]): CompactTask[] {
       const due = new Date(t.due_date);
       if (!isNaN(due.getTime()) && due < today) compact.overdue = true;
     }
-    if (t.description) compact.description = t.description.slice(0, 100);
+    if (t.description) compact.description = t.description.slice(0, 50);
     return compact;
   });
+}
+
+/** Pre-filter to the most relevant tasks to stay within LLM token limits */
+function selectRelevant(tasks: Task[], max: number = 75): Task[] {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekOut = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  const scored = tasks.map(t => {
+    const due = t.due_date ? new Date(t.due_date) : null;
+    const validDue = due && !isNaN(due.getTime());
+    const isOverdue = validDue && due < today;
+    const isDueSoon = validDue && due >= today && due <= weekOut;
+    let score = 50;
+    if (isOverdue) score = 0;
+    else if (isDueSoon) score = 10;
+    else if (t.priority <= 2) score = 20;
+    else if (t.source === 'milestone') score = 25;
+    return { task: t, score };
+  });
+
+  scored.sort((a, b) => a.score - b.score || (a.task.priority ?? 50) - (b.task.priority ?? 50));
+  return scored.slice(0, max).map(s => s.task);
 }
 
 function parseJson<T>(text: string): T | null {
@@ -70,7 +93,8 @@ export async function generateMorningBriefing(
   previousRitual?: Ritual | null,
 ): Promise<MorningBriefing> {
   const client = new OpenAI({ apiKey });
-  const compact = compactify(tasks);
+  const relevant = selectRelevant(tasks, 75);
+  const compact = compactify(relevant);
 
   let yesterdayContext = '';
   if (previousRitual?.planned_items) {
@@ -100,7 +124,7 @@ Use actual task IDs from the data. Keep reasons to 1 sentence each. No markdown,
       },
       {
         role: 'user',
-        content: `Today's date: ${new Date().toISOString().split('T')[0]}\n\nMy ${tasks.length} current tasks:\n${JSON.stringify(compact)}${yesterdayContext}\n\nGenerate my briefing.`,
+        content: `Today's date: ${new Date().toISOString().split('T')[0]}\n\nMy ${relevant.length} most relevant tasks (from ${tasks.length} total):\n${JSON.stringify(compact)}${yesterdayContext}\n\nGenerate my briefing.`,
       },
     ],
   });
@@ -123,7 +147,8 @@ export async function generateReplan(
   morningRitual?: Ritual | null,
 ): Promise<ReplanBriefing> {
   const client = new OpenAI({ apiKey });
-  const compact = compactify(tasks);
+  const relevant = selectRelevant(tasks, 75);
+  const compact = compactify(relevant);
 
   let morningContext = '';
   if (morningRitual?.planned_items) {
@@ -147,7 +172,7 @@ Use actual task IDs. Keep it brief. No markdown, just JSON.`,
       },
       {
         role: 'user',
-        content: `Current time: ${new Date().toLocaleTimeString()}\n\nMy ${tasks.length} tasks:\n${JSON.stringify(compact)}${morningContext}\n\nRe-plan my afternoon.`,
+        content: `Current time: ${new Date().toLocaleTimeString()}\n\nMy ${relevant.length} most relevant tasks (from ${tasks.length} total):\n${JSON.stringify(compact)}${morningContext}\n\nRe-plan my afternoon.`,
       },
     ],
   });
@@ -167,7 +192,8 @@ export async function generateEndOfDay(
   morningRitual?: Ritual | null,
 ): Promise<EodReview> {
   const client = new OpenAI({ apiKey });
-  const compact = compactify(tasks);
+  const relevant = selectRelevant(tasks, 75);
+  const compact = compactify(relevant);
 
   let morningContext = '';
   if (morningRitual?.planned_items) {
@@ -193,7 +219,7 @@ Use actual task IDs where relevant. No markdown, just JSON.`,
       },
       {
         role: 'user',
-        content: `End of day: ${new Date().toLocaleTimeString()}\n\nMy ${tasks.length} remaining tasks:\n${JSON.stringify(compact)}${morningContext}\n\nGenerate my end-of-day review.`,
+        content: `End of day: ${new Date().toLocaleTimeString()}\n\nMy ${relevant.length} most relevant remaining tasks (from ${tasks.length} total):\n${JSON.stringify(compact)}${morningContext}\n\nGenerate my end-of-day review.`,
       },
     ],
   });

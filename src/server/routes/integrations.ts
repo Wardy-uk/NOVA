@@ -9,6 +9,7 @@ import { INTEGRATIONS, buildMcpConfig } from '../services/integrations.js';
 import type { Dynamics365Service } from '../services/dynamics365.js';
 import type { IntegrationStatus, McpServerStatus } from '../../shared/types.js';
 import type { JiraRestClient } from '../services/jira-client.js';
+import { isAdmin } from '../utils/role-helpers.js';
 
 // Admin-only integrations: credentials stay in global settings.json
 const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso']);
@@ -58,6 +59,8 @@ export function createIntegrationRoutes(
   // GET /api/integrations — list all with masked creds + status (per-user)
   router.get('/', async (req, res) => {
     const userId = (req as any).user?.id as number | undefined;
+    const userRole = (req as any).user?.role as string | undefined;
+    const userIsAdmin = userRole ? isAdmin(userRole) : false;
     const globalSettings = settingsQueries.getAll();
     const userSettings = userId ? userSettingsQueries.getAllForUser(userId) : {};
     const mcpStatuses = mcpManager.getStatus();
@@ -69,12 +72,20 @@ export function createIntegrationRoutes(
       const values: Record<string, string> = {};
       const isAdminOnly = ADMIN_ONLY_IDS.has(integ.id);
 
-      // Admin-only integrations read from global; personal integrations read from user_settings
-      const source = isAdminOnly ? globalSettings : userSettings;
+      // Non-admins: skip credential values for admin-only integrations
+      if (isAdminOnly && !userIsAdmin) {
+        // Still include the integration card with status, but no credential values
+        for (const field of integ.fields) {
+          values[field.key] = '';
+        }
+      } else {
+        // Admin-only integrations read from global; personal integrations read from user_settings
+        const source = isAdminOnly ? globalSettings : userSettings;
 
-      for (const field of integ.fields) {
-        const raw = source[field.key] ?? '';
-        values[field.key] = field.type === 'password' && raw ? maskToken(raw) : raw;
+        for (const field of integ.fields) {
+          const raw = source[field.key] ?? '';
+          values[field.key] = field.type === 'password' && raw ? maskToken(raw) : raw;
+        }
       }
 
       let loggedIn = false;
@@ -142,7 +153,14 @@ export function createIntegrationRoutes(
 
     const { enabled, credentials } = parsed.data;
     const userId = (req as any).user?.id as number | undefined;
+    const userRole = (req as any).user?.role as string | undefined;
     const isAdminOnly = ADMIN_ONLY_IDS.has(integId);
+
+    // Admin-only integrations require admin role
+    if (isAdminOnly && (!userRole || !isAdmin(userRole))) {
+      res.status(403).json({ ok: false, error: 'Admin role required to modify this integration' });
+      return;
+    }
 
     if (isAdminOnly) {
       // Admin-only: save to global settings
@@ -403,6 +421,13 @@ export function createIntegrationRoutes(
   // POST /api/integrations/:id/test — test connection (currently Jira Global only)
   router.post('/:id/test', async (req, res) => {
     const integId = req.params.id;
+    const userRole = (req as any).user?.role as string | undefined;
+
+    // Admin-only integrations require admin role to test
+    if (ADMIN_ONLY_IDS.has(integId) && (!userRole || !isAdmin(userRole))) {
+      res.status(403).json({ ok: false, error: 'Admin role required' });
+      return;
+    }
 
     if (integId === 'jira-onboarding') {
       if (!getJiraClient) {

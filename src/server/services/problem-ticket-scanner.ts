@@ -398,6 +398,9 @@ export class ProblemTicketScanner {
       // Run missed commitment analysis
       await this.runCommitmentAnalysis(needsSentiment, config.get('missed_commitment'));
 
+      // Run "no next reply" analysis — customer waiting for agent response
+      await this.runNoReplyAnalysis(allIssues, config.get('no_next_reply'), scanId, now);
+
       // Mark resolved — alerts not seen in this scan
       const allAlertedKeys = allIssues.filter(i => {
         // Only include issues that scored >= 15
@@ -685,6 +688,166 @@ Rules:
       } catch (err: any) {
         console.warn(`[ProblemTicketScanner] Commitment batch failed:`, err.message);
       }
+    }
+  }
+
+  /** Check for tickets where the customer replied but the agent hasn't responded */
+  private async runNoReplyAnalysis(
+    allIssues: JiraIssue[],
+    noReplyConfig: ProblemTicketConfigRow | undefined,
+    scanId: string,
+    now: Date,
+  ): Promise<void> {
+    if (!noReplyConfig?.enabled || !this.jira) return;
+
+    const threshold = JSON.parse(noReplyConfig.threshold_json ?? '{}');
+    const hoursThreshold = threshold.hoursThreshold ?? 4;
+    const staffDomains: string[] = threshold.staffDomains ?? ['nurtur'];
+    const thresholdMs = hoursThreshold * 60 * 60 * 1000;
+
+    // Only check tickets that have comments
+    const withComments = allIssues.filter(issue => {
+      const cf = issue.fields.comment as { total?: number; comments?: unknown[] } | undefined;
+      return (cf?.total ?? cf?.comments?.length ?? 0) > 0;
+    });
+
+    if (withComments.length === 0) return;
+
+    console.log(`[ProblemTicketScanner] No-reply analysis: checking ${withComments.length} tickets with comments...`);
+
+    let triggered = 0;
+
+    // Process in batches to avoid overwhelming the API
+    const batchSize = 10;
+    for (let i = 0; i < withComments.length; i += batchSize) {
+      const batch = withComments.slice(i, i + batchSize);
+
+      for (const issue of batch) {
+        try {
+          const comments = await this.jira.getComments(issue.key, 10);
+          if (comments.length === 0) continue;
+
+          const reporterEmail = ((issue.fields.reporter as any)?.emailAddress ?? '').toLowerCase();
+          const assigneeEmail = ((issue.fields.assignee as any)?.emailAddress ?? '').toLowerCase();
+
+          // Sort ascending by created
+          const sorted = [...comments].sort((a, b) =>
+            new Date(a.created).getTime() - new Date(b.created).getTime()
+          );
+
+          // Walk from most recent to find the last customer comment
+          let lastCustomerComment: JiraComment | null = null;
+          let agentRepliedAfter = false;
+
+          for (let j = sorted.length - 1; j >= 0; j--) {
+            const c = sorted[j];
+            const authorEmail = (c.author.emailAddress ?? '').toLowerCase();
+            const isStaff = authorEmail === assigneeEmail ||
+              staffDomains.some(d => authorEmail.includes(`@${d}`));
+
+            if (!isStaff) {
+              // This is a customer/external comment
+              if (!lastCustomerComment) {
+                lastCustomerComment = c;
+              }
+            } else if (lastCustomerComment) {
+              // Found a staff comment that's newer than the customer comment?
+              // No — we're walking backwards, so if we already found a customer comment
+              // and now hit a staff comment, the staff comment is OLDER. Keep looking.
+            }
+          }
+
+          if (!lastCustomerComment) continue;
+
+          // Check if any agent/staff replied AFTER the customer comment
+          const customerTime = new Date(lastCustomerComment.created).getTime();
+          for (const c of sorted) {
+            const authorEmail = (c.author.emailAddress ?? '').toLowerCase();
+            const isStaff = authorEmail === assigneeEmail ||
+              staffDomains.some(d => authorEmail.includes(`@${d}`));
+
+            if (isStaff && new Date(c.created).getTime() > customerTime) {
+              agentRepliedAfter = true;
+              break;
+            }
+          }
+
+          if (agentRepliedAfter) continue;
+
+          // Check elapsed time
+          const elapsedMs = now.getTime() - customerTime;
+          if (elapsedMs < thresholdMs) continue;
+
+          const elapsedHours = Math.floor(elapsedMs / (1000 * 60 * 60));
+          const detail = elapsedHours >= 24
+            ? `${Math.floor(elapsedHours / 24)}d ${elapsedHours % 24}h since customer replied`
+            : `${elapsedHours}h since customer replied`;
+
+          // Get or create the alert for this issue
+          const existing = this.queries.getAlertByIssueKey(issue.key);
+
+          if (existing) {
+            // Add no_next_reply reason to existing alert
+            const alreadyHasRule = existing.reasons?.some(r => r.rule === 'no_next_reply');
+            if (!alreadyHasRule) {
+              const newScore = Math.min(100, existing.score + noReplyConfig.weight);
+              const newSeverity = newScore >= 60 ? 'P1' : newScore >= 35 ? 'P2' : 'P3';
+              const reasons = [...(existing.reasons ?? []), {
+                rule: 'no_next_reply',
+                label: 'Customer Waiting',
+                weight: noReplyConfig.weight,
+                detail,
+              }];
+              this.queries.upsertAlert({
+                ...existing,
+                score: newScore,
+                severity: newSeverity,
+                scan_id: scanId,
+              }, reasons);
+              triggered++;
+            }
+          } else {
+            // Create new alert solely from this rule
+            const score = noReplyConfig.weight;
+            if (score >= 15) {
+              const sev = score >= 60 ? 'P1' : score >= 35 ? 'P2' : 'P3';
+              const commentCount = (issue.fields.comment as any)?.total ?? comments.length;
+              const fingerprint = computeFingerprint(issue, commentCount, false);
+
+              this.queries.upsertAlert({
+                issue_key: issue.key,
+                project_key: issue.key.split('-')[0],
+                summary: (issue.fields.summary as string) ?? '',
+                status: (issue.fields.status as any)?.name ?? null,
+                priority: (issue.fields.priority as any)?.name ?? null,
+                assignee: (issue.fields.assignee as any)?.displayName ?? null,
+                reporter: (issue.fields.reporter as any)?.displayName ?? null,
+                created_at: (issue.fields.created as string) ?? null,
+                severity: sev,
+                score,
+                fingerprint,
+                sla_remaining_ms: getSlaRemainingMs(issue as any),
+                sentiment_score: null,
+                sentiment_summary: null,
+                scan_id: scanId,
+              }, [{
+                rule: 'no_next_reply',
+                label: 'Customer Waiting',
+                weight: noReplyConfig.weight,
+                detail,
+              }]);
+              triggered++;
+            }
+          }
+        } catch (err: any) {
+          // Skip individual ticket failures
+          console.warn(`[ProblemTicketScanner] No-reply check failed for ${issue.key}:`, err.message);
+        }
+      }
+    }
+
+    if (triggered > 0) {
+      console.log(`[ProblemTicketScanner] No-reply analysis: ${triggered} tickets flagged`);
     }
   }
 }

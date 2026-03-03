@@ -3,24 +3,19 @@ N.O.V.A — TO DO
 
 --- Triage ---
 
-[URGENT BUG] Some users see my to do's
-
-
-ability to manually add ticket ids to delivery items where these have been created before NOVA 
-
 ability to assign milestone tasks to users - by default should be onboarding owner, but allow to be changed
 
-=== CURRENT STATUS (2 Mar 2026) ===
+=== CURRENT STATUS (3 Mar 2026) ===
 
-Deployed at https://nova.nurtur.tech | v1.1.6 | Branch: nova-codex
+Deployed at https://nova.nurtur.tech | v1.1.11 | Branch: nova-codex
 IIS reverse proxy → Node.js (NSSM) on Windows Server VM
 
 6 areas: My NOVA, Service Desk, Onboarding, Delivery, CRM, Admin
-5 MCP integrations: Jira, MS365, Monday.com, D365, OneDrive
+4 MCP integrations: MS365, Monday.com, D365, OneDrive | Jira: direct REST per-user
 Milestone workflow engine: progressive task/ticket creation on lead-day triggers
 AI chat, notifications, audit log, team workload, SD dashboard, Jira OAuth
 AI Problem Ticket Detection: 10-rule engine + LLM sentiment/commitment, P1/P2/P3 queue
-0 bugs | 0 blockers | Monday.com syncing 22 tasks across 5 boards
+0 blockers | Monday.com syncing 22 tasks across 5 boards
 
 Known limitation:
   - MS365 transient sources may not populate on restart until manual sync or 10s retry
@@ -28,6 +23,32 @@ Known limitation:
 Deploy: .\deploy\deploy.ps1 -Branch nova-codex (on server C:\Nurtur\NOVA)
 Completed items: see NOVA_completed.txt
 
+
+=== DONE (3 Mar 2026) ===
+
+- TD1+TD2: Security hardening — GET /api/settings now redacts sensitive keys
+  (jwt_secret, tokens, secrets) for non-admin users. Integration PUT/test
+  endpoints enforce admin role for admin-only integrations (SSO, Jira Global,
+  SD config). GET /api/integrations hides credential values for non-admins.
+- New problem ticket rule: "no_next_reply" (Customer Waiting) — detects when
+  customer replied but agent hasn't responded within configurable hours
+  (default 4h). Staff detection via assignee email + configurable domain list.
+  Post-processing step fetches last 10 comments per ticket. Weight 20.
+- Toast notifications for SLA breach, milestone overdue, feedback reply — new
+  ToastStack component in NotificationBell. Auto-dismisses after 8s with fade.
+  SLA breach = red, milestone = amber, feedback = teal. Polling triggers check
+  every 60s, toasts only for items created in last 2 mins (no stale flood).
+  Feedback reply notification was already implemented in feedback.ts route.
+- Fix AI Insights 429 TPM error — all 4 LLM endpoints (actions, morning, replan,
+  eod) now pre-filter to 75 most relevant tasks (overdue→due soon→high priority→
+  milestones) instead of sending all 190+. Descriptions trimmed to 50 chars.
+- Fix multi-permission save on user creation — POST /admin/users used single
+  .includes() instead of parseRoles(), so comma-separated roles (e.g.
+  "onboarding,viewer") never validated. Now matches PUT endpoint logic.
+- Sort admin users alphabetically by display name (was by created_at)
+- Removed: [URGENT] Jira ticket cross-visibility — fixed by MCP→REST migration
+- Removed: sort users alphabetically, manual ticket IDs on delivery items (done)
+- T4 traffic light indicators — already fully implemented
 
 === DONE (2 Mar 2026) ===
 
@@ -61,15 +82,11 @@ Completed items: see NOVA_completed.txt
 
 === DO NEXT ===
 
-T4. Onboarding ticket status — on each onboarding/delivery item, show what
-    Jira tickets have been created and their live status (batch-fetch from
-    delivery_milestones.jira_keys and onboarding_runs.child_keys)
+(all cleared)
 
 === TIER 1: Quick wins / high-value ===
 
-1.  Add problem ticket count to Service Desk > Dashboard KPI cards
-2.  Toast notifications for SLA breach warning (~30 mins before breach)
-3.  Feedback reply notification — reply from admin triggers a user notification
+(all cleared — #1 problem ticket KPI already existed, #2 toast + #3 feedback reply done)
 
 
 === TIER 2: Feature additions ===
@@ -86,11 +103,6 @@ T4. Onboarding ticket status — on each onboarding/delivery item, show what
 
 
 === TECHINCAL DEBT ===
-
-TD1.  Lock down global settings exposure — restrict `GET /api/settings` to admin
-    or return a redacted subset; never expose `jwt_secret` or integration creds.
-TD2.  Role-guard integrations endpoints — only admin can modify admin-only
-    integrations (SSO, Jira onboarding, Service Desk config); validate updates.
 TD3.  Fix production SPA fallback route — replace invalid `{*path}` with Express
     wildcard to ensure SPA loads in prod.
 TD4.  Jira OAuth base URL resolution — correct redirect base when `FRONTEND_URL`

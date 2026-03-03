@@ -598,6 +598,11 @@ export function initializeSchema(database: Database): void {
     `INSERT OR IGNORE INTO problem_ticket_config (rule, weight, threshold_json) VALUES ('missed_commitment', 25, '{}')`,
   );
 
+  // Backfill no_next_reply rule for existing DBs
+  database.run(
+    `INSERT OR IGNORE INTO problem_ticket_config (rule, weight, threshold_json) VALUES ('no_next_reply', 20, '{"hoursThreshold":4,"staffDomains":["nurtur"]}')`,
+  );
+
   // Seed default milestone templates from file
   const tmplCount = database.exec('SELECT COUNT(*) as c FROM milestone_templates');
   if ((tmplCount[0]?.values[0]?.[0] as number) === 0) {

@@ -73,20 +73,46 @@ export function getAiActionsDebugLog(): DebugEntry[] {
   return [...debugLog];
 }
 
+/** Pre-filter to the most relevant tasks to stay within LLM token limits */
+function selectRelevant(tasks: Task[], max: number = 75): Task[] {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekOut = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  // Score: lower = more relevant
+  const scored = tasks.map(t => {
+    const due = t.due_date ? new Date(t.due_date) : null;
+    const validDue = due && !isNaN(due.getTime());
+    const isOverdue = validDue && due < today;
+    const isDueSoon = validDue && due >= today && due <= weekOut;
+    let score = 50;
+    if (isOverdue) score = 0;
+    else if (isDueSoon) score = 10;
+    else if (t.priority <= 2) score = 20;
+    else if (t.source === 'milestone') score = 25;
+    return { task: t, score };
+  });
+
+  scored.sort((a, b) => a.score - b.score || (a.task.priority ?? 50) - (b.task.priority ?? 50));
+  return scored.slice(0, max).map(s => s.task);
+}
+
 export async function getNextActions(
   tasks: Task[],
   count: number,
   apiKey: string,
 ): Promise<ActionSuggestion[]> {
+  const relevant = selectRelevant(tasks, 75);
+
   if (process.env.AI_ACTIONS_DEBUG === 'true') {
-    const sources = Array.from(new Set(tasks.map((t) => t.source)));
-    const sample = tasks.slice(0, 5).map((t) => t.id).join(', ');
-    recordAiActionsDebug(`[meta] count=${tasks.length} sources=${sources.join(',') || 'none'} sample=${sample}`);
+    const sources = Array.from(new Set(relevant.map((t) => t.source)));
+    const sample = relevant.slice(0, 5).map((t) => t.id).join(', ');
+    recordAiActionsDebug(`[meta] total=${tasks.length} sent=${relevant.length} sources=${sources.join(',') || 'none'} sample=${sample}`);
   }
 
   const client = new OpenAI({ apiKey });
 
-  const compact = compactify(tasks);
+  const compact = compactify(relevant);
 
   const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -96,7 +122,7 @@ export async function getNextActions(
       { role: 'system', content: SYSTEM_PROMPT },
       {
         role: 'user',
-        content: `Here are my ${tasks.length} current tasks:\n\n${JSON.stringify(compact)}\n\nSuggest the top ${count} tasks I should focus on next.`,
+        content: `Here are my ${relevant.length} most relevant current tasks (from ${tasks.length} total):\n\n${JSON.stringify(compact)}\n\nSuggest the top ${count} tasks I should focus on next.`,
       },
     ],
   });

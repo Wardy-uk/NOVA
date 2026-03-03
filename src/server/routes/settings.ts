@@ -3,10 +3,21 @@ import { z } from 'zod';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { UserSettingsQueries } from '../db/queries.js';
 import { requireRole } from '../middleware/auth.js';
+import { isAdmin } from '../utils/role-helpers.js';
 
 const SettingUpdateSchema = z.object({
   value: z.string(),
 });
+
+// Keys that should NEVER be exposed to non-admin users
+const SENSITIVE_KEYS = new Set([
+  'jwt_secret',
+  'jira_token', 'jira_ob_token',
+  'openai_api_key',
+  'monday_token',
+  'd365_client_secret', 'sso_client_secret',
+  'smtp_pass',
+]);
 
 export function createSettingsRoutes(
   settingsQueries: SettingsQueries,
@@ -15,9 +26,23 @@ export function createSettingsRoutes(
 ): Router {
   const router = Router();
 
-  // GET /api/settings — All global settings
-  router.get('/', (_req, res) => {
-    res.json({ ok: true, data: settingsQueries.getAll() });
+  // GET /api/settings — admin gets all, non-admin gets redacted subset
+  router.get('/', (req, res) => {
+    const all = settingsQueries.getAll();
+    const userRole = (req as any).user?.role as string | undefined;
+    if (userRole && isAdmin(userRole)) {
+      res.json({ ok: true, data: all });
+      return;
+    }
+    // Redact sensitive keys for non-admin users
+    const safe: Record<string, string> = {};
+    for (const [key, value] of Object.entries(all)) {
+      if (SENSITIVE_KEYS.has(key) || key.includes('_token') || key.includes('_secret')) {
+        continue; // Strip entirely
+      }
+      safe[key] = value;
+    }
+    res.json({ ok: true, data: safe });
   });
 
   // GET /api/settings/my/ai-key — User's personal AI key override

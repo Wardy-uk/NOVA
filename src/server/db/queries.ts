@@ -1040,7 +1040,7 @@ export class UserQueries {
   }
 
   getAll(): Omit<User, 'password_hash'>[] {
-    const stmt = this.db.prepare(`SELECT id, username, display_name, email, role, auth_provider, provider_id, team_id, created_at, updated_at FROM users ORDER BY created_at`);
+    const stmt = this.db.prepare(`SELECT id, username, display_name, email, role, auth_provider, provider_id, team_id, created_at, updated_at FROM users ORDER BY LOWER(display_name), LOWER(username)`);
     const users: Omit<User, 'password_hash'>[] = [];
     while (stmt.step()) { users.push(stmt.getAsObject() as unknown as Omit<User, 'password_hash'>); }
     stmt.free();

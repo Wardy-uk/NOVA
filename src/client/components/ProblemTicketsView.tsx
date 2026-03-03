@@ -62,6 +62,7 @@ const RULE_LABELS: Record<string, string> = {
   sentiment: 'Negative Sentiment',
   stagnant_status: 'Status Stagnant',
   missed_commitment: 'Missed Commitment',
+  no_next_reply: 'Customer Waiting',
 };
 
 function timeAgo(dateStr: string | null): string {

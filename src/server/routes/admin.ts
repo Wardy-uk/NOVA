@@ -57,7 +57,13 @@ export function createAdminRoutes(
       if (rawRoles) customRoleIds = (JSON.parse(rawRoles) as Array<{ id: string }>).map(r => r.id);
     } catch { /* ignore */ }
     const allValidRoles = ['admin', ...customRoleIds];
-    const assignedRole = role && allValidRoles.includes(role) ? role : (customRoleIds.includes('viewer') ? 'viewer' : customRoleIds[0] || 'viewer');
+    const requested = role ? parseRoles(role) : [];
+    const invalid = requested.filter(r => !allValidRoles.includes(r));
+    if (invalid.length > 0) {
+      res.status(400).json({ ok: false, error: `Invalid role(s): ${invalid.join(', ')}` });
+      return;
+    }
+    const assignedRole = requested.length > 0 ? requested.join(',') : (customRoleIds.includes('viewer') ? 'viewer' : customRoleIds[0] || 'viewer');
     const normalizedUsername = username.trim().toLowerCase();
     if (userQueries.getByUsername(normalizedUsername)) {
       res.status(409).json({ ok: false, error: 'Username already taken' });
