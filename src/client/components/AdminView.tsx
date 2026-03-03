@@ -65,6 +65,8 @@ interface IntegrationConfig {
   fields: Array<{ key: string; label: string; type: string; placeholder?: string; required: boolean }>;
   values: Record<string, string>;
   enabled: boolean;
+  mcpStatus?: string;
+  lastError?: string | null;
 }
 
 interface CustomRole {
@@ -99,6 +101,8 @@ export function AdminView() {
   const [integrations, setIntegrations] = useState<IntegrationConfig[]>([]);
   const [integValues, setIntegValues] = useState<Record<string, Record<string, string>>>({});
   const [integSaving, setIntegSaving] = useState<string | null>(null);
+  const [integTesting, setIntegTesting] = useState<string | null>(null);
+  const [integTestResult, setIntegTestResult] = useState<Record<string, { status: string; message: string }>>({});
 
   // Milestone template state
   const [milestoneTemplates, setMilestoneTemplates] = useState<MilestoneTemplate[]>([]);
@@ -214,6 +218,24 @@ export function AdminView() {
       setError(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setIntegSaving(null);
+    }
+  };
+
+  const testIntegConnection = async (integId: string) => {
+    setIntegTesting(integId);
+    setIntegTestResult(prev => ({ ...prev, [integId]: { status: 'testing', message: 'Testing...' } }));
+    try {
+      const res = await fetch(`/api/integrations/${integId}/test`, { method: 'POST' });
+      const json = await res.json();
+      if (json.ok) {
+        setIntegTestResult(prev => ({ ...prev, [integId]: { status: json.status, message: json.message } }));
+      } else {
+        setIntegTestResult(prev => ({ ...prev, [integId]: { status: 'error', message: json.error || 'Test failed' } }));
+      }
+    } catch (err) {
+      setIntegTestResult(prev => ({ ...prev, [integId]: { status: 'error', message: err instanceof Error ? err.message : 'Test failed' } }));
+    } finally {
+      setIntegTesting(null);
     }
   };
 
@@ -1118,9 +1140,28 @@ export function AdminView() {
           {integrations.map((integ) => (
             <div key={integ.id} className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold">
-                  {integ.name}
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold">
+                    {integ.name}
+                  </h3>
+                  {integ.enabled && (
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                      (integTestResult[integ.id]?.status === 'connected' || integ.mcpStatus === 'connected')
+                        ? 'bg-emerald-900/40 text-emerald-400'
+                        : integTestResult[integ.id]?.status === 'error'
+                          ? 'bg-red-900/40 text-red-400'
+                          : integ.mcpStatus === 'disconnected'
+                            ? 'bg-neutral-800 text-neutral-500'
+                            : 'bg-amber-900/40 text-amber-400'
+                    }`}>
+                      {integTestResult[integ.id]?.status === 'connected' ? 'Connected'
+                        : integTestResult[integ.id]?.status === 'error' ? 'Error'
+                        : integTestResult[integ.id]?.status === 'testing' ? 'Testing...'
+                        : integ.mcpStatus === 'connected' ? 'Configured'
+                        : 'Not configured'}
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={() => {
                     setIntegrations(prev => prev.map(i =>
@@ -1163,7 +1204,7 @@ export function AdminView() {
                   </div>
                 ))}
               </div>
-              <div className="mt-3">
+              <div className="mt-3 flex items-center gap-2">
                 <button
                   onClick={() => saveIntegConfig(integ.id)}
                   disabled={integSaving === integ.id}
@@ -1171,7 +1212,27 @@ export function AdminView() {
                 >
                   {integSaving === integ.id ? 'Saving...' : 'Save'}
                 </button>
+                {integ.id === 'jira-onboarding' && integ.enabled && (
+                  <button
+                    onClick={() => testIntegConnection(integ.id)}
+                    disabled={integTesting === integ.id}
+                    className="px-4 py-2 bg-neutral-700 text-neutral-200 font-medium rounded text-sm hover:bg-neutral-600 transition-colors disabled:opacity-40"
+                  >
+                    {integTesting === integ.id ? 'Testing...' : 'Test Connection'}
+                  </button>
+                )}
               </div>
+              {integTestResult[integ.id] && integTestResult[integ.id].status !== 'testing' && (
+                <div className={`mt-2 text-xs px-3 py-2 rounded ${
+                  integTestResult[integ.id].status === 'connected'
+                    ? 'bg-emerald-900/30 text-emerald-400'
+                    : integTestResult[integ.id].status === 'not_configured'
+                      ? 'bg-amber-900/30 text-amber-400'
+                      : 'bg-red-900/30 text-red-400'
+                }`}>
+                  {integTestResult[integ.id].message}
+                </div>
+              )}
             </div>
           ))}
         </div>

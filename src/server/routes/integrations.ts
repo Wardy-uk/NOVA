@@ -8,6 +8,7 @@ import { McpClientManager } from '../services/mcp-client.js';
 import { INTEGRATIONS, buildMcpConfig } from '../services/integrations.js';
 import type { Dynamics365Service } from '../services/dynamics365.js';
 import type { IntegrationStatus, McpServerStatus } from '../../shared/types.js';
+import type { JiraRestClient } from '../services/jira-client.js';
 
 // Admin-only integrations: credentials stay in global settings.json
 const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso']);
@@ -35,7 +36,8 @@ export function createIntegrationRoutes(
   userSettingsQueries: UserSettingsQueries,
   uvxCommand: string,
   getD365Service: () => Dynamics365Service | null,
-  onSettingsChange?: (key: string) => void
+  onSettingsChange?: (key: string) => void,
+  getJiraClient?: () => JiraRestClient | null,
 ): Router {
   const router = Router();
 
@@ -396,6 +398,37 @@ export function createIntegrationRoutes(
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Logout failed' });
     }
+  });
+
+  // POST /api/integrations/:id/test — test connection (currently Jira Global only)
+  router.post('/:id/test', async (req, res) => {
+    const integId = req.params.id;
+
+    if (integId === 'jira-onboarding') {
+      if (!getJiraClient) {
+        res.status(500).json({ ok: false, error: 'Jira client builder not available' });
+        return;
+      }
+      const client = getJiraClient();
+      if (!client) {
+        res.json({ ok: true, status: 'not_configured', message: 'Jira (Global) credentials not configured or missing Cloud ID' });
+        return;
+      }
+      try {
+        const result = await client.searchJql('order by created DESC', ['summary'], 1);
+        res.json({
+          ok: true,
+          status: 'connected',
+          message: `Connected — ${result.total} issues accessible`,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.json({ ok: true, status: 'error', message: msg });
+      }
+      return;
+    }
+
+    res.status(400).json({ ok: false, error: 'Test not supported for this integration' });
   });
 
   return router;

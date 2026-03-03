@@ -299,7 +299,7 @@ async function main() {
   }));
   app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, userSettingsQueries, uvxCommand, () => d365Service, (key) => {
     if (key.startsWith('d365_')) buildD365Service();
-  }));
+  }, buildJiraClient));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
   app.use('/api/jira', createJiraRoutes(mcpManager, taskQueries, buildJiraClient, () => settingsQueries.getAll(), userSettingsQueries));
