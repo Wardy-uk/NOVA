@@ -1035,8 +1035,8 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
                                       placeholder="NT-1234"
                                       className="w-[70px] text-[9px] px-1.5 py-0.5 rounded bg-[#1a1f26] border border-[#3a424d] text-neutral-200 font-mono outline-none focus:border-[#5ec1ca]"
                                     />
-                                    <button type="submit" className="text-[10px] text-green-400 hover:text-green-300">&check;</button>
-                                    <button type="button" onClick={() => { setNewKeyValue(''); setAddingKeyForMilestone(null); }} className="text-[10px] text-neutral-500 hover:text-red-400">&times;</button>
+                                    <button type="submit" className="text-[10px] text-green-400 hover:text-green-300">{'\u2713'}</button>
+                                    <button type="button" onClick={() => { setNewKeyValue(''); setAddingKeyForMilestone(null); }} className="text-[10px] text-neutral-500 hover:text-red-400">{'\u00D7'}</button>
                                   </form>
                                 ) : (
                                   <button
