@@ -1,5 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 
+/** Feature flag — panel renders nothing if disabled in settings */
+function useFeatureFlag(flag: string): boolean | null {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(r => r.json())
+      .then(json => {
+        if (json.ok) setEnabled(json.data?.[flag] === 'true');
+        else setEnabled(false);
+      })
+      .catch(() => setEnabled(false));
+  }, [flag]);
+  return enabled;
+}
+
 interface SetupStep {
   id: number;
   delivery_id: number;
@@ -33,22 +48,27 @@ const NEXT_STATUS: Record<string, string> = {
 };
 
 export function InstanceSetupPanel({ deliveryId, product }: Props) {
+  const featureEnabled = useFeatureFlag('feature_instance_setup');
   const [steps, setSteps] = useState<SetupStep[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(false);
 
   const fetchSteps = useCallback(async () => {
+    if (featureEnabled !== true) return;
     try {
       const res = await fetch(`/api/instance-setup/delivery/${deliveryId}/steps`);
       const json = await res.json();
       if (json.ok) setSteps(json.data);
     } catch { /* ignore */ }
-  }, [deliveryId]);
+  }, [deliveryId, featureEnabled]);
 
   useEffect(() => {
     fetchSteps();
   }, [fetchSteps]);
+
+  // Feature flag: render nothing if disabled or still loading
+  if (featureEnabled !== true) return null;
 
   const handleInitialize = async () => {
     setInitializing(true);
