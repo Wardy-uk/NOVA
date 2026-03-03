@@ -239,11 +239,32 @@ export class JiraRestClient {
     const body: Record<string, unknown> = {
       jql,
       fields: fields ?? ['summary', 'status', 'issuetype', 'issuelinks', 'priority', 'duedate'],
-      maxResults,
+      maxResults: Math.min(maxResults, 100), // Jira caps at 100 per page
     };
     if (options?.nextPageToken) body.nextPageToken = options.nextPageToken;
     if (options?.expand?.length) body.expand = options.expand.join(',');
     return this.request<JiraSearchResult>('POST', 'search/jql', body);
+  }
+
+  /** Search with automatic pagination — fetches all pages up to maxResults total. */
+  async searchJqlAll(
+    jql: string,
+    fields?: string[],
+    maxResults = 500,
+    options?: { expand?: string[] }
+  ): Promise<JiraSearchResult> {
+    const allIssues: JiraIssue[] = [];
+    let nextPageToken: string | undefined;
+    const perPage = Math.min(maxResults, 100);
+
+    do {
+      const page = await this.searchJql(jql, fields, perPage, { nextPageToken, expand: options?.expand });
+      allIssues.push(...page.issues);
+      nextPageToken = page.nextPageToken;
+      if (page.isLast !== false || !nextPageToken) break;
+    } while (allIssues.length < maxResults);
+
+    return { issues: allIssues, total: allIssues.length, maxResults, isLast: true };
   }
 
   async getIssue(issueKey: string, fields?: string[]): Promise<JiraIssue | null> {
