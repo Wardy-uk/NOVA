@@ -415,11 +415,16 @@ export function createIntegrationRoutes(
         return;
       }
       try {
-        const result = await client.searchJql('order by created DESC', ['summary'], 1);
+        const project = settingsQueries.get('jira_ob_project');
+        const jql = project ? `project = ${project} ORDER BY created DESC` : 'ORDER BY created DESC';
+        const result = await client.searchJql(jql, ['summary'], 1);
+        const projectMsg = project
+          ? `Project ${project}: ${result.total} issues`
+          : `${result.total} issues accessible (no project configured)`;
         res.json({
           ok: true,
           status: 'connected',
-          message: `Connected — ${result.total} issues accessible`,
+          message: `Connected — ${projectMsg}`,
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
