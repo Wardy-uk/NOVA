@@ -149,8 +149,36 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
+// Read initial view from URL hash (e.g. #delivery → 'delivery')
+function getViewFromHash(): View | null {
+  const hash = window.location.hash.slice(1); // strip '#'
+  if (!hash || hash.includes('sso_token')) return null;
+  // Validate it's a known view
+  const allViews = new Set<string>([
+    ...Object.values(AREAS).flatMap(a => a.tabs.map(t => t.view)),
+    ...STANDALONE_VIEWS,
+  ]);
+  return allViews.has(hash) ? (hash as View) : null;
+}
+
 export function App() {
-  const [view, setView] = useState<View>('focus');
+  const [view, setViewRaw] = useState<View>(() => getViewFromHash() ?? 'focus');
+
+  // Wrap setView to sync hash
+  const setView = useCallback((v: View) => {
+    setViewRaw(v);
+    window.history.replaceState(null, '', `#${v}`);
+  }, []);
+
+  // Handle browser back/forward
+  useEffect(() => {
+    const onHashChange = () => {
+      const v = getViewFromHash();
+      if (v) setViewRaw(v);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
   const auth = useAuth();
   const { tasks, loading, error, syncing, fetchTasks, updateTask } = useTasks();
   const health = useHealth();
@@ -217,9 +245,11 @@ export function App() {
   }, []);
 
   // Auto-trigger standup on first visit if no morning ritual today
+  // (skip if user navigated to a specific view via URL hash)
   useEffect(() => {
     if (!auth.isAuthenticated || standupChecked.current) return;
     standupChecked.current = true;
+    if (getViewFromHash()) return; // User intentionally navigated here — don't override
     fetch('/api/standups/today')
       .then((r) => r.json())
       .then((json) => {
@@ -228,7 +258,7 @@ export function App() {
         }
       })
       .catch(() => {});
-  }, [auth.isAuthenticated]);
+  }, [auth.isAuthenticated, setView]);
 
   useEffect(() => {
     if (view !== 'debug') return;
