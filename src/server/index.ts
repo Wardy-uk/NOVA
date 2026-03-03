@@ -207,13 +207,13 @@ async function main() {
     const s = settingsQueries.getAll();
     // Prefer dedicated global/onboarding credentials (Admin > Jira Global)
     if (s.jira_ob_enabled === 'true' && s.jira_ob_email && s.jira_ob_token) {
-      // Cloud ID → api.atlassian.com gateway (preferred)
-      if (s.jira_ob_cloud_id) {
-        return new JiraRestClient({ cloudId: s.jira_ob_cloud_id, email: s.jira_ob_email, apiToken: s.jira_ob_token });
-      }
-      // Fallback to direct org URL
+      // Direct org URL preferred (avoids api.atlassian.com gateway scope restrictions)
       if (s.jira_ob_url) {
         return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
+      }
+      // Fallback to Cloud ID → api.atlassian.com gateway
+      if (s.jira_ob_cloud_id) {
+        return new JiraRestClient({ cloudId: s.jira_ob_cloud_id, email: s.jira_ob_email, apiToken: s.jira_ob_token });
       }
     }
     // Fallback to personal Jira creds (direct URL only)
