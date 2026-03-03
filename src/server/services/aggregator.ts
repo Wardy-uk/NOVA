@@ -80,11 +80,22 @@ function createJiraAdapter(): SourceAdapter {
 }
 
 function mapJiraIssue(issue: Record<string, unknown>, jiraBaseUrl?: string): NormalizedTask {
-  // Status and priority can be objects with a 'name' field or plain strings
+  // Status and priority can be objects with a 'name' field or plain strings.
+  // Jira may return localized names (e.g. Chinese) — prefer statusCategory fallback.
   const statusRaw = issue.status;
-  const statusStr = typeof statusRaw === 'string'
-    ? statusRaw
-    : (statusRaw as Record<string, unknown>)?.name as string | undefined;
+  let statusStr: string | undefined;
+  if (typeof statusRaw === 'string') {
+    statusStr = statusRaw;
+  } else if (statusRaw && typeof statusRaw === 'object') {
+    const s = statusRaw as Record<string, unknown>;
+    const name = typeof s.name === 'string' ? s.name : undefined;
+    if (name && /^[\x20-\x7E]+$/.test(name)) {
+      statusStr = name;
+    } else {
+      const cat = s.statusCategory as Record<string, unknown> | undefined;
+      statusStr = (cat?.name as string) ?? (cat?.key === 'new' ? 'Open' : cat?.key === 'indeterminate' ? 'In Progress' : cat?.key === 'done' ? 'Done' : name) ?? name;
+    }
+  }
 
   const priorityRaw = issue.priority;
   const priorityStr = typeof priorityRaw === 'string'

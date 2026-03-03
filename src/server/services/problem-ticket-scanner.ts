@@ -50,6 +50,33 @@ interface UserSettingsAccessor {
 
 // ── Helpers ──
 
+/** Extract a usable English status name from Jira's status field.
+ *  Jira may return localized names (e.g. "打开" for "Open") depending on
+ *  the API user's locale. Fall back to statusCategory.name or key. */
+function resolveStatusName(statusField: unknown): string | null {
+  if (!statusField || typeof statusField !== 'object') return null;
+  const s = statusField as Record<string, unknown>;
+  const name = typeof s.name === 'string' ? s.name : null;
+
+  // If the name is ASCII, it's likely English — use it as-is
+  if (name && /^[\x20-\x7E]+$/.test(name)) return name;
+
+  // Non-ASCII (localized) — prefer statusCategory
+  const cat = s.statusCategory as Record<string, unknown> | undefined;
+  if (cat) {
+    const catName = typeof cat.name === 'string' ? cat.name : null;
+    if (catName && /^[\x20-\x7E]+$/.test(catName)) return catName;
+    // Last resort: category key (new, indeterminate, done)
+    const catKey = typeof cat.key === 'string' ? cat.key : null;
+    if (catKey) {
+      const keyMap: Record<string, string> = { new: 'Open', indeterminate: 'In Progress', done: 'Done' };
+      return keyMap[catKey] ?? catKey;
+    }
+  }
+
+  return name; // Return whatever we have, even if localized
+}
+
 /** Extract plain text from ADF body (Atlassian Document Format) */
 function adfToText(body: unknown): string {
   if (!body || typeof body !== 'object') return '';
@@ -75,7 +102,7 @@ function adfToText(body: unknown): string {
 function computeFingerprint(issue: JiraIssue, commentCount: number, reopened: boolean): string {
   const fields = issue.fields;
   const priority = (fields.priority as any)?.name ?? '';
-  const status = (fields.status as any)?.name ?? '';
+  const status = resolveStatusName(fields.status) ?? '';
   const assignee = (fields.assignee as any)?.displayName ?? '';
   const slaRemaining = getSlaRemainingMs(issue as any) ?? 'none';
 
@@ -348,7 +375,7 @@ export class ProblemTicketScanner {
             const existingAlert = this.queries.getAlertByIssueKey(issue.key);
             if (existingAlert) {
               if (existingAlert.priority !== ((issue.fields.priority as any)?.name ?? null)) changes.push('priority changed');
-              if (existingAlert.status !== ((issue.fields.status as any)?.name ?? null)) changes.push('status changed');
+              if (existingAlert.status !== (resolveStatusName(issue.fields.status) ?? null)) changes.push('status changed');
               if (existingAlert.assignee !== ((issue.fields.assignee as any)?.displayName ?? null)) changes.push('reassigned');
             }
             if (reopened) changes.push('reopened');
@@ -369,7 +396,7 @@ export class ProblemTicketScanner {
           issue_key: issue.key,
           project_key: issue.key.split('-')[0],
           summary: (issue.fields.summary as string) ?? '',
-          status: (issue.fields.status as any)?.name ?? null,
+          status: resolveStatusName(issue.fields.status) ?? null,
           priority: (issue.fields.priority as any)?.name ?? null,
           assignee: (issue.fields.assignee as any)?.displayName ?? null,
           reporter: (issue.fields.reporter as any)?.displayName ?? null,
@@ -818,7 +845,7 @@ Rules:
                 issue_key: issue.key,
                 project_key: issue.key.split('-')[0],
                 summary: (issue.fields.summary as string) ?? '',
-                status: (issue.fields.status as any)?.name ?? null,
+                status: resolveStatusName(issue.fields.status) ?? null,
                 priority: (issue.fields.priority as any)?.name ?? null,
                 assignee: (issue.fields.assignee as any)?.displayName ?? null,
                 reporter: (issue.fields.reporter as any)?.displayName ?? null,

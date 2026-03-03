@@ -488,8 +488,14 @@ export function createJiraRoutes(
         const statusObj = fields.status as { name?: string; statusCategory?: { name?: string; key?: string } } | undefined;
         const assigneeObj = fields.assignee as { displayName?: string } | undefined;
         const priorityObj = fields.priority as { name?: string } | undefined;
+        // Prefer ASCII status name; fall back to statusCategory for localized names
+        let statusName = statusObj?.name ?? 'Unknown';
+        if (!/^[\x20-\x7E]+$/.test(statusName)) {
+          const cat = statusObj?.statusCategory;
+          statusName = cat?.name ?? (cat?.key === 'new' ? 'Open' : cat?.key === 'indeterminate' ? 'In Progress' : cat?.key === 'done' ? 'Done' : statusName);
+        }
         statuses[issue.key] = {
-          status: statusObj?.name ?? 'Unknown',
+          status: statusName,
           statusCategory: statusObj?.statusCategory?.key ?? statusObj?.statusCategory?.name ?? 'undefined',
           summary: (fields.summary as string) ?? '',
           assignee: assigneeObj?.displayName ?? null,
