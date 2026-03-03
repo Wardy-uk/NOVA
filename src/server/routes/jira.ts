@@ -109,8 +109,8 @@ export function createJiraRoutes(
   getSettings?: () => Record<string, string>,
   userSettingsQueries?: UserSettingsQueries
 ): Router {
-  /** Build a JiraRestClient for the requesting user.
-   *  Personal credentials first → then global fallback. */
+  /** Build a JiraRestClient for the requesting user (personal credentials only).
+   *  Never falls back to global — personal and global Jira are separate. */
   function getClientForUser(userId?: number): JiraRestClient | null {
     if (userId && userSettingsQueries) {
       // 1. Per-user OAuth tokens (from Jira OAuth login)
@@ -130,7 +130,12 @@ export function createJiraRoutes(
       }
     }
 
-    // 3. Fall back to global client (Admin > Jira Global)
+    return null;
+  }
+
+  /** Get the global Jira client (Admin > Jira Global). Used for shared views
+   *  like onboarding ticket status, service desk all/unassigned. */
+  function getGlobalClient(): JiraRestClient | null {
     return getJiraClient?.() ?? null;
   }
   const router = Router();
@@ -587,7 +592,8 @@ export function createJiraRoutes(
     const trimmed = keys.slice(0, 50);
 
     const userId = (req as any).user?.id as number | undefined;
-    const client = getClientForUser(userId);
+    // Batch-status resolves specific keys — try personal first, then global
+    const client = getClientForUser(userId) ?? getGlobalClient();
     if (!client) {
       res.status(501).json({ ok: false, error: 'No Jira client available' });
       return;

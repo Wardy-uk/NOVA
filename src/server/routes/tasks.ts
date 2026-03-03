@@ -73,9 +73,16 @@ export function createTaskRoutes(
       }
       const userId = (req as any).user?.id as number | undefined;
       const userRole = (req as any).user?.role as string | undefined;
-      // "mine" requires Jira config (per-user, admin falls back to global)
+      // "mine" requires personal Jira config
       if (filter === 'mine') {
         if (!isJiraEnabled(userId, userRole, userSettingsQueries, settingsQueries)) {
+          res.json({ ok: true, data: [] });
+          return;
+        }
+      }
+      // "all" / "unassigned" require the global Jira (Admin) to be configured
+      if (filter === 'all' || filter === 'unassigned') {
+        if (settingsQueries?.get('jira_ob_enabled') !== 'true') {
           res.json({ ok: true, data: [] });
           return;
         }
@@ -126,6 +133,11 @@ export function createTaskRoutes(
         const jiraUsername = getJiraUsername(userId, userRole, userSettingsQueries, settingsQueries);
         tickets = await aggregator.fetchServiceDeskTickets('mine', jiraUsername);
       } else {
+        // scope=all requires global Jira (Admin) to be configured
+        if (settingsQueries?.get('jira_ob_enabled') !== 'true') {
+          res.json({ ok: true, data: [] });
+          return;
+        }
         tickets = await aggregator.fetchServiceDeskTickets('all');
       }
       const now = new Date();
@@ -191,6 +203,11 @@ export function createTaskRoutes(
   // GET /api/tasks/service-desk/dashboard — aggregated dashboard KPIs
   router.get('/service-desk/dashboard', async (_req, res) => {
     try {
+      // Dashboard requires global Jira (Admin) — it shows all tickets
+      if (settingsQueries?.get('jira_ob_enabled') !== 'true') {
+        res.json({ ok: true, data: { total: 0, slaBreached: 0, overdueUpdates: 0, byStatus: {}, byPriority: {}, byAssignee: {}, customers: 0 } });
+        return;
+      }
       const tickets = await aggregator.fetchServiceDeskTickets('all');
       const now = new Date();
 
