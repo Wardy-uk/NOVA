@@ -982,7 +982,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
 
           {/* ── Instance Setup Checklist ── */}
           {entry && !isNew && (
-            <InstanceSetupPanel deliveryId={entry.id} product={form.product || entry.product} />
+            <InstanceSetupPanel deliveryId={entry.id} product={form.product || entry.product} azdoPrUrl={(entry as any).azdo_pr_url} />
           )}
 
           {/* ── Branches ── */}

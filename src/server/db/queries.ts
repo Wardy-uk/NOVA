@@ -748,6 +748,15 @@ export class DeliveryQueries {
     stmt.free();
     return products;
   }
+
+  updateAzDoFields(deliveryId: number, branchName: string | null, prUrl: string | null): boolean {
+    this.db.run(
+      `UPDATE delivery_entries SET azdo_branch_name = ?, azdo_pr_url = ? WHERE id = ?`,
+      [branchName, prUrl, deliveryId]
+    );
+    saveDb();
+    return this.db.getRowsModified() > 0;
+  }
 }
 
 // ---------- CRM ----------
@@ -2971,5 +2980,93 @@ export class LogoQueries {
     this.db.run(`DELETE FROM delivery_logos WHERE delivery_id = ? AND logo_type = ?`, [deliveryId, logoType]);
     saveDb();
     return this.db.getRowsModified() > 0;
+  }
+}
+
+// ─── Phase 5: Setup Execution Queries ─────────────────────────────────────
+
+export interface SetupExecutionRun {
+  id: number;
+  delivery_id: number;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  started_by: number | null;
+  summary: string | null;
+}
+
+export interface SetupExecutionLog {
+  id: number;
+  run_id: number;
+  step_key: string;
+  timestamp: string;
+  level: string;
+  message: string;
+}
+
+export class SetupExecutionQueries {
+  constructor(private db: Database) {}
+
+  createRun(deliveryId: number, startedBy: number | null): number {
+    this.db.run(
+      `INSERT INTO setup_execution_runs (delivery_id, started_by) VALUES (?, ?)`,
+      [deliveryId, startedBy]
+    );
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  updateRunStatus(runId: number, status: string, summary?: string): void {
+    const finished = ['complete', 'failed', 'cancelled'].includes(status)
+      ? new Date().toISOString()
+      : null;
+    this.db.run(
+      `UPDATE setup_execution_runs SET status = ?, finished_at = COALESCE(?, finished_at), summary = COALESCE(?, summary) WHERE id = ?`,
+      [status, finished, summary ?? null, runId]
+    );
+    saveDb();
+  }
+
+  addLog(runId: number, stepKey: string, level: string, message: string): void {
+    this.db.run(
+      `INSERT INTO setup_execution_logs (run_id, step_key, level, message) VALUES (?, ?, ?, ?)`,
+      [runId, stepKey, level, message]
+    );
+    saveDb();
+  }
+
+  getRunsByDelivery(deliveryId: number): SetupExecutionRun[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM setup_execution_runs WHERE delivery_id = ? ORDER BY started_at DESC LIMIT 20`
+    );
+    stmt.bind([deliveryId]);
+    const results: SetupExecutionRun[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as SetupExecutionRun);
+    stmt.free();
+    return results;
+  }
+
+  getLogsByRun(runId: number): SetupExecutionLog[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM setup_execution_logs WHERE run_id = ? ORDER BY id ASC`
+    );
+    stmt.bind([runId]);
+    const results: SetupExecutionLog[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as SetupExecutionLog);
+    stmt.free();
+    return results;
+  }
+
+  getLatestRun(deliveryId: number): SetupExecutionRun | null {
+    const stmt = this.db.prepare(
+      `SELECT * FROM setup_execution_runs WHERE delivery_id = ? ORDER BY started_at DESC LIMIT 1`
+    );
+    stmt.bind([deliveryId]);
+    let run: SetupExecutionRun | null = null;
+    if (stmt.step()) run = stmt.getAsObject() as unknown as SetupExecutionRun;
+    stmt.free();
+    return run;
   }
 }

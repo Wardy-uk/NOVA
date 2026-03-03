@@ -111,6 +111,31 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'jira_oauth_client_secret', label: 'OAuth Client Secret', type: 'password', placeholder: 'From Atlassian developer console', required: true },
     ],
   },
+  {
+    id: 'azdo',
+    name: 'Azure DevOps',
+    description: 'Push brand settings to Azure DevOps repo. Creates branches and pull requests for site deployments.',
+    enabledKey: 'azdo_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'azdo_org', label: 'Organization', type: 'text', placeholder: 'e.g. nurtur-group', required: true },
+      { key: 'azdo_project', label: 'Project', type: 'text', placeholder: 'e.g. Website.Settings', required: true },
+      { key: 'azdo_repo', label: 'Repository', type: 'text', placeholder: 'e.g. Website.Settings', required: true },
+      { key: 'azdo_pat', label: 'PAT', type: 'password', placeholder: 'Personal Access Token (Code read/write)', required: true },
+      { key: 'azdo_base_branch', label: 'Base Branch', type: 'text', placeholder: 'main (default)', required: false },
+    ],
+  },
+  {
+    id: 'onboarding-tool',
+    name: 'Onboarding.Tool',
+    description: 'Automated instance setup — pushes branches, brand settings, logos, and config to client website instances.',
+    enabledKey: 'obtool_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'obtool_base_url', label: 'Base URL', type: 'url', placeholder: 'https://onboarding.nurtur.agency', required: true },
+      { key: 'obtool_api_key', label: 'API Key', type: 'password', placeholder: 'Bearer token or API key', required: true },
+    ],
+  },
 ];
 
 export interface McpServerConfig {

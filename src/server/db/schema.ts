@@ -783,6 +783,37 @@ export function initializeSchema(database: Database): void {
   `);
   database.run(`CREATE INDEX IF NOT EXISTS idx_delivery_logos_delivery ON delivery_logos(delivery_id)`);
 
+  // ── Phase 4: AzDO columns on delivery_entries ──
+  try { database.run(`ALTER TABLE delivery_entries ADD COLUMN azdo_branch_name TEXT`); } catch { /* already exists */ }
+  try { database.run(`ALTER TABLE delivery_entries ADD COLUMN azdo_pr_url TEXT`); } catch { /* already exists */ }
+
+  // ── Phase 5: Setup Execution Runs ──
+  database.run(`
+    CREATE TABLE IF NOT EXISTS setup_execution_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_id INTEGER NOT NULL REFERENCES delivery_entries(id) ON DELETE CASCADE,
+      started_at TEXT DEFAULT (datetime('now')),
+      finished_at TEXT,
+      status TEXT DEFAULT 'running',
+      started_by INTEGER REFERENCES users(id),
+      summary TEXT
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_setup_runs_delivery ON setup_execution_runs(delivery_id)`);
+
+  // ── Phase 5: Setup Execution Logs ──
+  database.run(`
+    CREATE TABLE IF NOT EXISTS setup_execution_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER NOT NULL REFERENCES setup_execution_runs(id) ON DELETE CASCADE,
+      step_key TEXT NOT NULL,
+      timestamp TEXT DEFAULT (datetime('now')),
+      level TEXT DEFAULT 'info',
+      message TEXT NOT NULL
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_setup_logs_run ON setup_execution_logs(run_id)`);
+
   const defaults: [string, string][] = [
     ['source_weight_jira', '90'],
     ['source_weight_planner', '60'],

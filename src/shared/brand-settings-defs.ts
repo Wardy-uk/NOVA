@@ -30,6 +30,7 @@ export const BRAND_SETTING_DEFS: BrandSettingDef[] = [
   { key: 'registeredAddress', label: 'Registered Address', group: 'company', type: 'text' },
   { key: 'registeredNumber', label: 'Company Number', group: 'company', type: 'text' },
   { key: 'registeredVATNo', label: 'VAT Number', group: 'company', type: 'text' },
+  { key: 'subdomain', label: 'Subdomain', group: 'company', type: 'text', required: true, placeholder: 'e.g. acme (for acme.nurtur.agency)' },
   { key: 'bannerWebsite', label: 'Website URL', group: 'company', type: 'url', required: true },
 
   // Social

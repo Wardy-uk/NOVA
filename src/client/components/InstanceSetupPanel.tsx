@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface SetupStep {
   id: number;
@@ -11,9 +11,29 @@ interface SetupStep {
   executed_by: number | null;
 }
 
+interface ExecutionRun {
+  id: number;
+  delivery_id: number;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  started_by: number | null;
+  summary: string | null;
+}
+
+interface ExecutionLog {
+  id: number;
+  run_id: number;
+  step_key: string;
+  timestamp: string;
+  level: string;
+  message: string;
+}
+
 interface Props {
   deliveryId: number;
   product: string;
+  azdoPrUrl?: string | null;
 }
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: string; label: string }> = {
@@ -32,12 +52,27 @@ const NEXT_STATUS: Record<string, string> = {
   skipped: 'pending',
 };
 
-export function InstanceSetupPanel({ deliveryId, product }: Props) {
+const LOG_COLORS: Record<string, string> = {
+  info: 'text-neutral-400',
+  warn: 'text-amber-400',
+  error: 'text-red-400',
+  success: 'text-green-400',
+};
+
+export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl }: Props) {
   const [steps, setSteps] = useState<SetupStep[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(false);
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [executing, setExecuting] = useState(false);
+  const [activeRunId, setActiveRunId] = useState<number | null>(null);
+  const [logs, setLogs] = useState<ExecutionLog[]>([]);
+  const [showConsole, setShowConsole] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [runs, setRuns] = useState<ExecutionRun[]>([]);
+  const logEndRef = useRef<HTMLDivElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Check feature flag
   useEffect(() => {
@@ -65,6 +100,38 @@ export function InstanceSetupPanel({ deliveryId, product }: Props) {
   useEffect(() => {
     if (enabled) fetchSteps();
   }, [fetchSteps, enabled]);
+
+  // Poll logs while a run is active
+  useEffect(() => {
+    if (activeRunId && executing) {
+      pollRef.current = setInterval(async () => {
+        try {
+          const [logsRes, latestRes] = await Promise.all([
+            fetch(`/api/setup-execution/runs/${activeRunId}/logs`),
+            fetch(`/api/setup-execution/delivery/${deliveryId}/latest-run`),
+          ]);
+          const logsJson = await logsRes.json();
+          if (logsJson.ok) setLogs(logsJson.data);
+
+          const latestJson = await latestRes.json();
+          if (latestJson.ok && latestJson.data) {
+            const run = latestJson.data as ExecutionRun;
+            if (run.status !== 'running') {
+              setExecuting(false);
+              fetchSteps(); // Refresh step statuses
+            }
+          }
+        } catch { /* ignore */ }
+      }, 2000);
+      return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    }
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [activeRunId, executing, deliveryId, fetchSteps]);
+
+  // Auto-scroll console
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
 
   // Don't render until flag is checked; hide if disabled
   if (enabled === null || enabled === false) return null;
@@ -111,7 +178,6 @@ export function InstanceSetupPanel({ deliveryId, product }: Props) {
 
   const handleContextMenu = (e: React.MouseEvent, stepKey: string) => {
     e.preventDefault();
-    // Right-click cycles: skip / fail
     const step = steps.find(s => s.step_key === stepKey);
     if (!step) return;
     const nextStatus = step.status === 'skipped' ? 'pending' : 'skipped';
@@ -137,6 +203,55 @@ export function InstanceSetupPanel({ deliveryId, product }: Props) {
     try {
       await fetch(`/api/instance-setup/delivery/${deliveryId}/steps`, { method: 'DELETE' });
       setSteps([]);
+    } catch { /* ignore */ }
+  };
+
+  const handleExecute = async (dryRun = false) => {
+    setExecuting(true);
+    setShowConsole(true);
+    setLogs([]);
+    setError(null);
+    try {
+      const endpoint = dryRun
+        ? `/api/setup-execution/delivery/${deliveryId}/execute/dry-run`
+        : `/api/setup-execution/delivery/${deliveryId}/execute`;
+      const res = await fetch(endpoint, { method: 'POST' });
+      const json = await res.json();
+      if (json.ok) {
+        setActiveRunId(json.data.runId);
+        // If dry run completes immediately, fetch logs
+        if (dryRun || json.data.status !== 'running') {
+          const logsRes = await fetch(`/api/setup-execution/runs/${json.data.runId}/logs`);
+          const logsJson = await logsRes.json();
+          if (logsJson.ok) setLogs(logsJson.data);
+          setExecuting(false);
+          fetchSteps();
+        }
+      } else {
+        setError(json.error || 'Execution failed');
+        setExecuting(false);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Execution failed');
+      setExecuting(false);
+    }
+  };
+
+  const fetchRuns = async () => {
+    try {
+      const res = await fetch(`/api/setup-execution/delivery/${deliveryId}/runs`);
+      const json = await res.json();
+      if (json.ok) setRuns(json.data);
+    } catch { /* ignore */ }
+  };
+
+  const viewRunLogs = async (runId: number) => {
+    setActiveRunId(runId);
+    setShowConsole(true);
+    try {
+      const res = await fetch(`/api/setup-execution/runs/${runId}/logs`);
+      const json = await res.json();
+      if (json.ok) setLogs(json.data);
     } catch { /* ignore */ }
   };
 
@@ -172,9 +287,21 @@ export function InstanceSetupPanel({ deliveryId, product }: Props) {
     <div className="border border-[#3a424d] rounded-lg bg-[#272C33] p-3 space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-neutral-300">Instance Setup</span>
-        <span className="text-[10px] text-neutral-500">
-          {completed}/{total} complete{skipped > 0 ? ` (${skipped} skipped)` : ''} — {progress}%
-        </span>
+        <div className="flex items-center gap-2">
+          {azdoPrUrl && (
+            <a
+              href={azdoPrUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[9px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 transition-colors"
+            >
+              AzDO PR
+            </a>
+          )}
+          <span className="text-[10px] text-neutral-500">
+            {completed}/{total} complete{skipped > 0 ? ` (${skipped} skipped)` : ''} — {progress}%
+          </span>
+        </div>
       </div>
 
       {/* Progress bar */}
@@ -188,6 +315,10 @@ export function InstanceSetupPanel({ deliveryId, product }: Props) {
         />
       </div>
 
+      {error && (
+        <div className="p-2 bg-red-950/50 border border-red-900 rounded text-red-400 text-[10px]">{error}</div>
+      )}
+
       {/* Step list */}
       <div className="space-y-0.5">
         {steps.map((step) => {
@@ -196,7 +327,7 @@ export function InstanceSetupPanel({ deliveryId, product }: Props) {
             <div
               key={step.step_key}
               className={`flex items-center gap-2 px-2 py-1.5 rounded ${cfg.bg} transition-colors group cursor-pointer`}
-              onClick={() => !loading && handleToggleStatus(step.step_key, step.status)}
+              onClick={() => !loading && !executing && handleToggleStatus(step.step_key, step.status)}
               onContextMenu={(e) => handleContextMenu(e, step.step_key)}
               title={`Click to cycle status. Right-click to skip.\n${step.result_message || ''}`}
             >
@@ -222,8 +353,57 @@ export function InstanceSetupPanel({ deliveryId, product }: Props) {
         })}
       </div>
 
+      {/* Execution Console */}
+      {showConsole && (
+        <div className="border border-[#3a424d] rounded bg-[#0d1117] p-2 space-y-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold text-neutral-300">Console</span>
+              {executing && (
+                <span className="text-[9px] text-amber-400 animate-pulse">Running...</span>
+              )}
+            </div>
+            <button
+              onClick={() => { setShowConsole(false); setLogs([]); }}
+              className="text-[9px] text-neutral-500 hover:text-neutral-300"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-h-48 overflow-y-auto font-mono text-[9px] space-y-px">
+            {logs.length === 0 && !executing && (
+              <div className="text-neutral-600">No logs yet.</div>
+            )}
+            {logs.map((log) => (
+              <div key={log.id} className={`${LOG_COLORS[log.level] || 'text-neutral-400'}`}>
+                <span className="text-neutral-600">{log.timestamp?.slice(11, 19) || ''}</span>
+                {' '}
+                <span className="text-neutral-500">[{log.step_key}]</span>
+                {' '}
+                {log.message}
+              </div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+      )}
+
       {/* Actions */}
-      <div className="flex items-center gap-2 pt-1 border-t border-[#3a424d]">
+      <div className="flex items-center gap-2 pt-1 border-t border-[#3a424d] flex-wrap">
+        <button
+          onClick={() => handleExecute(false)}
+          disabled={executing}
+          className="px-3 py-1 text-[10px] rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50 transition-colors"
+        >
+          {executing ? 'Executing...' : 'Execute Setup'}
+        </button>
+        <button
+          onClick={() => handleExecute(true)}
+          disabled={executing}
+          className="px-3 py-1 text-[10px] rounded border border-[#5ec1ca] text-[#5ec1ca] hover:bg-[#5ec1ca]/10 disabled:opacity-50 transition-colors"
+        >
+          Dry Run
+        </button>
         <button
           onClick={handleReset}
           className="text-[10px] text-neutral-500 hover:text-red-400 transition-colors"
@@ -236,7 +416,41 @@ export function InstanceSetupPanel({ deliveryId, product }: Props) {
         >
           Re-initialize
         </button>
+        <button
+          onClick={() => { setShowHistory(!showHistory); if (!showHistory) fetchRuns(); }}
+          className="text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors ml-auto"
+        >
+          {showHistory ? 'Hide History' : 'History'}
+        </button>
       </div>
+
+      {/* Run History */}
+      {showHistory && (
+        <div className="space-y-1">
+          {runs.length === 0 && (
+            <div className="text-[10px] text-neutral-600">No previous runs.</div>
+          )}
+          {runs.map((run) => {
+            const statusColor = run.status === 'complete' ? 'text-green-400'
+              : run.status === 'failed' ? 'text-red-400'
+              : run.status === 'running' ? 'text-amber-400'
+              : 'text-neutral-400';
+            return (
+              <div
+                key={run.id}
+                className="flex items-center gap-2 px-2 py-1 rounded bg-[#1f242b] cursor-pointer hover:bg-[#272C33] transition-colors"
+                onClick={() => viewRunLogs(run.id)}
+              >
+                <span className={`text-[9px] font-semibold ${statusColor}`}>{run.status}</span>
+                <span className="text-[9px] text-neutral-500 flex-1">{run.summary || ''}</span>
+                <span className="text-[9px] text-neutral-600">
+                  {run.started_at ? new Date(run.started_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
