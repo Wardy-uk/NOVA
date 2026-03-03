@@ -729,6 +729,60 @@ export function initializeSchema(database: Database): void {
     console.log(`[N.O.V.A] Seeded ${bymSteps.length} BYM instance setup step templates`);
   }
 
+  // ── Phase 2: Delivery Branches ──
+  database.run(`
+    CREATE TABLE IF NOT EXISTS delivery_branches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_id INTEGER NOT NULL REFERENCES delivery_entries(id) ON DELETE CASCADE,
+      is_default INTEGER DEFAULT 0,
+      name TEXT NOT NULL,
+      sales_email TEXT,
+      sales_phone TEXT,
+      lettings_email TEXT,
+      lettings_phone TEXT,
+      address1 TEXT,
+      address2 TEXT,
+      address3 TEXT,
+      town TEXT,
+      post_code1 TEXT,
+      post_code2 TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(delivery_id, name)
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_delivery_branches_delivery ON delivery_branches(delivery_id)`);
+
+  // ── Phase 2: Delivery Brand Settings (key-value per delivery) ──
+  database.run(`
+    CREATE TABLE IF NOT EXISTS delivery_brand_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_id INTEGER NOT NULL REFERENCES delivery_entries(id) ON DELETE CASCADE,
+      setting_key TEXT NOT NULL,
+      setting_value TEXT,
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(delivery_id, setting_key)
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_brand_settings_delivery ON delivery_brand_settings(delivery_id)`);
+
+  // ── Phase 3: Delivery Logos (base64 in DB) ──
+  database.run(`
+    CREATE TABLE IF NOT EXISTS delivery_logos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_id INTEGER NOT NULL REFERENCES delivery_entries(id) ON DELETE CASCADE,
+      logo_type INTEGER NOT NULL,
+      logo_label TEXT NOT NULL,
+      mime_type TEXT NOT NULL DEFAULT 'image/png',
+      image_data TEXT NOT NULL,
+      file_name TEXT,
+      file_size INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(delivery_id, logo_type)
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_delivery_logos_delivery ON delivery_logos(delivery_id)`);
+
   const defaults: [string, string][] = [
     ['source_weight_jira', '90'],
     ['source_weight_planner', '60'],

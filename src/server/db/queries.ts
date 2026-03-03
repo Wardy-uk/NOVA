@@ -2753,3 +2753,223 @@ export class InstanceSetupQueries {
     return result;
   }
 }
+
+// ─── Phase 2: Branch Queries ───────────────────────────────────────────────
+
+export interface DeliveryBranch {
+  id: number;
+  delivery_id: number;
+  is_default: number;
+  name: string;
+  sales_email: string | null;
+  sales_phone: string | null;
+  lettings_email: string | null;
+  lettings_phone: string | null;
+  address1: string | null;
+  address2: string | null;
+  address3: string | null;
+  town: string | null;
+  post_code1: string | null;
+  post_code2: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export class BranchQueries {
+  constructor(private db: Database) {}
+
+  getByDelivery(deliveryId: number): DeliveryBranch[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM delivery_branches WHERE delivery_id = ? ORDER BY is_default DESC, sort_order, name`
+    );
+    stmt.bind([deliveryId]);
+    const rows: DeliveryBranch[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as DeliveryBranch);
+    stmt.free();
+    return rows;
+  }
+
+  getById(id: number): DeliveryBranch | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_branches WHERE id = ?`);
+    stmt.bind([id]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as DeliveryBranch) : undefined;
+    stmt.free();
+    return row;
+  }
+
+  create(data: Omit<DeliveryBranch, 'id' | 'created_at'>): number {
+    this.db.run(
+      `INSERT INTO delivery_branches (delivery_id, is_default, name, sales_email, sales_phone, lettings_email, lettings_phone, address1, address2, address3, town, post_code1, post_code2, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [data.delivery_id, data.is_default ?? 0, data.name, data.sales_email ?? null, data.sales_phone ?? null,
+       data.lettings_email ?? null, data.lettings_phone ?? null, data.address1 ?? null, data.address2 ?? null,
+       data.address3 ?? null, data.town ?? null, data.post_code1 ?? null, data.post_code2 ?? null, data.sort_order ?? 0]
+    );
+    const idRow = this.db.exec('SELECT last_insert_rowid() as id');
+    saveDb();
+    return (idRow[0]?.values[0]?.[0] as number) ?? 0;
+  }
+
+  update(id: number, updates: Partial<Omit<DeliveryBranch, 'id' | 'delivery_id' | 'created_at'>>): boolean {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [key, val] of Object.entries(updates)) {
+      fields.push(`${key} = ?`);
+      params.push(val ?? null);
+    }
+    if (fields.length === 0) return false;
+    params.push(id);
+    this.db.run(`UPDATE delivery_branches SET ${fields.join(', ')} WHERE id = ?`, params);
+    saveDb();
+    return this.db.getRowsModified() > 0;
+  }
+
+  delete(id: number): boolean {
+    this.db.run(`DELETE FROM delivery_branches WHERE id = ?`, [id]);
+    saveDb();
+    return this.db.getRowsModified() > 0;
+  }
+
+  bulkCreate(deliveryId: number, branches: Array<Omit<DeliveryBranch, 'id' | 'delivery_id' | 'created_at'>>): number {
+    let created = 0;
+    for (const b of branches) {
+      try {
+        this.db.run(
+          `INSERT OR IGNORE INTO delivery_branches (delivery_id, is_default, name, sales_email, sales_phone, lettings_email, lettings_phone, address1, address2, address3, town, post_code1, post_code2, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [deliveryId, b.is_default ?? 0, b.name, b.sales_email ?? null, b.sales_phone ?? null,
+           b.lettings_email ?? null, b.lettings_phone ?? null, b.address1 ?? null, b.address2 ?? null,
+           b.address3 ?? null, b.town ?? null, b.post_code1 ?? null, b.post_code2 ?? null, b.sort_order ?? 0]
+        );
+        created += this.db.getRowsModified();
+      } catch { /* skip duplicates */ }
+    }
+    saveDb();
+    return created;
+  }
+
+  setDefault(deliveryId: number, branchId: number): void {
+    this.db.run(`UPDATE delivery_branches SET is_default = 0 WHERE delivery_id = ?`, [deliveryId]);
+    this.db.run(`UPDATE delivery_branches SET is_default = 1 WHERE id = ? AND delivery_id = ?`, [branchId, deliveryId]);
+    saveDb();
+  }
+}
+
+// ─── Phase 2: Brand Settings Queries ───────────────────────────────────────
+
+export class BrandSettingsQueries {
+  constructor(private db: Database) {}
+
+  getByDelivery(deliveryId: number): Record<string, string> {
+    const stmt = this.db.prepare(
+      `SELECT setting_key, setting_value FROM delivery_brand_settings WHERE delivery_id = ?`
+    );
+    stmt.bind([deliveryId]);
+    const result: Record<string, string> = {};
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as { setting_key: string; setting_value: string };
+      result[row.setting_key] = row.setting_value;
+    }
+    stmt.free();
+    return result;
+  }
+
+  upsert(deliveryId: number, key: string, value: string | null): void {
+    this.db.run(
+      `INSERT INTO delivery_brand_settings (delivery_id, setting_key, setting_value, updated_at)
+       VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(delivery_id, setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = datetime('now')`,
+      [deliveryId, key, value]
+    );
+    saveDb();
+  }
+
+  bulkUpsert(deliveryId: number, settings: Record<string, string | null>): number {
+    let count = 0;
+    for (const [key, value] of Object.entries(settings)) {
+      this.db.run(
+        `INSERT INTO delivery_brand_settings (delivery_id, setting_key, setting_value, updated_at)
+         VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT(delivery_id, setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = datetime('now')`,
+        [deliveryId, key, value]
+      );
+      count++;
+    }
+    saveDb();
+    return count;
+  }
+
+  deleteByDelivery(deliveryId: number): void {
+    this.db.run(`DELETE FROM delivery_brand_settings WHERE delivery_id = ?`, [deliveryId]);
+    saveDb();
+  }
+}
+
+// ─── Phase 3: Logo Queries ─────────────────────────────────────────────────
+
+export interface DeliveryLogo {
+  id: number;
+  delivery_id: number;
+  logo_type: number;
+  logo_label: string;
+  mime_type: string;
+  image_data: string;
+  file_name: string | null;
+  file_size: number | null;
+  created_at: string;
+}
+
+export class LogoQueries {
+  constructor(private db: Database) {}
+
+  getMetadataByDelivery(deliveryId: number): Array<Omit<DeliveryLogo, 'image_data'>> {
+    const stmt = this.db.prepare(
+      `SELECT id, delivery_id, logo_type, logo_label, mime_type, file_name, file_size, created_at
+       FROM delivery_logos WHERE delivery_id = ? ORDER BY logo_type`
+    );
+    stmt.bind([deliveryId]);
+    const rows: Array<Omit<DeliveryLogo, 'image_data'>> = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as Omit<DeliveryLogo, 'image_data'>);
+    stmt.free();
+    return rows;
+  }
+
+  getByDeliveryAndType(deliveryId: number, logoType: number): DeliveryLogo | undefined {
+    const stmt = this.db.prepare(
+      `SELECT * FROM delivery_logos WHERE delivery_id = ? AND logo_type = ?`
+    );
+    stmt.bind([deliveryId, logoType]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as DeliveryLogo) : undefined;
+    stmt.free();
+    return row;
+  }
+
+  getById(id: number): DeliveryLogo | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_logos WHERE id = ?`);
+    stmt.bind([id]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as DeliveryLogo) : undefined;
+    stmt.free();
+    return row;
+  }
+
+  upsert(data: { delivery_id: number; logo_type: number; logo_label: string; mime_type: string; image_data: string; file_name?: string; file_size?: number }): number {
+    this.db.run(
+      `INSERT INTO delivery_logos (delivery_id, logo_type, logo_label, mime_type, image_data, file_name, file_size)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(delivery_id, logo_type) DO UPDATE SET
+         logo_label = excluded.logo_label, mime_type = excluded.mime_type,
+         image_data = excluded.image_data, file_name = excluded.file_name,
+         file_size = excluded.file_size, created_at = datetime('now')`,
+      [data.delivery_id, data.logo_type, data.logo_label, data.mime_type, data.image_data, data.file_name ?? null, data.file_size ?? null]
+    );
+    const idRow = this.db.exec(`SELECT id FROM delivery_logos WHERE delivery_id = ${data.delivery_id} AND logo_type = ${data.logo_type}`);
+    saveDb();
+    return (idRow[0]?.values[0]?.[0] as number) ?? 0;
+  }
+
+  deleteByDeliveryAndType(deliveryId: number, logoType: number): boolean {
+    this.db.run(`DELETE FROM delivery_logos WHERE delivery_id = ? AND logo_type = ?`, [deliveryId, logoType]);
+    saveDb();
+    return this.db.getRowsModified() > 0;
+  }
+}

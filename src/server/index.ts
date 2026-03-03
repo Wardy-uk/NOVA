@@ -51,8 +51,11 @@ import { JiraOAuthService } from './services/jira-oauth.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
 import { createNotificationRoutes } from './routes/notifications.js';
-import { ProblemTicketQueries, InstanceSetupQueries } from './db/queries.js';
+import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries } from './db/queries.js';
 import { createInstanceSetupRoutes } from './routes/instance-setup.js';
+import { createBranchRoutes } from './routes/branches.js';
+import { createBrandSettingsRoutes } from './routes/brand-settings.js';
+import { createLogoRoutes } from './routes/logos.js';
 import { ProblemTicketScanner } from './services/problem-ticket-scanner.js';
 import { createProblemTicketRoutes } from './routes/problem-tickets.js';
 
@@ -88,6 +91,9 @@ async function main() {
   const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries, taskQueries);
   const problemTicketQueries = new ProblemTicketQueries(db);
   const instanceSetupQueries = new InstanceSetupQueries(db);
+  const branchQueries = new BranchQueries(db);
+  const brandSettingsQueries = new BrandSettingsQueries(db);
+  const logoQueries = new LogoQueries(db);
 
   // Purge transient MS365 data from previous session
   const purgedCount = taskQueries.deleteTransientTasks();
@@ -356,6 +362,9 @@ async function main() {
   });
   app.use('/api/onboarding/config', createOnboardingConfigRoutes(onboardingConfigQueries, requireAreaAccess));
   app.use('/api/instance-setup', createInstanceSetupRoutes(instanceSetupQueries, deliveryQueries));
+  app.use('/api/branches', createBranchRoutes(branchQueries));
+  app.use('/api/brand-settings', createBrandSettingsRoutes(brandSettingsQueries));
+  app.use('/api/logos', createLogoRoutes(logoQueries));
 
   // Debug endpoints (admin-only, behind auth)
   app.get('/api/debug/tools', (req, res, next) => {
