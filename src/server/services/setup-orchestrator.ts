@@ -231,6 +231,7 @@ export class SetupOrchestrator {
       }
 
       // ── Step 5: Push Portal Accounts ──
+      this.log(runId, 'push_portals', 'info', `Portal accounts: ${portalAccounts.length}, bearerToken: ${bearerToken ? 'yes' : 'no'}`);
       if (portalAccounts.length > 0 && bearerToken) {
         stepsRun++;
         try {
@@ -254,6 +255,7 @@ export class SetupOrchestrator {
       }
 
       // ── Step 6: Push Branch Districts ──
+      this.log(runId, 'push_districts', 'info', `Districts: ${districts.length}, bearerToken: ${bearerToken ? 'yes' : 'no'}`);
       if (districts.length > 0 && bearerToken) {
         stepsRun++;
         try {
