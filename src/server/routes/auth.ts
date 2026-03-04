@@ -11,6 +11,7 @@ import type { JiraOAuthService } from '../services/jira-oauth.js';
 import type { UserSettingsQueries } from '../db/queries.js';
 import { EmailService } from '../services/email.js';
 import { passwordResetHtml } from '../services/email-templates.js';
+import { ssoLogger } from '../services/sso-logger.js';
 
 // In-memory reset tokens — cleared on restart, 1h TTL
 const resetTokens = new Map<string, { userId: number; expiresAt: number }>();
@@ -263,13 +264,16 @@ export function createAuthRoutes(
 
   // GET /api/auth/sso/status — public, check if SSO is configured
   router.get('/sso/status', (_req, res) => {
-    res.json({ ok: true, data: { enabled: ssoService.isConfigured() } });
+    const enabled = ssoService.isConfigured();
+    ssoLogger.log('status_check', `SSO status checked: ${enabled ? 'enabled' : 'disabled'}`);
+    res.json({ ok: true, data: { enabled } });
   });
 
   // GET /api/auth/sso/login — public, returns Microsoft OAuth login URL
   router.get('/sso/login', async (_req, res) => {
     try {
       if (!ssoService.isConfigured()) {
+        ssoLogger.warn('login_start', 'SSO not configured — missing settings');
         res.status(503).json({ ok: false, error: 'SSO not configured' });
         return;
       }
@@ -277,11 +281,14 @@ export function createAuthRoutes(
       const settings = settingsQueries.getAll();
       const baseUrl = settings.sso_base_url || `https://${_req.get('host')}`;
       const redirectUri = `${baseUrl}/api/auth/sso/callback`;
+      ssoLogger.log('login_start', 'Generating Microsoft login URL', { redirectUri, baseUrl, host: _req.get('host') });
       const url = await ssoService.getLoginUrl(redirectUri);
+      ssoLogger.log('login_url', 'Login URL generated successfully', { urlPrefix: url.substring(0, 80) + '...' });
       res.json({ ok: true, data: { url } });
     } catch (err) {
-      console.error('[SSO] Login URL error:', err);
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'SSO login failed' });
+      const msg = err instanceof Error ? err.message : 'SSO login failed';
+      ssoLogger.error('login_start', `Failed to generate login URL: ${msg}`, { error: msg, stack: err instanceof Error ? err.stack : undefined });
+      res.status(500).json({ ok: false, error: msg });
     }
   });
 
@@ -293,12 +300,24 @@ export function createAuthRoutes(
       // Determine frontend URL for redirects
       const frontendUrl = process.env.FRONTEND_URL || '';
 
+      ssoLogger.log('callback', 'SSO callback received', {
+        hasCode: !!code,
+        hasState: !!state,
+        oauthError: oauthError || null,
+        errorDescription: error_description || null,
+        host: req.get('host'),
+        protocol: req.protocol,
+        fullUrl: req.originalUrl?.substring(0, 120),
+      });
+
       if (oauthError) {
+        ssoLogger.error('callback', `OAuth error from Microsoft: ${error_description || oauthError}`, { oauthError, error_description });
         res.redirect(`${frontendUrl}/?sso_error=${encodeURIComponent(String(error_description || oauthError))}`);
         return;
       }
 
       if (!code || !state) {
+        ssoLogger.error('callback', 'Missing code or state parameter in callback');
         res.redirect(`${frontendUrl}/?sso_error=${encodeURIComponent('Missing code or state')}`);
         return;
       }
@@ -307,6 +326,7 @@ export function createAuthRoutes(
       const settings = settingsQueries.getAll();
       const baseUrl = settings.sso_base_url || `https://${req.get('host')}`;
       const redirectUri = `${baseUrl}/api/auth/sso/callback`;
+      ssoLogger.log('token_exchange', 'Exchanging auth code for token', { redirectUri, baseUrl, statePrefix: String(state).substring(0, 8) + '...' });
 
       const claims = await ssoService.handleCallback(
         String(code),
@@ -314,13 +334,25 @@ export function createAuthRoutes(
         redirectUri,
       );
 
+      ssoLogger.log('token_exchange', 'Token exchange successful — claims received', {
+        oid: claims.oid,
+        email: claims.email,
+        name: claims.name,
+        preferredUsername: claims.preferredUsername,
+      });
+
       // User resolution: OID lookup → email lookup (link existing) → auto-create
       let user = userQueries.getByProviderId('entra', claims.oid);
+
+      if (user) {
+        ssoLogger.log('user_resolved', `Matched existing user by OID`, { userId: user.id, username: user.username });
+      }
 
       if (!user) {
         // Try matching by email to link existing local accounts
         const existing = userQueries.getByEmail(claims.email);
         if (existing) {
+          ssoLogger.log('user_linked', `Linking existing local account by email`, { userId: existing.id, username: existing.username, email: claims.email });
           // Link existing account to Entra
           userQueries.update(existing.id, {
             auth_provider: 'entra',
@@ -329,6 +361,8 @@ export function createAuthRoutes(
             display_name: claims.name || existing.display_name,
           });
           user = userQueries.getById(existing.id);
+        } else {
+          ssoLogger.log('user_resolved', `No existing user found by OID or email`, { oid: claims.oid, email: claims.email });
         }
       }
 
@@ -340,6 +374,7 @@ export function createAuthRoutes(
         }
 
         const isFirstUser = userQueries.count() === 0;
+        ssoLogger.log('user_created', `Auto-provisioning new user`, { username, email: claims.email, role: isFirstUser ? 'admin' : 'viewer' });
         const id = userQueries.create({
           username,
           display_name: claims.name || username,
@@ -353,20 +388,41 @@ export function createAuthRoutes(
       }
 
       if (!user) {
+        ssoLogger.error('user_resolved', 'Failed to create or find user after all resolution steps');
         res.redirect(`${frontendUrl}/?sso_error=${encodeURIComponent('Failed to create user')}`);
         return;
       }
 
       const token = signToken(user, jwtSecret);
+      ssoLogger.log('login_success', `SSO login complete`, { userId: user.id, username: user.username, authProvider: user.auth_provider });
       // Redirect to frontend with token in hash fragment (never sent to server)
       res.redirect(`${frontendUrl}/#sso_token=${token}`);
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'SSO callback failed';
-      console.error('[SSO Callback]', msg);
+      ssoLogger.error('callback_error', msg, { error: msg, stack: err instanceof Error ? err.stack : undefined });
       const frontendUrl = process.env.FRONTEND_URL || '';
       res.redirect(`${frontendUrl}/?sso_error=${encodeURIComponent(msg)}`);
     }
+  });
+
+  // GET /api/auth/sso/logs — admin-only, returns SSO diagnostic log
+  router.get('/sso/logs', authMiddleware(jwtSecret), (req, res) => {
+    if (!isAdmin(req.user!.role)) {
+      res.status(403).json({ ok: false, error: 'Admin only' });
+      return;
+    }
+    res.json({ ok: true, data: ssoLogger.getAll(), total: ssoLogger.count() });
+  });
+
+  // DELETE /api/auth/sso/logs — admin-only, clear SSO log
+  router.delete('/sso/logs', authMiddleware(jwtSecret), (req, res) => {
+    if (!isAdmin(req.user!.role)) {
+      res.status(403).json({ ok: false, error: 'Admin only' });
+      return;
+    }
+    ssoLogger.clear();
+    res.json({ ok: true });
   });
 
   // ── Permissions ──
