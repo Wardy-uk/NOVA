@@ -60,6 +60,15 @@ export class BymApiError extends Error {
   }
 }
 
+/** Normalize PascalCase keys to camelCase (one level deep). */
+function toCamel<T>(obj: Record<string, unknown>): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[k[0].toLowerCase() + k.slice(1)] = v;
+  }
+  return out as T;
+}
+
 export class BymClient {
   private apiKey: string;
   private urlTemplate: string;
@@ -92,6 +101,33 @@ export class BymClient {
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(300_000), // 5 min timeout like original tool
     });
+
+    if (!res.ok) {
+      let errorBody: unknown;
+      try { errorBody = await res.json(); } catch { errorBody = await res.text().catch(() => ''); }
+      console.error(`[BYM] ${method} ${url} → ${res.status} ${res.statusText}`, errorBody);
+      throw new BymApiError(res.status, res.statusText, errorBody);
+    }
+
+    if (res.status === 204) return {} as T;
+    const text = await res.text();
+    if (!text) return {} as T;
+    return JSON.parse(text) as T;
+  }
+
+  /** Like basicRequest but treats 409 Conflict as success (item already exists). */
+  private async basicRequest409OK<T>(method: string, url: string, body?: unknown): Promise<T> {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        'Authorization': `Basic ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(300_000),
+    });
+
+    if (res.status === 409) return {} as T; // already exists — idempotent
 
     if (!res.ok) {
       let errorBody: unknown;
@@ -154,19 +190,21 @@ export class BymClient {
   // ── BriefYourMarket Instance API (Basic Auth) ──
 
   async getBrands(subdomain: string): Promise<LookupValue[]> {
-    return this.basicRequest('GET', `${this.instanceUrl(subdomain)}/api/brands`);
+    const raw = await this.basicRequest<Record<string, unknown>[]>('GET', `${this.instanceUrl(subdomain)}/api/brands`);
+    return raw.map(r => toCamel<LookupValue>(r));
   }
 
   async createBrands(subdomain: string, brands: LookupValue[]): Promise<unknown> {
-    return this.basicRequest('POST', `${this.instanceUrl(subdomain)}/api/brands`, brands);
+    return this.basicRequest409OK('POST', `${this.instanceUrl(subdomain)}/api/brands`, brands);
   }
 
   async getBranches(subdomain: string): Promise<LookupValue[]> {
-    return this.basicRequest('GET', `${this.instanceUrl(subdomain)}/api/branches`);
+    const raw = await this.basicRequest<Record<string, unknown>[]>('GET', `${this.instanceUrl(subdomain)}/api/branches`);
+    return raw.map(r => toCamel<LookupValue>(r));
   }
 
   async createBranches(subdomain: string, branches: LookupValue[]): Promise<unknown> {
-    return this.basicRequest('POST', `${this.instanceUrl(subdomain)}/api/branches`, branches);
+    return this.basicRequest409OK('POST', `${this.instanceUrl(subdomain)}/api/branches`, branches);
   }
 
   // ── BuildYourMarket API (Bearer Token) ──
