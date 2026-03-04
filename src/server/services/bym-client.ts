@@ -93,6 +93,7 @@ export class BymClient {
     if (!res.ok) {
       let errorBody: unknown;
       try { errorBody = await res.json(); } catch { errorBody = await res.text().catch(() => ''); }
+      console.error(`[BYM] ${method} ${url} → ${res.status} ${res.statusText}`, errorBody);
       throw new BymApiError(res.status, res.statusText, errorBody);
     }
 
@@ -130,6 +131,7 @@ export class BymClient {
   /** Get bearer token from BriefYourMarket instance. */
   async authorize(subdomain: string): Promise<string> {
     const url = `${this.instanceUrl(subdomain)}/api/authorize`;
+    console.log(`[BYM] Authorize URL: ${url}`);
     const result = await this.basicRequest<{ bearerToken: string }>(
       'GET', url,
     );

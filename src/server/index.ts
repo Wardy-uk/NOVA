@@ -396,7 +396,7 @@ async function main() {
     if (key.startsWith('d365_')) buildD365Service();
     if (key.startsWith('azdo_')) buildAzDoService();
     if (key.startsWith('bym_')) buildBymService();
-  }, buildOnboardingJiraClient));
+  }, buildOnboardingJiraClient, () => bymClient));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
   app.use('/api/jira', createJiraRoutes(taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries));

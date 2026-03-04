@@ -9,6 +9,7 @@ import { INTEGRATIONS, buildMcpConfig } from '../services/integrations.js';
 import type { Dynamics365Service } from '../services/dynamics365.js';
 import type { IntegrationStatus, McpServerStatus } from '../../shared/types.js';
 import type { JiraRestClient } from '../services/jira-client.js';
+import type { BymClient } from '../services/bym-client.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
 // Admin-only integrations: credentials stay in global settings.json
@@ -39,6 +40,7 @@ export function createIntegrationRoutes(
   getD365Service: () => Dynamics365Service | null,
   onSettingsChange?: (key: string) => void,
   getJiraClient?: () => JiraRestClient | null,
+  getBymClient?: () => BymClient | null,
 ): Router {
   const router = Router();
 
@@ -452,6 +454,28 @@ export function createIntegrationRoutes(
           status: 'connected',
           message: `Connected — ${projectMsg}`,
         });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.json({ ok: true, status: 'error', message: msg });
+      }
+      return;
+    }
+
+    if (integId === 'bym-setup') {
+      const bym = getBymClient?.();
+      if (!bym) {
+        res.json({ ok: true, status: 'not_configured', message: 'BriefYourMarket Setup not configured' });
+        return;
+      }
+      const testSubdomain = (req.body as Record<string, unknown>)?.subdomain as string | undefined;
+      if (!testSubdomain) {
+        // Just test that we can reach a known instance — use a simple connectivity check
+        res.json({ ok: true, status: 'configured', message: 'BYM client configured. Provide { subdomain } to test a specific instance.' });
+        return;
+      }
+      try {
+        const token = await bym.authorize(testSubdomain);
+        res.json({ ok: true, status: 'connected', message: `Authorized with ${testSubdomain} — token: ${token.slice(0, 8)}...` });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         res.json({ ok: true, status: 'error', message: msg });
