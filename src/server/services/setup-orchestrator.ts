@@ -197,37 +197,43 @@ export class SetupOrchestrator {
       }
 
       // ── Step 4: Upload Logos ──
+      // DISABLED: The bymmedia-dev image service returns 401. Investigation shows
+      // the Onboarding.Tool's ImageService is dead code — logos actually go to the
+      // Config API (api/files/folders/{id}) during a later stage. Re-enable when
+      // the correct upload target is confirmed.
       if (logos.length > 0) {
-        stepsRun++;
-        try {
-          this.log(runId, 'upload_logos', 'info', `Uploading ${logos.length} logo(s)...`);
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'upload_logos', 'in_progress', undefined, userId);
-
-          let uploaded = 0;
-          for (const logoMeta of logos) {
-            const logoFull = this.deps.logoQueries.getById(logoMeta.id);
-            if (!logoFull?.image_data) continue;
-
-            const typeDef = LOGO_TYPE_DEFS.find(t => t.type === logoMeta.logo_type);
-            const ext = logoMeta.mime_type === 'image/svg+xml' ? 'svg'
-              : logoMeta.mime_type === 'image/png' ? 'png' : 'jpg';
-            const fileName = typeDef ? `${typeDef.key}.${ext}` : `logo-${logoMeta.logo_type}.${ext}`;
-
-            const imageBuffer = Buffer.from(logoFull.image_data, 'base64');
-            this.log(runId, 'upload_logos', 'info', `Uploading ${fileName} (${imageBuffer.length} bytes) to ${subdomain}...`);
-            await bym.uploadImage(subdomain, fileName, imageBuffer, logoMeta.mime_type);
-            uploaded++;
-            this.log(runId, 'upload_logos', 'info', `Uploaded: ${fileName}`);
-          }
-
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'upload_logos', 'complete', `${uploaded} uploaded`, userId);
-          this.log(runId, 'upload_logos', 'success', `${uploaded} logo(s) uploaded`);
-        } catch (err) {
-          stepsFailed++;
-          const msg = err instanceof Error ? err.message : String(err);
-          this.log(runId, 'upload_logos', 'error', `Failed: ${msg}`);
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'upload_logos', 'failed', msg, userId);
-        }
+        this.log(runId, 'upload_logos', 'info', `${logos.length} logo(s) available — upload skipped (not yet implemented for this stage)`);
+        this.deps.setupQueries.updateStepStatus(deliveryId, 'upload_logos', 'complete', 'Skipped — pending Config API integration', userId);
+        // stepsRun++;
+        // try {
+        //   this.log(runId, 'upload_logos', 'info', `Uploading ${logos.length} logo(s)...`);
+        //   this.deps.setupQueries.updateStepStatus(deliveryId, 'upload_logos', 'in_progress', undefined, userId);
+        //
+        //   let uploaded = 0;
+        //   for (const logoMeta of logos) {
+        //     const logoFull = this.deps.logoQueries.getById(logoMeta.id);
+        //     if (!logoFull?.image_data) continue;
+        //
+        //     const typeDef = LOGO_TYPE_DEFS.find(t => t.type === logoMeta.logo_type);
+        //     const ext = logoMeta.mime_type === 'image/svg+xml' ? 'svg'
+        //       : logoMeta.mime_type === 'image/png' ? 'png' : 'jpg';
+        //     const fileName = typeDef ? `${typeDef.key}.${ext}` : `logo-${logoMeta.logo_type}.${ext}`;
+        //
+        //     const imageBuffer = Buffer.from(logoFull.image_data, 'base64');
+        //     this.log(runId, 'upload_logos', 'info', `Uploading ${fileName} (${imageBuffer.length} bytes) to ${subdomain}...`);
+        //     await bym.uploadImage(subdomain, fileName, imageBuffer, logoMeta.mime_type);
+        //     uploaded++;
+        //     this.log(runId, 'upload_logos', 'info', `Uploaded: ${fileName}`);
+        //   }
+        //
+        //   this.deps.setupQueries.updateStepStatus(deliveryId, 'upload_logos', 'complete', `${uploaded} uploaded`, userId);
+        //   this.log(runId, 'upload_logos', 'success', `${uploaded} logo(s) uploaded`);
+        // } catch (err) {
+        //   stepsFailed++;
+        //   const msg = err instanceof Error ? err.message : String(err);
+        //   this.log(runId, 'upload_logos', 'error', `Failed: ${msg}`);
+        //   this.deps.setupQueries.updateStepStatus(deliveryId, 'upload_logos', 'failed', msg, userId);
+        // }
       }
 
       // ── Step 5: Push Portal Accounts ──
