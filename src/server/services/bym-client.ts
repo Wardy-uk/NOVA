@@ -73,6 +73,9 @@ export class BymClient {
     this.imageServiceUrl = config.imageServiceUrl.replace(/\/+$/, '');
   }
 
+  /** Expose URL template for debugging. */
+  getUrlTemplate(): string { return this.urlTemplate; }
+
   private instanceUrl(subdomain: string): string {
     return this.urlTemplate.replace('{0}', subdomain);
   }

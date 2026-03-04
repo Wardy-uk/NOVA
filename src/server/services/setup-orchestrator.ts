@@ -117,7 +117,8 @@ export class SetupOrchestrator {
       let bearerToken: string | undefined;
       stepsRun++;
       try {
-        this.log(runId, 'authorize', 'info', `Authenticating with ${subdomain}...`);
+        const authUrl = `${bym.getUrlTemplate().replace('{0}', subdomain)}/api/authorize`;
+        this.log(runId, 'authorize', 'info', `URL: ${authUrl}`);
         this.deps.setupQueries.updateStepStatus(deliveryId, 'authorize', 'in_progress', undefined, userId);
         bearerToken = await bym.authorize(subdomain);
         this.deps.setupQueries.updateStepStatus(deliveryId, 'authorize', 'complete', 'Token obtained', userId);
