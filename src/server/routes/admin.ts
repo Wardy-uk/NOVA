@@ -25,15 +25,15 @@ export function createAdminRoutes(
 
   const emailService = new EmailService(() => settingsQueries.getAll());
 
-  /** Get valid role IDs — falls back to ['editor','viewer'] if no custom roles configured */
+  /** Get valid role IDs — built-in roles always valid, plus any custom roles */
   function getValidRoleIds(): string[] {
+    const builtIn = ['admin', 'editor', 'viewer'];
     const rawRoles = settingsQueries.get('custom_roles');
     let customRoleIds: string[] = [];
     try {
       if (rawRoles) customRoleIds = (JSON.parse(rawRoles) as Array<{ id: string }>).map(r => r.id);
     } catch { /* ignore */ }
-    if (customRoleIds.length === 0) customRoleIds = ['editor', 'viewer'];
-    return ['admin', ...customRoleIds];
+    return [...new Set([...builtIn, ...customRoleIds])];
   }
 
   /** Send an email via SMTP */
