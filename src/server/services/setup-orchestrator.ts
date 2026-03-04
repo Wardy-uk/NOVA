@@ -34,6 +34,20 @@ interface OrchestratorDeps {
   districtQueries: BranchDistrictQueries;
 }
 
+/** Extract just the subdomain from a value that might be a full URL or plain name. */
+function extractSubdomain(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  try {
+    const url = new URL(trimmed);
+    // e.g. https://dominosandbox.briefyourmarket.com → dominosandbox
+    const host = url.hostname; // dominosandbox.briefyourmarket.com
+    return host.split('.')[0];
+  } catch {
+    // Not a URL — treat as plain subdomain
+    return trimmed;
+  }
+}
+
 export class SetupOrchestrator {
   constructor(private deps: OrchestratorDeps) {}
 
@@ -64,7 +78,8 @@ export class SetupOrchestrator {
       const logos = this.deps.logoQueries.getMetadataByDelivery(deliveryId);
       const portalAccounts = this.deps.portalAccountQueries.getByDelivery(deliveryId);
       const districts = this.deps.districtQueries.getByDelivery(deliveryId);
-      const subdomain = brandSettings['subdomain'];
+      const rawSubdomain = brandSettings['subdomain'];
+      const subdomain = rawSubdomain ? extractSubdomain(rawSubdomain) : undefined;
 
       this.log(runId, 'init', 'info', `Delivery: ${delivery.onboarding_id || delivery.account} | Subdomain: ${subdomain || '(not set)'}`);
       this.log(runId, 'init', 'info', `Data: ${Object.keys(brandSettings).length} brand settings, ${branches.length} branches, ${logos.length} logos, ${portalAccounts.length} portal accounts, ${districts.length} districts`);
