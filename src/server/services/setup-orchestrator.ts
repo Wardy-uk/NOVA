@@ -141,7 +141,7 @@ export class SetupOrchestrator {
 
         // Get existing to deduplicate
         const existing = await bym.getBrands(subdomain);
-        const existingNames = new Set(existing.map(b => b.value.toLowerCase()));
+        const existingNames = new Set(existing.filter(b => b.value).map(b => b.value.toLowerCase()));
 
         // Brand name from settings
         const companyName = brandSettings['companyName'];
@@ -171,7 +171,7 @@ export class SetupOrchestrator {
         this.deps.setupQueries.updateStepStatus(deliveryId, 'push_branches', 'in_progress', undefined, userId);
 
         const existing = await bym.getBranches(subdomain);
-        const existingNames = new Set(existing.map(b => b.value.toLowerCase()));
+        const existingNames = new Set(existing.filter(b => b.value).map(b => b.value.toLowerCase()));
 
         const newBranches: LookupValue[] = branches
           .filter(b => !existingNames.has(b.name.toLowerCase()))
@@ -214,6 +214,7 @@ export class SetupOrchestrator {
             const fileName = typeDef ? `${typeDef.key}.${ext}` : `logo-${logoMeta.logo_type}.${ext}`;
 
             const imageBuffer = Buffer.from(logoFull.image_data, 'base64');
+            this.log(runId, 'upload_logos', 'info', `Uploading ${fileName} (${imageBuffer.length} bytes) to ${subdomain}...`);
             await bym.uploadImage(subdomain, fileName, imageBuffer, logoMeta.mime_type);
             uploaded++;
             this.log(runId, 'upload_logos', 'info', `Uploaded: ${fileName}`);
