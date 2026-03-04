@@ -301,7 +301,9 @@ export function createSetupPortalPublicRoutes(
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
     const district = districtQueries.create({
-      ...parsed.data,
+      branch_id: parsed.data.branch_id,
+      district_name: parsed.data.district_name,
+      all_sectors: parsed.data.all_sectors,
       delivery_id: req.portalToken!.delivery_id,
       sectors: parsed.data.sectors || [],
     });
