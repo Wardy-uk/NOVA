@@ -12,7 +12,7 @@ import type { JiraRestClient } from '../services/jira-client.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
 // Admin-only integrations: credentials stay in global settings.json
-const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso']);
+const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo']);
 
 const execFileAsync = promisify(execFile);
 
