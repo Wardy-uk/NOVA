@@ -171,10 +171,11 @@ export class BymClient {
   async authorize(subdomain: string): Promise<string> {
     const url = `${this.instanceUrl(subdomain)}/api/authorize`;
     console.log(`[BYM] Authorize URL: ${url}`);
-    const result = await this.basicRequest<{ bearerToken: string }>(
+    const result = await this.basicRequest<Record<string, unknown>>(
       'GET', url,
     );
-    return result.bearerToken;
+    // API returns PascalCase: BearerToken
+    return (result.BearerToken || result.bearerToken) as string;
   }
 
   /** Test connectivity by calling authorize. */
