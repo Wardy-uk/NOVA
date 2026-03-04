@@ -44,11 +44,27 @@ interface LogoMeta {
   file_size: number | null;
 }
 
+interface PortalAccount {
+  id: number;
+  delivery_id: number;
+  portal_name: string;
+}
+
+interface BranchDistrict {
+  id: number;
+  branch_id: number;
+  delivery_id: number;
+  district_name: string;
+  all_sectors: number;
+  sectors_json: string;
+}
+
 const STEPS = [
   { key: 'company', label: 'Company Info' },
   { key: 'colors', label: 'Colours & Theme' },
   { key: 'branches', label: 'Branches' },
   { key: 'logos', label: 'Logos & Images' },
+  { key: 'build', label: 'Build' },
   { key: 'social', label: 'Social & URLs' },
   { key: 'review', label: 'Review & Submit' },
 ] as const;
@@ -67,6 +83,8 @@ export function SetupPortal({ token }: { token: string }) {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<Branch[]>([]);
   const [logos, setLogos] = useState<LogoMeta[]>([]);
+  const [portalAccounts, setPortalAccounts] = useState<PortalAccount[]>([]);
+  const [districts, setDistricts] = useState<BranchDistrict[]>([]);
   const [progress, setProgress] = useState<Record<string, boolean>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -81,7 +99,9 @@ export function SetupPortal({ token }: { token: string }) {
       fetch(`${API}/brand-settings${q}`).then(r => r.json()),
       fetch(`${API}/branches${q}`).then(r => r.json()),
       fetch(`${API}/logos${q}`).then(r => r.json()),
-    ]).then(([infoRes, brandRes, branchRes, logoRes]) => {
+      fetch(`${API}/portal-accounts${q}`).then(r => r.json()),
+      fetch(`${API}/districts${q}`).then(r => r.json()),
+    ]).then(([infoRes, brandRes, branchRes, logoRes, portalRes, districtRes]) => {
       if (!infoRes.ok) {
         setError(infoRes.error === 'expired' ? 'This link has expired or is no longer valid.' : (infoRes.error || 'Invalid link'));
         return;
@@ -90,6 +110,8 @@ export function SetupPortal({ token }: { token: string }) {
       setSettings(brandRes.data || {});
       setBranches(branchRes.data || []);
       setLogos(logoRes.data || []);
+      if (portalRes.ok) setPortalAccounts(portalRes.data || []);
+      if (districtRes.ok) setDistricts(districtRes.data || []);
       setProgress(infoRes.data.progress || {});
       if (infoRes.data.completed_at) {
         setSubmitted(true);
@@ -219,15 +241,16 @@ export function SetupPortal({ token }: { token: string }) {
       {/* Content */}
       <main style={{ maxWidth: 720, margin: '0 auto', padding: '24px 16px' }}>
         {submitted ? (
-          <SubmittedView account={info.account} settings={settings} branches={branches} logos={logos} info={info} token={token} />
+          <SubmittedView account={info.account} settings={settings} branches={branches} logos={logos} portalAccounts={portalAccounts} districts={districts} info={info} token={token} />
         ) : (
           <>
             {step === 0 && <BrandFieldsStep defs={info.brandSettingDefs} groups={STEP_GROUPS.company} settings={settings} setSettings={setSettings} autoSave={autoSave} />}
             {step === 1 && <BrandFieldsStep defs={info.brandSettingDefs} groups={STEP_GROUPS.colors} settings={settings} setSettings={setSettings} autoSave={autoSave} />}
             {step === 2 && <BranchStep branches={branches} setBranches={setBranches} q={q} />}
             {step === 3 && <LogoStep logos={logos} setLogos={setLogos} logoTypeDefs={info.logoTypeDefs} q={q} />}
-            {step === 4 && <BrandFieldsStep defs={info.brandSettingDefs} groups={STEP_GROUPS.social} settings={settings} setSettings={setSettings} autoSave={autoSave} />}
-            {step === 5 && <ReviewStep settings={settings} branches={branches} logos={logos} info={info} onSubmit={handleSubmit} submitting={submitting} />}
+            {step === 4 && <BuildStep portalAccounts={portalAccounts} setPortalAccounts={setPortalAccounts} districts={districts} setDistricts={setDistricts} branches={branches} q={q} />}
+            {step === 5 && <BrandFieldsStep defs={info.brandSettingDefs} groups={STEP_GROUPS.social} settings={settings} setSettings={setSettings} autoSave={autoSave} />}
+            {step === 6 && <ReviewStep settings={settings} branches={branches} logos={logos} portalAccounts={portalAccounts} districts={districts} info={info} onSubmit={handleSubmit} submitting={submitting} />}
 
             {/* Navigation */}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 32, paddingTop: 16, borderTop: '1px solid #e2e8f0' }}>
@@ -534,12 +557,321 @@ function LogoStep({ logos, setLogos, logoTypeDefs, q }: {
   );
 }
 
+// ── Build Step ──
+
+function BuildStep({ portalAccounts, setPortalAccounts, districts, setDistricts, branches, q }: {
+  portalAccounts: PortalAccount[];
+  setPortalAccounts: (a: PortalAccount[]) => void;
+  districts: BranchDistrict[];
+  setDistricts: (d: BranchDistrict[]) => void;
+  branches: Branch[];
+  q: string;
+}) {
+  // Portal accounts state
+  const [newPortal, setNewPortal] = useState('');
+  const [addingPortal, setAddingPortal] = useState(false);
+  const [importingCsv, setImportingCsv] = useState(false);
+  const csvRef = useRef<HTMLInputElement>(null);
+
+  // Districts state
+  const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
+  const [addingDistrict, setAddingDistrict] = useState(false);
+  const [editingDistrictId, setEditingDistrictId] = useState<number | null>(null);
+  const [districtForm, setDistrictForm] = useState({ district_name: '', all_sectors: false, sectors: [] as string[], currentSector: '' });
+
+  // ── Portal Account actions ──
+
+  const addPortalAccount = async () => {
+    if (!newPortal.trim()) return;
+    try {
+      const res = await fetch(`${API}/portal-accounts${q}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ portal_name: newPortal.trim() }),
+      });
+      const json = await res.json();
+      if (json.ok) { setPortalAccounts(json.data); setNewPortal(''); setAddingPortal(false); }
+      else alert(json.error || 'Failed to add');
+    } catch { alert('Network error'); }
+  };
+
+  const deletePortalAccount = async (id: number) => {
+    const res = await fetch(`${API}/portal-accounts/${id}${q}`, { method: 'DELETE' });
+    const json = await res.json();
+    if (json.ok) setPortalAccounts(json.data);
+  };
+
+  const handleCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) { alert('CSV must have a header row and at least one data row'); return; }
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const nameIdx = headers.indexOf('name');
+    if (nameIdx === -1) { alert('CSV must have a "name" column'); return; }
+    const names = lines.slice(1).map(l => l.split(',')[nameIdx]?.trim()).filter(Boolean);
+    if (names.length === 0) { alert('No valid names found in CSV'); return; }
+
+    try {
+      const res = await fetch(`${API}/portal-accounts/import${q}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ names }),
+      });
+      const json = await res.json();
+      if (json.ok) { setPortalAccounts(json.data); alert(`Imported ${names.length} portal account(s)`); }
+      else alert(json.error || 'Import failed');
+    } catch { alert('Network error'); }
+    e.target.value = '';
+    setImportingCsv(false);
+  };
+
+  // ── District actions ──
+
+  const resetDistrictForm = () => setDistrictForm({ district_name: '', all_sectors: false, sectors: [], currentSector: '' });
+
+  const addSector = () => {
+    const s = districtForm.currentSector.trim();
+    if (!s) return;
+    if (districtForm.sectors.includes(s)) { alert('Sector already added'); return; }
+    setDistrictForm(prev => ({ ...prev, sectors: [...prev.sectors, s], currentSector: '' }));
+  };
+
+  const removeSector = (sector: string) => {
+    setDistrictForm(prev => ({ ...prev, sectors: prev.sectors.filter(s => s !== sector) }));
+  };
+
+  const saveDistrict = async () => {
+    if (!districtForm.district_name.trim()) { alert('District name is required'); return; }
+    if (!districtForm.all_sectors && districtForm.sectors.length === 0) { alert('Add at least one sector or toggle "All Sectors"'); return; }
+
+    const payload = {
+      branch_id: selectedBranchId,
+      district_name: districtForm.district_name.trim(),
+      all_sectors: districtForm.all_sectors,
+      sectors: districtForm.sectors,
+    };
+
+    try {
+      const url = editingDistrictId
+        ? `${API}/districts/${editingDistrictId}${q}`
+        : `${API}/districts${q}`;
+      const res = await fetch(url, {
+        method: editingDistrictId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (json.ok) { setDistricts(json.data); setAddingDistrict(false); setEditingDistrictId(null); resetDistrictForm(); }
+      else alert(json.error || 'Failed to save district');
+    } catch { alert('Network error'); }
+  };
+
+  const deleteDistrict = async (id: number) => {
+    if (!confirm('Delete this district?')) return;
+    const res = await fetch(`${API}/districts/${id}${q}`, { method: 'DELETE' });
+    const json = await res.json();
+    if (json.ok) setDistricts(json.data);
+  };
+
+  const startEditDistrict = (d: BranchDistrict) => {
+    setEditingDistrictId(d.id);
+    setAddingDistrict(true);
+    let sectors: string[] = [];
+    try { sectors = JSON.parse(d.sectors_json || '[]'); } catch { /* ignore */ }
+    setDistrictForm({ district_name: d.district_name, all_sectors: !!d.all_sectors, sectors, currentSector: '' });
+  };
+
+  const branchDistricts = selectedBranchId ? districts.filter(d => d.branch_id === selectedBranchId) : [];
+
+  return (
+    <div>
+      {/* ── Section 1: Portal Accounts ── */}
+      <div style={{ marginBottom: 32 }}>
+        <h3 style={{ color: '#1e293b', margin: '0 0 4px', fontSize: 15, fontWeight: 600 }}>Portal Accounts</h3>
+        <p style={{ color: '#64748b', fontSize: 13, margin: '0 0 12px' }}>
+          Add the portal account names for this instance (e.g. Estates, Residential, Commercial).
+        </p>
+
+        {/* Chips */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+          {portalAccounts.map(a => (
+            <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', backgroundColor: '#f1f5f9', borderRadius: 20, fontSize: 13, color: '#334155' }}>
+              {a.portal_name}
+              <button onClick={() => deletePortalAccount(a.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 14, lineHeight: 1, padding: 0 }} title="Remove">&times;</button>
+            </span>
+          ))}
+          {portalAccounts.length === 0 && !addingPortal && (
+            <span style={{ color: '#94a3b8', fontSize: 13 }}>No portal accounts added yet</span>
+          )}
+        </div>
+
+        {/* Add form */}
+        {addingPortal ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <input
+              type="text"
+              value={newPortal}
+              onChange={e => setNewPortal(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addPortalAccount()}
+              placeholder="Portal account name"
+              autoFocus
+              style={{ flex: 1, padding: '8px 12px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, outline: 'none' }}
+            />
+            <button onClick={addPortalAccount} style={{ padding: '8px 16px', borderRadius: 6, border: 'none', backgroundColor: '#059669', color: '#fff', fontSize: 13, cursor: 'pointer' }}>Add</button>
+            <button onClick={() => { setAddingPortal(false); setNewPortal(''); }} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #d1d5db', backgroundColor: '#fff', color: '#374151', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setAddingPortal(true)} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, cursor: 'pointer', backgroundColor: '#fff', color: '#374151' }}>+ Add Portal Account</button>
+            <button onClick={() => csvRef.current?.click()} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, cursor: 'pointer', backgroundColor: '#fff', color: '#374151' }}>Import CSV</button>
+            <input ref={csvRef} type="file" accept=".csv" hidden onChange={handleCsvImport} />
+          </div>
+        )}
+      </div>
+
+      {/* ── Section 2: Branch Districts & Sectors ── */}
+      <div>
+        <h3 style={{ color: '#1e293b', margin: '0 0 4px', fontSize: 15, fontWeight: 600 }}>Branch Districts &amp; Sectors</h3>
+        <p style={{ color: '#64748b', fontSize: 13, margin: '0 0 12px' }}>
+          Select a branch and configure the districts and sectors it covers.
+        </p>
+
+        {branches.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13, backgroundColor: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+            Add branches in the Branches step first.
+          </div>
+        ) : (
+          <>
+            {/* Branch selector */}
+            <select
+              value={selectedBranchId ?? ''}
+              onChange={e => { setSelectedBranchId(e.target.value ? Number(e.target.value) : null); setAddingDistrict(false); setEditingDistrictId(null); resetDistrictForm(); }}
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, marginBottom: 16, outline: 'none', color: '#1e293b', backgroundColor: '#fff' }}
+            >
+              <option value="">Select a branch...</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+
+            {selectedBranchId && (
+              <>
+                {/* District list */}
+                {branchDistricts.length === 0 && !addingDistrict && (
+                  <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No districts for this branch</div>
+                )}
+
+                {branchDistricts.map(d => {
+                  let sectors: string[] = [];
+                  try { sectors = JSON.parse(d.sectors_json || '[]'); } catch { /* ignore */ }
+                  return (
+                    <div key={d.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 14, marginBottom: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ fontWeight: 600, color: '#1e293b', fontSize: 14, textTransform: 'uppercase' }}>{d.district_name}</div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={() => startEditDistrict(d)} style={{ fontSize: 12, color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer' }}>Edit</button>
+                          <button onClick={() => deleteDistrict(d.id)} style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>Delete</button>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {d.all_sectors ? (
+                          <span style={{ fontSize: 11, padding: '3px 8px', backgroundColor: '#dbeafe', color: '#1e40af', borderRadius: 12, fontWeight: 500 }}>All Sectors</span>
+                        ) : sectors.length > 0 ? (
+                          sectors.map(s => (
+                            <span key={s} style={{ fontSize: 11, padding: '3px 8px', backgroundColor: '#f1f5f9', color: '#475569', borderRadius: 12 }}>{s}</span>
+                          ))
+                        ) : (
+                          <span style={{ fontSize: 11, color: '#94a3b8' }}>No sectors</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Add/Edit district form */}
+                {addingDistrict ? (
+                  <div style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, marginTop: 8 }}>
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: '#374151', marginBottom: 3 }}>District Name</label>
+                      <input
+                        type="text"
+                        value={districtForm.district_name}
+                        onChange={e => setDistrictForm(prev => ({ ...prev, district_name: e.target.value }))}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+                      />
+                    </div>
+
+                    <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <label style={{ fontSize: 12, fontWeight: 500, color: '#374151' }}>All Sectors</label>
+                      <button
+                        onClick={() => setDistrictForm(prev => ({ ...prev, all_sectors: !prev.all_sectors }))}
+                        style={{
+                          width: 40, height: 22, borderRadius: 11, border: 'none', cursor: 'pointer', position: 'relative',
+                          backgroundColor: districtForm.all_sectors ? '#059669' : '#d1d5db', transition: 'background-color 0.2s',
+                        }}
+                      >
+                        <span style={{
+                          position: 'absolute', top: 2, left: districtForm.all_sectors ? 20 : 2,
+                          width: 18, height: 18, borderRadius: '50%', backgroundColor: '#fff', transition: 'left 0.2s',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                        }} />
+                      </button>
+                    </div>
+
+                    {!districtForm.all_sectors && (
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: '#374151', marginBottom: 3 }}>Sectors</label>
+                        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                          <input
+                            type="text"
+                            value={districtForm.currentSector}
+                            onChange={e => setDistrictForm(prev => ({ ...prev, currentSector: e.target.value }))}
+                            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addSector())}
+                            placeholder="Enter sector code"
+                            style={{ flex: 1, padding: '8px 12px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, outline: 'none' }}
+                          />
+                          <button onClick={addSector} style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #d1d5db', backgroundColor: '#fff', color: '#374151', fontSize: 13, cursor: 'pointer' }}>Add</button>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {districtForm.sectors.map(s => (
+                            <span key={s} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', backgroundColor: '#f1f5f9', borderRadius: 12, fontSize: 12, color: '#334155' }}>
+                              {s}
+                              <button onClick={() => removeSector(s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 13, lineHeight: 1, padding: 0 }}>&times;</button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={saveDistrict} style={{ padding: '8px 20px', borderRadius: 6, border: 'none', backgroundColor: '#059669', color: '#fff', fontSize: 13, cursor: 'pointer' }}>
+                        {editingDistrictId ? 'Update' : 'Save'}
+                      </button>
+                      <button onClick={() => { setAddingDistrict(false); setEditingDistrictId(null); resetDistrictForm(); }} style={{ padding: '8px 20px', borderRadius: 6, border: '1px solid #d1d5db', backgroundColor: '#fff', color: '#374151', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => { setAddingDistrict(true); resetDistrictForm(); }} style={{ marginTop: 8, padding: '8px 16px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, cursor: 'pointer', backgroundColor: '#fff', color: '#374151' }}>+ Add District</button>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Review Step ──
 
-function ReviewStep({ settings, branches, logos, info, onSubmit, submitting }: {
+function ReviewStep({ settings, branches, logos, portalAccounts, districts, info, onSubmit, submitting }: {
   settings: Record<string, string>;
   branches: Branch[];
   logos: LogoMeta[];
+  portalAccounts: PortalAccount[];
+  districts: BranchDistrict[];
   info: PortalInfo;
   onSubmit: () => void;
   submitting: boolean;
@@ -601,6 +933,39 @@ function ReviewStep({ settings, branches, logos, info, onSubmit, submitting }: {
         )}
       </SummarySection>
 
+      <SummarySection title="Portal Accounts" count={`${portalAccounts.length} accounts`}>
+        {portalAccounts.length === 0 ? (
+          <div style={{ color: '#94a3b8', fontSize: 13 }}>No portal accounts added</div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {portalAccounts.map(a => (
+              <span key={a.id} style={{ fontSize: 12, padding: '4px 8px', backgroundColor: '#f1f5f9', borderRadius: 4, color: '#374151' }}>{a.portal_name}</span>
+            ))}
+          </div>
+        )}
+      </SummarySection>
+
+      <SummarySection title="Districts & Sectors" count={`${districts.length} districts`}>
+        {districts.length === 0 ? (
+          <div style={{ color: '#94a3b8', fontSize: 13 }}>No districts configured</div>
+        ) : (
+          districts.map(d => {
+            const branch = branches.find(b => b.id === d.branch_id);
+            return (
+              <div key={d.id} style={{ fontSize: 13, padding: '4px 0', color: '#374151', borderBottom: '1px solid #f1f5f9' }}>
+                <strong>{d.district_name}</strong>
+                <span style={{ color: '#94a3b8', marginLeft: 8 }}>({branch?.name || 'Unknown branch'})</span>
+                {d.all_sectors ? (
+                  <span style={{ marginLeft: 8, fontSize: 11, backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '2px 6px', borderRadius: 4 }}>All Sectors</span>
+                ) : d.sectors_json && JSON.parse(d.sectors_json).length > 0 ? (
+                  <span style={{ marginLeft: 8, fontSize: 11, color: '#64748b' }}>Sectors: {JSON.parse(d.sectors_json).join(', ')}</span>
+                ) : null}
+              </div>
+            );
+          })
+        )}
+      </SummarySection>
+
       <div style={{ marginTop: 24, textAlign: 'center' }}>
         {missing.length > 0 && (
           <p style={{ color: '#b91c1c', fontSize: 13, marginBottom: 12 }}>Please complete all required fields before submitting.</p>
@@ -624,11 +989,13 @@ function ReviewStep({ settings, branches, logos, info, onSubmit, submitting }: {
 
 // ── Submitted View ──
 
-function SubmittedView({ account, settings, branches, logos, info, token }: {
+function SubmittedView({ account, settings, branches, logos, portalAccounts, districts, info, token }: {
   account: string;
   settings: Record<string, string>;
   branches: Branch[];
   logos: LogoMeta[];
+  portalAccounts: PortalAccount[];
+  districts: BranchDistrict[];
   info: PortalInfo;
   token: string;
 }) {
@@ -677,6 +1044,29 @@ function SubmittedView({ account, settings, branches, logos, info, token }: {
           ))}
         </div>
       </SummarySection>
+
+      {portalAccounts.length > 0 && (
+        <SummarySection title="Portal Accounts" count={`${portalAccounts.length}`}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {portalAccounts.map(a => (
+              <span key={a.id} style={{ fontSize: 12, padding: '4px 8px', backgroundColor: '#f1f5f9', borderRadius: 4, color: '#374151' }}>{a.portal_name}</span>
+            ))}
+          </div>
+        </SummarySection>
+      )}
+
+      {districts.length > 0 && (
+        <SummarySection title="Districts & Sectors" count={`${districts.length}`}>
+          {districts.map(d => {
+            const branch = branches.find(b => b.id === d.branch_id);
+            return (
+              <div key={d.id} style={{ fontSize: 13, padding: '4px 0', color: '#374151' }}>
+                {d.district_name} <span style={{ color: '#94a3b8' }}>({branch?.name || '?'})</span>
+              </div>
+            );
+          })}
+        </SummarySection>
+      )}
     </div>
   );
 }

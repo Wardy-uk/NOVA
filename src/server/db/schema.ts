@@ -833,6 +833,33 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_setup_token ON setup_portal_tokens(token)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_setup_portal_delivery ON setup_portal_tokens(delivery_id)`);
 
+  // ── Build tab tables (portal accounts + branch districts) ──
+  database.run(`
+    CREATE TABLE IF NOT EXISTS delivery_portal_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_id INTEGER NOT NULL,
+      portal_name TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(delivery_id, portal_name)
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_portal_accounts_delivery ON delivery_portal_accounts(delivery_id)`);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS delivery_branch_districts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      branch_id INTEGER NOT NULL REFERENCES delivery_branches(id) ON DELETE CASCADE,
+      delivery_id INTEGER NOT NULL,
+      district_name TEXT NOT NULL,
+      all_sectors INTEGER DEFAULT 0,
+      sectors_json TEXT DEFAULT '[]',
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(branch_id, district_name)
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_branch_districts_delivery ON delivery_branch_districts(delivery_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_branch_districts_branch ON delivery_branch_districts(branch_id)`);
+
   const defaults: [string, string][] = [
     ['source_weight_jira', '90'],
     ['source_weight_planner', '60'],

@@ -51,7 +51,7 @@ import { JiraOAuthService } from './services/jira-oauth.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
 import { createNotificationRoutes } from './routes/notifications.js';
-import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries } from './db/queries.js';
+import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries, PortalAccountQueries, BranchDistrictQueries } from './db/queries.js';
 import { createInstanceSetupRoutes } from './routes/instance-setup.js';
 import { createBranchRoutes } from './routes/branches.js';
 import { createBrandSettingsRoutes } from './routes/brand-settings.js';
@@ -102,6 +102,8 @@ async function main() {
   const logoQueries = new LogoQueries(db);
   const execQueries = new SetupExecutionQueries(db);
   const portalQueries = new SetupPortalQueries(db);
+  const portalAccountQueries = new PortalAccountQueries(db);
+  const districtQueries = new BranchDistrictQueries(db);
 
   // Purge transient MS365 data from previous session
   const purgedCount = taskQueries.deleteTransientTasks();
@@ -294,7 +296,7 @@ async function main() {
     legacyHeaders: false,
     message: { ok: false, error: 'Too many requests. Please try again shortly.' },
   });
-  app.use('/api/public/setup', portalLimiter, createSetupPortalPublicRoutes(portalQueries, brandSettingsQueries, branchQueries, logoQueries, deliveryQueries));
+  app.use('/api/public/setup', portalLimiter, createSetupPortalPublicRoutes(portalQueries, brandSettingsQueries, branchQueries, logoQueries, deliveryQueries, portalAccountQueries, districtQueries));
 
   // Debug endpoints are registered after auth middleware below (admin-only)
 

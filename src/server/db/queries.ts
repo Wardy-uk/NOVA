@@ -3160,3 +3160,143 @@ export class SetupPortalQueries {
     return deleted;
   }
 }
+
+// ── Portal Account Queries ──────────────────────────────────────────────────
+
+export interface PortalAccount {
+  id: number;
+  delivery_id: number;
+  portal_name: string;
+  created_at: string;
+}
+
+export class PortalAccountQueries {
+  constructor(private db: any) {}
+
+  getByDelivery(deliveryId: number): PortalAccount[] {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_portal_accounts WHERE delivery_id = ? ORDER BY portal_name`);
+    stmt.bind([deliveryId]);
+    const rows: PortalAccount[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as PortalAccount);
+    stmt.free();
+    return rows;
+  }
+
+  create(deliveryId: number, portalName: string): PortalAccount | null {
+    try {
+      this.db.run(
+        `INSERT INTO delivery_portal_accounts (delivery_id, portal_name) VALUES (?, ?)`,
+        [deliveryId, portalName.trim()]
+      );
+      saveDb();
+      const id = this.db.exec(`SELECT last_insert_rowid() as id`)[0].values[0][0] as number;
+      return this.getById(id);
+    } catch {
+      return null; // duplicate
+    }
+  }
+
+  bulkCreate(deliveryId: number, names: string[]): PortalAccount[] {
+    for (const name of names) {
+      const trimmed = name.trim();
+      if (!trimmed) continue;
+      try {
+        this.db.run(
+          `INSERT OR IGNORE INTO delivery_portal_accounts (delivery_id, portal_name) VALUES (?, ?)`,
+          [deliveryId, trimmed]
+        );
+      } catch { /* skip duplicates */ }
+    }
+    saveDb();
+    return this.getByDelivery(deliveryId);
+  }
+
+  delete(id: number): boolean {
+    this.db.run(`DELETE FROM delivery_portal_accounts WHERE id = ?`, [id]);
+    saveDb();
+    return this.db.getRowsModified() > 0;
+  }
+
+  private getById(id: number): PortalAccount | null {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_portal_accounts WHERE id = ?`);
+    stmt.bind([id]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as PortalAccount) : null;
+    stmt.free();
+    return row;
+  }
+}
+
+// ── Branch District Queries ─────────────────────────────────────────────────
+
+export interface BranchDistrict {
+  id: number;
+  branch_id: number;
+  delivery_id: number;
+  district_name: string;
+  all_sectors: number;
+  sectors_json: string;
+  created_at: string;
+}
+
+export class BranchDistrictQueries {
+  constructor(private db: any) {}
+
+  getByDelivery(deliveryId: number): BranchDistrict[] {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_branch_districts WHERE delivery_id = ? ORDER BY branch_id, district_name`);
+    stmt.bind([deliveryId]);
+    const rows: BranchDistrict[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as BranchDistrict);
+    stmt.free();
+    return rows;
+  }
+
+  getByBranch(branchId: number): BranchDistrict[] {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_branch_districts WHERE branch_id = ? ORDER BY district_name`);
+    stmt.bind([branchId]);
+    const rows: BranchDistrict[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as BranchDistrict);
+    stmt.free();
+    return rows;
+  }
+
+  create(data: { branch_id: number; delivery_id: number; district_name: string; all_sectors: boolean; sectors: string[] }): BranchDistrict | null {
+    try {
+      this.db.run(
+        `INSERT INTO delivery_branch_districts (branch_id, delivery_id, district_name, all_sectors, sectors_json) VALUES (?, ?, ?, ?, ?)`,
+        [data.branch_id, data.delivery_id, data.district_name.trim(), data.all_sectors ? 1 : 0, JSON.stringify(data.sectors || [])]
+      );
+      saveDb();
+      const id = this.db.exec(`SELECT last_insert_rowid() as id`)[0].values[0][0] as number;
+      return this.getById(id);
+    } catch {
+      return null;
+    }
+  }
+
+  update(id: number, data: { district_name?: string; all_sectors?: boolean; sectors?: string[] }): BranchDistrict | null {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    if (data.district_name !== undefined) { sets.push('district_name = ?'); vals.push(data.district_name.trim()); }
+    if (data.all_sectors !== undefined) { sets.push('all_sectors = ?'); vals.push(data.all_sectors ? 1 : 0); }
+    if (data.sectors !== undefined) { sets.push('sectors_json = ?'); vals.push(JSON.stringify(data.sectors)); }
+    if (sets.length === 0) return this.getById(id);
+    vals.push(id);
+    this.db.run(`UPDATE delivery_branch_districts SET ${sets.join(', ')} WHERE id = ?`, vals);
+    saveDb();
+    return this.getById(id);
+  }
+
+  delete(id: number): boolean {
+    this.db.run(`DELETE FROM delivery_branch_districts WHERE id = ?`, [id]);
+    saveDb();
+    return this.db.getRowsModified() > 0;
+  }
+
+  private getById(id: number): BranchDistrict | null {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_branch_districts WHERE id = ?`);
+    stmt.bind([id]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as BranchDistrict) : null;
+    stmt.free();
+    return row;
+  }
+}

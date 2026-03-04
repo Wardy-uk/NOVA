@@ -10,7 +10,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { z } from 'zod';
 import type { SetupPortalQueries } from '../db/queries.js';
-import type { BrandSettingsQueries, BranchQueries, LogoQueries, DeliveryQueries } from '../db/queries.js';
+import type { BrandSettingsQueries, BranchQueries, LogoQueries, DeliveryQueries, PortalAccountQueries, BranchDistrictQueries } from '../db/queries.js';
 import { BRAND_SETTING_DEFS, BRAND_SETTING_GROUPS, LOGO_TYPE_DEFS } from '../../shared/brand-settings-defs.js';
 import { EmailService } from '../services/email.js';
 import { setupPortalHtml } from '../services/email-templates.js';
@@ -27,6 +27,8 @@ export function createSetupPortalPublicRoutes(
   branchQueries: BranchQueries,
   logoQueries: LogoQueries,
   deliveryQueries: DeliveryQueries,
+  portalAccountQueries: PortalAccountQueries,
+  districtQueries: BranchDistrictQueries,
 ): Router {
   const router = Router();
 
@@ -241,6 +243,95 @@ export function createSetupPortalPublicRoutes(
     logoQueries.deleteByDeliveryAndType(req.portalToken!.delivery_id, logoType);
     const logos = logoQueries.getMetadataByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: logos });
+  });
+
+  // ── Portal Accounts ──
+
+  // GET /portal-accounts
+  router.get('/portal-accounts', (req: PortalRequest, res) => {
+    const accounts = portalAccountQueries.getByDelivery(req.portalToken!.delivery_id);
+    res.json({ ok: true, data: accounts });
+  });
+
+  // POST /portal-accounts — create single
+  router.post('/portal-accounts', (req: PortalRequest, res) => {
+    if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
+    const parsed = z.object({ portal_name: z.string().min(1).max(100) }).safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
+    const account = portalAccountQueries.create(req.portalToken!.delivery_id, parsed.data.portal_name);
+    if (!account) { res.status(409).json({ ok: false, error: 'Portal account already exists' }); return; }
+    const all = portalAccountQueries.getByDelivery(req.portalToken!.delivery_id);
+    res.json({ ok: true, data: all });
+  });
+
+  // POST /portal-accounts/import — bulk create from CSV data
+  router.post('/portal-accounts/import', (req: PortalRequest, res) => {
+    if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
+    const parsed = z.object({ names: z.array(z.string().min(1)) }).safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
+    const all = portalAccountQueries.bulkCreate(req.portalToken!.delivery_id, parsed.data.names);
+    res.json({ ok: true, data: all });
+  });
+
+  // DELETE /portal-accounts/:id
+  router.delete('/portal-accounts/:id', (req: PortalRequest, res) => {
+    if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
+    const id = Number(req.params.id);
+    portalAccountQueries.delete(id);
+    const all = portalAccountQueries.getByDelivery(req.portalToken!.delivery_id);
+    res.json({ ok: true, data: all });
+  });
+
+  // ── Branch Districts ──
+
+  // GET /districts
+  router.get('/districts', (req: PortalRequest, res) => {
+    const districts = districtQueries.getByDelivery(req.portalToken!.delivery_id);
+    res.json({ ok: true, data: districts });
+  });
+
+  // POST /districts — create
+  router.post('/districts', (req: PortalRequest, res) => {
+    if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
+    const parsed = z.object({
+      branch_id: z.number(),
+      district_name: z.string().min(1).max(100),
+      all_sectors: z.boolean(),
+      sectors: z.array(z.string()).optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
+    const district = districtQueries.create({
+      ...parsed.data,
+      delivery_id: req.portalToken!.delivery_id,
+      sectors: parsed.data.sectors || [],
+    });
+    if (!district) { res.status(409).json({ ok: false, error: 'District already exists for this branch' }); return; }
+    const all = districtQueries.getByDelivery(req.portalToken!.delivery_id);
+    res.json({ ok: true, data: all });
+  });
+
+  // PUT /districts/:id — update
+  router.put('/districts/:id', (req: PortalRequest, res) => {
+    if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
+    const id = Number(req.params.id);
+    const parsed = z.object({
+      district_name: z.string().min(1).max(100).optional(),
+      all_sectors: z.boolean().optional(),
+      sectors: z.array(z.string()).optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
+    districtQueries.update(id, parsed.data);
+    const all = districtQueries.getByDelivery(req.portalToken!.delivery_id);
+    res.json({ ok: true, data: all });
+  });
+
+  // DELETE /districts/:id
+  router.delete('/districts/:id', (req: PortalRequest, res) => {
+    if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
+    const id = Number(req.params.id);
+    districtQueries.delete(id);
+    const all = districtQueries.getByDelivery(req.portalToken!.delivery_id);
+    res.json({ ok: true, data: all });
   });
 
   // GET /progress — get progress JSON
