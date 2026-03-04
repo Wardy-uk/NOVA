@@ -49,7 +49,7 @@ export class AuditQueries {
     const offset = filters.offset ?? 0;
 
     const stmt = this.db.prepare(
-      `SELECT a.*, u.username FROM audit_log a LEFT JOIN users u ON a.user_id = u.id ${where} ORDER BY a.created_at DESC LIMIT ? OFFSET ?`
+      `SELECT a.*, COALESCE(u.display_name, u.username) AS username FROM audit_log a LEFT JOIN users u ON a.user_id = u.id ${where} ORDER BY a.created_at DESC LIMIT ? OFFSET ?`
     );
     params.push(limit, offset);
     stmt.bind(params);

@@ -3,7 +3,25 @@ N.O.V.A — TO DO
 
 --- Triage ---
 
+Exclude Development tickets from the global ticket views (based on configuration in admin - setting already present) but include them in My Ticket views
+
 ability to assign milestone tasks to users - by default should be onboarding owner, but allow to be changed
+
+Allow user to set there preferred homepage to load when opening nova.nurtur.tech
+
+1. on the customer set up portal, Branches tab add branch button text colour makes it unreadable
+
+2. on the customer set up portal, images and logo tabs, uploaded thumb doesn't show for primary logo, then none of the other upload image sections allow upload
+
+on the customer set up portal, all entries should be saved as a read only version, called "[Customer name] - Welcome Pack"
+
+update "whats new" with everything added since v 1.1.7
+
+in the Audit log, user's appear as #5 (except my account which appears as NickW)
+
+onboarding tool replacement - once it has set everything via the API, its needs to replicate the template push to the git repo as per the "legacy" onboarding tool here "C:\Users\NickW\Claude\TFS\Onboarding.Tool"
+
+onboarding - create tickets - need to set correct request type: 'Delivery QA' for the QA ticket and 'Onboarding' for all others
 
 === CURRENT STATUS (3 Mar 2026) ===
 

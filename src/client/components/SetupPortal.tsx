@@ -401,7 +401,7 @@ function BranchStep({ branches, setBranches, q }: {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <p style={{ color: '#64748b', fontSize: 13, margin: 0 }}>Add your office branches with contact details.</p>
         {!adding && (
-          <button onClick={() => { setAdding(true); setForm({}); setEditId(null); }} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, cursor: 'pointer', backgroundColor: '#fff', color: '#374151' }}>
+          <button onClick={() => { setAdding(true); setForm({}); setEditId(null); }} style={{ padding: '8px 16px', borderRadius: 6, border: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer', backgroundColor: '#059669', color: '#fff' }}>
             + Add Branch
           </button>
         )}
@@ -465,7 +465,9 @@ function LogoCard({ def, existing, uploading, onUpload, onDelete, apiBase, query
   query: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const imgSrc = existing ? `${apiBase}/logos/${existing.id}/image${query}` : null;
+  // Cache-bust with file_size to force re-fetch after upload
+  const cacheBust = existing ? `&_cb=${existing.file_size || existing.id}` : '';
+  const imgSrc = existing ? `${apiBase}/logos/${existing.id}/image${query}${cacheBust}` : null;
 
   return (
     <div style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, textAlign: 'center' }}>
@@ -474,21 +476,29 @@ function LogoCard({ def, existing, uploading, onUpload, onDelete, apiBase, query
       {imgSrc ? (
         <div>
           <img src={imgSrc} alt={def.label} style={{ maxWidth: '100%', maxHeight: 80, objectFit: 'contain', marginBottom: 8 }} />
-          <div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+            <button onClick={() => { inputRef.current?.click(); }} style={{ fontSize: 11, color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer' }}>Replace</button>
             <button onClick={() => onDelete(def.type)} style={{ fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>Remove</button>
           </div>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/svg+xml"
+            style={{ display: 'none' }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(def.type, f); e.target.value = ''; }}
+          />
         </div>
       ) : (
         <div
           onClick={() => inputRef.current?.click()}
-          style={{ padding: '20px 8px', border: '2px dashed #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: '#64748b' }}
+          style={{ position: 'relative', padding: '20px 8px', border: '2px dashed #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: '#64748b' }}
         >
           {uploading ? 'Uploading...' : 'Click to upload'}
           <input
             ref={inputRef}
             type="file"
             accept="image/png,image/jpeg,image/svg+xml"
-            style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0 }}
+            style={{ display: 'none' }}
             onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(def.type, f); e.target.value = ''; }}
           />
         </div>
