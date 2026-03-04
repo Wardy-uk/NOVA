@@ -1,17 +1,5 @@
-import OpenAI from 'openai';
 import type { Task } from '../../shared/types.js';
 import type { Ritual } from '../db/queries.js';
-
-interface CompactTask {
-  id: string;
-  title: string;
-  source: string;
-  status: string;
-  priority: number;
-  due?: string;
-  overdue?: boolean;
-  description?: string;
-}
 
 export interface MorningBriefing {
   summary: string;
@@ -33,204 +21,292 @@ export interface EodReview {
   insights: string;
 }
 
-function compactify(tasks: Task[]): CompactTask[] {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-  return tasks.map((t) => {
-    const compact: CompactTask = {
-      id: t.id,
-      title: t.title,
-      source: t.source,
-      status: t.status,
-      priority: t.priority,
-    };
-    if (t.due_date) {
-      compact.due = t.due_date;
-      const due = new Date(t.due_date);
-      if (!isNaN(due.getTime()) && due < today) compact.overdue = true;
-    }
-    if (t.description) compact.description = t.description.slice(0, 50);
-    return compact;
-  });
+function daysBetween(a: Date, b: Date): number {
+  return Math.floor((a.getTime() - b.getTime()) / MS_PER_DAY);
 }
 
-/** Pre-filter to the most relevant tasks to stay within LLM token limits */
-function selectRelevant(tasks: Task[], max: number = 75): Task[] {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const weekOut = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+}
 
-  const scored = tasks.map(t => {
+function sourceLabel(source: string): string {
+  const labels: Record<string, string> = {
+    jira: 'Jira', planner: 'Planner', todo: 'To-Do',
+    monday: 'Monday', email: 'Email', calendar: 'Calendar',
+    milestone: 'Onboarding',
+  };
+  return labels[source] ?? source;
+}
+
+function priorityLabel(p: number): string {
+  if (p <= 1) return 'urgent';
+  if (p <= 2) return 'high priority';
+  if (p <= 3) return 'medium priority';
+  return '';
+}
+
+interface Categorised {
+  overdue: Task[];
+  dueToday: Task[];
+  dueSoon: Task[];  // next 7 days
+  highPriority: Task[];
+  milestones: Task[];
+  pinned: Task[];
+  rest: Task[];
+}
+
+function categorise(tasks: Task[], todayStart: Date, weekOut: Date): Categorised {
+  const result: Categorised = {
+    overdue: [], dueToday: [], dueSoon: [],
+    highPriority: [], milestones: [], pinned: [], rest: [],
+  };
+
+  for (const t of tasks) {
     const due = t.due_date ? new Date(t.due_date) : null;
     const validDue = due && !isNaN(due.getTime());
-    const isOverdue = validDue && due < today;
-    const isDueSoon = validDue && due >= today && due <= weekOut;
-    let score = 50;
-    if (isOverdue) score = 0;
-    else if (isDueSoon) score = 10;
-    else if (t.priority <= 2) score = 20;
-    else if (t.source === 'milestone') score = 25;
-    return { task: t, score };
-  });
 
-  scored.sort((a, b) => a.score - b.score || (a.task.priority ?? 50) - (b.task.priority ?? 50));
-  return scored.slice(0, max).map(s => s.task);
-}
-
-function parseJson<T>(text: string): T | null {
-  try {
-    const cleaned = text.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
-    return JSON.parse(cleaned) as T;
-  } catch {
-    return null;
+    if (validDue && due < todayStart) {
+      result.overdue.push(t);
+    } else if (validDue && daysBetween(due, todayStart) === 0) {
+      result.dueToday.push(t);
+    } else if (validDue && due <= weekOut) {
+      result.dueSoon.push(t);
+    } else if (t.priority <= 2) {
+      result.highPriority.push(t);
+    } else if (t.source === 'milestone') {
+      result.milestones.push(t);
+    } else if (t.is_pinned) {
+      result.pinned.push(t);
+    } else {
+      result.rest.push(t);
+    }
   }
+
+  // Sort overdue by most overdue first
+  result.overdue.sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime());
+  // Sort due today/soon by priority
+  result.dueToday.sort((a, b) => (a.priority ?? 50) - (b.priority ?? 50));
+  result.dueSoon.sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime());
+  result.highPriority.sort((a, b) => (a.priority ?? 50) - (b.priority ?? 50));
+
+  return result;
 }
 
-export async function generateMorningBriefing(
+function buildTopPriorities(cat: Categorised, todayStart: Date, max: number = 5): { task_id: string; reason: string }[] {
+  const picks: { task_id: string; reason: string }[] = [];
+  const seen = new Set<string>();
+
+  const add = (t: Task, reason: string) => {
+    if (seen.has(t.id) || picks.length >= max) return;
+    seen.add(t.id);
+    picks.push({ task_id: t.id, reason });
+  };
+
+  // 1. Overdue (most urgent)
+  for (const t of cat.overdue.slice(0, 3)) {
+    const days = Math.abs(daysBetween(todayStart, new Date(t.due_date!)));
+    const pLabel = priorityLabel(t.priority);
+    add(t, `Overdue by ${days} day${days === 1 ? '' : 's'}${pLabel ? ', ' + pLabel : ''} (${sourceLabel(t.source)}).`);
+  }
+
+  // 2. Due today
+  for (const t of cat.dueToday.slice(0, 2)) {
+    add(t, `Due today${priorityLabel(t.priority) ? ', ' + priorityLabel(t.priority) : ''} (${sourceLabel(t.source)}).`);
+  }
+
+  // 3. High priority
+  for (const t of cat.highPriority.slice(0, 2)) {
+    add(t, `${priorityLabel(t.priority).charAt(0).toUpperCase() + priorityLabel(t.priority).slice(1)} (${sourceLabel(t.source)}).`);
+  }
+
+  // 4. Due soon
+  for (const t of cat.dueSoon.slice(0, 2)) {
+    const days = daysBetween(new Date(t.due_date!), todayStart);
+    add(t, `Due in ${days} day${days === 1 ? '' : 's'} (${sourceLabel(t.source)}).`);
+  }
+
+  // 5. Milestones
+  for (const t of cat.milestones.slice(0, 2)) {
+    add(t, `Onboarding milestone — impacts customer delivery.`);
+  }
+
+  // 6. Pinned
+  for (const t of cat.pinned.slice(0, 2)) {
+    add(t, `Pinned focus item (${sourceLabel(t.source)}).`);
+  }
+
+  return picks;
+}
+
+// ── Public API (same signatures as before, minus apiKey) ──
+
+export function generateMorningBriefing(
   tasks: Task[],
-  apiKey: string,
   previousRitual?: Ritual | null,
-): Promise<MorningBriefing> {
-  const client = new OpenAI({ apiKey });
-  const relevant = selectRelevant(tasks, 75);
-  const compact = compactify(relevant);
+): MorningBriefing {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekOut = new Date(todayStart.getTime() + 7 * MS_PER_DAY);
+  const cat = categorise(tasks, todayStart, weekOut);
 
-  let yesterdayContext = '';
+  // Overdue list
+  const overdue = cat.overdue.slice(0, 10).map(t => {
+    const days = Math.abs(daysBetween(todayStart, new Date(t.due_date!)));
+    return { task_id: t.id, reason: `Overdue by ${days} day${days === 1 ? '' : 's'} (${sourceLabel(t.source)}).` };
+  });
+
+  // Due today
+  const due_today = cat.dueToday.map(t => ({
+    task_id: t.id,
+    note: `${priorityLabel(t.priority) || 'Standard priority'} — ${sourceLabel(t.source)}.`,
+  }));
+
+  // Top priorities
+  const top_priorities = buildTopPriorities(cat, todayStart, 5);
+
+  // Rolled over from yesterday
+  const rolled_over: { task_id: string; reason: string }[] = [];
   if (previousRitual?.planned_items) {
-    yesterdayContext = `\n\nYesterday's planned items were:\n${previousRitual.planned_items}\n\nYesterday's completed items were:\n${previousRitual.completed_items ?? 'None recorded'}\n\nIdentify any tasks that were planned but not completed as "rolled over".`;
+    try {
+      const planned = JSON.parse(previousRitual.planned_items) as string[];
+      const completed = previousRitual.completed_items
+        ? new Set(JSON.parse(previousRitual.completed_items) as string[])
+        : new Set<string>();
+      for (const tid of planned) {
+        if (!completed.has(tid)) {
+          const task = tasks.find(t => t.id === tid);
+          if (task) {
+            rolled_over.push({ task_id: tid, reason: `Planned yesterday but not completed (${sourceLabel(task.source)}).` });
+          }
+        }
+      }
+    } catch { /* ignore corrupt data */ }
   }
 
-  const hour = new Date().getHours();
-  const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+  // Summary
+  const parts: string[] = [`${greeting()}!`];
+  if (cat.overdue.length > 0) {
+    parts.push(`You have ${cat.overdue.length} overdue task${cat.overdue.length === 1 ? '' : 's'} needing attention.`);
+  }
+  if (cat.dueToday.length > 0) {
+    parts.push(`${cat.dueToday.length} task${cat.dueToday.length === 1 ? ' is' : 's are'} due today.`);
+  }
+  if (parts.length === 1) {
+    parts.push(`You have ${tasks.length} open tasks across your integrations. Here's your prioritised focus list.`);
+  }
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    temperature: 0.3,
-    max_tokens: 2000,
-    messages: [
-      {
-        role: 'system',
-        content: `You are N.O.V.A (Nurtur Operational Virtual Assistant), running a standup briefing. The current time of day is ${timeOfDay}. Analyse the task list and produce a structured briefing. Tasks with source "milestone" are customer onboarding milestones — highlight overdue ones prominently as they impact customer delivery timelines.
+  const overdueMilestones = cat.overdue.filter(t => t.source === 'milestone');
+  if (overdueMilestones.length > 0) {
+    parts.push(`${overdueMilestones.length} overdue onboarding milestone${overdueMilestones.length === 1 ? '' : 's'} — customer delivery impact.`);
+  }
 
-Return ONLY a JSON object with these fields:
-- "summary": 2-3 sentence overview starting with an appropriate ${timeOfDay} greeting (e.g. "Good ${timeOfDay}!"). Be direct, professional, slightly motivating.
-- "overdue": array of {"task_id","reason"} for overdue tasks (max 10)
-- "due_today": array of {"task_id","note"} for tasks due today
-- "top_priorities": array of {"task_id","reason"} — your top 5 recommended focus items with short justification
-- "rolled_over": array of {"task_id","reason"} — tasks from yesterday that weren't completed (only if yesterday's data provided)
-
-Use actual task IDs from the data. Keep reasons to 1 sentence each. No markdown, just JSON.`,
-      },
-      {
-        role: 'user',
-        content: `Today's date: ${new Date().toISOString().split('T')[0]}\n\nMy ${relevant.length} most relevant tasks (from ${tasks.length} total):\n${JSON.stringify(compact)}${yesterdayContext}\n\nGenerate my briefing.`,
-      },
-    ],
-  });
-
-  const text = response.choices[0]?.message?.content?.trim() ?? '{}';
-  const parsed = parseJson<MorningBriefing>(text);
-
-  return parsed ?? {
-    summary: 'N.O.V.A could not generate a briefing. Please check your tasks and try again.',
-    overdue: [],
-    due_today: [],
-    top_priorities: [],
-    rolled_over: [],
-  };
+  return { summary: parts.join(' '), overdue, due_today, top_priorities, rolled_over };
 }
 
-export async function generateReplan(
+export function generateReplan(
   tasks: Task[],
-  apiKey: string,
   morningRitual?: Ritual | null,
-): Promise<ReplanBriefing> {
-  const client = new OpenAI({ apiKey });
-  const relevant = selectRelevant(tasks, 75);
-  const compact = compactify(relevant);
+): ReplanBriefing {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekOut = new Date(todayStart.getTime() + 7 * MS_PER_DAY);
+  const cat = categorise(tasks, todayStart, weekOut);
 
-  let morningContext = '';
-  if (morningRitual?.planned_items) {
-    morningContext = `\n\nThis morning's planned priorities were:\n${morningRitual.planned_items}\n\nCompleted so far:\n${morningRitual.completed_items ?? 'None yet'}`;
+  const adjusted_priorities = buildTopPriorities(cat, todayStart, 5);
+
+  // Summary
+  const parts: string[] = [];
+  if (cat.overdue.length > 0) {
+    parts.push(`${cat.overdue.length} overdue task${cat.overdue.length === 1 ? '' : 's'} still need${cat.overdue.length === 1 ? 's' : ''} attention.`);
+  }
+  if (cat.dueToday.length > 0) {
+    parts.push(`${cat.dueToday.length} task${cat.dueToday.length === 1 ? '' : 's'} still due today.`);
   }
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    temperature: 0.3,
-    max_tokens: 1000,
-    messages: [
-      {
-        role: 'system',
-        content: `You are N.O.V.A running a quick mid-day re-plan. Look at the current task state and suggest adjusted priorities for the rest of the day. Pay attention to onboarding milestones (source: "milestone") that are overdue or due today.
+  // Check progress against morning plan
+  if (morningRitual?.planned_items) {
+    try {
+      const planned = JSON.parse(morningRitual.planned_items) as string[];
+      const completed = morningRitual.completed_items
+        ? (JSON.parse(morningRitual.completed_items) as string[]).length
+        : 0;
+      parts.push(`${completed} of ${planned.length} morning priorities completed so far.`);
+    } catch { /* ignore */ }
+  }
 
-Return ONLY a JSON object:
-- "summary": 1-2 sentence re-assessment
-- "adjusted_priorities": array of {"task_id","reason"} — top 5 things to focus on for the rest of the day
+  if (parts.length === 0) {
+    parts.push(`Here are your adjusted priorities for the rest of the day.`);
+  }
 
-Use actual task IDs. Keep it brief. No markdown, just JSON.`,
-      },
-      {
-        role: 'user',
-        content: `Current time: ${new Date().toLocaleTimeString()}\n\nMy ${relevant.length} most relevant tasks (from ${tasks.length} total):\n${JSON.stringify(compact)}${morningContext}\n\nRe-plan my afternoon.`,
-      },
-    ],
-  });
-
-  const text = response.choices[0]?.message?.content?.trim() ?? '{}';
-  const parsed = parseJson<ReplanBriefing>(text);
-
-  return parsed ?? {
-    summary: 'N.O.V.A could not generate a re-plan.',
-    adjusted_priorities: [],
-  };
+  return { summary: parts.join(' '), adjusted_priorities };
 }
 
-export async function generateEndOfDay(
+export function generateEndOfDay(
   tasks: Task[],
-  apiKey: string,
   morningRitual?: Ritual | null,
-): Promise<EodReview> {
-  const client = new OpenAI({ apiKey });
-  const relevant = selectRelevant(tasks, 75);
-  const compact = compactify(relevant);
+): EodReview {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekOut = new Date(todayStart.getTime() + 7 * MS_PER_DAY);
+  const cat = categorise(tasks, todayStart, weekOut);
 
-  let morningContext = '';
+  // Accomplished — from completed items in morning ritual
+  const accomplished: string[] = [];
+  let completedCount = 0;
+  let plannedCount = 0;
+  if (morningRitual?.completed_items) {
+    try {
+      const items = JSON.parse(morningRitual.completed_items) as string[];
+      completedCount = items.length;
+      for (const tid of items) {
+        const task = tasks.find(t => t.id === tid);
+        accomplished.push(task ? `Completed: ${task.title} (${sourceLabel(task.source)})` : `Completed task ${tid}`);
+      }
+    } catch { /* ignore */ }
+  }
   if (morningRitual?.planned_items) {
-    morningContext = `\n\nThis morning's planned priorities were:\n${morningRitual.planned_items}\n\nCompleted during the day:\n${morningRitual.completed_items ?? 'None recorded'}`;
+    try { plannedCount = (JSON.parse(morningRitual.planned_items) as string[]).length; } catch { /* ignore */ }
+  }
+  if (accomplished.length === 0) {
+    accomplished.push('No completed items were recorded for today.');
   }
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    temperature: 0.3,
-    max_tokens: 1500,
-    messages: [
-      {
-        role: 'system',
-        content: `You are N.O.V.A running an end-of-day review. Summarise what was accomplished and what's rolling over to tomorrow. Note progress on onboarding milestones (source: "milestone") in the accomplishments.
+  // Rolling over — overdue + due today that are still open
+  const rolling_over = [...cat.overdue, ...cat.dueToday].slice(0, 10).map(t => ({
+    task_id: t.id,
+    reason: `Still open — ${t.due_date ? 'due ' + t.due_date : 'needs attention'} (${sourceLabel(t.source)}).`,
+  }));
 
-Return ONLY a JSON object:
-- "summary": 2-3 sentence end-of-day wrap up. Be constructive, note achievements.
-- "accomplished": array of strings describing what was achieved today (based on completed items and task state changes)
-- "rolling_over": array of {"task_id","reason"} — tasks that need attention tomorrow
-- "insights": 1-2 sentences of productivity insight or suggestion for tomorrow
+  // Summary
+  const parts: string[] = [];
+  if (completedCount > 0) {
+    parts.push(`You completed ${completedCount} task${completedCount === 1 ? '' : 's'} today${plannedCount ? ` out of ${plannedCount} planned` : ''}.`);
+  } else {
+    parts.push(`End of day wrap-up.`);
+  }
+  if (rolling_over.length > 0) {
+    parts.push(`${rolling_over.length} task${rolling_over.length === 1 ? '' : 's'} rolling over to tomorrow.`);
+  }
 
-Use actual task IDs where relevant. No markdown, just JSON.`,
-      },
-      {
-        role: 'user',
-        content: `End of day: ${new Date().toLocaleTimeString()}\n\nMy ${relevant.length} most relevant remaining tasks (from ${tasks.length} total):\n${JSON.stringify(compact)}${morningContext}\n\nGenerate my end-of-day review.`,
-      },
-    ],
-  });
+  // Insights
+  const insightParts: string[] = [];
+  if (cat.overdue.length > 3) {
+    insightParts.push(`Consider clearing overdue items first thing tomorrow — you have ${cat.overdue.length} stacking up.`);
+  }
+  if (cat.milestones.length > 0) {
+    insightParts.push(`Keep an eye on ${cat.milestones.length} onboarding milestone${cat.milestones.length === 1 ? '' : 's'} — customer timelines depend on them.`);
+  }
+  if (insightParts.length === 0) {
+    insightParts.push('Try to tackle overdue items early tomorrow to keep momentum.');
+  }
 
-  const text = response.choices[0]?.message?.content?.trim() ?? '{}';
-  const parsed = parseJson<EodReview>(text);
-
-  return parsed ?? {
-    summary: 'N.O.V.A could not generate an end-of-day review.',
-    accomplished: [],
-    rolling_over: [],
-    insights: '',
+  return {
+    summary: parts.join(' '),
+    accomplished,
+    rolling_over,
+    insights: insightParts.join(' '),
   };
 }

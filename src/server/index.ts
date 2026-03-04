@@ -537,11 +537,6 @@ async function main() {
       const existing = ritualQueries.getByDate(todayStr, 'morning');
       if (existing.length > 0) return; // already generated
 
-      const apiKey = settingsQueries.get('openai_api_key')?.trim()
-        ?? process.env.OPENAI_API_KEY?.trim()
-        ?? process.env.OPENAI_KEY?.trim();
-      if (!apiKey) return;
-
       const tasks = taskQueries.getAll();
       if (tasks.length === 0) return;
 
@@ -553,7 +548,7 @@ async function main() {
       );
 
       console.log('[PreLoad] Generating morning briefing in background...');
-      const briefing = await generateMorningBriefing(tasks, apiKey, yesterdayRituals[0] ?? null);
+      const briefing = generateMorningBriefing(tasks, yesterdayRituals[0] ?? null);
       const plannedIds = briefing.top_priorities.map((p) => p.task_id);
       ritualQueries.create({
         type: 'morning',
