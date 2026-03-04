@@ -183,6 +183,22 @@ export function createSetupPortalPublicRoutes(
     res.json({ ok: true, data: logos });
   });
 
+  // GET /logos/:id/image — serve logo as binary image (public, token-validated)
+  router.get('/logos/:id/image', (req: PortalRequest, res) => {
+    const logoId = Number(req.params.id);
+    if (!logoId) { res.status(400).json({ ok: false, error: 'Invalid logo ID' }); return; }
+    const logo = logoQueries.getById(logoId);
+    if (!logo || logo.delivery_id !== req.portalToken!.delivery_id) {
+      res.status(404).json({ ok: false, error: 'Logo not found' });
+      return;
+    }
+    const buffer = Buffer.from(logo.image_data, 'base64');
+    res.set('Content-Type', logo.mime_type);
+    res.set('Content-Length', String(buffer.length));
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.send(buffer);
+  });
+
   // PUT /logos/:type — upload logo
   router.put('/logos/:type', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }

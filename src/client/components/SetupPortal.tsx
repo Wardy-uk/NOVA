@@ -378,7 +378,7 @@ function BranchStep({ branches, setBranches, q }: {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <p style={{ color: '#64748b', fontSize: 13, margin: 0 }}>Add your office branches with contact details.</p>
         {!adding && (
-          <button onClick={() => { setAdding(true); setForm({}); setEditId(null); }} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, cursor: 'pointer', backgroundColor: '#fff' }}>
+          <button onClick={() => { setAdding(true); setForm({}); setEditId(null); }} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, cursor: 'pointer', backgroundColor: '#fff', color: '#374151' }}>
             + Add Branch
           </button>
         )}
@@ -472,7 +472,7 @@ function LogoStep({ logos, setLogos, logoTypeDefs, q, token }: {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
         {logoTypeDefs.map(def => {
           const existing = logos.find(l => l.logo_type === def.type);
-          const imgSrc = existing ? `/api/logos/${existing.id}/image?token=${token}` : null;
+          const imgSrc = existing ? `${API}/logos/${existing.id}/image${q}` : null;
           return (
             <div key={def.type} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, textAlign: 'center' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', marginBottom: 4 }}>{def.label}</div>
@@ -487,7 +487,7 @@ function LogoStep({ logos, setLogos, logoTypeDefs, q, token }: {
               ) : (
                 <label style={{ display: 'block', padding: '20px 8px', border: '2px dashed #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: '#64748b' }}>
                   {uploading === def.type ? 'Uploading...' : 'Click to upload'}
-                  <input type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(def.type, f); }} />
+                  <input type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(def.type, f); e.target.value = ''; }} />
                 </label>
               )}
             </div>
