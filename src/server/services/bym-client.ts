@@ -68,16 +68,16 @@ export class BymClient {
 
   constructor(config: BymConfig) {
     this.apiKey = config.apiKey;
-    this.urlTemplate = config.urlTemplate.replace(/\/+$/, '');
-    this.buildApiUrl = config.buildApiUrl.replace(/\/+$/, '');
-    this.imageServiceUrl = config.imageServiceUrl.replace(/\/+$/, '');
+    this.urlTemplate = config.urlTemplate.trim().replace(/\/+$/, '');
+    this.buildApiUrl = config.buildApiUrl.trim().replace(/\/+$/, '');
+    this.imageServiceUrl = config.imageServiceUrl.trim().replace(/\/+$/, '');
   }
 
   /** Expose URL template for debugging. */
   getUrlTemplate(): string { return this.urlTemplate; }
 
   private instanceUrl(subdomain: string): string {
-    return this.urlTemplate.replace('{0}', subdomain).replace(/\/+$/, '');
+    return this.urlTemplate.replace('{0}', subdomain).trim().replace(/\/+$/, '');
   }
 
   // ── Generic request helpers ──
