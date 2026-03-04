@@ -25,6 +25,17 @@ export function createAdminRoutes(
 
   const emailService = new EmailService(() => settingsQueries.getAll());
 
+  /** Get valid role IDs — falls back to ['editor','viewer'] if no custom roles configured */
+  function getValidRoleIds(): string[] {
+    const rawRoles = settingsQueries.get('custom_roles');
+    let customRoleIds: string[] = [];
+    try {
+      if (rawRoles) customRoleIds = (JSON.parse(rawRoles) as Array<{ id: string }>).map(r => r.id);
+    } catch { /* ignore */ }
+    if (customRoleIds.length === 0) customRoleIds = ['editor', 'viewer'];
+    return ['admin', ...customRoleIds];
+  }
+
   /** Send an email via SMTP */
   async function sendEmail(to: string, subject: string, text: string, html?: string): Promise<void> {
     if (!emailService.isConfigured()) {
@@ -51,19 +62,14 @@ export function createAdminRoutes(
       res.status(400).json({ ok: false, error: 'Password must be at least 6 characters' });
       return;
     }
-    const rawRoles = settingsQueries.get('custom_roles');
-    let customRoleIds: string[] = [];
-    try {
-      if (rawRoles) customRoleIds = (JSON.parse(rawRoles) as Array<{ id: string }>).map(r => r.id);
-    } catch { /* ignore */ }
-    const allValidRoles = ['admin', ...customRoleIds];
+    const allValidRoles = getValidRoleIds();
     const requested = role ? parseRoles(role) : [];
     const invalid = requested.filter(r => !allValidRoles.includes(r));
     if (invalid.length > 0) {
       res.status(400).json({ ok: false, error: `Invalid role(s): ${invalid.join(', ')}` });
       return;
     }
-    const assignedRole = requested.length > 0 ? requested.join(',') : (customRoleIds.includes('viewer') ? 'viewer' : customRoleIds[0] || 'viewer');
+    const assignedRole = requested.length > 0 ? requested.join(',') : (allValidRoles.includes('viewer') ? 'viewer' : allValidRoles[1] || 'viewer');
     const normalizedUsername = username.trim().toLowerCase();
     if (userQueries.getByUsername(normalizedUsername)) {
       res.status(409).json({ ok: false, error: 'Username already taken' });
@@ -93,12 +99,7 @@ export function createAdminRoutes(
     if (email !== undefined) updates.email = email;
     if (role !== undefined) {
       // Validate each role in comma-separated list
-      const rawRoles = settingsQueries.get('custom_roles');
-      let customRoleIds: string[] = [];
-      try {
-        if (rawRoles) customRoleIds = (JSON.parse(rawRoles) as Array<{ id: string }>).map(r => r.id);
-      } catch { /* ignore */ }
-      const validRoles = ['admin', ...customRoleIds];
+      const validRoles = getValidRoleIds();
       const requested = parseRoles(role);
       if (requested.length === 0) {
         res.status(400).json({ ok: false, error: 'At least one role is required' });
@@ -223,13 +224,8 @@ export function createAdminRoutes(
     }
 
     // Resolve valid roles
-    const rawRoles = settingsQueries.get('custom_roles');
-    let customRoleIds: string[] = [];
-    try {
-      if (rawRoles) customRoleIds = (JSON.parse(rawRoles) as Array<{ id: string }>).map(r => r.id);
-    } catch { /* ignore */ }
-    const allValidRoles = ['admin', ...customRoleIds];
-    const defaultRole = customRoleIds.includes('viewer') ? 'viewer' : customRoleIds[0] || 'viewer';
+    const allValidRoles = getValidRoleIds();
+    const defaultRole = allValidRoles.includes('viewer') ? 'viewer' : allValidRoles[1] || 'viewer';
 
     const ssoEnabled = settingsQueries.get('sso_enabled') === 'true';
     const frontendUrl = (process.env.FRONTEND_URL || `https://${req.headers.host}`).replace(/\/+$/, '');
