@@ -13,3 +13,4 @@ users.json
 settings.json
 ~$*
 .claude/
+appsettings*.json

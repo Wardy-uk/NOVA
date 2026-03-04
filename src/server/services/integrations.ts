@@ -126,14 +126,16 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
     ],
   },
   {
-    id: 'onboarding-tool',
-    name: 'Onboarding.Tool',
-    description: 'Automated instance setup — pushes branches, brand settings, logos, and config to client website instances.',
-    enabledKey: 'obtool_enabled',
+    id: 'bym-setup',
+    name: 'BriefYourMarket Setup',
+    description: 'Direct API integration — pushes brands, branches, logos, portal accounts, and districts to BriefYourMarket + BuildYourMarket instances.',
+    enabledKey: 'bym_enabled',
     authType: 'credentials',
     fields: [
-      { key: 'obtool_base_url', label: 'Base URL', type: 'url', placeholder: 'https://onboarding.nurtur.agency', required: true },
-      { key: 'obtool_api_key', label: 'API Key', type: 'password', placeholder: 'Bearer token or API key', required: true },
+      { key: 'bym_api_key', label: 'API Key (Basic Auth, base64)', type: 'password', placeholder: 'Base64-encoded API key', required: true },
+      { key: 'bym_url_template', label: 'Instance URL Template', type: 'url', placeholder: 'https://{0}.briefyourmarket.services/', required: true },
+      { key: 'bym_build_api_url', label: 'BuildYourMarket API URL', type: 'url', placeholder: 'https://buildyourmarketapi-live.azurewebsites.net/', required: true },
+      { key: 'bym_image_url', label: 'Image Service URL', type: 'url', placeholder: 'https://bymmedia-dev.azurewebsites.net', required: true },
     ],
   },
 ];

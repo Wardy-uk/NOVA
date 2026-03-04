@@ -59,7 +59,7 @@ import { createLogoRoutes } from './routes/logos.js';
 import { ProblemTicketScanner } from './services/problem-ticket-scanner.js';
 import { createProblemTicketRoutes } from './routes/problem-tickets.js';
 import { AzDoClient } from './services/azdo-client.js';
-import { OnboardingToolClient } from './services/obtool-client.js';
+import { BymClient } from './services/bym-client.js';
 import { SetupOrchestrator } from './services/setup-orchestrator.js';
 import { createAzDoRoutes } from './routes/azdo.js';
 import { createSetupExecutionRoutes } from './routes/setup-execution.js';
@@ -335,33 +335,35 @@ async function main() {
   }
   buildAzDoService();
 
-  // Onboarding.Tool — REST API client
-  let obtoolClient: OnboardingToolClient | null = null;
-  function buildObtoolService() {
+  // BriefYourMarket — direct API client
+  let bymClient: BymClient | null = null;
+  function buildBymService() {
     const s = settingsQueries.getAll();
-    if (s.obtool_enabled === 'true' && s.obtool_base_url && s.obtool_api_key) {
-      obtoolClient = new OnboardingToolClient({
-        baseUrl: s.obtool_base_url,
-        apiKey: s.obtool_api_key,
+    if (s.bym_enabled === 'true' && s.bym_api_key && s.bym_url_template && s.bym_build_api_url && s.bym_image_url) {
+      bymClient = new BymClient({
+        apiKey: s.bym_api_key,
+        urlTemplate: s.bym_url_template,
+        buildApiUrl: s.bym_build_api_url,
+        imageServiceUrl: s.bym_image_url,
       });
-      console.log('[N.O.V.A] Onboarding.Tool: Service configured');
+      console.log('[N.O.V.A] BriefYourMarket Setup: Service configured');
     } else {
-      obtoolClient = null;
+      bymClient = null;
     }
   }
-  buildObtoolService();
+  buildBymService();
 
-  // Setup orchestrator — coordinates AzDO + Onboarding.Tool execution
+  // Setup orchestrator — coordinates direct BYM API execution
   const setupOrchestrator = new SetupOrchestrator({
-    getAzdo: () => azdoClient,
-    getObtool: () => obtoolClient,
+    getBym: () => bymClient,
     branchQueries,
     brandQueries: brandSettingsQueries,
     logoQueries,
     setupQueries: instanceSetupQueries,
     execQueries,
     deliveryQueries,
-    settingsGetter: () => settingsQueries.getAll(),
+    portalAccountQueries,
+    districtQueries,
   });
 
   // Protected API routes
@@ -386,14 +388,14 @@ async function main() {
     if (key.includes('interval_minutes')) restartSyncTimers();
     // Rebuild D365 service when credentials change
     if (key.startsWith('d365_')) buildD365Service();
-    // Rebuild AzDO / Onboarding.Tool services
+    // Rebuild AzDO / BYM services
     if (key.startsWith('azdo_')) buildAzDoService();
-    if (key.startsWith('obtool_')) buildObtoolService();
+    if (key.startsWith('bym_')) buildBymService();
   }));
   app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, userSettingsQueries, uvxCommand, () => d365Service, (key) => {
     if (key.startsWith('d365_')) buildD365Service();
     if (key.startsWith('azdo_')) buildAzDoService();
-    if (key.startsWith('obtool_')) buildObtoolService();
+    if (key.startsWith('bym_')) buildBymService();
   }, buildOnboardingJiraClient));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
