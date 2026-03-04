@@ -262,6 +262,10 @@ export class SetupOrchestrator {
           this.log(runId, 'push_districts', 'info', `Configuring districts for branches...`);
           this.deps.setupQueries.updateStepStatus(deliveryId, 'push_districts', 'in_progress', undefined, userId);
 
+          // Get BYM branch IDs by name lookup
+          const bymBranches = await bym.getBranches(subdomain);
+          const bymBranchByName = new Map(bymBranches.filter(b => b.value && b.id).map(b => [b.value.toLowerCase(), b]));
+
           // Group districts by branch
           const districtsByBranch = new Map<number, typeof districts>();
           for (const d of districts) {
@@ -275,6 +279,13 @@ export class SetupOrchestrator {
             const branch = branches.find(b => b.id === branchId);
             if (!branch) continue;
 
+            // Look up BYM's internal branch ID by name
+            const bymBranch = bymBranchByName.get(branch.name.toLowerCase());
+            if (!bymBranch || !bymBranch.id) {
+              this.log(runId, 'push_districts', 'warn', `Branch "${branch.name}" not found in BYM — skipping`);
+              continue;
+            }
+
             const postCodeDistricts: PostCodeDistrict[] = branchDistricts.map(d => {
               let sectors: string[] = [];
               try { sectors = JSON.parse(d.sectors_json || '[]'); } catch { /* ignore */ }
@@ -287,7 +298,7 @@ export class SetupOrchestrator {
             });
 
             const payload: BuildBranchPayload = {
-              branchId: branch.id,
+              branchId: bymBranch.id!,
               name: branch.name,
               customDirty: true,
               personalLandlordSalutation: false,
