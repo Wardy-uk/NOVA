@@ -755,7 +755,8 @@ export class TaskAggregator {
       parts.push(`project = ${sdProject}`);
     }
 
-    if (sdTiers) {
+    // Exclude configured tiers (e.g. Development) from global views only — My Tickets shows everything
+    if (sdTiers && filter !== 'mine') {
       const tierValues = sdTiers.split(',').map(t => `"${t.trim()}"`).join(', ');
       parts.push(`"Current Tier" NOT IN (${tierValues})`);
     }
