@@ -496,8 +496,14 @@ function LogoStep({ logos, setLogos, logoTypeDefs, q }: {
         body: JSON.stringify({ image_data: data, mime_type: file.type, file_name: file.name, file_size: file.size }),
       });
       const json = await res.json();
-      if (json.ok) setLogos(json.data);
-    } catch { /* ignore */ }
+      if (json.ok) {
+        setLogos(json.data);
+      } else {
+        alert(`Upload failed: ${json.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      alert(`Upload error: ${err instanceof Error ? err.message : 'Network or server error'}`);
+    }
     setUploading(null);
   };
 
