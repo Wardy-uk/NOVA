@@ -225,7 +225,7 @@ export function SetupPortal({ token }: { token: string }) {
             {step === 0 && <BrandFieldsStep defs={info.brandSettingDefs} groups={STEP_GROUPS.company} settings={settings} setSettings={setSettings} autoSave={autoSave} />}
             {step === 1 && <BrandFieldsStep defs={info.brandSettingDefs} groups={STEP_GROUPS.colors} settings={settings} setSettings={setSettings} autoSave={autoSave} />}
             {step === 2 && <BranchStep branches={branches} setBranches={setBranches} q={q} />}
-            {step === 3 && <LogoStep logos={logos} setLogos={setLogos} logoTypeDefs={info.logoTypeDefs} q={q} token={token} />}
+            {step === 3 && <LogoStep logos={logos} setLogos={setLogos} logoTypeDefs={info.logoTypeDefs} q={q} />}
             {step === 4 && <BrandFieldsStep defs={info.brandSettingDefs} groups={STEP_GROUPS.social} settings={settings} setSettings={setSettings} autoSave={autoSave} />}
             {step === 5 && <ReviewStep settings={settings} branches={branches} logos={logos} info={info} onSubmit={handleSubmit} submitting={submitting} />}
 
@@ -432,12 +432,53 @@ function BranchStep({ branches, setBranches, q }: {
 
 // ── Logo Step ──
 
-function LogoStep({ logos, setLogos, logoTypeDefs, q, token }: {
+function LogoCard({ def, existing, uploading, onUpload, onDelete, apiBase, query }: {
+  def: LogoTypeDef;
+  existing: LogoMeta | undefined;
+  uploading: boolean;
+  onUpload: (logoType: number, file: File) => void;
+  onDelete: (logoType: number) => void;
+  apiBase: string;
+  query: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const imgSrc = existing ? `${apiBase}/logos/${existing.id}/image${query}` : null;
+
+  return (
+    <div style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, textAlign: 'center' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', marginBottom: 4 }}>{def.label}</div>
+      <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 12 }}>{def.description}</div>
+      {imgSrc ? (
+        <div>
+          <img src={imgSrc} alt={def.label} style={{ maxWidth: '100%', maxHeight: 80, objectFit: 'contain', marginBottom: 8 }} />
+          <div>
+            <button onClick={() => onDelete(def.type)} style={{ fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>Remove</button>
+          </div>
+        </div>
+      ) : (
+        <div
+          onClick={() => inputRef.current?.click()}
+          style={{ padding: '20px 8px', border: '2px dashed #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: '#64748b' }}
+        >
+          {uploading ? 'Uploading...' : 'Click to upload'}
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/svg+xml"
+            style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0 }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(def.type, f); e.target.value = ''; }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LogoStep({ logos, setLogos, logoTypeDefs, q }: {
   logos: LogoMeta[];
   setLogos: (l: LogoMeta[]) => void;
   logoTypeDefs: LogoTypeDef[];
   q: string;
-  token: string;
 }) {
   const [uploading, setUploading] = useState<number | null>(null);
 
@@ -470,29 +511,18 @@ function LogoStep({ logos, setLogos, logoTypeDefs, q, token }: {
     <div>
       <p style={{ color: '#64748b', fontSize: 13, marginBottom: 16 }}>Upload your brand logos. Accepted formats: PNG, JPEG, SVG (max 2MB).</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-        {logoTypeDefs.map(def => {
-          const existing = logos.find(l => l.logo_type === def.type);
-          const imgSrc = existing ? `${API}/logos/${existing.id}/image${q}` : null;
-          return (
-            <div key={def.type} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, textAlign: 'center' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', marginBottom: 4 }}>{def.label}</div>
-              <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 12 }}>{def.description}</div>
-              {imgSrc ? (
-                <div>
-                  <img src={imgSrc} alt={def.label} style={{ maxWidth: '100%', maxHeight: 80, objectFit: 'contain', marginBottom: 8 }} />
-                  <div>
-                    <button onClick={() => handleDelete(def.type)} style={{ fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>Remove</button>
-                  </div>
-                </div>
-              ) : (
-                <label style={{ display: 'block', padding: '20px 8px', border: '2px dashed #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: '#64748b' }}>
-                  {uploading === def.type ? 'Uploading...' : 'Click to upload'}
-                  <input type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(def.type, f); e.target.value = ''; }} />
-                </label>
-              )}
-            </div>
-          );
-        })}
+        {logoTypeDefs.map(def => (
+          <LogoCard
+            key={def.type}
+            def={def}
+            existing={logos.find(l => l.logo_type === def.type)}
+            uploading={uploading === def.type}
+            onUpload={handleUpload}
+            onDelete={handleDelete}
+            apiBase={API}
+            query={q}
+          />
+        ))}
       </div>
     </div>
   );
