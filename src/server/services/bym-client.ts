@@ -77,7 +77,7 @@ export class BymClient {
   getUrlTemplate(): string { return this.urlTemplate; }
 
   private instanceUrl(subdomain: string): string {
-    return this.urlTemplate.replace('{0}', subdomain);
+    return this.urlTemplate.replace('{0}', subdomain).replace(/\/+$/, '');
   }
 
   // ── Generic request helpers ──
