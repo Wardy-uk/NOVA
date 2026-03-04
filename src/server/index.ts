@@ -257,7 +257,7 @@ async function main() {
   const app = express();
   app.use(helmet({ contentSecurityPolicy: false })); // CSP off for SPA
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '2mb' }));
 
   // Rate limit login attempts (15 per 15 min window)
   const loginLimiter = rateLimit({
