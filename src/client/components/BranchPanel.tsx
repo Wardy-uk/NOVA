@@ -142,7 +142,8 @@ export function BranchPanel({ deliveryId }: Props) {
       setImportText(text);
       parseImportCsv(text);
     } else {
-      const XLSX = (await import('xlsx')).default;
+      const xlsxMod = await import('xlsx');
+      const XLSX = xlsxMod.default || xlsxMod;
       const data = new Uint8Array(await file.arrayBuffer());
       const wb = XLSX.read(data, { type: 'array' });
       const sheet = wb.Sheets[wb.SheetNames[0]];

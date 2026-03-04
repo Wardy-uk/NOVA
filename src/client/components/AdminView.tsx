@@ -472,7 +472,8 @@ export function AdminView() {
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
-        const XLSX = (await import('xlsx')).default;
+        const xlsxMod = await import('xlsx');
+        const XLSX = xlsxMod.default || xlsxMod;
         const data = new Uint8Array(evt.target?.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: 'array' });
         const sheet = wb.Sheets[wb.SheetNames[0]];
