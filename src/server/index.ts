@@ -511,6 +511,14 @@ async function main() {
     res.json({ ok: true, data: watcher.getStatus() });
   });
 
+  // JSON error handler — catch unhandled errors before Express default HTML handler
+  app.use('/api', (err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[API Error]', err.message, err.stack?.split('\n').slice(0, 3).join('\n'));
+    if (!res.headersSent) {
+      res.status(500).json({ ok: false, error: err.message || 'Internal server error' });
+    }
+  });
+
   // Production: serve built Vite frontend
   if (isProduction) {
     const clientDist = path.resolve(__dirname, '../../client');

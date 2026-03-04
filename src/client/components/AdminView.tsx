@@ -212,7 +212,9 @@ export function AdminView() {
           credentials: integValues[integId] ?? {},
         }),
       });
-      const json = await res.json();
+      const text = await res.text();
+      let json: { ok?: boolean; error?: string };
+      try { json = JSON.parse(text); } catch { json = { ok: false, error: `Server error (${res.status}): ${text.slice(0, 100)}` }; }
       if (json.ok) {
         setSuccess(`${integ.name} configuration saved`);
         fetchIntegrations();
