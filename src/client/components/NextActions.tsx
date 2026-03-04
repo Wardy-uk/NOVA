@@ -237,7 +237,7 @@ export function NextActions({ onUpdateTask }: Props) {
         <div className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
           <div className="flex items-center gap-3 text-neutral-400 text-sm">
             <div className="w-4 h-4 border-2 border-[#5ec1ca] border-t-transparent rounded-full animate-spin" />
-            N.O.V.A is analysing your tasks...
+            N.O.V.A is scanning your tasks...
           </div>
         </div>
       )}

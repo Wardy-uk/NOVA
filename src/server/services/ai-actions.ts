@@ -1,59 +1,9 @@
-import OpenAI from 'openai';
 import type { Task } from '../../shared/types.js';
 
 export interface ActionSuggestion {
   task_id: string;
   reason: string;
 }
-
-interface CompactTask {
-  id: string;
-  title: string;
-  source: string;
-  status: string;
-  priority: number;
-  due?: string;
-  overdue?: boolean;
-}
-
-function compactify(tasks: Task[]): CompactTask[] {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  return tasks.map((t) => {
-    const compact: CompactTask = {
-      id: t.id,
-      title: t.title,
-      source: t.source,
-      status: t.status,
-      priority: t.priority,
-    };
-    if (t.due_date) {
-      compact.due = t.due_date;
-      const due = new Date(t.due_date);
-      if (!isNaN(due.getTime()) && due < today) {
-        compact.overdue = true;
-      }
-    }
-    return compact;
-  });
-}
-
-const SYSTEM_PROMPT = `You are N.O.V.A (Nurtur Operational Virtual Assistant), an AI productivity assistant for a busy professional. You are given their current task list from multiple sources (Jira, Planner, To-Do, Calendar, Onboarding Milestones).
-
-Analyse the tasks and suggest the most important ones they should focus on next. Consider:
-- Overdue tasks (highest urgency)
-- Tasks with approaching due dates
-- High priority items (lower number = higher priority)
-- SLA breaches
-- Onboarding milestones (source: "milestone") — these represent customer delivery milestones. Overdue milestones are especially urgent as they impact customer go-live dates.
-- A balanced mix across sources
-
-For each suggestion, return the task ID and a short reason (1 sentence) explaining why it's urgent.
-
-Return ONLY a JSON array of objects with "task_id" and "reason" fields. No markdown, no explanation — just the JSON array.
-
-Example: [{"task_id":"jira:PROJ-123","reason":"Overdue by 3 days and high priority."}]`;
 
 interface DebugEntry {
   ts: string;
@@ -64,135 +14,193 @@ const debugLog: DebugEntry[] = [];
 
 export function recordAiActionsDebug(text: string): void {
   debugLog.push({ ts: new Date().toISOString(), text });
-  if (debugLog.length > 50) {
-    debugLog.splice(0, debugLog.length - 50);
-  }
+  if (debugLog.length > 50) debugLog.splice(0, debugLog.length - 50);
 }
 
 export function getAiActionsDebugLog(): DebugEntry[] {
   return [...debugLog];
 }
 
-/** Pre-filter to the most relevant tasks to stay within LLM token limits */
-function selectRelevant(tasks: Task[], max: number = 75): Task[] {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const weekOut = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+// ── Scoring weights ──
 
-  // Score: lower = more relevant
-  const scored = tasks.map(t => {
-    const due = t.due_date ? new Date(t.due_date) : null;
-    const validDue = due && !isNaN(due.getTime());
-    const isOverdue = validDue && due < today;
-    const isDueSoon = validDue && due >= today && due <= weekOut;
-    let score = 50;
-    if (isOverdue) score = 0;
-    else if (isDueSoon) score = 10;
-    else if (t.priority <= 2) score = 20;
-    else if (t.source === 'milestone') score = 25;
-    return { task: t, score };
-  });
+const W = {
+  SLA_BREACH:   200,   // SLA already breached
+  SLA_IMMINENT: 120,   // SLA breaches within 4 hours
+  OVERDUE:      150,   // Past due date
+  OVERDUE_DAYS:  10,   // Per day overdue (compounds)
+  DUE_TODAY:     80,
+  DUE_TOMORROW:  60,
+  DUE_THIS_WEEK: 40,
+  DUE_NEXT_WEEK: 15,
+  PRIORITY_1:    50,   // Urgent / Highest
+  PRIORITY_2:    35,   // High
+  PRIORITY_3:    15,   // Medium
+  MILESTONE:     25,   // Onboarding milestones get a boost
+  PINNED:        30,   // User explicitly pinned
+  RECENTLY_UPDATED: 5, // Updated in last 24h — slight freshness boost
+};
 
-  scored.sort((a, b) => a.score - b.score || (a.task.priority ?? 50) - (b.task.priority ?? 50));
-  return scored.slice(0, max).map(s => s.task);
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const MS_PER_HOUR = 60 * 60 * 1000;
+
+interface ScoredTask {
+  task: Task;
+  score: number;
+  reasons: string[];
 }
 
-export async function getNextActions(
-  tasks: Task[],
-  count: number,
-  apiKey: string,
-): Promise<ActionSuggestion[]> {
-  const relevant = selectRelevant(tasks, 75);
+function scoreTask(t: Task, now: Date, todayStart: Date): ScoredTask {
+  let score = 0;
+  const reasons: string[] = [];
 
-  if (process.env.AI_ACTIONS_DEBUG === 'true') {
-    const sources = Array.from(new Set(relevant.map((t) => t.source)));
-    const sample = relevant.slice(0, 5).map((t) => t.id).join(', ');
-    recordAiActionsDebug(`[meta] total=${tasks.length} sent=${relevant.length} sources=${sources.join(',') || 'none'} sample=${sample}`);
+  const due = t.due_date ? new Date(t.due_date) : null;
+  const validDue = due && !isNaN(due.getTime());
+  const sla = t.sla_breach_at ? new Date(t.sla_breach_at) : null;
+  const validSla = sla && !isNaN(sla.getTime());
+
+  // ── SLA breach ──
+  if (validSla) {
+    if (sla <= now) {
+      score += W.SLA_BREACH;
+      reasons.push('SLA breached');
+    } else if (sla.getTime() - now.getTime() < 4 * MS_PER_HOUR) {
+      score += W.SLA_IMMINENT;
+      const mins = Math.round((sla.getTime() - now.getTime()) / 60000);
+      reasons.push(`SLA breaches in ${mins < 60 ? mins + 'm' : Math.round(mins / 60) + 'h'}`);
+    }
   }
 
-  const client = new OpenAI({ apiKey });
+  // ── Due date ──
+  if (validDue) {
+    const daysUntilDue = Math.floor((due.getTime() - todayStart.getTime()) / MS_PER_DAY);
 
-  const compact = compactify(relevant);
-
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    temperature: 0.3,
-    max_tokens: 1500,
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content: `Here are my ${relevant.length} most relevant current tasks (from ${tasks.length} total):\n\n${JSON.stringify(compact)}\n\nSuggest the top ${count} tasks I should focus on next.`,
-      },
-    ],
-  });
-
-  const text = response.choices[0]?.message?.content?.trim() ?? '[]';
-  recordAiActionsDebug(text);
-  if (process.env.AI_ACTIONS_DEBUG === 'true') {
-    console.log('[AI Actions] Raw response:', text);
+    if (daysUntilDue < 0) {
+      const daysOverdue = Math.abs(daysUntilDue);
+      score += W.OVERDUE + Math.min(daysOverdue, 30) * W.OVERDUE_DAYS;
+      reasons.push(`Overdue by ${daysOverdue} day${daysOverdue === 1 ? '' : 's'}`);
+    } else if (daysUntilDue === 0) {
+      score += W.DUE_TODAY;
+      reasons.push('Due today');
+    } else if (daysUntilDue === 1) {
+      score += W.DUE_TOMORROW;
+      reasons.push('Due tomorrow');
+    } else if (daysUntilDue <= 7) {
+      score += W.DUE_THIS_WEEK;
+      reasons.push(`Due in ${daysUntilDue} days`);
+    } else if (daysUntilDue <= 14) {
+      score += W.DUE_NEXT_WEEK;
+      reasons.push(`Due in ${daysUntilDue} days`);
+    }
   }
 
-  try {
-    const cleaned = text.replace(/^```json?\n?/, '').replace(/\n?```$/, '').trim();
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch {
-      const start = cleaned.indexOf('[');
-      const end = cleaned.lastIndexOf(']');
-      if (start >= 0 && end > start) {
-        parsed = JSON.parse(cleaned.slice(start, end + 1));
-      } else {
-        throw new Error('No JSON array found');
+  // ── Priority (lower number = higher priority) ──
+  const p = t.priority ?? 50;
+  if (p <= 1) { score += W.PRIORITY_1; reasons.push('Urgent priority'); }
+  else if (p <= 2) { score += W.PRIORITY_2; reasons.push('High priority'); }
+  else if (p <= 3) { score += W.PRIORITY_3; }
+
+  // ── Source bonuses ──
+  if (t.source === 'milestone') {
+    score += W.MILESTONE;
+    if (!reasons.length) reasons.push('Onboarding milestone');
+  }
+
+  // ── Pinned ──
+  if (t.is_pinned) {
+    score += W.PINNED;
+    reasons.push('Pinned');
+  }
+
+  // ── Freshness: recently updated tasks get a small nudge ──
+  if (t.updated_at) {
+    const updatedAgo = now.getTime() - new Date(t.updated_at).getTime();
+    if (updatedAgo < MS_PER_DAY) score += W.RECENTLY_UPDATED;
+  }
+
+  // Default reason if nothing specific triggered
+  if (reasons.length === 0) {
+    if (t.due_date) reasons.push('Has a due date');
+    else reasons.push('Open task');
+  }
+
+  return { task: t, score, reasons };
+}
+
+/**
+ * Build a human-readable reason string from scored reasons.
+ */
+function buildReason(reasons: string[]): string {
+  if (reasons.length === 0) return 'Open task.';
+  // Capitalize first, join with " — "
+  const main = reasons[0].charAt(0).toUpperCase() + reasons[0].slice(1);
+  if (reasons.length === 1) return main + '.';
+  return main + ' — ' + reasons.slice(1).join(', ') + '.';
+}
+
+/**
+ * Source-diverse selection: after scoring, pick top tasks but avoid
+ * flooding results from a single source.
+ */
+function diverseSelect(scored: ScoredTask[], count: number): ScoredTask[] {
+  if (scored.length <= count) return scored;
+
+  const result: ScoredTask[] = [];
+  const sourceCount: Record<string, number> = {};
+  // How many of the same source before we start skipping
+  const maxPerSource = Math.max(2, Math.ceil(count * 0.4));
+
+  for (const item of scored) {
+    if (result.length >= count) break;
+    const src = item.task.source;
+    const cnt = sourceCount[src] ?? 0;
+    if (cnt < maxPerSource) {
+      result.push(item);
+      sourceCount[src] = cnt + 1;
+    }
+  }
+
+  // If we didn't fill up (because of diversity limits), backfill from remaining
+  if (result.length < count) {
+    const picked = new Set(result.map(r => r.task.id));
+    for (const item of scored) {
+      if (result.length >= count) break;
+      if (!picked.has(item.task.id)) {
+        result.push(item);
       }
     }
-    if (Array.isArray(parsed)) {
-      const filtered = parsed
-        .filter((item: unknown) => {
-          const obj = item as Record<string, unknown>;
-          return obj.task_id && obj.reason;
-        })
-        .slice(0, count) as ActionSuggestion[];
-      if (filtered.length > 0) return filtered;
-    }
-  } catch {
-    // Parse failed — return empty
   }
 
-  // Fallback: deterministic heuristic ranking
-  const today = new Date();
-  const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const scored = tasks.map((t) => {
-    const due = t.due_date ? new Date(t.due_date) : null;
-    const isOverdue = !!due && !isNaN(due.getTime()) && due < dayStart;
-    const dueTime = due && !isNaN(due.getTime()) ? due.getTime() : Number.POSITIVE_INFINITY;
-    return {
-      task_id: t.id,
-      reason: isOverdue
-        ? 'Overdue task based on due date.'
-        : t.due_date
-          ? 'Upcoming due date.'
-          : 'High priority task.',
-      score: [
-        isOverdue ? 0 : 1,
-        dueTime,
-        t.priority ?? 50,
-        -new Date(t.updated_at).getTime(),
-      ],
-    };
-  });
+  return result;
+}
 
-  scored.sort((a, b) => {
-    for (let i = 0; i < a.score.length; i += 1) {
-      if (a.score[i] < b.score[i]) return -1;
-      if (a.score[i] > b.score[i]) return 1;
-    }
-    return 0;
-  });
+/**
+ * Rules-based task prioritization — no API key required.
+ * Scores tasks by: overdue, SLA breach, due date proximity,
+ * priority level, source type, pinned status, and freshness.
+ * Returns a diverse mix across sources.
+ */
+export function getNextActions(
+  tasks: Task[],
+  count: number,
+): ActionSuggestion[] {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  return scored.slice(0, count).map((s) => ({
-    task_id: s.task_id,
-    reason: s.reason,
+  recordAiActionsDebug(`[score] Scoring ${tasks.length} tasks, selecting top ${count}`);
+
+  const scored = tasks.map(t => scoreTask(t, now, todayStart));
+  scored.sort((a, b) => b.score - a.score);
+
+  const selected = diverseSelect(scored, count);
+
+  const suggestions = selected.map(s => ({
+    task_id: s.task.id,
+    reason: buildReason(s.reasons),
   }));
+
+  recordAiActionsDebug(
+    `[score] Top scores: ${selected.slice(0, 5).map(s => `${s.task.id}=${s.score}`).join(', ')}`
+  );
+
+  return suggestions;
 }
