@@ -199,6 +199,7 @@ export class BymClient {
     const res = await fetch(url, {
       method: 'POST',
       headers: {
+        'Authorization': `Basic ${this.apiKey}`,
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'Content-Length': String(body.length),
       },
