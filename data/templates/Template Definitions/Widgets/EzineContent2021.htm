@@ -1,0 +1,282 @@
+<style type="text/css">  .mce-item-table, .mce-item-table td, .mce-item-table th, .mce-item-table caption {  border:0 !important;  }  </style>
+<table cellpadding="0" cellspacing="0" border="0" bgcolor="$Contact.GetBrandSetting('theme.colourPrimary')" width="100%">
+	<tr>
+		<td style="padding:0;">
+			<table cellpadding="0" cellspacing="0" border="0" width="100%">
+				<tr>
+					<td style="padding: 0px; vertical-align: top" valign="top">
+						<table cellspacing="0" cellpadding="0" bym-type="TextBlock" bym-meta="{&quot;toolbarType&quot;:&quot;Full&quot;}" id="bym-segment-background" style="background-image: url('https://campaign.briefyourmarket.com/Images/Ezine/Ezine2021Background.png');background-repeat: no-repeat;" bym-size="620,540" height="540">
+							<tbody>
+								<tr>
+									<td height="540" align="center" style="padding: 0px; vertical-align: top; font-weight:bold; vertical-align:top" valign="top">
+										<table cellspacing="0" cellpadding="0" border="0"  width="100%" style="font-family:$Contact.GetBrandSetting('fontFamily');">
+											 <tr>
+												 <td>
+													 <table cellpadding="0" cellspacing="0" border="0" width="100%">
+														<tr>
+															<td height="10" style="height:10px;">
+																&nbsp;
+															</td>
+														</tr>
+													   <tr>
+														   <td width="250" style="width:250px;" class="hide">
+															   &nbsp;
+														   </td>
+														   <td>
+															   <table cellpadding="0" cellspacing="0" border="0" width="100%" class="HeaderBGOverride">
+																   <tr>
+																	   <td style="padding:0;">
+																		   <table cellpadding="0" cellspacing="0" border="0" align="center" style="font-family:$Contact.GetBrandSetting('fontFamily'); font-weight:bold; font-size: 22px;text-align:right;" class="alignCenter" >
+																			   <tr>
+																				   <!--Header Text-->
+																				   <td style="color:$Contact.GetBrandSetting('footerText');padding-bottom:10px;">
+																					   Welcome to the latest edition<br />
+																					   of the $Contact.GetBrandSetting('footerHTMLText1')<br />
+																					   Interactive Magazine.
+																				   </td>
+																			   </tr>
+																			   <tr>
+																				   <!--Secondary intro Text-->
+																				   <td style="color:$Contact.GetBrandSetting('footerText');font-weight:normal; font-size: 12px;" class="sidebar">
+																					   Click on the magnifying glass or<br/>click <a href="$Link.BrandCounted('ezineURL')" style="color:$Contact.GetBrandSetting('footerText');">here</a> to view a selection<br/>of our latest properties.
+																				   </td>
+																			   </tr>
+																		   </table>
+																	   </td>
+																	   <td width="20" style="width:20px;" class="hide">
+																		   &nbsp;
+																	   </td>
+																   </tr>
+															   </table>
+														   </td>
+													   </tr>
+													 </table>
+												 </td>
+											 </tr>
+											<tr>
+												<td width="620" height="405" style="height:405px;width:620px;">
+													<table cellpadding="0" cellspacing="0" border="0" width="100%">
+														<tr>
+															<td width="620" height="405" style="height:405px;width:620px;line-height: 405px;">
+																<div><!--[if mso]>
+																	<v:rect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="$Link.BrandCounted('ezineURL')" style="height:405px;v-text-anchor:middle;width:620px;" border="0" stroke="0" fillcolor="none" >
+																	  <w:anchorlock/>
+																	  <center>
+																	<![endif]-->
+																	<a href="$Link.BrandCounted('ezineURL')" style="display: block;">
+																		&nbsp;
+																	</a>
+																	<!--[if mso]>
+																	  </center>
+																	</v:rect>
+																  <![endif]--></div>
+															</td>
+														</tr>
+													</table>
+												</td>
+											</tr>
+										</table>
+									</td>
+								</tr>
+							</tbody>
+						</table>
+					</td>
+				</tr>
+			</table>
+		</td>
+	</tr>
+	<tr>
+		<th style="padding:0;">
+			<table cellpadding="0" cellspacing="0" border="0" width="100%">
+				<tr>
+					<th style="padding:0px 20px 20px 20px">
+						<table cellpadding="0" cellspacing="0" border="0" width="100%">
+							<tr>
+								<th>
+									<table cellpadding="0" cellspacing="0" border="0" width="100%">
+										<tr>
+											<!--Logo-->
+											<th width="200" style="text-align:center;" class="column sidebar20">
+												<a href="${Link.BrandCounted('bannerWebsite')}">
+													<img src="$Contact.GetBrandSetting('banner')" width="150" border="0"/>
+												</a>
+											</th>
+											<!--Social Icons-->
+											<th class="column sidebar20" valign="top" style="vertical-align: top;">
+												<table cellpadding="0" cellspacing="0" border="0" width="100%">
+													<tr>
+														<th>
+															<table cellpadding="0" cellspacing="0" border="0" align="right" class="width100">
+																<tr>
+																	<!--Social icons IF statement-->
+																	<th>
+																		<table cellpadding="0" cellspacing="0" border="0" align="center">
+																			#if($Contact.GetBrandSetting('footerBackground').ToString().Contains("ffffff") || $Contact.GetBrandSetting('footerBackground').ToString().Contains("FFFFFF") )
+																			<tr>
+																				#if($Contact.GetBrandSetting('FacebookShow').ToString().Contains("1"))
+																				#else
+																				<th width="24" style="padding:0px 0px 0px 0px; font-weight: normal; text-align: center;">
+																					<a href="$Link.BrandCounted('FacebookURL')" target="_blank">
+																						<img src="$Global.ExternalUrl/Global/Images/Templates/SocialMedia/Default/facebook_rnd.png" style="padding:0px; Margin:0px; border:0px" width="24" />
+																					</a>
+																				</th>
+																				#end
+
+																				#if($Contact.GetBrandSetting('TwitterShow').ToString().Contains("1"))
+																				#else
+																				<th width="24" style="padding:0px 0px 0px 10px; font-weight: normal; text-align: center;">
+																					<a href="$Link.BrandCounted('TwitterURL')" target="_blank">
+																						<img src="$Global.ExternalUrl/Global/Images/Templates/SocialMedia/Default/twitter_rnd.png" style="padding:0px; Margin:0px; border:0px" width="24" />
+																					</a>
+																				</th>
+																				#end
+
+																				#if($Contact.GetBrandSetting('LinkedinShow').ToString().Contains("1"))
+																				#else
+																				<th width="24" style="padding:0px 0px 0px 10px; font-weight: normal; text-align: center;">
+																					<a href="$Link.BrandCounted('LinkedinURL')" target="_blank">
+																						<img src="$Global.ExternalUrl/Global/Images/Templates/SocialMedia/Default/linkedin_rnd.png" style="padding:0px; Margin:0px; border:0px" width="24" />
+																					</a>
+																				</th>
+																				#end
+
+																				#if($Contact.GetBrandSetting('YoutubeShow').ToString().Contains("1"))
+																				#else
+																				<th width="24" style="padding:0px 0px 0px 10px; font-weight: normal; text-align: center;">
+																					<a href="$Link.BrandCounted('YoutubeURL')" target="_blank">
+																						<img src="$Global.ExternalUrl/Global/Images/Templates/SocialMedia/Default/youtube_rnd.png" style="padding:0px; Margin:0px; border:0px" width="24" />
+																					</a>
+																				</th>
+																				#end
+
+																				#if($Contact.GetBrandSetting('InstagramShow').ToString().Contains("1"))
+																				#else
+																				<th width="24" style="padding:0px 0px 0px 10px; font-weight: normal; text-align: center;">
+																					<a href="$Link.BrandCounted('InstagramURL')" target="_blank">
+																						<img src="$Global.ExternalUrl/Global/Images/Templates/SocialMedia/Default/instagram_rnd.png" style="padding:0px; Margin:0px; border:0px" width="24" />
+																					</a>
+																				</th>
+																				#end
+
+
+																			</tr>
+																			#else
+																			<tr>
+																				#if($Contact.GetBrandSetting('FacebookShow').ToString().Contains("1"))
+																				#else
+																				<th width="24" style="padding:0px 0px 0px 0px; font-weight: normal; text-align: center;">
+																					<a href="$Link.BrandCounted('FacebookURL')" target="_blank">
+																						<img src="$Global.ExternalUrl/Global/Images/Templates/SocialMedia/White/facebook_rnd.png" style="padding:0px; Margin:0px; border:0px" width="24" />
+																					</a>
+																				</th>
+																				#end
+
+																				#if($Contact.GetBrandSetting('TwitterShow').ToString().Contains("1"))
+																				#else
+																				<th width="24" style="padding:0px 0px 0px 10px; font-weight: normal; text-align: center;">
+																					<a href="$Link.BrandCounted('TwitterURL')" target="_blank">
+																						<img src="$Global.ExternalUrl/Global/Images/Templates/SocialMedia/White/twitter_rnd.png" style="padding:0px; Margin:0px; border:0px" width="24" />
+																					</a>
+																				</th>
+																				#end
+
+																				#if($Contact.GetBrandSetting('LinkedinShow').ToString().Contains("1"))
+																				#else
+																				<th width="24" style="padding:0px 0px 0px 10px; font-weight: normal; text-align: center;">
+																					<a href="$Link.BrandCounted('LinkedinURL')" target="_blank">
+																						<img src="$Global.ExternalUrl/Global/Images/Templates/SocialMedia/White/linkedin_rnd.png" style="padding:0px; Margin:0px; border:0px" width="24" />
+																					</a>
+																				</th>
+																				#end
+
+																				#if($Contact.GetBrandSetting('YoutubeShow').ToString().Contains("1"))
+																				#else
+																				<th width="24" style="padding:0px 0px 0px 10px; font-weight: normal; text-align: center;">
+																					<a href="$Link.BrandCounted('YoutubeURL')" target="_blank">
+																						<img src="$Global.ExternalUrl/Global/Images/Templates/SocialMedia/White/youtube_rnd.png" style="padding:0px; Margin:0px; border:0px" width="24" />
+																					</a>
+																				</th>
+																				#end
+
+																				#if($Contact.GetBrandSetting('InstagramShow').ToString().Contains("1"))
+																				#else
+																				<th width="24" style="padding:0px 0px 0px 10px; font-weight: normal; text-align: center;">
+																					<a href="$Link.BrandCounted('InstagramURL')" target="_blank">
+																						<img src="https://campaign.briefyourmarket.com/Images/Templates/instagram_rndV2.png" style="padding:0px; Margin:0px; border:0px" width="24" />
+																					</a>
+																				</th>
+																				#end
+
+
+																			</tr>
+																			#end
+																		</table>
+																	</th>
+																</tr>
+															</table>
+														</th>
+													</tr>
+												</table>
+											</th>
+										</tr>
+									</table>
+								</th>
+							</tr>
+							<tr>
+								<th>
+									<table cellpadding="0" cellspacing="0" border="0" width="100%">
+										<tr>
+											<!--Valuation Button-->
+											<th style="padding-top:20px;" class="column padding0">
+												<table cellpadding="0" cellspacing="0" border="0" align="left" class="width100">
+													<tr>
+														<th class="sidebar20" width="200">
+															<table cellpadding="0" cellspacing="0" border="0" align="center">
+																<tr>
+																	<th width="180" style="padding:10px;" bgcolor="$Contact.GetBrandSetting('theme.colourSecondary')">
+																		<a href="${Link.BrandCounted('theme.valuationLink')}" style="text-decoration: none;color:$Contact.GetBrandSetting('headerText')">
+																			Book a Valuation
+																		</a>
+																	</th>
+																</tr>
+																<tr>
+																	<th style="font-size: 1px; line-height: 1px; padding: 0">
+																		&nbsp;
+																	</th>
+																</tr>
+															</table>
+														</th>
+													</tr>
+													<tr>
+														<th style="font-size: 1px; line-height: 1px; padding: 0">
+															&nbsp;
+														</th>
+													</tr>
+												</table>
+											</th>
+											<!--Contact Details-->
+											<th style="font-family:$Contact.GetBrandSetting('fontFamily'); font-weight:normal; font-size: 10px;text-align:right;color:$Contact.GetBrandSetting('footerText');color:#ffffff;" class="column">
+												<a href="${Link.Counted("tel:$Contact.GetBrandSetting('companyPhone')")}" style="text-decoration: none;color:#ffffff;">
+													$Contact.GetBrandSetting('companyPhone')<br/>
+												</a>
+												<a href="${Link.Counted("mailto:$Contact.GetBrandSetting('companyEmail')")}" style="text-decoration: none;color:#ffffff;">
+													$Contact.GetBrandSetting('companyEmail')<br/>
+												</a>
+												$Contact.GetBrandSetting('footerHTMLText2')
+											</th>
+										</tr>
+									</table>
+								</th>
+							</tr>
+							<tr>
+								<th style="font-size: 1px; line-height: 1px; padding: 0">
+									&nbsp;
+								</th>
+							</tr>
+						</table>
+					</th>
+				</tr>
+			</table>
+		</th>
+	</tr>
+</table>

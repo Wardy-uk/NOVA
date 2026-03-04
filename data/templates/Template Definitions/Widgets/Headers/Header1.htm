@@ -1,0 +1,122 @@
+<table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="$Contact.getBrandSetting('headerBackground')">
+	<tr>
+		<th style="padding:0;">
+			<table cellspacing="0" cellpadding="0" border="0" width="100%">
+				<tr>
+					<th width="35%" class="column padding10" style="vertical-align: middle;padding:20px 10px 20px 20px;" valign="middle">
+						<table cellpadding="0" cellspacing="0" border="0" width="100%">
+							<tr>
+								<th class="alignCenter" style="text-align: left; padding:0px;">
+									<a href="$Link.BrandCounted('bannerWebsite')">
+										<img src="$Contact.GetBrandSetting('banner')" border="0" width="$Contact.GetBrandSetting('logoWidth')" />
+									</a>
+								</th>
+							</tr>
+						</table>
+					</th>
+					<th width="65%" class="column padding10" style="padding:20px 20px 20px 10px;">
+						<table cellspacing="0" cellpadding="0" border="0" width="100%">
+							#if ($Contact.GetBrandSetting('aspxLink').Length > 1)
+							<tr>
+								<th style="padding-bottom:15px;">
+									<table bgcolor="$Contact.getBrandSetting('headerBackground')" cellpadding="0" cellspacing="0" border="0" width="100%">
+										<tr>
+											<th style="padding:0;">
+												<table cellspacing="0" border="0" align="right" class="width100" cellpadding="0">
+													<tr>
+														<th style="padding:0;" align="center">
+															<table cellpadding="0" cellspacing="0" border="0" width="240" align="center">
+																<tr>
+																	<th style="padding:0;">
+																		<table cellpadding="0" cellspacing="0" border="0" width="100%">
+																			<tbody>
+																				<tr>
+																					<td>
+																						<table cellpadding="0" cellspacing="0" border="0" width="100%">
+																							<tr>
+																								<td width="100%" style="padding:0px; vertical-align: top" valign="top">
+																									<table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="$Contact.GetBrandSetting('theme.colourSecondary')">
+
+																										<tr>
+																											<td style="padding: 10px 20px; font-family: $Contact.GetBrandSetting('fontFamily'); font-size: 16px; text-align: center; font-weight: bold;">
+																												<a href="$Link.BrandCounted('aspxLink')" style="font-weight:bold;text-decoration:none;color:#ffffff;">
+																													$Contact.GetBrandSetting('aspxLinkText')
+																												</a>
+																											</td>
+																										</tr>
+
+																									</table>
+																								</td>
+																							</tr>
+																						</table>
+																					</td>
+																				</tr>
+																			</tbody>
+																		</table>
+																	</th>
+																</tr>
+															</table>
+
+
+														</th>
+													</tr>
+												</table>
+											</th>
+										</tr>
+									</table>
+								</th>
+							</tr>
+							#end
+							<tr>
+								<th style="padding:0;">
+									<table cellpadding="0" cellspacing="0" border="0" width="100%">
+										<tr>
+											<th style="padding:0">
+												<table cellpadding="0" cellspacing="0" border="0" align="right" class="width100">
+													<tr>
+														<th style="padding:0;" align="center">
+															<table cellpadding="0" cellspacing="0" border="0" align="center" style="font-family: $Contact.getBrandSetting('fontFamily'); color: #ffffff; font-size: 16px;">
+																<tr>
+																	<th class="column" style="padding:0;" align="center">
+																	  <table cellpadding="0" cellspacing="0" border="0" align="center" style="font-family: $Contact.getBrandSetting('fontFamily'); color: #ffffff; font-size: 16px;">
+																		<tr> #if ($Contact.GetBrandSetting('CTAText1').Length > 1 && $Contact.GetBrandSetting('CTALink1').Length > 1) <th class="padding5" style="text-align: center; padding: 0 8px;">
+																			<a href="$Link.BrandCounted('CTALink1')" style="text-decoration: none; font-weight:normal; color:$Contact.GetBrandSetting('headerText')"> $Contact.getBrandSetting('CTAText1') </a>
+																		  </th> #end #if ($Contact.GetBrandSetting('CTAText2').Length > 1 && $Contact.GetBrandSetting('CTALink2').Length > 1) <th class="padding5" style="text-align: center; padding: 0 8px;">
+																			<a href="$Link.BrandCounted('CTALink2')" style="text-decoration: none; font-weight:normal; color:$Contact.GetBrandSetting('headerText')"> $Contact.getBrandSetting('CTAText2') </a>
+																		  </th> #end #if ($Contact.GetBrandSetting('CTAText3').Length > 1 && $Contact.GetBrandSetting('CTALink3').Length > 1) <th class="padding5" style="text-align: center; padding: 0 8px;">
+																			<a href="$Link.BrandCounted('CTALink3')" style="text-decoration: none; font-weight:normal; color:$Contact.GetBrandSetting('headerText')"> $Contact.getBrandSetting('CTAText3') </a>
+																		  </th> #end #if ($Contact.GetBrandSetting('CTAText4').Length > 1 && $Contact.GetBrandSetting('CTALink4').Length > 1) </tr>
+																	  </table>
+																	</th>
+																	<th class="column" style="padding:0;" align="center">
+																	  <table cellpadding="0" cellspacing="0" border="0" align="center" style="font-family: $Contact.getBrandSetting('fontFamily'); color: #ffffff; font-size: 16px;">
+																		<tr>
+																		  <th class="padding5" style="text-align: center; padding: 0 8px;">
+																			<a href="$Link.BrandCounted('CTALink4')" style="text-decoration: none; font-weight:normal; color:$Contact.GetBrandSetting('headerText')"> $Contact.getBrandSetting('CTAText4') </a>
+																		  </th> #end #if ($Contact.GetBrandSetting('CTAText5').Length > 1 && $Contact.GetBrandSetting('CTALink5').Length > 1) <th class="padding5" style="text-align: center; padding: 0 0 0 8px;">
+																			<a href="$Link.BrandCounted('CTALink5')" style="text-decoration: none; font-weight:normal; color:$Contact.GetBrandSetting('headerText')"> $Contact.getBrandSetting('CTAText5') </a>
+																		  </th> #end
+																		</tr>
+																	  </table>
+																	</th>
+																  </tr>
+															</table>
+														</th>
+													</tr>
+												</table>
+
+											</th>
+										</tr>
+									</table>
+								</th>
+							</tr>
+						</table>
+
+
+					</th>
+				</tr>
+			</table>
+		</th>
+	</tr>
+	
+</table>

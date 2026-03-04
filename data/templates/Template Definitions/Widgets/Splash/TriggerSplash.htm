@@ -1,0 +1,18 @@
+<table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="$Contact.getBrandSetting('headerBackground')">
+
+	#if($Contact.GetBrandSetting('splashImageShow').ToString().Contains("1"))
+	<tr>
+		<th style="padding:0;">
+			<table cellpadding="0" cellspacing="0" border="0" width="100%">
+				<tr>
+					<td width="100%" style="padding:0px;border-bottom:4px solid $Contact.GetBrandSetting('theme.colourSecondary'); vertical-align: top" valign="top">
+						<a href="$Link.BrandCounted('MainCTALink')" style="font-weight:bold;text-decoration:none;color:#ffffff;">
+							<img src="$Contact.getBrandSetting('splashImage')" width="620" style="width:620px;display:block" class="imageWidth" />
+						</a>
+					</td>
+				</tr>
+			</table>
+		</th>
+	</tr>
+	#end
+</table>

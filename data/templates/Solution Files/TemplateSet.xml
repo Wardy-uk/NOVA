@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TemplateSet xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+
+  <TemplateDefinitions>
+
+    <TemplateDefinition>
+      <Name>Master Page Template</Name>
+      <Type>NewsPage</Type>
+      <TemplateDefinitionPath>ResponsiveMicrosite03.master</TemplateDefinitionPath>
+    </TemplateDefinition>
+	  <TemplateDefinition>
+		  <Name>Survey Template One</Name>
+		  <Type>Survey</Type>
+		  <TemplateDefinitionPath>Surveys/SurveyOne.master</TemplateDefinitionPath>
+	  </TemplateDefinition>
+	  <TemplateDefinition>
+		  <Name>Survey Template Two</Name>
+		  <Type>Survey</Type>
+		  <TemplateDefinitionPath>Surveys/SurveyTwo.master</TemplateDefinitionPath>
+	  </TemplateDefinition>
+	  <TemplateDefinition>
+		  <Name>Survey Template Three</Name>
+		  <Type>Survey</Type>
+		  <TemplateDefinitionPath>Surveys/SurveyThree.master</TemplateDefinitionPath>
+	  </TemplateDefinition>
+
+    <!-- Newsletters -->
+    <TemplateDefinition>
+      <Name>Newsletter Template - 1</Name>
+      <Type>Newsletter</Type>
+      <TemplateDefinitionPath>Newsletters/Newsletter1.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Newsletter Template - 2</Name>
+      <Type>Newsletter</Type>
+      <TemplateDefinitionPath>Newsletters/Newsletter2.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Newsletter Template - 3</Name>
+      <Type>Newsletter</Type>
+      <TemplateDefinitionPath>Newsletters/Newsletter3.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Newsletter Template - 4</Name>
+      <Type>Newsletter</Type>
+      <TemplateDefinitionPath>Newsletters/Newsletter4.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Newsletter Template - 5</Name>
+      <Type>Newsletter</Type>
+      <TemplateDefinitionPath>Newsletters/Newsletter5.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+
+    <!-- Messages -->
+    <TemplateDefinition>
+      <Name>Message Template - 1</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/Message1.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Message Template - 2</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/Message2.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Message Template - 3</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/Message3.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Message Template - 4</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/Message4.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Message Template - 5</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/Message5.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    
+    <TemplateDefinition>
+      <Name>Campaign Message Template - 1</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/CampaignMessage1.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Campaign Message Template - 2</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/CampaignMessage2.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>   
+    <TemplateDefinition>
+      <Name>Campaign Message Template - 3</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/CampaignMessage3.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Campaign Message Template - 4</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/CampaignMessage4.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Campaign Message Template - 5</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/CampaignMessage5.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>true</ValidWireframeTemplate>
+    </TemplateDefinition>
+    
+    
+    <!-- Triggers -->
+    <TemplateDefinition>
+      <Name>Trigger Message Template - 1</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Triggers/TriggerMessage1.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Trigger Message Template - 2</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Triggers/TriggerMessage2.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Trigger Message Template - 3</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Triggers/TriggerMessage3.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Trigger Message Template - 4</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Triggers/TriggerMessage4.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Trigger Message Template - 5</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Triggers/TriggerMessage5.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    
+    <TemplateDefinition>
+      <Name>Campaign Trigger Message Template - 1</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Triggers/CampaignTriggerMessage1.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Campaign Trigger Message Template - 2</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Triggers/CampaignTriggerMessage2.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Campaign Trigger Message Template - 3</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Triggers/CampaignTriggerMessage3.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Campaign Trigger Message Template - 4</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Triggers/CampaignTriggerMessage4.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Campaign Trigger Message Template - 5</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Triggers/CampaignTriggerMessage5.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    
+	  <TemplateDefinition>
+		  <Name>Transactional Message</Name>
+		  <Type>Message</Type>
+		  <TemplateDefinitionPath>Transactional/TransactionalMessage.htm</TemplateDefinitionPath>
+		  <IsResponsive>true</IsResponsive>
+		  <OldStyleTemplate>false</OldStyleTemplate>
+		  <ValidWireframeTemplate>true</ValidWireframeTemplate>
+	  </TemplateDefinition>
+
+    <TemplateDefinition>
+      <Name>Confirmation Message Template</Name>
+      <Type>System</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\SystemMessages\\ConfirmationTD.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Forwarded Confirmation Message Template</Name>
+      <Type>System</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\SystemMessages\\ForwardedConfirmationTD.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Password Reset Template</Name>
+      <Type>System</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\SystemMessages\\PasswordResetTD.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Subscription Notification Template</Name>
+      <Type>System</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\SystemMessages\\SubscriptionNotificationTD.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+
+
+    <TemplateDefinition>
+      <Name>Transactional Trigger Message Template</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\SystemMessages\\TransactionalTriggerMessage.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Call To Action</Name>
+      <Type>System</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\SystemMessages\\CallToAction.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+
+
+    <TemplateDefinition>
+      <Name>Latest Ezine</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/Ezine.htm</TemplateDefinitionPath>
+    </TemplateDefinition>
+
+    <TemplateDefinition>
+      <Name>Digival Template - 1</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\Templates\\DigiVal\\DigivalEmail1.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Digival Template - 2</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\Templates\\DigiVal\\DigivalEmail2.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Digival Template - 3</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\Templates\\DigiVal\\DigivalEmail3.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Digival Template - 4</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\Templates\\DigiVal\\DigivalEmail4.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Digival Template - 5</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\Templates\\DigiVal\\DigivalEmail5.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Digival Template - 6</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\Templates\\DigiVal\\DigivalEmail6.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+
+    <!--Portal Lead Template-->
+    <TemplateDefinition>
+      <Name>Lead Message Template</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/LeadMessageTemplate.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+
+    <!--BuildYM-->
+    <TemplateDefinition>
+      <Name>Build Message Template - 1</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/BuildMessage1.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Build Message Template - 2</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/BuildMessage2.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Build Message Template - 3</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/BuildMessage3.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Build Message Template - 4</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/BuildMessage4.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+    <TemplateDefinition>
+      <Name>Build Message Template - 5</Name>
+      <Type>Message</Type>
+      <TemplateDefinitionPath>Messages/BuildMessage5.htm</TemplateDefinitionPath>
+      <IsResponsive>true</IsResponsive>
+      <OldStyleTemplate>false</OldStyleTemplate>
+      <ValidWireframeTemplate>false</ValidWireframeTemplate>
+    </TemplateDefinition>
+	  <TemplateDefinition>
+		  <Name>Survey Service Comment</Name>
+		  <Type>Survey</Type>
+		  <TemplateDefinitionPath>Surveys/SurveyServiceComment.master</TemplateDefinitionPath>
+	  </TemplateDefinition>
+	  <TemplateDefinition>
+		  <Name>Survey Multiple Questions</Name>
+		  <Type>Survey</Type>
+		  <TemplateDefinitionPath>Surveys/SurveyMultipleQuestions.master</TemplateDefinitionPath>
+	  </TemplateDefinition>
+
+	  <!-- Messages -->
+	  <TemplateDefinition>
+		  <Name>B2B Message 1</Name>
+		  <Type>Message</Type>
+		  <TemplateDefinitionPath>Messages/B2BMessage1.htm</TemplateDefinitionPath>
+		  <IsResponsive>true</IsResponsive>
+		  <OldStyleTemplate>false</OldStyleTemplate>
+		  <ValidWireframeTemplate>true</ValidWireframeTemplate>
+	  </TemplateDefinition>
+	  <TemplateDefinition>
+		  <Name>B2B Message 2</Name>
+		  <Type>Message</Type>
+		  <TemplateDefinitionPath>Messages/B2BMessage2.htm</TemplateDefinitionPath>
+		  <IsResponsive>true</IsResponsive>
+		  <OldStyleTemplate>false</OldStyleTemplate>
+		  <ValidWireframeTemplate>true</ValidWireframeTemplate>
+	  </TemplateDefinition>
+	  <TemplateDefinition>
+		  <Name>B2B Message 3</Name>
+		  <Type>Message</Type>
+		  <TemplateDefinitionPath>Messages/B2BMessage3.htm</TemplateDefinitionPath>
+		  <IsResponsive>true</IsResponsive>
+		  <OldStyleTemplate>false</OldStyleTemplate>
+		  <ValidWireframeTemplate>true</ValidWireframeTemplate>
+	  </TemplateDefinition>
+	  <TemplateDefinition>
+		  <Name>B2B Message 4</Name>
+		  <Type>Message</Type>
+		  <TemplateDefinitionPath>Messages/B2BMessage4.htm</TemplateDefinitionPath>
+		  <IsResponsive>true</IsResponsive>
+		  <OldStyleTemplate>false</OldStyleTemplate>
+		  <ValidWireframeTemplate>true</ValidWireframeTemplate>
+	  </TemplateDefinition>
+	  <TemplateDefinition>
+		  <Name>B2B Message 5</Name>
+		  <Type>Message</Type>
+		  <TemplateDefinitionPath>Messages/B2BMessage5.htm</TemplateDefinitionPath>
+		  <IsResponsive>true</IsResponsive>
+		  <OldStyleTemplate>false</OldStyleTemplate>
+		  <ValidWireframeTemplate>true</ValidWireframeTemplate>
+	  </TemplateDefinition>
+  </TemplateDefinitions>
+
+  <WidgetLocations>
+    <string>..\\..\\..\\TemplateTools\\Widgets</string>
+    <string>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\OuterFrame</string>
+    <string>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\OuterFrame\\FrameWidgets</string>
+    <string>..\\..\\..\\TemplateTools\\In-the-box Definitions\\New Editor Templates\\Templates\\Template Blocks</string>
+  </WidgetLocations>
+  <Domain>{{ domain }}</Domain>
+  <UserName>BYM Support</UserName>
+  <!--<Url>https://qaservice.briefyourmarket.com/BYMService.svc</Url>-->
+  <Url>https://service.briefyourmarket.com/BYMService.svc</Url>
+
+  <GlobalSettings>
+    <GlobalSetting>
+      <Name>Title</Name>
+      <Value>Title</Value>
+    </GlobalSetting>
+    <GlobalSetting>
+      <Name>Address</Name>
+      <Value>Address</Value>
+    </GlobalSetting>
+    <GlobalSetting>
+      <Name>ExternalURL</Name>
+      <Value>https://{{ domain }}/</Value>
+    </GlobalSetting>
+  </GlobalSettings>
+
+</TemplateSet>

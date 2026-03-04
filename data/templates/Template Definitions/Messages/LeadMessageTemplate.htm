@@ -1,0 +1,337 @@
+{{{BodyStart.htm}}}
+<!--BodyStart-->
+{{{Header.htm}}}
+
+<!--Header-->
+<div style="display:none;visibility:hidden;mso-hide:all;font-size:0;line-height:0;"><p>*** Insert Message Here ***</p></div>
+<table cellspacing="0" cellpadding="0" border="0" width="100%" bgcolor="ffffff">
+    <tr>
+        <td style="padding:0px;">
+            <table cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                    <td>
+                        #set ($Count = 0)
+                        #foreach($match in $Matches)
+                        #set ($Count = ($Count + 1))
+                        #end
+                        #if ($Count >= 3)
+                        #foreach($match in $Matches)
+                        <table cellpadding="0" cellspacing="0" border="0" width="620" align="center" class="width100">
+                            <tr>
+                                <td>
+                                    <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="f2f2f2">
+                                        <tr>
+                                            <td style="padding: 30px; text-align: left; font-family: $Contact.getBrandSetting('fontFamily'); color: $Contact.getBrandSetting('mainTitlesColour'); font-size: 24px; font-weight: bold;">
+                                                Here are the details of the property you requested.
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                        <tr>
+                                            <td style="padding: 30px;">
+                                                <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                    <tr>
+                                                        <td style="padding-top: 5px; padding-bottom: 10px; border-top: 5px solid $Contact.getBrandSetting('mainTitlesColour');">
+                                                            <a href="$Link.Counted($Help.Concatenate($Contact.GetBrandSetting('ProductMoreLinkBase'),$match.Product.AlternateId))">
+                                                                <img border="0" class="bym-email-layout-responsiveImage" width="100%" src="$match.Product.MainImage.Url" style="border:0px;" />
+                                                            </a>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="border-top: 2px solid #f2f2f2; border-bottom: 2px solid #f2f2f2;">
+                                                            <table cellpadding="0" cellspacing="0" border="0" width="100%" style="font-family: $Contact.getBrandSetting('fontFamily'); color: $Contact.getBrandSetting('mainTitlesColour'); font-size: 16px;">
+                                                                <tr>
+                                                                    <td class="column padding10" style="padding: 10px 20px; text-align: left; font-weight: normal;">
+                                                                        $match.Product.Name
+                                                                    </td>
+                                                                    <td class="column padding10" style="padding: 10px 20px; text-align: right; font-size: 20px; font-weight: bold;">
+                                                                        $match.Product.PriceText
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="padding-top: 20px; padding-bottom: 20px; font-family: $Contact.getBrandSetting('fontFamily'); color: $Contact.getBrandSetting('mainTextColour'); font-size: 14px; font-weight: normal; text-align: left;">
+                                                            $match.Product.Summary
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>
+                                                            <table cellspacing="0" cellpadding="0" border="0" width="100%">
+                                                                <tr>
+                                                                    <td class="column sidebar" width="50%" style="padding-right: 10px;">
+                                                                        <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                                            <tr>
+                                                                                <td width="100%" bgcolor="$Contact.getBrandSetting('theme.colourPrimary')" style="text-align: center; font-size: 14px; font-family: $Contact.getBrandSetting('fontFamily'); padding: 10px 0; border-radius: 5px;">
+                                                                                    <a href="$Link.BrandCounted('PortalLead.CallbackLink')" style="text-decoration: none; font-weight: normal; color: #ffffff;">
+                                                                                        Request A Call Back
+                                                                                    </a>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                    </td>
+                                                                    <td class="column padding0" width="50%" style="padding-left: 10px;">
+                                                                        <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                                            <tr>
+                                                                                <td width="100%" bgcolor="$Contact.getBrandSetting('theme.colourPrimary')" style="text-align: center; font-size: 14px; font-family: $Contact.getBrandSetting('fontFamily'); padding: 10px 0; border-radius: 5px;">
+                                                                                    <a href="$Link.BrandCounted('PortalLead.MarketAppraisalLink')" style="text-decoration: none; font-weight: normal; color: #ffffff;">
+                                                                                        Request Market Appraisal
+                                                                                    </a>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>
+                                                            <table cellspacing="0" cellpadding="0" border="0" width="100%">
+                                                                <tr>
+                                                                    <td style="padding-top: 10px;">
+                                                                        <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                                            <tr>
+                                                                                <td width="100%" bgcolor="$Contact.getBrandSetting('theme.colourSecondary')" style="text-align: center; font-size: 14px; font-family: $Contact.getBrandSetting('fontFamily'); padding: 10px 0; border-radius: 5px;">
+                                                                                    <a href="$Link.Counted($Help.Concatenate($Contact.GetBrandSetting('ProductMoreLinkBase'),$match.Product.AlternateId))" style="text-decoration: none; font-weight: normal; color: #ffffff;">
+                                                                                        View More Property Details
+                                                                                    </a>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                        #end
+                        #elseif ($Count == 2)
+                        #foreach($match in $Matches)
+                        <table cellpadding="0" cellspacing="0" border="0" width="620" align="center" class="width100">
+                            <tr>
+                                <td>
+                                    <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="f2f2f2">
+                                        <tr>
+                                            <td style="padding: 30px; text-align: left; font-family: $Contact.getBrandSetting('fontFamily'); color: $Contact.getBrandSetting('mainTitlesColour'); font-size: 24px; font-weight: bold;">
+                                                Here are the details of the property you requested.
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                        <tr>
+                                            <td style="padding: 30px;">
+                                                <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                    <tr>
+                                                        <td style="padding-top: 5px; padding-bottom: 10px; border-top: 5px solid $Contact.getBrandSetting('mainTitlesColour');">
+                                                            <a href="$Link.Counted($Help.Concatenate($Contact.GetBrandSetting('ProductMoreLinkBase'),$match.Product.AlternateId))">
+                                                                <img border="0" class="bym-email-layout-responsiveImage" width="100%" src="$match.Product.MainImage.Url" style="border:0px;" />
+                                                            </a>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="border-top: 2px solid #f2f2f2; border-bottom: 2px solid #f2f2f2;">
+                                                            <table cellpadding="0" cellspacing="0" border="0" width="100%" style="font-family: $Contact.getBrandSetting('fontFamily'); color: $Contact.getBrandSetting('mainTitlesColour'); font-size: 16px;">
+                                                                <tr>
+                                                                    <td class="column padding10" style="padding: 10px 20px; text-align: left; font-weight: normal;">
+                                                                        $match.Product.Name
+                                                                    </td>
+                                                                    <td class="column padding10" style="padding: 10px 20px; text-align: right; font-size: 20px; font-weight: bold;">
+                                                                        $match.Product.PriceText
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="padding-top: 20px; padding-bottom: 20px; font-family: $Contact.getBrandSetting('fontFamily'); color: $Contact.getBrandSetting('mainTextColour'); font-size: 14px; font-weight: normal; text-align: left;">
+                                                            $match.Product.Summary
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>
+                                                            <table cellspacing="0" cellpadding="0" border="0" width="100%">
+                                                                <tr>
+                                                                    <td class="column sidebar" width="50%" style="padding-right: 10px;">
+                                                                        <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                                            <tr>
+                                                                                <td width="100%" bgcolor="$Contact.getBrandSetting('theme.colourPrimary')" style="text-align: center; font-size: 14px; font-family: $Contact.getBrandSetting('fontFamily'); padding: 10px 0; border-radius: 5px;">
+                                                                                    <a href="$Link.BrandCounted('PortalLead.CallbackLink')" style="text-decoration: none; font-weight: normal; color: #ffffff;">
+                                                                                        Request A Call Back
+                                                                                    </a>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                    </td>
+                                                                    <td class="column padding0" width="50%" style="padding-left: 10px;">
+                                                                        <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                                            <tr>
+                                                                                <td width="100%" bgcolor="$Contact.getBrandSetting('theme.colourPrimary')" style="text-align: center; font-size: 14px; font-family: $Contact.getBrandSetting('fontFamily'); padding: 10px 0; border-radius: 5px;">
+                                                                                    <a href="$Link.BrandCounted('PortalLead.MarketAppraisalLink')" style="text-decoration: none; font-weight: normal; color: #ffffff;">
+                                                                                        Request Market Appraisal
+                                                                                    </a>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>
+                                                            <table cellspacing="0" cellpadding="0" border="0" width="100%">
+                                                                <tr>
+                                                                    <td style="padding-top: 10px;">
+                                                                        <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                                            <tr>
+                                                                                <td width="100%" bgcolor="$Contact.getBrandSetting('theme.colourSecondary')" style="text-align: center; font-size: 14px; font-family: $Contact.getBrandSetting('fontFamily'); padding: 10px 0; border-radius: 5px;">
+                                                                                    <a href="$Link.Counted($Help.Concatenate($Contact.GetBrandSetting('ProductMoreLinkBase'),$match.Product.AlternateId))" style="text-decoration: none; font-weight: normal; color: #ffffff;">
+                                                                                        View More Property Details
+                                                                                    </a>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                        #end
+
+                        #else
+                        #foreach($match in $Matches)
+                        <table cellpadding="0" cellspacing="0" border="0" width="620" align="center" class="width100">
+                            <tr>
+                                <td>
+                                    <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="f2f2f2">
+                                        <tr>
+                                            <td style="padding: 30px; text-align: left; font-family: $Contact.getBrandSetting('fontFamily'); color: $Contact.getBrandSetting('mainTitlesColour'); font-size: 24px; font-weight: bold;">
+                                                Here are the details of the property you requested.
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                        <tr>
+                                            <td style="padding: 30px;">
+                                                <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                    <tr>
+                                                        <td style="padding-top: 5px; padding-bottom: 10px; border-top: 5px solid $Contact.getBrandSetting('mainTitlesColour');">
+                                                            <a href="$Link.Counted($Help.Concatenate($Contact.GetBrandSetting('ProductMoreLinkBase'),$match.Product.AlternateId))">
+                                                                <img border="0" class="bym-email-layout-responsiveImage" width="560" class="width100" src="$match.Product.MainImage.Url" style="border:0px;" />
+                                                            </a>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="border-top: 2px solid #f2f2f2; border-bottom: 2px solid #f2f2f2;">
+                                                            <table cellpadding="0" cellspacing="0" border="0" width="100%" style="font-family: $Contact.getBrandSetting('fontFamily'); color: $Contact.getBrandSetting('mainTitlesColour'); font-size: 16px;">
+                                                                <tr>
+                                                                    <td class="column padding10" style="padding: 10px 20px; text-align: left; font-weight: normal;">
+                                                                        $match.Product.Name
+                                                                    </td>
+                                                                    <td class="column padding10" style="padding: 10px 20px; text-align: right; font-size: 20px; font-weight: bold;">
+                                                                        $match.Product.PriceText
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="padding-top: 20px; padding-bottom: 20px; font-family: $Contact.getBrandSetting('fontFamily'); color: $Contact.getBrandSetting('mainTextColour'); font-size: 14px; font-weight: normal; text-align: left;">
+                                                            $match.Product.Summary
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>
+                                                            <table cellspacing="0" cellpadding="0" border="0" width="100%">
+                                                                <tr>
+                                                                    <td class="column sidebar" width="50%" style="padding-right: 10px;">
+                                                                        <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                                            <tr>
+                                                                                <td width="100%" bgcolor="$Contact.getBrandSetting('theme.colourPrimary')" style="text-align: center; font-size: 14px; font-family: $Contact.getBrandSetting('fontFamily'); padding: 10px 0; border-radius: 5px;">
+                                                                                    <a href="$Link.BrandCounted('PortalLead.CallbackLink')" style="text-decoration: none; font-weight: normal; color: #ffffff;">
+                                                                                        Request A Call Back
+                                                                                    </a>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                    </td>
+                                                                    <td class="column padding0" width="50%" style="padding-left: 10px;">
+                                                                        <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                                            <tr>
+                                                                                <td width="100%" bgcolor="$Contact.getBrandSetting('theme.colourPrimary')" style="text-align: center; font-size: 14px; font-family: $Contact.getBrandSetting('fontFamily'); padding: 10px 0; border-radius: 5px;">
+                                                                                    <a href="$Link.BrandCounted('PortalLead.MarketAppraisalLink')" style="text-decoration: none; font-weight: normal; color: #ffffff;">
+                                                                                        Request Market Appraisal
+                                                                                    </a>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>
+                                                            <table cellspacing="0" cellpadding="0" border="0" width="100%">
+                                                                <tr>
+                                                                    <td style="padding-top: 10px;">
+                                                                        <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                                                                            <tr>
+                                                                                <td width="100%" bgcolor="$Contact.getBrandSetting('theme.colourSecondary')" style="text-align: center; font-size: 14px; font-family: $Contact.getBrandSetting('fontFamily'); padding: 10px 0; border-radius: 5px;">
+                                                                                    <a href="$Link.Counted($Help.Concatenate($Contact.GetBrandSetting('ProductMoreLinkBase'),$match.Product.AlternateId))" style="text-decoration: none; font-weight: normal; color: #ffffff;">
+                                                                                        View More Property Details
+                                                                                    </a>
+                                                                                </td>
+                                                                            </tr>
+                                                                        </table>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                        #end
+                        #end
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+
+{{{Footer.htm}}}
+
+{{{BodyEnd.htm}}}

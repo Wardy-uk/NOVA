@@ -1,0 +1,31 @@
+<style type="text/css">
+    a.footerLink {
+        color: <%=footerText%> !important;
+    }
+    .fa {
+        color: <%=micrositeIcon%>;
+        transition:1s;
+        -moz-transition:1s;
+        -webkit-transition:1s;
+        -o-transition:1s;
+    }
+    .fa:hover {
+        color: <%=micrositeIconHover%>;
+    }
+    #social div {
+	    padding-right:10px;
+        display:inline;
+    }
+</style>
+
+<div class="footer" style="background-color:<%=footerBackground%>;color:<%=footerText%>;text-align:center;border-top:4px solid <%=micrositeBorder%>;font-size:12px;line-height:normal;font-family:<%=fontfamily%>">
+    <div class="grid-container">
+        <div class="section group">
+		    {{{W-MicrositeFooterSocial.master}}}
+	    </div>
+    </div>
+</div>
+
+<script type="text/javascript">
+        $('#ctl00_MainContentHolder_m_images .thumbnail:nth-child(1)').click()
+</script>

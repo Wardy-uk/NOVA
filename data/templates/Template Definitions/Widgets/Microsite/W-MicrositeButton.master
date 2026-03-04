@@ -1,0 +1,30 @@
+<style type="text/css">
+
+#btn {
+  -webkit-border-radius: 10;
+  -moz-border-radius: 10;
+  border-radius: 10px;
+  font-family:<%=fontFamily%>;
+  color: <%=micrositeBtnText%>;
+  font-size: 16px;
+  font-weight:bold;
+  background: <%=micrositeBtnColour%>;
+  padding: 10px 20px 10px 20px;
+  text-decoration: none;
+  border:2px solid <%=micrositeBtnText%>;
+  -webkit-appearance: none;
+}
+
+#btn:hover {
+  text-decoration: none;
+  color: <%=footerBackground%>;
+  cursor:pointer;
+}
+
+#btn:focus {
+  outline: 0;
+}
+
+</style>
+
+<a href="<%=micrositeBtnLink%>"><center id="btn">Click here</center></a>

@@ -1,0 +1,93 @@
+/* Table Styles */
+/* ---------------------------------------------- */
+
+.bym-product-table {
+    width: 100%;
+    border-spacing: 10px;
+}
+
+.bym-product-table td {
+    padding: 10px;
+    vertical-align: top;
+}
+
+
+/* Table Styles - Descriptions */
+/* ---------------------------------------------- */
+.bym-product-table .title {
+    text-align: left;
+}
+
+.bym-product-table .price {
+    text-align: right;
+    width: 200px;
+}
+
+.bym-product-table .title,
+.bym-product-table .price {
+    font-size: 14pt;
+    font-weight: bold;
+}
+
+
+/* Table Styles - Images */
+/* ---------------------------------------------- */
+
+.bym-product-table .imageContainer {
+    width: 500px;
+    display: inline-block;
+}
+
+.bym-product-table .mainImage {
+    width: 500px;
+    height: 400px;
+}
+
+.bym-product-table .thumbnail {
+    width: 98px;
+    height: 100px;
+    cursor: pointer;
+}
+
+.bym-product-table .mainImage,
+.bym-product-table .thumbnail {
+    border: 0;
+    float: left;
+    margin-left: 2px;
+    margin-bottom: 2px;
+}
+
+
+/* Table Styles - Buttons */
+/* ---------------------------------------------- */
+
+.bym-product-table .share_on_facebook,
+.bym-product-table .share_on_twitter,
+.bym-product-table .link_button {
+    width: 150px;
+    height: 32px;
+    display: inline-block;
+    background-repeat: no-repeat;
+    color: white;
+    font-size: 8pt;
+    text-align: center;
+    padding-left: 34px;
+    padding-top: 7px;
+    margin-bottom: 2px;
+}
+
+.bym-product-table .share_on_facebook {
+    background-image: url("images/share_on_facebook.png");
+}
+
+.bym-product-table .share_on_twitter {
+    background-image: url("images/share_on_twitter.png");
+}
+
+.bym-product-table .link_button {
+    background-image: url("images/link_button.png");
+}
+
+img[src*="vebra"], img[src*="portalimages"]     {
+        display: none !important;
+}

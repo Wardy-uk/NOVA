@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<%@ master language="C#" autoeventwireup="true" codebehind="MasterPage.master.cs"
+    inherits="Jwayela.BriefYourMarket.Public.DefaultMasterPage" %>
+
+<%@ register src="Controls/ArticleCategories.ascx" tagname="ArticleCategories" tagprefix="uc1" %>
+
+<head id="Head1" runat="server">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="ROBOTS" content="ALL" />
+    <meta name="ROBOTS" content="index,follow" />
+    <meta name="AUTHOR" content="briefyourmarket.com" />
+    <meta name="viewport" content="width=device-width" />
+
+    <!--Favicon-->
+    <link rel="shortcut icon" href="/Management/Images/bym2/Metro/favicon.png" type="image/x-icon" />
+    <link rel="icon" href="/Management/Images/bym2/Metro/favicon.png" type="image/ico" />
+
+    <link rel="shortcut icon" href="briefyourmarket.ico" />
+	<script src="/Scripts/jquery-1.7.1.js"></script>
+	<script src="/Scripts/jquery.fittext.js"></script>
+	<script type="text/javascript">
+        var jQuerySA = $.noConflict(true);
+        var jQuerySA = $.noConflict(true);
+	</script>
+    <script src="https://use.fontawesome.com/b3129e2657.js"></script>
+    <link rel='stylesheet' href='https://goodrichestates.briefyourmarket.com/Documents/css/essential-social-share.css' type='text/css' media='all' />
+<link rel='stylesheet'  href='https://goodrichestates.briefyourmarket.com/Documents/css/foundation.css' type='text/css' media='all' />
+<script type='text/javascript' src='http://ajax.googleapis.com/ajax/libs/jquery/2.1.0/jquery.min.js?ver=2.1.0'></script>
+
+
+{{{W-ResponsiveSurveyBrandSettings.master}}}
+
+{{{BYMSurveyRebrandCSS1.master}}}
+
+</head>
+<body style="background:<%=survey1Background%>;">
+
+
+
+
+    <%-- HEADER --%>
+
+<div class="grid-container">
+
+    <header class="fixed" style="background-color:<%=headerBackground%>; border-bottom:2px solid <%=surveyBorder%>; font-family:<%=fontfamily%>;">
+		
+        <div class="section group">
+            {{{W-SurveyHeaderOneColumn.master}}}
+		</div>
+		
+	</header>
+
+
+
+
+    <%-- FORM --%>
+	
+	<content>
+		<div class="section group surveyFormHolder" style="padding-top:75px; padding-bottom:30px; font-family:<%=fontfamily%>;">
+			<div class="col span_4_of_4">
+                <div class="paddingVertical35">
+                    <!-- \\\\\\\\\\\\\\\\\\\\\\\\\\\ -->
+                    <!-- //// BYM Main Content Area  \\\\ -->
+                    <!--Main Content for SURVEY -->
+                    <br /><form id="BYMSurveyForm" runat="server">
+                    <asp:scriptmanager runat="server" id="ScriptManager" />
+                    <div class="BYMmaincontent" style="color:<%=mainTextColour%>">
+                        <asp:contentplaceholder id="MainContentHolder" runat="server"></asp:contentplaceholder>
+                    
+                        <!--POWERED BY FOOTER -->
+                    </div>
+                    </form>
+                    <br />
+
+                    <!-- \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\ -->
+                    <!-- end of text-box -->
+                    <!-- end of text-container -->
+                </div> 
+			</div>	
+        </div>
+	</content>
+
+
+
+
+    <%-- FOOTER --%>
+
+    <footer class="footerFixed" style="background-color:<%=mainBackground%>; border-top:2px solid <%=surveyBorder%>; font-family:<%=fontFamily%>">
+		
+        <div class="section group">
+            <div class="poweredBy" style="color:<%=mainTextColour%>;text-align:center;font-size:11px;padding:10px 0px;">
+                Survey powered by <a href="http://www.BriefYourMarket.com/FeelThePower.aspx" target="_blank" style="color:<%=linkColour%>;">BriefYourMarket.com</a>
+            </div>
+		</div>
+		
+	</footer>
+	
+</div>
+
+    <style type="text/css">
+
+/* STYLES THAT USE BRAND SETTINGS*/
+
+    form {
+  width: 60%;
+  margin: 0 auto;
+  overflow: auto;
+  border-top: 5px solid <%=surveyBtnColour%>;
+  margin-top: 200px;
+  background: rgba<%=survey1BgColour%>;
+}
+
+    input[type=radio] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  -ms-appearance: none;
+  -o-appearance: none;
+  appearance: none;
+  background: transparent;
+  border: 2px solid #333333;
+  border-radius: 50%;
+  -o-transition: .2s;
+  -ms-transition: .2s;
+  -moz-transition: .2s;
+  -webkit-transition: .2s;
+  transition: .2s;
+  height: 25px;
+  width: 25px;
+}
+
+    input[type=radio]:checked {
+  background: <%=surveyBtnColour%>;
+  z-index: 100;
+  border: none;
+}
+
+input[type=radio]:checked+label {
+  color: <%=surveyBtnColour%>;
+}
+
+input[type=checkbox]:checked {
+  background: <%=surveyBtnColour%>;
+  z-index: 100;
+  border: none;
+}
+
+input[type=checkbox]:checked+label {
+  color: <%=surveyBtnColour%>;
+}
+
+input[type=text], textarea {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  -ms-appearance: none;
+  -o-appearance: none;
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid <%=surveyBtnColour%>;
+  width: 100%;
+  min-height: 30px;
+  font-family: <%=fontFamily%>;
+}
+
+input[type=submit] {
+  color: <%=surveyBtnColour%>;
+  font-size: 30px;
+  text-align: left;
+  font-weight: bold;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  -ms-appearance: none;
+  -o-appearance: none;
+  appearance: none;
+  background: transparent;
+  border: none;
+  min-height: 30px;
+  cursor: pointer;
+  width: 100%;
+  font-family: <%=fontFamily%>;
+  position: relative;
+  border-bottom: 2px solid <%=surveyBtnColour%>;
+  width: 200px;
+  float: right;
+    margin-left: 50px;
+}
+
+input[type=submit]:after{ 
+   content: '\f138';
+   font-family: FontAwesome;
+   font-weight: normal;
+   font-style: normal;
+   margin:0px 0px 0px 10px;
+   text-decoration:none;
+   color: <%=surveyBtnColour%>;
+} 
+
+.surveyRatingOptionDiv {
+    margin: 15px 0 0 15px;
+}
+
+.question {
+    overflow: auto;
+}
+  
+</style>
+
+<script>
+        jQuerySA('.newsletterTitle').css("color", "<%=mainTitlesColour%>");
+        jQuerySA('.surveyItemTitle').css("color", "<%=mainTitlesColour%>");
+</script>
+
+</body>
+</html>

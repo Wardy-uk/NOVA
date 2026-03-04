@@ -356,6 +356,8 @@ async function main() {
   // Setup orchestrator — coordinates direct BYM API execution
   const setupOrchestrator = new SetupOrchestrator({
     getBym: () => bymClient,
+    getAzdo: () => azdoClient,
+    templateDir: path.resolve(__dirname, '../../data/templates'),
     branchQueries,
     brandQueries: brandSettingsQueries,
     logoQueries,

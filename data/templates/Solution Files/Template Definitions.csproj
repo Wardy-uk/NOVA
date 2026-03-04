@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')"/>
+  <PropertyGroup>
+	  <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+	  <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+	  <ProjectGuid>{BE264784-A38E-4DB3-90E1-B2B020F4B328}</ProjectGuid>
+	  <OutputType>Library</OutputType>
+	  <AppDesignerFolder>Properties</AppDesignerFolder>
+	  <RootNamespace>Template_Definitions</RootNamespace>
+	  <AssemblyName>Template Definitions</AssemblyName>
+	  <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+	  <FileAlignment>512</FileAlignment>
+	  <Deterministic>true</Deterministic>
+	  </PropertyGroup>
+	  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+	  <DebugSymbols>true</DebugSymbols>
+	  <DebugType>full</DebugType>
+	  <Optimize>false</Optimize>
+	  <OutputPath>bin\Debug\</OutputPath>
+	  <DefineConstants>DEBUG;TRACE</DefineConstants>
+	  <ErrorReport>prompt</ErrorReport>
+	  <WarningLevel>4</WarningLevel>
+	  </PropertyGroup>
+	  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+	  <DebugType>pdbonly</DebugType>
+	  <Optimize>true</Optimize>
+	  <OutputPath>bin\elease\</OutputPath>
+	  <DefineConstants>TRACE</DefineConstants>
+	  <ErrorReport>prompt</ErrorReport>
+	  <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+	  <Reference Include="System"/>
+	  <Reference Include="System.Core"/>
+	  <Reference Include="System.Xml.Linq"/>
+	  <Reference Include="System.Data.DataSetExtensions"/>
+	  <Reference Include="Microsoft.CSharp"/>
+	  <Reference Include="System.Data"/>
+	  <Reference Include="System.Net.Http"/>
+	  <Reference Include="System.Xml"/>
+  </ItemGroup>
+  <ItemGroup>
+	<Compile Include="Properties\AssemblyInfo.cs"/>
+  </ItemGroup>
+  <ItemGroup>
+	<Content Include="Brands.xml"/>
+	<Content Include="BrandSettings.xml"/>
+	<Content Include="Categories.xml"/>
+	<Content Include="Documents\Css\BYMProductStyles.css"/>
+	<Content Include="Documents\Css\Product.css"/>
+	<Content Include="Documents\ProductPage.aspx"/>
+	{{ aspx_pages }}
+	<Content Include="Images\Templates\digivalBackground.jpg" />
+	<Content Include="Images\Templates\{{ image_logo }}" />
+	<Content Include="Images\Templates\{{ image_splash }}" />
+	<Content Include="Messages\BuildMessage1.htm" />
+	<Content Include="Messages\BuildMessage1.txt" />
+	<Content Include="Messages\BuildMessage2.htm" />
+	<Content Include="Messages\BuildMessage2.txt" />
+	<Content Include="Messages\BuildMessage3.htm" />
+	<Content Include="Messages\BuildMessage3.txt" />
+	<Content Include="Messages\BuildMessage4.htm" />
+	<Content Include="Messages\BuildMessage4.txt" />
+	<Content Include="Messages\BuildMessage5.htm" />
+	<Content Include="Messages\BuildMessage5.txt" />
+	<Content Include="Messages\CampaignMessage1.htm" />
+	<Content Include="Messages\CampaignMessage1.txt" />
+	<Content Include="Messages\CampaignMessage2.htm" />
+	<Content Include="Messages\CampaignMessage2.txt" />
+	<Content Include="Messages\CampaignMessage3.htm" />
+	<Content Include="Messages\CampaignMessage3.txt" />
+	<Content Include="Messages\CampaignMessage4.htm" />
+	<Content Include="Messages\CampaignMessage4.txt" />
+	<Content Include="Messages\CampaignMessage5.htm" />
+	<Content Include="Messages\CampaignMessage5.txt" />
+	<Content Include="Messages\Ezine.htm" />
+	<Content Include="Messages\Ezine.txt" />
+	<Content Include="Messages\LeadMessageTemplate.htm" />
+	<Content Include="Messages\LeadMessageTemplate.txt" />
+	<Content Include="Messages\Message1.htm" />
+	<Content Include="Messages\Message1.txt" />
+	<Content Include="Messages\Message2.htm" />
+	<Content Include="Messages\Message2.txt" />
+	<Content Include="Messages\Message3.htm" />
+	<Content Include="Messages\Message3.txt" />
+	<Content Include="Messages\Message4.htm" />
+	<Content Include="Messages\Message4.txt" />
+	<Content Include="Messages\Message5.htm" />
+	<Content Include="Messages\Message5.txt" />
+	<Content Include="Newsletters\Newsletter1.htm" />
+	<Content Include="Newsletters\Newsletter1.txt" />
+	<Content Include="Newsletters\Newsletter2.htm" />
+	<Content Include="Newsletters\Newsletter2.txt" />
+	<Content Include="Newsletters\Newsletter3.htm" />
+	<Content Include="Newsletters\Newsletter3.txt" />
+	<Content Include="Newsletters\Newsletter4.htm" />
+	<Content Include="Newsletters\Newsletter4.txt" />
+	<Content Include="Newsletters\Newsletter5.htm" />
+	<Content Include="Newsletters\Newsletter5.txt" />
+	<Content Include="TemplateSet.xml" />
+	<Content Include="Transactional\TransactionalMessage.htm" />
+	<Content Include="Transactional\TransactionalMessage.txt" />
+	<Content Include="Triggers\CampaignTriggerMessage1.htm" />
+	<Content Include="Triggers\CampaignTriggerMessage1.txt" />
+	<Content Include="Triggers\CampaignTriggerMessage2.htm" />
+	<Content Include="Triggers\CampaignTriggerMessage2.txt" />
+	<Content Include="Triggers\CampaignTriggerMessage3.htm" />
+	<Content Include="Triggers\CampaignTriggerMessage3.txt" />
+	<Content Include="Triggers\CampaignTriggerMessage4.htm" />
+	<Content Include="Triggers\CampaignTriggerMessage4.txt" />
+	<Content Include="Triggers\CampaignTriggerMessage5.htm" />
+	<Content Include="Triggers\CampaignTriggerMessage5.txt" />
+	<Content Include="Triggers\TriggerMessage1.htm" />
+	<Content Include="Triggers\TriggerMessage1.txt" />
+	<Content Include="Triggers\TriggerMessage2.htm" />
+	<Content Include="Triggers\TriggerMessage2.txt" />
+	<Content Include="Triggers\TriggerMessage3.htm" />
+	<Content Include="Triggers\TriggerMessage3.txt" />
+	<Content Include="Triggers\TriggerMessage4.htm" />
+	<Content Include="Triggers\TriggerMessage4.txt" />
+	<Content Include="Triggers\TriggerMessage5.htm" />
+	<Content Include="Triggers\TriggerMessage5.txt" />
+	<Content Include="Widgets\Footers\Footer.htm" />
+	<Content Include="Widgets\Footers\Footer1.htm" />
+	<Content Include="Widgets\Footers\Footer2.htm" />
+	<Content Include="Widgets\Footers\Footer3.htm" />
+	<Content Include="Widgets\Footers\Footer4.htm" />
+	<Content Include="Widgets\Footers\Footer5.htm" />
+	<Content Include="Widgets\Footers\TransactionalFooter.htm" />
+	<Content Include="Widgets\Headers\Header.htm" />
+	<Content Include="Widgets\Headers\Header1.htm" />
+	<Content Include="Widgets\Headers\Header2.htm" />
+	<Content Include="Widgets\Headers\Header3.htm" />
+	<Content Include="Widgets\Headers\Header4.htm" />
+	<Content Include="Widgets\Headers\Header5.htm" />
+	<Content Include="Widgets\Headers\TransactionalHeader.htm" />
+	<Content Include="Widgets\Headers\TriggerHeader1.htm" />
+	<Content Include="Widgets\Headers\TriggerHeader2.htm" />
+	<Content Include="Widgets\Headers\TriggerHeader3.htm" />
+	<Content Include="Widgets\Headers\TriggerHeader4.htm" />
+	<Content Include="Widgets\Headers\TriggerHeader5.htm" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="ResponsiveMicrosite03.master" />
+    <None Include="Surveys\SurveyOne.master" />
+    <None Include="Surveys\SurveyThree.master" />
+    <None Include="Surveys\SurveyTwo.master" />
+    <None Include="Widgets\Microsite\W-MicrositeButton.master" />
+    <None Include="Widgets\Microsite\W-MicrositeFooter.master" />
+    <None Include="Widgets\Microsite\W-MicrositeHeader.master" />
+  </ItemGroup>
+  <ItemGroup />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

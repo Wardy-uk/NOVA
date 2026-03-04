@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Categories>
+  <Category>
+    <Id>13</Id>
+    <Value>Hot Tips</Value>
+    <Classification>News</Classification>
+    <IsDefault>False</IsDefault>
+    <Brand />
+  </Category>
+  <Category>
+    <Id>2</Id>
+    <Value>General News</Value>
+    <Classification>News</Classification>
+    <IsDefault>True</IsDefault>
+    <Brand />
+  </Category>
+  <Category>
+    <Id>3</Id>
+    <Value>Quote for the day</Value>
+    <Classification>News</Classification>
+    <IsDefault>True</IsDefault>
+    <Brand />
+  </Category>
+  <Category>
+    <Id>10</Id>
+    <Value>Regional News</Value>
+    <Classification>News</Classification>
+    <IsDefault>True</IsDefault>
+    <Brand />
+  </Category>
+</Categories>

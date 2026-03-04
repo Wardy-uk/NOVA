@@ -1,0 +1,33 @@
+<style type="text/css">
+    .header {
+        background-color:<%=headerBackground%>;
+        color:<%=headerText%>;
+        border-bottom:4px solid <%=micrositeBorder%>;
+        font-family:<%=fontfamily%>;
+        float:left;
+        width:100%;
+    }
+    a.headerText {
+        color: <%=headerText%> !important;
+    }
+</style>
+
+<div class="header">
+    <div class="grid-container">
+	    <div class="section group">
+		    <div class="col span_3_of_4 alignCenter" style="text-align:left;">
+	            <div class="paddingLeft10">
+		            <a href="<%=bannerWebsite%>"><img src="<%=micrositeLogo%>" class="fullWidthLogo" style="border:0px" border="0" /></a>
+	            </div>				
+            </div>
+            <div class="col span_1_of_4 alignCenter" style="text-align:right;">
+                <div class="paddingRight10 hide">
+                    <a href="<%=bannerWebsite%>"><i class="fa fa-home fa-5x"></i></a>
+                </div>
+                <div class="show" style="display:none">
+                    <a href="<%=bannerWebsite%>" class="headerText" style="color:<%=headerText%>;text-decoration:none"><%=bannerAddress%></a>
+                </div>
+            </div>
+	    </div>	
+    </div>
+</div>
