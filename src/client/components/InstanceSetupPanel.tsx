@@ -34,6 +34,7 @@ interface Props {
   deliveryId: number;
   product: string;
   azdoPrUrl?: string | null;
+  canPushGit?: boolean;
 }
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: string; label: string }> = {
@@ -59,7 +60,7 @@ const LOG_COLORS: Record<string, string> = {
   success: 'text-green-400',
 };
 
-export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl }: Props) {
+export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl, canPushGit }: Props) {
   const [steps, setSteps] = useState<SetupStep[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +72,8 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl }: Props) {
   const [showConsole, setShowConsole] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [runs, setRuns] = useState<ExecutionRun[]>([]);
+  const [pushingGit, setPushingGit] = useState(false);
+  const [gitResult, setGitResult] = useState<{ prUrl: string; fileCount: number } | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -237,6 +240,29 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl }: Props) {
     }
   };
 
+  const handlePushGit = async () => {
+    setPushingGit(true);
+    setError(null);
+    setGitResult(null);
+    try {
+      const token = localStorage.getItem('nova_token');
+      const res = await fetch(`/api/setup-execution/delivery/${deliveryId}/push-templates`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setGitResult({ prUrl: json.data.prUrl, fileCount: json.data.fileCount });
+      } else {
+        setError(json.error || 'Push failed');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Push failed');
+    } finally {
+      setPushingGit(false);
+    }
+  };
+
   const fetchRuns = async () => {
     try {
       const res = await fetch(`/api/setup-execution/delivery/${deliveryId}/runs`);
@@ -317,6 +343,15 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl }: Props) {
 
       {error && (
         <div className="p-2 bg-red-950/50 border border-red-900 rounded text-red-400 text-[10px]">{error}</div>
+      )}
+
+      {gitResult && (
+        <div className="p-2 bg-purple-950/30 border border-purple-800 rounded text-[10px] flex items-center gap-2">
+          <span className="text-purple-300">Pushed {gitResult.fileCount} files</span>
+          <a href={gitResult.prUrl} target="_blank" rel="noopener noreferrer" className="text-purple-400 underline hover:text-purple-300">
+            View PR
+          </a>
+        </div>
       )}
 
       {/* Step list */}
@@ -404,6 +439,15 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl }: Props) {
         >
           Dry Run
         </button>
+        {canPushGit && (
+          <button
+            onClick={handlePushGit}
+            disabled={pushingGit || executing}
+            className="px-3 py-1 text-[10px] rounded border border-purple-500 text-purple-400 hover:bg-purple-500/10 disabled:opacity-50 transition-colors"
+          >
+            {pushingGit ? 'Pushing...' : 'Push to Git'}
+          </button>
+        )}
         <button
           onClick={handleReset}
           className="text-[10px] text-neutral-500 hover:text-red-400 transition-colors"

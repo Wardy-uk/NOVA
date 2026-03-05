@@ -115,9 +115,10 @@ interface Props {
   onSaved: (product?: string) => void;
   onDeleted: (id: number) => void;
   onStarToggled: (id: number) => void;
+  canPushGit?: boolean;
 }
 
-export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill, onClose, onSaved, onDeleted, onStarToggled }: Props) {
+export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill, onClose, onSaved, onDeleted, onStarToggled, canPushGit }: Props) {
   const [form, setForm] = useState({
     product: '', account: '', status: 'Not Started', onboarder: '',
     order_date: '', go_live_date: '', predicted_delivery: '', training_date: '',
@@ -983,7 +984,7 @@ export function DeliveryDrawer({ entry, isNew, products, defaultProduct, prefill
 
           {/* ── Instance Setup Checklist ── */}
           {entry && !isNew && (
-            <InstanceSetupPanel deliveryId={entry.id} product={form.product || entry.product} azdoPrUrl={(entry as any).azdo_pr_url} />
+            <InstanceSetupPanel deliveryId={entry.id} product={form.product || entry.product} azdoPrUrl={(entry as any).azdo_pr_url} canPushGit={canPushGit} />
           )}
 
           {/* ── Branches ── */}

@@ -755,7 +755,7 @@ export function App() {
             <OnboardingDashboard />
           )}
           {view === 'delivery' && (
-            <DeliveryView canWrite={areaAccess.onboarding === 'edit'} />
+            <DeliveryView canWrite={areaAccess.onboarding === 'edit'} canPushGit={areaAccess.azdo_push === 'edit'} />
           )}
           {view === 'ob-overdue' && (
             <OverdueDeliveriesView />

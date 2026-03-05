@@ -6,8 +6,6 @@
  */
 
 import type { BymClient, LookupValue, PostCodeDistrict, BuildBranchPayload } from './bym-client.js';
-import type { AzDoClient } from './azdo-client.js';
-import { TemplateBuilder } from './template-builder.js';
 import type {
   BranchQueries, BrandSettingsQueries, LogoQueries,
   InstanceSetupQueries, SetupExecutionQueries, DeliveryQueries,
@@ -26,8 +24,6 @@ export interface ExecutionResult {
 
 interface OrchestratorDeps {
   getBym: () => BymClient | null;
-  getAzdo?: () => AzDoClient | null;
-  templateDir?: string;
   branchQueries: BranchQueries;
   brandQueries: BrandSettingsQueries;
   logoQueries: LogoQueries;
@@ -331,67 +327,9 @@ export class SetupOrchestrator {
         }
       }
 
-      // ── Step 7: Push Templates to AzDO ──
-      const azdo = this.deps.getAzdo?.();
-      const templateDir = this.deps.templateDir;
-      if (azdo && templateDir) {
-        stepsRun++;
-        try {
-          this.log(runId, 'push_templates', 'info', 'Building template files for AzDO push...');
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'push_templates', 'in_progress', undefined, userId);
-
-          // Resolve domain from subdomain
-          const domain = `${subdomain}.briefyourmarket.com`;
-
-          // Load full logo data (with image_data) for the push
-          const fullLogos = logos.map(l => this.deps.logoQueries.getById(l.id)).filter(Boolean) as import('../db/queries.js').DeliveryLogo[];
-
-          const builder = new TemplateBuilder(templateDir);
-          const fileChanges = await builder.buildFileChanges({
-            domain,
-            subdomain,
-            brandSettings,
-            branches,
-            logos: fullLogos,
-          });
-
-          this.log(runId, 'push_templates', 'info', `Built ${fileChanges.length} files, pushing to AzDO...`);
-
-          // Branch name matching legacy Onboarding.Tool format
-          const now = new Date();
-          const pad2 = (n: number) => String(n).padStart(2, '0');
-          const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-          const dateStr = `${pad2(now.getDate())}${months[now.getMonth()]}${now.getFullYear()}${pad2(now.getHours())}-${pad2(now.getMinutes())}`;
-          const branchName = `onboarding-automation/${subdomain}-${dateStr}`;
-
-          const push = await azdo.pushCommit({
-            branchName,
-            files: fileChanges,
-            commitMessage: `Created new template set for instance: ${subdomain}`,
-            createBranch: true,
-          });
-
-          this.log(runId, 'push_templates', 'info', `Commit ${push.commitId.slice(0, 8)}, creating PR...`);
-
-          const pr = await azdo.createPullRequest({
-            sourceBranch: branchName,
-            title: `New template set: ${subdomain}`,
-            description: `Automated template push from N.O.V.A for ${subdomain}.\n\n${fileChanges.length} files.`,
-          });
-
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'push_templates', 'complete', `PR #${pr.pullRequestId}`, userId);
-          this.log(runId, 'push_templates', 'success', `Pushed ${fileChanges.length} files, PR created: ${pr.webUrl}`);
-        } catch (err) {
-          stepsFailed++;
-          const msg = err instanceof Error ? err.message : String(err);
-          this.log(runId, 'push_templates', 'error', `Failed: ${msg}`);
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'push_templates', 'failed', msg, userId);
-        }
-      } else if (!azdo) {
-        this.log(runId, 'push_templates', 'info', 'AzDO not configured — skipping template push');
-      }
-
       // ── Finalize ──
+      // Note: Template push to AzDO is a standalone action (POST /api/setup-execution/delivery/:id/push-templates)
+      // gated by the azdo_push permission area (Design role). Not part of the automated execution flow.
       const finalStatus = stepsFailed === 0 ? 'complete' : (stepsRun > stepsFailed ? 'complete' : 'failed');
       const summary = `${stepsRun} steps run, ${stepsFailed} failed`;
       this.log(runId, 'done', finalStatus === 'complete' ? 'success' : 'warn', summary);

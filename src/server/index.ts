@@ -356,8 +356,6 @@ async function main() {
   // Setup orchestrator — coordinates direct BYM API execution
   const setupOrchestrator = new SetupOrchestrator({
     getBym: () => bymClient,
-    getAzdo: () => azdoClient,
-    templateDir: path.resolve(__dirname, '../../data/templates'),
     branchQueries,
     brandQueries: brandSettingsQueries,
     logoQueries,
@@ -443,7 +441,15 @@ async function main() {
   app.use('/api/brand-settings', createBrandSettingsRoutes(brandSettingsQueries));
   app.use('/api/logos', createLogoRoutes(logoQueries));
   app.use('/api/azdo', createAzDoRoutes(() => azdoClient, brandSettingsQueries, logoQueries, deliveryQueries, instanceSetupQueries));
-  app.use('/api/setup-execution', createSetupExecutionRoutes(execQueries, () => setupOrchestrator));
+  app.use('/api/setup-execution', createSetupExecutionRoutes(execQueries, () => setupOrchestrator, {
+    getAzdo: () => azdoClient,
+    templateDir: path.resolve(__dirname, '../../data/templates'),
+    brandQueries: brandSettingsQueries,
+    branchQueries,
+    logoQueries,
+    deliveryQueries,
+    requireAreaAccess,
+  }));
   app.use('/api/setup-portal', createSetupPortalRoutes(portalQueries, deliveryQueries, () => settingsQueries.getAll()));
 
   // Debug endpoints (admin-only, behind auth)

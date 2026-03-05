@@ -36,6 +36,7 @@ import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 
 const DEFAULT_CUSTOM_ROLES: CustomRole[] = [
   { id: 'editor', name: 'Editor', areas: { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit' } },
+  { id: 'design', name: 'Design', areas: { command: 'view', servicedesk: 'view', onboarding: 'edit', accounts: 'view', azdo_push: 'edit' } },
   { id: 'viewer', name: 'Viewer', areas: { command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view' } },
 ];
 
@@ -50,7 +51,7 @@ function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
 function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string, string> {
   const userRoles = parseRoles(roleStr);
   if (userRoles.includes('admin')) {
-    return { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', admin: 'edit' };
+    return { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', azdo_push: 'edit', admin: 'edit' };
   }
   const matched = roles.filter(r => userRoles.includes(r.id));
   if (matched.length === 0) {

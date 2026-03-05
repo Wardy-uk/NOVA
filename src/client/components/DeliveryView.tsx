@@ -208,7 +208,7 @@ function XlsxStarButton({ row, activeTab, dbEntries, starring, onToggleStar, onS
   );
 }
 
-export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
+export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrite?: boolean; canPushGit?: boolean }) {
   const [data, setData] = useState<DeliveryData | null>(null);
   const [dbEntries, setDbEntries] = useState<DbEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1360,6 +1360,7 @@ export function DeliveryView({ canWrite = false }: { canWrite?: boolean }) {
             setDrawerIsNew(false);
           }}
           onStarToggled={(id) => handleToggleStar(id)}
+          canPushGit={canPushGit}
         />
       )}
     </div>
