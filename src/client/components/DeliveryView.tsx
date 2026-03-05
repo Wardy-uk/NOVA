@@ -222,7 +222,7 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
   const [starringAccount, setStarringAccount] = useState<string | null>(null);
   const [starView, setStarView] = useState<'mine' | 'team'>('team');
   const [syncing, setSyncing] = useState<'pull' | 'push' | false>(false);
-  const [syncResult, setSyncResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [syncResult, setSyncResult] = useState<{ ok: boolean; message: string; logs?: string[] } | null>(null);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [editingCell, setEditingCell] = useState<{ id: number; column: string } | null>(null);
@@ -463,10 +463,11 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
         setSyncResult({
           ok: true,
           message: `Pulled ${d.entriesCreated} new entries from ${d.sheetsProcessed} sheets (${d.entriesSkipped} already tracked)`,
+          logs: d.logs,
         });
         refreshDbEntries();
       } else {
-        setSyncResult({ ok: false, message: json.data?.errors?.join(', ') || json.error || 'Sync failed' });
+        setSyncResult({ ok: false, message: json.data?.errors?.join(', ') || json.error || 'Sync failed', logs: json.data?.logs });
       }
     } catch (err) {
       setSyncResult({ ok: false, message: err instanceof Error ? err.message : 'Network error' });
@@ -486,9 +487,10 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
         setSyncResult({
           ok: true,
           message: `Pushed ${d.entriesUpdated} entries across ${d.sheetsProcessed} sheets to SharePoint`,
+          logs: d.logs,
         });
       } else {
-        setSyncResult({ ok: false, message: json.data?.errors?.join(', ') || json.error || 'Push failed' });
+        setSyncResult({ ok: false, message: json.data?.errors?.join(', ') || json.error || 'Push failed', logs: json.data?.logs });
       }
     } catch (err) {
       setSyncResult({ ok: false, message: err instanceof Error ? err.message : 'Network error' });
@@ -888,8 +890,20 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
             ? 'bg-green-950/50 border-green-900 text-green-400'
             : 'bg-red-950/50 border-red-900 text-red-400'
         }`}>
-          {syncResult.message}
-          <button onClick={() => setSyncResult(null)} className="ml-3 text-neutral-500 hover:text-neutral-300">x</button>
+          <div className="flex items-center justify-between">
+            <span>{syncResult.message}</span>
+            <button onClick={() => setSyncResult(null)} className="ml-3 text-neutral-500 hover:text-neutral-300">x</button>
+          </div>
+          {syncResult.logs && syncResult.logs.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-neutral-500 hover:text-neutral-300 text-[10px]">
+                Show logs ({syncResult.logs.length} entries)
+              </summary>
+              <pre className="mt-1 p-2 bg-black/30 rounded text-[10px] text-neutral-400 max-h-48 overflow-auto whitespace-pre-wrap">
+                {syncResult.logs.join('\n')}
+              </pre>
+            </details>
+          )}
         </div>
       )}
 

@@ -22,6 +22,7 @@ export interface SyncResult {
   entriesUpdated: number;
   entriesSkipped: number;
   errors: string[];
+  logs: string[];
   timestamp: string;
 }
 
@@ -100,23 +101,29 @@ export class SharePointSync {
       entriesUpdated: 0,
       entriesSkipped: 0,
       errors: [],
+      logs: [],
       timestamp: new Date().toISOString(),
     };
 
+    const log = (msg: string) => { result.logs.push(msg); console.log('[SP-Sync]', msg); };
+
     if (!this.isAvailable()) {
       result.errors.push('Microsoft 365 MCP server not connected or missing file tools');
+      log('ERROR: MCP server "msgraph" not connected or missing file tools');
+      log(`Connected: ${this.mcp.isConnected('msgraph')}, Tools: ${this.mcp.getServerTools('msgraph').join(', ') || '(none)'}`);
       this._lastResult = result;
       return result;
     }
 
     const { siteUrl, driveHint, folderPath, fileName } = this.getSpConfig();
+    log(`Config: site=${siteUrl}, drive=${driveHint}, path=${folderPath.join('/')}, file=${fileName}`);
 
     try {
       // Step 1: List SharePoint site drives (not personal OneDrive)
-      console.log('[SP-Sync] Listing site drives for:', siteUrl);
+      log(`Step 1: Listing site drives for ${siteUrl}...`);
       const drivesResp = await this.mcp.callTool('msgraph', 'list-sharepoint-site-drives', { siteId: siteUrl });
       const drivesText = this.extractText(drivesResp);
-      console.log('[SP-Sync] Site drives response (first 2000):', drivesText.slice(0, 2000));
+      log(`Drives response (${drivesText.length} chars): ${drivesText.slice(0, 500)}`);
 
       const driveId = this.findDriveByHint(drivesText, driveHint);
       if (!driveId) {
@@ -124,23 +131,25 @@ export class SharePointSync {
         this._lastResult = result;
         return result;
       }
-      console.log('[SP-Sync] Using drive ID:', driveId);
+      log(`Found drive: ${driveId}`);
 
       // Step 2: Navigate folder tree to find the xlsx file
       // Start from root, traverse folder path one level at a time
       let currentFolderId = 'root'; // Start at drive root
       for (const folderName of folderPath) {
-        console.log(`[SP-Sync] Listing folder: ${folderName} (parent: ${currentFolderId})`);
+        log(`Step 2: Listing folder "${folderName}" (parent: ${currentFolderId})`);
         const folderResp = await this.mcp.callTool('msgraph', 'list-folder-files', {
           driveId,
           driveItemId: currentFolderId,
         });
         const folderText = this.extractText(folderResp);
-        console.log(`[SP-Sync] Folder listing response (first 1500):`, folderText.slice(0, 1500));
+        log(`Folder listing response (${folderText.length} chars): ${folderText.slice(0, 500)}`);
         const folderId = this.findItemIdByName(folderText, folderName);
-        console.log(`[SP-Sync] findItemIdByName("${folderName}") => ${folderId}`);
+        log(`findItemIdByName("${folderName}") => ${folderId}`);
         if (!folderId) {
-          result.errors.push(`Could not find folder "${folderName}" in drive navigation. Response: ${folderText.slice(0, 500)}`);
+          const errMsg = `Could not find folder "${folderName}" in drive navigation. Response: ${folderText.slice(0, 500)}`;
+          log(`ERROR: ${errMsg}`);
+          result.errors.push(errMsg);
           this._lastResult = result;
           return result;
         }
@@ -148,57 +157,61 @@ export class SharePointSync {
       }
 
       // Now list the final folder to find the xlsx file
-      console.log(`[SP-Sync] Listing final folder for ${fileName} (folder: ${currentFolderId})...`);
+      log(`Step 2 (final): Listing folder for "${fileName}" (folder: ${currentFolderId})`);
       const finalResp = await this.mcp.callTool('msgraph', 'list-folder-files', {
         driveId,
         driveItemId: currentFolderId,
       });
       const finalText = this.extractText(finalResp);
-      console.log(`[SP-Sync] Final folder listing (first 2000):`, finalText.slice(0, 2000));
+      log(`Final folder listing (${finalText.length} chars): ${finalText.slice(0, 500)}`);
       const fileItemId = this.findItemIdByName(finalText, fileName);
-      console.log(`[SP-Sync] findItemIdByName("${fileName}") => ${fileItemId}`);
+      log(`findItemIdByName("${fileName}") => ${fileItemId}`);
       if (!fileItemId) {
-        result.errors.push(`Could not find "${fileName}" in the target folder. Contents: ${finalText.slice(0, 500)}`);
+        const errMsg = `Could not find "${fileName}" in the target folder. Contents: ${finalText.slice(0, 500)}`;
+        log(`ERROR: ${errMsg}`);
+        result.errors.push(errMsg);
         this._lastResult = result;
         return result;
       }
-      console.log('[SP-Sync] File driveItemId:', fileItemId);
+      log(`File driveItemId: ${fileItemId}`);
 
       // Step 3: Download the file by driveItemId
-      console.log('[SP-Sync] Downloading file...');
+      log('Step 3: Downloading file...');
       const downloadResp = await this.mcp.callTool('msgraph', 'download-onedrive-file-content', {
         driveId,
         driveItemId: fileItemId,
       });
       const rawDownload = this.extractText(downloadResp);
-      console.log(`[SP-Sync] Download response (full, ${rawDownload.length} chars):`, rawDownload.slice(0, 5000));
+      log(`Download response (${rawDownload.length} chars): ${rawDownload.slice(0, 300)}`);
       const extracted = await this.extractFileContent(downloadResp);
-      console.log(`[SP-Sync] Extracted file content: ${extracted ? `${extracted.content.length} chars via ${extracted.method}` : 'null'}`);
+      log(`Extracted file content: ${extracted ? `${extracted.content.length} chars via ${extracted.method}` : 'null — EXTRACTION FAILED'}`);
       if (!extracted) {
-        result.errors.push(`Downloaded file content is empty. Raw response (first 500): ${rawDownload.slice(0, 500)}`);
+        const errMsg = `Downloaded file content is empty. Raw response (first 500): ${rawDownload.slice(0, 500)}`;
+        log(`ERROR: ${errMsg}`);
+        result.errors.push(errMsg);
         this._lastResult = result;
         return result;
       }
 
       // Step 4: Parse the xlsx
+      log('Step 4: Parsing xlsx...');
       const XLSX = (await import('xlsx')).default;
       const buf = Buffer.from(extracted.content, 'base64');
-      console.log(`[SP-Sync] Base64 decoded to ${buf.length} bytes`);
+      log(`Base64 decoded to ${buf.length} bytes`);
       const wb = XLSX.read(buf);
-      console.log('[SP-Sync] Parsed workbook with', wb.SheetNames.length, 'sheets:', wb.SheetNames.join(', '));
+      log(`Parsed workbook: ${wb.SheetNames.length} sheets — ${wb.SheetNames.join(', ')}`);
 
       // Step 5: Process each product sheet
-      console.log(`[SP-Sync] Looking for product sheets: ${PRODUCT_SHEETS.join(', ')}`);
-      console.log(`[SP-Sync] Workbook sheet names: ${wb.SheetNames.join(', ')}`);
+      log(`Step 5: Processing product sheets...`);
       for (const sheetName of PRODUCT_SHEETS) {
         const ws = wb.Sheets[sheetName];
         if (!ws) {
-          console.log(`[SP-Sync] Sheet "${sheetName}" not found in workbook`);
+          log(`  Sheet "${sheetName}" — not found, skipping`);
           continue;
         }
 
         const rows = this.parseSheetRows(XLSX, ws);
-        console.log(`[SP-Sync] Sheet "${sheetName}": ${rows.length} parseable rows`);
+        log(`  Sheet "${sheetName}" — ${rows.length} parseable rows`);
         if (rows.length === 0) continue;
 
         result.sheetsProcessed++;
@@ -237,13 +250,10 @@ export class SharePointSync {
         }
       }
 
-      console.log(
-        `[SP-Sync] Pull complete: ${result.sheetsProcessed} sheets, ` +
-        `${result.entriesCreated} created, ${result.entriesSkipped} skipped`
-      );
+      log(`Pull complete: ${result.sheetsProcessed} sheets, ${result.entriesCreated} created, ${result.entriesSkipped} skipped`);
     } catch (err) {
       const msg = err instanceof Error ? err.stack ?? err.message : String(err);
-      console.error('[SP-Sync] Pull failed with exception:', msg);
+      log(`EXCEPTION: ${msg}`);
       result.errors.push(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
@@ -266,42 +276,55 @@ export class SharePointSync {
       entriesUpdated: 0,
       entriesSkipped: 0,
       errors: [],
+      logs: [],
       timestamp: new Date().toISOString(),
     };
 
+    const log = (msg: string) => { result.logs.push(msg); console.log('[SP-Push]', msg); };
+
     if (!this.isAvailable()) {
       result.errors.push('Microsoft 365 MCP server not connected or missing file tools');
+      log('ERROR: MCP server "msgraph" not connected or missing file tools');
+      log(`Connected: ${this.mcp.isConnected('msgraph')}, Tools: ${this.mcp.getServerTools('msgraph').join(', ') || '(none)'}`);
       this._lastResult = result;
       return result;
     }
 
     const { siteUrl, driveHint, folderPath, fileName } = this.getSpConfig();
+    log(`Config: site=${siteUrl}, drive=${driveHint}, path=${folderPath.join('/')}, file=${fileName}`);
 
     try {
       // Step 1: Locate the SP site drive and target folder (same as pull)
-      console.log('[SP-Push] Listing site drives for:', siteUrl);
+      log(`Step 1: Listing site drives for ${siteUrl}...`);
       const drivesResp = await this.mcp.callTool('msgraph', 'list-sharepoint-site-drives', { siteId: siteUrl });
       const drivesText = this.extractText(drivesResp);
-      console.log('[SP-Push] Site drives response (first 2000):', drivesText.slice(0, 2000));
+      log(`Drives response (${drivesText.length} chars): ${drivesText.slice(0, 500)}`);
       const driveId = this.findDriveByHint(drivesText, driveHint);
       if (!driveId) {
-        result.errors.push(`Could not find a drive matching "${driveHint}" in SharePoint site drives. Available drives: ${drivesText.slice(0, 800)}`);
+        const errMsg = `Could not find a drive matching "${driveHint}" in SharePoint site drives. Available drives: ${drivesText.slice(0, 800)}`;
+        log(`ERROR: ${errMsg}`);
+        result.errors.push(errMsg);
         this._lastResult = result;
         return result;
       }
-      console.log('[SP-Push] Using drive ID:', driveId);
+      log(`Found drive: ${driveId}`);
 
       // Navigate to the target folder
       let currentFolderId = 'root';
       for (const folderName of folderPath) {
+        log(`Step 1 (nav): Listing folder "${folderName}" (parent: ${currentFolderId})`);
         const folderResp = await this.mcp.callTool('msgraph', 'list-folder-files', {
           driveId,
           driveItemId: currentFolderId,
         });
         const folderText = this.extractText(folderResp);
+        log(`Folder listing (${folderText.length} chars): ${folderText.slice(0, 300)}`);
         const folderId = this.findItemIdByName(folderText, folderName);
+        log(`findItemIdByName("${folderName}") => ${folderId}`);
         if (!folderId) {
-          result.errors.push(`Could not find folder "${folderName}" in drive navigation`);
+          const errMsg = `Could not find folder "${folderName}" in drive navigation`;
+          log(`ERROR: ${errMsg}`);
+          result.errors.push(errMsg);
           this._lastResult = result;
           return result;
         }
@@ -309,6 +332,7 @@ export class SharePointSync {
       }
 
       // Step 2: Build the xlsx workbook from DB entries
+      log('Step 2: Building xlsx from DB entries...');
       const XLSX = (await import('xlsx')).default;
       const wb = XLSX.utils.book_new();
 
@@ -343,9 +367,11 @@ export class SharePointSync {
         const ws = XLSX.utils.aoa_to_sheet(rows);
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
         result.sheetsProcessed++;
+        log(`  Sheet "${sheetName}": ${entries.length} entries`);
       }
 
       if (result.sheetsProcessed === 0) {
+        log('ERROR: No DB entries to push — all product sheets are empty');
         result.errors.push('No DB entries to push — all product sheets are empty');
         this._lastResult = result;
         return result;
@@ -354,10 +380,10 @@ export class SharePointSync {
       // Step 3: Write workbook to base64
       const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' }) as Buffer;
       const base64Content = buf.toString('base64');
-      console.log(`[SP-Push] Built xlsx: ${result.sheetsProcessed} sheets, ${result.entriesUpdated} entries, ${(buf.length / 1024).toFixed(1)}KB`);
+      log(`Built xlsx: ${result.sheetsProcessed} sheets, ${result.entriesUpdated} entries, ${(buf.length / 1024).toFixed(1)}KB`);
 
       // Step 4: Upload to SharePoint (overwrite the existing file)
-      console.log('[SP-Push] Uploading to SharePoint...');
+      log('Step 4: Uploading to SharePoint...');
       await this.mcp.callTool('msgraph', 'upload-file-content', {
         driveId,
         parentDriveItemId: currentFolderId,
@@ -365,8 +391,10 @@ export class SharePointSync {
         content: base64Content,
       });
 
-      console.log('[SP-Push] Push complete');
+      log('Push complete');
     } catch (err) {
+      const msg = err instanceof Error ? err.stack ?? err.message : String(err);
+      log(`EXCEPTION: ${msg}`);
       result.errors.push(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
