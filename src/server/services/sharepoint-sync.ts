@@ -587,13 +587,15 @@ export class SharePointSync {
     const raw = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown[][];
     const str = (val: unknown) => String(val ?? '').trim();
 
-    // Find header row
+    // Find header row — require at least 2 header keywords to avoid matching title rows
+    const HEADER_KEYWORDS = ['account', 'customer', 'onboarder', 'status', 'order', 'mrr', 'delivery', 'branch'];
     let headerIdx = -1;
     for (let i = 0; i < Math.min(5, raw.length); i++) {
       const row = raw[i];
       if (!row) continue;
       const joined = row.map((c) => str(c).toLowerCase()).join('|');
-      if (joined.includes('account') || joined.includes('customer') || joined.includes('onboarder')) {
+      const matchCount = HEADER_KEYWORDS.filter(kw => joined.includes(kw)).length;
+      if (matchCount >= 2) {
         headerIdx = i;
         break;
       }
@@ -635,7 +637,9 @@ export class SharePointSync {
       const r = raw[i];
       if (!r || r.length === 0) continue;
       const account = colAccount >= 0 ? str(r[colAccount]) : '';
-      if (!account || account.toLowerCase() === 'totals') continue;
+      const lower = account.toLowerCase();
+      // Skip totals row and header-like values that slipped through
+      if (!account || lower === 'totals' || HEADER_KEYWORDS.includes(lower)) continue;
 
       rows.push({
         account,
