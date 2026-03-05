@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { RequestHandler } from 'express';
-import type { SetupExecutionQueries, BranchQueries, BrandSettingsQueries, LogoQueries, DeliveryQueries } from '../db/queries.js';
+import type { SetupExecutionQueries, BranchQueries, BrandSettingsQueries, LogoQueries, DeliveryQueries, WelcomePackQueries, PortalAccountQueries, BranchDistrictQueries } from '../db/queries.js';
 import type { SetupOrchestrator } from '../services/setup-orchestrator.js';
 import type { AzDoClient } from '../services/azdo-client.js';
 import { TemplateBuilder } from '../services/template-builder.js';
@@ -26,6 +26,9 @@ export function createSetupExecutionRoutes(
     branchQueries: BranchQueries;
     logoQueries: LogoQueries;
     deliveryQueries: DeliveryQueries;
+    portalAccountQueries: PortalAccountQueries;
+    districtQueries: BranchDistrictQueries;
+    welcomePackQueries: WelcomePackQueries;
     requireAreaAccess: (area: string, level: 'view' | 'edit') => RequestHandler;
   },
 ): Router {
@@ -156,6 +159,85 @@ export function createSetupExecutionRoutes(
     const deliveryId = parseInt(String(req.params.id), 10);
     const run = execQueries.getLatestRun(deliveryId);
     res.json({ ok: true, data: run });
+  });
+
+  /** Save a welcome pack snapshot for a delivery */
+  router.post('/delivery/:id/welcome-pack', async (req, res) => {
+    const deliveryId = parseInt(String(req.params.id), 10);
+    const userName = (req as any).user?.username ?? 'system';
+
+    try {
+      const entries = deps.deliveryQueries.getAll();
+      const delivery = entries.find(e => e.id === deliveryId);
+      if (!delivery) {
+        res.status(404).json({ ok: false, error: 'Delivery not found' });
+        return;
+      }
+
+      const brandSettings = deps.brandQueries.getByDelivery(deliveryId);
+      const branches = deps.branchQueries.getByDelivery(deliveryId);
+      const logoMeta = deps.logoQueries.getMetadataByDelivery(deliveryId);
+      const portalAccounts = deps.portalAccountQueries.getByDelivery(deliveryId);
+      const districts = deps.districtQueries.getByDelivery(deliveryId);
+
+      const snapshot = {
+        account: delivery.account,
+        product: delivery.product,
+        onboardingId: delivery.onboarding_id,
+        brandSettings,
+        branches: branches.map(b => ({
+          name: b.name,
+          isDefault: !!b.is_default,
+          salesEmail: b.sales_email,
+          salesPhone: b.sales_phone,
+          lettingsEmail: b.lettings_email,
+          lettingsPhone: b.lettings_phone,
+          address1: b.address1,
+          address2: b.address2,
+          address3: b.address3,
+          town: b.town,
+          postCode: [b.post_code1, b.post_code2].filter(Boolean).join(' '),
+        })),
+        logos: logoMeta.map(l => ({
+          id: l.id,
+          type: l.logo_type,
+          label: l.logo_label,
+          fileName: l.file_name,
+          mimeType: l.mime_type,
+          fileSize: l.file_size,
+        })),
+        portalAccounts: portalAccounts.map((p: any) => p.portal_name),
+        districts: districts.map((d: any) => ({
+          branchId: d.branch_id,
+          districtName: d.district_name,
+          allSectors: !!d.all_sectors,
+          sectors: d.sectors_json ? JSON.parse(d.sectors_json) : [],
+        })),
+      };
+
+      const name = `${delivery.account} - Welcome Pack`;
+      const pack = deps.welcomePackQueries.create(deliveryId, name, JSON.stringify(snapshot), userName);
+
+      res.json({ ok: true, data: { id: pack.id, name: pack.name, createdAt: pack.created_at } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create welcome pack' });
+    }
+  });
+
+  /** Get welcome packs for a delivery */
+  router.get('/delivery/:id/welcome-pack', (req, res) => {
+    const deliveryId = parseInt(String(req.params.id), 10);
+    const packs = deps.welcomePackQueries.getByDelivery(deliveryId);
+    res.json({
+      ok: true,
+      data: packs.map(p => ({
+        id: p.id,
+        name: p.name,
+        createdAt: p.created_at,
+        createdBy: p.created_by,
+        snapshot: JSON.parse(p.snapshot_json),
+      })),
+    });
   });
 
   return router;

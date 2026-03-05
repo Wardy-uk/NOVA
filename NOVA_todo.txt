@@ -3,29 +3,16 @@ N.O.V.A — TO DO
 
 --- Triage ---
 
-Exclude Development tickets from the global ticket views (based on configuration in admin - setting already present) but include them in My Ticket views
-
-ability to assign milestone tasks to users - by default should be onboarding owner, but allow to be changed
-
-Allow user to set there preferred homepage to load when opening nova.nurtur.tech
-
-1. on the customer set up portal, Branches tab add branch button text colour makes it unreadable
-
-2. on the customer set up portal, images and logo tabs, uploaded thumb doesn't show for primary logo, then none of the other upload image sections allow upload
+Allow user to set their preferred homepage to load when opening nova.nurtur.tech
 
 on the customer set up portal, all entries should be saved as a read only version, called "[Customer name] - Welcome Pack"
 
 update "whats new" with everything added since v 1.1.7
 
-in the Audit log, user's appear as #5 (except my account which appears as NickW)
 
-onboarding tool replacement - once it has set everything via the API, its needs to replicate the template push to the git repo as per the "legacy" onboarding tool here "C:\Users\NickW\Claude\TFS\Onboarding.Tool"
+=== CURRENT STATUS (5 Mar 2026) ===
 
-onboarding - create tickets - need to set correct request type: 'Delivery QA' for the QA ticket and 'Onboarding' for all others
-
-=== CURRENT STATUS (3 Mar 2026) ===
-
-Deployed at https://nova.nurtur.tech | v1.1.11 | Branch: nova-codex
+Deployed at https://nova.nurtur.tech | v1.1.16 | Branch: nova-codex
 IIS reverse proxy → Node.js (NSSM) on Windows Server VM
 
 6 areas: My NOVA, Service Desk, Onboarding, Delivery, CRM, Admin
@@ -33,6 +20,8 @@ IIS reverse proxy → Node.js (NSSM) on Windows Server VM
 Milestone workflow engine: progressive task/ticket creation on lead-day triggers
 AI chat, notifications, audit log, team workload, SD dashboard, Jira OAuth
 AI Problem Ticket Detection: 10-rule engine + LLM sentiment/commitment, P1/P2/P3 queue
+Customer Setup Portal: 6-step BYM API orchestrator + standalone AzDO Git template push
+SharePoint sync: bi-directional pull/push with diagnostic logging
 0 blockers | Monday.com syncing 22 tasks across 5 boards
 
 Known limitation:
@@ -41,6 +30,26 @@ Known limitation:
 Deploy: .\deploy\deploy.ps1 -Branch nova-codex (on server C:\Nurtur\NOVA)
 Completed items: see NOVA_completed.txt
 
+
+=== DONE (5 Mar 2026) ===
+
+- Git template push to AzDO — TemplateBuilder service replicates Onboarding.Tool's
+  ~130 template files (static + Scriban-rendered + BrandSettings.xml). Standalone
+  "Push to Git" button gated by Design role, creates branch + PR in AzDO.
+  Incorporated nt-1658 PR fixes (FromAddress, article styles, EzineContent2021).
+- Fix logo thumbnails not displaying — auth middleware now accepts ?token= query
+  param for <img src> tags. LogoPanel passes JWT + cache-bust on image URLs.
+- Fix setup portal branch button text colour (unreadable) — 634aa82
+- Fix setup portal logo uploads (primary thumb missing, others blocked) — 634aa82
+- Fix audit log user names showing as #5 instead of display name — 634aa82
+- Exclude Development tickets from global views only (still visible in My Tickets) — 47541c7
+- Milestone task assignment to users (defaults to onboarder, changeable) — 981bfbc
+- Jira request types: Delivery QA for QA ticket, Onboarding for all others — already in orchestrator
+- Onboarding.Tool Git push replacement — fully implemented as standalone AzDO push
+- SharePoint sync diagnostic logging — step-by-step logs in pull/push, collapsible
+  log viewer in UI sync result toast
+- Fix SP sync importing header row as delivery entry — require 2+ keyword matches
+  for header detection, skip header-like account values
 
 === DONE (3 Mar 2026) ===
 
@@ -104,7 +113,7 @@ Completed items: see NOVA_completed.txt
 
 === TIER 1: Quick wins / high-value ===
 
-(all cleared — #1 problem ticket KPI already existed, #2 toast + #3 feedback reply done)
+(all cleared)
 
 
 === TIER 2: Feature additions ===
@@ -120,7 +129,7 @@ Completed items: see NOVA_completed.txt
     Jira support DB; pull back agent availability, max tickets, configure these
 
 
-=== TECHINCAL DEBT ===
+=== TECHNICAL DEBT ===
 TD3.  Fix production SPA fallback route — replace invalid `{*path}` with Express
     wildcard to ensure SPA loads in prod.
 TD4.  Jira OAuth base URL resolution — correct redirect base when `FRONTEND_URL`

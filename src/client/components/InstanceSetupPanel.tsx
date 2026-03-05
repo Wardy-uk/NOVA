@@ -74,6 +74,10 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl, canPushGit 
   const [runs, setRuns] = useState<ExecutionRun[]>([]);
   const [pushingGit, setPushingGit] = useState(false);
   const [gitResult, setGitResult] = useState<{ prUrl: string; fileCount: number } | null>(null);
+  const [savingPack, setSavingPack] = useState(false);
+  const [packResult, setPackResult] = useState<{ name: string } | null>(null);
+  const [showPack, setShowPack] = useState(false);
+  const [packData, setPackData] = useState<any>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -263,6 +267,44 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl, canPushGit 
     }
   };
 
+  const handleSaveWelcomePack = async () => {
+    setSavingPack(true);
+    setError(null);
+    setPackResult(null);
+    try {
+      const token = localStorage.getItem('nova_token');
+      const res = await fetch(`/api/setup-execution/delivery/${deliveryId}/welcome-pack`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setPackResult({ name: json.data.name });
+      } else {
+        setError(json.error || 'Failed to save welcome pack');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save welcome pack');
+    } finally {
+      setSavingPack(false);
+    }
+  };
+
+  const handleViewWelcomePack = async () => {
+    try {
+      const res = await fetch(`/api/setup-execution/delivery/${deliveryId}/welcome-pack`);
+      const json = await res.json();
+      if (json.ok && json.data.length > 0) {
+        setPackData(json.data[0]); // Latest pack
+        setShowPack(true);
+      } else {
+        setError('No welcome pack found. Save one first.');
+      }
+    } catch {
+      setError('Failed to load welcome pack');
+    }
+  };
+
   const fetchRuns = async () => {
     try {
       const res = await fetch(`/api/setup-execution/delivery/${deliveryId}/runs`);
@@ -351,6 +393,108 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl, canPushGit 
           <a href={gitResult.prUrl} target="_blank" rel="noopener noreferrer" className="text-purple-400 underline hover:text-purple-300">
             View PR
           </a>
+        </div>
+      )}
+
+      {packResult && (
+        <div className="p-2 bg-green-950/30 border border-green-800 rounded text-[10px] flex items-center gap-2">
+          <span className="text-green-300">Saved: {packResult.name}</span>
+          <button onClick={handleViewWelcomePack} className="text-green-400 underline hover:text-green-300">View</button>
+        </div>
+      )}
+
+      {/* Welcome Pack Modal */}
+      {showPack && packData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowPack(false)}>
+          <div
+            className="bg-[#2f353d] border border-[#3a424d] rounded-lg w-full max-w-2xl mx-4 shadow-xl flex flex-col max-h-[80vh]"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#3a424d]">
+              <h3 className="text-sm font-semibold text-neutral-100">{packData.name}</h3>
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] text-neutral-500">{new Date(packData.createdAt).toLocaleDateString('en-GB')}</span>
+                <button onClick={() => setShowPack(false)} className="text-neutral-500 hover:text-neutral-300">{'\u2715'}</button>
+              </div>
+            </div>
+            <div className="px-5 py-4 overflow-y-auto space-y-4">
+              {/* Brand Settings */}
+              {packData.snapshot?.brandSettings && Object.keys(packData.snapshot.brandSettings).length > 0 && (
+                <div>
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">Brand Settings</div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                    {Object.entries(packData.snapshot.brandSettings).map(([key, val]) => (
+                      <div key={key} className="flex gap-2 text-[11px]">
+                        <span className="text-neutral-500 truncate min-w-[120px]">{key}</span>
+                        <span className="text-neutral-300 truncate">{String(val)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Branches */}
+              {packData.snapshot?.branches?.length > 0 && (
+                <div>
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">Branches ({packData.snapshot.branches.length})</div>
+                  <div className="space-y-1">
+                    {packData.snapshot.branches.map((b: any, i: number) => (
+                      <div key={i} className="p-2 bg-[#1f242b] rounded text-[11px]">
+                        <span className="text-neutral-200 font-medium">{b.name}</span>
+                        {b.isDefault && <span className="ml-2 text-[9px] text-[#5ec1ca]">Default</span>}
+                        <div className="text-neutral-500 mt-0.5">
+                          {[b.salesEmail, b.salesPhone, b.postCode].filter(Boolean).join(' | ')}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Logos */}
+              {packData.snapshot?.logos?.length > 0 && (
+                <div>
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">Logos ({packData.snapshot.logos.length})</div>
+                  <div className="flex gap-2 flex-wrap">
+                    {packData.snapshot.logos.map((l: any) => (
+                      <div key={l.id} className="p-2 bg-[#1f242b] rounded text-center">
+                        <img
+                          src={`/api/logos/${l.id}/image?token=${localStorage.getItem('nova_token') || ''}`}
+                          alt={l.label}
+                          className="w-16 h-12 object-contain rounded mb-1"
+                        />
+                        <div className="text-[9px] text-neutral-400">{l.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Portal Accounts */}
+              {packData.snapshot?.portalAccounts?.length > 0 && (
+                <div>
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">Portal Accounts ({packData.snapshot.portalAccounts.length})</div>
+                  <div className="flex flex-wrap gap-1">
+                    {packData.snapshot.portalAccounts.map((name: string, i: number) => (
+                      <span key={i} className="px-2 py-0.5 bg-[#1f242b] rounded text-[10px] text-neutral-300">{name}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Districts */}
+              {packData.snapshot?.districts?.length > 0 && (
+                <div>
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">Districts ({packData.snapshot.districts.length})</div>
+                  <div className="space-y-1">
+                    {packData.snapshot.districts.map((d: any, i: number) => (
+                      <div key={i} className="p-1.5 bg-[#1f242b] rounded text-[11px] text-neutral-300">
+                        {d.districtName}
+                        {d.allSectors ? <span className="ml-2 text-[9px] text-neutral-500">All sectors</span>
+                          : d.sectors?.length > 0 && <span className="ml-2 text-[9px] text-neutral-500">{d.sectors.join(', ')}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -448,6 +592,19 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl, canPushGit 
             {pushingGit ? 'Pushing...' : 'Push to Git'}
           </button>
         )}
+        <button
+          onClick={handleSaveWelcomePack}
+          disabled={savingPack || executing}
+          className="px-3 py-1 text-[10px] rounded border border-green-600 text-green-400 hover:bg-green-600/10 disabled:opacity-50 transition-colors"
+        >
+          {savingPack ? 'Saving...' : 'Save Welcome Pack'}
+        </button>
+        <button
+          onClick={handleViewWelcomePack}
+          className="px-3 py-1 text-[10px] rounded border border-[#3a424d] text-neutral-400 hover:bg-[#363d47] transition-colors"
+        >
+          View Pack
+        </button>
         <button
           onClick={handleReset}
           className="text-[10px] text-neutral-500 hover:text-red-400 transition-colors"

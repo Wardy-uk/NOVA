@@ -8,6 +8,52 @@ interface ReleaseEntry {
 
 const RELEASE_NOTES: ReleaseEntry[] = [
   {
+    version: '1.1.16',
+    date: '5 Mar 2026',
+    items: [
+      'Push to Git — push template files to Azure DevOps with PR creation',
+      'Design role with AzDO push permissions',
+      'Pin as Homepage — set any page as your default landing page',
+      'Welcome Pack — save read-only snapshot of customer setup data',
+      'SharePoint sync diagnostic logging with collapsible UI log viewer',
+      'Fix: logo thumbnails, SP sync header import, portal branch button',
+    ],
+  },
+  {
+    version: '1.1.15',
+    date: '4 Mar 2026',
+    items: [
+      'Customer Setup Portal with magic link access for external customers',
+      'BYM API integration — direct API setup replacing Onboarding.Tool',
+      'Setup execution engine with dry-run validation',
+      'Brand settings, branches, logos, and Build tab (portal accounts + districts)',
+    ],
+  },
+  {
+    version: '1.1.12',
+    date: '3 Mar 2026',
+    items: [
+      'Rules-based AI Insights + Briefings (no more OpenAI dependency)',
+      'Milestone task assignment to specific users',
+      'Traffic light indicators on delivery cards',
+      'Development tier exclusion from global ticket views',
+      'Security hardening — redacted settings, admin-only endpoints',
+      'Toast notifications for SLA breach, milestone overdue, feedback reply',
+      'No Next Reply + Missed Commitment detection rules',
+    ],
+  },
+  {
+    version: '1.1.10',
+    date: '3 Mar 2026',
+    items: [
+      'Per-user Jira REST API — removed MCP dependency entirely',
+      'Multi-role support with checkbox assignment',
+      'Inline-editable user display names and emails',
+      'Jira search pagination (all results beyond 100-item cap)',
+      'SSO base URL auto-detection from host header',
+    ],
+  },
+  {
     version: '1.1.7',
     date: '2 Mar 2026',
     items: [

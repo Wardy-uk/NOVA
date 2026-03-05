@@ -258,7 +258,35 @@ export function createAuthRoutes(
       res.status(401).json({ ok: false, error: 'User not found' });
       return;
     }
-    res.json({ ok: true, data: { user: safeUser(user) } });
+    const preferences: Record<string, string | null> = {};
+    if (userSettingsQueries) {
+      preferences.homepage = userSettingsQueries.get(req.user!.id, 'homepage');
+    }
+    res.json({ ok: true, data: { user: safeUser(user), preferences } });
+  });
+
+  // GET /api/auth/preferences — user preferences
+  router.get('/preferences', authMiddleware(jwtSecret), (req, res) => {
+    if (!userSettingsQueries) {
+      res.json({ ok: true, data: { homepage: null } });
+      return;
+    }
+    res.json({ ok: true, data: { homepage: userSettingsQueries.get(req.user!.id, 'homepage') } });
+  });
+
+  // PUT /api/auth/preferences — update user preferences
+  router.put('/preferences', authMiddleware(jwtSecret), (req, res) => {
+    if (!userSettingsQueries) {
+      res.status(500).json({ ok: false, error: 'User settings not available' });
+      return;
+    }
+    const { homepage } = req.body;
+    if (homepage === null || homepage === '') {
+      userSettingsQueries.delete(req.user!.id, 'homepage');
+    } else if (typeof homepage === 'string') {
+      userSettingsQueries.set(req.user!.id, 'homepage', homepage);
+    }
+    res.json({ ok: true, data: { homepage: userSettingsQueries.get(req.user!.id, 'homepage') } });
   });
 
   // ── SSO Routes ──

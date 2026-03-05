@@ -860,6 +860,19 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_branch_districts_delivery ON delivery_branch_districts(delivery_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_branch_districts_branch ON delivery_branch_districts(branch_id)`);
 
+  // Welcome pack snapshots
+  database.run(`
+    CREATE TABLE IF NOT EXISTS delivery_welcome_packs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      created_by TEXT
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_welcome_packs_delivery ON delivery_welcome_packs(delivery_id)`);
+
   const defaults: [string, string][] = [
     ['source_weight_jira', '90'],
     ['source_weight_planner', '60'],

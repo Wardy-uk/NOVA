@@ -197,6 +197,7 @@ export function App() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [homepage, setHomepage] = useState<View | null>(null);
   const [sdFilter, setSdFilter] = useState<OwnershipFilter>(() => {
     if (typeof window === 'undefined') return null;
     const stored = window.localStorage.getItem('nova_sd_filter');
@@ -230,6 +231,27 @@ export function App() {
       .catch(() => {});
   }, [auth.isAuthenticated, auth.token]);
 
+  // Fetch user preferences (homepage) on login
+  const homepageApplied = useRef(false);
+  useEffect(() => {
+    if (!auth.isAuthenticated || !auth.token) return;
+    fetch('/api/auth/preferences', {
+      headers: { Authorization: `Bearer ${auth.token}` },
+    })
+      .then(r => r.json())
+      .then(json => {
+        if (json.ok && json.data?.homepage) {
+          setHomepage(json.data.homepage as View);
+          // Apply homepage on first load if no URL hash override
+          if (!homepageApplied.current && !getViewFromHash()) {
+            homepageApplied.current = true;
+            setView(json.data.homepage as View);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [auth.isAuthenticated, auth.token, setView]);
+
   // Auto-show tour on first visit
   useEffect(() => {
     if (auth.isAuthenticated) checkFirstVisit();
@@ -250,11 +272,11 @@ export function App() {
   }, []);
 
   // Auto-trigger standup on first visit if no morning ritual today
-  // (skip if user navigated to a specific view via URL hash)
+  // (skip if user navigated to a specific view via URL hash or has a pinned homepage)
   useEffect(() => {
     if (!auth.isAuthenticated || standupChecked.current) return;
     standupChecked.current = true;
-    if (getViewFromHash()) return; // User intentionally navigated here — don't override
+    if (getViewFromHash() || homepage) return; // User has hash nav or pinned homepage — don't override
     fetch('/api/standups/today')
       .then((r) => r.json())
       .then((json) => {
@@ -263,7 +285,7 @@ export function App() {
         }
       })
       .catch(() => {});
-  }, [auth.isAuthenticated, setView]);
+  }, [auth.isAuthenticated, setView, homepage]);
 
   useEffect(() => {
     if (view !== 'debug') return;
@@ -336,6 +358,19 @@ export function App() {
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('nova_sd_filter', sdFilter ?? '');
   }, [sdFilter]);
+
+  // Pin/unpin current view as homepage
+  const togglePinHomepage = useCallback(async () => {
+    const newHomepage = homepage === view ? null : view;
+    setHomepage(newHomepage);
+    try {
+      await fetch('/api/auth/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth.token}` },
+        body: JSON.stringify({ homepage: newHomepage }),
+      });
+    } catch { /* ignore */ }
+  }, [homepage, view, auth.token]);
 
   // Navigate helper — used by child components
   const navigate = (v: string) => setView(v as View);
@@ -505,6 +540,19 @@ export function App() {
                   </button>
                 ))}
               </div>
+              {/* Pin as homepage */}
+              <button
+                onClick={togglePinHomepage}
+                className={`px-1.5 py-1.5 transition-colors rounded hover:bg-[#363d47] ${
+                  homepage === view ? 'text-[#5ec1ca]' : 'text-neutral-600 hover:text-neutral-400'
+                }`}
+                title={homepage === view ? 'Unpin homepage' : 'Pin as homepage'}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill={homepage === view ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="17" x2="12" y2="22" />
+                  <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+                </svg>
+              </button>
               {/* User menu */}
               <div className="relative ml-1 pl-2 border-l border-[#3a424d]" ref={userMenuRef} data-tour="user-menu">
                 <button
@@ -656,7 +704,7 @@ export function App() {
               )}
               {/* Manual refresh button (non-SD areas) */}
               {currentArea !== 'servicedesk' && (
-                <div className="ml-auto">
+                <div className="ml-auto flex items-center gap-1">
                   <button
                     onClick={handleManualRefresh}
                     disabled={refreshing}

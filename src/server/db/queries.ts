@@ -3300,3 +3300,45 @@ export class BranchDistrictQueries {
     return row;
   }
 }
+
+// ─── Welcome Pack Queries ───
+
+export interface WelcomePack {
+  id: number;
+  delivery_id: number;
+  name: string;
+  snapshot_json: string;
+  created_at: string;
+  created_by: string | null;
+}
+
+export class WelcomePackQueries {
+  constructor(private db: any) {}
+
+  create(deliveryId: number, name: string, snapshotJson: string, createdBy?: string): WelcomePack {
+    this.db.run(
+      `INSERT INTO delivery_welcome_packs (delivery_id, name, snapshot_json, created_by) VALUES (?, ?, ?, ?)`,
+      [deliveryId, name, snapshotJson, createdBy ?? null],
+    );
+    saveDb();
+    const id = (this.db.exec('SELECT last_insert_rowid() as id')[0]?.values[0]?.[0] as number) ?? 0;
+    return this.getById(id)!;
+  }
+
+  getByDelivery(deliveryId: number): WelcomePack[] {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_welcome_packs WHERE delivery_id = ? ORDER BY created_at DESC`);
+    stmt.bind([deliveryId]);
+    const rows: WelcomePack[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as WelcomePack);
+    stmt.free();
+    return rows;
+  }
+
+  getById(id: number): WelcomePack | null {
+    const stmt = this.db.prepare(`SELECT * FROM delivery_welcome_packs WHERE id = ?`);
+    stmt.bind([id]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as WelcomePack) : null;
+    stmt.free();
+    return row;
+  }
+}
