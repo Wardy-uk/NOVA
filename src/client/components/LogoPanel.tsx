@@ -25,6 +25,7 @@ export function LogoPanel({ deliveryId }: Props) {
   const [uploading, setUploading] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const token = localStorage.getItem('nova_token') || '';
 
   useEffect(() => {
     (async () => {
@@ -150,7 +151,7 @@ export function LogoPanel({ deliveryId }: Props) {
                   onClick={() => fileRefs.current[typeDef.type]?.click()}
                 >
                   <img
-                    src={`/api/logos/${logo.id}/image`}
+                    src={`/api/logos/${logo.id}/image?token=${token}&_cb=${logo.file_size || logo.id}`}
                     alt={typeDef.label}
                     className="w-full h-16 object-contain rounded mb-1"
                   />

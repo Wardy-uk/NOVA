@@ -83,14 +83,22 @@ export type AreaAccessGuard = ReturnType<typeof createAreaAccessGuard>;
 
 export function authMiddleware(secret: string) {
   return (req: Request, res: Response, next: NextFunction): void => {
+    // Accept token from Authorization header or ?token= query param (for <img src> etc.)
+    let token: string | undefined;
     const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) {
+    if (header?.startsWith('Bearer ')) {
+      token = header.slice(7);
+    } else if (typeof req.query.token === 'string') {
+      token = req.query.token;
+    }
+
+    if (!token) {
       res.status(401).json({ ok: false, error: 'Not authenticated' });
       return;
     }
 
     try {
-      const payload = jwt.verify(header.slice(7), secret) as AuthPayload;
+      const payload = jwt.verify(token, secret) as AuthPayload;
       req.user = payload;
       next();
     } catch {
