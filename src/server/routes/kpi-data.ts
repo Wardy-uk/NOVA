@@ -168,5 +168,85 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
     }
   });
 
+  // GET /api/admin/kpi-data/comparison
+  router.get('/comparison', async (req, res) => {
+    try {
+      const p = await getPool();
+      const statsQuery = (s: string) => `
+        SELECT 'KpiSnapshot' AS tableName, COUNT(*) AS rowCount, MAX(CreatedAt) AS latestRecord,
+               (SELECT COUNT(DISTINCT KPI) FROM dbo.KpiSnapshot${s}) AS distinctKPIs
+        FROM dbo.KpiSnapshot${s}
+        UNION ALL
+        SELECT 'jira_kpi_daily', COUNT(*), MAX(createdAt), COUNT(DISTINCT kpi)
+        FROM dbo.jira_kpi_daily${s}
+        UNION ALL
+        SELECT 'jira_kpi_digest', COUNT(*), MAX(CreatedAt), NULL
+        FROM dbo.jira_kpi_digest${s}
+        UNION ALL
+        SELECT 'Agent', COUNT(*), MAX(TicketsSnapshotAt),
+               SUM(CASE WHEN IsActive=1 THEN 1 ELSE 0 END)
+        FROM dbo.Agent${s}
+        UNION ALL
+        SELECT 'JiraEodTicketStatusSnapshot', COUNT(*), MAX(SnapshotAt),
+               COUNT(DISTINCT CAST(SnapshotDate AS date))
+        FROM dbo.JiraEodTicketStatusSnapshot${s}`;
+
+      const [liveResult, uatResult] = await Promise.all([
+        p.request().query(statsQuery('')),
+        p.request().query(statsQuery('UAT')),
+      ]);
+
+      const live = liveResult.recordset;
+      const uat = uatResult.recordset;
+
+      const comparison = live.map((l, i) => {
+        const u = uat[i] || {};
+        const diff = (u.rowCount ?? 0) - (l.rowCount ?? 0);
+        return {
+          table: l.tableName,
+          liveRows: l.rowCount,
+          uatRows: u.rowCount ?? 0,
+          diff,
+          liveLatest: l.latestRecord,
+          uatLatest: u.latestRecord,
+          liveExtra: l.distinctKPIs,
+          uatExtra: u.distinctKPIs,
+        };
+      });
+
+      res.json({ ok: true, data: comparison });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // GET /api/admin/kpi-data/snapshot-compare?kpi=...
+  router.get('/snapshot-compare', async (req, res) => {
+    try {
+      const p = await getPool();
+      const result = await p.request().query(`
+        SELECT l.KPI, l.KPIGroup,
+               l.[Count] AS liveCount, u.[Count] AS uatCount,
+               l.[Count] - u.[Count] AS diff,
+               l.KPITarget, l.KPIDirection,
+               l.RAG AS liveRAG, u.RAG AS uatRAG,
+               l.CreatedAt AS liveUpdated, u.CreatedAt AS uatUpdated
+        FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY KPI ORDER BY CreatedAt DESC) AS rn
+          FROM dbo.KpiSnapshot
+        ) l
+        FULL OUTER JOIN (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY KPI ORDER BY CreatedAt DESC) AS rn
+          FROM dbo.KpiSnapshotUAT
+        ) u ON l.KPI = u.KPI AND u.rn = 1
+        WHERE l.rn = 1
+        ORDER BY l.KPIGroup, l.KPI
+      `);
+      res.json({ ok: true, data: result.recordset });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
   return router;
 }

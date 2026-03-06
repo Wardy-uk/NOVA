@@ -3,6 +3,7 @@ import { OnboardingConfigView } from './OnboardingConfigView.js';
 import { AuditLogView } from './AuditPanel.js';
 import { SsoLogPanel } from './SsoLogPanel.js';
 import { KpiDataView } from './KpiDataView.js';
+import { KpiComparisonView } from './KpiComparisonView.js';
 
 interface UserRow {
   id: number;
@@ -21,7 +22,7 @@ interface Team {
   description: string | null;
 }
 
-type Tab = 'users' | 'teams' | 'ai-keys' | 'integrations' | 'onboarding' | 'permissions' | 'feedback' | 'audit-log' | 'sso-log' | 'kpi-data';
+type Tab = 'users' | 'teams' | 'ai-keys' | 'integrations' | 'onboarding' | 'permissions' | 'feedback' | 'audit-log' | 'sso-log' | 'kpi-data' | 'kpi-compare';
 
 interface FeedbackItem {
   id: number;
@@ -791,7 +792,7 @@ export function AdminView() {
 
       {/* Tabs */}
       <div className="flex items-center gap-2">
-        {([['users', 'Users'], ['teams', 'Teams'], ['onboarding', 'Onboarding'], ['ai-keys', 'AI Keys'], ['integrations', 'Integrations'], ['permissions', 'Permissions'], ['feedback', 'Feedback'], ['audit-log', 'Audit Log'], ['sso-log', 'SSO Log'], ['kpi-data', 'KPI Data']] as const).map(([key, label]) => (
+        {([['users', 'Users'], ['teams', 'Teams'], ['onboarding', 'Onboarding'], ['ai-keys', 'AI Keys'], ['integrations', 'Integrations'], ['permissions', 'Permissions'], ['feedback', 'Feedback'], ['audit-log', 'Audit Log'], ['sso-log', 'SSO Log'], ['kpi-data', 'KPI Data'], ['kpi-compare', 'Live vs UAT']] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => { setTab(key); clearMessages(); }}
@@ -1733,6 +1734,11 @@ export function AdminView() {
       {/* KPI Data Tab */}
       {tab === 'kpi-data' && (
         <KpiDataView />
+      )}
+
+      {/* KPI Comparison Tab */}
+      {tab === 'kpi-compare' && (
+        <KpiComparisonView />
       )}
     </div>
   );
