@@ -173,7 +173,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
     try {
       const p = await getPool();
       const statsQuery = (s: string) => `
-        SELECT 'KpiSnapshot' AS tableName, COUNT(*) AS rowCount, MAX(CreatedAt) AS latestRecord,
+        SELECT 'KpiSnapshot' AS tableName, COUNT(*) AS [rowCount], MAX(CreatedAt) AS latestRecord,
                (SELECT COUNT(DISTINCT KPI) FROM dbo.KpiSnapshot${s}) AS distinctKPIs
         FROM dbo.KpiSnapshot${s}
         UNION ALL
