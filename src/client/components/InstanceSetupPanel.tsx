@@ -249,7 +249,7 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl, canPushGit 
     setError(null);
     setGitResult(null);
     try {
-      const token = localStorage.getItem('nova_token');
+      const token = localStorage.getItem('nova_auth_token') ?? sessionStorage.getItem('nova_auth_token');
       const res = await fetch(`/api/setup-execution/delivery/${deliveryId}/push-templates`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -272,7 +272,7 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl, canPushGit 
     setError(null);
     setPackResult(null);
     try {
-      const token = localStorage.getItem('nova_token');
+      const token = localStorage.getItem('nova_auth_token') ?? sessionStorage.getItem('nova_auth_token');
       const res = await fetch(`/api/setup-execution/delivery/${deliveryId}/welcome-pack`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -457,7 +457,7 @@ export function InstanceSetupPanel({ deliveryId, product, azdoPrUrl, canPushGit 
                     {packData.snapshot.logos.map((l: any) => (
                       <div key={l.id} className="p-2 bg-[#1f242b] rounded text-center">
                         <img
-                          src={`/api/logos/${l.id}/image?token=${localStorage.getItem('nova_token') || ''}`}
+                          src={`/api/logos/${l.id}/image?token=${(localStorage.getItem('nova_auth_token') ?? sessionStorage.getItem('nova_auth_token')) || ''}`}
                           alt={l.label}
                           className="w-16 h-12 object-contain rounded mb-1"
                         />

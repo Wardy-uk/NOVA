@@ -25,6 +25,7 @@ import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
 import { createO365Routes } from './routes/o365.js';
 import { createAdminRoutes } from './routes/admin.js';
+import { createKpiDataRoutes } from './routes/kpi-data.js';
 import { createFeedbackRoutes } from './routes/feedback.js';
 import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
 import { createOnboardingRoutes } from './routes/onboarding.js';
@@ -409,6 +410,7 @@ async function main() {
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
+  app.use('/api/admin/kpi-data', createKpiDataRoutes(settingsQueries));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries, userQueries, notificationQueries));
   app.use('/api/audit', createAuditRoutes(auditQueries));

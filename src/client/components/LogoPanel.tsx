@@ -25,7 +25,7 @@ export function LogoPanel({ deliveryId }: Props) {
   const [uploading, setUploading] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileRefs = useRef<Record<number, HTMLInputElement | null>>({});
-  const token = localStorage.getItem('nova_token') || '';
+  const token = localStorage.getItem('nova_auth_token') ?? sessionStorage.getItem('nova_auth_token') ?? '';
 
   useEffect(() => {
     (async () => {

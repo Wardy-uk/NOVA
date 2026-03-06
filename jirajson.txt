@@ -1,0 +1,647 @@
+[
+  {
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations,customfield_12800.requestTypePractice,customfield_12851.properties",
+    "id": "118502",
+    "self": "https://nurturtech.atlassian.net/rest/api/2/issue/118502",
+    "key": "NT-11003",
+    "fields": {
+      "customfield_13344": null,
+      "statusCategory": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/statuscategory/4",
+        "id": 4,
+        "key": "indeterminate",
+        "colorName": "yellow",
+        "name": "In Progress"
+      },
+      "resolution": null,
+      "customfield_12800": {
+        "_links": {
+          "jiraRest": "https://nurturtech.atlassian.net/rest/api/2/issue/118502",
+          "web": "https://nurturtech.atlassian.net/servicedesk/customer/portal/50/NT-11003",
+          "agent": "https://nurturtech.atlassian.net/browse/NT-11003",
+          "self": "https://nurturtech.atlassian.net/rest/servicedeskapi/request/118502"
+        },
+        "requestType": {
+          "_expands": [
+            "field"
+          ],
+          "id": "598",
+          "_links": {
+            "self": "https://nurturtech.atlassian.net/rest/servicedeskapi/servicedesk/50/requesttype/598"
+          },
+          "name": "Service Request",
+          "description": "",
+          "helpText": "",
+          "defaultName": "Service Request",
+          "issueTypeId": "10706",
+          "serviceDeskId": "50",
+          "portalId": "50",
+          "groupIds": [],
+          "icon": {
+            "id": "12938",
+            "_links": {
+              "iconUrls": {
+                "48x48": "https://nurturtech.atlassian.net/rest/api/2/universal_avatar/view/type/SD_REQTYPE/avatar/12938?size=large",
+                "24x24": "https://nurturtech.atlassian.net/rest/api/2/universal_avatar/view/type/SD_REQTYPE/avatar/12938?size=small",
+                "16x16": "https://nurturtech.atlassian.net/rest/api/2/universal_avatar/view/type/SD_REQTYPE/avatar/12938?size=xsmall",
+                "32x32": "https://nurturtech.atlassian.net/rest/api/2/universal_avatar/view/type/SD_REQTYPE/avatar/12938?size=medium"
+              }
+            }
+          }
+        },
+        "currentStatus": {
+          "status": "Waiting on Assignee",
+          "statusCategory": "INDETERMINATE",
+          "statusDate": {
+            "iso8601": "2026-03-01T10:04:08+0000",
+            "jira": "2026-03-01T10:04:08.670+0000",
+            "friendly": "Today 10:04 AM",
+            "epochMillis": 1772359448670
+          }
+        }
+      },
+      "customfield_13217": null,
+      "customfield_12802": null,
+      "customfield_14427": null,
+      "customfield_12801": [],
+      "customfield_12804": null,
+      "customfield_12803": null,
+      "customfield_12806": null,
+      "customfield_12805": null,
+      "customfield_12808": null,
+      "customfield_12807": {
+        "languageCode": "en",
+        "displayName": "English"
+      },
+      "customfield_12809": null,
+      "lastViewed": null,
+      "customfield_12000": null,
+      "customfield_13212": null,
+      "customfield_13214": null,
+      "customfield_13213": null,
+      "customfield_13576": null,
+      "customfield_13216": null,
+      "labels": [],
+      "customfield_13215": null,
+      "aggregatetimeoriginalestimate": null,
+      "customfield_12916": null,
+      "customfield_11706": 0,
+      "customfield_12915": null,
+      "issuelinks": [],
+      "assignee": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Af108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+        "accountId": "712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+        "emailAddress": "nickw@nurtur.tech",
+        "avatarUrls": {
+          "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/48",
+          "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/24",
+          "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/16",
+          "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/32"
+        },
+        "displayName": "Nick Ward",
+        "active": true,
+        "timeZone": "Europe/London",
+        "accountType": "atlassian"
+      },
+      "components": [],
+      "customfield_13443": null,
+      "customfield_13685": null,
+      "customfield_13684": null,
+      "customfield_13687": null,
+      "customfield_13686": null,
+      "customfield_13444": null,
+      "customfield_13689": null,
+      "customfield_13688": null,
+      "customfield_14527": "product sub category goes here",
+      "customfield_14081": "2026-02-28T08:05:00.000+0000",
+      "subtasks": [],
+      "customfield_13791": null,
+      "customfield_13311": null,
+      "reporter": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Af108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+        "accountId": "712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+        "emailAddress": "nickw@nurtur.tech",
+        "avatarUrls": {
+          "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/48",
+          "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/24",
+          "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/16",
+          "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/32"
+        },
+        "displayName": "Nick Ward",
+        "active": true,
+        "timeZone": "Europe/London",
+        "accountType": "atlassian"
+      },
+      "customfield_12100": null,
+      "customfield_13312": null,
+      "progress": {
+        "progress": 0,
+        "total": 0
+      },
+      "worklog": {
+        "startAt": 0,
+        "maxResults": 20,
+        "total": 0,
+        "worklogs": []
+      },
+      "issuetype": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/issuetype/10706",
+        "id": "10706",
+        "description": "For customer support issues. Created by Jira Service Desk.",
+        "iconUrl": "https://nurturtech.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/12932?size=medium",
+        "name": "Support",
+        "subtask": false,
+        "avatarId": 12932,
+        "hierarchyLevel": 0
+      },
+      "project": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/project/11776",
+        "id": "11776",
+        "key": "NT",
+        "name": "Nurtur Service Hub",
+        "projectTypeKey": "service_desk",
+        "simplified": false,
+        "avatarUrls": {
+          "48x48": "https://nurturtech.atlassian.net/rest/api/2/universal_avatar/view/type/project/avatar/13238",
+          "24x24": "https://nurturtech.atlassian.net/rest/api/2/universal_avatar/view/type/project/avatar/13238?size=small",
+          "16x16": "https://nurturtech.atlassian.net/rest/api/2/universal_avatar/view/type/project/avatar/13238?size=xsmall",
+          "32x32": "https://nurturtech.atlassian.net/rest/api/2/universal_avatar/view/type/project/avatar/13238?size=medium"
+        }
+      },
+      "customfield_11000": null,
+      "customfield_13421": null,
+      "customfield_13542": null,
+      "customfield_13420": null,
+      "customfield_13416": null,
+      "customfield_13415": null,
+      "customfield_13418": null,
+      "customfield_13417": null,
+      "customfield_13419": null,
+      "resolutiondate": null,
+      "watches": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/issue/NT-11003/watchers",
+        "watchCount": 2,
+        "isWatching": false
+      },
+      "customfield_13890": null,
+      "customfield_14185": "2026-03-01T10:03:00.000+0000",
+      "customfield_13410": null,
+      "customfield_13412": null,
+      "customfield_13411": null,
+      "customfield_13414": null,
+      "customfield_13413": null,
+      "customfield_11900": null,
+      "updated": "2026-03-01T10:04:08.670+0000",
+      "customfield_13080": null,
+      "customfield_14293": null,
+      "customfield_14294": null,
+      "timeoriginalestimate": null,
+      "description": "testing testing  one two three",
+      "customfield_11100": null,
+      "customfield_13645": null,
+      "timetracking": {},
+      "customfield_13757": null,
+      "customfield_10007": null,
+      "customfield_13758": null,
+      "customfield_10008": null,
+      "customfield_10800": "1|i07sp7:",
+      "summary": "test ticket",
+      "customfield_14047": null,
+      "customfield_14048": {
+        "id": "78",
+        "name": "Resolution",
+        "_links": {
+          "self": "https://nurturtech.atlassian.net/rest/servicedeskapi/request/118502/sla/78"
+        },
+        "completedCycles": [
+          {
+            "startTime": {
+              "iso8601": "2026-02-28T08:01:55+0000",
+              "jira": "2026-02-28T08:01:55.403+0000",
+              "friendly": "Yesterday 8:01 AM",
+              "epochMillis": 1772265715403
+            },
+            "stopTime": {
+              "iso8601": "2026-03-01T10:04:08+0000",
+              "jira": "2026-03-01T10:04:08.670+0000",
+              "friendly": "Today 10:04 AM",
+              "epochMillis": 1772359448670
+            },
+            "breachTime": {
+              "iso8601": "2026-03-06T15:00:00+0000",
+              "jira": "2026-03-06T15:00:00.000+0000",
+              "friendly": "06/Mar/26 3:00 PM",
+              "epochMillis": 1772809200000
+            },
+            "breached": false,
+            "goalDuration": {
+              "millis": 144000000,
+              "friendly": "40h"
+            },
+            "elapsedTime": {
+              "millis": 0,
+              "friendly": "0m"
+            },
+            "remainingTime": {
+              "millis": 144000000,
+              "friendly": "40h"
+            }
+          }
+        ],
+        "slaDisplayFormat": "OLD_SLA_FORMAT"
+      },
+      "customfield_14287": null,
+      "customfield_14288": null,
+      "customfield_10000": null,
+      "customfield_14046": {
+        "id": "76",
+        "name": "First Reply Time",
+        "_links": {
+          "self": "https://nurturtech.atlassian.net/rest/servicedeskapi/request/118502/sla/76"
+        },
+        "completedCycles": [],
+        "ongoingCycle": {
+          "startTime": {
+            "iso8601": "2026-02-28T08:01:55+0000",
+            "jira": "2026-02-28T08:01:55.403+0000",
+            "friendly": "Yesterday 8:01 AM",
+            "epochMillis": 1772265715403
+          },
+          "breachTime": {
+            "iso8601": "2026-03-02T09:30:00+0000",
+            "jira": "2026-03-02T09:30:00.000+0000",
+            "friendly": "02/Mar/26 9:30 AM",
+            "epochMillis": 1772443800000
+          },
+          "breached": false,
+          "paused": false,
+          "withinCalendarHours": false,
+          "goalDuration": {
+            "millis": 1800000,
+            "friendly": "30m"
+          },
+          "elapsedTime": {
+            "millis": 0,
+            "friendly": "0m"
+          },
+          "remainingTime": {
+            "millis": 1800000,
+            "friendly": "30m"
+          }
+        },
+        "slaDisplayFormat": "OLD_SLA_FORMAT"
+      },
+      "customfield_10001": "2026-02-28T08:02:01.960+0000",
+      "customfield_12300": "{}",
+      "customfield_10002": null,
+      "environment": null,
+      "duedate": "2026-03-01",
+      "comment": {
+        "comments": [
+          {
+            "self": "https://nurturtech.atlassian.net/rest/api/2/issue/118502/comment/215147",
+            "id": "215147",
+            "author": {
+              "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Aac84e46b-ecff-4878-974c-2825b0497d54",
+              "accountId": "712020:ac84e46b-ecff-4878-974c-2825b0497d54",
+              "avatarUrls": {
+                "48x48": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "24x24": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "16x16": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "32x32": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png"
+              },
+              "displayName": "Nurtur",
+              "active": true,
+              "timeZone": "Europe/London",
+              "accountType": "app"
+            },
+            "body": "AI Summary\n\nUser Nick Ward has raised a test Jira ticket with no described product issue, only the text \"testing testing one two three\", indicating this is a non-functional test or placeholder and not a real support request.\n\n**Actions / Issues:**\n- No actionable product issue described.\n- Confirm with requester whether this was only a test.\n- Close or re-purpose the ticket based on requester's response.\n\n**Private Comment (for agents only):**\nThis appears to be a test/placeholder ticket with no actual problem statement, impact, affected area, or steps to reproduce. Probable cause is that the user is testing Jira or the support process. Next steps:  \n1) Add a public comment asking Nick to confirm whether this was just a test or if there is a real issue to investigate, and to provide clear details (what they were doing, expected vs actual behaviour, impact, screenshots).  \n2) If they confirm it is a test only, resolve the ticket as \"No action required – test ticket\".  \n3) If they provide real issue details, re-triage the ticket at that point for correct severity and routing.  \nNo Confluence lookup is needed as there is no technical problem described.\n\n**Priority:** Low  \n**Recommended Tier:** Customer Care",
+            "updateAuthor": {
+              "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Aac84e46b-ecff-4878-974c-2825b0497d54",
+              "accountId": "712020:ac84e46b-ecff-4878-974c-2825b0497d54",
+              "avatarUrls": {
+                "48x48": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "24x24": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "16x16": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "32x32": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png"
+              },
+              "displayName": "Nurtur",
+              "active": true,
+              "timeZone": "Europe/London",
+              "accountType": "app"
+            },
+            "created": "2026-02-28T08:02:01.960+0000",
+            "updated": "2026-02-28T08:02:01.960+0000",
+            "jsdPublic": false
+          },
+          {
+            "self": "https://nurturtech.atlassian.net/rest/api/2/issue/118502/comment/215152",
+            "id": "215152",
+            "author": {
+              "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Aac84e46b-ecff-4878-974c-2825b0497d54",
+              "accountId": "712020:ac84e46b-ecff-4878-974c-2825b0497d54",
+              "avatarUrls": {
+                "48x48": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "24x24": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "16x16": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "32x32": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png"
+              },
+              "displayName": "Nurtur",
+              "active": true,
+              "timeZone": "Europe/London",
+              "accountType": "app"
+            },
+            "body": "Hello Nick,\n\nThank you for contacting us regarding: test ticket.\n\nWe have logged your issue with a Minor priority. Based on this priority, you can expect an initial response from our team within 8 hours.\n\nDescription received: testing testing  one two three\n\nIf you have any further information, screenshots, or examples that might help us investigate, please reply to this ticket and we will include it in our review.\n\nRegards\n\nNurtur Support Team\n\n\n\nNote For Support\n\nPriority: Minor Request Type: Incident",
+            "updateAuthor": {
+              "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Aac84e46b-ecff-4878-974c-2825b0497d54",
+              "accountId": "712020:ac84e46b-ecff-4878-974c-2825b0497d54",
+              "avatarUrls": {
+                "48x48": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "24x24": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "16x16": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png",
+                "32x32": "https://secure.gravatar.com/avatar/7de608cc9ecf060d65bcaa9ee2f9cedb?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FN-2.png"
+              },
+              "displayName": "Nurtur",
+              "active": true,
+              "timeZone": "Europe/London",
+              "accountType": "app"
+            },
+            "created": "2026-02-28T08:02:06.924+0000",
+            "updated": "2026-02-28T08:02:06.924+0000",
+            "jsdPublic": false
+          },
+          {
+            "self": "https://nurturtech.atlassian.net/rest/api/2/issue/118502/comment/215177",
+            "id": "215177",
+            "author": {
+              "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Af108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+              "accountId": "712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+              "emailAddress": "nickw@nurtur.tech",
+              "avatarUrls": {
+                "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/48",
+                "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/24",
+                "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/16",
+                "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/32"
+              },
+              "displayName": "Nick Ward",
+              "active": true,
+              "timeZone": "Europe/London",
+              "accountType": "atlassian"
+            },
+            "body": "testing Jira Sync",
+            "updateAuthor": {
+              "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Af108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+              "accountId": "712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+              "emailAddress": "nickw@nurtur.tech",
+              "avatarUrls": {
+                "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/48",
+                "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/24",
+                "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/16",
+                "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/32"
+              },
+              "displayName": "Nick Ward",
+              "active": true,
+              "timeZone": "Europe/London",
+              "accountType": "atlassian"
+            },
+            "created": "2026-02-28T08:05:01.647+0000",
+            "updated": "2026-02-28T08:05:01.647+0000",
+            "jsdPublic": true
+          },
+          {
+            "self": "https://nurturtech.atlassian.net/rest/api/2/issue/118502/comment/215467",
+            "id": "215467",
+            "author": {
+              "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Af108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+              "accountId": "712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+              "emailAddress": "nickw@nurtur.tech",
+              "avatarUrls": {
+                "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/48",
+                "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/24",
+                "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/16",
+                "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/32"
+              },
+              "displayName": "Nick Ward",
+              "active": true,
+              "timeZone": "Europe/London",
+              "accountType": "atlassian"
+            },
+            "body": "int",
+            "updateAuthor": {
+              "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Af108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+              "accountId": "712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+              "emailAddress": "nickw@nurtur.tech",
+              "avatarUrls": {
+                "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/48",
+                "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/24",
+                "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/16",
+                "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/32"
+              },
+              "displayName": "Nick Ward",
+              "active": true,
+              "timeZone": "Europe/London",
+              "accountType": "atlassian"
+            },
+            "created": "2026-03-01T10:04:08.618+0000",
+            "updated": "2026-03-01T10:04:08.618+0000",
+            "jsdPublic": false
+          }
+        ],
+        "self": "https://nurturtech.atlassian.net/rest/api/2/issue/118502/comment",
+        "maxResults": 4,
+        "total": 4,
+        "startAt": 0
+      },
+      "statuscategorychangedate": "2026-03-01T10:04:08.717+0000",
+      "customfield_14150": null,
+      "customfield_13182": null,
+      "customfield_13181": null,
+      "customfield_13184": "tl?:dr goes here",
+      "customfield_13183": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/customFieldOption/13098",
+        "value": "Nurtur Direct Communications",
+        "id": "13098"
+      },
+      "customfield_13186": null,
+      "customfield_14151": null,
+      "customfield_14394": null,
+      "customfield_13185": null,
+      "customfield_14152": null,
+      "customfield_13188": null,
+      "customfield_13187": null,
+      "fixVersions": [],
+      "customfield_11201": null,
+      "customfield_13857": null,
+      "customfield_12880": {
+        "id": "2000",
+        "name": "Neutral"
+      },
+      "customfield_14147": null,
+      "customfield_12881": null,
+      "customfield_13610": null,
+      "priority": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/priority/10100",
+        "iconUrl": "https://nurturtech.atlassian.net/images/icons/priorities/medium.svg",
+        "name": "Normal",
+        "id": "10100"
+      },
+      "customfield_12400": null,
+      "customfield_14148": null,
+      "customfield_13612": null,
+      "customfield_14149": null,
+      "customfield_13611": null,
+      "customfield_13724": null,
+      "customfield_12877": null,
+      "customfield_12876": null,
+      "customfield_13723": null,
+      "customfield_12879": null,
+      "timeestimate": null,
+      "versions": [],
+      "customfield_13609": null,
+      "customfield_13608": null,
+      "status": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/status/11933",
+        "description": "",
+        "iconUrl": "https://nurturtech.atlassian.net/",
+        "name": "Waiting on Assignee",
+        "id": "11933",
+        "statusCategory": {
+          "self": "https://nurturtech.atlassian.net/rest/api/2/statuscategory/4",
+          "id": 4,
+          "key": "indeterminate",
+          "colorName": "yellow",
+          "name": "In Progress"
+        }
+      },
+      "customfield_14252": null,
+      "customfield_14494": null,
+      "customfield_14253": null,
+      "customfield_14254": [
+        {
+          "self": "https://nurturtech.atlassian.net/rest/api/2/customFieldOption/13634",
+          "value": "No",
+          "id": "13634"
+        }
+      ],
+      "customfield_13047": null,
+      "customfield_12870": null,
+      "customfield_13048": null,
+      "customfield_12875": null,
+      "customfield_13722": null,
+      "customfield_12866": null,
+      "customfield_12865": null,
+      "customfield_12868": null,
+      "customfield_13957": null,
+      "customfield_12867": null,
+      "customfield_13956": null,
+      "aggregatetimeestimate": null,
+      "customfield_12869": null,
+      "creator": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/user?accountId=712020%3Af108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+        "accountId": "712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65",
+        "emailAddress": "nickw@nurtur.tech",
+        "avatarUrls": {
+          "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/48",
+          "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/24",
+          "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/16",
+          "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65/58f65ef2-e6a5-4242-89a3-ca983aac55aa/32"
+        },
+        "displayName": "Nick Ward",
+        "active": true,
+        "timeZone": "Europe/London",
+        "accountType": "atlassian"
+      },
+      "customfield_14360": null,
+      "customfield_14361": null,
+      "customfield_13278": null,
+      "customfield_12981": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/customFieldOption/13061",
+        "value": "Customer Care",
+        "id": "13061"
+      },
+      "customfield_12860": null,
+      "aggregateprogress": {
+        "progress": 0,
+        "total": 0
+      },
+      "customfield_12862": [],
+      "customfield_12861": null,
+      "customfield_12864": null,
+      "customfield_12863": null,
+      "customfield_12500": [],
+      "customfield_12857": null,
+      "customfield_12856": null,
+      "customfield_13824": null,
+      "customfield_12859": "Service requests",
+      "customfield_12858": null,
+      "timespent": null,
+      "customfield_14114": null,
+      "customfield_13146": null,
+      "aggregatetimespent": null,
+      "customfield_13148": null,
+      "customfield_12851": null,
+      "customfield_13147": null,
+      "customfield_12850": 0,
+      "customfield_12852": null,
+      "customfield_12844": null,
+      "customfield_12843": null,
+      "customfield_12845": null,
+      "customfield_12848": null,
+      "customfield_12847": null,
+      "customfield_12849": "",
+      "workratio": -1,
+      "created": "2026-02-28T08:01:55.403+0000",
+      "customfield_14460": null,
+      "customfield_13014": null,
+      "customfield_13377": null,
+      "customfield_12840": null,
+      "customfield_10300": null,
+      "customfield_12842": null,
+      "customfield_12835": null,
+      "customfield_14218": null,
+      "customfield_13923": null,
+      "customfield_14219": null,
+      "customfield_12834": null,
+      "customfield_12837": null,
+      "customfield_12836": null,
+      "customfield_12839": null,
+      "customfield_13482": {
+        "self": "https://nurturtech.atlassian.net/rest/api/2/customFieldOption/13325",
+        "value": "Service Request",
+        "id": "13325"
+      },
+      "customfield_13245": null,
+      "customfield_13247": null,
+      "customfield_13246": null,
+      "customfield_13248": null,
+      "customfield_12822": null,
+      "customfield_12821": null,
+      "customfield_12824": null,
+      "security": null,
+      "customfield_12823": null,
+      "customfield_12826": null,
+      "attachment": [],
+      "customfield_12825": null,
+      "customfield_12828": null,
+      "customfield_12827": null,
+      "customfield_13113": null,
+      "customfield_13115": null,
+      "customfield_13114": null,
+      "customfield_14327": null,
+      "customfield_12820": null,
+      "customfield_10400": null,
+      "customfield_11601": null,
+      "customfield_12811": null,
+      "customfield_11600": null,
+      "customfield_12810": null,
+      "customfield_12813": null,
+      "customfield_12812": null,
+      "customfield_12815": null,
+      "customfield_12814": null,
+      "customfield_12817": null,
+      "customfield_12816": null,
+      "customfield_12819": null,
+      "customfield_12818": null
+    }
+  }
+]
