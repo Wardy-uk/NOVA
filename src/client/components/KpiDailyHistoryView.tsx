@@ -115,7 +115,7 @@ export function KpiDailyHistoryView() {
 
   const [fromDate, setFromDate] = useState(fmtDate(monday));
   const [toDate, setToDate] = useState(fmtDate(today));
-  const [env, setEnv] = useState<'live' | 'uat'>('live');
+  const [env, setEnv] = useState<'live' | 'uat'>('uat');
   const [subTab, setSubTab] = useState<SubTab>('departmental');
 
   const [deptData, setDeptData] = useState<DailyKpi[]>([]);

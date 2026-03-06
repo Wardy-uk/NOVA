@@ -111,12 +111,12 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const s = suffix(env);
       const p = await getPool();
       const result = await p.request().query(`
-        SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team, Department,
+        SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team,
                IsActive, IsAvailable, AccountId,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                SolvedTickets_Today, SolvedTickets_ThisWeek, TicketsSnapshotAt
         FROM dbo.Agent${s}
-        WHERE IsActive = 1 AND Department = 'NT'
+        WHERE IsActive = 1
         ORDER BY Team, AgentName
       `);
       res.json({ ok: true, data: result.recordset, env });
@@ -216,7 +216,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         SELECT 'Agent', COUNT(*), MAX(TicketsSnapshotAt),
                SUM(CASE WHEN IsActive=1 THEN 1 ELSE 0 END)
         FROM dbo.Agent${s}
-        WHERE Department = 'NT'
+        WHERE IsActive = 1
         UNION ALL
         SELECT 'JiraEodTicketStatusSnapshot', COUNT(*), MAX(SnapshotAt),
                (SELECT COUNT(DISTINCT CONVERT(varchar(10), SnapshotDate, 23)) FROM dbo.JiraEodTicketStatusSnapshot${s})
@@ -331,11 +331,11 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
 
       // Read current Agent state for NT department
       const agents = await p.request().query(`
-        SELECT AgentId, AgentName, AgentSurname, TierCode, Team, Department,
+        SELECT AgentId, AgentName, AgentSurname, TierCode, Team,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                SolvedTickets_Today, SolvedTickets_ThisWeek
         FROM dbo.Agent${s}
-        WHERE IsActive = 1 AND Department = 'NT'
+        WHERE IsActive = 1
       `);
 
       if (agents.recordset.length === 0) {
