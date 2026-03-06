@@ -107,8 +107,9 @@ export function AdminView() {
   const [integValues, setIntegValues] = useState<Record<string, Record<string, string>>>({});
   const [integSaving, setIntegSaving] = useState<string | null>(null);
   const [integTesting, setIntegTesting] = useState<string | null>(null);
-  const [integTestResult, setIntegTestResult] = useState<Record<string, { status: string; message: string }>>({});
+  const [integTestResult, setIntegTestResult] = useState<Record<string, { status: string; message: string; logs?: string[] }>>({});
   const [integSaved, setIntegSaved] = useState<Set<string>>(new Set());
+  const [integLogModal, setIntegLogModal] = useState<{ id: string; logs: string[] } | null>(null);
 
   // Milestone template state
   const [milestoneTemplates, setMilestoneTemplates] = useState<MilestoneTemplate[]>([]);
@@ -240,11 +241,13 @@ export function AdminView() {
     try {
       const res = await fetch(`/api/integrations/${integId}/test`, { method: 'POST' });
       const json = await res.json();
+      const logs: string[] = json.logs ?? [];
       if (json.ok) {
-        setIntegTestResult(prev => ({ ...prev, [integId]: { status: json.status, message: json.message } }));
+        setIntegTestResult(prev => ({ ...prev, [integId]: { status: json.status, message: json.message, logs } }));
       } else {
-        setIntegTestResult(prev => ({ ...prev, [integId]: { status: 'error', message: json.error || 'Test failed' } }));
+        setIntegTestResult(prev => ({ ...prev, [integId]: { status: 'error', message: json.error || 'Test failed', logs } }));
       }
+      if (logs.length > 0) setIntegLogModal({ id: integId, logs });
     } catch (err) {
       setIntegTestResult(prev => ({ ...prev, [integId]: { status: 'error', message: err instanceof Error ? err.message : 'Test failed' } }));
     } finally {
@@ -1737,6 +1740,37 @@ export function AdminView() {
       {/* SSO Log Tab */}
       {tab === 'sso-log' && (
         <SsoLogPanel />
+      )}
+
+      {/* Test Connection Log Modal */}
+      {integLogModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setIntegLogModal(null)}>
+          <div className="bg-[#2f353d] border border-[#3a424d] rounded-lg shadow-2xl w-full max-w-lg mx-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#3a424d]">
+              <h3 className="text-sm font-semibold text-neutral-100">Connection Log</h3>
+              <button onClick={() => setIntegLogModal(null)} className="text-neutral-500 hover:text-neutral-300 text-lg leading-none">&times;</button>
+            </div>
+            <div className="px-5 py-4 max-h-80 overflow-auto">
+              {integLogModal.logs.map((line, i) => (
+                <div key={i} className="text-[11px] text-neutral-300 font-mono py-0.5 border-b border-[#3a424d]/50 last:border-0">
+                  <span className="text-neutral-500 mr-2">{i + 1}.</span>
+                  {line}
+                </div>
+              ))}
+            </div>
+            {integTestResult[integLogModal.id] && (
+              <div className={`mx-5 mb-4 text-xs px-3 py-2 rounded ${
+                integTestResult[integLogModal.id].status === 'connected'
+                  ? 'bg-emerald-900/30 text-emerald-400'
+                  : integTestResult[integLogModal.id].status === 'not_configured'
+                    ? 'bg-amber-900/30 text-amber-400'
+                    : 'bg-red-900/30 text-red-400'
+              }`}>
+                {integTestResult[integLogModal.id].message}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

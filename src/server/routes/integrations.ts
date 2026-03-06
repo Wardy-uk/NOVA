@@ -484,37 +484,41 @@ export function createIntegrationRoutes(
     }
 
     if (integId === 'kpi-sql') {
+      const logs: string[] = [];
+      const log = (msg: string) => { logs.push(msg); console.log(`[KPI SQL Test] ${msg}`); };
+
       const settings = settingsQueries.getAll();
       const server = settings.kpi_sql_server;
       const database = settings.kpi_sql_database;
       const user = settings.kpi_sql_user;
       const password = settings.kpi_sql_password;
-      console.log(`[KPI SQL Test] server=${server}, database=${database}, user=${user}, password=${password ? '***' : '(empty)'}`);
+      log(`server=${server}, database=${database}, user=${user}, password=${password ? '***' : '(empty)'}`);
       if (!server || !database || !user || !password) {
-        console.log('[KPI SQL Test] Missing credentials');
-        res.json({ ok: true, status: 'not_configured', message: 'KPI SQL Server credentials not fully configured' });
+        log('Missing credentials — aborting');
+        res.json({ ok: true, status: 'not_configured', message: 'KPI SQL Server credentials not fully configured', logs });
         return;
       }
       try {
         const sql = await import('mssql');
-        console.log('[KPI SQL Test] Creating connection pool...');
+        log('Creating connection pool...');
         const pool = await new sql.default.ConnectionPool({
           server, database, user, password,
           options: { encrypt: true, trustServerCertificate: true },
           requestTimeout: 10000,
           connectionTimeout: 10000,
         }).connect();
-        console.log('[KPI SQL Test] Pool connected, running SELECT 1...');
+        log('Pool connected, running SELECT 1...');
         const result = await pool.request().query('SELECT 1 AS ok');
-        console.log('[KPI SQL Test] Query OK, closing pool');
+        log('Query OK, closing pool');
         await pool.close();
-        res.json({ ok: true, status: 'connected', message: `Connected to ${database} on ${server}` });
+        log('Done — connection successful');
+        res.json({ ok: true, status: 'connected', message: `Connected to ${database} on ${server}`, logs });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         const stack = err instanceof Error ? err.stack : '';
-        console.error(`[KPI SQL Test] Connection failed: ${msg}`);
-        if (stack) console.error(`[KPI SQL Test] Stack: ${stack}`);
-        res.json({ ok: true, status: 'error', message: msg });
+        log(`Connection failed: ${msg}`);
+        if (stack) log(`Stack: ${stack}`);
+        res.json({ ok: true, status: 'error', message: msg, logs });
       }
       return;
     }
