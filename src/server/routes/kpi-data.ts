@@ -188,7 +188,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         FROM dbo.Agent${s}
         UNION ALL
         SELECT 'JiraEodTicketStatusSnapshot', COUNT(*), MAX(SnapshotAt),
-               COUNT(DISTINCT CONVERT(date, SnapshotDate))
+               (SELECT COUNT(DISTINCT CONVERT(varchar(10), SnapshotDate, 23)) FROM dbo.JiraEodTicketStatusSnapshot${s})
         FROM dbo.JiraEodTicketStatusSnapshot${s}`;
 
       const [liveResult, uatResult] = await Promise.all([
