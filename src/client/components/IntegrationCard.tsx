@@ -44,6 +44,7 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
   const [saving, setSaving] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [showPasswords, setShowPasswords] = useState(false);
 
   // Device code login state
   const [loginPending, setLoginPending] = useState(false);
@@ -282,14 +283,25 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
                 {field.label}
                 {field.required && <span className="text-red-500 ml-0.5">*</span>}
               </label>
-              <input
-                type={field.type === 'password' ? 'password' : 'text'}
-                value={values[field.key] ?? ''}
-                onChange={(e) => handleFieldChange(field.key, e.target.value)}
-                onFocus={() => handleFieldFocus(field.key, field.type)}
-                placeholder={field.placeholder}
-                className="w-full bg-[#2f353d] border border-[#3a424d] rounded px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
-              />
+              <div className="relative">
+                <input
+                  type={field.type === 'password' && !showPasswords ? 'password' : 'text'}
+                  value={values[field.key] ?? ''}
+                  onChange={(e) => handleFieldChange(field.key, e.target.value)}
+                  onFocus={() => handleFieldFocus(field.key, field.type)}
+                  placeholder={field.placeholder}
+                  className="w-full bg-[#2f353d] border border-[#3a424d] rounded px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
+                />
+                {field.type === 'password' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswords(p => !p)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 text-[10px] transition-colors"
+                  >
+                    {showPasswords ? 'Hide' : 'Show'}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

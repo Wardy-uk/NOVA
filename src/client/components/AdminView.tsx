@@ -110,6 +110,7 @@ export function AdminView() {
   const [integTestResult, setIntegTestResult] = useState<Record<string, { status: string; message: string; logs?: string[] }>>({});
   const [integSaved, setIntegSaved] = useState<Set<string>>(new Set());
   const [integLogModal, setIntegLogModal] = useState<{ id: string; logs: string[] } | null>(null);
+  const [integShowPasswords, setIntegShowPasswords] = useState<Set<string>>(new Set());
 
   // Milestone template state
   const [milestoneTemplates, setMilestoneTemplates] = useState<MilestoneTemplate[]>([]);
@@ -1224,27 +1225,42 @@ export function AdminView() {
                       {field.label}
                       {field.required && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
-                    <input
-                      type={field.type === 'password' ? 'password' : 'text'}
-                      value={integValues[integ.id]?.[field.key] ?? ''}
-                      onChange={(e) => {
-                        setIntegSaved(prev => { const s = new Set(prev); s.delete(integ.id); return s; });
-                        setIntegValues(prev => ({
-                          ...prev,
-                          [integ.id]: { ...prev[integ.id], [field.key]: e.target.value },
-                        }));
-                      }}
-                      onFocus={() => {
-                        if (field.type === 'password' && (integValues[integ.id]?.[field.key] ?? '').includes('****')) {
+                    <div className="relative">
+                      <input
+                        type={field.type === 'password' && !integShowPasswords.has(integ.id) ? 'password' : 'text'}
+                        value={integValues[integ.id]?.[field.key] ?? ''}
+                        onChange={(e) => {
+                          setIntegSaved(prev => { const s = new Set(prev); s.delete(integ.id); return s; });
                           setIntegValues(prev => ({
                             ...prev,
-                            [integ.id]: { ...prev[integ.id], [field.key]: '' },
+                            [integ.id]: { ...prev[integ.id], [field.key]: e.target.value },
                           }));
-                        }
-                      }}
-                      placeholder={field.placeholder}
-                      className="w-full bg-[#272C33] border border-[#3a424d] rounded px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-[#5ec1ca] focus:outline-none"
-                    />
+                        }}
+                        onFocus={() => {
+                          if (field.type === 'password' && (integValues[integ.id]?.[field.key] ?? '').includes('****')) {
+                            setIntegValues(prev => ({
+                              ...prev,
+                              [integ.id]: { ...prev[integ.id], [field.key]: '' },
+                            }));
+                          }
+                        }}
+                        placeholder={field.placeholder}
+                        className="w-full bg-[#272C33] border border-[#3a424d] rounded px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-[#5ec1ca] focus:outline-none"
+                      />
+                      {field.type === 'password' && (
+                        <button
+                          type="button"
+                          onClick={() => setIntegShowPasswords(prev => {
+                            const s = new Set(prev);
+                            s.has(integ.id) ? s.delete(integ.id) : s.add(integ.id);
+                            return s;
+                          })}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 text-[10px] transition-colors"
+                        >
+                          {integShowPasswords.has(integ.id) ? 'Hide' : 'Show'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
