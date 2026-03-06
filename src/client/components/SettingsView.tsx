@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth.js';
 import { IntegrationCard } from './IntegrationCard.js';
 import { PABridgeCard } from './PABridgeCard.js';
 import { AISettingsCard } from './AISettingsCard.js';
+import { CollapsibleSection } from './CollapsibleSection.js';
 
 // Global/service-account integrations managed in Admin (not user-facing)
 const ADMIN_ONLY_INTEGRATIONS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp']);
@@ -41,44 +42,57 @@ export function SettingsView() {
           View-only mode. Contact an admin to make changes.
         </div>
       )}
-      <h2 className="text-xs text-neutral-500 uppercase tracking-widest mb-4">
-        Connections & Sync
-      </h2>
       {userIntegrations.map((integ) => (
-        <IntegrationCard
+        <CollapsibleSection
           key={integ.id}
-          integration={integ}
-          onSave={saveIntegration}
-          onReconnect={reconnect}
-          onStartLogin={startLogin}
-          onCheckLoginStatus={checkLoginStatus}
-          onLogout={logout}
-          onRefresh={refresh}
-          onDeleteRecords={
-            INTEGRATION_SOURCES[integ.id]
-              ? async () => {
-                  const sources = INTEGRATION_SOURCES[integ.id];
-                  for (const src of sources) {
-                    const res = await fetch(`/api/data/source/${src}`, { method: 'DELETE' });
-                    if (!res.ok) throw new Error(`Failed to delete ${src} data`);
-                  }
-                }
-              : undefined
+          title={integ.name}
+          borderless
+          badge={
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+              integ.mcpStatus === 'connected' ? 'bg-emerald-900/40 text-emerald-400'
+                : integ.mcpStatus === 'error' ? 'bg-red-900/40 text-red-400'
+                : integ.enabled ? 'bg-amber-900/40 text-amber-400'
+                : 'bg-neutral-800 text-neutral-500'
+            }`}>
+              {integ.mcpStatus === 'connected' ? 'Connected'
+                : integ.mcpStatus === 'error' ? 'Error'
+                : integ.enabled ? 'Enabled'
+                : 'Not configured'}
+            </span>
           }
-        />
+        >
+          <IntegrationCard
+            integration={integ}
+            onSave={saveIntegration}
+            onReconnect={reconnect}
+            onStartLogin={startLogin}
+            onCheckLoginStatus={checkLoginStatus}
+            onLogout={logout}
+            onRefresh={refresh}
+            onDeleteRecords={
+              INTEGRATION_SOURCES[integ.id]
+                ? async () => {
+                    const sources = INTEGRATION_SOURCES[integ.id];
+                    for (const src of sources) {
+                      const res = await fetch(`/api/data/source/${src}`, { method: 'DELETE' });
+                      if (!res.ok) throw new Error(`Failed to delete ${src} data`);
+                    }
+                  }
+                : undefined
+            }
+          />
+        </CollapsibleSection>
       ))}
 
       <JiraOAuthCard />
 
-      <h2 className="text-xs text-neutral-500 uppercase tracking-widest mb-4 mt-8">
-        Power Automate Bridge
-      </h2>
-      <PABridgeCard />
+      <CollapsibleSection title="Power Automate Bridge">
+        <PABridgeCard />
+      </CollapsibleSection>
 
-      <h2 className="text-xs text-neutral-500 uppercase tracking-widest mb-4 mt-8">
-        AI Preferences
-      </h2>
-      <AISettingsCard />
+      <CollapsibleSection title="AI Preferences">
+        <AISettingsCard />
+      </CollapsibleSection>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { OnboardingConfigView } from './OnboardingConfigView.js';
 import { AuditLogView } from './AuditPanel.js';
 import { SsoLogPanel } from './SsoLogPanel.js';
+import { CollapsibleSection } from './CollapsibleSection.js';
 
 
 
@@ -1176,30 +1177,29 @@ export function AdminView() {
             </div>
           )}
           {integrations.map((integ) => (
-            <div key={integ.id} className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
+            <CollapsibleSection
+              key={integ.id}
+              title={integ.name}
+              badge={integ.enabled ? (
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                  (integTestResult[integ.id]?.status === 'connected' || integ.mcpStatus === 'connected')
+                    ? 'bg-emerald-900/40 text-emerald-400'
+                    : integTestResult[integ.id]?.status === 'error'
+                      ? 'bg-red-900/40 text-red-400'
+                      : integ.mcpStatus === 'disconnected'
+                        ? 'bg-neutral-800 text-neutral-500'
+                        : 'bg-amber-900/40 text-amber-400'
+                }`}>
+                  {integTestResult[integ.id]?.status === 'connected' ? 'Connected'
+                    : integTestResult[integ.id]?.status === 'error' ? 'Error'
+                    : integTestResult[integ.id]?.status === 'testing' ? 'Testing...'
+                    : integ.mcpStatus === 'connected' ? 'Configured'
+                    : 'Not configured'}
+                </span>
+              ) : undefined}
+            >
               <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold">
-                    {integ.name}
-                  </h3>
-                  {integ.enabled && (
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                      (integTestResult[integ.id]?.status === 'connected' || integ.mcpStatus === 'connected')
-                        ? 'bg-emerald-900/40 text-emerald-400'
-                        : integTestResult[integ.id]?.status === 'error'
-                          ? 'bg-red-900/40 text-red-400'
-                          : integ.mcpStatus === 'disconnected'
-                            ? 'bg-neutral-800 text-neutral-500'
-                            : 'bg-amber-900/40 text-amber-400'
-                    }`}>
-                      {integTestResult[integ.id]?.status === 'connected' ? 'Connected'
-                        : integTestResult[integ.id]?.status === 'error' ? 'Error'
-                        : integTestResult[integ.id]?.status === 'testing' ? 'Testing...'
-                        : integ.mcpStatus === 'connected' ? 'Configured'
-                        : 'Not configured'}
-                    </span>
-                  )}
-                </div>
+                <span className="text-xs text-neutral-400">Enabled</span>
                 <button
                   onClick={() => {
                     setIntegrations(prev => prev.map(i =>
@@ -1271,7 +1271,7 @@ export function AdminView() {
                   {integTestResult[integ.id].message}
                 </div>
               )}
-            </div>
+            </CollapsibleSection>
           ))}
         </div>
       )}
