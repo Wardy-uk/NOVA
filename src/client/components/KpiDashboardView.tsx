@@ -262,39 +262,79 @@ function KpiCard({ kpi }: { kpi: KpiSnapshot }) {
 /* ------------------------------------------------------------------ */
 
 function KpiSummarySection({ data }: { data: KpiSnapshot[] }) {
-  const grouped = data.reduce<Record<string, KpiSnapshot[]>>((acc, row) => {
-    const g = row.KPIGroup || 'Other';
-    (acc[g] = acc[g] || []).push(row);
-    return acc;
-  }, {});
-
-  const groups = Object.entries(grouped);
+  const [sortBy, setSortBy] = useState<'type' | 'breached'>('type');
 
   // Summary counts
   const greenCount = data.filter(d => d.RAG === 1).length;
   const amberCount = data.filter(d => d.RAG === 2).length;
   const redCount = data.filter(d => d.RAG === 3).length;
 
+  // Group data based on sort mode
+  let groups: [string, KpiSnapshot[]][];
+  if (sortBy === 'type') {
+    const grouped = data.reduce<Record<string, KpiSnapshot[]>>((acc, row) => {
+      const g = row.KPIGroup || 'Other';
+      (acc[g] = acc[g] || []).push(row);
+      return acc;
+    }, {});
+    groups = Object.entries(grouped);
+  } else {
+    // Sort by RAG: Red (3) first, then Amber (2), then Green (1), then unset
+    const ragOrder = (rag: number | null) => rag === 3 ? 0 : rag === 2 ? 1 : rag === 1 ? 2 : 3;
+    const ragLabels: Record<number, string> = { 0: 'Red - Breached', 1: 'Amber - At Risk', 2: 'Green - On Target', 3: 'No Target' };
+    const sorted = [...data].sort((a, b) => ragOrder(a.RAG) - ragOrder(b.RAG));
+    const grouped = sorted.reduce<Record<string, KpiSnapshot[]>>((acc, row) => {
+      const key = ragLabels[ragOrder(row.RAG)];
+      (acc[key] = acc[key] || []).push(row);
+      return acc;
+    }, {});
+    groups = Object.entries(grouped);
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <SectionHeader title="KPI Overview" subtitle={`${data.length} metrics tracked`} />
-        <div style={{ display: 'flex', gap: 12 }}>
-          {[
-            { label: 'Green', count: greenCount, color: C.green },
-            { label: 'Amber', count: amberCount, color: C.amber },
-            { label: 'Red', count: redCount, color: C.red },
-          ].map(s => (
-            <div key={s.label} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '4px 12px', borderRadius: 20,
-              background: `${s.color}15`, border: `1px solid ${s.color}30`,
-            }}>
-              <Pulse color={s.color} />
-              <span style={{ fontSize: 12, fontWeight: 700, color: s.color }}>{s.count}</span>
-              <span style={{ fontSize: 10, color: C.text3 }}>{s.label}</span>
-            </div>
-          ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {/* Sort toggle */}
+          <div style={{
+            display: 'flex', borderRadius: 20, overflow: 'hidden',
+            border: `1px solid ${C.border}`,
+          }}>
+            {([
+              { id: 'type' as const, label: 'By Type' },
+              { id: 'breached' as const, label: 'By RAG' },
+            ]).map(s => (
+              <button
+                key={s.id}
+                onClick={() => setSortBy(s.id)}
+                style={{
+                  padding: '4px 12px', border: 'none', cursor: 'pointer',
+                  fontSize: 10, fontWeight: 600, transition: 'all 0.2s',
+                  background: sortBy === s.id ? `${C.teal}20` : 'transparent',
+                  color: sortBy === s.id ? C.teal : C.text3,
+                }}
+              >{s.label}</button>
+            ))}
+          </div>
+          {/* RAG summary pills */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            {[
+              { label: 'Green', count: greenCount, color: C.green },
+              { label: 'Amber', count: amberCount, color: C.amber },
+              { label: 'Red', count: redCount, color: C.red },
+            ].map(s => (
+              <div key={s.label} style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '4px 12px', borderRadius: 20,
+                background: `${s.color}15`, border: `1px solid ${s.color}30`,
+              }}>
+                <Pulse color={s.color} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: s.color }}>{s.count}</span>
+                <span style={{ fontSize: 10, color: C.text3 }}>{s.label}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -640,15 +680,10 @@ export function KpiDashboardView() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [env, setEnv] = useState<'live' | 'uat'>('live');
 
-  const token = localStorage.getItem('nova_token');
-
   const fetchAll = useCallback(async () => {
     setError(null);
     try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const snapRes = await fetch(`/api/kpi-data/team-snapshot?env=${env}`, { headers });
+      const snapRes = await fetch(`/api/kpi-data/team-snapshot?env=${env}`);
       const snapData = await snapRes.json();
       if (!snapData.ok) throw new Error(snapData.error || 'Failed to load team snapshot');
       setSnapshots(snapData.data || []);
@@ -658,7 +693,7 @@ export function KpiDashboardView() {
     } finally {
       setLoading(false);
     }
-  }, [token, env]);
+  }, [env]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 

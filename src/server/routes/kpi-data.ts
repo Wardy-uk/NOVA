@@ -70,20 +70,35 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
     }
   });
 
-  // GET /api/admin/kpi-data/daily-history?env=live|uat&days=7
+  // GET /api/admin/kpi-data/daily-history?env=live|uat&days=7&from=YYYY-MM-DD&to=YYYY-MM-DD
   router.get('/daily-history', async (req, res) => {
     try {
       const env = parseEnv(req);
       const s = suffix(env);
-      const days = Math.min(parseInt(req.query.days as string) || 7, 90);
       const p = await getPool();
-      const result = await p.request().query(`
-        SELECT kpi, kpiGroup, [count], target, direction, rag, CreatedAt
-        FROM dbo.jira_kpi_daily${s}
-        WHERE CreatedAt >= DATEADD(day, -${days}, GETDATE())
-        ORDER BY CreatedAt DESC, kpiGroup, kpi
-      `);
-      res.json({ ok: true, data: result.recordset, env });
+      const from = req.query.from as string | undefined;
+      const to = req.query.to as string | undefined;
+      if (from && to) {
+        const request = p.request();
+        request.input('from', sql.Date, from);
+        request.input('to', sql.Date, to);
+        const result = await request.query(`
+          SELECT kpi, kpiGroup, [count], target, direction, rag, CreatedAt
+          FROM dbo.jira_kpi_daily${s}
+          WHERE CAST(CreatedAt AS DATE) >= @from AND CAST(CreatedAt AS DATE) <= @to
+          ORDER BY CreatedAt DESC, kpiGroup, kpi
+        `);
+        res.json({ ok: true, data: result.recordset, env });
+      } else {
+        const days = Math.min(parseInt(req.query.days as string) || 7, 90);
+        const result = await p.request().query(`
+          SELECT kpi, kpiGroup, [count], target, direction, rag, CreatedAt
+          FROM dbo.jira_kpi_daily${s}
+          WHERE CreatedAt >= DATEADD(day, -${days}, GETDATE())
+          ORDER BY CreatedAt DESC, kpiGroup, kpi
+        `);
+        res.json({ ok: true, data: result.recordset, env });
+      }
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
@@ -110,20 +125,35 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
     }
   });
 
-  // GET /api/admin/kpi-data/agent-daily?env=live|uat&days=7
+  // GET /api/admin/kpi-data/agent-daily?env=live|uat&days=7&from=YYYY-MM-DD&to=YYYY-MM-DD
   router.get('/agent-daily', async (req, res) => {
     try {
       const env = parseEnv(req);
       const s = suffix(env);
-      const days = Math.min(parseInt(req.query.days as string) || 7, 90);
       const p = await getPool();
-      const result = await p.request().query(`
-        SELECT *
-        FROM dbo.jira_agent_kpi_daily${s}
-        WHERE ReportDate >= DATEADD(day, -${days}, CAST(GETDATE() AS DATE))
-        ORDER BY ReportDate DESC, AgentName
-      `);
-      res.json({ ok: true, data: result.recordset, env });
+      const from = req.query.from as string | undefined;
+      const to = req.query.to as string | undefined;
+      if (from && to) {
+        const request = p.request();
+        request.input('from', sql.Date, from);
+        request.input('to', sql.Date, to);
+        const result = await request.query(`
+          SELECT *
+          FROM dbo.jira_agent_kpi_daily${s}
+          WHERE ReportDate >= @from AND ReportDate <= @to
+          ORDER BY ReportDate DESC, AgentName
+        `);
+        res.json({ ok: true, data: result.recordset, env });
+      } else {
+        const days = Math.min(parseInt(req.query.days as string) || 7, 90);
+        const result = await p.request().query(`
+          SELECT *
+          FROM dbo.jira_agent_kpi_daily${s}
+          WHERE ReportDate >= DATEADD(day, -${days}, CAST(GETDATE() AS DATE))
+          ORDER BY ReportDate DESC, AgentName
+        `);
+        res.json({ ok: true, data: result.recordset, env });
+      }
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
@@ -254,10 +284,10 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
     try {
       const p = await getPool();
       const result = await p.request().query(`
-        SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team, Department,
-               IsActive, IsAvailable, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3
+        SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team,
+               IsActive, IsAvailable
         FROM dbo.Agent
-        ORDER BY Department, Team, AgentName
+        ORDER BY Team, AgentName
       `);
       res.json({ ok: true, data: result.recordset });
     } catch (err) {
@@ -270,34 +300,182 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
     try {
       const p = await getPool();
       const { agentId } = req.params;
-      const { Department, Team, TierCode, IsActive, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3 } = req.body;
+      const { Team, TierCode, IsActive } = req.body;
 
       const request = p.request();
       request.input('agentId', sql.Int, parseInt(agentId));
-      request.input('department', sql.NVarChar, Department);
       request.input('team', sql.NVarChar, Team);
       request.input('tierCode', sql.NVarChar, TierCode);
       request.input('isActive', sql.Bit, IsActive ? 1 : 0);
-      request.input('maxTickets', sql.Int, MaxTickets);
-      request.input('maxTicketsCC', sql.Int, MaxTicketsCustomerCare);
-      request.input('maxTicketsT2T3', sql.Int, MaxTicketsT2T3);
 
       await request.query(`
         UPDATE dbo.Agent SET
-          Department = @department,
           Team = @team,
           TierCode = @tierCode,
-          IsActive = @isActive,
-          MaxTickets = @maxTickets,
-          MaxTicketsCustomerCare = @maxTicketsCC,
-          MaxTicketsT2T3 = @maxTicketsT2T3,
-          UpdatedAt = GETDATE()
+          IsActive = @isActive
         WHERE AgentId = @agentId
       `);
 
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Update failed' });
+    }
+  });
+
+  // POST /api/admin/kpi-data/save-agent-daily — snapshot current Agent table → jira_agent_kpi_daily
+  router.post('/save-agent-daily', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const p = await getPool();
+
+      // Read current Agent state for NT department
+      const agents = await p.request().query(`
+        SELECT AgentId, AgentName, AgentSurname, TierCode, Team, Department,
+               OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
+               SolvedTickets_Today, SolvedTickets_ThisWeek
+        FROM dbo.Agent${s}
+        WHERE IsActive = 1 AND Department = 'NT'
+      `);
+
+      if (agents.recordset.length === 0) {
+        return res.json({ ok: true, inserted: 0, message: 'No active NT agents found' });
+      }
+
+      // Build a VALUES clause for bulk insert
+      const today = new Date().toISOString().slice(0, 10);
+      let inserted = 0;
+
+      for (const a of agents.recordset) {
+        const request = p.request();
+        request.input('reportDate', sql.Date, today);
+        request.input('agentName', sql.NVarChar, a.AgentName);
+        request.input('agentSurname', sql.NVarChar, a.AgentSurname || '');
+        request.input('tierCode', sql.NVarChar, a.TierCode || '');
+        request.input('team', sql.NVarChar, a.Team || '');
+        request.input('openTotal', sql.Int, a.OpenTickets_Total ?? 0);
+        request.input('over2h', sql.Int, a.OpenTickets_Over2Hours ?? 0);
+        request.input('noUpdate', sql.Int, a.OpenTickets_NoUpdateToday ?? 0);
+        request.input('solvedToday', sql.Int, a.SolvedTickets_Today ?? 0);
+        request.input('solvedWeek', sql.Int, a.SolvedTickets_ThisWeek ?? 0);
+
+        await request.query(`
+          MERGE dbo.jira_agent_kpi_daily${s} AS t
+          USING (SELECT @reportDate AS ReportDate, @agentName AS AgentName) AS s
+          ON t.ReportDate = s.ReportDate AND t.AgentName = s.AgentName
+          WHEN MATCHED THEN UPDATE SET
+            TierCode = @tierCode,
+            Team = @team,
+            OpenTickets_Total = @openTotal,
+            OpenTickets_Over2Hours = @over2h,
+            OpenTickets_NoUpdateToday = @noUpdate,
+            SolvedTickets_Today = @solvedToday,
+            SolvedTickets_ThisWeek = @solvedWeek
+          WHEN NOT MATCHED THEN INSERT
+            (ReportDate, AgentName, TierCode, Team,
+             OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
+             SolvedTickets_Today, SolvedTickets_ThisWeek)
+          VALUES
+            (@reportDate, @agentName, @tierCode, @team,
+             @openTotal, @over2h, @noUpdate,
+             @solvedToday, @solvedWeek);
+        `);
+        inserted++;
+      }
+
+      res.json({ ok: true, inserted, date: today, env });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Save failed' });
+    }
+  });
+
+  // POST /api/admin/kpi-data/backfill-agent-daily — backfill from JiraEodTicketStatusSnapshot
+  router.post('/backfill-agent-daily', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const { startDate, endDate } = req.body;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({ ok: false, error: 'startDate and endDate required (YYYY-MM-DD)' });
+      }
+
+      const p = await getPool();
+      const request = p.request();
+      request.input('startDate', sql.Date, startDate);
+      request.input('endDate', sql.Date, endDate);
+
+      // Aggregate from JiraEodTicketStatusSnapshot per agent per day
+      // Then MERGE into jira_agent_kpi_daily
+      const result = await request.query(`
+        ;WITH AgentDays AS (
+          SELECT
+            CAST(SnapshotDate AS DATE) AS ReportDate,
+            Assignee AS AgentName,
+            COUNT(*) AS OpenTickets_Total,
+            SUM(CASE WHEN IsOver2Hours = 1 THEN 1 ELSE 0 END) AS OpenTickets_Over2Hours,
+            SUM(CASE WHEN HasNoUpdateToday = 1 THEN 1 ELSE 0 END) AS OpenTickets_NoUpdateToday,
+            SUM(CASE WHEN SolvedToday = 1 THEN 1 ELSE 0 END) AS SolvedTickets_Today
+          FROM dbo.JiraEodTicketStatusSnapshot${s}
+          WHERE CAST(SnapshotDate AS DATE) BETWEEN @startDate AND @endDate
+            AND Assignee IS NOT NULL AND Assignee <> ''
+          GROUP BY CAST(SnapshotDate AS DATE), Assignee
+        )
+        MERGE dbo.jira_agent_kpi_daily${s} AS t
+        USING AgentDays AS s
+        ON t.ReportDate = s.ReportDate AND t.AgentName = s.AgentName
+        WHEN MATCHED THEN UPDATE SET
+          OpenTickets_Total = s.OpenTickets_Total,
+          OpenTickets_Over2Hours = s.OpenTickets_Over2Hours,
+          OpenTickets_NoUpdateToday = s.OpenTickets_NoUpdateToday,
+          SolvedTickets_Today = s.SolvedTickets_Today
+        WHEN NOT MATCHED THEN INSERT
+          (ReportDate, AgentName, OpenTickets_Total, OpenTickets_Over2Hours,
+           OpenTickets_NoUpdateToday, SolvedTickets_Today)
+        VALUES
+          (s.ReportDate, s.AgentName, s.OpenTickets_Total, s.OpenTickets_Over2Hours,
+           s.OpenTickets_NoUpdateToday, s.SolvedTickets_Today);
+
+        SELECT @@ROWCOUNT AS [rowsAffected];
+      `);
+
+      const rowsAffected = result.recordset?.[0]?.rowsAffected ?? 0;
+      res.json({ ok: true, rowsAffected, startDate, endDate, env });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Backfill failed' });
+    }
+  });
+
+  // GET /api/admin/kpi-data/backfill-status — check what dates have data
+  router.get('/backfill-status', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const p = await getPool();
+
+      const [dailyStats, eodStats] = await Promise.all([
+        p.request().query(`
+          SELECT MIN(ReportDate) AS earliest, MAX(ReportDate) AS latest,
+                 COUNT(DISTINCT CONVERT(varchar(10), ReportDate, 23)) AS distinctDays,
+                 COUNT(*) AS totalRows
+          FROM dbo.jira_agent_kpi_daily${s}
+        `),
+        p.request().query(`
+          SELECT MIN(CAST(SnapshotDate AS DATE)) AS earliest,
+                 MAX(CAST(SnapshotDate AS DATE)) AS latest,
+                 COUNT(DISTINCT CONVERT(varchar(10), SnapshotDate, 23)) AS distinctDays
+          FROM dbo.JiraEodTicketStatusSnapshot${s}
+        `),
+      ]);
+
+      res.json({
+        ok: true,
+        env,
+        agentDaily: dailyStats.recordset[0],
+        eodSnapshot: eodStats.recordset[0],
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
   });
 

@@ -19,8 +19,39 @@ interface Agent {
   TicketsSnapshotAt: string;
 }
 
+interface AgentDaily {
+  AgentName: string;
+  TierCode: string;
+  ReportDate: string;
+  OpenTickets_Total: number;
+  OpenTickets_Over2Hours: number;
+  SolvedTickets_Today: number;
+  TicketsPerHour: number | null;
+  CSATAverage: number | null;
+  QAOverallAvg: number | null;
+  GoldenRulesAvg: number | null;
+}
+
+type LeaderboardTab = 'combined' | 'productivity' | 'sla' | 'quality';
+
+interface RankedAgent {
+  name: string;
+  team: string;
+  tier: string;
+  available: boolean;
+  solvedToday: number;
+  solvedWeek: number;
+  openTotal: number;
+  over2h: number;
+  stale: number;
+  ticketsPerHour: number | null;
+  slaPercent: number | null;
+  qaScore: number | null;
+  compositeScore: number;
+}
+
 /* ------------------------------------------------------------------ */
-/*  Colours & Tokens                                                   */
+/*  Colours                                                            */
 /* ------------------------------------------------------------------ */
 
 const C = {
@@ -38,8 +69,11 @@ const C = {
   text3: '#64748b',
   border: 'rgba(255,255,255,0.06)',
   glass: 'rgba(255,255,255,0.03)',
-  glassHover: 'rgba(255,255,255,0.06)',
 } as const;
+
+const GOLD = '#fbbf24';
+const SILVER = '#9ca3af';
+const BRONZE = '#d97706';
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -53,10 +87,27 @@ function rankSuffix(n: number): string {
 }
 
 function rankColor(n: number): string {
-  if (n === 1) return '#fbbf24';
-  if (n === 2) return '#9ca3af';
-  if (n === 3) return '#d97706';
+  if (n === 1) return GOLD;
+  if (n === 2) return SILVER;
+  if (n === 3) return BRONZE;
   return C.text3;
+}
+
+function pct(v: number | null): string {
+  if (v == null) return '-';
+  return `${Math.round(v)}%`;
+}
+
+function fmt1(v: number | null): string {
+  if (v == null) return '-';
+  return v.toFixed(1);
+}
+
+function scoreColor(v: number | null, thresholds: [number, number]): string {
+  if (v == null) return C.text3;
+  if (v >= thresholds[0]) return C.green;
+  if (v >= thresholds[1]) return C.amber;
+  return C.red;
 }
 
 /* ------------------------------------------------------------------ */
@@ -78,17 +129,72 @@ function StatPill({ value, label, color }: { value: number | string; label: stri
   return (
     <div style={{
       display: 'flex', flexDirection: 'column' as const, alignItems: 'center',
-      padding: '12px 24px', borderRadius: 12,
+      padding: '12px 20px', borderRadius: 12,
       background: `${color}10`, border: `1px solid ${color}25`,
-      minWidth: 120,
+      minWidth: 100, flex: 1,
     }}>
-      <span style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1 }}>
+      <span style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>
         {value}
       </span>
-      <span style={{ fontSize: 10, fontWeight: 600, color: C.text3, marginTop: 4, textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>
+      <span style={{ fontSize: 9, fontWeight: 600, color: C.text3, marginTop: 4, textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>
         {label}
       </span>
     </div>
+  );
+}
+
+function MiniBar({ value, max, color }: { value: number; max: number; color: string }) {
+  const w = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+  return (
+    <div style={{
+      width: 60, height: 4, borderRadius: 2,
+      background: `${C.text3}30`, overflow: 'hidden',
+      display: 'inline-block', verticalAlign: 'middle', marginLeft: 6,
+    }}>
+      <div style={{
+        width: `${w}%`, height: '100%', borderRadius: 2,
+        background: color, transition: 'width 0.4s ease',
+      }} />
+    </div>
+  );
+}
+
+function TabButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '6px 16px', cursor: 'pointer',
+        fontSize: 11, fontWeight: 600, borderRadius: 20,
+        letterSpacing: '0.3px', transition: 'all 0.2s',
+        background: active ? `${C.teal}20` : 'transparent',
+        color: active ? C.teal : C.text3,
+        border: active ? `1px solid ${C.teal}30` : '1px solid transparent',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Rank Badge                                                         */
+/* ------------------------------------------------------------------ */
+
+function RankBadge({ rank }: { rank: number }) {
+  const isTop3 = rank <= 3;
+  const color = rankColor(rank);
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: 28, height: 28, borderRadius: '50%',
+      background: isTop3 ? `${color}20` : 'transparent',
+      border: isTop3 ? `1px solid ${color}40` : 'none',
+      fontSize: 12, fontWeight: 800,
+      color: isTop3 ? color : C.text3,
+    }}>
+      {rank}{rankSuffix(rank)}
+    </span>
   );
 }
 
@@ -98,43 +204,48 @@ function StatPill({ value, label, color }: { value: number | string; label: stri
 
 export function KpiLeaderboardView() {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [agentDaily, setAgentDaily] = useState<AgentDaily[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [env, setEnv] = useState<'live' | 'uat'>('live');
+  const [tab, setTab] = useState<LeaderboardTab>('combined');
 
-  const token = localStorage.getItem('nova_token');
-
-  const fetchAgents = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setError(null);
     try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const [agentsRes, dailyRes] = await Promise.all([
+        fetch(`/api/kpi-data/agents?env=${env}`),
+        fetch(`/api/kpi-data/agent-daily?env=${env}&days=1`),
+      ]);
 
-      const res = await fetch(`/api/kpi-data/agents?env=${env}`, { headers });
-      const data = await res.json();
+      const [agentsData, dailyData] = await Promise.all([
+        agentsRes.json(),
+        dailyRes.json(),
+      ]);
 
-      if (!data.ok) throw new Error(data.error || 'Failed to load agents');
+      if (!agentsData.ok) throw new Error(agentsData.error || 'Failed to load agents');
 
-      setAgents(data.data || []);
+      setAgents(agentsData.data || []);
+      setAgentDaily(dailyData.ok ? (dailyData.data || []) : []);
       setLastRefresh(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
       setLoading(false);
     }
-  }, [token, env]);
+  }, [env]);
 
-  useEffect(() => { setLoading(true); fetchAgents(); }, [fetchAgents]);
+  useEffect(() => { setLoading(true); fetchData(); }, [fetchData]);
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const id = setInterval(fetchAgents, 60_000);
+    const id = setInterval(fetchData, 60_000);
     return () => clearInterval(id);
-  }, [autoRefresh, fetchAgents]);
+  }, [autoRefresh, fetchData]);
 
-  /* ---- Keyframe injection (once) ---- */
+  /* ---- Keyframe injection ---- */
   useEffect(() => {
     const id = 'kpi-leaderboard-keyframes';
     if (document.getElementById(id)) return;
@@ -163,19 +274,101 @@ export function KpiLeaderboardView() {
     return () => { document.getElementById(id)?.remove(); };
   }, []);
 
-  /* ---- Derived data ---- */
-  const sorted = [...agents].sort((a, b) => {
-    const diff = b.SolvedTickets_Today - a.SolvedTickets_Today;
-    if (diff !== 0) return diff;
-    return b.SolvedTickets_ThisWeek - a.SolvedTickets_ThisWeek;
+  /* ---- Merge agent + daily data ---- */
+  const merged: RankedAgent[] = (() => {
+    // Build a map of latest daily data per agent
+    const dailyMap = new Map<string, AgentDaily>();
+    for (const d of agentDaily) {
+      const existing = dailyMap.get(d.AgentName);
+      if (!existing || d.ReportDate > existing.ReportDate) {
+        dailyMap.set(d.AgentName, d);
+      }
+    }
+
+    return agents.map(a => {
+      const daily = dailyMap.get(a.AgentName);
+      const slaPercent = a.OpenTickets_Total > 0
+        ? ((a.OpenTickets_Total - a.OpenTickets_Over2Hours) / a.OpenTickets_Total) * 100
+        : (a.SolvedTickets_Today > 0 ? 100 : null);
+
+      const tph = daily?.TicketsPerHour ?? null;
+      const qa = daily?.QAOverallAvg ?? null;
+
+      // Composite: normalise each metric to 0-100, average available ones
+      const scores: number[] = [];
+      if (tph != null) scores.push(Math.min(tph * 20, 100)); // 5 tix/hr = 100
+      if (slaPercent != null) scores.push(slaPercent);
+      if (qa != null) scores.push(qa * 20); // assume 0-5 scale → 0-100
+
+      const compositeScore = scores.length > 0
+        ? scores.reduce((s, v) => s + v, 0) / scores.length
+        : 0;
+
+      return {
+        name: `${a.AgentName} ${a.AgentSurname}`,
+        team: a.Team,
+        tier: a.TierCode,
+        available: a.IsAvailable,
+        solvedToday: a.SolvedTickets_Today,
+        solvedWeek: a.SolvedTickets_ThisWeek,
+        openTotal: a.OpenTickets_Total,
+        over2h: a.OpenTickets_Over2Hours,
+        stale: a.OpenTickets_NoUpdateToday,
+        ticketsPerHour: tph,
+        slaPercent,
+        qaScore: qa,
+        compositeScore,
+      };
+    });
+  })();
+
+  /* ---- Sort by selected tab ---- */
+  const sorted = [...merged].sort((a, b) => {
+    switch (tab) {
+      case 'productivity':
+        return (b.ticketsPerHour ?? -1) - (a.ticketsPerHour ?? -1);
+      case 'sla':
+        return (b.slaPercent ?? -1) - (a.slaPercent ?? -1);
+      case 'quality':
+        return (b.qaScore ?? -1) - (a.qaScore ?? -1);
+      case 'combined':
+      default:
+        return b.compositeScore - a.compositeScore;
+    }
   });
 
+  /* ---- Stats ---- */
   const totalAgents = agents.length;
   const availableCount = agents.filter(a => a.IsAvailable).length;
   const totalSolvedToday = agents.reduce((s, a) => s + a.SolvedTickets_Today, 0);
-  const totalOpenTickets = agents.reduce((s, a) => s + a.OpenTickets_Total, 0);
+  const avgTph = (() => {
+    const vals = merged.filter(m => m.ticketsPerHour != null);
+    return vals.length > 0 ? (vals.reduce((s, v) => s + v.ticketsPerHour!, 0) / vals.length).toFixed(1) : '-';
+  })();
+  const avgSla = (() => {
+    const vals = merged.filter(m => m.slaPercent != null);
+    return vals.length > 0 ? Math.round(vals.reduce((s, v) => s + v.slaPercent!, 0) / vals.length) + '%' : '-';
+  })();
+  const avgQa = (() => {
+    const vals = merged.filter(m => m.qaScore != null);
+    return vals.length > 0 ? (vals.reduce((s, v) => s + v.qaScore!, 0) / vals.length).toFixed(1) : '-';
+  })();
 
-  /* ---- Loading state ---- */
+  /* ---- Max values for mini bars ---- */
+  const maxTph = Math.max(...merged.map(m => m.ticketsPerHour ?? 0), 1);
+  const maxQa = Math.max(...merged.map(m => m.qaScore ?? 0), 1);
+
+  /* ---- Column headers per tab ---- */
+  const columnHeaders: Record<LeaderboardTab, string[]> = {
+    combined: ['Rank', 'Agent', 'Team', 'Tier', 'Tix/Hr', 'SLA %', 'QA Score', 'Composite', 'Solved Today'],
+    productivity: ['Rank', 'Agent', 'Team', 'Tier', 'Tix/Hr', 'Solved Today', 'Solved Week', 'Open', '>2h'],
+    sla: ['Rank', 'Agent', 'Team', 'Tier', 'SLA %', 'Open', '>2h Overdue', 'Stale', 'Solved Today'],
+    quality: ['Rank', 'Agent', 'Team', 'Tier', 'QA Score', 'Golden Rules', 'Tix/Hr', 'Solved Today'],
+  };
+
+  const isLeftAligned = (h: string) => ['Agent', 'Team', 'Tier'].includes(h);
+
+  /* ---- Loading ---- */
   if (loading) {
     return (
       <div style={{ padding: 32, background: C.bg0, minHeight: '100vh' }}>
@@ -184,12 +377,10 @@ export function KpiLeaderboardView() {
           borderRadius: 12, marginBottom: 32,
           animation: 'kpiLbShimmer 1.5s ease-in-out infinite alternate',
         }} />
-        <div style={{
-          display: 'flex', gap: 16, marginBottom: 32,
-        }}>
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div style={{ display: 'flex', gap: 16, marginBottom: 32 }}>
+          {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} style={{
-              flex: 1, height: 80, background: C.glass, border: `1px solid ${C.border}`,
+              flex: 1, height: 72, background: C.glass, border: `1px solid ${C.border}`,
               borderRadius: 12, animation: 'kpiLbShimmer 1.5s ease-in-out infinite alternate',
             }} />
           ))}
@@ -202,6 +393,132 @@ export function KpiLeaderboardView() {
     );
   }
 
+  /* ---- Render cell value for current tab ---- */
+  function renderCell(agent: RankedAgent, header: string) {
+    const cellStyle = (align: 'left' | 'center' = 'center'): React.CSSProperties => ({
+      padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
+      textAlign: align, fontSize: 13,
+    });
+
+    switch (header) {
+      case 'Agent':
+        return (
+          <td key={header} style={cellStyle('left')}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{
+                display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                background: agent.available ? C.green : '#4b5563',
+                boxShadow: agent.available ? `0 0 6px ${C.green}` : 'none',
+                flexShrink: 0,
+              }} />
+              <span style={{ fontWeight: 500, color: C.text1 }}>{agent.name}</span>
+            </div>
+          </td>
+        );
+      case 'Team':
+        return <td key={header} style={{ ...cellStyle('left'), color: C.text2, fontSize: 12 }}>{agent.team}</td>;
+      case 'Tier':
+        return (
+          <td key={header} style={cellStyle('left')}>
+            <span style={{
+              fontSize: 10, fontWeight: 700, color: C.purple,
+              padding: '2px 8px', borderRadius: 8, background: `${C.purple}15`,
+            }}>{agent.tier}</span>
+          </td>
+        );
+      case 'Tix/Hr':
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{ fontWeight: 700, color: scoreColor(agent.ticketsPerHour, [3, 1.5]) }}>
+              {fmt1(agent.ticketsPerHour)}
+            </span>
+            {agent.ticketsPerHour != null && (
+              <MiniBar value={agent.ticketsPerHour} max={maxTph} color={scoreColor(agent.ticketsPerHour, [3, 1.5])} />
+            )}
+          </td>
+        );
+      case 'SLA %':
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{ fontWeight: 700, color: scoreColor(agent.slaPercent, [90, 70]) }}>
+              {pct(agent.slaPercent)}
+            </span>
+            {agent.slaPercent != null && (
+              <MiniBar value={agent.slaPercent} max={100} color={scoreColor(agent.slaPercent, [90, 70])} />
+            )}
+          </td>
+        );
+      case 'QA Score':
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{ fontWeight: 700, color: scoreColor(agent.qaScore, [4, 3]) }}>
+              {fmt1(agent.qaScore)}
+            </span>
+            {agent.qaScore != null && (
+              <MiniBar value={agent.qaScore} max={maxQa} color={scoreColor(agent.qaScore, [4, 3])} />
+            )}
+          </td>
+        );
+      case 'Golden Rules': {
+        const daily = agentDaily.find(d => agent.name.startsWith(d.AgentName));
+        const gr = daily?.GoldenRulesAvg ?? null;
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{ fontWeight: 700, color: scoreColor(gr, [4, 3]) }}>
+              {fmt1(gr)}
+            </span>
+          </td>
+        );
+      }
+      case 'Composite':
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{
+              fontWeight: 800, fontSize: 16,
+              color: scoreColor(agent.compositeScore, [75, 50]),
+            }}>
+              {Math.round(agent.compositeScore)}
+            </span>
+            <MiniBar value={agent.compositeScore} max={100} color={scoreColor(agent.compositeScore, [75, 50])} />
+          </td>
+        );
+      case 'Solved Today':
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{
+              fontSize: 16, fontWeight: 800,
+              color: agent.solvedToday > 0 ? C.teal : C.text3,
+            }}>{agent.solvedToday}</span>
+          </td>
+        );
+      case 'Solved Week':
+        return <td key={header} style={{ ...cellStyle(), fontWeight: 600, color: C.text2 }}>{agent.solvedWeek}</td>;
+      case 'Open':
+        return <td key={header} style={{ ...cellStyle(), color: C.text2 }}>{agent.openTotal}</td>;
+      case '>2h':
+      case '>2h Overdue':
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{ fontWeight: 600, color: agent.over2h > 0 ? C.red : C.text3 }}>
+              {agent.over2h}
+            </span>
+          </td>
+        );
+      case 'Stale':
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{ fontWeight: 600, color: agent.stale > 0 ? C.amber : C.text3 }}>
+              {agent.stale}
+            </span>
+          </td>
+        );
+      default:
+        return <td key={header} style={cellStyle()}>-</td>;
+    }
+  }
+
+  const headers = columnHeaders[tab];
+
   return (
     <div style={{
       padding: 32, background: C.bg0, minHeight: '100vh',
@@ -211,11 +528,10 @@ export function KpiLeaderboardView() {
       {/* ---- Top Bar ---- */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 24px', marginBottom: 32,
+        padding: '14px 24px', marginBottom: 24,
         background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
         position: 'relative' as const, overflow: 'hidden' as const,
       }}>
-        {/* Animated gradient top border */}
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 2,
           background: `linear-gradient(90deg, ${C.teal}, ${C.purple}, ${C.teal})`,
@@ -224,7 +540,6 @@ export function KpiLeaderboardView() {
         }} />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {/* Logo */}
           <div style={{
             width: 36, height: 36, borderRadius: 10,
             background: `linear-gradient(135deg, ${C.teal}, ${C.purple})`,
@@ -238,20 +553,18 @@ export function KpiLeaderboardView() {
               letterSpacing: '-0.3px',
             }}>Agent Leaderboard</h1>
             <p style={{ fontSize: 11, color: C.text3, margin: 0 }}>
-              {env === 'live' ? 'Live' : 'UAT'} agent performance
+              {env === 'live' ? 'Live' : 'UAT'} performance rankings
             </p>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {/* Last refreshed */}
           {lastRefresh && (
             <span style={{ fontSize: 11, color: C.text3 }}>
               Updated {lastRefresh.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
           )}
 
-          {/* Env toggle */}
           <div style={{
             display: 'flex', borderRadius: 20, overflow: 'hidden',
             border: `1px solid ${C.border}`,
@@ -277,7 +590,6 @@ export function KpiLeaderboardView() {
             ))}
           </div>
 
-          {/* Auto-refresh toggle */}
           <button
             onClick={() => setAutoRefresh(!autoRefresh)}
             style={{
@@ -293,9 +605,8 @@ export function KpiLeaderboardView() {
             Auto-refresh {autoRefresh ? 'ON' : 'OFF'}
           </button>
 
-          {/* Manual refresh */}
           <button
-            onClick={fetchAgents}
+            onClick={fetchData}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               width: 36, height: 36, borderRadius: 10, border: `1px solid ${C.border}`,
@@ -309,7 +620,6 @@ export function KpiLeaderboardView() {
         </div>
       </div>
 
-      {/* ---- Error Banner ---- */}
       {error && (
         <div style={{
           padding: '12px 20px', marginBottom: 24, borderRadius: 10,
@@ -320,18 +630,32 @@ export function KpiLeaderboardView() {
         </div>
       )}
 
-      {/* ---- Summary Stats Row ---- */}
+      {/* ---- Summary Stats ---- */}
       <div style={{
-        display: 'flex', gap: 16, marginBottom: 32,
+        display: 'flex', gap: 12, marginBottom: 24,
         animation: 'kpiLbFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) forwards',
       }}>
-        <StatPill value={totalAgents} label="Total Agents" color={C.teal} />
+        <StatPill value={totalAgents} label="Agents" color={C.teal} />
         <StatPill value={availableCount} label="Available" color={C.green} />
         <StatPill value={totalSolvedToday} label="Solved Today" color={C.purple} />
-        <StatPill value={totalOpenTickets} label="Open Tickets" color={C.amber} />
+        <StatPill value={avgTph} label="Avg Tix/Hr" color={C.teal} />
+        <StatPill value={avgSla} label="Avg SLA" color={C.green} />
+        <StatPill value={avgQa} label="Avg QA" color={C.amber} />
       </div>
 
-      {/* ---- Agent Table ---- */}
+      {/* ---- Tab Selector ---- */}
+      <div style={{
+        display: 'flex', gap: 8, marginBottom: 20,
+        animation: 'kpiLbFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.05s forwards',
+        opacity: 0,
+      }}>
+        <TabButton active={tab === 'combined'} label="Combined" onClick={() => setTab('combined')} />
+        <TabButton active={tab === 'productivity'} label="Productivity" onClick={() => setTab('productivity')} />
+        <TabButton active={tab === 'sla'} label="SLA Achievement" onClick={() => setTab('sla')} />
+        <TabButton active={tab === 'quality'} label="Quality" onClick={() => setTab('quality')} />
+      </div>
+
+      {/* ---- Leaderboard Table ---- */}
       <div style={{
         animation: 'kpiLbFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.1s forwards',
         opacity: 0,
@@ -343,10 +667,10 @@ export function KpiLeaderboardView() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['Rank', 'Agent', 'Team', 'Department', 'Tier', 'Solved Today', 'Solved Week', 'Open', '>2h Overdue', 'Stale'].map(h => (
+                {headers.map(h => (
                   <th key={h} style={{
                     padding: '12px 16px',
-                    textAlign: h === 'Agent' || h === 'Team' || h === 'Department' || h === 'Tier' ? 'left' : 'center',
+                    textAlign: isLeftAligned(h) ? 'left' : 'center',
                     fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
                     letterSpacing: '0.5px', color: C.text3,
                     background: C.bg1, borderBottom: `1px solid ${C.border}`,
@@ -357,7 +681,7 @@ export function KpiLeaderboardView() {
             <tbody>
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={10} style={{
+                  <td colSpan={headers.length} style={{
                     padding: '40px 16px', textAlign: 'center',
                     color: C.text3, fontSize: 13, fontWeight: 500,
                   }}>
@@ -368,124 +692,27 @@ export function KpiLeaderboardView() {
               {sorted.map((agent, i) => {
                 const rank = i + 1;
                 const isTop3 = rank <= 3;
-                const isZero = agent.SolvedTickets_Today === 0;
+                const hasNoData = agent.compositeScore === 0 && tab === 'combined';
 
                 return (
                   <tr key={i} style={{
                     background: isTop3 ? `${rankColor(rank)}08` : 'transparent',
-                    opacity: isZero ? 0.5 : 1,
+                    opacity: hasNoData ? 0.5 : 1,
                     transition: 'background 0.15s',
                   }}>
-                    {/* Rank */}
-                    <td style={{
-                      padding: '10px 16px', textAlign: 'center',
-                      borderBottom: `1px solid ${C.border}`,
-                    }}>
-                      <span style={{
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        width: 28, height: 28, borderRadius: '50%',
-                        background: isTop3 ? `${rankColor(rank)}20` : 'transparent',
-                        border: isTop3 ? `1px solid ${rankColor(rank)}40` : 'none',
-                        fontSize: 12, fontWeight: 800,
-                        color: isTop3 ? rankColor(rank) : C.text3,
-                      }}>
-                        {rank}{rankSuffix(rank)}
-                      </span>
-                    </td>
-
-                    {/* Agent Name + Availability */}
-                    <td style={{
-                      padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{
-                          display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-                          background: agent.IsAvailable ? C.green : '#4b5563',
-                          boxShadow: agent.IsAvailable ? `0 0 6px ${C.green}` : 'none',
-                          flexShrink: 0,
-                        }} />
-                        <span style={{
-                          fontSize: 13, fontWeight: isTop3 ? 700 : 500,
-                          color: isTop3 ? C.text1 : (isZero ? C.text3 : C.text1),
-                        }}>
-                          {agent.AgentName} {agent.AgentSurname}
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Team */}
-                    <td style={{
-                      padding: '10px 16px', fontSize: 12, color: C.text2,
-                      borderBottom: `1px solid ${C.border}`,
-                    }}>{agent.Team}</td>
-
-                    {/* Department */}
-                    <td style={{
-                      padding: '10px 16px', fontSize: 12, color: C.text2,
-                      borderBottom: `1px solid ${C.border}`,
-                    }}>{agent.Department}</td>
-
-                    {/* Tier */}
-                    <td style={{
-                      padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
-                    }}>
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, color: C.purple,
-                        padding: '2px 8px', borderRadius: 8,
-                        background: `${C.purple}15`,
-                      }}>{agent.TierCode}</span>
-                    </td>
-
-                    {/* Solved Today */}
-                    <td style={{
-                      padding: '10px 16px', textAlign: 'center',
-                      borderBottom: `1px solid ${C.border}`,
-                    }}>
-                      <span style={{
-                        fontSize: 18, fontWeight: 800,
-                        color: agent.SolvedTickets_Today > 0 ? C.teal : C.text3,
-                      }}>
-                        {agent.SolvedTickets_Today}
-                      </span>
-                    </td>
-
-                    {/* Solved Week */}
-                    <td style={{
-                      padding: '10px 16px', textAlign: 'center', fontSize: 14, fontWeight: 600,
-                      color: C.text2, borderBottom: `1px solid ${C.border}`,
-                    }}>{agent.SolvedTickets_ThisWeek}</td>
-
-                    {/* Open */}
-                    <td style={{
-                      padding: '10px 16px', textAlign: 'center', fontSize: 13, fontWeight: 500,
-                      color: C.text2, borderBottom: `1px solid ${C.border}`,
-                    }}>{agent.OpenTickets_Total}</td>
-
-                    {/* >2h Overdue */}
-                    <td style={{
-                      padding: '10px 16px', textAlign: 'center',
-                      borderBottom: `1px solid ${C.border}`,
-                    }}>
-                      <span style={{
-                        fontSize: 13, fontWeight: 600,
-                        color: agent.OpenTickets_Over2Hours > 0 ? C.red : C.text3,
-                      }}>
-                        {agent.OpenTickets_Over2Hours}
-                      </span>
-                    </td>
-
-                    {/* Stale */}
-                    <td style={{
-                      padding: '10px 16px', textAlign: 'center',
-                      borderBottom: `1px solid ${C.border}`,
-                    }}>
-                      <span style={{
-                        fontSize: 13, fontWeight: 600,
-                        color: agent.OpenTickets_NoUpdateToday > 0 ? C.amber : C.text3,
-                      }}>
-                        {agent.OpenTickets_NoUpdateToday}
-                      </span>
-                    </td>
+                    {headers.map(h => {
+                      if (h === 'Rank') {
+                        return (
+                          <td key={h} style={{
+                            padding: '10px 16px', textAlign: 'center',
+                            borderBottom: `1px solid ${C.border}`,
+                          }}>
+                            <RankBadge rank={rank} />
+                          </td>
+                        );
+                      }
+                      return renderCell(agent, h);
+                    })}
                   </tr>
                 );
               })}
@@ -493,7 +720,6 @@ export function KpiLeaderboardView() {
           </table>
         </div>
 
-        {/* Snapshot timestamp */}
         {agents.length > 0 && agents[0].TicketsSnapshotAt && (
           <div style={{
             marginTop: 12, fontSize: 11, color: C.text3, textAlign: 'right',

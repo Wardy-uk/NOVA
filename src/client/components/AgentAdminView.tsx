@@ -7,22 +7,14 @@ interface Agent {
   AgentSurname: string;
   TierCode: string;
   Team: string;
-  Department: string | null;
   IsActive: boolean;
   IsAvailable: boolean;
-  MaxTickets: number;
-  MaxTicketsCustomerCare: number;
-  MaxTicketsT2T3: number;
 }
 
 interface EditState {
-  Department: string;
   Team: string;
   TierCode: string;
   IsActive: boolean;
-  MaxTickets: number;
-  MaxTicketsCustomerCare: number;
-  MaxTicketsT2T3: number;
 }
 
 type Toast = { message: string; type: 'success' | 'error' };
@@ -31,31 +23,199 @@ const TH = 'px-3 py-2 text-left text-[10px] uppercase tracking-wider text-neutra
 const TD = 'px-3 py-2 text-[13px] text-neutral-300 border-b border-[#3a424d]';
 const INPUT = 'bg-[#272C33] border border-[#3a424d] rounded px-2 py-1 text-[12px] text-neutral-300 focus:border-[#5ec1ca] focus:outline-none transition-colors';
 
-function getToken(): string {
-  return localStorage.getItem('nova_token') || '';
-}
+// Auth token is injected automatically by the global fetch interceptor in useAuth.ts
+// No need to manually set Authorization headers
 
 function editStateFromAgent(a: Agent): EditState {
   return {
-    Department: a.Department || '',
     Team: a.Team || '',
     TierCode: a.TierCode || 'T1',
     IsActive: a.IsActive,
-    MaxTickets: a.MaxTickets,
-    MaxTicketsCustomerCare: a.MaxTicketsCustomerCare,
-    MaxTicketsT2T3: a.MaxTicketsT2T3,
   };
 }
 
 function hasChanges(original: Agent, edit: EditState): boolean {
   return (
-    (original.Department || '') !== edit.Department ||
     (original.Team || '') !== edit.Team ||
     original.TierCode !== edit.TierCode ||
-    original.IsActive !== edit.IsActive ||
-    original.MaxTickets !== edit.MaxTickets ||
-    original.MaxTicketsCustomerCare !== edit.MaxTicketsCustomerCare ||
-    original.MaxTicketsT2T3 !== edit.MaxTicketsT2T3
+    original.IsActive !== edit.IsActive
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Daily Snapshot Panel                                               */
+/* ------------------------------------------------------------------ */
+
+function DailySnapshotPanel({ onToast }: { onToast: (t: Toast) => void }) {
+  const [backfillStart, setBackfillStart] = useState('');
+  const [backfillEnd, setBackfillEnd] = useState('');
+  const [running, setRunning] = useState(false);
+  const [env, setEnv] = useState<'live' | 'uat'>('live');
+  const [status, setStatus] = useState<{
+    agentDaily: { earliest: string; latest: string; distinctDays: number; totalRows: number };
+    eodSnapshot: { earliest: string; latest: string; distinctDays: number };
+  } | null>(null);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/kpi-data/backfill-status?env=${env}`);
+      const json = await res.json();
+      if (json.ok) setStatus({ agentDaily: json.agentDaily, eodSnapshot: json.eodSnapshot });
+    } catch { /* ignore */ }
+  }, [env]);
+
+  useEffect(() => { fetchStatus(); }, [fetchStatus]);
+
+  const saveNow = async () => {
+    setRunning(true);
+    try {
+      const res = await fetch(`/api/kpi-data/save-agent-daily?env=${env}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const json = await res.json();
+      if (json.ok) {
+        onToast({ message: `Saved ${json.inserted} agents for ${json.date} (${env})`, type: 'success' });
+        fetchStatus();
+      } else {
+        onToast({ message: json.error || 'Save failed', type: 'error' });
+      }
+    } catch (err) {
+      onToast({ message: err instanceof Error ? err.message : 'Save failed', type: 'error' });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const runBackfill = async () => {
+    if (!backfillStart || !backfillEnd) {
+      onToast({ message: 'Select start and end dates', type: 'error' });
+      return;
+    }
+    setRunning(true);
+    try {
+      const res = await fetch(`/api/kpi-data/backfill-agent-daily?env=${env}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startDate: backfillStart, endDate: backfillEnd }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        onToast({ message: `Backfill complete: ${json.rowsAffected} rows affected (${json.startDate} to ${json.endDate})`, type: 'success' });
+        fetchStatus();
+      } else {
+        onToast({ message: json.error || 'Backfill failed', type: 'error' });
+      }
+    } catch (err) {
+      onToast({ message: err instanceof Error ? err.message : 'Backfill failed', type: 'error' });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const fmtDate = (d: string | null) => {
+    if (!d) return '-';
+    try { return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch { return d; }
+  };
+
+  return (
+    <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold text-neutral-100">Daily Agent KPI Snapshot</h3>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-neutral-500 uppercase tracking-wide">Env:</span>
+          {(['live', 'uat'] as const).map(e => (
+            <button
+              key={e}
+              onClick={() => setEnv(e)}
+              className={`px-2.5 py-1 text-[10px] font-semibold uppercase rounded transition-colors ${
+                env === e
+                  ? e === 'live' ? 'bg-red-900/30 text-red-400 border border-red-800/30' : 'bg-[#5ec1ca]/15 text-[#5ec1ca] border border-[#5ec1ca]/25'
+                  : 'text-neutral-500 border border-transparent'
+              }`}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Status cards */}
+      {status && (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-[#272C33] rounded p-3 border border-[#3a424d]">
+            <div className="text-[10px] uppercase text-neutral-500 font-semibold mb-1">Agent Daily Data</div>
+            <div className="text-[12px] text-neutral-300 space-y-0.5">
+              <div>Range: {fmtDate(status.agentDaily.earliest)} - {fmtDate(status.agentDaily.latest)}</div>
+              <div>{status.agentDaily.distinctDays} days, {status.agentDaily.totalRows} rows</div>
+            </div>
+          </div>
+          <div className="bg-[#272C33] rounded p-3 border border-[#3a424d]">
+            <div className="text-[10px] uppercase text-neutral-500 font-semibold mb-1">EOD Snapshot Source</div>
+            <div className="text-[12px] text-neutral-300 space-y-0.5">
+              <div>Range: {fmtDate(status.eodSnapshot.earliest)} - {fmtDate(status.eodSnapshot.latest)}</div>
+              <div>{status.eodSnapshot.distinctDays} days available for backfill</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-end gap-3 flex-wrap">
+        {/* Save Now button */}
+        <div>
+          <div className="text-[10px] text-neutral-500 mb-1">Capture today's snapshot</div>
+          <button
+            onClick={saveNow}
+            disabled={running}
+            className={`px-4 py-2 text-xs rounded font-semibold transition-colors ${
+              running
+                ? 'bg-[#5ec1ca]/50 text-[#272C33] cursor-wait'
+                : 'bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9]'
+            }`}
+          >
+            {running ? 'Running...' : 'Save Now'}
+          </button>
+        </div>
+
+        <div className="border-l border-[#3a424d] h-8 mx-1" />
+
+        {/* Backfill */}
+        <div>
+          <div className="text-[10px] text-neutral-500 mb-1">Start Date</div>
+          <input
+            type="date"
+            value={backfillStart}
+            onChange={e => setBackfillStart(e.target.value)}
+            className={`${INPUT} w-36`}
+          />
+        </div>
+        <div>
+          <div className="text-[10px] text-neutral-500 mb-1">End Date</div>
+          <input
+            type="date"
+            value={backfillEnd}
+            onChange={e => setBackfillEnd(e.target.value)}
+            className={`${INPUT} w-36`}
+          />
+        </div>
+        <button
+          onClick={runBackfill}
+          disabled={running || !backfillStart || !backfillEnd}
+          className={`px-4 py-2 text-xs rounded font-semibold transition-colors ${
+            running || !backfillStart || !backfillEnd
+              ? 'bg-[#7c3aed]/30 text-[#7c3aed]/50 cursor-not-allowed'
+              : 'bg-[#7c3aed] text-white hover:bg-[#6d28d9]'
+          }`}
+        >
+          {running ? 'Running...' : 'Backfill from EOD Snapshots'}
+        </button>
+      </div>
+
+      <div className="text-[10px] text-neutral-600">
+        Auto-saves daily at 17:30. Backfill derives agent stats from JiraEodTicketStatusSnapshot.
+      </div>
+    </div>
   );
 }
 
@@ -67,7 +227,6 @@ export function AgentAdminView() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [search, setSearch] = useState('');
-  const [deptFilter, setDeptFilter] = useState('All');
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -80,9 +239,7 @@ export function AgentAdminView() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/kpi-data/agent-admin', {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
+      const res = await fetch('/api/kpi-data/agent-admin');
       const json = await res.json();
       if (json.ok) {
         setAgents(json.data);
@@ -106,32 +263,17 @@ export function AgentAdminView() {
     fetchAgents();
   }, [fetchAgents]);
 
-  // Unique departments for filter dropdown
-  const departments = useMemo(() => {
-    const set = new Set<string>();
-    for (const a of agents) {
-      if (a.Department) set.add(a.Department);
-    }
-    return Array.from(set).sort();
-  }, [agents]);
-
   // Filtered agents
   const filtered = useMemo(() => {
-    let list = agents;
-    if (deptFilter !== 'All') {
-      list = list.filter(a => (a.Department || '') === deptFilter);
-    }
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        a =>
-          a.AgentName.toLowerCase().includes(q) ||
-          a.AgentSurname.toLowerCase().includes(q) ||
-          a.AgentKey.toLowerCase().includes(q)
-      );
-    }
-    return list;
-  }, [agents, search, deptFilter]);
+    if (!search.trim()) return agents;
+    const q = search.toLowerCase();
+    return agents.filter(
+      a =>
+        a.AgentName.toLowerCase().includes(q) ||
+        a.AgentSurname.toLowerCase().includes(q) ||
+        a.AgentKey.toLowerCase().includes(q)
+    );
+  }, [agents, search]);
 
   const updateEdit = (agentId: number, field: keyof EditState, value: any) => {
     setEdits(prev => ({
@@ -149,16 +291,11 @@ export function AgentAdminView() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
         },
         body: JSON.stringify({
-          Department: edit.Department || null,
           Team: edit.Team,
           TierCode: edit.TierCode,
           IsActive: edit.IsActive,
-          MaxTickets: edit.MaxTickets,
-          MaxTicketsCustomerCare: edit.MaxTicketsCustomerCare,
-          MaxTicketsT2T3: edit.MaxTicketsT2T3,
         }),
       });
       const json = await res.json();
@@ -169,13 +306,9 @@ export function AgentAdminView() {
             a.AgentId === agent.AgentId
               ? {
                   ...a,
-                  Department: edit.Department || null,
                   Team: edit.Team,
                   TierCode: edit.TierCode,
                   IsActive: edit.IsActive,
-                  MaxTickets: edit.MaxTickets,
-                  MaxTicketsCustomerCare: edit.MaxTicketsCustomerCare,
-                  MaxTicketsT2T3: edit.MaxTicketsT2T3,
                 }
               : a
           )
@@ -217,7 +350,7 @@ export function AgentAdminView() {
         </button>
       </div>
 
-      {/* Filters */}
+      {/* Search */}
       <div className="flex items-center gap-3">
         <input
           type="text"
@@ -226,18 +359,6 @@ export function AgentAdminView() {
           onChange={e => setSearch(e.target.value)}
           className={`${INPUT} w-64`}
         />
-        <select
-          value={deptFilter}
-          onChange={e => setDeptFilter(e.target.value)}
-          className={INPUT}
-        >
-          <option value="All">All Departments</option>
-          {departments.map(d => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </select>
       </div>
 
       {/* Row count */}
@@ -266,11 +387,7 @@ export function AgentAdminView() {
                 <th className={TH}>Email</th>
                 <th className={TH}>Tier</th>
                 <th className={TH}>Team</th>
-                <th className={TH}>Department</th>
                 <th className={`${TH} text-center`}>Active</th>
-                <th className={`${TH} text-right`}>Max Tickets</th>
-                <th className={`${TH} text-right`}>Max CC</th>
-                <th className={`${TH} text-right`}>Max T2T3</th>
                 <th className={`${TH} text-center`}>Actions</th>
               </tr>
             </thead>
@@ -280,7 +397,6 @@ export function AgentAdminView() {
                 if (!edit) return null;
                 const modified = hasChanges(agent, edit);
                 const isSaving = saving[agent.AgentId] || false;
-                const isNT = edit.Department === 'NT';
                 const inactive = !edit.IsActive;
 
                 return (
@@ -291,7 +407,7 @@ export function AgentAdminView() {
                     }`}
                   >
                     {/* Agent Name (read-only) */}
-                    <td className={`${TD} whitespace-nowrap font-medium ${isNT ? 'text-[#5ec1ca]' : ''}`}>
+                    <td className={`${TD} whitespace-nowrap font-medium`}>
                       {agent.AgentName} {agent.AgentSurname}
                     </td>
 
@@ -321,16 +437,6 @@ export function AgentAdminView() {
                       />
                     </td>
 
-                    {/* Department */}
-                    <td className={TD}>
-                      <input
-                        type="text"
-                        value={edit.Department}
-                        onChange={e => updateEdit(agent.AgentId, 'Department', e.target.value)}
-                        className={`${INPUT} w-20 ${isNT ? 'border-[#5ec1ca]/40 text-[#5ec1ca]' : ''}`}
-                      />
-                    </td>
-
                     {/* IsActive */}
                     <td className={`${TD} text-center`}>
                       <button
@@ -345,43 +451,6 @@ export function AgentAdminView() {
                           }`}
                         />
                       </button>
-                    </td>
-
-                    {/* MaxTickets */}
-                    <td className={`${TD} text-right`}>
-                      <input
-                        type="number"
-                        min={0}
-                        value={edit.MaxTickets}
-                        onChange={e => updateEdit(agent.AgentId, 'MaxTickets', Number(e.target.value) || 0)}
-                        className={`${INPUT} w-16 text-right`}
-                      />
-                    </td>
-
-                    {/* MaxTicketsCustomerCare */}
-                    <td className={`${TD} text-right`}>
-                      <input
-                        type="number"
-                        min={0}
-                        value={edit.MaxTicketsCustomerCare}
-                        onChange={e =>
-                          updateEdit(agent.AgentId, 'MaxTicketsCustomerCare', Number(e.target.value) || 0)
-                        }
-                        className={`${INPUT} w-16 text-right`}
-                      />
-                    </td>
-
-                    {/* MaxTicketsT2T3 */}
-                    <td className={`${TD} text-right`}>
-                      <input
-                        type="number"
-                        min={0}
-                        value={edit.MaxTicketsT2T3}
-                        onChange={e =>
-                          updateEdit(agent.AgentId, 'MaxTicketsT2T3', Number(e.target.value) || 0)
-                        }
-                        className={`${INPUT} w-16 text-right`}
-                      />
                     </td>
 
                     {/* Save */}
@@ -405,7 +474,7 @@ export function AgentAdminView() {
               })}
               {filtered.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={10} className="text-center py-8 text-neutral-500 text-[13px]">
+                  <td colSpan={6} className="text-center py-8 text-neutral-500 text-[13px]">
                     No agents found
                   </td>
                 </tr>
@@ -414,6 +483,9 @@ export function AgentAdminView() {
           </table>
         )}
       </div>
+
+      {/* Daily KPI Snapshot & Backfill */}
+      <DailySnapshotPanel onToast={setToast} />
 
       {/* Toast */}
       {toast && (

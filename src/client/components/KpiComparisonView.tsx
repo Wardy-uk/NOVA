@@ -35,18 +35,13 @@ export function KpiComparisonView() {
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  const token = localStorage.getItem('nova_token');
-
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
       const [compRes, snapRes] = await Promise.all([
-        fetch('/api/kpi-data/comparison', { headers }),
-        fetch('/api/kpi-data/snapshot-compare', { headers }),
+        fetch('/api/kpi-data/comparison'),
+        fetch('/api/kpi-data/snapshot-compare'),
       ]);
 
       const compData = await compRes.json();
