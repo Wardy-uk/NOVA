@@ -20,7 +20,9 @@ import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
 import { ServiceDeskDashboard } from './components/ServiceDeskDashboard.js';
-import { ServiceDeskKpis } from './components/ServiceDeskKpis.js';
+import { KpiDataView } from './components/KpiDataView.js';
+import { KpiComparisonView } from './components/KpiComparisonView.js';
+// ServiceDeskKpis wrapper no longer needed — KPI views are now a top-level area
 import { TeamWorkloadView } from './components/TeamWorkloadView.js';
 import { NotificationBell } from './components/NotificationBell.js';
 import { ChatView } from './components/ChatView.js';
@@ -39,11 +41,12 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts';
+type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts' | 'kpis';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
-  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'sd-kpis' | 'team-workload' | 'chat'
+  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm'
+  | 'kpi-data' | 'kpi-compare'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -61,7 +64,7 @@ type AccessLevel = 'hidden' | 'view' | 'edit';
 interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
-  command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view', admin: 'hidden',
+  command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden', admin: 'hidden',
 };
 
 const AREAS: Record<Area, AreaDef> = {
@@ -87,7 +90,6 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
       { view: 'attention', label: 'My Breached' },
-      { view: 'sd-kpis', label: 'KPI Data' },
     ],
   },
   onboarding: {
@@ -108,9 +110,17 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'crm', label: 'CRM' },
     ],
   },
+  kpis: {
+    label: 'KPIs',
+    defaultView: 'kpi-data',
+    tabs: [
+      { view: 'kpi-data', label: 'KPI Data' },
+      { view: 'kpi-compare', label: 'Live vs UAT' },
+    ],
+  },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'onboarding', 'accounts'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'onboarding', 'accounts', 'kpis'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
@@ -122,7 +132,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'sd-kpis', 'team-workload', 'admin-panel']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-data', 'kpi-compare', 'team-workload', 'admin-panel']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -218,7 +228,7 @@ export function App() {
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
     userRole.split(',').map(r => r.trim()).includes('admin')
-      ? { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', admin: 'edit' }
+      ? { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit', admin: 'edit' }
       : DEFAULT_AREA_ACCESS,
   );
   useEffect(() => {
@@ -799,8 +809,12 @@ export function App() {
           {view === 'sd-dashboard' && !sdFilter && (
             <ServiceDeskDashboard />
           )}
-          {view === 'sd-kpis' && !sdFilter && (
-            <ServiceDeskKpis />
+          {/* KPIs */}
+          {view === 'kpi-data' && (
+            <KpiDataView />
+          )}
+          {view === 'kpi-compare' && (
+            <KpiComparisonView />
           )}
 
           {/* Onboarding */}

@@ -35,9 +35,10 @@ import type { CustomRole } from '../middleware/auth.js';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 
 const DEFAULT_CUSTOM_ROLES: CustomRole[] = [
-  { id: 'editor', name: 'Editor', areas: { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit' } },
-  { id: 'design', name: 'Design', areas: { command: 'view', servicedesk: 'view', onboarding: 'edit', accounts: 'view', azdo_push: 'edit' } },
-  { id: 'viewer', name: 'Viewer', areas: { command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view' } },
+  { id: 'editor', name: 'Editor', areas: { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit' } },
+  { id: 'design', name: 'Design', areas: { command: 'view', servicedesk: 'view', onboarding: 'edit', accounts: 'view', azdo_push: 'edit', kpis: 'view' } },
+  { id: 'viewer', name: 'Viewer', areas: { command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden' } },
+  { id: 'report_viewer', name: 'Report Viewer', areas: { command: 'view', servicedesk: 'view', onboarding: 'hidden', accounts: 'hidden', kpis: 'view' } },
 ];
 
 function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
@@ -51,11 +52,11 @@ function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
 function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string, string> {
   const userRoles = parseRoles(roleStr);
   if (userRoles.includes('admin')) {
-    return { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', azdo_push: 'edit', admin: 'edit' };
+    return { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit', azdo_push: 'edit', admin: 'edit' };
   }
   const matched = roles.filter(r => userRoles.includes(r.id));
   if (matched.length === 0) {
-    return { command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view' };
+    return { command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden' };
   }
   // Merge: take highest access per area across all assigned roles
   const RANK: Record<string, number> = { hidden: 0, view: 1, edit: 2 };

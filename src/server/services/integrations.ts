@@ -138,6 +138,19 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'bym_image_url', label: 'Image Service URL', type: 'url', placeholder: 'https://bymmedia-dev.azurewebsites.net', required: true },
     ],
   },
+  {
+    id: 'kpi-sql',
+    name: 'KPI SQL Server',
+    description: 'SQL Server connection for Jira Support DB KPI data. Used by the KPIs area to display team and agent metrics.',
+    enabledKey: 'kpi_sql_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'kpi_sql_server', label: 'Server', type: 'text', placeholder: 'your-server.database.windows.net', required: true },
+      { key: 'kpi_sql_database', label: 'Database', type: 'text', placeholder: 'JiraSupportDB', required: true },
+      { key: 'kpi_sql_user', label: 'Username', type: 'text', placeholder: 'SQL username', required: true },
+      { key: 'kpi_sql_password', label: 'Password', type: 'password', placeholder: 'SQL password', required: true },
+    ],
+  },
 ];
 
 export interface McpServerConfig {
