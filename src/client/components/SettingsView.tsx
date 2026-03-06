@@ -7,7 +7,7 @@ import { AISettingsCard } from './AISettingsCard.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
 
 // Global/service-account integrations managed in Admin (not user-facing)
-const ADMIN_ONLY_INTEGRATIONS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp']);
+const ADMIN_ONLY_INTEGRATIONS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp', 'bym-setup', 'azdo', 'kpi-sql']);
 
 // Map integration IDs to the data source(s) they populate locally
 const INTEGRATION_SOURCES: Record<string, string[]> = {

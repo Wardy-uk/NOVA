@@ -13,7 +13,7 @@ import type { BymClient } from '../services/bym-client.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
 // Admin-only integrations: credentials stay in global settings.json
-const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo']);
+const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo', 'kpi-sql']);
 
 const execFileAsync = promisify(execFile);
 
