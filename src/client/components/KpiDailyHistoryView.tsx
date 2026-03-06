@@ -25,9 +25,21 @@ interface AgentDaily {
   OpenTickets_NoUpdateToday: number;
   SolvedTickets_Today: number;
   SolvedTickets_ThisWeek: number;
-  QaAvgScore?: number | null;
-  GoldenRuleFails?: number | null;
-  CsatAvg?: number | null;
+  AvailableHours?: number | null;
+  TicketsPerHour?: number | null;
+  CSATCount?: number | null;
+  CSATAverage?: number | null;
+  QATicketsScored?: number | null;
+  QAOverallAvg?: number | null;
+  QAAccuracyAvg?: number | null;
+  QAClarityAvg?: number | null;
+  QAToneAvg?: number | null;
+  QARedCount?: number | null;
+  QAAmberCount?: number | null;
+  QAGreenCount?: number | null;
+  QAConcerningCount?: number | null;
+  GoldenRulesScored?: number | null;
+  GoldenRulesAvg?: number | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -87,6 +99,13 @@ function fmtDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+function fmtDateShort(s: string): string {
+  try {
+    const d = new Date(s + 'T00:00:00');
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  } catch { return s; }
+}
+
 function fmtDateDisplay(s: string): string {
   try {
     const d = new Date(s);
@@ -95,15 +114,204 @@ function fmtDateDisplay(s: string): string {
 }
 
 function fmtNum(v: number | null | undefined, dp = 0): string {
-  if (v === null || v === undefined) return '-';
+  if (v === null || v === undefined) return '';
   return Number.isFinite(v) ? v.toFixed(dp) : String(v);
 }
+
+function fmtPct(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '';
+  return (v * 100).toFixed(2) + '%';
+}
+
+/* ---- RAG calculation ---- */
+type Direction = 'higher' | 'lower';
+
+function calcRag(
+  value: number | null | undefined,
+  target: number | null,
+  threshold: number | null,
+  dir: Direction,
+): number | null {
+  if (value === null || value === undefined || target === null) return null;
+  const thr = threshold ?? target;
+  if (dir === 'higher') {
+    if (value >= target) return 1;     // green
+    if (value >= thr) return 2;        // amber
+    return 3;                          // red
+  } else {
+    if (value <= target) return 1;
+    if (value <= thr) return 2;
+    return 3;
+  }
+}
+
+/* ---- Productivity targets per tier (from spreadsheet) ---- */
+const PROD_TARGETS: Record<string, { target: number; threshold: number }> = {
+  T1: { target: 2.00, threshold: 1.90 },
+  T2: { target: 0.67, threshold: 0.63 },
+  TL: { target: 1.00, threshold: 0.95 },
+};
+
+const QA_TARGET = 95;
+const QA_THRESHOLD = 90;
 
 /* ------------------------------------------------------------------ */
 /*  Sub-tab types                                                      */
 /* ------------------------------------------------------------------ */
 
 type SubTab = 'departmental' | 'agents';
+
+/* ------------------------------------------------------------------ */
+/*  Metric Pivot Table                                                 */
+/* ------------------------------------------------------------------ */
+
+interface MetricDef {
+  label: string;
+  getValue: (row: AgentDaily) => number | null | undefined;
+  format: (v: number | null | undefined) => string;
+  target: (tier: string) => number | null;
+  threshold: (tier: string) => number | null;
+  direction: Direction;
+}
+
+const AGENT_METRICS: MetricDef[] = [
+  {
+    label: 'Productivity',
+    getValue: (r) => r.SolvedTickets_Today,
+    format: (v) => fmtNum(v, 2),
+    target: (tier) => PROD_TARGETS[tier]?.target ?? null,
+    threshold: (tier) => PROD_TARGETS[tier]?.threshold ?? null,
+    direction: 'higher',
+  },
+  {
+    label: 'QA',
+    getValue: (r) => r.QAOverallAvg,
+    format: (v) => v != null ? fmtNum(v, 2) + '%' : '',
+    target: () => QA_TARGET,
+    threshold: () => QA_THRESHOLD,
+    direction: 'higher',
+  },
+];
+
+function AgentMetricGrid({ metric, agents, dates, dataMap }: {
+  metric: MetricDef;
+  agents: { name: string; tier: string }[];
+  dates: string[];
+  dataMap: Map<string, AgentDaily>;
+}) {
+  const thStyle: React.CSSProperties = {
+    padding: '8px 12px', textAlign: 'center',
+    fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+    letterSpacing: '0.5px', color: C.text3,
+    background: C.bg1, borderBottom: `1px solid ${C.border}`,
+    position: 'sticky', top: 0, zIndex: 2,
+    whiteSpace: 'nowrap',
+  };
+  const tdBase: React.CSSProperties = {
+    padding: '6px 10px', fontSize: 12, textAlign: 'center',
+    borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap',
+  };
+
+  return (
+    <div style={{ marginBottom: 32 }}>
+      {/* Section header */}
+      <div style={{
+        fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+        letterSpacing: '1px', color: C.teal, marginBottom: 8,
+        paddingBottom: 6, borderBottom: `1px solid ${C.border}`,
+        display: 'flex', alignItems: 'center', gap: 8,
+      }}>
+        {metric.label}
+      </div>
+
+      <div style={{
+        background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+        overflow: 'auto',
+      }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: dates.length * 120 + 300 }}>
+          <thead>
+            <tr>
+              <th style={{ ...thStyle, textAlign: 'left', minWidth: 120, position: 'sticky', left: 0, zIndex: 3, background: C.bg1 }}>
+                {metric.label}
+              </th>
+              <th style={{ ...thStyle, minWidth: 40 }}>Tier</th>
+              <th style={{ ...thStyle, minWidth: 60 }}>Target</th>
+              <th style={{ ...thStyle, minWidth: 60 }}>Threshold</th>
+              {dates.map(d => (
+                <th key={d} style={thStyle}>{fmtDateShort(d)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {agents.map((agent, i) => {
+              const tgt = metric.target(agent.tier);
+              const thr = metric.threshold(agent.tier);
+              return (
+                <tr key={i}>
+                  <td style={{
+                    ...tdBase, textAlign: 'left', fontWeight: 500, color: C.text1,
+                    position: 'sticky', left: 0, zIndex: 1,
+                    background: i % 2 === 0 ? C.bg0 : C.bg2,
+                  }}>{agent.name}</td>
+                  <td style={{
+                    ...tdBase,
+                    background: i % 2 === 0 ? C.bg0 : C.bg2,
+                  }}>
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, color: C.purple,
+                      padding: '1px 6px', borderRadius: 6,
+                      background: `${C.purple}15`,
+                    }}>{agent.tier}</span>
+                  </td>
+                  <td style={{
+                    ...tdBase, color: C.text3, fontWeight: 600,
+                    background: i % 2 === 0 ? C.bg0 : C.bg2,
+                  }}>{tgt !== null ? metric.format(tgt) : '-'}</td>
+                  <td style={{
+                    ...tdBase, color: C.text3, fontWeight: 600,
+                    background: i % 2 === 0 ? C.bg0 : C.bg2,
+                  }}>{thr !== null ? metric.format(thr) : '-'}</td>
+                  {dates.map(d => {
+                    const key = `${agent.name}|${d}`;
+                    const row = dataMap.get(key);
+                    const val = row ? metric.getValue(row) : null;
+                    const rag = calcRag(val, tgt, thr, metric.direction);
+                    const formatted = val != null ? metric.format(val) : '';
+                    const bgBase = i % 2 === 0 ? C.bg0 : C.bg2;
+                    return (
+                      <td key={d} style={{
+                        ...tdBase,
+                        background: bgBase,
+                      }}>
+                        {formatted ? (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 5,
+                          }}>
+                            <span style={{ fontWeight: 600, color: C.text1 }}>{formatted}</span>
+                            {rag !== null && (
+                              <span style={{
+                                display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                                background: ragColor(rag),
+                                boxShadow: `0 0 4px ${ragColor(rag)}`,
+                                flexShrink: 0,
+                              }} />
+                            )}
+                          </span>
+                        ) : (
+                          <span style={{ color: C.text3 }}></span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /*  Main Component                                                     */
@@ -170,7 +378,7 @@ export function KpiDailyHistoryView() {
     const lm = getMonday(today);
     lm.setDate(lm.getDate() - 7);
     const ls = new Date(lm);
-    ls.setDate(ls.getDate() + 4); // Friday
+    ls.setDate(ls.getDate() + 4);
     setFromDate(fmtDate(lm));
     setToDate(fmtDate(ls));
   };
@@ -183,10 +391,19 @@ export function KpiDailyHistoryView() {
 
   /* ---- Departmental: pivot by date ---- */
   const deptDates = [...new Set(deptData.map(d => d.CreatedAt.slice(0, 10)))].sort().reverse();
-  const deptGroups = [...new Set(deptData.map(d => d.kpiGroup))].sort();
 
-  /* ---- Agent: pivot by date ---- */
-  const agentDates = [...new Set(agentData.map(d => (d.ReportDate || '').slice(0, 10)))].sort().reverse();
+  /* ---- Agent: build pivot structures ---- */
+  const agentDates = [...new Set(agentData.map(d => (d.ReportDate || '').slice(0, 10)).filter(Boolean))].sort();
+  const agentNames = [...new Set(agentData.map(d => d.AgentName))].sort();
+  const agentTiers = new Map<string, string>();
+  agentData.forEach(d => { if (d.TierCode) agentTiers.set(d.AgentName, d.TierCode); });
+  const agents = agentNames.map(name => ({ name, tier: agentTiers.get(name) || '' }));
+  // Build lookup map: "AgentName|YYYY-MM-DD" => row
+  const agentDataMap = new Map<string, AgentDaily>();
+  agentData.forEach(d => {
+    const dateKey = (d.ReportDate || '').slice(0, 10);
+    if (dateKey) agentDataMap.set(`${d.AgentName}|${dateKey}`, d);
+  });
 
   /* ---- Styles ---- */
   const thStyle: React.CSSProperties = {
@@ -443,113 +660,23 @@ export function KpiDailyHistoryView() {
         </div>
       )}
 
-      {/* ---- Agent KPIs Tab ---- */}
+      {/* ---- Agent KPIs Tab: Pivoted spreadsheet style ---- */}
       {!loading && subTab === 'agents' && (
         <div>
-          {agentDates.length === 0 ? (
+          {agents.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: C.text3 }}>
               No agent KPI data for this date range.
             </div>
           ) : (
-            agentDates.map(date => {
-              const dayRows = agentData
-                .filter(d => (d.ReportDate || '').slice(0, 10) === date)
-                .sort((a, b) => b.SolvedTickets_Today - a.SolvedTickets_Today);
-              const totalSolved = dayRows.reduce((s, r) => s + r.SolvedTickets_Today, 0);
-
-              return (
-                <div key={date} style={{ marginBottom: 24 }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    marginBottom: 8,
-                  }}>
-                    <h3 style={{
-                      fontSize: 14, fontWeight: 700, color: C.text1, margin: 0,
-                    }}>{fmtDateDisplay(date)}</h3>
-                    <span style={{
-                      fontSize: 11, fontWeight: 600, color: C.teal,
-                      padding: '2px 10px', borderRadius: 10,
-                      background: `${C.teal}15`,
-                    }}>{totalSolved} solved &middot; {dayRows.length} agents</span>
-                  </div>
-                  <div style={{
-                    background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
-                    overflow: 'auto',
-                  }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr>
-                          <th style={thStyle}>Agent</th>
-                          <th style={thStyle}>Tier</th>
-                          <th style={thStyle}>Team</th>
-                          <th style={{ ...thStyle, textAlign: 'center' }}>Solved</th>
-                          <th style={{ ...thStyle, textAlign: 'center' }}>Open</th>
-                          <th style={{ ...thStyle, textAlign: 'center' }}>&gt;2h</th>
-                          <th style={{ ...thStyle, textAlign: 'center' }}>Stale</th>
-                          {agentData.some(r => r.QaAvgScore != null) && (
-                            <th style={{ ...thStyle, textAlign: 'center' }}>QA Avg</th>
-                          )}
-                          {agentData.some(r => r.GoldenRuleFails != null) && (
-                            <th style={{ ...thStyle, textAlign: 'center' }}>GR Fails</th>
-                          )}
-                          {agentData.some(r => r.CsatAvg != null) && (
-                            <th style={{ ...thStyle, textAlign: 'center' }}>CSAT</th>
-                          )}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dayRows.map((row, i) => (
-                          <tr key={i}>
-                            <td style={{ ...tdStyle, fontWeight: 500 }}>
-                              {row.AgentName} {row.AgentSurname || ''}
-                            </td>
-                            <td style={tdStyle}>
-                              <span style={{
-                                fontSize: 10, fontWeight: 700, color: C.purple,
-                                padding: '2px 8px', borderRadius: 8,
-                                background: `${C.purple}15`,
-                              }}>{row.TierCode}</span>
-                            </td>
-                            <td style={{ ...tdStyle, fontSize: 12, color: C.text2 }}>{row.Team}</td>
-                            <td style={{
-                              ...tdStyle, textAlign: 'center', fontWeight: 700,
-                              color: row.SolvedTickets_Today > 0 ? C.teal : C.text3,
-                            }}>{row.SolvedTickets_Today}</td>
-                            <td style={{ ...tdStyle, textAlign: 'center' }}>{row.OpenTickets_Total}</td>
-                            <td style={{
-                              ...tdStyle, textAlign: 'center',
-                              color: row.OpenTickets_Over2Hours > 0 ? C.red : C.text3,
-                              fontWeight: row.OpenTickets_Over2Hours > 0 ? 600 : 400,
-                            }}>{row.OpenTickets_Over2Hours}</td>
-                            <td style={{
-                              ...tdStyle, textAlign: 'center',
-                              color: row.OpenTickets_NoUpdateToday > 0 ? C.amber : C.text3,
-                              fontWeight: row.OpenTickets_NoUpdateToday > 0 ? 600 : 400,
-                            }}>{row.OpenTickets_NoUpdateToday}</td>
-                            {agentData.some(r => r.QaAvgScore != null) && (
-                              <td style={{ ...tdStyle, textAlign: 'center' }}>
-                                {fmtNum(row.QaAvgScore, 1)}
-                              </td>
-                            )}
-                            {agentData.some(r => r.GoldenRuleFails != null) && (
-                              <td style={{
-                                ...tdStyle, textAlign: 'center',
-                                color: (row.GoldenRuleFails ?? 0) > 0 ? C.red : C.text3,
-                              }}>{fmtNum(row.GoldenRuleFails)}</td>
-                            )}
-                            {agentData.some(r => r.CsatAvg != null) && (
-                              <td style={{ ...tdStyle, textAlign: 'center' }}>
-                                {fmtNum(row.CsatAvg, 1)}
-                              </td>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })
+            AGENT_METRICS.map(metric => (
+              <AgentMetricGrid
+                key={metric.label}
+                metric={metric}
+                agents={agents}
+                dates={agentDates}
+                dataMap={agentDataMap}
+              />
+            ))
           )}
         </div>
       )}
