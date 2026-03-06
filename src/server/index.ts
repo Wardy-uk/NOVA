@@ -410,7 +410,7 @@ async function main() {
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
-  app.use('/api/admin/kpi-data', createKpiDataRoutes(settingsQueries));
+  app.use('/api/kpi-data', createKpiDataRoutes(settingsQueries));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries, userQueries, notificationQueries));
   app.use('/api/audit', createAuditRoutes(auditQueries));

@@ -45,8 +45,8 @@ export function KpiComparisonView() {
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
       const [compRes, snapRes] = await Promise.all([
-        fetch('/api/admin/kpi-data/comparison', { headers }),
-        fetch('/api/admin/kpi-data/snapshot-compare', { headers }),
+        fetch('/api/kpi-data/comparison', { headers }),
+        fetch('/api/kpi-data/snapshot-compare', { headers }),
       ]);
 
       const compData = await compRes.json();

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import sql from 'mssql';
-import { requireRole } from '../middleware/auth.js';
+
 import type { SettingsQueries } from '../db/settings-store.js';
 
 const VALID_ENVS = ['live', 'uat'] as const;
@@ -12,7 +12,7 @@ function suffix(env: Env): string {
 
 export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
   const router = Router();
-  router.use(requireRole('admin'));
+
 
   let pool: sql.ConnectionPool | null = null;
 
@@ -188,7 +188,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         FROM dbo.Agent${s}
         UNION ALL
         SELECT 'JiraEodTicketStatusSnapshot', COUNT(*), MAX(SnapshotAt),
-               COUNT(DISTINCT CAST(SnapshotDate AS date))
+               COUNT(DISTINCT CONVERT(date, SnapshotDate))
         FROM dbo.JiraEodTicketStatusSnapshot${s}`;
 
       const [liveResult, uatResult] = await Promise.all([

@@ -202,7 +202,7 @@ export function KpiDataView() {
       if (['daily-history', 'agent-daily', 'qa-scores', 'digest'].includes(tab)) {
         params.set('days', String(days));
       }
-      const res = await fetch(`/api/admin/kpi-data/${tab}?${params}`);
+      const res = await fetch(`/api/kpi-data/${tab}?${params}`);
       const json = await res.json();
       if (json.ok) {
         setData(json.data);

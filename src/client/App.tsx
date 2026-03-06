@@ -20,6 +20,7 @@ import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
 import { ServiceDeskDashboard } from './components/ServiceDeskDashboard.js';
+import { ServiceDeskKpis } from './components/ServiceDeskKpis.js';
 import { TeamWorkloadView } from './components/TeamWorkloadView.js';
 import { NotificationBell } from './components/NotificationBell.js';
 import { ChatView } from './components/ChatView.js';
@@ -40,7 +41,7 @@ declare const __APP_VERSION__: string;
 
 type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
-  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
+  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'sd-kpis' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm'
   | 'settings' | 'admin-panel' | 'my-feedback'
@@ -86,6 +87,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
       { view: 'attention', label: 'My Breached' },
+      { view: 'sd-kpis', label: 'KPI Data' },
     ],
   },
   onboarding: {
@@ -120,7 +122,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'team-workload', 'admin-panel']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'sd-kpis', 'team-workload', 'admin-panel']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -796,6 +798,9 @@ export function App() {
           )}
           {view === 'sd-dashboard' && !sdFilter && (
             <ServiceDeskDashboard />
+          )}
+          {view === 'sd-kpis' && !sdFilter && (
+            <ServiceDeskKpis />
           )}
 
           {/* Onboarding */}
