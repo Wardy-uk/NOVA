@@ -96,12 +96,12 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const s = suffix(env);
       const p = await getPool();
       const result = await p.request().query(`
-        SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team,
+        SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team, Department,
                IsActive, IsAvailable, AccountId,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                SolvedTickets_Today, SolvedTickets_ThisWeek, TicketsSnapshotAt
         FROM dbo.Agent${s}
-        WHERE IsActive = 1
+        WHERE IsActive = 1 AND Department = 'NT'
         ORDER BY Team, AgentName
       `);
       res.json({ ok: true, data: result.recordset, env });
@@ -186,6 +186,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         SELECT 'Agent', COUNT(*), MAX(TicketsSnapshotAt),
                SUM(CASE WHEN IsActive=1 THEN 1 ELSE 0 END)
         FROM dbo.Agent${s}
+        WHERE Department = 'NT'
         UNION ALL
         SELECT 'JiraEodTicketStatusSnapshot', COUNT(*), MAX(SnapshotAt),
                (SELECT COUNT(DISTINCT CONVERT(varchar(10), SnapshotDate, 23)) FROM dbo.JiraEodTicketStatusSnapshot${s})
@@ -245,6 +246,58 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       res.json({ ok: true, data: result.recordset });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // GET /api/admin/kpi-data/agent-admin — all agents, no filters (for admin editing)
+  router.get('/agent-admin', async (req, res) => {
+    try {
+      const p = await getPool();
+      const result = await p.request().query(`
+        SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team, Department,
+               IsActive, IsAvailable, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3
+        FROM dbo.Agent
+        ORDER BY Department, Team, AgentName
+      `);
+      res.json({ ok: true, data: result.recordset });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // PUT /api/admin/kpi-data/agent-admin/:agentId — update a single agent record
+  router.put('/agent-admin/:agentId', async (req, res) => {
+    try {
+      const p = await getPool();
+      const { agentId } = req.params;
+      const { Department, Team, TierCode, IsActive, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3 } = req.body;
+
+      const request = p.request();
+      request.input('agentId', sql.Int, parseInt(agentId));
+      request.input('department', sql.NVarChar, Department);
+      request.input('team', sql.NVarChar, Team);
+      request.input('tierCode', sql.NVarChar, TierCode);
+      request.input('isActive', sql.Bit, IsActive ? 1 : 0);
+      request.input('maxTickets', sql.Int, MaxTickets);
+      request.input('maxTicketsCC', sql.Int, MaxTicketsCustomerCare);
+      request.input('maxTicketsT2T3', sql.Int, MaxTicketsT2T3);
+
+      await request.query(`
+        UPDATE dbo.Agent SET
+          Department = @department,
+          Team = @team,
+          TierCode = @tierCode,
+          IsActive = @isActive,
+          MaxTickets = @maxTickets,
+          MaxTicketsCustomerCare = @maxTicketsCC,
+          MaxTicketsT2T3 = @maxTicketsT2T3,
+          UpdatedAt = GETDATE()
+        WHERE AgentId = @agentId
+      `);
+
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Update failed' });
     }
   });
 

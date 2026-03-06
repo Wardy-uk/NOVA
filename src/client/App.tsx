@@ -23,6 +23,7 @@ import { ServiceDeskDashboard } from './components/ServiceDeskDashboard.js';
 import { KpiDashboardView } from './components/KpiDashboardView.js';
 import { KpiDataView } from './components/KpiDataView.js';
 import { KpiComparisonView } from './components/KpiComparisonView.js';
+import { KpiLeaderboardView } from './components/KpiLeaderboardView.js';
 import { TeamWorkloadView } from './components/TeamWorkloadView.js';
 import { NotificationBell } from './components/NotificationBell.js';
 import { ChatView } from './components/ChatView.js';
@@ -46,7 +47,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm'
-  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare'
+  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -115,6 +116,7 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'kpi-dashboard',
     tabs: [
       { view: 'kpi-dashboard', label: 'Dashboard' },
+      { view: 'kpi-leaderboard', label: 'Leaderboard' },
       { view: 'kpi-data', label: 'KPI Data' },
       { view: 'kpi-compare', label: 'Live vs UAT' },
     ],
@@ -133,7 +135,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'team-workload', 'admin-panel']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'team-workload', 'admin-panel']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -819,6 +821,9 @@ export function App() {
           )}
           {view === 'kpi-compare' && (
             <KpiComparisonView />
+          )}
+          {view === 'kpi-leaderboard' && (
+            <KpiLeaderboardView />
           )}
 
           {/* Onboarding */}

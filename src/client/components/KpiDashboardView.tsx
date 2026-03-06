@@ -634,12 +634,11 @@ function AgentLeaderboard({ data }: { data: Agent[] }) {
 
 export function KpiDashboardView() {
   const [snapshots, setSnapshots] = useState<KpiSnapshot[]>([]);
-  const [comparison, setComparison] = useState<SnapshotCompare[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [env, setEnv] = useState<'live' | 'uat'>('live');
 
   const token = localStorage.getItem('nova_token');
 
@@ -649,30 +648,17 @@ export function KpiDashboardView() {
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const [snapRes, compRes, agentRes] = await Promise.all([
-        fetch('/api/kpi-data/team-snapshot?env=live', { headers }),
-        fetch('/api/kpi-data/snapshot-compare', { headers }),
-        fetch('/api/kpi-data/agents?env=live', { headers }),
-      ]);
-
+      const snapRes = await fetch(`/api/kpi-data/team-snapshot?env=${env}`, { headers });
       const snapData = await snapRes.json();
-      const compData = await compRes.json();
-      const agentData = await agentRes.json();
-
       if (!snapData.ok) throw new Error(snapData.error || 'Failed to load team snapshot');
-      if (!compData.ok) throw new Error(compData.error || 'Failed to load comparison');
-      if (!agentData.ok) throw new Error(agentData.error || 'Failed to load agents');
-
       setSnapshots(snapData.data || []);
-      setComparison(compData.data || []);
-      setAgents(agentData.data || []);
       setLastRefresh(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, env]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -767,7 +753,7 @@ export function KpiDashboardView() {
               letterSpacing: '-0.3px',
             }}>KPI Dashboard</h1>
             <p style={{ fontSize: 11, color: C.text3, margin: 0 }}>
-              Real-time operational metrics
+              {env === 'live' ? 'Live' : 'UAT'} operational metrics
             </p>
           </div>
         </div>
@@ -779,6 +765,32 @@ export function KpiDashboardView() {
               Updated {lastRefresh.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
           )}
+
+          {/* Env toggle */}
+          <div style={{
+            display: 'flex', borderRadius: 20, overflow: 'hidden',
+            border: `1px solid ${C.border}`,
+          }}>
+            {(['live', 'uat'] as const).map(e => (
+              <button
+                key={e}
+                onClick={() => setEnv(e)}
+                style={{
+                  padding: '6px 14px', border: 'none', cursor: 'pointer',
+                  fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+                  letterSpacing: '0.5px', transition: 'all 0.2s',
+                  background: env === e
+                    ? e === 'live' ? `${C.red}25` : `${C.teal}20`
+                    : 'transparent',
+                  color: env === e
+                    ? e === 'live' ? C.red : C.teal
+                    : C.text3,
+                }}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
 
           {/* Auto-refresh toggle */}
           <button
@@ -831,23 +843,8 @@ export function KpiDashboardView() {
         <KpiSummarySection data={snapshots} />
       </div>
 
-      {/* ---- Section 2: Live vs UAT Comparison ---- */}
-      <div style={{
-        marginBottom: 40,
-        animation: 'kpiFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.1s forwards',
-        opacity: 0,
-      }}>
-        <ComparisonSection data={comparison} />
-      </div>
 
-      {/* ---- Section 3: Agent Leaderboard ---- */}
-      <div style={{
-        marginBottom: 40,
-        animation: 'kpiFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.2s forwards',
-        opacity: 0,
-      }}>
-        <AgentLeaderboard data={agents} />
-      </div>
+
     </div>
   );
 }
