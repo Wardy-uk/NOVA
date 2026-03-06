@@ -108,6 +108,7 @@ export function AdminView() {
   const [integSaving, setIntegSaving] = useState<string | null>(null);
   const [integTesting, setIntegTesting] = useState<string | null>(null);
   const [integTestResult, setIntegTestResult] = useState<Record<string, { status: string; message: string }>>({});
+  const [integSaved, setIntegSaved] = useState<Set<string>>(new Set());
 
   // Milestone template state
   const [milestoneTemplates, setMilestoneTemplates] = useState<MilestoneTemplate[]>([]);
@@ -221,6 +222,7 @@ export function AdminView() {
       try { json = JSON.parse(text); } catch { json = { ok: false, error: `Server error (${res.status}): ${text.slice(0, 100)}` }; }
       if (json.ok) {
         setSuccess(`${integ.name} configuration saved`);
+        setIntegSaved(prev => new Set(prev).add(integId));
         fetchIntegrations();
       } else {
         setError(json.error || 'Save failed');
@@ -1223,6 +1225,7 @@ export function AdminView() {
                       type={field.type === 'password' ? 'password' : 'text'}
                       value={integValues[integ.id]?.[field.key] ?? ''}
                       onChange={(e) => {
+                        setIntegSaved(prev => { const s = new Set(prev); s.delete(integ.id); return s; });
                         setIntegValues(prev => ({
                           ...prev,
                           [integ.id]: { ...prev[integ.id], [field.key]: e.target.value },
@@ -1244,13 +1247,17 @@ export function AdminView() {
               </div>
               <div className="mt-3 flex items-center gap-2">
                 <button
-                  onClick={() => saveIntegConfig(integ.id)}
+                  onClick={() => { setIntegSaved(prev => { const s = new Set(prev); s.delete(integ.id); return s; }); saveIntegConfig(integ.id); }}
                   disabled={integSaving === integ.id}
-                  className="px-4 py-2 bg-[#5ec1ca] text-[#272C33] font-semibold rounded text-sm hover:bg-[#4db0b9] transition-colors disabled:opacity-40"
+                  className={`px-4 py-2 font-semibold rounded text-sm transition-colors disabled:opacity-40 ${
+                    integSaved.has(integ.id)
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9]'
+                  }`}
                 >
-                  {integSaving === integ.id ? 'Saving...' : 'Save'}
+                  {integSaving === integ.id ? 'Saving...' : integSaved.has(integ.id) ? 'Saved' : 'Save'}
                 </button>
-                {integ.id === 'jira-onboarding' && integ.enabled && (
+                {(integ.id === 'jira-onboarding' || integ.id === 'kpi-sql') && integ.enabled && (
                   <button
                     onClick={() => testIntegConnection(integ.id)}
                     disabled={integTesting === integ.id}

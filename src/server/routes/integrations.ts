@@ -483,6 +483,34 @@ export function createIntegrationRoutes(
       return;
     }
 
+    if (integId === 'kpi-sql') {
+      const settings = settingsQueries.getAll();
+      const server = settings.kpi_sql_server;
+      const database = settings.kpi_sql_database;
+      const user = settings.kpi_sql_user;
+      const password = settings.kpi_sql_password;
+      if (!server || !database || !user || !password) {
+        res.json({ ok: true, status: 'not_configured', message: 'KPI SQL Server credentials not fully configured' });
+        return;
+      }
+      try {
+        const sql = await import('mssql');
+        const pool = await new sql.default.ConnectionPool({
+          server, database, user, password,
+          options: { encrypt: true, trustServerCertificate: true },
+          requestTimeout: 10000,
+          connectionTimeout: 10000,
+        }).connect();
+        const result = await pool.request().query('SELECT 1 AS ok');
+        await pool.close();
+        res.json({ ok: true, status: 'connected', message: `Connected to ${database} on ${server}` });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.json({ ok: true, status: 'error', message: msg });
+      }
+      return;
+    }
+
     res.status(400).json({ ok: false, error: 'Test not supported for this integration' });
   });
 
