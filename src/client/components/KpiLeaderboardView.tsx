@@ -25,10 +25,12 @@ interface AgentDaily {
   OpenTickets_Total: number;
   OpenTickets_Over2Hours: number;
   SolvedTickets_Today: number;
+  SolvedTickets_ThisWeek: number;
   TicketsPerHour: number | null;
   CSATAverage: number | null;
   QAOverallAvg: number | null;
   GoldenRulesAvg: number | null;
+  SLACompliancePct: number | null;
 }
 
 type LeaderboardTab = 'combined' | 'productivity' | 'sla' | 'quality';
@@ -217,7 +219,7 @@ export function KpiLeaderboardView() {
     try {
       const [agentsRes, dailyRes] = await Promise.all([
         fetch(`/api/kpi-data/agents?env=${env}`),
-        fetch(`/api/kpi-data/agent-daily?env=${env}&days=1`),
+        fetch(`/api/kpi-data/agent-daily?env=${env}&days=7`),
       ]);
 
       const [agentsData, dailyData] = await Promise.all([
@@ -287,9 +289,7 @@ export function KpiLeaderboardView() {
 
     return agents.map(a => {
       const daily = dailyMap.get(a.AgentName);
-      const slaPercent = a.OpenTickets_Total > 0
-        ? ((a.OpenTickets_Total - a.OpenTickets_Over2Hours) / a.OpenTickets_Total) * 100
-        : (a.SolvedTickets_Today > 0 ? 100 : null);
+      const slaPercent = daily?.SLACompliancePct ?? null;
 
       const tph = daily?.TicketsPerHour ?? null;
       const qa = daily?.QAOverallAvg ?? null;
