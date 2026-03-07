@@ -493,26 +493,56 @@ function ComparisonSection({ data }: { data: SnapshotCompare[] }) {
 /* ------------------------------------------------------------------ */
 
 function AgentLeaderboard({ data }: { data: Agent[] }) {
+  const [period, setPeriod] = useState<'daily' | 'weekly'>('daily');
+
   const sorted = [...data].sort((a, b) => {
-    const diff = b.SolvedTickets_Today - a.SolvedTickets_Today;
-    if (diff !== 0) return diff;
-    return b.SolvedTickets_ThisWeek - a.SolvedTickets_ThisWeek;
+    if (period === 'daily') {
+      const diff = b.SolvedTickets_Today - a.SolvedTickets_Today;
+      if (diff !== 0) return diff;
+      return b.SolvedTickets_ThisWeek - a.SolvedTickets_ThisWeek;
+    } else {
+      const diff = b.SolvedTickets_ThisWeek - a.SolvedTickets_ThisWeek;
+      if (diff !== 0) return diff;
+      return b.SolvedTickets_Today - a.SolvedTickets_Today;
+    }
   });
 
   const totalSolvedToday = data.reduce((s, a) => s + a.SolvedTickets_Today, 0);
+  const totalSolvedWeek = data.reduce((s, a) => s + a.SolvedTickets_ThisWeek, 0);
   const availableCount = data.filter(a => a.IsAvailable).length;
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <SectionHeader title="Agent Leaderboard" subtitle={`${data.length} agents tracked`} />
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Daily / Weekly toggle */}
+          <div style={{
+            display: 'flex', borderRadius: 20, overflow: 'hidden',
+            border: `1px solid ${C.border}`,
+          }}>
+            {([
+              { id: 'daily' as const, label: 'Daily' },
+              { id: 'weekly' as const, label: 'Weekly' },
+            ]).map(p => (
+              <button
+                key={p.id}
+                onClick={() => setPeriod(p.id)}
+                style={{
+                  padding: '4px 12px', border: 'none', cursor: 'pointer',
+                  fontSize: 10, fontWeight: 600, transition: 'all 0.2s',
+                  background: period === p.id ? `${C.teal}20` : 'transparent',
+                  color: period === p.id ? C.teal : C.text3,
+                }}
+              >{p.label}</button>
+            ))}
+          </div>
           <div style={{
             padding: '4px 14px', borderRadius: 20,
             background: `${C.teal}15`, border: `1px solid ${C.teal}30`,
             fontSize: 12, fontWeight: 600, color: C.teal,
           }}>
-            {totalSolvedToday} solved today
+            {period === 'daily' ? `${totalSolvedToday} solved today` : `${totalSolvedWeek} solved this week`}
           </div>
           <div style={{
             padding: '4px 14px', borderRadius: 20,
@@ -546,7 +576,9 @@ function AgentLeaderboard({ data }: { data: Agent[] }) {
             {sorted.map((agent, i) => {
               const rank = i + 1;
               const isTop3 = rank <= 3;
-              const isZero = agent.SolvedTickets_Today === 0;
+              const isZero = period === 'daily'
+                ? agent.SolvedTickets_Today === 0
+                : agent.SolvedTickets_ThisWeek === 0;
 
               return (
                 <tr key={i} style={{
@@ -614,8 +646,11 @@ function AgentLeaderboard({ data }: { data: Agent[] }) {
                     borderBottom: `1px solid ${C.border}`,
                   }}>
                     <span style={{
-                      fontSize: 18, fontWeight: 800,
-                      color: agent.SolvedTickets_Today > 0 ? C.teal : C.text3,
+                      fontSize: period === 'daily' ? 18 : 14,
+                      fontWeight: period === 'daily' ? 800 : 600,
+                      color: period === 'daily'
+                        ? (agent.SolvedTickets_Today > 0 ? C.teal : C.text3)
+                        : C.text2,
                     }}>
                       {agent.SolvedTickets_Today}
                     </span>
@@ -623,9 +658,19 @@ function AgentLeaderboard({ data }: { data: Agent[] }) {
 
                   {/* Solved Week */}
                   <td style={{
-                    padding: '10px 16px', textAlign: 'center', fontSize: 14, fontWeight: 600,
-                    color: C.text2, borderBottom: `1px solid ${C.border}`,
-                  }}>{agent.SolvedTickets_ThisWeek}</td>
+                    padding: '10px 16px', textAlign: 'center',
+                    borderBottom: `1px solid ${C.border}`,
+                  }}>
+                    <span style={{
+                      fontSize: period === 'weekly' ? 18 : 14,
+                      fontWeight: period === 'weekly' ? 800 : 600,
+                      color: period === 'weekly'
+                        ? (agent.SolvedTickets_ThisWeek > 0 ? C.teal : C.text3)
+                        : C.text2,
+                    }}>
+                      {agent.SolvedTickets_ThisWeek}
+                    </span>
+                  </td>
 
                   {/* Open */}
                   <td style={{

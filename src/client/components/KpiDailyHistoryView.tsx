@@ -40,6 +40,9 @@ interface AgentDaily {
   QAConcerningCount?: number | null;
   GoldenRulesScored?: number | null;
   GoldenRulesAvg?: number | null;
+  SLAResolvedCount?: number | null;
+  SLABreachedCount?: number | null;
+  SLACompliancePct?: number | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -181,6 +184,14 @@ const AGENT_METRICS: MetricDef[] = [
     format: (v) => fmtNum(v, 2),
     target: (tier) => PROD_TARGETS[tier]?.target ?? null,
     threshold: (tier) => PROD_TARGETS[tier]?.threshold ?? null,
+    direction: 'higher',
+  },
+  {
+    label: 'Solve Time SLA',
+    getValue: (r) => r.SLACompliancePct,
+    format: (v) => v != null ? fmtNum(v, 2) + '%' : '',
+    target: () => 95,
+    threshold: () => 90,
     direction: 'higher',
   },
   {
