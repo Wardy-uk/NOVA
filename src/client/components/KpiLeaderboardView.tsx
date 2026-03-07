@@ -9,7 +9,6 @@ interface Agent {
   AgentSurname: string;
   TierCode: string;
   Team: string;
-  Department: string;
   IsAvailable: boolean;
   OpenTickets_Total: number;
   OpenTickets_Over2Hours: number;
@@ -211,6 +210,7 @@ export function KpiLeaderboardView() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [env, setEnv] = useState<'live' | 'uat'>('live');
   const [tab, setTab] = useState<LeaderboardTab>('combined');
+  const [period, setPeriod] = useState<'daily' | 'weekly'>('daily');
 
   const fetchData = useCallback(async () => {
     setError(null);
@@ -325,8 +325,14 @@ export function KpiLeaderboardView() {
   /* ---- Sort by selected tab ---- */
   const sorted = [...merged].sort((a, b) => {
     switch (tab) {
-      case 'productivity':
-        return (b.ticketsPerHour ?? -1) - (a.ticketsPerHour ?? -1);
+      case 'productivity': {
+        if (period === 'weekly') {
+          const diff = b.solvedWeek - a.solvedWeek;
+          return diff !== 0 ? diff : b.solvedToday - a.solvedToday;
+        }
+        const diff = b.solvedToday - a.solvedToday;
+        return diff !== 0 ? diff : b.solvedWeek - a.solvedWeek;
+      }
       case 'sla':
         return (b.slaPercent ?? -1) - (a.slaPercent ?? -1);
       case 'quality':
@@ -341,6 +347,7 @@ export function KpiLeaderboardView() {
   const totalAgents = agents.length;
   const availableCount = agents.filter(a => a.IsAvailable).length;
   const totalSolvedToday = agents.reduce((s, a) => s + a.SolvedTickets_Today, 0);
+  const totalSolvedWeek = agents.reduce((s, a) => s + a.SolvedTickets_ThisWeek, 0);
   const avgTph = (() => {
     const vals = merged.filter(m => m.ticketsPerHour != null);
     return vals.length > 0 ? (vals.reduce((s, v) => s + v.ticketsPerHour!, 0) / vals.length).toFixed(1) : '-';
@@ -486,13 +493,26 @@ export function KpiLeaderboardView() {
         return (
           <td key={header} style={cellStyle()}>
             <span style={{
-              fontSize: 16, fontWeight: 800,
-              color: agent.solvedToday > 0 ? C.teal : C.text3,
+              fontSize: period === 'daily' ? 16 : 13,
+              fontWeight: period === 'daily' ? 800 : 600,
+              color: period === 'daily'
+                ? (agent.solvedToday > 0 ? C.teal : C.text3)
+                : C.text2,
             }}>{agent.solvedToday}</span>
           </td>
         );
       case 'Solved Week':
-        return <td key={header} style={{ ...cellStyle(), fontWeight: 600, color: C.text2 }}>{agent.solvedWeek}</td>;
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{
+              fontSize: period === 'weekly' ? 16 : 13,
+              fontWeight: period === 'weekly' ? 800 : 600,
+              color: period === 'weekly'
+                ? (agent.solvedWeek > 0 ? C.teal : C.text3)
+                : C.text2,
+            }}>{agent.solvedWeek}</span>
+          </td>
+        );
       case 'Open':
         return <td key={header} style={{ ...cellStyle(), color: C.text2 }}>{agent.openTotal}</td>;
       case '>2h':
@@ -637,22 +657,45 @@ export function KpiLeaderboardView() {
       }}>
         <StatPill value={totalAgents} label="Agents" color={C.teal} />
         <StatPill value={availableCount} label="Available" color={C.green} />
-        <StatPill value={totalSolvedToday} label="Solved Today" color={C.purple} />
+        <StatPill value={period === 'daily' ? totalSolvedToday : totalSolvedWeek} label={period === 'daily' ? 'Solved Today' : 'Solved This Week'} color={C.purple} />
         <StatPill value={avgTph} label="Avg Tix/Hr" color={C.teal} />
         <StatPill value={avgSla} label="Avg SLA" color={C.green} />
         <StatPill value={avgQa} label="Avg QA" color={C.amber} />
       </div>
 
-      {/* ---- Tab Selector ---- */}
+      {/* ---- Tab Selector + Period Toggle ---- */}
       <div style={{
-        display: 'flex', gap: 8, marginBottom: 20,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 20,
         animation: 'kpiLbFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.05s forwards',
         opacity: 0,
       }}>
-        <TabButton active={tab === 'combined'} label="Combined" onClick={() => setTab('combined')} />
-        <TabButton active={tab === 'productivity'} label="Productivity" onClick={() => setTab('productivity')} />
-        <TabButton active={tab === 'sla'} label="SLA Achievement" onClick={() => setTab('sla')} />
-        <TabButton active={tab === 'quality'} label="Quality" onClick={() => setTab('quality')} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <TabButton active={tab === 'combined'} label="Combined" onClick={() => setTab('combined')} />
+          <TabButton active={tab === 'productivity'} label="Productivity" onClick={() => setTab('productivity')} />
+          <TabButton active={tab === 'sla'} label="SLA Achievement" onClick={() => setTab('sla')} />
+          <TabButton active={tab === 'quality'} label="Quality" onClick={() => setTab('quality')} />
+        </div>
+        <div style={{
+          display: 'flex', borderRadius: 20, overflow: 'hidden',
+          border: `1px solid ${C.border}`,
+        }}>
+          {([
+            { id: 'daily' as const, label: 'Daily' },
+            { id: 'weekly' as const, label: 'Weekly' },
+          ]).map(p => (
+            <button
+              key={p.id}
+              onClick={() => setPeriod(p.id)}
+              style={{
+                padding: '5px 14px', border: 'none', cursor: 'pointer',
+                fontSize: 10, fontWeight: 600, transition: 'all 0.2s',
+                background: period === p.id ? `${C.teal}20` : 'transparent',
+                color: period === p.id ? C.teal : C.text3,
+              }}
+            >{p.label}</button>
+          ))}
+        </div>
       </div>
 
       {/* ---- Leaderboard Table ---- */}
