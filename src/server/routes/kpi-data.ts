@@ -405,7 +405,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       request.input('startDate', sql.Date, startDate);
       request.input('endDate', sql.Date, endDate);
 
-      // Aggregate from JiraEodTicketStatusSnapshot per agent per day
+      // Step 1: Aggregate from JiraEodTicketStatusSnapshot per agent per day
       // Then MERGE into jira_agent_kpi_daily
       const result = await request.query(`
         ;WITH AgentDays AS (
@@ -439,8 +439,51 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         SELECT @@ROWCOUNT AS [rowsAffected];
       `);
 
-      const rowsAffected = result.recordset?.[0]?.rowsAffected ?? 0;
-      res.json({ ok: true, rowsAffected, startDate, endDate, env });
+      const ticketRows = result.recordset?.[0]?.rowsAffected ?? 0;
+
+      // Step 2: Backfill QA scores from jira_qa_results
+      const qaRequest = p.request();
+      qaRequest.input('startDate', sql.Date, startDate);
+      qaRequest.input('endDate', sql.Date, endDate);
+      const qaResult = await qaRequest.query(`
+        ;WITH QaAgg AS (
+          SELECT
+            CAST(CreatedAt AS DATE) AS ReportDate,
+            assigneeName AS AgentName,
+            COUNT(*) AS QATicketsScored,
+            AVG(CAST(overallScore AS FLOAT)) AS QAOverallAvg,
+            AVG(CAST(accuracyScore AS FLOAT)) AS QAAccuracyAvg,
+            AVG(CAST(clarityScore AS FLOAT)) AS QAClarityAvg,
+            AVG(CAST(toneScore AS FLOAT)) AS QAToneAvg,
+            SUM(CASE WHEN grade = 'red' THEN 1 ELSE 0 END) AS QARedCount,
+            SUM(CASE WHEN grade = 'amber' THEN 1 ELSE 0 END) AS QAAmberCount,
+            SUM(CASE WHEN grade = 'green' THEN 1 ELSE 0 END) AS QAGreenCount,
+            SUM(CASE WHEN isConcerning = 1 THEN 1 ELSE 0 END) AS QAConcerningCount
+          FROM dbo.jira_qa_results${s}
+          WHERE CAST(CreatedAt AS DATE) BETWEEN @startDate AND @endDate
+            AND assigneeName IS NOT NULL AND assigneeName <> ''
+          GROUP BY CAST(CreatedAt AS DATE), assigneeName
+        )
+        UPDATE t SET
+          t.QATicketsScored = q.QATicketsScored,
+          t.QAOverallAvg = ROUND(q.QAOverallAvg, 1),
+          t.QAAccuracyAvg = ROUND(q.QAAccuracyAvg, 1),
+          t.QAClarityAvg = ROUND(q.QAClarityAvg, 1),
+          t.QAToneAvg = ROUND(q.QAToneAvg, 1),
+          t.QARedCount = q.QARedCount,
+          t.QAAmberCount = q.QAAmberCount,
+          t.QAGreenCount = q.QAGreenCount,
+          t.QAConcerningCount = q.QAConcerningCount
+        FROM dbo.jira_agent_kpi_daily${s} t
+        INNER JOIN QaAgg q ON t.ReportDate = q.ReportDate AND t.AgentName = q.AgentName;
+
+        SELECT @@ROWCOUNT AS [rowsAffected];
+      `);
+
+      const qaRows = qaResult.recordset?.[0]?.rowsAffected ?? 0;
+
+      res.json({ ok: true, ticketRows, qaRows, startDate, endDate, env,
+        note: 'SLA data cannot be backfilled (requires live Jira API). Only populated by v3.1 daily run.' });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Backfill failed' });
     }

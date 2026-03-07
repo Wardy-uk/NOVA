@@ -719,6 +719,7 @@ function AgentLeaderboard({ data }: { data: Agent[] }) {
 
 export function KpiDashboardView() {
   const [snapshots, setSnapshots] = useState<KpiSnapshot[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -728,10 +729,16 @@ export function KpiDashboardView() {
   const fetchAll = useCallback(async () => {
     setError(null);
     try {
-      const snapRes = await fetch(`/api/kpi-data/team-snapshot?env=${env}`);
+      const [snapRes, agentRes] = await Promise.all([
+        fetch(`/api/kpi-data/team-snapshot?env=${env}`),
+        fetch(`/api/kpi-data/agents?env=${env}`),
+      ]);
       const snapData = await snapRes.json();
+      const agentData = await agentRes.json();
       if (!snapData.ok) throw new Error(snapData.error || 'Failed to load team snapshot');
+      if (!agentData.ok) throw new Error(agentData.error || 'Failed to load agents');
       setSnapshots(snapData.data || []);
+      setAgents(agentData.data || []);
       setLastRefresh(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -923,8 +930,14 @@ export function KpiDashboardView() {
         <KpiSummarySection data={snapshots} />
       </div>
 
-
-
+      {/* ---- Section 2: Agent Leaderboard ---- */}
+      {agents.length > 0 && (
+        <div style={{
+          animation: 'kpiFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.15s both',
+        }}>
+          <AgentLeaderboard data={agents} />
+        </div>
+      )}
     </div>
   );
 }
