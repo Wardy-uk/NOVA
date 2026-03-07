@@ -338,8 +338,13 @@ export function KpiLeaderboardView() {
       case 'quality':
         return (b.qaScore ?? -1) - (a.qaScore ?? -1);
       case 'combined':
-      default:
-        return b.compositeScore - a.compositeScore;
+      default: {
+        const cDiff = b.compositeScore - a.compositeScore;
+        if (cDiff !== 0) return cDiff;
+        return period === 'weekly'
+          ? b.solvedWeek - a.solvedWeek
+          : b.solvedToday - a.solvedToday;
+      }
     }
   });
 
@@ -365,12 +370,13 @@ export function KpiLeaderboardView() {
   const maxTph = Math.max(...merged.map(m => m.ticketsPerHour ?? 0), 1);
   const maxQa = Math.max(...merged.map(m => m.qaScore ?? 0), 1);
 
-  /* ---- Column headers per tab ---- */
+  /* ---- Column headers per tab (dynamic based on period) ---- */
+  const solvedLabel = period === 'weekly' ? 'Solved Week' : 'Solved Today';
   const columnHeaders: Record<LeaderboardTab, string[]> = {
-    combined: ['Rank', 'Agent', 'Team', 'Tier', 'Tix/Hr', 'SLA %', 'QA Score', 'Composite', 'Solved Today'],
+    combined: ['Rank', 'Agent', 'Team', 'Tier', 'Tix/Hr', 'SLA %', 'QA Score', 'Composite', solvedLabel],
     productivity: ['Rank', 'Agent', 'Team', 'Tier', 'Tix/Hr', 'Solved Today', 'Solved Week', 'Open', '>2h'],
-    sla: ['Rank', 'Agent', 'Team', 'Tier', 'SLA %', 'Open', '>2h Overdue', 'Stale', 'Solved Today'],
-    quality: ['Rank', 'Agent', 'Team', 'Tier', 'QA Score', 'Golden Rules', 'Tix/Hr', 'Solved Today'],
+    sla: ['Rank', 'Agent', 'Team', 'Tier', 'SLA %', 'Open', '>2h Overdue', 'Stale', solvedLabel],
+    quality: ['Rank', 'Agent', 'Team', 'Tier', 'QA Score', 'Golden Rules', 'Tix/Hr', solvedLabel],
   };
 
   const isLeftAligned = (h: string) => ['Agent', 'Team', 'Tier'].includes(h);
@@ -489,30 +495,34 @@ export function KpiLeaderboardView() {
             <MiniBar value={agent.compositeScore} max={100} color={scoreColor(agent.compositeScore, [75, 50])} />
           </td>
         );
-      case 'Solved Today':
+      case 'Solved Today': {
+        const isPrimary = period === 'daily';
         return (
           <td key={header} style={cellStyle()}>
             <span style={{
-              fontSize: period === 'daily' ? 16 : 13,
-              fontWeight: period === 'daily' ? 800 : 600,
-              color: period === 'daily'
+              fontSize: isPrimary ? 16 : 13,
+              fontWeight: isPrimary ? 800 : 600,
+              color: isPrimary
                 ? (agent.solvedToday > 0 ? C.teal : C.text3)
                 : C.text2,
             }}>{agent.solvedToday}</span>
           </td>
         );
-      case 'Solved Week':
+      }
+      case 'Solved Week': {
+        const isPrimary = period === 'weekly';
         return (
           <td key={header} style={cellStyle()}>
             <span style={{
-              fontSize: period === 'weekly' ? 16 : 13,
-              fontWeight: period === 'weekly' ? 800 : 600,
-              color: period === 'weekly'
+              fontSize: isPrimary ? 16 : 13,
+              fontWeight: isPrimary ? 800 : 600,
+              color: isPrimary
                 ? (agent.solvedWeek > 0 ? C.teal : C.text3)
                 : C.text2,
             }}>{agent.solvedWeek}</span>
           </td>
         );
+      }
       case 'Open':
         return <td key={header} style={{ ...cellStyle(), color: C.text2 }}>{agent.openTotal}</td>;
       case '>2h':
