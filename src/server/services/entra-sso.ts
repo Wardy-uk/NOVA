@@ -1,7 +1,7 @@
 import { ConfidentialClientApplication } from '@azure/msal-node';
 import crypto from 'crypto';
 
-const SSO_SCOPES = ['openid', 'profile', 'email', 'User.Read'];
+const SSO_SCOPES = ['openid', 'profile', 'email', 'User.Read', 'GroupMember.Read.All'];
 
 // In-memory PKCE + state store (expires after 10 min)
 const pendingLogins = new Map<string, { verifier: string; createdAt: number }>();
@@ -25,6 +25,7 @@ export interface SsoClaimResult {
   email: string;
   name: string;
   preferredUsername: string;
+  groups: string[];
 }
 
 export class EntraSsoService {
@@ -102,6 +103,30 @@ export class EntraSsoService {
     if (!oid) throw new Error('No user identifier (oid) in Microsoft token');
     if (!email) throw new Error('No email in Microsoft token. Ensure User.Read permission is granted.');
 
-    return { oid, email, name, preferredUsername };
+    // Fetch group memberships via Graph API
+    const groups = await this.fetchUserGroups(result.accessToken);
+
+    return { oid, email, name, preferredUsername, groups };
+  }
+
+  /** Fetch the user's Azure AD group IDs via Microsoft Graph /me/memberOf */
+  private async fetchUserGroups(accessToken: string): Promise<string[]> {
+    try {
+      const res = await fetch('https://graph.microsoft.com/v1.0/me/memberOf?$select=id,displayName', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok) {
+        console.warn(`[SSO] Failed to fetch groups: ${res.status} ${res.statusText}`);
+        return [];
+      }
+      const data = await res.json() as { value?: Array<{ id?: string; '@odata.type'?: string }> };
+      return (data.value ?? [])
+        .filter(m => m['@odata.type'] === '#microsoft.graph.group')
+        .map(m => m.id!)
+        .filter(Boolean);
+    } catch (err) {
+      console.warn('[SSO] Error fetching group memberships:', err instanceof Error ? err.message : err);
+      return [];
+    }
   }
 }

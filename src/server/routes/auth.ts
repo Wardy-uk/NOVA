@@ -369,13 +369,50 @@ export function createAuthRoutes(
         email: claims.email,
         name: claims.name,
         preferredUsername: claims.preferredUsername,
+        groups: claims.groups,
       });
+
+      // ── Group-based access control ──
+      const groupRolesRaw = settingsQueries.get('sso_group_roles');
+      let groupMappings: Array<{ groupId: string; groupName: string; novaRole: string }> = [];
+      try { if (groupRolesRaw) groupMappings = JSON.parse(groupRolesRaw); } catch { /* ignore */ }
+
+      let resolvedRole: string | null = null;
+      if (groupMappings.length > 0) {
+        // Find all matching roles from the user's groups
+        const matchedRoles = groupMappings
+          .filter(m => claims.groups.includes(m.groupId))
+          .map(m => m.novaRole);
+
+        if (matchedRoles.length === 0) {
+          ssoLogger.warn('access_denied', `User not in any mapped Azure group`, {
+            email: claims.email,
+            userGroups: claims.groups,
+            configuredGroups: groupMappings.map(m => m.groupId),
+          });
+          res.redirect(`${frontendUrl}/?sso_error=${encodeURIComponent('Access denied. You are not in an authorised group. Contact your administrator.')}`);
+          return;
+        }
+
+        // Combine unique roles (e.g., "editor,admin")
+        resolvedRole = [...new Set(matchedRoles)].join(',');
+        ssoLogger.log('group_match', `Matched Azure groups → NOVA role(s)`, {
+          email: claims.email,
+          matchedRoles,
+          resolvedRole,
+        });
+      }
 
       // User resolution: OID lookup → email lookup (link existing) → auto-create
       let user = userQueries.getByProviderId('entra', claims.oid);
 
       if (user) {
         ssoLogger.log('user_resolved', `Matched existing user by OID`, { userId: user.id, username: user.username });
+        // Update role from group mapping on each login (if mapping is active)
+        if (resolvedRole) {
+          userQueries.update(user.id, { role: resolvedRole });
+          user = userQueries.getById(user.id);
+        }
       }
 
       if (!user) {
@@ -383,12 +420,13 @@ export function createAuthRoutes(
         const existing = userQueries.getByEmail(claims.email);
         if (existing) {
           ssoLogger.log('user_linked', `Linking existing local account by email`, { userId: existing.id, username: existing.username, email: claims.email });
-          // Link existing account to Entra
+          // Link existing account to Entra, update role from group mapping
           userQueries.update(existing.id, {
             auth_provider: 'entra',
             provider_id: claims.oid,
             email: claims.email,
             display_name: claims.name || existing.display_name,
+            ...(resolvedRole ? { role: resolvedRole } : {}),
           });
           user = userQueries.getById(existing.id);
         } else {
@@ -404,13 +442,14 @@ export function createAuthRoutes(
         }
 
         const isFirstUser = userQueries.count() === 0;
-        ssoLogger.log('user_created', `Auto-provisioning new user`, { username, email: claims.email, role: isFirstUser ? 'admin' : 'viewer' });
+        const newRole = isFirstUser ? 'admin' : (resolvedRole || 'viewer');
+        ssoLogger.log('user_created', `Auto-provisioning new user`, { username, email: claims.email, role: newRole });
         const id = userQueries.create({
           username,
           display_name: claims.name || username,
           email: claims.email,
           password_hash: '', // SSO users cannot use local login
-          role: isFirstUser ? 'admin' : 'viewer',
+          role: newRole,
           auth_provider: 'entra',
           provider_id: claims.oid,
         });

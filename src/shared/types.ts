@@ -70,9 +70,15 @@ export interface HealthResponse {
 export interface IntegrationField {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'url';
+  type: 'text' | 'password' | 'url' | 'group_roles';
   placeholder?: string;
   required: boolean;
+}
+
+export interface SsoGroupRoleMapping {
+  groupId: string;
+  groupName: string;
+  novaRole: string;
 }
 
 export interface IntegrationDefinition {

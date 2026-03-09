@@ -84,6 +84,7 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'sso_client_id', label: 'Client ID', type: 'text', placeholder: 'Azure AD app registration client ID', required: true },
       { key: 'sso_client_secret', label: 'Client Secret', type: 'password', placeholder: 'Azure AD app registration client secret', required: true },
       { key: 'sso_base_url', label: 'Base URL', type: 'url', placeholder: 'https://nova.nurtur.tech (auto-detected if blank)', required: false },
+      { key: 'sso_group_roles', label: 'Group → Role Mapping', type: 'group_roles', placeholder: '', required: false },
     ],
   },
   {

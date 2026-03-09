@@ -1224,7 +1224,74 @@ export function AdminView() {
                 </button>
               </div>
               <div className="space-y-3">
-                {integ.fields.map((field) => (
+                {integ.fields.map((field) => {
+                  if (field.type === 'group_roles') {
+                    // Group → Role mapping table
+                    let mappings: Array<{ groupId: string; groupName: string; novaRole: string }> = [];
+                    try { const raw = integValues[integ.id]?.[field.key]; if (raw) mappings = JSON.parse(raw); } catch { /* ignore */ }
+                    const updateMappings = (next: typeof mappings) => {
+                      setIntegSaved(prev => { const s = new Set(prev); s.delete(integ.id); return s; });
+                      setIntegValues(prev => ({
+                        ...prev,
+                        [integ.id]: { ...prev[integ.id], [field.key]: JSON.stringify(next) },
+                      }));
+                    };
+                    const availableRoles = [
+                      { id: 'admin', name: 'Admin' },
+                      ...customRoles.map(r => ({ id: r.id, name: r.name })),
+                    ];
+                    return (
+                      <div key={field.key}>
+                        <label className="block text-xs text-neutral-400 mb-2">{field.label}</label>
+                        <p className="text-[10px] text-neutral-500 mb-2">
+                          Map Azure AD group Object IDs to NOVA roles. Users not in any mapped group will be denied SSO access.
+                        </p>
+                        {mappings.length > 0 && (
+                          <div className="border border-[#3a424d] rounded overflow-hidden mb-2">
+                            <div className="grid grid-cols-[1fr_1fr_140px_32px] gap-0 text-[10px] font-semibold text-neutral-500 uppercase tracking-wide bg-[#1e2228] px-2 py-1.5">
+                              <span>Group ID</span><span>Label</span><span>NOVA Role</span><span />
+                            </div>
+                            {mappings.map((m, i) => (
+                              <div key={i} className="grid grid-cols-[1fr_1fr_140px_32px] gap-0 items-center border-t border-[#3a424d] px-2 py-1">
+                                <input
+                                  value={m.groupId}
+                                  onChange={(e) => { const next = [...mappings]; next[i] = { ...next[i], groupId: e.target.value }; updateMappings(next); }}
+                                  placeholder="e.g. a1b2c3d4-..."
+                                  className="bg-transparent text-xs text-neutral-100 placeholder:text-neutral-600 focus:outline-none pr-2 py-0.5"
+                                />
+                                <input
+                                  value={m.groupName}
+                                  onChange={(e) => { const next = [...mappings]; next[i] = { ...next[i], groupName: e.target.value }; updateMappings(next); }}
+                                  placeholder="Friendly name"
+                                  className="bg-transparent text-xs text-neutral-100 placeholder:text-neutral-600 focus:outline-none pr-2 py-0.5"
+                                />
+                                <select
+                                  value={m.novaRole}
+                                  onChange={(e) => { const next = [...mappings]; next[i] = { ...next[i], novaRole: e.target.value }; updateMappings(next); }}
+                                  className="bg-[#272C33] border border-[#3a424d] rounded text-xs text-neutral-100 px-1.5 py-0.5 focus:outline-none focus:border-[#5ec1ca]"
+                                >
+                                  <option value="">— select —</option>
+                                  {availableRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => { const next = mappings.filter((_, j) => j !== i); updateMappings(next); }}
+                                  className="text-neutral-600 hover:text-red-400 text-sm transition-colors text-center"
+                                  title="Remove"
+                                >×</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => updateMappings([...mappings, { groupId: '', groupName: '', novaRole: '' }])}
+                          className="text-[11px] text-[#5ec1ca] hover:text-[#4db0b9] transition-colors"
+                        >+ Add group mapping</button>
+                      </div>
+                    );
+                  }
+                  return (
                   <div key={field.key}>
                     <label className="block text-xs text-neutral-400 mb-1">
                       {field.label}
@@ -1267,7 +1334,8 @@ export function AdminView() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="mt-3 flex items-center gap-2">
                 <button
