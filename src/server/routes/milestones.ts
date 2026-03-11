@@ -89,7 +89,7 @@ export function syncDeliveryMilestonesToTasks(
 export function resyncAllMilestoneTasks(
   milestoneQueries: MilestoneQueries,
   taskQueries: TaskQueries,
-  onboarderToUserId?: Map<string, number>,
+  _onboarderToUserId?: Map<string, number>,
 ) {
   const all = milestoneQueries.getAllWithDelivery();
   let synced = 0;
@@ -97,8 +97,10 @@ export function resyncAllMilestoneTasks(
     if (m.status === 'complete') continue;
     // Only resync milestones that have had their task created (progressive workflow)
     if ((m as any).workflow_task_created === 0) continue;
-    const userId = (m as any).assigned_to
-      ?? (m.onboarder ? onboarderToUserId?.get(m.onboarder.toLowerCase()) : undefined);
+    // Only use explicit assigned_to (user ID). Free-text onboarder names are not
+    // matched to users — those deliveries remain unowned (null user_id) so they
+    // don't appear in anyone's "my tasks" but stay visible in the Onboarding area.
+    const userId = (m as any).assigned_to ?? undefined;
     syncMilestoneToTask(m, m.account, taskQueries, userId);
     synced++;
   }

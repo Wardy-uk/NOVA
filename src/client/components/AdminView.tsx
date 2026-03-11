@@ -83,6 +83,7 @@ const AREA_DEFS = [
   { id: 'command', label: 'My NOVA' },
   { id: 'nova_features', label: 'Briefing / Team / Chat' },
   { id: 'servicedesk', label: 'Service Desk' },
+  { id: 'sales', label: 'Sales Hotbox' },
   { id: 'onboarding', label: 'Onboarding' },
   { id: 'accounts', label: 'Account Management' },
   { id: 'kpis', label: 'KPIs' },

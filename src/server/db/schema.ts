@@ -873,6 +873,67 @@ export function initializeSchema(database: Database): void {
   `);
   database.run(`CREATE INDEX IF NOT EXISTS idx_welcome_packs_delivery ON delivery_welcome_packs(delivery_id)`);
 
+  // ── Sales Hotbox ──────────────────────────────────────────────────────────
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sales_pipeline (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      salesperson TEXT NOT NULL,
+      lead_gen TEXT,
+      company TEXT NOT NULL,
+      mrr REAL NOT NULL DEFAULT 0,
+      product TEXT,
+      stage TEXT NOT NULL,
+      demo_date TEXT,
+      est_close_date TEXT,
+      next_chase_date TEXT,
+      contact TEXT,
+      phone TEXT,
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_sales_pipeline_salesperson ON sales_pipeline(salesperson)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_sales_pipeline_stage ON sales_pipeline(stage)`);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sales_monthly (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sale_date TEXT NOT NULL,
+      lead_gen TEXT,
+      salesperson TEXT NOT NULL,
+      product TEXT,
+      trading_name TEXT,
+      limited_company TEXT,
+      company_number TEXT,
+      email TEXT,
+      setup_fee REAL DEFAULT 0,
+      licence REAL DEFAULT 0,
+      upsell_mrr REAL DEFAULT 0,
+      postal REAL DEFAULT 0,
+      coms REAL DEFAULT 0,
+      trial_mrr REAL DEFAULT 0,
+      actual_mrr REAL DEFAULT 0,
+      branches INTEGER DEFAULT 1,
+      existing_vs_new TEXT,
+      hotbox_ref INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_sales_monthly_salesperson ON sales_monthly(salesperson)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_sales_monthly_date ON sales_monthly(sale_date)`);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sales_targets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      salesperson TEXT NOT NULL,
+      month TEXT NOT NULL,
+      target_mrr REAL NOT NULL DEFAULT 0,
+      UNIQUE(salesperson, month)
+    )
+  `);
+
   const defaults: [string, string][] = [
     ['source_weight_jira', '90'],
     ['source_weight_planner', '60'],

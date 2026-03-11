@@ -30,6 +30,8 @@ import { createFeedbackRoutes } from './routes/feedback.js';
 import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
 import { createOnboardingRoutes } from './routes/onboarding.js';
 import { createMilestoneRoutes, resyncAllMilestoneTasks } from './routes/milestones.js';
+import { SalesQueries } from './db/sales-queries.js';
+import { createSalesHotboxRoutes } from './routes/sales-hotbox.js';
 import { JiraRestClient } from './services/jira-client.js';
 import { OnboardingOrchestrator } from './services/onboarding-orchestrator.js';
 import { authMiddleware, createAreaAccessGuard } from './middleware/auth.js';
@@ -86,6 +88,7 @@ async function main() {
   const backfilled = deliveryQueries.backfillOnboardingIds();
   if (backfilled > 0) console.log(`[N.O.V.A] Backfilled ${backfilled} onboarding IDs`);
   const crmQueries = new CrmQueries(db);
+  const salesQueries = new SalesQueries(db);
   const userQueries = new FileUserQueries();
   const teamQueries = new TeamQueries(db);
   const userSettingsQueries = new UserSettingsQueries(db);
@@ -411,6 +414,7 @@ async function main() {
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
   app.use('/api/kpi-data', requireAreaAccess('kpis', 'view'), createKpiDataRoutes(settingsQueries));
+  app.use('/api/sales', requireAreaAccess('sales', 'view'), createSalesHotboxRoutes(salesQueries, requireAreaAccess));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries, userQueries, notificationQueries));
   app.use('/api/audit', createAuditRoutes(auditQueries));

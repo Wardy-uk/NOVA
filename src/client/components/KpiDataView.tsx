@@ -38,11 +38,70 @@ function fmtDate(v: string | null): string {
   catch { return v; }
 }
 
+/* ---- KPI Sort Order ---- */
+
+const GROUP_PRIORITY: Record<string, number> = {
+  'New Tickets': 0,
+  'Solved Tickets': 1,
+};
+
+const KPI_ORDER: string[] = [
+  'Number of Tickets in CC - Incidents',
+  'Number of Tickets in CC - Service Requests',
+  'Number of Tickets in CC - TPJ',
+  'Number of Tickets in Production',
+  'Number of Tickets in Tier 2',
+  'Number of Tickets in Tier 3',
+  'Number of Tickets in Development',
+  'Number of Tickets With No Reply in CC - Incidents',
+  'Number of Tickets With No Reply in CC - Production',
+  'Number of Tickets With No Reply in CC - TPJ',
+  'Number of Tickets With No Reply in Tier 2',
+  'Number of Tickets With No Reply in Tier 3',
+  'Number of CC tickets over SLA (actionable) (Incidents)',
+  'Number of CC tickets over SLA (actionable) (Production)',
+  'Number of CC tickets over SLA (actionable) (TPJ)',
+  'Number of Tier 2 tickets over SLA (actionable)',
+  'Number of Tier 3 tickets over SLA (actionable)',
+  'Number of CC tickets over SLA (Not actionable) (Incidents)',
+  'Number of CC tickets over SLA (Not actionable) (Production)',
+  'Number of CC tickets over SLA (Not actionable) (TPJ)',
+  'Number of Tier 2 tickets over SLA (not actionable)',
+  'Number of Tier 3 tickets over SLA (not actionable)',
+  'Tickets escalated to Tier 2',
+  'Tickets escalated to Tier 3',
+  'Tickets escalated to Development',
+  'Tickets rejected by Tier 2',
+  'Tickets rejected by Tier 3',
+  'Tickets rejected by Development',
+  'Oldest actionable ticket (days) in CC (Incident)',
+  'Oldest actionable ticket (days) in CC (Production)',
+  'Oldest actionable ticket (days) in CC (TPJ)',
+  'Oldest actionable ticket (days) in Production',
+  'Oldest actionable ticket (days) in Tier 2',
+  'Oldest actionable ticket (days) in Tier 3',
+];
+
+function sortKpiRows<T extends { KPI?: string; KPIGroup?: string }>(data: T[]): T[] {
+  return [...data].sort((a, b) => {
+    const ga = GROUP_PRIORITY[a.KPIGroup ?? ''] ?? 2;
+    const gb = GROUP_PRIORITY[b.KPIGroup ?? ''] ?? 2;
+    if (ga !== gb) return ga - gb;
+    const ia = KPI_ORDER.indexOf(a.KPI ?? '');
+    const ib = KPI_ORDER.indexOf(b.KPI ?? '');
+    const oa = ia >= 0 ? ia : KPI_ORDER.length;
+    const ob = ib >= 0 ? ib : KPI_ORDER.length;
+    if (oa !== ob) return oa - ob;
+    return (a.KPI ?? '').localeCompare(b.KPI ?? '');
+  });
+}
+
 const TH = 'px-3 py-2 text-left text-[10px] uppercase tracking-wider text-neutral-400 font-semibold bg-[#272C33] border-b border-[#3a424d]';
 const TD = 'px-3 py-2 text-[13px] text-neutral-300 border-b border-[#3a424d]';
 const TDR = 'px-3 py-2 text-[13px] text-neutral-300 border-b border-[#3a424d] text-right';
 
 function TeamSnapshotTable({ data }: { data: any[] }) {
+  const sorted = sortKpiRows(data);
   return (
     <table className="w-full border-collapse">
       <thead><tr>
@@ -50,7 +109,7 @@ function TeamSnapshotTable({ data }: { data: any[] }) {
         <th className={`${TH} text-right`}>Count</th><th className={`${TH} text-right`}>Target</th>
         <th className={TH}>Direction</th><th className={TH}>RAG</th><th className={TH}>Updated</th>
       </tr></thead>
-      <tbody>{data.map((r, i) => (
+      <tbody>{sorted.map((r, i) => (
         <tr key={i} className="hover:bg-[#343a42]">
           <td className={TD}>{r.KPI}</td><td className={TD}>{r.KPIGroup}</td>
           <td className={TDR}>{fmt(r.Count, 0)}</td><td className={TDR}>{fmt(r.KPITarget, 0)}</td>

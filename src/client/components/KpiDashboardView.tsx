@@ -103,6 +103,75 @@ function fmtTime(v: string | null): string {
   } catch { return v; }
 }
 
+/* ------------------------------------------------------------------ */
+/*  KPI Sort Order                                                     */
+/* ------------------------------------------------------------------ */
+
+const GROUP_PRIORITY: Record<string, number> = {
+  'New Tickets': 0,
+  'Solved Tickets': 1,
+};
+
+const KPI_ORDER: string[] = [
+  // — Open ticket counts —
+  'Number of Tickets in CC - Incidents',
+  'Number of Tickets in CC - Service Requests',
+  'Number of Tickets in CC - TPJ',
+  'Number of Tickets in Production',
+  'Number of Tickets in Tier 2',
+  'Number of Tickets in Tier 3',
+  'Number of Tickets in Development',
+  // — No reply —
+  'Number of Tickets With No Reply in CC - Incidents',
+  'Number of Tickets With No Reply in CC - Production',
+  'Number of Tickets With No Reply in CC - TPJ',
+  'Number of Tickets With No Reply in Tier 2',
+  'Number of Tickets With No Reply in Tier 3',
+  // — SLA actionable —
+  'Number of CC tickets over SLA (actionable) (Incidents)',
+  'Number of CC tickets over SLA (actionable) (Production)',
+  'Number of CC tickets over SLA (actionable) (TPJ)',
+  'Number of Tier 2 tickets over SLA (actionable)',
+  'Number of Tier 3 tickets over SLA (actionable)',
+  // — SLA not actionable —
+  'Number of CC tickets over SLA (Not actionable) (Incidents)',
+  'Number of CC tickets over SLA (Not actionable) (Production)',
+  'Number of CC tickets over SLA (Not actionable) (TPJ)',
+  'Number of Tier 2 tickets over SLA (not actionable)',
+  'Number of Tier 3 tickets over SLA (not actionable)',
+  // — Escalations —
+  'Tickets escalated to Tier 2',
+  'Tickets escalated to Tier 3',
+  'Tickets escalated to Development',
+  // — Rejections —
+  'Tickets rejected by Tier 2',
+  'Tickets rejected by Tier 3',
+  'Tickets rejected by Development',
+  // — Oldest actionable —
+  'Oldest actionable ticket (days) in CC (Incident)',
+  'Oldest actionable ticket (days) in CC (Production)',
+  'Oldest actionable ticket (days) in CC (TPJ)',
+  'Oldest actionable ticket (days) in Production',
+  'Oldest actionable ticket (days) in Tier 2',
+  'Oldest actionable ticket (days) in Tier 3',
+];
+
+function kpiSortKey(kpi: { KPI: string; KPIGroup: string }): number {
+  const gp = GROUP_PRIORITY[kpi.KPIGroup] ?? 2;
+  const idx = KPI_ORDER.indexOf(kpi.KPI);
+  // Group priority * 1000 + position within group (unknowns go to end)
+  return gp * 1000 + (idx >= 0 ? idx : KPI_ORDER.length);
+}
+
+function sortKpis<T extends { KPI: string; KPIGroup: string }>(data: T[]): T[] {
+  return [...data].sort((a, b) => {
+    const ka = kpiSortKey(a);
+    const kb = kpiSortKey(b);
+    if (ka !== kb) return ka - kb;
+    return a.KPI.localeCompare(b.KPI);
+  });
+}
+
 function directionArrow(dir: string | null): string {
   if (!dir) return '';
   const d = dir.toLowerCase();
@@ -269,15 +338,21 @@ function KpiSummarySection({ data }: { data: KpiSnapshot[] }) {
   const amberCount = data.filter(d => d.RAG === 2).length;
   const redCount = data.filter(d => d.RAG === 3).length;
 
+  // Sort data using defined KPI order
+  const sorted = sortKpis(data);
+
   // Group data based on sort mode
   let groups: [string, KpiSnapshot[]][];
   if (sortBy === 'type') {
-    const grouped = data.reduce<Record<string, KpiSnapshot[]>>((acc, row) => {
+    // Build groups preserving the sorted order
+    const groupOrder: string[] = [];
+    const grouped: Record<string, KpiSnapshot[]> = {};
+    for (const row of sorted) {
       const g = row.KPIGroup || 'Other';
-      (acc[g] = acc[g] || []).push(row);
-      return acc;
-    }, {});
-    groups = Object.entries(grouped);
+      if (!grouped[g]) { grouped[g] = []; groupOrder.push(g); }
+      grouped[g].push(row);
+    }
+    groups = groupOrder.map(g => [g, grouped[g]]);
   } else {
     // Sort by RAG: Red (3) first, then Amber (2), then Green (1), then unset
     const ragOrder = (rag: number | null) => rag === 3 ? 0 : rag === 2 ? 1 : rag === 1 ? 2 : 3;

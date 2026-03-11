@@ -25,6 +25,7 @@ import { KpiDataView } from './components/KpiDataView.js';
 import { KpiComparisonView } from './components/KpiComparisonView.js';
 import { KpiLeaderboardView } from './components/KpiLeaderboardView.js';
 import { KpiDailyHistoryView } from './components/KpiDailyHistoryView.js';
+import { SalesHotboxView } from './components/SalesHotboxView.js';
 import { TeamWorkloadView } from './components/TeamWorkloadView.js';
 import { NotificationBell } from './components/NotificationBell.js';
 import { ChatView } from './components/ChatView.js';
@@ -43,11 +44,12 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'onboarding' | 'accounts' | 'kpis';
+type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'kpis';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm'
+  | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
@@ -67,7 +69,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden', admin: 'hidden',
+  servicedesk: 'view', sales: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden', admin: 'hidden',
 };
 
 // Map certain command sub-tabs to their own permission area
@@ -102,6 +104,13 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'attention', label: 'My Breached' },
     ],
   },
+  sales: {
+    label: 'Sales Hotbox',
+    defaultView: 'sales-hotbox',
+    tabs: [
+      { view: 'sales-hotbox', label: 'Sales Hotbox' },
+    ],
+  },
   onboarding: {
     label: 'Onboarding',
     defaultView: 'delivery',
@@ -133,7 +142,7 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'onboarding', 'accounts', 'kpis'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'kpis'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
@@ -145,7 +154,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'team-workload', 'admin-panel']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'team-workload', 'admin-panel', 'sales-hotbox']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -241,7 +250,7 @@ export function App() {
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
     userRole.split(',').map(r => r.trim()).includes('admin')
-      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit', admin: 'edit' }
+      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit', admin: 'edit' }
       : DEFAULT_AREA_ACCESS,
   );
   useEffect(() => {
@@ -866,6 +875,11 @@ export function App() {
           {/* Account Management */}
           {view === 'crm' && (
             <CrmView canWrite={areaAccess.accounts === 'edit'} />
+          )}
+
+          {/* Sales Hotbox */}
+          {view === 'sales-hotbox' && (
+            <SalesHotboxView canWrite={areaAccess.sales === 'edit'} />
           )}
 
           {/* Administration */}
