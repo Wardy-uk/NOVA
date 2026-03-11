@@ -591,19 +591,66 @@ export function KpiDailyHistoryView() {
       {/* ---- Departmental KPIs Tab: Grid with days across, KPIs down ---- */}
       {!loading && subTab === 'departmental' && (() => {
         const sortedDates = [...new Set(deptData.map(d => d.CreatedAt.slice(0, 10)))].sort();
-        const kpiNames = [...new Set(deptData.map(d => d.kpi))];
-        // Preserve order from first date's data (grouped by kpiGroup)
-        const kpiOrder = kpiNames.length > 0 ? kpiNames : [];
         // Build lookup: "kpi|date" => DailyKpi
         const deptMap = new Map<string, DailyKpi>();
         deptData.forEach(d => deptMap.set(`${d.kpi}|${d.CreatedAt.slice(0, 10)}`, d));
-        // Group KPIs by group
+        // Fixed KPI display order
+        const KPI_ORDER: string[] = [
+          "WTD percentage KPI's Green",
+          "WTD percentage KPI's Red",
+          'Number of Tickets in CC - Incidents',
+          'Number of Tickets in CC - Service Requests',
+          'Number of Tickets in CC - TPJ',
+          'Number of Tickets in Production',
+          'Number of Tickets in Tier 2',
+          'Number of Tickets in Tier 3',
+          'Number of Tickets in Development',
+          'Number of Tickets With No Reply in CC - Incidents',
+          'Number of Tickets With No Reply in CC - Production',
+          'Number of Tickets With No Reply in CC - TPJ',
+          'Number of Tickets With No Reply in Tier 2',
+          'Number of Tickets With No Reply in Tier 3',
+          'Number of CC tickets over SLA (actionable) (Incidents)',
+          'Number of CC tickets over SLA (actionable) (Production)',
+          'Number of CC tickets over SLA (actionable) (TPJ)',
+          'Number of Tier 2 tickets over SLA (actionable)',
+          'Number of Tier 3 tickets over SLA (actionable)',
+          'Number of CC tickets over SLA (Not actionable) (Incidents)',
+          'Number of CC tickets over SLA (Not actionable) (Production)',
+          'Number of CC tickets over SLA (Not actionable) (TPJ)',
+          'Number of Tier 2 tickets over SLA (not actionable)',
+          'Number of Tier 3 tickets over SLA (not actionable)',
+          'Tickets escalated to Tier 2',
+          'Tickets escalated to Tier 3',
+          'Tickets escalated to Development',
+          'Tickets rejected by Tier 2',
+          'Tickets rejected by Tier 3',
+          'Tickets rejected by Development',
+          'Oldest actionable ticket (days) in CC (Incident)',
+          'Oldest actionable ticket (days) in CC (Production)',
+          'Oldest actionable ticket (days) in CC (TPJ)',
+          'Oldest actionable ticket (days) in Production',
+          'Oldest actionable ticket (days) in Tier 2',
+          'Oldest actionable ticket (days) in Tier 3',
+        ];
+        // Group KPIs by their kpiGroup from the data
         const groupMap = new Map<string, string>();
         deptData.forEach(d => groupMap.set(d.kpi, d.kpiGroup));
-        const groups = [...new Set(deptData.map(d => d.kpiGroup))];
-        const kpisByGroup = groups.map(g => ({
+        // Order all KPIs: known ones first in fixed order, then any unknown ones at the end
+        const allKpiNames = [...new Set(deptData.map(d => d.kpi))];
+        const orderedKpis = [
+          ...KPI_ORDER.filter(k => allKpiNames.includes(k)),
+          ...allKpiNames.filter(k => !KPI_ORDER.includes(k)),
+        ];
+        // Build grouped structure preserving the fixed order
+        const seenGroups: string[] = [];
+        for (const kpi of orderedKpis) {
+          const g = groupMap.get(kpi) || 'Other';
+          if (!seenGroups.includes(g)) seenGroups.push(g);
+        }
+        const kpisByGroup = seenGroups.map(g => ({
           group: g,
-          kpis: kpiOrder.filter(k => groupMap.get(k) === g),
+          kpis: orderedKpis.filter(k => (groupMap.get(k) || 'Other') === g),
         }));
 
         return (
