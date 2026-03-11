@@ -66,7 +66,15 @@ type AccessLevel = 'hidden' | 'view' | 'edit';
 interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
-  command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden', admin: 'hidden',
+  command: 'view', briefing: 'view', my_team: 'view', my_chat: 'view',
+  servicedesk: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden', admin: 'hidden',
+};
+
+// Map certain command sub-tabs to their own permission area
+const TAB_AREA_GATE: Partial<Record<View, string>> = {
+  standup: 'briefing',
+  'team-workload': 'my_team',
+  chat: 'my_chat',
 };
 
 const AREAS: Record<Area, AreaDef> = {
@@ -233,7 +241,7 @@ export function App() {
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
     userRole.split(',').map(r => r.trim()).includes('admin')
-      ? { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit', admin: 'edit' }
+      ? { command: 'edit', briefing: 'edit', my_team: 'edit', my_chat: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit', admin: 'edit' }
       : DEFAULT_AREA_ACCESS,
   );
   useEffect(() => {
@@ -294,6 +302,7 @@ export function App() {
     if (!auth.isAuthenticated || standupChecked.current) return;
     standupChecked.current = true;
     if (getViewFromHash() || homepage) return; // User has hash nav or pinned homepage — don't override
+    if ((areaAccess.briefing || 'hidden') === 'hidden') return; // No briefing permission
     fetch('/api/standups/today')
       .then((r) => r.json())
       .then((json) => {
@@ -493,7 +502,11 @@ export function App() {
   };
 
   const getVisibleTabs = (area: Area) => {
-    return AREAS[area].tabs;
+    return AREAS[area].tabs.filter(t => {
+      const gateArea = TAB_AREA_GATE[t.view];
+      if (!gateArea) return true;
+      return (areaAccess[gateArea] || 'hidden') !== 'hidden';
+    });
   };
 
   const isFullWidth = FULL_WIDTH_VIEWS.has(view);

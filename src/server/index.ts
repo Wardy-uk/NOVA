@@ -402,7 +402,7 @@ async function main() {
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
   app.use('/api/jira', createJiraRoutes(taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries));
-  app.use('/api/standups', createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
+  app.use('/api/standups', requireAreaAccess('briefing', 'view'), createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
   const spSync = new SharePointSync(mcpManager, deliveryQueries, () => settingsQueries.getAll());
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess, auditQueries, onboardingRunQueries, settingsQueries));
   // Milestone routes — wired with workflow engine after buildOrchestrator is defined (see below)
@@ -414,9 +414,9 @@ async function main() {
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries, userQueries, notificationQueries));
   app.use('/api/audit', createAuditRoutes(auditQueries));
-  app.use('/api/team', createTeamRoutes(deliveryQueries, milestoneQueries, taskQueries, userQueries));
+  app.use('/api/team', requireAreaAccess('my_team', 'view'), createTeamRoutes(deliveryQueries, milestoneQueries, taskQueries, userQueries));
   app.use('/api/notifications', createNotificationRoutes(notificationQueries, notificationEngine));
-  app.use('/api/chat', createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
+  app.use('/api/chat', requireAreaAccess('my_chat', 'view'), createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
 
   // DELETE /api/data/source/:source — purge local records for a given integration source
   app.delete('/api/data/source/:source', (req, res) => {

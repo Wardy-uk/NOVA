@@ -35,10 +35,10 @@ import type { CustomRole } from '../middleware/auth.js';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 
 const DEFAULT_CUSTOM_ROLES: CustomRole[] = [
-  { id: 'editor', name: 'Editor', areas: { command: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit' } },
-  { id: 'design', name: 'Design', areas: { command: 'view', servicedesk: 'view', onboarding: 'edit', accounts: 'view', azdo_push: 'edit', kpis: 'view' } },
-  { id: 'viewer', name: 'Viewer', areas: { command: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden' } },
-  { id: 'report_viewer', name: 'Report Viewer', areas: { command: 'view', servicedesk: 'view', onboarding: 'hidden', accounts: 'hidden', kpis: 'view' } },
+  { id: 'editor', name: 'Editor', areas: { command: 'edit', briefing: 'edit', my_team: 'edit', my_chat: 'edit', servicedesk: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit' } },
+  { id: 'design', name: 'Design', areas: { command: 'view', briefing: 'view', my_team: 'view', my_chat: 'view', servicedesk: 'view', onboarding: 'edit', accounts: 'view', azdo_push: 'edit', kpis: 'view' } },
+  { id: 'viewer', name: 'Viewer', areas: { command: 'view', briefing: 'view', my_team: 'view', my_chat: 'view', servicedesk: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden' } },
+  { id: 'report_viewer', name: 'Report Viewer', areas: { command: 'view', briefing: 'hidden', my_team: 'hidden', my_chat: 'hidden', servicedesk: 'view', onboarding: 'hidden', accounts: 'hidden', kpis: 'view' } },
 ];
 
 function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
