@@ -596,6 +596,8 @@ export function KpiDailyHistoryView() {
         deptData.forEach(d => deptMap.set(`${d.kpi}|${d.CreatedAt.slice(0, 10)}`, d));
         // Fixed KPI display order
         const KPI_ORDER: string[] = [
+          'Created Today',
+          'Solved Today',
           "WTD percentage KPI's Green",
           "WTD percentage KPI's Red",
           'Number of Tickets in CC - Incidents',
