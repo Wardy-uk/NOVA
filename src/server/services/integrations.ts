@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import type { IntegrationDefinition } from '../../shared/types.js';
 
@@ -8,7 +9,7 @@ const __dirname = path.dirname(__filename);
 function findProjectRoot(startDir: string): string {
   let dir = startDir;
   for (let i = 0; i < 10; i++) {
-    if (require('fs').existsSync(path.join(dir, 'package.json'))) return dir;
+    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;

@@ -12,6 +12,7 @@ import type { JiraRestClient } from '../services/jira-client.js';
 import type { BymClient } from '../services/bym-client.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,7 +20,7 @@ const __dirname = path.dirname(__filename);
 function findProjectRoot(startDir: string): string {
   let dir = startDir;
   for (let i = 0; i < 10; i++) {
-    if (require('fs').existsSync(path.join(dir, 'package.json'))) return dir;
+    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
