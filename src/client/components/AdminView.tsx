@@ -814,6 +814,32 @@ export function AdminView() {
             >
               Import Users
             </button>
+            <button
+              onClick={() => {
+                const teamName = (id: number | null) => teams.find(t => t.id === id)?.name ?? '';
+                const header = ['Username', 'Display Name', 'Email', 'Roles', 'Team', 'Auth Provider', 'Created'];
+                const rows = users.map(u => [
+                  u.username,
+                  u.display_name ?? '',
+                  u.email ?? '',
+                  u.role,
+                  teamName(u.team_id),
+                  u.auth_provider,
+                  u.created_at ? new Date(u.created_at).toLocaleDateString() : '',
+                ]);
+                const csv = [header, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `users-export-${new Date().toISOString().slice(0, 10)}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="px-4 py-2 bg-[#2f353d] text-neutral-300 border border-[#3a424d] rounded text-sm hover:bg-[#363d47] transition-colors"
+            >
+              Export Users
+            </button>
           </div>
           {showAddUser && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowAddUser(false)}>
