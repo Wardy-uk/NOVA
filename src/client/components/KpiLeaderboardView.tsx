@@ -215,6 +215,7 @@ export function KpiLeaderboardView() {
   const [env, setEnv] = useState<'live' | 'uat'>('live');
   const [tab, setTab] = useState<LeaderboardTab>('combined');
   const [period, setPeriod] = useState<'daily' | 'weekly'>('daily');
+  const [nameFilter, setNameFilter] = useState('');
 
   const fetchData = useCallback(async () => {
     setError(null);
@@ -742,6 +743,27 @@ export function KpiLeaderboardView() {
         </div>
       </div>
 
+      {/* ---- Agent Name Filter ---- */}
+      <div style={{
+        marginBottom: 16,
+        animation: 'kpiLbFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.07s forwards',
+        opacity: 0,
+      }}>
+        <input
+          type="text"
+          placeholder="Filter by agent name..."
+          value={nameFilter}
+          onChange={e => setNameFilter(e.target.value)}
+          style={{
+            padding: '8px 16px', borderRadius: 20, border: `1px solid ${C.border}`,
+            background: C.glass, color: C.text1, fontSize: 13, fontFamily: 'inherit',
+            width: 260, outline: 'none', transition: 'border-color 0.2s',
+          }}
+          onFocus={e => { e.currentTarget.style.borderColor = `${C.teal}60`; }}
+          onBlur={e => { e.currentTarget.style.borderColor = C.border; }}
+        />
+      </div>
+
       {/* ---- Leaderboard Table ---- */}
       <div style={{
         animation: 'kpiLbFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.1s forwards',
@@ -766,19 +788,24 @@ export function KpiLeaderboardView() {
               </tr>
             </thead>
             <tbody>
-              {sorted.length === 0 && (
+              {(() => {
+                const filtered = nameFilter.trim()
+                  ? sorted.filter(a => a.name.toLowerCase().includes(nameFilter.toLowerCase()))
+                  : sorted;
+                return <>
+              {filtered.length === 0 && (
                 <tr>
                   <td colSpan={headers.length} style={{
                     padding: '40px 16px', textAlign: 'center',
                     color: C.text3, fontSize: 13, fontWeight: 500,
                   }}>
-                    No agent data available
+                    {nameFilter ? 'No agents match filter' : 'No agent data available'}
                   </td>
                 </tr>
               )}
-              {sorted.map((agent, i) => {
-                const rank = i + 1;
-                const isTop3 = rank <= 3;
+              {filtered.map((agent, i) => {
+                const rank = nameFilter ? i + 1 : i + 1;
+                const isTop3 = rank <= 3 && !nameFilter;
                 const hasNoData = agent.compositeScore === 0 && tab === 'combined';
 
                 return (
@@ -803,6 +830,8 @@ export function KpiLeaderboardView() {
                   </tr>
                 );
               })}
+                </>;
+              })()}
             </tbody>
           </table>
         </div>
