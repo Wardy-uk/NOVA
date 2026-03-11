@@ -135,7 +135,6 @@ export function AdminView() {
 
   // Custom roles state
   const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
-  const [rolesDirty, setRolesDirty] = useState(false);
   const [rolesSaving, setRolesSaving] = useState(false);
   const [editingRole, setEditingRole] = useState<CustomRole | null>(null);
   const [showAddRole, setShowAddRole] = useState(false);
@@ -288,24 +287,22 @@ export function AdminView() {
       ]);
       const rolesJson = await rolesRes.json();
       const validJson = await validRes.json();
-      if (rolesJson.ok) { setCustomRoles(rolesJson.data.roles); setRolesDirty(false); }
+      if (rolesJson.ok) { setCustomRoles(rolesJson.data.roles); }
       if (validJson.ok) setValidRoleIds(validJson.data.roles);
     } catch { /* ignore */ }
   }, []);
 
-  const saveRoles = async () => {
-    clearMessages();
+  const saveRoles = async (rolesToSave?: CustomRole[]) => {
+    const payload = rolesToSave ?? customRoles;
     setRolesSaving(true);
     try {
       const res = await fetch('/api/admin/roles', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roles: customRoles }),
+        body: JSON.stringify({ roles: payload }),
       });
       const json = await res.json();
       if (json.ok) {
-        setSuccess('Roles saved');
-        setRolesDirty(false);
         fetchRoles();
       } else {
         setError(json.error || 'Failed to save roles');
@@ -1463,9 +1460,10 @@ export function AdminView() {
                     <>
                       <button
                         onClick={() => {
-                          setCustomRoles(prev => prev.map(r => r.id === editingRole.id ? editingRole : r));
+                          const updated = customRoles.map(r => r.id === editingRole.id ? editingRole : r);
+                          setCustomRoles(updated);
                           setEditingRole(null);
-                          setRolesDirty(true);
+                          saveRoles(updated);
                         }}
                         className="px-2 py-1 text-[10px] rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors"
                       >
@@ -1489,8 +1487,9 @@ export function AdminView() {
                       <button
                         onClick={() => {
                           if (!confirm(`Delete role "${role.name}"? Users with this role will lose access.`)) return;
-                          setCustomRoles(prev => prev.filter(r => r.id !== role.id));
-                          setRolesDirty(true);
+                          const updated = customRoles.filter(r => r.id !== role.id);
+                          setCustomRoles(updated);
+                          saveRoles(updated);
                         }}
                         className="px-2 py-1 text-[10px] rounded bg-[#272C33] text-neutral-400 hover:text-red-400 transition-colors"
                       >
@@ -1570,10 +1569,12 @@ export function AdminView() {
                       }
                       const areas: Record<string, AccessLevel> = {};
                       for (const a of AREA_DEFS) areas[a.id] = 'view';
-                      setCustomRoles(prev => [...prev, { id, name: newRoleName.trim(), areas }]);
+                      const newRole = { id, name: newRoleName.trim(), areas };
+                      const updated = [...customRoles, newRole];
+                      setCustomRoles(updated);
                       setNewRoleName('');
                       setShowAddRole(false);
-                      setRolesDirty(true);
+                      saveRoles(updated);
                     }
                   }}
                   className="flex-1 bg-[#272C33] text-neutral-300 text-sm rounded px-3 py-2 border border-[#3a424d] outline-none focus:border-[#5ec1ca] placeholder:text-neutral-600"
@@ -1589,10 +1590,12 @@ export function AdminView() {
                     }
                     const areas: Record<string, AccessLevel> = {};
                     for (const a of AREA_DEFS) areas[a.id] = 'view';
-                    setCustomRoles(prev => [...prev, { id, name: newRoleName.trim(), areas }]);
+                    const newRole = { id, name: newRoleName.trim(), areas };
+                    const updated = [...customRoles, newRole];
+                    setCustomRoles(updated);
                     setNewRoleName('');
                     setShowAddRole(false);
-                    setRolesDirty(true);
+                    saveRoles(updated);
                   }}
                   disabled={!newRoleName.trim()}
                   className="px-4 py-2 bg-[#5ec1ca] text-[#272C33] font-semibold rounded text-sm hover:bg-[#4db0b9] transition-colors disabled:opacity-40"
@@ -1616,18 +1619,9 @@ export function AdminView() {
             </button>
           )}
 
-          {/* Save button */}
-          {rolesDirty && (
-            <div className="flex items-center gap-3">
-              <button
-                onClick={saveRoles}
-                disabled={rolesSaving}
-                className="px-4 py-2 bg-[#5ec1ca] text-[#272C33] font-semibold rounded text-sm hover:bg-[#4db0b9] disabled:opacity-50 transition-colors"
-              >
-                {rolesSaving ? 'Saving...' : 'Save Roles'}
-              </button>
-              <span className="text-xs text-amber-400">Unsaved changes</span>
-            </div>
+          {/* Auto-save indicator */}
+          {rolesSaving && (
+            <span className="text-xs text-neutral-500">Saving...</span>
           )}
 
           {/* Feature Flags */}
