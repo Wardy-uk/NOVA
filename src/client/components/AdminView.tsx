@@ -81,9 +81,7 @@ interface CustomRole {
 
 const AREA_DEFS = [
   { id: 'command', label: 'My NOVA' },
-  { id: 'briefing', label: 'NOVA Briefing' },
-  { id: 'my_team', label: 'My Team' },
-  { id: 'my_chat', label: 'My Chat' },
+  { id: 'nova_features', label: 'Briefing / Team / Chat' },
   { id: 'servicedesk', label: 'Service Desk' },
   { id: 'onboarding', label: 'Onboarding' },
   { id: 'accounts', label: 'Account Management' },
