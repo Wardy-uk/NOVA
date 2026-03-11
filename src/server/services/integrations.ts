@@ -4,9 +4,20 @@ import type { IntegrationDefinition } from '../../shared/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// Project root: src/server/services/ → 3 levels up
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+// Find project root by walking up until we find package.json
+function findProjectRoot(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (require('fs').existsSync(path.join(dir, 'package.json'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return startDir; // fallback
+}
+const PROJECT_ROOT = findProjectRoot(__dirname);
 const MS365_DATA_DIR = path.join(PROJECT_ROOT, 'data');
+console.log(`[MS365] Token cache dir: ${MS365_DATA_DIR}`);
 
 export const INTEGRATIONS: IntegrationDefinition[] = [
   {

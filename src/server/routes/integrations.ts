@@ -16,7 +16,17 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+function findProjectRoot(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (require('fs').existsSync(path.join(dir, 'package.json'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return startDir;
+}
+const PROJECT_ROOT = findProjectRoot(__dirname);
 const MS365_DATA_DIR = path.join(PROJECT_ROOT, 'data');
 
 // Stable env for ms-365-mcp-server CLI commands so token cache persists across npx updates
