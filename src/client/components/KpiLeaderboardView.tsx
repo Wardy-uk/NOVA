@@ -280,23 +280,37 @@ export function KpiLeaderboardView() {
 
   /* ---- Merge agent + daily data ---- */
   const merged: RankedAgent[] = (() => {
-    // Build a map of latest daily data per agent
-    const dailyMap = new Map<string, AgentDaily>();
+    // Build a map of ALL daily records per agent (keyed by full name)
+    const allDailyMap = new Map<string, AgentDaily[]>();
     for (const d of agentDaily) {
-      const existing = dailyMap.get(d.AgentName);
-      if (!existing || d.ReportDate > existing.ReportDate) {
-        dailyMap.set(d.AgentName, d);
-      }
+      const key = d.AgentName;
+      const arr = allDailyMap.get(key) || [];
+      arr.push(d);
+      allDailyMap.set(key, arr);
     }
 
-    return agents.map(a => {
-      const daily = dailyMap.get(`${a.AgentName} ${a.AgentSurname}`.trim());
-      const slaPercent = daily?.SLACompliancePct ?? null;
+    // Helper: from an agent's daily records, pick the most recent non-null value
+    const bestVal = (rows: AgentDaily[], getter: (r: AgentDaily) => number | null | undefined): number | null => {
+      // Sort newest first
+      const sorted = [...rows].sort((a, b) => b.ReportDate.localeCompare(a.ReportDate));
+      for (const r of sorted) {
+        const v = getter(r);
+        if (v != null) return v;
+      }
+      return null;
+    };
 
-      const tph = daily?.TicketsPerHour ?? null;
-      const qa = daily?.QAOverallAvg ?? null;
-      const csat = daily?.CSATAverage ?? null;
-      const gr = daily?.GoldenRulesAvg ?? null;
+    return agents.map(a => {
+      const fullName = `${a.AgentName} ${a.AgentSurname}`.trim();
+      const rows = allDailyMap.get(fullName) || [];
+
+      // Use latest day for ticket counts (point-in-time), but best available for scored metrics
+      const latest = rows.length > 0 ? rows.reduce((best, r) => r.ReportDate > best.ReportDate ? r : best) : null;
+      const tph = bestVal(rows, r => r.TicketsPerHour ?? null);
+      const slaPercent = bestVal(rows, r => r.SLACompliancePct ?? null);
+      const qa = bestVal(rows, r => r.QAOverallAvg ?? null);
+      const csat = bestVal(rows, r => r.CSATAverage ?? null);
+      const gr = bestVal(rows, r => r.GoldenRulesAvg ?? null);
 
       // Composite: normalise each metric to 0-100, average available ones
       const scores: number[] = [];

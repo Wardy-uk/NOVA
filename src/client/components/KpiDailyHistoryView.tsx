@@ -588,88 +588,99 @@ export function KpiDailyHistoryView() {
         }}>Loading...</div>
       )}
 
-      {/* ---- Departmental KPIs Tab ---- */}
-      {!loading && subTab === 'departmental' && (
-        <div>
-          {deptDates.length === 0 ? (
-            <div style={{ padding: 40, textAlign: 'center', color: C.text3 }}>
-              No departmental KPI data for this date range.
-            </div>
-          ) : (
-            deptDates.map(date => {
-              const dayRows = deptData.filter(d => d.CreatedAt.slice(0, 10) === date);
-              const greenCount = dayRows.filter(d => d.rag === 1).length;
-              const amberCount = dayRows.filter(d => d.rag === 2).length;
-              const redCount = dayRows.filter(d => d.rag === 3).length;
+      {/* ---- Departmental KPIs Tab: Grid with days across, KPIs down ---- */}
+      {!loading && subTab === 'departmental' && (() => {
+        const sortedDates = [...new Set(deptData.map(d => d.CreatedAt.slice(0, 10)))].sort();
+        const kpiNames = [...new Set(deptData.map(d => d.kpi))];
+        // Preserve order from first date's data (grouped by kpiGroup)
+        const kpiOrder = kpiNames.length > 0 ? kpiNames : [];
+        // Build lookup: "kpi|date" => DailyKpi
+        const deptMap = new Map<string, DailyKpi>();
+        deptData.forEach(d => deptMap.set(`${d.kpi}|${d.CreatedAt.slice(0, 10)}`, d));
+        // Group KPIs by group
+        const groupMap = new Map<string, string>();
+        deptData.forEach(d => groupMap.set(d.kpi, d.kpiGroup));
+        const groups = [...new Set(deptData.map(d => d.kpiGroup))];
+        const kpisByGroup = groups.map(g => ({
+          group: g,
+          kpis: kpiOrder.filter(k => groupMap.get(k) === g),
+        }));
 
-              return (
-                <div key={date} style={{ marginBottom: 24 }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    marginBottom: 8,
-                  }}>
-                    <h3 style={{
-                      fontSize: 14, fontWeight: 700, color: C.text1, margin: 0,
-                    }}>{fmtDateDisplay(date)}</h3>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      {[
-                        { c: greenCount, color: C.green, label: 'G' },
-                        { c: amberCount, color: C.amber, label: 'A' },
-                        { c: redCount, color: C.red, label: 'R' },
-                      ].map(s => (
-                        <span key={s.label} style={{
-                          fontSize: 11, fontWeight: 700, color: s.color,
-                          padding: '2px 10px', borderRadius: 10,
-                          background: `${s.color}15`,
-                        }}>{s.c} {s.label}</span>
+        return (
+          <div>
+            {sortedDates.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center', color: C.text3 }}>
+                No departmental KPI data for this date range.
+              </div>
+            ) : (
+              <div style={{
+                background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+                overflow: 'auto',
+              }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: sortedDates.length * 100 + 300 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...thStyle, textAlign: 'left', minWidth: 200, position: 'sticky', left: 0, zIndex: 3, background: C.bg1 }}>KPI</th>
+                      <th style={{ ...thStyle, textAlign: 'center', minWidth: 60 }}>Target</th>
+                      {sortedDates.map(d => (
+                        <th key={d} style={{ ...thStyle, textAlign: 'center', whiteSpace: 'nowrap' }}>{fmtDateShort(d)}</th>
                       ))}
-                    </div>
-                  </div>
-                  <div style={{
-                    background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
-                    overflow: 'hidden',
-                  }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr>
-                          <th style={thStyle}>KPI</th>
-                          <th style={thStyle}>Group</th>
-                          <th style={{ ...thStyle, textAlign: 'center' }}>Count</th>
-                          <th style={{ ...thStyle, textAlign: 'center' }}>Target</th>
-                          <th style={{ ...thStyle, textAlign: 'center' }}>RAG</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {kpisByGroup.map(({ group, kpis }) => (
+                      <>
+                        <tr key={`group-${group}`}>
+                          <td colSpan={2 + sortedDates.length} style={{
+                            padding: '10px 14px', fontSize: 10, fontWeight: 700,
+                            textTransform: 'uppercase', letterSpacing: '1px',
+                            color: C.teal, background: C.bg2,
+                            borderBottom: `1px solid ${C.border}`,
+                            position: 'sticky', left: 0,
+                          }}>{group}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {dayRows.map((row, i) => (
-                          <tr key={i} style={{
-                            background: row.rag === 3 ? 'rgba(239,68,68,0.04)' : 'transparent',
-                          }}>
-                            <td style={{ ...tdStyle, fontWeight: 500 }}>{row.kpi}</td>
-                            <td style={{ ...tdStyle, fontSize: 11, color: C.text3 }}>{row.kpiGroup}</td>
-                            <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700 }}>
-                              {fmtNum(row.count)}
-                            </td>
-                            <td style={{ ...tdStyle, textAlign: 'center', color: C.text3 }}>
-                              {row.target !== null ? fmtNum(row.target) : '-'}
-                            </td>
-                            <td style={{ ...tdStyle, textAlign: 'center' }}>
-                              <span style={{
-                                fontSize: 10, fontWeight: 600, color: ragColor(row.rag),
-                                padding: '2px 8px', borderRadius: 10,
-                                background: ragBg(row.rag),
-                              }}>{ragLabel(row.rag)}</span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
+                        {kpis.map((kpi, ki) => {
+                          const firstRow = deptMap.get(`${kpi}|${sortedDates[0]}`);
+                          return (
+                            <tr key={kpi}>
+                              <td style={{
+                                ...tdStyle, fontWeight: 500, position: 'sticky', left: 0, zIndex: 1,
+                                background: ki % 2 === 0 ? C.bg0 : C.bg2,
+                              }}>{kpi}</td>
+                              <td style={{
+                                ...tdStyle, textAlign: 'center', color: C.text3, fontWeight: 600,
+                                background: ki % 2 === 0 ? C.bg0 : C.bg2,
+                              }}>{firstRow?.target != null ? fmtNum(firstRow.target) : '-'}</td>
+                              {sortedDates.map(date => {
+                                const row = deptMap.get(`${kpi}|${date}`);
+                                const bg = ki % 2 === 0 ? C.bg0 : C.bg2;
+                                if (!row) return <td key={date} style={{ ...tdStyle, textAlign: 'center', background: bg, color: C.text3 }}></td>;
+                                return (
+                                  <td key={date} style={{ ...tdStyle, textAlign: 'center', background: bg }}>
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                                      <span style={{ fontWeight: 600, color: C.text1 }}>{fmtNum(row.count)}</span>
+                                      <span style={{
+                                        display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                                        background: ragColor(row.rag),
+                                        boxShadow: `0 0 4px ${ragColor(row.rag)}`,
+                                        flexShrink: 0,
+                                      }} />
+                                    </span>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ---- Agent KPIs Tab: Pivoted spreadsheet style ---- */}
       {!loading && subTab === 'agents' && (
