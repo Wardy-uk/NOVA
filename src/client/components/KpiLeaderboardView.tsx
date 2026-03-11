@@ -48,6 +48,8 @@ interface RankedAgent {
   ticketsPerHour: number | null;
   slaPercent: number | null;
   qaScore: number | null;
+  csatScore: number | null;
+  goldenRulesScore: number | null;
   compositeScore: number;
 }
 
@@ -288,17 +290,21 @@ export function KpiLeaderboardView() {
     }
 
     return agents.map(a => {
-      const daily = dailyMap.get(a.AgentName);
+      const daily = dailyMap.get(`${a.AgentName} ${a.AgentSurname}`.trim());
       const slaPercent = daily?.SLACompliancePct ?? null;
 
       const tph = daily?.TicketsPerHour ?? null;
       const qa = daily?.QAOverallAvg ?? null;
+      const csat = daily?.CSATAverage ?? null;
+      const gr = daily?.GoldenRulesAvg ?? null;
 
       // Composite: normalise each metric to 0-100, average available ones
       const scores: number[] = [];
       if (tph != null) scores.push(Math.min(tph * 20, 100)); // 5 tix/hr = 100
       if (slaPercent != null) scores.push(slaPercent);
       if (qa != null) scores.push(qa * 20); // assume 0-5 scale → 0-100
+      if (csat != null) scores.push(csat * 20); // 1-5 scale → 0-100
+      if (gr != null) scores.push(gr * 20); // 1-5 scale → 0-100
 
       const compositeScore = scores.length > 0
         ? scores.reduce((s, v) => s + v, 0) / scores.length
@@ -317,6 +323,8 @@ export function KpiLeaderboardView() {
         ticketsPerHour: tph,
         slaPercent,
         qaScore: qa,
+        csatScore: csat,
+        goldenRulesScore: gr,
         compositeScore,
       };
     });
@@ -373,10 +381,10 @@ export function KpiLeaderboardView() {
   /* ---- Column headers per tab (dynamic based on period) ---- */
   const solvedLabel = period === 'weekly' ? 'Solved Week' : 'Solved Today';
   const columnHeaders: Record<LeaderboardTab, string[]> = {
-    combined: ['Rank', 'Agent', 'Team', 'Tier', 'Tix/Hr', 'SLA %', 'QA Score', 'Composite', solvedLabel],
+    combined: ['Rank', 'Agent', 'Team', 'Tier', 'Tix/Hr', 'SLA %', 'QA Score', 'CSAT', 'Composite', solvedLabel],
     productivity: ['Rank', 'Agent', 'Team', 'Tier', 'Tix/Hr', 'Solved Today', 'Solved Week', 'Open', '>2h'],
     sla: ['Rank', 'Agent', 'Team', 'Tier', 'SLA %', 'Open', '>2h Overdue', 'Stale', solvedLabel],
-    quality: ['Rank', 'Agent', 'Team', 'Tier', 'QA Score', 'Golden Rules', 'Tix/Hr', solvedLabel],
+    quality: ['Rank', 'Agent', 'Team', 'Tier', 'QA Score', 'CSAT', 'Golden Rules', 'Tix/Hr', solvedLabel],
   };
 
   const isLeftAligned = (h: string) => ['Agent', 'Team', 'Tier'].includes(h);
@@ -472,17 +480,25 @@ export function KpiLeaderboardView() {
             )}
           </td>
         );
-      case 'Golden Rules': {
-        const daily = agentDaily.find(d => agent.name.startsWith(d.AgentName));
-        const gr = daily?.GoldenRulesAvg ?? null;
+      case 'CSAT':
         return (
           <td key={header} style={cellStyle()}>
-            <span style={{ fontWeight: 700, color: scoreColor(gr, [4, 3]) }}>
-              {fmt1(gr)}
+            <span style={{ fontWeight: 700, color: scoreColor(agent.csatScore, [4, 3]) }}>
+              {fmt1(agent.csatScore)}
+            </span>
+            {agent.csatScore != null && (
+              <MiniBar value={agent.csatScore} max={5} color={scoreColor(agent.csatScore, [4, 3])} />
+            )}
+          </td>
+        );
+      case 'Golden Rules':
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{ fontWeight: 700, color: scoreColor(agent.goldenRulesScore, [4, 3]) }}>
+              {fmt1(agent.goldenRulesScore)}
             </span>
           </td>
         );
-      }
       case 'Composite':
         return (
           <td key={header} style={cellStyle()}>
@@ -671,6 +687,10 @@ export function KpiLeaderboardView() {
         <StatPill value={avgTph} label="Avg Tix/Hr" color={C.teal} />
         <StatPill value={avgSla} label="Avg SLA" color={C.green} />
         <StatPill value={avgQa} label="Avg QA" color={C.amber} />
+        <StatPill value={(() => {
+          const vals = merged.filter(m => m.csatScore != null);
+          return vals.length > 0 ? (vals.reduce((s, v) => s + v.csatScore!, 0) / vals.length).toFixed(1) : '-';
+        })()} label="Avg CSAT" color={C.amber} />
       </div>
 
       {/* ---- Tab Selector + Period Toggle ---- */}
