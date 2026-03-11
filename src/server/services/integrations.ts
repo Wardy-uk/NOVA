@@ -1,5 +1,12 @@
 import path from 'path';
+import { fileURLToPath } from 'url';
 import type { IntegrationDefinition } from '../../shared/types.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// Project root: src/server/services/ → 3 levels up
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+const MS365_DATA_DIR = path.join(PROJECT_ROOT, 'data');
 
 export const INTEGRATIONS: IntegrationDefinition[] = [
   {
@@ -169,14 +176,12 @@ export function buildMcpConfig(
   switch (id) {
     // Jira uses direct REST API (per-user credentials) — no MCP server needed
     case 'msgraph': {
-      // Persist MSAL token cache to a stable location so it survives npx cache clears and server restarts
-      const dataDir = path.join(process.cwd(), 'data');
       return {
         command: 'npx',
         args: ['@softeria/ms-365-mcp-server', '--preset', 'tasks,calendar,mail,files', '--org-mode'],
         env: {
-          MS365_MCP_TOKEN_CACHE_PATH: path.join(dataDir, '.ms365-token-cache.json'),
-          MS365_MCP_SELECTED_ACCOUNT_PATH: path.join(dataDir, '.ms365-selected-account.json'),
+          MS365_MCP_TOKEN_CACHE_PATH: path.join(MS365_DATA_DIR, '.ms365-token-cache.json'),
+          MS365_MCP_SELECTED_ACCOUNT_PATH: path.join(MS365_DATA_DIR, '.ms365-selected-account.json'),
         },
       };
     }

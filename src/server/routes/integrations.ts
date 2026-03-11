@@ -12,12 +12,18 @@ import type { JiraRestClient } from '../services/jira-client.js';
 import type { BymClient } from '../services/bym-client.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+const MS365_DATA_DIR = path.join(PROJECT_ROOT, 'data');
 
 // Stable env for ms-365-mcp-server CLI commands so token cache persists across npx updates
 const ms365Env = {
   ...process.env,
-  MS365_MCP_TOKEN_CACHE_PATH: path.join(process.cwd(), 'data', '.ms365-token-cache.json'),
-  MS365_MCP_SELECTED_ACCOUNT_PATH: path.join(process.cwd(), 'data', '.ms365-selected-account.json'),
+  MS365_MCP_TOKEN_CACHE_PATH: path.join(MS365_DATA_DIR, '.ms365-token-cache.json'),
+  MS365_MCP_SELECTED_ACCOUNT_PATH: path.join(MS365_DATA_DIR, '.ms365-selected-account.json'),
 };
 
 // Admin-only integrations: credentials stay in global settings.json
