@@ -11,6 +11,14 @@ import type { IntegrationStatus, McpServerStatus } from '../../shared/types.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { BymClient } from '../services/bym-client.js';
 import { isAdmin } from '../utils/role-helpers.js';
+import path from 'path';
+
+// Stable env for ms-365-mcp-server CLI commands so token cache persists across npx updates
+const ms365Env = {
+  ...process.env,
+  MS365_MCP_TOKEN_CACHE_PATH: path.join(process.cwd(), 'data', '.ms365-token-cache.json'),
+  MS365_MCP_SELECTED_ACCOUNT_PATH: path.join(process.cwd(), 'data', '.ms365-selected-account.json'),
+};
 
 // Admin-only integrations: credentials stay in global settings.json
 const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo', 'kpi-sql']);
@@ -50,6 +58,7 @@ export function createIntegrationRoutes(
       const { stdout } = await execFileAsync('npx', ['@softeria/ms-365-mcp-server', '--list-accounts'], {
         timeout: 30000,
         shell: true,
+        env: ms365Env,
       });
       const parsed = JSON.parse(stdout.trim());
       return Array.isArray(parsed.accounts) && parsed.accounts.length > 0;
@@ -318,6 +327,7 @@ export function createIntegrationRoutes(
     const child = spawn('npx', ['@softeria/ms-365-mcp-server', '--login', '--org-mode'], {
       shell: true,
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: ms365Env,
     });
 
     let output = '';
@@ -414,6 +424,7 @@ export function createIntegrationRoutes(
       await execFileAsync('npx', ['@softeria/ms-365-mcp-server', '--logout'], {
         timeout: 30000,
         shell: true,
+        env: ms365Env,
       });
       res.json({ ok: true });
     } catch (err) {
