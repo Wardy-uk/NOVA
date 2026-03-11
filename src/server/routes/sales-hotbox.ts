@@ -159,16 +159,12 @@ export function createSalesHotboxRoutes(
 
   router.post('/import', writeGuard, async (req, res) => {
     try {
-      const filePath = req.body.filePath as string;
-      if (!filePath) return res.status(400).json({ ok: false, error: 'filePath is required' });
-
-      const fs = await import('fs');
-      if (!fs.existsSync(filePath)) {
-        return res.status(400).json({ ok: false, error: `File not found: ${filePath}` });
-      }
+      const fileData = req.body.fileData as string;
+      if (!fileData) return res.status(400).json({ ok: false, error: 'fileData (base64) is required' });
 
       const XLSX = (await import('xlsx')).default;
-      const wb = XLSX.readFile(filePath);
+      const buf = Buffer.from(fileData, 'base64');
+      const wb = XLSX.read(buf, { type: 'buffer' });
       const stats = { deals: 0, sales: 0, targets: 0 };
 
       // ── Import pipeline deals from individual hotbox sheets ──

@@ -713,28 +713,42 @@ export function SalesHotboxView({ canWrite = false }: { canWrite?: boolean }) {
   };
 
   const runImport = async () => {
-    const filePath = prompt('Path to hotbox spreadsheet:', 'C:\\Users\\NickW\\Downloads\\hotbox Sales Team.xlsx');
-    if (!filePath) return;
-    setImporting(true);
-    setImportResult(null);
-    try {
-      const res = await fetch('/api/sales/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath, clear: true }),
-      });
-      const json = await res.json();
-      if (json.ok) {
-        setImportResult(`Imported: ${json.data.deals} deals, ${json.data.sales} sales, ${json.data.targets} targets`);
-        fetchAll();
-      } else {
-        setImportResult(`Error: ${json.error}`);
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      setImporting(true);
+      setImportResult(null);
+      try {
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(',')[1]); // strip data:...;base64, prefix
+          };
+          reader.readAsDataURL(file);
+        });
+        const res = await fetch('/api/sales/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileData: base64, clear: true }),
+        });
+        const json = await res.json();
+        if (json.ok) {
+          setImportResult(`Imported: ${json.data.deals} deals, ${json.data.sales} sales, ${json.data.targets} targets`);
+          fetchAll();
+        } else {
+          setImportResult(`Error: ${json.error}`);
+        }
+      } catch (err) {
+        setImportResult(`Error: ${err instanceof Error ? err.message : 'Unknown'}`);
+      } finally {
+        setImporting(false);
       }
-    } catch (err) {
-      setImportResult(`Error: ${err instanceof Error ? err.message : 'Unknown'}`);
-    } finally {
-      setImporting(false);
-    }
+    };
+    input.click();
   };
 
   if (loading) {
