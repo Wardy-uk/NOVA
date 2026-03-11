@@ -36,8 +36,8 @@ import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 
 const DEFAULT_CUSTOM_ROLES: CustomRole[] = [
   { id: 'editor', name: 'Editor', areas: { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit' } },
-  { id: 'design', name: 'Design', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'view', onboarding: 'edit', accounts: 'view', azdo_push: 'edit', kpis: 'view' } },
-  { id: 'viewer', name: 'Viewer', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden' } },
+  { id: 'design', name: 'Design', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'edit', accounts: 'view', azdo_push: 'edit', kpis: 'view' } },
+  { id: 'viewer', name: 'Viewer', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', kpis: 'hidden' } },
   { id: 'report_viewer', name: 'Report Viewer', areas: { command: 'view', nova_features: 'hidden', servicedesk: 'view', sales: 'hidden', onboarding: 'hidden', accounts: 'hidden', kpis: 'view' } },
 ];
 
@@ -56,7 +56,7 @@ function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string,
   }
   const matched = roles.filter(r => userRoles.includes(r.id));
   if (matched.length === 0) {
-    return { command: 'view', servicedesk: 'view', sales: 'view', onboarding: 'view', accounts: 'view', kpis: 'hidden' };
+    return { command: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', kpis: 'hidden' };
   }
   // Merge: take highest access per area across all assigned roles
   const RANK: Record<string, number> = { hidden: 0, view: 1, edit: 2 };
