@@ -84,7 +84,9 @@ export function SettingsView() {
         </CollapsibleSection>
       ))}
 
-      <JiraOAuthCard />
+      <CollapsibleSection title="Jira Account">
+        <JiraOAuthCard />
+      </CollapsibleSection>
 
       <CollapsibleSection title="Power Automate Bridge">
         <PABridgeCard />

@@ -24,7 +24,6 @@ interface Team {
   description: string | null;
 }
 
-type Tab = 'users' | 'teams' | 'ai-keys' | 'integrations' | 'onboarding' | 'permissions' | 'feedback' | 'audit-log' | 'sso-log' | 'agents';
 
 interface FeedbackItem {
   id: number;
@@ -92,7 +91,6 @@ const ACCESS_LEVELS = ['hidden', 'view', 'edit'] as const;
 type AccessLevel = typeof ACCESS_LEVELS[number];
 
 export function AdminView() {
-  const [tab, setTab] = useState<Tab>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -799,25 +797,8 @@ export function AdminView() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex items-center gap-2">
-        {([['users', 'Users'], ['teams', 'Teams'], ['agents', 'Agents'], ['onboarding', 'Onboarding'], ['ai-keys', 'AI Keys'], ['integrations', 'Integrations'], ['permissions', 'Permissions'], ['feedback', 'Feedback'], ['audit-log', 'Audit Log'], ['sso-log', 'SSO Log']] as const).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => { setTab(key); clearMessages(); }}
-            className={`px-3 py-1.5 text-xs rounded transition-colors ${
-              tab === key
-                ? 'bg-[#5ec1ca] text-[#272C33] font-semibold'
-                : 'bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Users Tab */}
-      {tab === 'users' && (
+      {/* Users */}
+      <CollapsibleSection title="Users">
         <div className="space-y-4">
           {/* Add User / Import Users buttons */}
           <div className="flex items-center gap-2">
@@ -1076,14 +1057,13 @@ export function AdminView() {
           )}
         </div>
         </div>
-      )}
+      </CollapsibleSection>
 
-      {/* Teams Tab */}
-      {tab === 'agents' && (
+      <CollapsibleSection title="Agents">
         <AgentAdminView />
-      )}
+      </CollapsibleSection>
 
-      {tab === 'teams' && (
+      <CollapsibleSection title="Teams">
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <input
@@ -1136,10 +1116,9 @@ export function AdminView() {
             )}
           </div>
         </div>
-      )}
+      </CollapsibleSection>
 
-      {/* AI Keys Tab */}
-      {tab === 'ai-keys' && (
+      <CollapsibleSection title="AI Keys">
         <div className="space-y-4">
           {/* Global key */}
           <div className="border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d]">
@@ -1174,10 +1153,9 @@ export function AdminView() {
             Users can set a personal API key override in My Settings &gt; AI Preferences.
           </p>
         </div>
-      )}
+      </CollapsibleSection>
 
-      {/* Integrations Tab */}
-      {tab === 'integrations' && (
+      <CollapsibleSection title="Integrations">
         <div className="space-y-4">
           <p className="text-xs text-neutral-500">
             Global integrations managed by admins. Personal integrations (Jira, M365, Monday) are in My Settings.
@@ -1373,10 +1351,9 @@ export function AdminView() {
             </CollapsibleSection>
           ))}
         </div>
-      )}
+      </CollapsibleSection>
 
-      {/* Onboarding Config Tab */}
-      {tab === 'onboarding' && (
+      <CollapsibleSection title="Onboarding">
         <div className="space-y-8">
           <OnboardingConfigView />
 
@@ -1408,10 +1385,9 @@ export function AdminView() {
             />
           </div>
         </div>
-      )}
+      </CollapsibleSection>
 
-      {/* Permissions Tab — Custom Role Editor */}
-      {tab === 'permissions' && (
+      <CollapsibleSection title="Permissions">
         <div className="space-y-4">
           <div className="text-xs text-neutral-400">
             Define custom roles with per-area access levels. Admin always has full access everywhere.
@@ -1651,10 +1627,9 @@ export function AdminView() {
             </div>
           </div>
         </div>
-      )}
+      </CollapsibleSection>
 
-      {/* Feedback Tab */}
-      {tab === 'feedback' && (
+      <CollapsibleSection title="Feedback">
         <div className="space-y-4">
           {feedbackLoading ? (
             <div className="text-sm text-neutral-500">Loading feedback...</div>
@@ -1819,17 +1794,15 @@ export function AdminView() {
             </>
           )}
         </div>
-      )}
+      </CollapsibleSection>
 
-      {/* Audit Log Tab */}
-      {tab === 'audit-log' && (
+      <CollapsibleSection title="Audit Log">
         <AuditLogView />
-      )}
+      </CollapsibleSection>
 
-      {/* SSO Log Tab */}
-      {tab === 'sso-log' && (
+      <CollapsibleSection title="SSO Log">
         <SsoLogPanel />
-      )}
+      </CollapsibleSection>
 
       {/* Test Connection Log Modal */}
       {integLogModal && (
