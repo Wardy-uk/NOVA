@@ -25,6 +25,7 @@ import { KpiDataView } from './components/KpiDataView.js';
 import { KpiComparisonView } from './components/KpiComparisonView.js';
 import { KpiLeaderboardView } from './components/KpiLeaderboardView.js';
 import { KpiDailyHistoryView } from './components/KpiDailyHistoryView.js';
+import { KpiBreachedView } from './components/KpiBreachedView.js';
 import { SalesHotboxView } from './components/SalesHotboxView.js';
 import { TeamWorkloadView } from './components/TeamWorkloadView.js';
 import { NotificationBell } from './components/NotificationBell.js';
@@ -50,7 +51,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm'
   | 'sales-hotbox'
-  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history'
+  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -138,6 +139,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-data', label: 'KPI Data' },
       { view: 'kpi-compare', label: 'Live vs UAT' },
       { view: 'kpi-daily-history', label: 'Daily History' },
+      { view: 'kpi-breached', label: 'Breached' },
     ],
   },
 };
@@ -154,7 +156,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'team-workload', 'admin-panel', 'sales-hotbox']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'team-workload', 'admin-panel', 'sales-hotbox']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -853,6 +855,9 @@ export function App() {
           )}
           {view === 'kpi-daily-history' && (
             <KpiDailyHistoryView />
+          )}
+          {view === 'kpi-breached' && (
+            <KpiBreachedView />
           )}
 
           {/* Onboarding */}

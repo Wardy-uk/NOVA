@@ -25,7 +25,7 @@ import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
 import { createO365Routes } from './routes/o365.js';
 import { createAdminRoutes } from './routes/admin.js';
-import { createKpiDataRoutes } from './routes/kpi-data.js';
+import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
 import { createFeedbackRoutes } from './routes/feedback.js';
 import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
 import { createOnboardingRoutes } from './routes/onboarding.js';
@@ -303,6 +303,9 @@ async function main() {
   });
   app.use('/api/public/setup', portalLimiter, createSetupPortalPublicRoutes(portalQueries, brandSettingsQueries, branchQueries, logoQueries, deliveryQueries, portalAccountQueries, districtQueries));
 
+  // KPI Wallboard — public route for TV displays (no auth required)
+  app.use('/api/public/wallboard', createKpiWallboardRoutes(settingsQueries));
+
   // Debug endpoints are registered after auth middleware below (admin-only)
 
   // Dynamics 365 — direct Web API with delegated auth (device code flow)
@@ -535,6 +538,102 @@ async function main() {
     if (!res.headersSent) {
       res.status(500).json({ ok: false, error: err.message || 'Internal server error' });
     }
+  });
+
+  // Wallboard — standalone page for TV displays (no auth)
+  app.get('/wallboard/breached', (_req, res) => {
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SLA Breach Board - nurtur.tech</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Figtree',system-ui,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}
+h1{font-family:'Plus Jakarta Sans',system-ui,sans-serif}
+.wrap{max-width:1600px;margin:0 auto;padding:24px 32px}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.title{font-size:26px;font-weight:800;color:#e2e8f0;letter-spacing:-0.5px}
+.subtitle{font-size:11px;color:#64748b;margin-top:2px}
+.live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:18px 22px}
+.card-label{font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px}
+.card-value{font-size:32px;font-weight:800;letter-spacing:-1px}
+table{width:100%;border-collapse:collapse}
+.tbl{border:1px solid #2f353d;border-radius:14px;overflow:hidden;background:rgba(255,255,255,.03)}
+th{padding:12px 16px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}
+th.c{text-align:center}
+td{padding:12px 16px;border-bottom:1px solid #2f353d;font-size:14px}
+td.c{text-align:center}
+tr.issue{background:rgba(239,68,68,.04)}
+.name{font-weight:600;color:#e2e8f0}
+.name.warn{color:#fca5a5}
+.team{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.rag{display:inline-block;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;min-width:48px;text-align:center}
+.rag-green{background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.25)}
+.rag-amber{background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.25)}
+.rag-red{background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)}
+.solved{color:#5ec1ca;font-weight:700;text-align:center}
+.footer{text-align:center;margin-top:16px;font-size:11px;color:#475569}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div><h1 class="title">SLA Breach Board</h1><div class="subtitle">Live ticket health per agent</div></div>
+    <div style="display:flex;align-items:center;gap:8px"><span class="live-dot"></span><span style="font-size:11px;color:#64748b">Auto-refresh 30s</span></div>
+  </div>
+  <div class="cards" id="cards"></div>
+  <div class="tbl"><table><thead><tr>
+    <th>Agent</th><th>Team</th><th class="c">Open</th><th class="c">Over SLA</th><th class="c">Not Updated</th><th class="c">Oldest (days)</th><th class="c">Solved Today</th>
+  </tr></thead><tbody id="tbody"></tbody></table></div>
+  <div class="footer" id="footer">nurtur.tech &middot; SLA Breach Board</div>
+</div>
+<script>
+const TEAM_COLORS={CC:'#3b82f6','Customer Care':'#3b82f6',Production:'#8b5cf6','Tier 2':'#f59e0b','Tier 3':'#ef4444',Development:'#10b981'};
+function rag(v,g,a){return v<=g?'green':v<=a?'amber':'red'}
+function ragCell(v,g,a,s){const r=rag(v,g,a);return '<td class="c"><span class="rag rag-'+r+'">'+v+(s||'')+'</span></td>'}
+function render(data){
+  const total=data.reduce((s,a)=>s+a.OpenTickets_Over2Hours,0);
+  const stale=data.reduce((s,a)=>s+a.OpenTickets_NoUpdateToday,0);
+  const breached=data.filter(a=>a.OpenTickets_Over2Hours>0).length;
+  const worst=data.reduce((m,a)=>Math.max(m,a.OldestTicketDays||0),0);
+  const kpis=[
+    {l:'Tickets Over SLA',v:total,c:total===0?'#10b981':'#ef4444'},
+    {l:'Agents Breached',v:breached+' / '+data.length,c:breached===0?'#10b981':'#f59e0b'},
+    {l:'Tickets Not Updated',v:stale,c:stale===0?'#10b981':'#f59e0b'},
+    {l:'Worst Oldest (days)',v:worst,c:worst<=3?'#10b981':worst<=7?'#f59e0b':'#ef4444'}
+  ];
+  document.getElementById('cards').innerHTML=kpis.map(k=>'<div class="card"><div class="card-label">'+k.l+'</div><div class="card-value" style="color:'+k.c+'">'+k.v+'</div></div>').join('');
+  const rows=data.map(a=>{
+    const name=(a.AgentSurname?a.AgentName+' '+a.AgentSurname:a.AgentName);
+    const hasIssues=a.OpenTickets_Over2Hours>0||a.OldestTicketDays>7;
+    const tc=TEAM_COLORS[a.TierCode||a.Team]||'#64748b';
+    return '<tr'+(hasIssues?' class="issue"':'')+'>'
+      +'<td><span class="name'+(hasIssues?' warn':'')+'">'+name+'</span></td>'
+      +'<td><span class="team" style="background:'+tc+'22;color:'+tc+';border:1px solid '+tc+'33">'+(a.TierCode||a.Team||'—')+'</span></td>'
+      +'<td class="c" style="color:#94a3b8;font-weight:600">'+a.OpenTickets_Total+'</td>'
+      +ragCell(a.OpenTickets_Over2Hours,0,2)
+      +ragCell(a.OpenTickets_NoUpdateToday,0,1)
+      +ragCell(a.OldestTicketDays||0,3,7,'d')
+      +'<td class="solved">'+a.SolvedTickets_Today+'</td>'
+      +'</tr>';
+  });
+  document.getElementById('tbody').innerHTML=rows.join('');
+  const d=new Date();
+  document.getElementById('footer').innerHTML='nurtur.tech &middot; SLA Breach Board &middot; '+d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+' &middot; Updated '+d.toLocaleTimeString('en-GB');
+}
+async function refresh(){
+  try{const r=await fetch('/api/public/wallboard/breached');const j=await r.json();if(j.ok)render(j.data)}catch(e){console.error(e)}
+}
+refresh();setInterval(refresh,30000);
+</script>
+</body>
+</html>`);
   });
 
   // Production: serve built Vite frontend

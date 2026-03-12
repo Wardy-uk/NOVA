@@ -114,6 +114,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team,
                IsActive, IsAvailable, AccountId,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
+               ISNULL(OldestTicketDays, 0) AS OldestTicketDays,
                SolvedTickets_Today, SolvedTickets_ThisWeek, TicketsSnapshotAt
         FROM dbo.Agent${s}
         WHERE IsActive = 1
@@ -517,6 +518,47 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         agentDaily: dailyStats.recordset[0],
         eodSnapshot: eodStats.recordset[0],
       });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  return router;
+}
+
+/** Public (no-auth) wallboard endpoint for TV displays */
+export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Router {
+  const router = Router();
+
+  let pool: sql.ConnectionPool | null = null;
+
+  async function getPool(): Promise<sql.ConnectionPool> {
+    if (pool?.connected) return pool;
+    const settings = settingsQueries.getAll();
+    const { kpi_sql_server: server, kpi_sql_database: database, kpi_sql_user: user, kpi_sql_password: password } = settings;
+    if (!server || !database || !user || !password) throw new Error('KPI SQL not configured');
+    pool = await new sql.ConnectionPool({
+      server, database, user, password,
+      options: { encrypt: true, trustServerCertificate: true },
+      requestTimeout: 30000,
+    }).connect();
+    return pool;
+  }
+
+  // GET /api/public/wallboard/breached — agent breach data for TV wallboard
+  router.get('/breached', async (_req, res) => {
+    try {
+      const p = await getPool();
+      const result = await p.request().query(`
+        SELECT AgentName, AgentSurname, TierCode, Team,
+               OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
+               ISNULL(OldestTicketDays, 0) AS OldestTicketDays,
+               SolvedTickets_Today, TicketsSnapshotAt
+        FROM dbo.AgentUAT
+        WHERE IsActive = 1
+        ORDER BY OpenTickets_Over2Hours DESC, OldestTicketDays DESC, AgentName
+      `);
+      res.json({ ok: true, data: result.recordset, ts: new Date().toISOString() });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
