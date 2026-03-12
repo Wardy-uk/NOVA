@@ -422,6 +422,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
           FROM dbo.JiraEodTicketStatusSnapshot${s}
           WHERE CAST(SnapshotDate AS DATE) BETWEEN @startDate AND @endDate
             AND Assignee IS NOT NULL AND Assignee <> ''
+            AND ProjectKey = 'NT'
           GROUP BY CAST(SnapshotDate AS DATE), Assignee
         )
         MERGE dbo.jira_agent_kpi_daily${s} AS t
