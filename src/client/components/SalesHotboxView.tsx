@@ -632,6 +632,159 @@ function TargetsTab({ targets, sales }: { targets: SalesTarget[]; sales: Monthly
 }
 
 /* ══════════════════════════════════════════════════════════════════════════ */
+/*  Move to Onboarding Modal                                                 */
+/* ══════════════════════════════════════════════════════════════════════════ */
+
+interface SaleType { id: number; name: string; active: number }
+
+function OnboardingModal({
+  open, onClose, deal,
+}: {
+  open: boolean;
+  onClose: () => void;
+  deal: PipelineDeal | null;
+}) {
+  const [saleTypes, setSaleTypes] = useState<SaleType[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [form, setForm] = useState<Record<string, string | number | null>>({});
+
+  useEffect(() => {
+    if (!open || !deal) return;
+    setResult(null);
+    setForm({
+      product: deal.product || '',
+      account: deal.company,
+      mrr: deal.mrr,
+      licence_fee: deal.mrr,
+      branches: 1,
+      order_date: today,
+      go_live_date: '',
+      predicted_delivery: '',
+      onboarder: '',
+      sale_type: '',
+      status: 'active',
+      notes: deal.notes || '',
+    });
+    fetch('/api/onboarding/config/sale-types')
+      .then(r => r.json())
+      .then(d => { if (d.ok) setSaleTypes(d.data.filter((s: SaleType) => s.active)); })
+      .catch(() => {});
+  }, [open, deal]);
+
+  if (!open || !deal) return null;
+
+  const set = (k: string, v: string | number) => setForm(f => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    if (!form.product || !form.account) return;
+    setSubmitting(true);
+    setResult(null);
+    try {
+      const res = await fetch('/api/delivery/entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setResult({ ok: true, message: `Created onboarding entry: ${json.data.onboarding_id || json.data.id}` });
+        setTimeout(onClose, 1500);
+      } else {
+        setResult({ ok: false, message: json.error || 'Failed to create entry' });
+      }
+    } catch (err) {
+      setResult({ ok: false, message: err instanceof Error ? err.message : 'Unknown error' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const fields: { label: string; key: string; type: string; options?: string[]; span2?: boolean }[] = [
+    { label: 'Product *', key: 'product', type: 'text' },
+    { label: 'Account (Company) *', key: 'account', type: 'text' },
+    { label: 'Sale Type', key: 'sale_type', type: 'select', options: saleTypes.map(s => s.name) },
+    { label: 'Onboarder', key: 'onboarder', type: 'text' },
+    { label: 'MRR (£)', key: 'mrr', type: 'number' },
+    { label: 'Licence Fee (£)', key: 'licence_fee', type: 'number' },
+    { label: 'Branches', key: 'branches', type: 'number' },
+    { label: 'Status', key: 'status', type: 'select', options: ['active', 'pending', 'on-hold'] },
+    { label: 'Order Date', key: 'order_date', type: 'date' },
+    { label: 'Go Live Date', key: 'go_live_date', type: 'date' },
+    { label: 'Predicted Delivery', key: 'predicted_delivery', type: 'date' },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-[#272C33] border border-[#3a424d] rounded-2xl p-7 w-[660px] max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-2">
+          <h3 className="text-base font-bold text-neutral-100">Move to Onboarding</h3>
+          <button onClick={onClose} className="text-neutral-500 hover:text-neutral-200 text-lg">✕</button>
+        </div>
+        <p className="text-[12px] text-neutral-500 mb-5">
+          <span className="text-[#5ec1ca] font-semibold">{deal.company}</span> has reached Contract Sent. Create a delivery entry to begin onboarding.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          {fields.map(f => (
+            <div key={f.key} className={`flex flex-col gap-1 ${f.span2 ? 'col-span-2' : ''}`}>
+              <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">{f.label}</label>
+              {f.type === 'select' ? (
+                <select
+                  value={String(form[f.key] || '')}
+                  onChange={e => set(f.key, e.target.value)}
+                  className="bg-[#1e2228] border border-[#3a424d] rounded-lg px-3 py-2 text-[13px] text-neutral-200 outline-none focus:border-[#5ec1ca]"
+                >
+                  <option value="">— Select —</option>
+                  {f.options!.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              ) : (
+                <input
+                  type={f.type}
+                  value={form[f.key] ?? ''}
+                  onChange={e => set(f.key, f.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)}
+                  className="bg-[#1e2228] border border-[#3a424d] rounded-lg px-3 py-2 text-[13px] text-neutral-200 outline-none focus:border-[#5ec1ca]"
+                />
+              )}
+            </div>
+          ))}
+          <div className="col-span-2 flex flex-col gap-1">
+            <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Notes</label>
+            <textarea
+              value={String(form.notes || '')}
+              onChange={e => set('notes', e.target.value)}
+              rows={2}
+              className="bg-[#1e2228] border border-[#3a424d] rounded-lg px-3 py-2 text-[13px] text-neutral-200 outline-none focus:border-[#5ec1ca] resize-none"
+            />
+          </div>
+        </div>
+
+        {result && (
+          <div className={`mt-4 px-4 py-2.5 rounded-lg text-[12px] font-semibold ${
+            result.ok ? 'bg-green-900/20 text-green-400 border border-green-800/30' : 'bg-red-900/20 text-red-400 border border-red-800/30'
+          }`}>
+            {result.message}
+          </div>
+        )}
+
+        <div className="flex justify-between items-center mt-5">
+          <button onClick={onClose} className="px-4 py-2 border border-[#3a424d] rounded-lg text-neutral-500 hover:border-[#5ec1ca] hover:text-[#5ec1ca] text-[13px] font-semibold transition-colors">
+            Skip
+          </button>
+          <button
+            onClick={submit}
+            disabled={submitting || !form.product || !form.account}
+            className="px-5 py-2 bg-[#10b981] text-white font-bold rounded-lg text-[13px] hover:bg-[#059669] transition-colors disabled:opacity-50"
+          >
+            {submitting ? 'Creating...' : 'Create Onboarding Entry'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════ */
 /*  Main Component                                                           */
 /* ══════════════════════════════════════════════════════════════════════════ */
 
@@ -647,6 +800,8 @@ export function SalesHotboxView({ canWrite = false }: { canWrite?: boolean }) {
   const [dealModalOpen, setDealModalOpen] = useState(false);
   const [editingDeal, setEditingDeal] = useState<PipelineDeal | null>(null);
   const [saleModalOpen, setSaleModalOpen] = useState(false);
+  const [onboardingModalOpen, setOnboardingModalOpen] = useState(false);
+  const [onboardingDeal, setOnboardingDeal] = useState<PipelineDeal | null>(null);
 
   // Import
   const [importing, setImporting] = useState(false);
@@ -676,15 +831,23 @@ export function SalesHotboxView({ canWrite = false }: { canWrite?: boolean }) {
 
   const saveDeal = async (data: Partial<PipelineDeal>) => {
     const isEdit = !!data.id;
+    const previousStage = editingDeal?.stage;
     const res = await fetch(`/api/sales/pipeline${isEdit ? `/${data.id}` : ''}`, {
       method: isEdit ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if ((await res.json()).ok) {
+    const json = await res.json();
+    if (json.ok) {
       setDealModalOpen(false);
       setEditingDeal(null);
       fetchAll();
+      // If stage changed to "Contract Sent", prompt to create onboarding entry
+      if (data.stage === 'Contract Sent' && previousStage !== 'Contract Sent') {
+        const saved = json.data as PipelineDeal;
+        setOnboardingDeal(saved);
+        setOnboardingModalOpen(true);
+      }
     }
   };
 
@@ -836,6 +999,11 @@ export function SalesHotboxView({ canWrite = false }: { canWrite?: boolean }) {
         onClose={() => setSaleModalOpen(false)}
         onSave={saveSale}
         refData={refData}
+      />
+      <OnboardingModal
+        open={onboardingModalOpen}
+        onClose={() => { setOnboardingModalOpen(false); setOnboardingDeal(null); }}
+        deal={onboardingDeal}
       />
     </div>
   );
