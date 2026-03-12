@@ -110,11 +110,13 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const env = parseEnv(req);
       const s = suffix(env);
       const p = await getPool();
+      const hasOldest = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'OldestTicketDays'`);
+      const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
       const result = await p.request().query(`
         SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team,
                IsActive, IsAvailable, AccountId,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
-               ISNULL(OldestTicketDays, 0) AS OldestTicketDays,
+               ${oldestCol} AS OldestTicketDays,
                SolvedTickets_Today, SolvedTickets_ThisWeek, TicketsSnapshotAt
         FROM dbo.Agent${s}
         WHERE IsActive = 1
@@ -549,14 +551,17 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
   router.get('/breached', async (_req, res) => {
     try {
       const p = await getPool();
+      const hasOldest = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.AgentUAT') AND name = 'OldestTicketDays'`);
+      const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
+      const orderCol = hasOldest.recordset.length > 0 ? 'OldestTicketDays DESC,' : '';
       const result = await p.request().query(`
         SELECT AgentName, AgentSurname, TierCode, Team,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
-               ISNULL(OldestTicketDays, 0) AS OldestTicketDays,
+               ${oldestCol} AS OldestTicketDays,
                SolvedTickets_Today, TicketsSnapshotAt
         FROM dbo.AgentUAT
         WHERE IsActive = 1
-        ORDER BY OpenTickets_Over2Hours DESC, OldestTicketDays DESC, AgentName
+        ORDER BY OpenTickets_Over2Hours DESC, ${orderCol} AgentName
       `);
       res.json({ ok: true, data: result.recordset, ts: new Date().toISOString() });
     } catch (err) {
