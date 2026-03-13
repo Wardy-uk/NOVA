@@ -934,6 +934,110 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  // ── Demo Bookings ───────────────────────────────────────────────────────
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sales_bookings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      booked_date TEXT NOT NULL,
+      salesperson TEXT NOT NULL,
+      lead_gen TEXT,
+      team TEXT,
+      product TEXT,
+      company TEXT NOT NULL,
+      email TEXT,
+      client_type TEXT,
+      demo_date TEXT,
+      dm TEXT,
+      phone TEXT,
+      lead_source TEXT,
+      taken_place INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_sales_bookings_date ON sales_bookings(booked_date)`);
+
+  // ── Taken Place ────────────────────────────────────────────────────────
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sales_taken_place (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      demo_date TEXT NOT NULL,
+      salesperson TEXT NOT NULL,
+      lead_gen TEXT,
+      product TEXT,
+      company TEXT NOT NULL,
+      email TEXT,
+      branches INTEGER DEFAULT 1,
+      dm TEXT,
+      est_mrr REAL DEFAULT 0,
+      hwc TEXT,
+      in_hotbox TEXT DEFAULT 'No',
+      client_type TEXT,
+      notes TEXT,
+      booking_id INTEGER,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_sales_taken_place_date ON sales_taken_place(demo_date)`);
+
+  // ── Lead Gen Monthly KPIs ──────────────────────────────────────────────
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sales_lg_kpi (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person TEXT NOT NULL,
+      month TEXT NOT NULL,
+      days_worked REAL DEFAULT 0,
+      calls_kpi REAL DEFAULT 0,
+      calls_actual REAL DEFAULT 0,
+      booked_kpi REAL DEFAULT 0,
+      booked_actual REAL DEFAULT 0,
+      tp_kpi REAL DEFAULT 0,
+      tp_actual REAL DEFAULT 0,
+      sales_count REAL DEFAULT 0,
+      mrr_total REAL DEFAULT 0,
+      UNIQUE(person, month)
+    )
+  `);
+  // Add columns if upgrading from older schema
+  for (const col of ['booked_actual', 'tp_actual', 'sales_count', 'mrr_total']) {
+    try { database.run(`ALTER TABLE sales_lg_kpi ADD COLUMN ${col} REAL DEFAULT 0`); } catch { /* already exists */ }
+  }
+
+  // ── Lead Gen Historical Monthly Totals (team-wide) ──────────────────
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sales_lg_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      year INTEGER NOT NULL,
+      month_num INTEGER NOT NULL,
+      calls INTEGER DEFAULT 0,
+      bookings INTEGER DEFAULT 0,
+      taken_place INTEGER DEFAULT 0,
+      UNIQUE(year, month_num)
+    )
+  `);
+
+  // ── BDM KPI Targets ────────────────────────────────────────────────────
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sales_bdm_kpi (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person TEXT NOT NULL,
+      month TEXT NOT NULL,
+      booked_kpi REAL DEFAULT 0,
+      booked_actual REAL DEFAULT 0,
+      tp_kpi REAL DEFAULT 0,
+      tp_actual REAL DEFAULT 0,
+      sales_kpi REAL DEFAULT 0,
+      sales_actual REAL DEFAULT 0,
+      mrr_kpi REAL DEFAULT 0,
+      mrr_actual REAL DEFAULT 0,
+      target REAL DEFAULT 0,
+      UNIQUE(person, month)
+    )
+  `);
+  // Add columns if upgrading from older schema
+  for (const col of ['booked_actual', 'tp_actual', 'sales_actual', 'mrr_actual', 'target']) {
+    try { database.run(`ALTER TABLE sales_bdm_kpi ADD COLUMN ${col} REAL DEFAULT 0`); } catch { /* already exists */ }
+  }
+
   const defaults: [string, string][] = [
     ['source_weight_jira', '90'],
     ['source_weight_planner', '60'],

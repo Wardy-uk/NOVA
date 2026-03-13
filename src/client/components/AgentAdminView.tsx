@@ -9,12 +9,19 @@ interface Agent {
   Team: string;
   IsActive: boolean;
   IsAvailable: boolean;
+  MaxTickets: number;
+  MaxTicketsCustomerCare: number;
+  MaxTicketsT2T3: number;
 }
 
 interface EditState {
   Team: string;
   TierCode: string;
   IsActive: boolean;
+  IsAvailable: boolean;
+  MaxTickets: number;
+  MaxTicketsCustomerCare: number;
+  MaxTicketsT2T3: number;
 }
 
 type Toast = { message: string; type: 'success' | 'error' };
@@ -31,6 +38,10 @@ function editStateFromAgent(a: Agent): EditState {
     Team: a.Team || '',
     TierCode: a.TierCode || 'T1',
     IsActive: a.IsActive,
+    IsAvailable: a.IsAvailable,
+    MaxTickets: a.MaxTickets ?? 0,
+    MaxTicketsCustomerCare: a.MaxTicketsCustomerCare ?? 0,
+    MaxTicketsT2T3: a.MaxTicketsT2T3 ?? 0,
   };
 }
 
@@ -38,7 +49,11 @@ function hasChanges(original: Agent, edit: EditState): boolean {
   return (
     (original.Team || '') !== edit.Team ||
     original.TierCode !== edit.TierCode ||
-    original.IsActive !== edit.IsActive
+    original.IsActive !== edit.IsActive ||
+    original.IsAvailable !== edit.IsAvailable ||
+    (original.MaxTickets ?? 0) !== edit.MaxTickets ||
+    (original.MaxTicketsCustomerCare ?? 0) !== edit.MaxTicketsCustomerCare ||
+    (original.MaxTicketsT2T3 ?? 0) !== edit.MaxTicketsT2T3
   );
 }
 
@@ -296,6 +311,10 @@ export function AgentAdminView() {
           Team: edit.Team,
           TierCode: edit.TierCode,
           IsActive: edit.IsActive,
+          IsAvailable: edit.IsAvailable,
+          MaxTickets: edit.MaxTickets,
+          MaxTicketsCustomerCare: edit.MaxTicketsCustomerCare,
+          MaxTicketsT2T3: edit.MaxTicketsT2T3,
         }),
       });
       const json = await res.json();
@@ -309,6 +328,10 @@ export function AgentAdminView() {
                   Team: edit.Team,
                   TierCode: edit.TierCode,
                   IsActive: edit.IsActive,
+                  IsAvailable: edit.IsAvailable,
+                  MaxTickets: edit.MaxTickets,
+                  MaxTicketsCustomerCare: edit.MaxTicketsCustomerCare,
+                  MaxTicketsT2T3: edit.MaxTicketsT2T3,
                 }
               : a
           )
@@ -387,6 +410,10 @@ export function AgentAdminView() {
                 <th className={TH}>Email</th>
                 <th className={TH}>Tier</th>
                 <th className={TH}>Team</th>
+                <th className={`${TH} text-center`}>Max</th>
+                <th className={`${TH} text-center`}>Max CC</th>
+                <th className={`${TH} text-center`}>Max T2/T3</th>
+                <th className={`${TH} text-center`}>Available</th>
                 <th className={`${TH} text-center`}>Active</th>
                 <th className={`${TH} text-center`}>Actions</th>
               </tr>
@@ -437,6 +464,55 @@ export function AgentAdminView() {
                       />
                     </td>
 
+                    {/* MaxTickets */}
+                    <td className={`${TD} text-center`}>
+                      <input
+                        type="number"
+                        min={0}
+                        value={edit.MaxTickets}
+                        onChange={e => updateEdit(agent.AgentId, 'MaxTickets', parseInt(e.target.value) || 0)}
+                        className={`${INPUT} w-14 text-center`}
+                      />
+                    </td>
+
+                    {/* MaxTicketsCustomerCare */}
+                    <td className={`${TD} text-center`}>
+                      <input
+                        type="number"
+                        min={0}
+                        value={edit.MaxTicketsCustomerCare}
+                        onChange={e => updateEdit(agent.AgentId, 'MaxTicketsCustomerCare', parseInt(e.target.value) || 0)}
+                        className={`${INPUT} w-14 text-center`}
+                      />
+                    </td>
+
+                    {/* MaxTicketsT2T3 */}
+                    <td className={`${TD} text-center`}>
+                      <input
+                        type="number"
+                        min={0}
+                        value={edit.MaxTicketsT2T3}
+                        onChange={e => updateEdit(agent.AgentId, 'MaxTicketsT2T3', parseInt(e.target.value) || 0)}
+                        className={`${INPUT} w-14 text-center`}
+                      />
+                    </td>
+
+                    {/* IsAvailable */}
+                    <td className={`${TD} text-center`}>
+                      <button
+                        onClick={() => updateEdit(agent.AgentId, 'IsAvailable', !edit.IsAvailable)}
+                        className={`w-9 h-5 rounded-full relative transition-colors ${
+                          edit.IsAvailable ? 'bg-[#5ec1ca]' : 'bg-[#3a424d]'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                            edit.IsAvailable ? 'left-[18px]' : 'left-0.5'
+                          }`}
+                        />
+                      </button>
+                    </td>
+
                     {/* IsActive */}
                     <td className={`${TD} text-center`}>
                       <button
@@ -474,7 +550,7 @@ export function AgentAdminView() {
               })}
               {filtered.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={6} className="text-center py-8 text-neutral-500 text-[13px]">
+                  <td colSpan={10} className="text-center py-8 text-neutral-500 text-[13px]">
                     No agents found
                   </td>
                 </tr>

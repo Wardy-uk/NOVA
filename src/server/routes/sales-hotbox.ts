@@ -315,6 +315,242 @@ export function createSalesHotboxRoutes(
     }
   });
 
+  // ── Bookings ──────────────────────────────────────────────────────────
+
+  router.get('/bookings', (req, res) => {
+    const month = req.query.month as string | undefined;
+    res.json({ ok: true, data: salesQueries.getBookings(month) });
+  });
+
+  router.post('/bookings', writeGuard, (req, res) => {
+    const { booked_date, salesperson, company } = req.body;
+    if (!booked_date || !salesperson || !company) {
+      return res.status(400).json({ ok: false, error: 'booked_date, salesperson, and company are required' });
+    }
+    const id = salesQueries.createBooking(req.body);
+    res.json({ ok: true, data: salesQueries.getBookingById(id) });
+  });
+
+  router.put('/bookings/:id', writeGuard, (req, res) => {
+    const ok = salesQueries.updateBooking(parseInt(req.params.id as string, 10), req.body);
+    if (!ok) return res.status(404).json({ ok: false, error: 'Booking not found' });
+    res.json({ ok: true, data: salesQueries.getBookingById(parseInt(req.params.id as string, 10)) });
+  });
+
+  router.delete('/bookings/:id', writeGuard, (req, res) => {
+    const ok = salesQueries.deleteBooking(parseInt(req.params.id as string, 10));
+    res.json({ ok: true, deleted: ok });
+  });
+
+  // ── Taken Place ─────────────────────────────────────────────────────────
+
+  router.get('/taken-place', (req, res) => {
+    const month = req.query.month as string | undefined;
+    res.json({ ok: true, data: salesQueries.getTakenPlace(month) });
+  });
+
+  router.post('/taken-place', writeGuard, (req, res) => {
+    const { demo_date, salesperson, company } = req.body;
+    if (!demo_date || !salesperson || !company) {
+      return res.status(400).json({ ok: false, error: 'demo_date, salesperson, and company are required' });
+    }
+    const id = salesQueries.createTakenPlace(req.body);
+    res.json({ ok: true, data: salesQueries.getTakenPlaceById(id) });
+  });
+
+  router.put('/taken-place/:id', writeGuard, (req, res) => {
+    const ok = salesQueries.updateTakenPlace(parseInt(req.params.id as string, 10), req.body);
+    if (!ok) return res.status(404).json({ ok: false, error: 'Record not found' });
+    res.json({ ok: true, data: salesQueries.getTakenPlaceById(parseInt(req.params.id as string, 10)) });
+  });
+
+  router.delete('/taken-place/:id', writeGuard, (req, res) => {
+    const ok = salesQueries.deleteTakenPlace(parseInt(req.params.id as string, 10));
+    res.json({ ok: true, deleted: ok });
+  });
+
+  // ── KPIs ────────────────────────────────────────────────────────────────
+
+  router.get('/lg-kpis', (req, res) => {
+    const month = req.query.month as string | undefined;
+    res.json({ ok: true, data: salesQueries.getLgKpis(month) });
+  });
+
+  router.post('/lg-kpis', writeGuard, (req, res) => {
+    const { person, month } = req.body;
+    if (!person || !month) return res.status(400).json({ ok: false, error: 'person and month required' });
+    salesQueries.setLgKpi(person, month, req.body);
+    res.json({ ok: true });
+  });
+
+  router.get('/bdm-kpis', (req, res) => {
+    const month = req.query.month as string | undefined;
+    res.json({ ok: true, data: salesQueries.getBdmKpis(month) });
+  });
+
+  router.post('/bdm-kpis', writeGuard, (req, res) => {
+    const { person, month } = req.body;
+    if (!person || !month) return res.status(400).json({ ok: false, error: 'person and month required' });
+    salesQueries.setBdmKpi(person, month, req.body);
+    res.json({ ok: true });
+  });
+
+  // ── LG History (team-wide monthly totals) ─────────────────────────────
+
+  router.get('/lg-history', (_req, res) => {
+    res.json({ ok: true, data: salesQueries.getLgHistory() });
+  });
+
+  // ── Data Pack Import (Dream Team Tracker spreadsheet) ────────────────
+
+  router.post('/import-data-pack', writeGuard, async (req, res) => {
+    try {
+      const fileData = req.body.fileData as string;
+      if (!fileData) return res.status(400).json({ ok: false, error: 'fileData (base64) is required' });
+
+      const XLSX = (await import('xlsx')).default;
+      const buf = Buffer.from(fileData, 'base64');
+      const wb = XLSX.read(buf, { type: 'buffer' });
+      const stats = { lgKpis: 0, lgHistory: 0 };
+
+      // ── Parse "Lead Gen 2023" sheet: per-person weekly data ──
+
+      const lgSheetName = wb.SheetNames.find((n: string) => n.includes('Lead Gen 2023'));
+      if (lgSheetName) {
+        const data = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[lgSheetName], { header: 1, defval: '', range: 0 });
+        const headers = data[0] as unknown[];
+
+        // Build date-to-column mapping: col index → { year, month }
+        const colMonths: Record<number, { year: number; month: number }> = {};
+        headers.forEach((h, i) => {
+          if (typeof h === 'number' && h > 40000) {
+            const d = new Date((h - 25569) * 86400000);
+            colMonths[i] = { year: d.getFullYear(), month: d.getMonth() + 1 };
+          }
+        });
+
+        // Person row mappings: { name, daysRow, callsRow, bookedTotalRow, callsPerDay }
+        const LG_PEOPLE = [
+          { name: 'Jane O',   daysRow: 35, callsRow: 57, bookedTotalRow: 108, callsPerDay: 64 },
+          { name: 'Steve W',  daysRow: 36, callsRow: 58, bookedTotalRow: 128, callsPerDay: 80 },
+          { name: 'Jack L',   daysRow: 44, callsRow: 66, bookedTotalRow: 163, callsPerDay: 80 },
+          { name: 'Ethan K',  daysRow: 51, callsRow: 73, bookedTotalRow: 234, callsPerDay: 80 },
+          { name: 'Georgi C', daysRow: 53, callsRow: 75, bookedTotalRow: 198, callsPerDay: 80 },
+        ];
+
+        // KPI rates per working day
+        const BOOKED_KPI_PER_DAY = 24.5 / 9; // ~2.72 per day (24.5 per 9-day period ≈ month)
+        const TP_KPI_PER_DAY = 16.4 / 9;     // ~1.82 per day
+
+        // Clear existing data before import
+        salesQueries.clearAllLgKpis();
+
+        for (const person of LG_PEOPLE) {
+          // Aggregate weekly values into monthly buckets
+          const monthBuckets: Record<string, { days: number; calls: number; booked: number }> = {};
+
+          for (const [colStr, mo] of Object.entries(colMonths)) {
+            const col = parseInt(colStr);
+            const key = `${mo.year}-${String(mo.month).padStart(2, '0')}`;
+            if (!monthBuckets[key]) monthBuckets[key] = { days: 0, calls: 0, booked: 0 };
+
+            const daysVal = parseFloat(String((data[person.daysRow] as unknown[])?.[col] ?? 0)) || 0;
+            const callsVal = parseFloat(String((data[person.callsRow] as unknown[])?.[col] ?? 0)) || 0;
+            const bookedVal = parseFloat(String((data[person.bookedTotalRow] as unknown[])?.[col] ?? 0)) || 0;
+
+            monthBuckets[key].days += daysVal;
+            monthBuckets[key].calls += callsVal;
+            monthBuckets[key].booked += bookedVal;
+          }
+
+          // Write each month to DB
+          for (const [month, bucket] of Object.entries(monthBuckets)) {
+            if (bucket.days === 0 && bucket.calls === 0 && bucket.booked === 0) continue;
+            salesQueries.setLgKpi(person.name, month, {
+              days_worked: Math.round(bucket.days * 10) / 10,
+              calls_kpi: Math.round(bucket.days * person.callsPerDay),
+              calls_actual: Math.round(bucket.calls),
+              booked_kpi: Math.round(bucket.days * BOOKED_KPI_PER_DAY * 10) / 10,
+              booked_actual: Math.round(bucket.booked),
+              tp_kpi: Math.round(bucket.days * TP_KPI_PER_DAY * 10) / 10,
+            });
+            stats.lgKpis++;
+          }
+        }
+      }
+
+      // ── Parse "LG Charts" sheet: team-wide monthly totals ──
+
+      const lcSheetName = wb.SheetNames.find((n: string) => n.includes('LG Charts'));
+      if (lcSheetName) {
+        const lcData = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[lcSheetName], { header: 1, defval: '', range: 0 });
+
+        salesQueries.clearAllLgHistory();
+
+        // Row layout: row 2-6 = Calls YYYY, row 10-13 = Bookings YYYY, row 17-20 = TP YYYY
+        // Cols 1-12 = Jan-Dec
+        const parseRow = (row: unknown[]): { year: number; values: number[] } | null => {
+          const label = String(row[0] || '').trim();
+          const yearMatch = label.match(/(\d{4})/);
+          if (!yearMatch) return null;
+          const year = parseInt(yearMatch[1]);
+          const values = [];
+          for (let m = 1; m <= 12; m++) {
+            values.push(parseFloat(String(row[m] ?? 0)) || 0);
+          }
+          return { year, values };
+        };
+
+        // Gather calls (rows 2-6), bookings (rows 10-13), taken_place (rows 17-20)
+        const callsRows: Record<number, number[]> = {};
+        const bookingsRows: Record<number, number[]> = {};
+        const tpRows: Record<number, number[]> = {};
+
+        for (let i = 2; i <= 6; i++) {
+          const row = lcData[i] as unknown[];
+          if (!row) continue;
+          const parsed = parseRow(row);
+          if (parsed) callsRows[parsed.year] = parsed.values;
+        }
+        for (let i = 10; i <= 13; i++) {
+          const row = lcData[i] as unknown[];
+          if (!row) continue;
+          const parsed = parseRow(row);
+          if (parsed) bookingsRows[parsed.year] = parsed.values;
+        }
+        for (let i = 17; i <= 20; i++) {
+          const row = lcData[i] as unknown[];
+          if (!row) continue;
+          const parsed = parseRow(row);
+          if (parsed) tpRows[parsed.year] = parsed.values;
+        }
+
+        // Merge into history records
+        const allYears = new Set([
+          ...Object.keys(callsRows).map(Number),
+          ...Object.keys(bookingsRows).map(Number),
+          ...Object.keys(tpRows).map(Number),
+        ]);
+
+        for (const year of allYears) {
+          for (let m = 0; m < 12; m++) {
+            const calls = callsRows[year]?.[m] ?? 0;
+            const bookings = bookingsRows[year]?.[m] ?? 0;
+            const tp = tpRows[year]?.[m] ?? 0;
+            if (calls === 0 && bookings === 0 && tp === 0) continue;
+            salesQueries.setLgHistory(year, m + 1, { calls, bookings, taken_place: tp });
+            stats.lgHistory++;
+          }
+        }
+      }
+
+      res.json({ ok: true, data: stats });
+    } catch (err) {
+      console.error('[Sales] Data pack import error:', err);
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Import failed' });
+    }
+  });
+
   // ── Reference data (for dropdowns) ────────────────────────────────────
 
   router.get('/reference', (_req, res) => {
@@ -323,7 +559,9 @@ export function createSalesHotboxRoutes(
       data: {
         salespeople: ["Aaron L","Abi B","Annabel G","Ben M","Ben S","Bethany S","Chloe M","Chris S","Eryn A","Ethan K","George V","Georgi C","Hannah M","Harry B","Holly P","Inderpal R","Isabel L","Jack L","Jade J","Jane O","Jerson A","Jon L","Jonathan D","Josh T","Kannan G","Kian K","Kieran E","Kieran H","Lewis T","Lucy R","Malathi P","Matthew D","Milli B","Nathan B","Neil P","Nicki W","Paul A","Riannah V","Richard C","Self Gen","Sharice R","Sharon C","Shivani R","Steve R","Steve W"],
         products: ["Audit","BYM","Data Sales","KYM","LeadPro","LeadPro - Social","Nurtur Bundle","Other","Social Media","Starberry","Starberry-DM","Starberry-DRM","Starberry PPC","Starberry-SEO","Starberry-Web","TPJ","Voice AI","Website SEO","Yomdel"],
+        leadSources: ["BYM","Booking Bug","Customer","Direct","Email","Events","Facebook","Google","Leaflet","LinkedIn","N/A","Prospect","Referral","Self Gen","TPJ","Website"],
         stages: ["Demo Completed","Proposal Submitted - Awaiting Feedback","Proposal Submitted - In Discussion","Contract Sent"],
+        clientTypes: ["New","Existing"],
       },
     });
   });

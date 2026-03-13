@@ -9,6 +9,17 @@ on the customer set up portal, all entries should be saved as a read only versio
 
 update "whats new" with everything added since v 1.1.7
 
+[BUG] onboarding tasks all show as mine in my dashboard > command center, nova insights, my tasks, Briefing and notifications
+
+
+define KPI s to capture and individual targets
+
+capture time worked, using isavailable flag, polled twice daily
+
+kpis only display my team, not other departments
+
+add SLAs to daily history > agent kpi's
+
 
 === CURRENT STATUS (5 Mar 2026) ===
 
