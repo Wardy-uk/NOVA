@@ -203,6 +203,11 @@ export function App() {
   const setupMatch = window.location.pathname.match(/^\/setup\/([a-f0-9]{64})$/);
   if (setupMatch) return <SetupPortal token={setupMatch[1]} />;
 
+  // Public wallboard — no auth required
+  if (window.location.hash === '#wallboard') {
+    return <KpiBreachedView isWallboard />;
+  }
+
   const [view, setViewRaw] = useState<View>(() => getViewFromHash() ?? 'focus');
 
   // Wrap setView to sync hash
