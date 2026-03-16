@@ -91,9 +91,16 @@ export function KpiBreachedView({ isWallboard = false }: { isWallboard?: boolean
   const getName = (a: AgentRow) =>
     a.AgentSurname ? `${a.AgentName} ${a.AgentSurname}` : a.AgentName;
 
-  const displayed = filter === 'breached'
+  const filtered = filter === 'breached'
     ? agents.filter(a => a.OpenTickets_Over2Hours > 0 || a.OpenTickets_NoUpdateToday > 0 || a.OldestTicketDays > 3)
     : agents;
+
+  // Sort alphabetically by full name
+  const displayed = [...filtered].sort((a, b) => {
+    const na = `${a.AgentName} ${a.AgentSurname ?? ''}`.trim().toLowerCase();
+    const nb = `${b.AgentName} ${b.AgentSurname ?? ''}`.trim().toLowerCase();
+    return na.localeCompare(nb);
+  });
 
   // Summary stats
   const totalOver = agents.reduce((s, a) => s + a.OpenTickets_Over2Hours, 0);

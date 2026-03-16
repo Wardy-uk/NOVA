@@ -27,12 +27,9 @@ interface SnapshotRow {
 
 /* ---- KPI Sort Order ---- */
 
-const GROUP_PRIORITY: Record<string, number> = {
-  'New Tickets': 0,
-  'Solved Tickets': 1,
-};
-
 const KPI_ORDER: string[] = [
+  'Raised Today',
+  'Solved Today',
   'Number of Tickets in CC - Incidents',
   'Number of Tickets in CC - Service Requests',
   'Number of Tickets in CC - TPJ',
@@ -67,17 +64,22 @@ const KPI_ORDER: string[] = [
   'Oldest actionable ticket (days) in Production',
   'Oldest actionable ticket (days) in Tier 2',
   'Oldest actionable ticket (days) in Tier 3',
+  'WTD percentage KPI\'s Green',
+  'WTD percentage KPI\'s Red',
 ];
+
+const KPI_ORDER_MAP = new Map<string, number>(
+  KPI_ORDER.map((k, i) => [k.toLowerCase(), i])
+);
+
+function kpiSortKey(kpi: string): number {
+  return KPI_ORDER_MAP.get(kpi.toLowerCase()) ?? KPI_ORDER.length;
+}
 
 function sortKpiRows<T extends { KPI?: string; KPIGroup?: string }>(data: T[]): T[] {
   return [...data].sort((a, b) => {
-    const ga = GROUP_PRIORITY[a.KPIGroup ?? ''] ?? 2;
-    const gb = GROUP_PRIORITY[b.KPIGroup ?? ''] ?? 2;
-    if (ga !== gb) return ga - gb;
-    const ia = KPI_ORDER.indexOf(a.KPI ?? '');
-    const ib = KPI_ORDER.indexOf(b.KPI ?? '');
-    const oa = ia >= 0 ? ia : KPI_ORDER.length;
-    const ob = ib >= 0 ? ib : KPI_ORDER.length;
+    const oa = kpiSortKey(a.KPI ?? '');
+    const ob = kpiSortKey(b.KPI ?? '');
     if (oa !== ob) return oa - ob;
     return (a.KPI ?? '').localeCompare(b.KPI ?? '');
   });

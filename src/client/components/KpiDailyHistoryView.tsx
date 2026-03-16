@@ -596,10 +596,9 @@ export function KpiDailyHistoryView() {
         deptData.forEach(d => deptMap.set(`${d.kpi}|${d.CreatedAt.slice(0, 10)}`, d));
         // Fixed KPI display order
         const KPI_ORDER: string[] = [
+          'Raised Today',
           'Created Today',
           'Solved Today',
-          "WTD percentage KPI's Green",
-          "WTD percentage KPI's Red",
           'Number of Tickets in CC - Incidents',
           'Number of Tickets in CC - Service Requests',
           'Number of Tickets in CC - TPJ',
@@ -634,6 +633,8 @@ export function KpiDailyHistoryView() {
           'Oldest actionable ticket (days) in Production',
           'Oldest actionable ticket (days) in Tier 2',
           'Oldest actionable ticket (days) in Tier 3',
+          "WTD percentage KPI's Green",
+          "WTD percentage KPI's Red",
         ];
         // Group KPIs by their kpiGroup from the data
         const groupMap = new Map<string, string>();

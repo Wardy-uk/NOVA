@@ -119,7 +119,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
                ${oldestCol} AS OldestTicketDays,
                SolvedTickets_Today, SolvedTickets_ThisWeek, TicketsSnapshotAt
         FROM dbo.Agent${s}
-        WHERE IsActive = 1
+        WHERE IsActive = 1 AND Department = 'NT'
         ORDER BY Team, AgentName
       `);
       res.json({ ok: true, data: result.recordset, env });
@@ -141,19 +141,23 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         request.input('from', sql.Date, from);
         request.input('to', sql.Date, to);
         const result = await request.query(`
-          SELECT *
-          FROM dbo.jira_agent_kpi_daily${s}
-          WHERE ReportDate >= @from AND ReportDate <= @to
-          ORDER BY ReportDate DESC, AgentName
+          SELECT d.*
+          FROM dbo.jira_agent_kpi_daily${s} d
+          INNER JOIN dbo.Agent${s} a ON a.AgentName = d.AgentName
+          WHERE d.ReportDate >= @from AND d.ReportDate <= @to
+            AND a.Department = 'NT'
+          ORDER BY d.ReportDate DESC, d.AgentName
         `);
         res.json({ ok: true, data: result.recordset, env });
       } else {
         const days = Math.min(parseInt(req.query.days as string) || 7, 90);
         const result = await p.request().query(`
-          SELECT *
-          FROM dbo.jira_agent_kpi_daily${s}
-          WHERE ReportDate >= DATEADD(day, -${days}, CAST(GETDATE() AS DATE))
-          ORDER BY ReportDate DESC, AgentName
+          SELECT d.*
+          FROM dbo.jira_agent_kpi_daily${s} d
+          INNER JOIN dbo.Agent${s} a ON a.AgentName = d.AgentName
+          WHERE d.ReportDate >= DATEADD(day, -${days}, CAST(GETDATE() AS DATE))
+            AND a.Department = 'NT'
+          ORDER BY d.ReportDate DESC, d.AgentName
         `);
         res.json({ ok: true, data: result.recordset, env });
       }
@@ -572,7 +576,7 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
                ${oldestCol} AS OldestTicketDays,
                SolvedTickets_Today, TicketsSnapshotAt
         FROM dbo.AgentUAT
-        WHERE IsActive = 1
+        WHERE IsActive = 1 AND Department = 'NT'
         ORDER BY OpenTickets_Over2Hours DESC, ${orderCol} AgentName
       `);
       res.json({ ok: true, data: result.recordset, ts: new Date().toISOString() });

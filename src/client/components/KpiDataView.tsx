@@ -40,12 +40,9 @@ function fmtDate(v: string | null): string {
 
 /* ---- KPI Sort Order ---- */
 
-const GROUP_PRIORITY: Record<string, number> = {
-  'New Tickets': 0,
-  'Solved Tickets': 1,
-};
-
 const KPI_ORDER: string[] = [
+  'Raised Today',
+  'Solved Today',
   'Number of Tickets in CC - Incidents',
   'Number of Tickets in CC - Service Requests',
   'Number of Tickets in CC - TPJ',
@@ -82,15 +79,15 @@ const KPI_ORDER: string[] = [
   'Oldest actionable ticket (days) in Tier 3',
 ];
 
+const KPI_ORDER_MAP = new Map<string, number>();
+KPI_ORDER.forEach((name, i) => KPI_ORDER_MAP.set(name.toLowerCase(), i));
+
 function sortKpiRows<T extends { KPI?: string; KPIGroup?: string }>(data: T[]): T[] {
   return [...data].sort((a, b) => {
-    const ga = GROUP_PRIORITY[a.KPIGroup ?? ''] ?? 2;
-    const gb = GROUP_PRIORITY[b.KPIGroup ?? ''] ?? 2;
-    if (ga !== gb) return ga - gb;
-    const ia = KPI_ORDER.indexOf(a.KPI ?? '');
-    const ib = KPI_ORDER.indexOf(b.KPI ?? '');
-    const oa = ia >= 0 ? ia : KPI_ORDER.length;
-    const ob = ib >= 0 ? ib : KPI_ORDER.length;
+    const ia = KPI_ORDER_MAP.get((a.KPI ?? '').toLowerCase());
+    const ib = KPI_ORDER_MAP.get((b.KPI ?? '').toLowerCase());
+    const oa = ia !== undefined ? ia : KPI_ORDER.length;
+    const ob = ib !== undefined ? ib : KPI_ORDER.length;
     if (oa !== ob) return oa - ob;
     return (a.KPI ?? '').localeCompare(b.KPI ?? '');
   });
