@@ -284,11 +284,15 @@ export function KpiLeaderboardView() {
     // Build a map of ALL daily records per agent (keyed by full name)
     const allDailyMap = new Map<string, AgentDaily[]>();
     for (const d of agentDaily) {
+      // Key by AgentName as stored in daily table (first name only)
       const key = d.AgentName;
       const arr = allDailyMap.get(key) || [];
       arr.push(d);
       allDailyMap.set(key, arr);
     }
+    // Also index by lowercase for fuzzy matching
+    const dailyMapLower = new Map<string, AgentDaily[]>();
+    for (const [k, v] of allDailyMap) dailyMapLower.set(k.toLowerCase(), v);
 
     // Helper: from an agent's daily records, pick the most recent non-null value
     const bestVal = (rows: AgentDaily[], getter: (r: AgentDaily) => number | null | undefined): number | null => {
@@ -303,7 +307,12 @@ export function KpiLeaderboardView() {
 
     return agents.map(a => {
       const fullName = `${a.AgentName} ${a.AgentSurname}`.trim();
-      const rows = allDailyMap.get(fullName) || [];
+      // Try full name first, then first name only, then lowercase fallbacks
+      const rows = allDailyMap.get(fullName)
+        || allDailyMap.get(a.AgentName)
+        || dailyMapLower.get(fullName.toLowerCase())
+        || dailyMapLower.get(a.AgentName.toLowerCase())
+        || [];
 
       // Use latest day for ticket counts (point-in-time), but best available for scored metrics
       const latest = rows.length > 0 ? rows.reduce((best, r) => r.ReportDate > best.ReportDate ? r : best) : null;
