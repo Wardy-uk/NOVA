@@ -112,14 +112,21 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const p = await getPool();
       const hasOldest = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'OldestTicketDays'`);
       const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
+      // Check both Agent and AgentUAT for Department column
       const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
-      const deptFilter = hasDept.recordset.length > 0 ? "AND Department = 'NT'" : '';
+      const hasDeptLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDept;
+      const deptCol = hasDept.recordset.length > 0 ? ', Department' : '';
+      const deptFilter = hasDept.recordset.length > 0
+        ? "AND Department = 'NT'"
+        : hasDeptLive.recordset.length > 0 && s
+          ? `AND AgentName IN (SELECT AgentName FROM dbo.Agent WHERE Department = 'NT')`
+          : '';
       const result = await p.request().query(`
         SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team,
                IsActive, IsAvailable, AccountId,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                ${oldestCol} AS OldestTicketDays,
-               SolvedTickets_Today, SolvedTickets_ThisWeek, TicketsSnapshotAt
+               SolvedTickets_Today, SolvedTickets_ThisWeek, TicketsSnapshotAt${deptCol}
         FROM dbo.Agent${s}
         WHERE IsActive = 1 ${deptFilter}
         ORDER BY Team, AgentName
@@ -137,10 +144,19 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const s = suffix(env);
       const p = await getPool();
       const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
-      const deptJoin = hasDept.recordset.length > 0
-        ? `INNER JOIN dbo.Agent${s} a ON a.AgentName = d.AgentName`
-        : '';
-      const deptWhere = hasDept.recordset.length > 0 ? "AND a.Department = 'NT'" : '';
+      const hasDeptLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDept;
+      let deptJoin: string;
+      let deptWhere: string;
+      if (hasDept.recordset.length > 0) {
+        deptJoin = `INNER JOIN dbo.Agent${s} a ON a.AgentName = d.AgentName`;
+        deptWhere = "AND a.Department = 'NT'";
+      } else if (hasDeptLive.recordset.length > 0) {
+        deptJoin = `INNER JOIN dbo.Agent a ON a.AgentName = d.AgentName`;
+        deptWhere = "AND a.Department = 'NT'";
+      } else {
+        deptJoin = '';
+        deptWhere = '';
+      }
       const from = req.query.from as string | undefined;
       const to = req.query.to as string | undefined;
       if (from && to) {
