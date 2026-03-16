@@ -107,12 +107,12 @@ function fmtTime(v: string | null): string {
 /*  KPI Sort Order                                                     */
 /* ------------------------------------------------------------------ */
 
-const GROUP_PRIORITY: Record<string, number> = {
-  'New Tickets': 0,
-  'Solved Tickets': 1,
-};
-
+// Flat display order — position in this array is the sort key.
+// KPIs not in this list sort to the end alphabetically.
 const KPI_ORDER: string[] = [
+  // — Raised / Solved today —
+  'Raised Today',
+  'Solved Today',
   // — Open ticket counts —
   'Number of Tickets in CC - Incidents',
   'Number of Tickets in CC - Service Requests',
@@ -156,11 +156,13 @@ const KPI_ORDER: string[] = [
   'Oldest actionable ticket (days) in Tier 3',
 ];
 
+// Build a case-insensitive lookup for resilient matching
+const KPI_ORDER_MAP = new Map<string, number>();
+KPI_ORDER.forEach((name, i) => KPI_ORDER_MAP.set(name.toLowerCase(), i));
+
 function kpiSortKey(kpi: { KPI: string; KPIGroup: string }): number {
-  const gp = GROUP_PRIORITY[kpi.KPIGroup] ?? 2;
-  const idx = KPI_ORDER.indexOf(kpi.KPI);
-  // Group priority * 1000 + position within group (unknowns go to end)
-  return gp * 1000 + (idx >= 0 ? idx : KPI_ORDER.length);
+  const idx = KPI_ORDER_MAP.get(kpi.KPI.toLowerCase());
+  return idx !== undefined ? idx : KPI_ORDER.length;
 }
 
 function sortKpis<T extends { KPI: string; KPIGroup: string }>(data: T[]): T[] {
