@@ -70,7 +70,7 @@ export function KpiBreachedView({ isWallboard = false }: { isWallboard?: boolean
     try {
       const url = isWallboard
         ? '/api/public/wallboard/breached'
-        : '/api/kpi-data/agents?env=uat';
+        : '/api/kpi-data/agents?env=live';
       const res = await fetch(url);
       const json = await res.json();
       if (json.ok) {
