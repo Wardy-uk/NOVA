@@ -56,6 +56,14 @@ export function LoginView({ onLogin, onRegister, onSsoLogin, error, loading }: L
   const [displayName, setDisplayName] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [localError, setLocalError] = useState('');
+  const [ssoPopupError, setSsoPopupError] = useState<string | null>(null);
+
+  // Show SSO errors in a prominent popup
+  useEffect(() => {
+    if (error && error.startsWith('Microsoft sign-in failed:')) {
+      setSsoPopupError(error);
+    }
+  }, [error]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -356,6 +364,29 @@ export function LoginView({ onLogin, onRegister, onSsoLogin, error, loading }: L
           Nurtur Limited
         </p>
       </div>
+
+      {/* SSO error popup */}
+      {ssoPopupError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="bg-[#2f353d] border border-red-900/60 rounded-xl p-6 max-w-md w-full shadow-2xl">
+            <h3 className="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2">
+              <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Microsoft Sign-In Failed
+            </h3>
+            <p className="text-xs text-neutral-300 leading-relaxed whitespace-pre-wrap break-words mb-4">
+              {ssoPopupError.replace('Microsoft sign-in failed: ', '')}
+            </p>
+            <button
+              onClick={() => setSsoPopupError(null)}
+              className="w-full px-4 py-2 text-sm rounded-lg bg-[#272C33] border border-[#3a424d] text-neutral-200 font-medium hover:bg-[#363d47] transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
