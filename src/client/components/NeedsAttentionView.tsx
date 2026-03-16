@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import type { Task } from '../../shared/types.js';
-import { TaskCard } from './TaskCard.js';
 import { TaskDrawer } from './TaskDrawer.js';
+import { getTier } from '../utils/taskHelpers.js';
 
 interface AttentionTask extends Task {
   attention_reasons: ('overdue_update' | 'sla_breached' | 'sla_approaching')[];
@@ -32,6 +32,52 @@ function urgencyColor(score: number): string {
   return 'bg-neutral-500';
 }
 
+function slaDisplay(ms: number | null): { text: string; className: string } {
+  if (ms === null) return { text: 'No SLA', className: 'text-neutral-600' };
+  if (ms < 0) return { text: 'Breached', className: 'text-red-400 font-bold' };
+  const hours = ms / (1000 * 60 * 60);
+  if (hours < 2) return { text: formatRemaining(ms), className: 'text-red-400 font-bold' };
+  if (hours < 8) return { text: formatRemaining(ms), className: 'text-amber-400 font-bold' };
+  return { text: formatRemaining(ms), className: 'text-neutral-400' };
+}
+
+function parseDescMeta(description: string | null): Record<string, string> {
+  if (!description) return {};
+  const meta: Record<string, string> = {};
+  for (const line of description.split('\n')) {
+    const match = line.match(/^(Status|Priority|Created|Assignee):\s*(.+)/);
+    if (match) meta[match[1]] = match[2].trim();
+  }
+  return meta;
+}
+
+function getStatusBadge(status: string): string {
+  const s = status.toLowerCase();
+  if (s.includes('done') || s.includes('closed') || s.includes('resolved')) return 'bg-green-900/40 text-green-400';
+  if (s.includes('progress') || s.includes('review') || s.includes('working')) return 'bg-blue-900/40 text-blue-400';
+  if (s.includes('waiting') || s.includes('hold') || s.includes('blocked')) return 'bg-amber-900/40 text-amber-400';
+  return 'bg-[#272C33] text-neutral-400';
+}
+
+function daysOpen(dateStr: string | null): string {
+  if (!dateStr) return '-';
+  const ms = Date.now() - new Date(dateStr).getTime();
+  if (isNaN(ms)) return '-';
+  return `${Math.floor(ms / (1000 * 60 * 60 * 24))}d`;
+}
+
+const REASON_LABELS: Record<string, string> = {
+  sla_breached: 'SLA Breached',
+  sla_approaching: 'SLA Approaching',
+  overdue_update: 'Overdue Update',
+};
+
+const REASON_STYLES: Record<string, string> = {
+  sla_breached: 'bg-red-900/40 text-red-400',
+  sla_approaching: 'bg-orange-900/40 text-orange-400',
+  overdue_update: 'bg-amber-900/40 text-amber-400',
+};
+
 export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
   const [tasks, setTasks] = useState<AttentionTask[]>([]);
   const [loading, setLoading] = useState(false);
@@ -39,6 +85,16 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [unassignedOnly, setUnassignedOnly] = useState(false);
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  const toggleExpandedRow = (id: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const fetchAttention = useCallback(async () => {
     setLoading(true);
@@ -114,7 +170,7 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
   return (
     <div className="space-y-3 max-w-5xl mx-auto">
       {/* Summary bar */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-semibold text-neutral-200">
             {tasks.length === 0
@@ -208,42 +264,197 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
         </div>
       )}
 
-      {/* Ticket list */}
+      {/* Ticket table */}
       {sorted.length > 0 && (
-        <div className="space-y-1">
-          {sorted.map((task) => (
-            <div key={task.id}>
-              {/* Urgency + attention badges */}
-              <div className="flex items-center gap-1.5 pl-12 mb-0.5">
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${urgencyColor(task.urgency_score ?? 0)}`}
-                  title={`Urgency: ${task.urgency_score ?? 0}`} />
-                <span className="text-[10px] text-neutral-500 tabular-nums">
-                  {task.urgency_score ?? 0}
-                </span>
-                {task.attention_reasons.includes('sla_breached') && (
-                  <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-red-600 text-red-100">
-                    SLA Breached
-                  </span>
-                )}
-                {task.attention_reasons.includes('sla_approaching') && (
-                  <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-orange-600 text-orange-100">
-                    SLA Approaching{task.sla_remaining_ms != null && task.sla_remaining_ms > 0
-                      ? ` — ${formatRemaining(task.sla_remaining_ms)}` : ''}
-                  </span>
-                )}
-                {task.attention_reasons.includes('overdue_update') && (
-                  <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-amber-600 text-amber-100">
-                    Overdue Update
-                  </span>
-                )}
-              </div>
-              <TaskCard
-                task={task}
-                onUpdate={onUpdateTask}
-                onClick={() => setDrawerTaskId(task.id)}
-              />
-            </div>
-          ))}
+        <div className="border border-[#3a424d] rounded-lg overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-[#272C33] text-neutral-500 uppercase tracking-wider text-[10px]">
+                <th className="text-center px-3 py-2">Score</th>
+                <th className="text-left px-3 py-2">Issue</th>
+                <th className="text-left px-3 py-2 hidden sm:table-cell">Status</th>
+                <th className="text-left px-3 py-2 hidden md:table-cell">Assignee</th>
+                <th className="text-left px-3 py-2">Reasons</th>
+                <th className="text-center px-3 py-2 hidden sm:table-cell">Age</th>
+                <th className="text-center px-3 py-2 hidden sm:table-cell">SLA</th>
+                <th className="text-center px-2 py-2 w-10"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#3a424d]">
+              {sorted.map(task => {
+                const meta = parseDescMeta(task.description);
+                const sla = slaDisplay(task.sla_remaining_ms);
+                const isExpanded = expandedRows.has(task.id);
+                const tier = getTier(task);
+
+                return (
+                  <Fragment key={task.id}>
+                    <tr
+                      className="bg-[#2f353d] hover:bg-[#363d47] transition-colors cursor-pointer"
+                      onClick={() => toggleExpandedRow(task.id)}
+                    >
+                      <td className="px-3 py-2 text-center">
+                        <div className="flex items-center gap-1 justify-center">
+                          <div className="w-12 h-1.5 bg-[#272C33] rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${urgencyColor(task.urgency_score ?? 0)}`}
+                              style={{ width: `${Math.min(task.urgency_score ?? 0, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-neutral-400 text-[10px] w-6">{task.urgency_score ?? 0}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="text-neutral-200 font-medium">
+                          {task.source === 'jira' && task.source_id && (
+                            <span className="text-neutral-500 mr-1.5">{task.source_id}</span>
+                          )}
+                          {task.source_url ? (
+                            <a
+                              href={task.source_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              className="hover:text-[#5ec1ca] transition-colors"
+                            >
+                              {task.title} ↗
+                            </a>
+                          ) : task.title}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 hidden sm:table-cell">
+                        {meta.Status ? (
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${getStatusBadge(meta.Status)}`}>
+                            {meta.Status}
+                          </span>
+                        ) : <span className="text-neutral-600">-</span>}
+                      </td>
+                      <td className="px-3 py-2 text-neutral-400 hidden md:table-cell">
+                        {meta.Assignee ?? '-'}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {task.attention_reasons.length > 0 ? task.attention_reasons.map((reason, i) => (
+                            <span key={i} className={`inline-block px-1.5 py-0.5 rounded text-[10px] ${REASON_STYLES[reason] ?? 'bg-[#272C33] text-neutral-400'}`}>
+                              {REASON_LABELS[reason] ?? reason}
+                            </span>
+                          )) : <span className="text-neutral-500">-</span>}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-center text-neutral-500 hidden sm:table-cell">
+                        {daysOpen(meta.Created)}
+                      </td>
+                      <td className="px-3 py-2 text-center hidden sm:table-cell">
+                        <span className={sla.className}>{sla.text}</span>
+                      </td>
+                      <td className="px-2 py-2 text-center text-neutral-600">
+                        {isExpanded ? '▾' : '▸'}
+                      </td>
+                    </tr>
+
+                    {isExpanded && (
+                      <tr className="bg-[#272C33]">
+                        <td colSpan={8} className="px-4 py-3">
+                          <div className="space-y-3">
+                            {/* Detail badges */}
+                            <div className="flex flex-wrap gap-2">
+                              {meta.Status && (
+                                <div className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                  <span className="text-neutral-500">Status:</span>
+                                  <span className="text-neutral-300 font-medium">{meta.Status}</span>
+                                </div>
+                              )}
+                              {meta.Priority && (
+                                <div className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                  <span className="text-neutral-500">Priority:</span>
+                                  <span className="text-neutral-300 font-medium">{meta.Priority}</span>
+                                </div>
+                              )}
+                              {tier && (
+                                <div className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                  <span className="text-neutral-500">Tier:</span>
+                                  <span className="text-neutral-300 font-medium">{tier}</span>
+                                </div>
+                              )}
+                              {meta.Assignee && (
+                                <div className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                  <span className="text-neutral-500">Assignee:</span>
+                                  <span className="text-neutral-300 font-medium">{meta.Assignee}</span>
+                                </div>
+                              )}
+                              {meta.Created && (
+                                <div className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                  <span className="text-neutral-500">Created:</span>
+                                  <span className="text-neutral-300 font-medium">{meta.Created}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Attention reasons detail */}
+                            <div>
+                              <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1.5">Attention Reasons</div>
+                              <div className="flex flex-wrap gap-2">
+                                {task.attention_reasons.map((reason, i) => (
+                                  <div key={i} className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                    <span className="text-neutral-300 font-medium">{REASON_LABELS[reason] ?? reason}</span>
+                                    {reason === 'sla_approaching' && task.sla_remaining_ms != null && task.sla_remaining_ms > 0 && (
+                                      <span className="text-neutral-500 text-[10px]">({formatRemaining(task.sla_remaining_ms)})</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Meta */}
+                            <div className="flex items-center gap-4 text-[10px] text-neutral-600">
+                              <span>Urgency score: {task.urgency_score ?? 0}</span>
+                              {task.sla_remaining_ms != null && (
+                                <span>SLA remaining: {task.sla_remaining_ms < 0 ? 'Breached' : formatRemaining(task.sla_remaining_ms)}</span>
+                              )}
+                              <span>Last updated: {new Date(task.updated_at).toLocaleString()}</span>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDrawerTaskId(task.id); }}
+                                className="px-3 py-1 text-xs bg-[#2f353d] text-neutral-300 rounded hover:text-[#5ec1ca] transition-colors"
+                              >
+                                Open Details
+                              </button>
+                              {task.source_url && (
+                                <a
+                                  href={task.source_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={e => e.stopPropagation()}
+                                  className="px-3 py-1 text-xs bg-[#2f353d] text-neutral-300 rounded hover:text-[#5ec1ca] transition-colors"
+                                >
+                                  Open in Jira
+                                </a>
+                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); onUpdateTask(task.id, { is_pinned: !task.is_pinned }); }}
+                                className="px-3 py-1 text-xs bg-[#363d47] text-neutral-300 rounded hover:bg-[#3a424d] transition-colors"
+                              >
+                                {task.is_pinned ? 'Unfocus' : 'Focus'}
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); onUpdateTask(task.id, { status: 'done' }); }}
+                                className="px-3 py-1 text-xs bg-[#363d47] text-neutral-300 rounded hover:bg-[#3a424d] transition-colors"
+                              >
+                                Done
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 

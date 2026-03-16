@@ -1,8 +1,10 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, Fragment } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TaskCard } from './TaskCard.js';
 import { TaskDrawer } from './TaskDrawer.js';
 import { CreateTaskForm } from './CreateTaskForm.js';
+import { getTier } from '../utils/taskHelpers.js';
+import { SLATimer } from './SLATimer.js';
 
 interface Props {
   tasks: Task[];
@@ -25,6 +27,66 @@ const SOURCE_META: Record<string, { label: string; color: string }> = {
 // Ordered source list for consistent display
 const SOURCE_ORDER = ['jira', 'planner', 'todo', 'monday', 'email', 'calendar', 'milestone'];
 
+const SOURCE_LABELS: Record<string, string> = {
+  jira: 'JIRA', planner: 'PLAN', todo: 'TODO', monday: 'MON',
+  email: 'EMAIL', calendar: 'CAL', milestone: 'OB',
+};
+
+const SOURCE_COLORS: Record<string, string> = {
+  jira: 'bg-[#0052CC]', planner: 'bg-[#31752F]', todo: 'bg-[#797673]',
+  monday: 'bg-[#FF6D00]', email: 'bg-[#0078D4]', calendar: 'bg-[#8764B8]',
+  milestone: 'bg-emerald-600',
+};
+
+function parseDescMeta(description: string | null): Record<string, string> {
+  if (!description) return {};
+  const meta: Record<string, string> = {};
+  for (const line of description.split('\n')) {
+    const match = line.match(/^(Status|Priority|Created|Assignee):\s*(.+)/);
+    if (match) meta[match[1]] = match[2].trim();
+  }
+  return meta;
+}
+
+function getStatusBadge(status: string): string {
+  const s = status.toLowerCase();
+  if (s.includes('done') || s.includes('closed') || s.includes('resolved')) return 'bg-green-900/40 text-green-400';
+  if (s.includes('progress') || s.includes('review') || s.includes('working')) return 'bg-blue-900/40 text-blue-400';
+  if (s.includes('waiting') || s.includes('hold') || s.includes('blocked')) return 'bg-amber-900/40 text-amber-400';
+  return 'bg-[#272C33] text-neutral-400';
+}
+
+function getPriorityBadge(priority: string): string {
+  const p = priority.toLowerCase();
+  if (p.includes('critical') || p.includes('highest') || p.includes('blocker')) return 'bg-red-900/40 text-red-400';
+  if (p.includes('high')) return 'bg-orange-900/40 text-orange-400';
+  if (p.includes('medium') || p.includes('normal')) return 'bg-amber-900/40 text-amber-400';
+  if (p.includes('low') || p.includes('lowest')) return 'bg-green-900/40 text-green-400';
+  return 'bg-[#272C33] text-neutral-400';
+}
+
+function daysOpen(dateStr: string | null): string {
+  if (!dateStr) return '-';
+  const ms = Date.now() - new Date(dateStr).getTime();
+  if (isNaN(ms)) return '-';
+  return `${Math.floor(ms / (1000 * 60 * 60 * 24))}d`;
+}
+
+function dueDateDisplay(dateStr: string | null): { text: string; className: string } {
+  if (!dateStr) return { text: '-', className: 'text-neutral-600' };
+  const due = new Date(dateStr);
+  if (isNaN(due.getTime())) return { text: dateStr, className: 'text-neutral-600' };
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  const diffDays = Math.round((dueDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return { text: `${Math.abs(diffDays)}d overdue`, className: 'text-red-400 font-bold' };
+  if (diffDays === 0) return { text: 'Today', className: 'text-amber-400 font-bold' };
+  if (diffDays === 1) return { text: 'Tomorrow', className: 'text-amber-400' };
+  if (diffDays <= 3) return { text: `${diffDays}d`, className: 'text-yellow-400' };
+  return { text: due.toLocaleDateString(), className: 'text-neutral-400' };
+}
+
 type SortField = 'priority' | 'due_date' | 'updated_at';
 
 export function TaskList({ tasks, loading, onUpdateTask, minimal }: Props) {
@@ -43,6 +105,16 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal }: Props) {
   });
   const [pinnedCollapsed, setPinnedCollapsed] = useState(true);
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  const toggleExpandedRow = (id: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Available sources — always show all known sources, plus any extras from tasks
   const activeSources = useMemo(() => {
@@ -200,12 +272,13 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal }: Props) {
     return !isNaN(due.getTime()) && due < today;
   }).length;
 
-  // Minimal mode: flat sorted list, no filters/grouping
+  // Minimal mode: table layout matching Problem Tickets view
   if (minimal) {
     const allSorted = sortTasks(tasks);
     return (
-      <div>
-        <div className="flex items-center justify-between mb-3">
+      <div className="space-y-3">
+        {/* Toolbar */}
+        <div className="flex items-center justify-between">
           <div className="text-[11px] text-neutral-500">{tasks.length} tickets</div>
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] text-neutral-600 uppercase tracking-wider">Sort</span>
@@ -220,11 +293,187 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal }: Props) {
             </select>
           </div>
         </div>
-        <div className="space-y-1">
-          {allSorted.map((task) => (
-            <TaskCard key={task.id} task={task} onUpdate={onUpdateTask} onClick={() => openDrawer(task.id)} />
-          ))}
-        </div>
+
+        {/* Table */}
+        {allSorted.length === 0 ? (
+          <div className="text-sm text-neutral-500 py-8 text-center">No tickets to show.</div>
+        ) : (
+          <div className="border border-[#3a424d] rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-[#272C33] text-neutral-500 uppercase tracking-wider text-[10px]">
+                  <th className="text-center px-2 py-2 w-14">Source</th>
+                  <th className="text-left px-3 py-2">Issue</th>
+                  <th className="text-left px-3 py-2 hidden sm:table-cell">Status</th>
+                  <th className="text-left px-3 py-2 hidden md:table-cell">Assignee</th>
+                  <th className="text-center px-3 py-2 hidden sm:table-cell">Priority</th>
+                  <th className="text-center px-3 py-2 hidden md:table-cell">Age</th>
+                  <th className="text-center px-3 py-2 hidden sm:table-cell">SLA</th>
+                  <th className="text-center px-3 py-2 hidden md:table-cell">Due</th>
+                  <th className="text-center px-2 py-2 w-10"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#3a424d]">
+                {allSorted.map(task => {
+                  const meta = parseDescMeta(task.description);
+                  const tier = getTier(task);
+                  const due = dueDateDisplay(task.due_date);
+                  const isExpanded = expandedRows.has(task.id);
+
+                  return (
+                    <Fragment key={task.id}>
+                      <tr
+                        className="bg-[#2f353d] hover:bg-[#363d47] transition-colors cursor-pointer"
+                        onClick={() => toggleExpandedRow(task.id)}
+                      >
+                        <td className="px-2 py-2 text-center">
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${SOURCE_COLORS[task.source] ?? 'bg-neutral-700'} text-white`}>
+                            {SOURCE_LABELS[task.source] ?? task.source.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="text-neutral-200 font-medium">
+                            {task.source === 'jira' && task.source_id && (
+                              <span className="text-neutral-500 mr-1.5">{task.source_id}</span>
+                            )}
+                            {task.source_url ? (
+                              <a
+                                href={task.source_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={e => e.stopPropagation()}
+                                className="hover:text-[#5ec1ca] transition-colors"
+                              >
+                                {task.title} ↗
+                              </a>
+                            ) : task.title}
+                          </div>
+                          {task.is_pinned && (
+                            <span className="text-[10px] text-amber-400 font-semibold">FOCUSED</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 hidden sm:table-cell">
+                          {meta.Status ? (
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${getStatusBadge(meta.Status)}`}>
+                              {meta.Status}
+                            </span>
+                          ) : <span className="text-neutral-600">-</span>}
+                        </td>
+                        <td className="px-3 py-2 text-neutral-400 hidden md:table-cell">
+                          {meta.Assignee ?? '-'}
+                        </td>
+                        <td className="px-3 py-2 text-center hidden sm:table-cell">
+                          {meta.Priority ? (
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${getPriorityBadge(meta.Priority)}`}>
+                              {meta.Priority}
+                            </span>
+                          ) : <span className="text-neutral-600">-</span>}
+                        </td>
+                        <td className="px-3 py-2 text-center text-neutral-500 hidden md:table-cell">
+                          {daysOpen(meta.Created)}
+                        </td>
+                        <td className="px-3 py-2 text-center hidden sm:table-cell">
+                          {task.sla_breach_at ? (
+                            <SLATimer breachAt={task.sla_breach_at} />
+                          ) : <span className="text-neutral-600">No SLA</span>}
+                        </td>
+                        <td className="px-3 py-2 text-center hidden md:table-cell">
+                          <span className={due.className}>{due.text}</span>
+                        </td>
+                        <td className="px-2 py-2 text-center text-neutral-600">
+                          {isExpanded ? '▾' : '▸'}
+                        </td>
+                      </tr>
+
+                      {isExpanded && (
+                        <tr className="bg-[#272C33]">
+                          <td colSpan={9} className="px-4 py-3">
+                            <div className="space-y-3">
+                              {/* Metadata badges */}
+                              <div className="flex flex-wrap gap-2">
+                                {meta.Status && (
+                                  <div className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                    <span className="text-neutral-500">Status:</span>
+                                    <span className="text-neutral-300 font-medium">{meta.Status}</span>
+                                  </div>
+                                )}
+                                {meta.Priority && (
+                                  <div className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                    <span className="text-neutral-500">Priority:</span>
+                                    <span className="text-neutral-300 font-medium">{meta.Priority}</span>
+                                  </div>
+                                )}
+                                {tier && (
+                                  <div className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                    <span className="text-neutral-500">Tier:</span>
+                                    <span className="text-neutral-300 font-medium">{tier}</span>
+                                  </div>
+                                )}
+                                {meta.Assignee && (
+                                  <div className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                    <span className="text-neutral-500">Assignee:</span>
+                                    <span className="text-neutral-300 font-medium">{meta.Assignee}</span>
+                                  </div>
+                                )}
+                                {meta.Created && (
+                                  <div className="flex items-center gap-1.5 bg-[#2f353d] rounded px-2 py-1 text-xs">
+                                    <span className="text-neutral-500">Created:</span>
+                                    <span className="text-neutral-300 font-medium">{meta.Created}</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* SLA + Due date detail */}
+                              <div className="flex items-center gap-4 text-[10px] text-neutral-600">
+                                {task.sla_breach_at && <span>SLA Breach: {new Date(task.sla_breach_at).toLocaleString()}</span>}
+                                {task.due_date && <span>Due: {new Date(task.due_date).toLocaleDateString()}</span>}
+                                <span>Last updated: {new Date(task.updated_at).toLocaleString()}</span>
+                              </div>
+
+                              {/* Actions */}
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openDrawer(task.id); }}
+                                  className="px-3 py-1 text-xs bg-[#2f353d] text-neutral-300 rounded hover:text-[#5ec1ca] transition-colors"
+                                >
+                                  Open Details
+                                </button>
+                                {task.source_url && (
+                                  <a
+                                    href={task.source_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={e => e.stopPropagation()}
+                                    className="px-3 py-1 text-xs bg-[#2f353d] text-neutral-300 rounded hover:text-[#5ec1ca] transition-colors"
+                                  >
+                                    Open in {SOURCE_META[task.source]?.label ?? task.source}
+                                  </a>
+                                )}
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); onUpdateTask(task.id, { is_pinned: !task.is_pinned }); }}
+                                  className="px-3 py-1 text-xs bg-[#363d47] text-neutral-300 rounded hover:bg-[#3a424d] transition-colors"
+                                >
+                                  {task.is_pinned ? 'Unfocus' : 'Focus'}
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); onUpdateTask(task.id, { status: 'done' }); }}
+                                  className="px-3 py-1 text-xs bg-[#363d47] text-neutral-300 rounded hover:bg-[#3a424d] transition-colors"
+                                >
+                                  Done
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {drawerTask && (
           <TaskDrawer
             task={drawerTask}
