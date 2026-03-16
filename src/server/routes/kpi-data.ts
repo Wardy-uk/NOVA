@@ -586,6 +586,22 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
     return pool;
   }
 
+  // GET /api/public/wallboard/diag — temporary diagnostic: raw Agent columns
+  router.get('/diag', async (_req, res) => {
+    try {
+      const p = await getPool();
+      const result = await p.request().query(`
+        SELECT TOP 5 AgentName, AccountId, OpenTickets_Total, OpenTickets_Over2Hours,
+               OpenTickets_NoUpdateToday, OldestTicketDays, TicketsSnapshotAt
+        FROM dbo.Agent WHERE IsActive = 1
+        ORDER BY AgentName
+      `);
+      res.json({ ok: true, data: result.recordset });
+    } catch (err) {
+      res.json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
   // GET /api/public/wallboard/breached — agent breach data for TV wallboard
   router.get('/breached', async (_req, res) => {
     try {
