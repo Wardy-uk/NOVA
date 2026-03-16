@@ -112,6 +112,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const p = await getPool();
       const hasOldest = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'OldestTicketDays'`);
       const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
+      const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
+      const deptFilter = hasDept.recordset.length > 0 ? "AND Department = 'NT'" : '';
       const result = await p.request().query(`
         SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team,
                IsActive, IsAvailable, AccountId,
@@ -119,7 +121,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
                ${oldestCol} AS OldestTicketDays,
                SolvedTickets_Today, SolvedTickets_ThisWeek, TicketsSnapshotAt
         FROM dbo.Agent${s}
-        WHERE IsActive = 1 AND Department = 'NT'
+        WHERE IsActive = 1 ${deptFilter}
         ORDER BY Team, AgentName
       `);
       res.json({ ok: true, data: result.recordset, env });
@@ -134,6 +136,11 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const env = parseEnv(req);
       const s = suffix(env);
       const p = await getPool();
+      const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
+      const deptJoin = hasDept.recordset.length > 0
+        ? `INNER JOIN dbo.Agent${s} a ON a.AgentName = d.AgentName`
+        : '';
+      const deptWhere = hasDept.recordset.length > 0 ? "AND a.Department = 'NT'" : '';
       const from = req.query.from as string | undefined;
       const to = req.query.to as string | undefined;
       if (from && to) {
@@ -143,9 +150,9 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         const result = await request.query(`
           SELECT d.*
           FROM dbo.jira_agent_kpi_daily${s} d
-          INNER JOIN dbo.Agent${s} a ON a.AgentName = d.AgentName
+          ${deptJoin}
           WHERE d.ReportDate >= @from AND d.ReportDate <= @to
-            AND a.Department = 'NT'
+            ${deptWhere}
           ORDER BY d.ReportDate DESC, d.AgentName
         `);
         res.json({ ok: true, data: result.recordset, env });
@@ -154,9 +161,9 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         const result = await p.request().query(`
           SELECT d.*
           FROM dbo.jira_agent_kpi_daily${s} d
-          INNER JOIN dbo.Agent${s} a ON a.AgentName = d.AgentName
+          ${deptJoin}
           WHERE d.ReportDate >= DATEADD(day, -${days}, CAST(GETDATE() AS DATE))
-            AND a.Department = 'NT'
+            ${deptWhere}
           ORDER BY d.ReportDate DESC, d.AgentName
         `);
         res.json({ ok: true, data: result.recordset, env });
@@ -570,13 +577,15 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
       const hasOldest = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.AgentUAT') AND name = 'OldestTicketDays'`);
       const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
       const orderCol = hasOldest.recordset.length > 0 ? 'OldestTicketDays DESC,' : '';
+      const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.AgentUAT') AND name = 'Department'`);
+      const deptFilter = hasDept.recordset.length > 0 ? "AND Department = 'NT'" : '';
       const result = await p.request().query(`
         SELECT AgentName, AgentSurname, TierCode, Team,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                ${oldestCol} AS OldestTicketDays,
                SolvedTickets_Today, TicketsSnapshotAt
         FROM dbo.AgentUAT
-        WHERE IsActive = 1 AND Department = 'NT'
+        WHERE IsActive = 1 ${deptFilter}
         ORDER BY OpenTickets_Over2Hours DESC, ${orderCol} AgentName
       `);
       res.json({ ok: true, data: result.recordset, ts: new Date().toISOString() });
