@@ -342,6 +342,8 @@ function KpiSummarySection({ data }: { data: KpiSnapshot[] }) {
 
   // Sort data using defined KPI order
   const sorted = sortKpis(data);
+  console.log('[KPI DEBUG] Raw data KPI names:', data.map(d => d.KPI));
+  console.log('[KPI DEBUG] Sorted order:', sorted.map(d => `${d.KPI} (pos=${KPI_ORDER_MAP.get(d.KPI.toLowerCase()) ?? 'MISS'})`));
 
   // Group data based on sort mode
   let groups: [string, KpiSnapshot[]][];
