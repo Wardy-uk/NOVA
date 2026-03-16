@@ -574,17 +574,17 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
   router.get('/breached', async (_req, res) => {
     try {
       const p = await getPool();
-      const hasOldest = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.AgentUAT') AND name = 'OldestTicketDays'`);
+      const hasOldest = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketDays'`);
       const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
       const orderCol = hasOldest.recordset.length > 0 ? 'OldestTicketDays DESC,' : '';
-      const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.AgentUAT') AND name = 'Department'`);
+      const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`);
       const deptFilter = hasDept.recordset.length > 0 ? "AND Department = 'NT'" : '';
       const result = await p.request().query(`
         SELECT AgentName, AgentSurname, TierCode, Team,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                ${oldestCol} AS OldestTicketDays,
                SolvedTickets_Today, TicketsSnapshotAt
-        FROM dbo.AgentUAT
+        FROM dbo.Agent
         WHERE IsActive = 1 ${deptFilter}
         ORDER BY OpenTickets_Over2Hours DESC, ${orderCol} AgentName
       `);
