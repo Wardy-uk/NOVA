@@ -540,100 +540,97 @@ async function main() {
     }
   });
 
-  // Wallboard — standalone page for TV displays (no auth)
-  app.get('/wallboard/breached', (_req, res) => {
-    res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SLA Breach Board - nurtur.tech</title>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Figtree',system-ui,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}
-h1{font-family:'Plus Jakarta Sans',system-ui,sans-serif}
-.wrap{max-width:1600px;margin:0 auto;padding:24px 32px}
-.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
-.title{font-size:26px;font-weight:800;color:#e2e8f0;letter-spacing:-0.5px}
-.subtitle{font-size:11px;color:#64748b;margin-top:2px}
-.live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
-.card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:18px 22px}
-.card-label{font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px}
-.card-value{font-size:32px;font-weight:800;letter-spacing:-1px}
-table{width:100%;border-collapse:collapse}
-.tbl{border:1px solid #2f353d;border-radius:14px;overflow:hidden;background:rgba(255,255,255,.03)}
-th{padding:12px 16px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}
-th.c{text-align:center}
-td{padding:12px 16px;border-bottom:1px solid #2f353d;font-size:14px}
-td.c{text-align:center}
-tr.issue{background:rgba(239,68,68,.04)}
-.name{font-weight:600;color:#e2e8f0}
-.name.warn{color:#fca5a5}
-.team{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
-.rag{display:inline-block;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;min-width:48px;text-align:center}
-.rag-green{background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.25)}
-.rag-amber{background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.25)}
-.rag-red{background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)}
-.solved{color:#5ec1ca;font-weight:700;text-align:center}
-.footer{text-align:center;margin-top:16px;font-size:11px;color:#475569}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="header">
-    <div><h1 class="title">SLA Breach Board</h1><div class="subtitle">Live ticket health per agent</div></div>
-    <div style="display:flex;align-items:center;gap:8px"><span class="live-dot"></span><span style="font-size:11px;color:#64748b">Auto-refresh 30s</span></div>
-  </div>
-  <div class="cards" id="cards"></div>
-  <div class="tbl"><table><thead><tr>
-    <th>Agent</th><th>Team</th><th class="c">Open</th><th class="c">Over SLA</th><th class="c">Not Updated</th><th class="c">Oldest (days)</th><th class="c">Solved Today</th>
-  </tr></thead><tbody id="tbody"></tbody></table></div>
-  <div class="footer" id="footer">nurtur.tech &middot; SLA Breach Board</div>
+  // Wallboard — server-rendered page for TV displays (no auth, no JS required)
+  app.get('/wallboard/breached', async (_req, res) => {
+    try {
+      const settings = settingsQueries.getAll();
+      const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
+      if (!srv || !db || !usr || !pwd) { res.status(500).send('KPI SQL not configured'); return; }
+      const sql = await import('mssql');
+      const pool = await new sql.default.ConnectionPool({
+        server: srv, database: db, user: usr, password: pwd,
+        options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
+      }).connect();
+      const hasOldest = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketDays'`);
+      const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
+      const hasDept = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`);
+      const deptFilter = hasDept.recordset.length > 0 ? "AND Department = 'NT'" : '';
+      const result = await pool.request().query(`
+        SELECT AgentName, AgentSurname, TierCode, Team,
+               OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
+               ${oldestCol} AS OldestTicketDays,
+               SolvedTickets_Today, TicketsSnapshotAt
+        FROM dbo.Agent WHERE IsActive = 1 ${deptFilter}
+        ORDER BY OpenTickets_Over2Hours DESC, AgentName
+      `);
+      const data = result.recordset;
+      await pool.close();
+
+      const TEAM_COLORS: Record<string, string> = { CC: '#3b82f6', 'Customer Care': '#3b82f6', Production: '#8b5cf6', 'Tier 2': '#f59e0b', 'Tier 3': '#ef4444', Development: '#10b981', NTL: '#3b82f6' };
+      const totalOver = data.reduce((s: number, a: any) => s + (a.OpenTickets_Over2Hours || 0), 0);
+      const totalStale = data.reduce((s: number, a: any) => s + (a.OpenTickets_NoUpdateToday || 0), 0);
+      const agentsBreached = data.filter((a: any) => a.OpenTickets_Over2Hours > 0).length;
+      const worstOldest = data.reduce((m: number, a: any) => Math.max(m, a.OldestTicketDays || 0), 0);
+
+      function rag(v: number, g: number, a: number) { return v <= g ? 'green' : v <= a ? 'amber' : 'red'; }
+      function ragHtml(v: number, g: number, a: number, suffix = '') {
+        const r = rag(v, g, a);
+        const colors: Record<string, { bg: string; fg: string; bd: string }> = {
+          green: { bg: 'rgba(16,185,129,.12)', fg: '#10b981', bd: 'rgba(16,185,129,.25)' },
+          amber: { bg: 'rgba(245,158,11,.12)', fg: '#f59e0b', bd: 'rgba(245,158,11,.25)' },
+          red: { bg: 'rgba(239,68,68,.15)', fg: '#ef4444', bd: 'rgba(239,68,68,.3)' },
+        };
+        const c = colors[r];
+        return `<td class="c"><span style="display:inline-block;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;min-width:48px;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${v}${suffix}</span></td>`;
+      }
+
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      const timeStr = now.toLocaleTimeString('en-GB');
+
+      function kpiCard(label: string, value: string | number, color: string) {
+        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:18px 22px"><div style="font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">${label}</div><div style="font-size:32px;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
+      }
+
+      const rows = data.map((a: any) => {
+        const name = a.AgentSurname ? `${a.AgentName} ${a.AgentSurname}` : a.AgentName;
+        const hasIssues = a.OpenTickets_Over2Hours > 0 || (a.OldestTicketDays || 0) > 7;
+        const tc = TEAM_COLORS[a.TierCode || a.Team] || '#64748b';
+        return `<tr${hasIssues ? ' style="background:rgba(239,68,68,.04)"' : ''}>
+          <td><span style="font-weight:600;color:${hasIssues ? '#fca5a5' : '#e2e8f0'}">${name}</span></td>
+          <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:${tc}22;color:${tc};border:1px solid ${tc}33">${a.TierCode || a.Team || '—'}</span></td>
+          <td class="c" style="color:#94a3b8;font-weight:600">${a.OpenTickets_Total}</td>
+          ${ragHtml(a.OpenTickets_Over2Hours || 0, 0, 2)}
+          ${ragHtml(a.OpenTickets_NoUpdateToday || 0, 0, 1)}
+          ${ragHtml(a.OldestTicketDays || 0, 3, 7, 'd')}
+          <td class="c" style="color:#5ec1ca;font-weight:700">${a.SolvedTickets_Today || 0}</td>
+        </tr>`;
+      }).join('');
+
+      res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>SLA Breach Board</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:24px 32px}table{width:100%;border-collapse:collapse}th{padding:12px 16px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:12px 16px;border-bottom:1px solid #2f353d;font-size:14px}td.c{text-align:center}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+  <div><h1 style="font-size:26px;font-weight:800;letter-spacing:-0.5px">SLA Breach Board</h1><div style="font-size:11px;color:#64748b;margin-top:2px">Live ticket health per agent</div></div>
+  <div style="font-size:11px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
 </div>
-<script>
-const TEAM_COLORS={CC:'#3b82f6','Customer Care':'#3b82f6',Production:'#8b5cf6','Tier 2':'#f59e0b','Tier 3':'#ef4444',Development:'#10b981'};
-function rag(v,g,a){return v<=g?'green':v<=a?'amber':'red'}
-function ragCell(v,g,a,s){const r=rag(v,g,a);return '<td class="c"><span class="rag rag-'+r+'">'+v+(s||'')+'</span></td>'}
-function render(data){
-  const total=data.reduce((s,a)=>s+a.OpenTickets_Over2Hours,0);
-  const stale=data.reduce((s,a)=>s+a.OpenTickets_NoUpdateToday,0);
-  const breached=data.filter(a=>a.OpenTickets_Over2Hours>0).length;
-  const worst=data.reduce((m,a)=>Math.max(m,a.OldestTicketDays||0),0);
-  const kpis=[
-    {l:'Tickets Over SLA',v:total,c:total===0?'#10b981':'#ef4444'},
-    {l:'Agents Breached',v:breached+' / '+data.length,c:breached===0?'#10b981':'#f59e0b'},
-    {l:'Tickets Not Updated',v:stale,c:stale===0?'#10b981':'#f59e0b'},
-    {l:'Worst Oldest (days)',v:worst,c:worst<=3?'#10b981':worst<=7?'#f59e0b':'#ef4444'}
-  ];
-  document.getElementById('cards').innerHTML=kpis.map(k=>'<div class="card"><div class="card-label">'+k.l+'</div><div class="card-value" style="color:'+k.c+'">'+k.v+'</div></div>').join('');
-  const rows=data.map(a=>{
-    const name=(a.AgentSurname?a.AgentName+' '+a.AgentSurname:a.AgentName);
-    const hasIssues=a.OpenTickets_Over2Hours>0||a.OldestTicketDays>7;
-    const tc=TEAM_COLORS[a.TierCode||a.Team]||'#64748b';
-    return '<tr'+(hasIssues?' class="issue"':'')+'>'
-      +'<td><span class="name'+(hasIssues?' warn':'')+'">'+name+'</span></td>'
-      +'<td><span class="team" style="background:'+tc+'22;color:'+tc+';border:1px solid '+tc+'33">'+(a.TierCode||a.Team||'—')+'</span></td>'
-      +'<td class="c" style="color:#94a3b8;font-weight:600">'+a.OpenTickets_Total+'</td>'
-      +ragCell(a.OpenTickets_Over2Hours,0,2)
-      +ragCell(a.OpenTickets_NoUpdateToday,0,1)
-      +ragCell(a.OldestTicketDays||0,3,7,'d')
-      +'<td class="solved">'+a.SolvedTickets_Today+'</td>'
-      +'</tr>';
-  });
-  document.getElementById('tbody').innerHTML=rows.join('');
-  const d=new Date();
-  document.getElementById('footer').innerHTML='nurtur.tech &middot; SLA Breach Board &middot; '+d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+' &middot; Updated '+d.toLocaleTimeString('en-GB');
-}
-async function refresh(){
-  try{const r=await fetch('/api/public/wallboard/breached');const j=await r.json();if(j.ok)render(j.data)}catch(e){console.error(e)}
-}
-refresh();setInterval(refresh,30000);
-</script>
-</body>
-</html>`);
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+  ${kpiCard('Tickets Over SLA', totalOver, totalOver === 0 ? '#10b981' : '#ef4444')}
+  ${kpiCard('Agents Breached', `${agentsBreached} / ${data.length}`, agentsBreached === 0 ? '#10b981' : '#f59e0b')}
+  ${kpiCard('Tickets Not Updated', totalStale, totalStale === 0 ? '#10b981' : '#f59e0b')}
+  ${kpiCard('Worst Oldest (days)', worstOldest, worstOldest <= 3 ? '#10b981' : worstOldest <= 7 ? '#f59e0b' : '#ef4444')}
+</div>
+<div style="border:1px solid #2f353d;border-radius:14px;overflow:hidden;background:rgba(255,255,255,.03)">
+<table><thead><tr><th>Agent</th><th>Team</th><th class="c">Open</th><th class="c">Over SLA</th><th class="c">Not Updated</th><th class="c">Oldest (days)</th><th class="c">Solved Today</th></tr></thead>
+<tbody>${rows}</tbody></table></div>
+<div style="text-align:center;margin-top:16px;font-size:11px;color:#475569">nurtur.tech &middot; SLA Breach Board &middot; ${dateStr}</div>
+</div></body></html>`);
+    } catch (err) {
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${err instanceof Error ? err.message : 'Unknown error'}</body></html>`);
+    }
   });
 
   // Production: serve built Vite frontend
