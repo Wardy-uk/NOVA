@@ -60,11 +60,16 @@ function TeamBadge({ team }: { team: string }) {
   );
 }
 
+type SortKey = 'name' | 'overSla' | 'notUpdated' | 'oldest';
+type SortDir = 'asc' | 'desc';
+
 export function KpiBreachedView({ isWallboard = false }: { isWallboard?: boolean }) {
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [filter, setFilter] = useState<'all' | 'breached'>('all');
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   const fetchData = useCallback(async () => {
     try {
@@ -95,11 +100,28 @@ export function KpiBreachedView({ isWallboard = false }: { isWallboard?: boolean
     ? agents.filter(a => a.OpenTickets_Over2Hours > 0 || a.OpenTickets_NoUpdateToday > 0 || a.OldestTicketDays > 3)
     : agents;
 
-  // Sort alphabetically by full name
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'name' ? 'asc' : 'desc');
+    }
+  };
+
   const displayed = [...filtered].sort((a, b) => {
-    const na = `${a.AgentName} ${a.AgentSurname ?? ''}`.trim().toLowerCase();
-    const nb = `${b.AgentName} ${b.AgentSurname ?? ''}`.trim().toLowerCase();
-    return na.localeCompare(nb);
+    let cmp = 0;
+    switch (sortKey) {
+      case 'overSla': cmp = a.OpenTickets_Over2Hours - b.OpenTickets_Over2Hours; break;
+      case 'notUpdated': cmp = a.OpenTickets_NoUpdateToday - b.OpenTickets_NoUpdateToday; break;
+      case 'oldest': cmp = a.OldestTicketDays - b.OldestTicketDays; break;
+      default: {
+        const na = `${a.AgentName} ${a.AgentSurname ?? ''}`.trim().toLowerCase();
+        const nb = `${b.AgentName} ${b.AgentSurname ?? ''}`.trim().toLowerCase();
+        cmp = na.localeCompare(nb);
+      }
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
   });
 
   // Summary stats
@@ -110,6 +132,15 @@ export function KpiBreachedView({ isWallboard = false }: { isWallboard?: boolean
 
   const TH = `px-4 py-3 text-left text-[10px] uppercase tracking-wider font-bold ${isWallboard ? 'text-neutral-400' : 'text-neutral-500'} bg-[#1e2228] border-b border-[#2f353d]`;
   const THC = `${TH} text-center`;
+  const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const sortTh = (key: SortKey, label: string, center = false) => (
+    <th
+      className={`${center ? THC : TH} cursor-pointer hover:text-neutral-300 select-none`}
+      onClick={() => toggleSort(key)}
+    >
+      {label}{sortArrow(key)}
+    </th>
+  );
 
   if (loading) {
     return (
@@ -178,12 +209,12 @@ export function KpiBreachedView({ isWallboard = false }: { isWallboard?: boolean
         <table className="w-full border-collapse">
           <thead>
             <tr>
-              <th className={TH}>Agent</th>
+              {sortTh('name', 'Agent')}
               <th className={TH}>Team</th>
               <th className={THC}>Open</th>
-              <th className={THC}>Over SLA</th>
-              <th className={THC}>Not Updated</th>
-              <th className={THC}>Oldest (days)</th>
+              {sortTh('overSla', 'Over SLA', true)}
+              {sortTh('notUpdated', 'Not Updated', true)}
+              {sortTh('oldest', 'Oldest (days)', true)}
               <th className={THC}>Solved Today</th>
             </tr>
           </thead>
