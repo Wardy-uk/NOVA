@@ -51,7 +51,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm'
   | 'sales-hotbox'
-  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached'
+  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -140,6 +140,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-compare', label: 'Live vs UAT' },
       { view: 'kpi-daily-history', label: 'Daily History' },
       { view: 'kpi-breached', label: 'Breached' },
+      { view: 'kpi-team-breached', label: 'Team KPIs' },
     ],
   },
 };
@@ -156,7 +157,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'team-workload', 'admin-panel', 'sales-hotbox']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'team-workload', 'admin-panel', 'sales-hotbox']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -863,6 +864,13 @@ export function App() {
           )}
           {view === 'kpi-breached' && (
             <KpiBreachedView />
+          )}
+          {view === 'kpi-team-breached' && (
+            <iframe
+              src="/wallboard/team-kpis"
+              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
+              title="Team KPI Breach Board"
+            />
           )}
 
           {/* Onboarding */}
