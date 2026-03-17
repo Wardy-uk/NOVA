@@ -112,6 +112,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const p = await getPool();
       const hasOldest = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'OldestTicketDays'`);
       const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
+      const hasOldestKey = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'OldestTicketKey'`);
+      const oldestKeyCol = hasOldestKey.recordset.length > 0 ? ', OldestTicketKey' : '';
       // Check both Agent and AgentUAT for Department column
       const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
       const hasDeptLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDept;
@@ -125,7 +127,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team,
                IsActive, IsAvailable, AccountId,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
-               ${oldestCol} AS OldestTicketDays,
+               ${oldestCol} AS OldestTicketDays${oldestKeyCol},
                SolvedTickets_Today, SolvedTickets_ThisWeek, TicketsSnapshotAt${deptCol}
         FROM dbo.Agent${s}
         WHERE IsActive = 1 ${deptFilter}
@@ -586,17 +588,20 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
     return pool;
   }
 
-  // GET /api/public/wallboard/diag — temporary diagnostic: raw Agent columns
+  // GET /api/public/wallboard/diag — temporary: add OldestTicketKey column then show schema
   router.get('/diag', async (_req, res) => {
     try {
       const p = await getPool();
-      const result = await p.request().query(`
-        SELECT AgentName, AgentSurname, AccountId, IsActive, Department,
-               OpenTickets_Total, OpenTickets_Over2Hours,
-               OpenTickets_NoUpdateToday, OldestTicketDays, SolvedTickets_Today, TicketsSnapshotAt
-        FROM dbo.Agent WHERE AgentName LIKE '%Nick%' OR AccountId = '712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65'
+      // Add column if missing
+      await p.request().query(`
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketKey')
+          ALTER TABLE dbo.Agent ADD OldestTicketKey NVARCHAR(50) NULL
       `);
-      res.json({ ok: true, data: result.recordset });
+      const result = await p.request().query(`
+        SELECT TOP 3 AgentName, OldestTicketDays, OldestTicketKey, TicketsSnapshotAt
+        FROM dbo.Agent WHERE IsActive = 1 ORDER BY AgentName
+      `);
+      res.json({ ok: true, message: 'OldestTicketKey column ensured', data: result.recordset });
     } catch (err) {
       res.json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
@@ -609,12 +614,14 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
       const hasOldest = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketDays'`);
       const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
       const orderCol = hasOldest.recordset.length > 0 ? 'OldestTicketDays DESC,' : '';
+      const hasOldestKey = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketKey'`);
+      const oldestKeyCol = hasOldestKey.recordset.length > 0 ? ', OldestTicketKey' : '';
       const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`);
       const deptFilter = hasDept.recordset.length > 0 ? "AND Department = 'NT'" : '';
       const result = await p.request().query(`
         SELECT AgentName, AgentSurname, TierCode, Team,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
-               ${oldestCol} AS OldestTicketDays,
+               ${oldestCol} AS OldestTicketDays${oldestKeyCol},
                SolvedTickets_Today, TicketsSnapshotAt
         FROM dbo.Agent
         WHERE IsActive = 1 ${deptFilter}

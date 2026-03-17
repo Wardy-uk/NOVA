@@ -9,6 +9,7 @@ interface AgentRow {
   OpenTickets_Over2Hours: number;
   OpenTickets_NoUpdateToday: number;
   OldestTicketDays: number;
+  OldestTicketKey?: string;
   SolvedTickets_Today: number;
   TicketsSnapshotAt: string;
 }
@@ -250,7 +251,38 @@ export function KpiBreachedView({ isWallboard = false }: { isWallboard?: boolean
                   </td>
                   <RagCell value={a.OpenTickets_Over2Hours} ragFn={RAG.over2h} />
                   <RagCell value={a.OpenTickets_NoUpdateToday} ragFn={RAG.stale} />
-                  <RagCell value={a.OldestTicketDays} ragFn={RAG.oldest} suffix="d" />
+                  <td className="px-4 py-3 text-center">
+                    {a.OldestTicketKey ? (
+                      <a
+                        href={`https://nurturtech.atlassian.net/browse/${a.OldestTicketKey}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="no-underline"
+                      >
+                        <span
+                          className="inline-block px-3 py-1 rounded-lg text-[13px] font-bold min-w-[48px] hover:brightness-125 transition-all"
+                          style={{
+                            background: RAG_COLORS[RAG.oldest(a.OldestTicketDays)].bg,
+                            color: RAG_COLORS[RAG.oldest(a.OldestTicketDays)].text,
+                            border: `1px solid ${RAG_COLORS[RAG.oldest(a.OldestTicketDays)].border}`,
+                          }}
+                        >
+                          {a.OldestTicketDays}d
+                        </span>
+                      </a>
+                    ) : (
+                      <span
+                        className="inline-block px-3 py-1 rounded-lg text-[13px] font-bold min-w-[48px]"
+                        style={{
+                          background: RAG_COLORS[RAG.oldest(a.OldestTicketDays)].bg,
+                          color: RAG_COLORS[RAG.oldest(a.OldestTicketDays)].text,
+                          border: `1px solid ${RAG_COLORS[RAG.oldest(a.OldestTicketDays)].border}`,
+                        }}
+                      >
+                        {a.OldestTicketDays}d
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-center text-[13px] text-[#5ec1ca] font-bold">
                     {a.SolvedTickets_Today}
                   </td>

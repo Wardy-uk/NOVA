@@ -553,12 +553,14 @@ async function main() {
       }).connect();
       const hasOldest = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketDays'`);
       const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
+      const hasOldestKey = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketKey'`);
+      const oldestKeyCol = hasOldestKey.recordset.length > 0 ? ', OldestTicketKey' : '';
       const hasDept = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`);
       const deptFilter = hasDept.recordset.length > 0 ? "AND Department = 'NT'" : '';
       const result = await pool.request().query(`
         SELECT AgentName, AgentSurname, TierCode, Team,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
-               ${oldestCol} AS OldestTicketDays,
+               ${oldestCol} AS OldestTicketDays${oldestKeyCol},
                SolvedTickets_Today, TicketsSnapshotAt
         FROM dbo.Agent WHERE IsActive = 1 ${deptFilter}
         ORDER BY OpenTickets_Over2Hours DESC, AgentName
@@ -602,7 +604,22 @@ async function main() {
           <td class="c" style="color:#94a3b8;font-weight:600">${a.OpenTickets_Total}</td>
           ${ragHtml(a.OpenTickets_Over2Hours || 0, 0, 2)}
           ${ragHtml(a.OpenTickets_NoUpdateToday || 0, 0, 1)}
-          ${ragHtml(a.OldestTicketDays || 0, 3, 7, 'd')}
+          ${(() => {
+            const days = a.OldestTicketDays || 0;
+            const key = a.OldestTicketKey;
+            const r = rag(days, 3, 7);
+            const colors: Record<string, { bg: string; fg: string; bd: string }> = {
+              green: { bg: 'rgba(16,185,129,.12)', fg: '#10b981', bd: 'rgba(16,185,129,.25)' },
+              amber: { bg: 'rgba(245,158,11,.12)', fg: '#f59e0b', bd: 'rgba(245,158,11,.25)' },
+              red: { bg: 'rgba(239,68,68,.15)', fg: '#ef4444', bd: 'rgba(239,68,68,.3)' },
+            };
+            const c = colors[r];
+            const badge = `<span style="display:inline-block;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;min-width:48px;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${days}d</span>`;
+            if (key) {
+              return `<td class="c"><a href="https://nurturtech.atlassian.net/browse/${key}" target="_blank" style="text-decoration:none">${badge}</a></td>`;
+            }
+            return `<td class="c">${badge}</td>`;
+          })()}
           <td class="c" style="color:#5ec1ca;font-weight:700">${a.SolvedTickets_Today || 0}</td>
         </tr>`;
       }).join('');
