@@ -583,7 +583,7 @@ async function main() {
           red: { bg: 'rgba(239,68,68,.15)', fg: '#ef4444', bd: 'rgba(239,68,68,.3)' },
         };
         const c = colors[r];
-        return `<td class="c"><span style="display:inline-block;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;min-width:48px;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${v}${suffix}</span></td>`;
+        return `<td class="c"><span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:700;min-width:36px;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${v}${suffix}</span></td>`;
       }
 
       const now = new Date();
@@ -591,7 +591,7 @@ async function main() {
       const timeStr = now.toLocaleTimeString('en-GB');
 
       function kpiCard(label: string, value: string | number, color: string) {
-        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:18px 22px"><div style="font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">${label}</div><div style="font-size:32px;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
+        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:10px 16px"><div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">${label}</div><div style="font-size:24px;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
       }
 
       const rows = data.map((a: any) => {
@@ -614,7 +614,7 @@ async function main() {
               red: { bg: 'rgba(239,68,68,.15)', fg: '#ef4444', bd: 'rgba(239,68,68,.3)' },
             };
             const c = colors[r];
-            const badge = `<span style="display:inline-block;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;min-width:48px;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${days}d</span>`;
+            const badge = `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:700;min-width:36px;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${days}d</span>`;
             if (key) {
               return `<td class="c"><a href="https://nurturtech.atlassian.net/browse/${key}" target="_blank" style="text-decoration:none">${badge}</a></td>`;
             }
@@ -628,13 +628,13 @@ async function main() {
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="30">
 <title>SLA Breach Board</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:24px 32px}table{width:100%;border-collapse:collapse}th{padding:12px 16px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:12px 16px;border-bottom:1px solid #2f353d;font-size:14px}td.c{text-align:center}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:12px 20px}table{width:100%;border-collapse:collapse}th{padding:6px 10px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:5px 10px;border-bottom:1px solid #2f353d;font-size:13px}td.c{text-align:center}</style>
 </head><body><div class="wrap">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-  <div><h1 style="font-size:26px;font-weight:800;letter-spacing:-0.5px">SLA Breach Board</h1><div style="font-size:11px;color:#64748b;margin-top:2px">Live ticket health per agent</div></div>
-  <div style="font-size:11px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+  <div><h1 style="font-size:20px;font-weight:800;letter-spacing:-0.5px">SLA Breach Board</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Live ticket health per agent</div></div>
+  <div style="font-size:10px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
 </div>
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">
   ${kpiCard('Tickets Over SLA', totalOver, totalOver === 0 ? '#10b981' : '#ef4444')}
   ${kpiCard('Agents Breached', `${agentsBreached} / ${data.length}`, agentsBreached === 0 ? '#10b981' : '#f59e0b')}
   ${kpiCard('Tickets Not Updated', totalStale, totalStale === 0 ? '#10b981' : '#f59e0b')}
@@ -643,7 +643,7 @@ async function main() {
 <div style="border:1px solid #2f353d;border-radius:14px;overflow:hidden;background:rgba(255,255,255,.03)">
 <table><thead><tr><th>Agent</th><th>Team</th><th class="c">Open</th><th class="c">Over SLA</th><th class="c">Not Updated</th><th class="c">Oldest (days)</th><th class="c">Solved Today</th></tr></thead>
 <tbody>${rows}</tbody></table></div>
-<div style="text-align:center;margin-top:16px;font-size:11px;color:#475569">nurtur.tech &middot; SLA Breach Board &middot; ${dateStr}</div>
+<div style="text-align:center;margin-top:8px;font-size:10px;color:#475569">nurtur.tech &middot; SLA Breach Board &middot; ${dateStr}</div>
 </div></body></html>`);
     } catch (err) {
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${err instanceof Error ? err.message : 'Unknown error'}</body></html>`);
