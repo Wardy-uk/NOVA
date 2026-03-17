@@ -650,6 +650,156 @@ async function main() {
     }
   });
 
+  // Wallboard — server-rendered Team KPI page for TV displays
+  app.get('/wallboard/team-kpis', async (_req, res) => {
+    try {
+      const settings = settingsQueries.getAll();
+      const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
+      if (!srv || !db || !usr || !pwd) { res.status(500).send('KPI SQL not configured'); return; }
+      const sql = await import('mssql');
+      const pool = await new sql.default.ConnectionPool({
+        server: srv, database: db, user: usr, password: pwd,
+        options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
+      }).connect();
+      const result = await pool.request().query(`
+        SELECT KPI, KPIGroup, [Count], KPITarget, KPIDirection, RAG, CreatedAt
+        FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY KPI ORDER BY CreatedAt DESC) AS rn
+          FROM dbo.KpiSnapshot
+        ) t WHERE rn = 1
+        ORDER BY KPIGroup, KPI
+      `);
+      const kpis = result.recordset as Array<{ KPI: string; KPIGroup: string; Count: number; KPITarget: number | null; KPIDirection: string | null; RAG: number | null; CreatedAt: string }>;
+      await pool.close();
+
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      const timeStr = now.toLocaleTimeString('en-GB');
+
+      // Organize KPIs into tiers with their metrics
+      const TIERS = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Production', 'Tier 2', 'Tier 3', 'Development'];
+      const TIER_LABELS: Record<string, string> = {
+        'CC (Incidents)': 'CC Incidents', 'CC (Service Requests)': 'CC Service Req', 'CC (TPJ)': 'CC TPJ',
+        'Production': 'Production', 'Tier 2': 'Tier 2', 'Tier 3': 'Tier 3', 'Development': 'Development',
+      };
+      const TIER_COLORS: Record<string, string> = {
+        'CC (Incidents)': '#3b82f6', 'CC (Service Requests)': '#3b82f6', 'CC (TPJ)': '#3b82f6',
+        'Production': '#8b5cf6', 'Tier 2': '#f59e0b', 'Tier 3': '#ef4444', 'Development': '#10b981',
+      };
+
+      function findKpi(pattern: string): { count: number; rag: number | null } {
+        const k = kpis.find(x => x.KPI.toLowerCase() === pattern.toLowerCase());
+        return { count: k?.Count ?? 0, rag: k?.RAG ?? null };
+      }
+
+      // Map for alternate naming (CC TPJ vs CC (TPJ))
+      function findTierKpi(tier: string, metric: string): { count: number; rag: number | null } {
+        const tierKey = tier.replace(/[()]/g, '');
+        const patterns = [
+          metric.replace('TIER', tier),
+          metric.replace('TIER', tierKey),
+        ];
+        for (const p of patterns) {
+          const k = kpis.find(x => x.KPI.toLowerCase() === p.toLowerCase());
+          if (k) return { count: k.Count, rag: k.RAG };
+        }
+        return { count: 0, rag: null };
+      }
+
+      function ragCell(val: number, rag: number | null): string {
+        const colors: Record<string, { bg: string; fg: string; bd: string }> = {
+          green: { bg: 'rgba(16,185,129,.12)', fg: '#10b981', bd: 'rgba(16,185,129,.25)' },
+          amber: { bg: 'rgba(245,158,11,.12)', fg: '#f59e0b', bd: 'rgba(245,158,11,.25)' },
+          red: { bg: 'rgba(239,68,68,.15)', fg: '#ef4444', bd: 'rgba(239,68,68,.3)' },
+          grey: { bg: 'transparent', fg: '#94a3b8', bd: 'rgba(148,163,184,.2)' },
+        };
+        const key = rag === 1 ? 'green' : rag === 2 ? 'amber' : rag === 3 ? 'red' : 'grey';
+        const c = colors[key];
+        return `<td class="c"><span style="display:inline-block;padding:3px 10px;border-radius:7px;font-size:12px;font-weight:700;min-width:40px;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${val}</span></td>`;
+      }
+
+      function ragCellSuffix(val: number, rag: number | null, suffix: string): string {
+        const colors: Record<string, { bg: string; fg: string; bd: string }> = {
+          green: { bg: 'rgba(16,185,129,.12)', fg: '#10b981', bd: 'rgba(16,185,129,.25)' },
+          amber: { bg: 'rgba(245,158,11,.12)', fg: '#f59e0b', bd: 'rgba(245,158,11,.25)' },
+          red: { bg: 'rgba(239,68,68,.15)', fg: '#ef4444', bd: 'rgba(239,68,68,.3)' },
+          grey: { bg: 'transparent', fg: '#94a3b8', bd: 'rgba(148,163,184,.2)' },
+        };
+        const key = rag === 1 ? 'green' : rag === 2 ? 'amber' : rag === 3 ? 'red' : 'grey';
+        const c = colors[key];
+        return `<td class="c"><span style="display:inline-block;padding:3px 10px;border-radius:7px;font-size:12px;font-weight:700;min-width:40px;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${val}${suffix}</span></td>`;
+      }
+
+      const tierRows = TIERS.map(tier => {
+        const tc = TIER_COLORS[tier] || '#64748b';
+        const label = TIER_LABELS[tier] || tier;
+        const volume = findTierKpi(tier, 'Number of Tickets in TIER');
+        const noReply = findTierKpi(tier, 'Number of Tickets With No Reply in TIER');
+        const slaAct = findTierKpi(tier, 'TIER over SLA (actionable)');
+        const slaNotAct = findTierKpi(tier, 'TIER over SLA (not actionable)');
+        const frtAct = findTierKpi(tier, 'TIER FRT breached (actionable)');
+        const frtNotAct = findTierKpi(tier, 'TIER FRT breached (not actionable)');
+        const oldest = findTierKpi(tier, 'Oldest actionable ticket (days) in TIER');
+        // For CC tiers, use "CC Incidents" style names for SLA/FRT
+        const slaActAlt = slaAct.count === 0 && slaAct.rag === null
+          ? findTierKpi(tier, `${label} over SLA (actionable)`.replace('TIER', ''))
+          : slaAct;
+        const totalSla = (slaActAlt.count || slaAct.count) + slaNotAct.count;
+        const totalFrt = frtAct.count + frtNotAct.count;
+
+        return `<tr>
+          <td><span style="display:inline-block;padding:3px 10px;border-radius:5px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:${tc}22;color:${tc};border:1px solid ${tc}33">${label}</span></td>
+          <td class="c" style="color:#e2e8f0;font-weight:600">${volume.count}</td>
+          ${ragCell(noReply.count, noReply.rag)}
+          ${ragCell(slaAct.count, slaAct.rag)}
+          ${ragCell(slaNotAct.count, slaNotAct.rag)}
+          ${ragCell(frtAct.count, frtAct.rag)}
+          ${ragCell(frtNotAct.count, frtNotAct.rag)}
+          ${ragCellSuffix(oldest.count, oldest.rag, 'd')}
+        </tr>`;
+      }).join('');
+
+      // Summary KPIs
+      const totalVolume = TIERS.reduce((s, t) => s + findTierKpi(t, 'Number of Tickets in TIER').count, 0);
+      const totalNoReply = TIERS.reduce((s, t) => s + findTierKpi(t, 'Number of Tickets With No Reply in TIER').count, 0);
+      const totalSlaBreached = TIERS.reduce((s, t) => s + findTierKpi(t, 'TIER over SLA (actionable)').count + findTierKpi(t, 'TIER over SLA (not actionable)').count, 0);
+      const frtCompliance = findKpi('FRT Compliance % (Open Queue)');
+      const resCompliance = findKpi('Resolution Compliance % (Open Queue)');
+      const newToday = findKpi('New Tickets Today');
+      const solvedToday = findKpi('Tickets Solved Today');
+
+      function kpiCard(label: string, value: string | number, color: string) {
+        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px 18px"><div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px">${label}</div><div style="font-size:26px;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
+      }
+
+      res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Team KPI Board</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:8px 12px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:7px 12px;border-bottom:1px solid #2f353d;font-size:13px}td.c{text-align:center}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">Team KPI Board</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Live team metrics from Jira</div></div>
+  <div style="font-size:10px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px">
+  ${kpiCard('Open Tickets', totalVolume, '#e2e8f0')}
+  ${kpiCard('New Today', newToday.count, '#3b82f6')}
+  ${kpiCard('Solved Today', solvedToday.count, '#5ec1ca')}
+  ${kpiCard('No Reply', totalNoReply, totalNoReply === 0 ? '#10b981' : '#f59e0b')}
+  ${kpiCard('FRT Compliance', frtCompliance.count + '%', frtCompliance.count >= 90 ? '#10b981' : frtCompliance.count >= 75 ? '#f59e0b' : '#ef4444')}
+  ${kpiCard('Resolution Compliance', resCompliance.count + '%', resCompliance.count >= 90 ? '#10b981' : resCompliance.count >= 75 ? '#f59e0b' : '#ef4444')}
+</div>
+<div style="border:1px solid #2f353d;border-radius:14px;overflow:hidden;background:rgba(255,255,255,.03)">
+<table><thead><tr><th>Tier</th><th class="c">Open</th><th class="c">No Reply</th><th class="c">SLA Breached<br><span style="font-size:8px;font-weight:400;opacity:.7">actionable</span></th><th class="c">SLA Breached<br><span style="font-size:8px;font-weight:400;opacity:.7">not actionable</span></th><th class="c">FRT Breached<br><span style="font-size:8px;font-weight:400;opacity:.7">actionable</span></th><th class="c">FRT Breached<br><span style="font-size:8px;font-weight:400;opacity:.7">not actionable</span></th><th class="c">Oldest<br><span style="font-size:8px;font-weight:400;opacity:.7">(days)</span></th></tr></thead>
+<tbody>${tierRows}</tbody></table></div>
+<div style="text-align:center;margin-top:10px;font-size:10px;color:#475569">nurtur.tech &middot; Team KPI Board &middot; ${dateStr}</div>
+</div></body></html>`);
+    } catch (err) {
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${err instanceof Error ? err.message : 'Unknown error'}</body></html>`);
+    }
+  });
+
   // Production: serve built Vite frontend
   if (isProduction) {
     const clientDist = path.resolve(__dirname, '../../client');

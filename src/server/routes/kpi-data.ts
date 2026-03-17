@@ -607,6 +607,24 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
     }
   });
 
+  // GET /api/public/wallboard/team-kpis — team KPI snapshot for TV wallboard
+  router.get('/team-kpis', async (_req, res) => {
+    try {
+      const p = await getPool();
+      const result = await p.request().query(`
+        SELECT KPI, KPIGroup, [Count], KPITarget, KPIDirection, RAG, CreatedAt
+        FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY KPI ORDER BY CreatedAt DESC) AS rn
+          FROM dbo.KpiSnapshot
+        ) t WHERE rn = 1
+        ORDER BY KPIGroup, KPI
+      `);
+      res.json({ ok: true, data: result.recordset, ts: new Date().toISOString() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
   // GET /api/public/wallboard/breached — agent breach data for TV wallboard
   router.get('/breached', async (_req, res) => {
     try {
