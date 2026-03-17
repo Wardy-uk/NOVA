@@ -591,10 +591,10 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
     try {
       const p = await getPool();
       const result = await p.request().query(`
-        SELECT TOP 5 AgentName, AccountId, OpenTickets_Total, OpenTickets_Over2Hours,
-               OpenTickets_NoUpdateToday, OldestTicketDays, TicketsSnapshotAt
-        FROM dbo.Agent WHERE IsActive = 1
-        ORDER BY AgentName
+        SELECT AgentName, AgentSurname, AccountId, IsActive, Department,
+               OpenTickets_Total, OpenTickets_Over2Hours,
+               OpenTickets_NoUpdateToday, OldestTicketDays, SolvedTickets_Today, TicketsSnapshotAt
+        FROM dbo.Agent WHERE AgentName LIKE '%Nick%' OR AccountId = '712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65'
       `);
       res.json({ ok: true, data: result.recordset });
     } catch (err) {
