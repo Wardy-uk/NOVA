@@ -588,22 +588,67 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
     return pool;
   }
 
-  // GET /api/public/wallboard/diag — temporary: add OldestTicketKey column then show schema
-  router.get('/diag', async (_req, res) => {
+  // GET /api/public/wallboard/dedup — remove duplicate rows from KPI tables
+  router.get('/dedup', async (_req, res) => {
     try {
       const p = await getPool();
-      // Add column if missing
-      await p.request().query(`
-        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketKey')
-          ALTER TABLE dbo.Agent ADD OldestTicketKey NVARCHAR(50) NULL
+      const results: Record<string, number> = {};
+
+      // 1. jira_kpi_daily — keep only the latest row per (kpi, date)
+      const r1 = await p.request().query(`
+        WITH cte AS (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY kpi, CAST(CreatedAt AS date)
+            ORDER BY CreatedAt DESC
+          ) AS rn
+          FROM dbo.jira_kpi_daily
+        )
+        DELETE FROM cte WHERE rn > 1
       `);
-      const result = await p.request().query(`
-        SELECT TOP 3 AgentName, OldestTicketDays, OldestTicketKey, TicketsSnapshotAt
-        FROM dbo.Agent WHERE IsActive = 1 ORDER BY AgentName
+      results['jira_kpi_daily'] = r1.rowsAffected[0] ?? 0;
+
+      // 2. jira_kpi_digest — keep only the latest row per (period, date)
+      const r2 = await p.request().query(`
+        WITH cte AS (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY period, CAST(CreatedAt AS date)
+            ORDER BY CreatedAt DESC
+          ) AS rn
+          FROM dbo.jira_kpi_digest
+        )
+        DELETE FROM cte WHERE rn > 1
       `);
-      res.json({ ok: true, message: 'OldestTicketKey column ensured', data: result.recordset });
+      results['jira_kpi_digest'] = r2.rowsAffected[0] ?? 0;
+
+      // 3. JiraEodTicketStatusSnapshot — keep only latest per (SnapshotDate, ProjectKey, CurrentTier, StatusName, RequestTypeId)
+      const r3 = await p.request().query(`
+        WITH cte AS (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY SnapshotDate, ProjectKey, CurrentTier, StatusName, ISNULL(RequestTypeId, '')
+            ORDER BY SnapshotAt DESC
+          ) AS rn
+          FROM dbo.JiraEodTicketStatusSnapshot
+        )
+        DELETE FROM cte WHERE rn > 1
+      `);
+      results['JiraEodTicketStatusSnapshot'] = r3.rowsAffected[0] ?? 0;
+
+      // 4. KpiSnapshot — keep only latest per KPI (should already be handled by upsert, but just in case)
+      const r4 = await p.request().query(`
+        WITH cte AS (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY KPI
+            ORDER BY CreatedAt DESC
+          ) AS rn
+          FROM dbo.KpiSnapshot
+        )
+        DELETE FROM cte WHERE rn > 1
+      `);
+      results['KpiSnapshot'] = r4.rowsAffected[0] ?? 0;
+
+      res.json({ ok: true, message: 'Deduplication complete', removed: results });
     } catch (err) {
-      res.json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+      res.json({ ok: false, error: err instanceof Error ? err.message : 'Dedup failed: ' + (err instanceof Error ? err.message : 'unknown') });
     }
   });
 
