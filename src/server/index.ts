@@ -792,8 +792,8 @@ async function main() {
       const data = lookup(p.kpi, p.altKpi);
       const color = ragColor(data.rag);
       return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;align-items:center">
-        <div style="font-size:11px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:12px;letter-spacing:.3px">${p.label}</div>
-        <div style="font-size:72px;font-weight:800;letter-spacing:-3px;line-height:1;color:${color}">${data.count}</div>
+        <div style="font-size:16px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:12px;letter-spacing:.3px">${p.label}</div>
+        <div style="font-size:96px;font-weight:800;letter-spacing:-3px;line-height:1;color:${color}">${data.count}</div>
       </div>`;
     }).join('');
 
