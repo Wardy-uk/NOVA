@@ -834,8 +834,8 @@ ${panelHtml}
     }
   });
 
-  // Backend tiers wallboard
-  app.get('/wallboard/backend', async (_req, res) => {
+  // Technical Support wallboard
+  app.get('/wallboard/tech-support', async (_req, res) => {
     try {
       const html = await renderStatWallboard(settingsQueries, 'Technical Support', 'Live queue metrics', [
         { label: 'Production Active Tickets', kpi: 'Number of Tickets in Production' },
