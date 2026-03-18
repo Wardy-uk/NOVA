@@ -837,7 +837,7 @@ ${panelHtml}
   // Backend tiers wallboard
   app.get('/wallboard/backend', async (_req, res) => {
     try {
-      const html = await renderStatWallboard(settingsQueries, 'Backend Tiers', 'Live queue metrics', [
+      const html = await renderStatWallboard(settingsQueries, 'Technical Support', 'Live queue metrics', [
         { label: 'Production Active Tickets', kpi: 'Number of Tickets in Production' },
         { label: 'Tier 2 Active Tickets', kpi: 'Number of Tickets in Tier 2' },
         { label: 'Development Active Tickets', kpi: 'Number of Tickets in Development' },
