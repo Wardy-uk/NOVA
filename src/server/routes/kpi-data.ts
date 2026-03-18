@@ -303,6 +303,93 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
     }
   });
 
+  // GET /api/kpi-data/qa-golden-summary?env=uat|live&days=7
+  router.get('/qa-golden-summary', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const days = Math.min(parseInt(req.query.days as string) || 7, 365);
+      const p = await getPool();
+      const result = await p.request().query(`
+        DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+        SELECT
+          COUNT(*) AS total,
+          SUM(CAST(rule1Pass AS INT)) AS rule1Pass,
+          SUM(CAST(rule2Pass AS INT)) AS rule2Pass,
+          SUM(CAST(rule3Pass AS INT)) AS rule3Pass,
+          CAST(AVG(CAST(OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore,
+          CAST(AVG(CAST(Rule1Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule1,
+          CAST(AVG(CAST(Rule2Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule2,
+          CAST(AVG(CAST(Rule3Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule3
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE CAST(processedAt AS DATE) >= @start
+      `);
+      res.json({ ok: true, data: result.recordset[0] ?? {}, env });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // GET /api/kpi-data/qa-golden-results?env=uat|live&days=30&page=1&limit=25&agent=X&pass=0|1
+  router.get('/qa-golden-results', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const days  = Math.min(parseInt(req.query.days  as string) || 30, 365);
+      const page  = Math.max(parseInt(req.query.page  as string) || 1, 1);
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const offset = (page - 1) * limit;
+      const safeStr = (v: unknown) => String(v ?? '').replace(/[^a-zA-Z0-9 \-_@.]/g, '').slice(0, 100);
+      const agent = safeStr(req.query.agent);
+      const passFilter = req.query.pass === '0' ? 'AND (rule1Pass = 0 OR rule2Pass = 0 OR rule3Pass = 0)'
+                       : req.query.pass === '1' ? 'AND rule1Pass = 1 AND rule2Pass = 1 AND rule3Pass = 1'
+                       : '';
+      const agentFilter = agent ? `AND ISNULL(Updater, '') = '${agent}'` : '';
+      const p = await getPool();
+      const result = await p.request().query(`
+        SELECT IssueKey, CommentId, OverallScore, Rule1Score, Rule2Score, Rule3Score,
+               rule1Pass, rule2Pass, rule3Pass,
+               Summary, SuggestedRewrite, Assignee, Updater,
+               ticketPriority, ticketType,
+               CONVERT(VARCHAR(23), processedAt, 126) AS processedAt
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE CAST(processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
+          ${agentFilter} ${passFilter}
+        ORDER BY processedAt DESC
+        OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+      `);
+      res.json({ ok: true, data: result.recordset, page, limit, env });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // GET /api/kpi-data/qa-golden-agents?env=uat|live&days=30
+  router.get('/qa-golden-agents', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const days = Math.min(parseInt(req.query.days as string) || 30, 365);
+      const p = await getPool();
+      const result = await p.request().query(`
+        SELECT Updater AS agentName,
+               COUNT(*) AS total,
+               SUM(CAST(rule1Pass AS INT)) AS rule1Pass,
+               SUM(CAST(rule2Pass AS INT)) AS rule2Pass,
+               SUM(CAST(rule3Pass AS INT)) AS rule3Pass,
+               CAST(AVG(CAST(OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE CAST(processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
+          AND Updater IS NOT NULL AND Updater <> ''
+        GROUP BY Updater
+        ORDER BY avgScore ASC
+      `);
+      res.json({ ok: true, data: result.recordset, env });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
   // GET /api/admin/kpi-data/digest?env=live|uat&days=7
   router.get('/digest', async (req, res) => {
     try {

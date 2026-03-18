@@ -44,6 +44,45 @@ interface QAAgent {
   concerning: number;
 }
 
+interface GRSummary {
+  total: number;
+  rule1Pass: number;
+  rule2Pass: number;
+  rule3Pass: number;
+  avgScore: number;
+  avgRule1: number;
+  avgRule2: number;
+  avgRule3: number;
+}
+
+interface GRResult {
+  IssueKey: string;
+  CommentId: string;
+  OverallScore: number;
+  Rule1Score: number;
+  Rule2Score: number;
+  Rule3Score: number;
+  rule1Pass: number;
+  rule2Pass: number;
+  rule3Pass: number;
+  Summary: string | null;
+  SuggestedRewrite: string | null;
+  Assignee: string | null;
+  Updater: string | null;
+  ticketPriority: string | null;
+  ticketType: string | null;
+  processedAt: string;
+}
+
+interface GRAgent {
+  agentName: string;
+  total: number;
+  rule1Pass: number;
+  rule2Pass: number;
+  rule3Pass: number;
+  avgScore: number;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Colours                                                            */
 /* ------------------------------------------------------------------ */
@@ -191,7 +230,7 @@ function ResultRow({ r }: { r: QAResult }) {
 /*  Main view                                                          */
 /* ------------------------------------------------------------------ */
 
-type Section = 'overview' | 'results' | 'agents';
+type Section = 'overview' | 'results' | 'agents' | 'goldenRules';
 type Env = 'uat' | 'live';
 
 export function QAView() {
@@ -210,6 +249,16 @@ export function QAView() {
   const [concerning, setConcerning] = useState(false);
   const [pendingFilters, setPendingFilters] = useState({ grade: '', agent: '', concerning: false });
 
+  const [grSummary, setGrSummary]   = useState<GRSummary | null>(null);
+  const [grResults, setGrResults]   = useState<GRResult[]>([]);
+  const [grAgents, setGrAgents]     = useState<GRAgent[]>([]);
+  const [grPage, setGrPage]         = useState(1);
+  const [grLoading, setGrLoading]   = useState(false);
+  const [grAgent, setGrAgent]       = useState('');
+  const [grPass, setGrPass]         = useState('');
+  const [grExpanded, setGrExpanded] = useState<string | null>(null);
+  const [grPendingFilters, setGrPendingFilters] = useState({ agent: '', pass: '' });
+
   const fetchSummary = useCallback(async () => {
     try {
       const r = await fetch(`/api/kpi-data/qa-summary?env=${env}&days=${days}`);
@@ -224,6 +273,35 @@ export function QAView() {
       const d = await r.json();
       if (d.ok) setAgents(d.data);
     } catch { /* ignore */ }
+  }, [env, days]);
+
+  const fetchGrSummary = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/kpi-data/qa-golden-summary?env=${env}&days=${days}`);
+      const d = await r.json();
+      if (d.ok) setGrSummary(d.data);
+    } catch { /* ignore */ }
+  }, [env, days]);
+
+  const fetchGrAgents = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/kpi-data/qa-golden-agents?env=${env}&days=${days}`);
+      const d = await r.json();
+      if (d.ok) setGrAgents(d.data);
+    } catch { /* ignore */ }
+  }, [env, days]);
+
+  const fetchGrResults = useCallback(async (p: number, filters: typeof grPendingFilters) => {
+    setGrLoading(true);
+    try {
+      const params = new URLSearchParams({ env, days: String(days), page: String(p), limit: '25' });
+      if (filters.agent) params.set('agent', filters.agent);
+      if (filters.pass)  params.set('pass', filters.pass);
+      const r = await fetch(`/api/kpi-data/qa-golden-results?${params}`);
+      const d = await r.json();
+      if (d.ok) { setGrResults(d.data); setGrPage(p); }
+    } catch { /* ignore */ }
+    setGrLoading(false);
   }, [env, days]);
 
   const fetchResults = useCallback(async (p: number, filters: typeof pendingFilters) => {
@@ -244,6 +322,9 @@ export function QAView() {
     fetchSummary();
     fetchAgents();
     fetchResults(1, pendingFilters);
+    fetchGrSummary();
+    fetchGrAgents();
+    fetchGrResults(1, grPendingFilters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [env, days]);
 
@@ -296,10 +377,8 @@ export function QAView() {
 
       {/* Section tabs */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}`, marginBottom: '1.25rem' }}>
-        {(['overview', 'results', 'agents'] as Section[]).map(s => (
-          <button key={s} style={tabBtn(section === s)} onClick={() => setSection(s)}>
-            {s.charAt(0).toUpperCase() + s.slice(1)}
-          </button>
+        {([['overview', 'Overview'], ['results', 'Results'], ['agents', 'Agents'], ['goldenRules', 'Golden Rules']] as [Section, string][]).map(([s, label]) => (
+          <button key={s} style={tabBtn(section === s)} onClick={() => setSection(s)}>{label}</button>
         ))}
       </div>
 
@@ -411,6 +490,143 @@ export function QAView() {
               </tbody>
             </table>
           )
+      )}
+
+      {/* Golden Rules */}
+      {section === 'goldenRules' && (
+        <>
+          {/* Summary stats */}
+          {grSummary && (
+            <>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+                <StatCard label="Comments QA'd" value={grSummary.total ?? null} />
+                <StatCard label="Avg Score" value={grSummary.avgScore != null ? Number(grSummary.avgScore).toFixed(1) : null} colour={grSummary.avgScore != null ? (Number(grSummary.avgScore) >= 2.5 ? C.green : Number(grSummary.avgScore) >= 1.5 ? C.amber : C.red) : undefined} />
+                <StatCard label="R1 Pass %" value={grSummary.total ? `${Math.round((grSummary.rule1Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
+                <StatCard label="R2 Pass %" value={grSummary.total ? `${Math.round((grSummary.rule2Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
+                <StatCard label="R3 Pass %" value={grSummary.total ? `${Math.round((grSummary.rule3Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
+              </div>
+              <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text2, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>Rule Pass Rates</div>
+                {(['Rule 1 — Ownership', 'Rule 2 — What\'s Happening', 'Rule 3 — Timeframes'] as const).map((label, i) => {
+                  const passes = [grSummary.rule1Pass, grSummary.rule2Pass, grSummary.rule3Pass][i];
+                  const pct = grSummary.total ? Math.round((passes / grSummary.total) * 100) : 0;
+                  const colour = pct >= 70 ? C.green : pct >= 50 ? C.amber : C.red;
+                  return (
+                    <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                      <div style={{ width: 200, fontSize: '0.8rem', color: C.text2 }}>{label}</div>
+                      <div style={{ flex: 1, height: 12, borderRadius: 3, overflow: 'hidden', background: C.bg0 }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: colour }} />
+                      </div>
+                      <div style={{ width: 48, fontSize: '0.8rem', fontWeight: 700, color: colour, textAlign: 'right' }}>{pct}%</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* Agent breakdown */}
+          {grAgents.length > 0 && (
+            <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text2, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>Agent Breakdown</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <thead>
+                  <tr>
+                    {['Agent', 'Comments', 'Avg', 'R1 Pass', 'R2 Pass', 'R3 Pass'].map(h => (
+                      <th key={h} style={th}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {grAgents.map(a => (
+                    <tr key={a.agentName} style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <td style={{ padding: '0.5rem 0.75rem', color: C.text1, fontWeight: 500 }}>{a.agentName}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: C.text2 }}>{a.total}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: Number(a.avgScore) >= 2.5 ? C.green : Number(a.avgScore) >= 1.5 ? C.amber : C.red }}>{Number(a.avgScore).toFixed(1)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: a.total ? (a.rule1Pass / a.total >= 0.7 ? C.green : C.amber) : C.text3 }}>{a.total ? `${Math.round((a.rule1Pass / a.total) * 100)}%` : '—'}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: a.total ? (a.rule2Pass / a.total >= 0.7 ? C.green : C.amber) : C.text3 }}>{a.total ? `${Math.round((a.rule2Pass / a.total) * 100)}%` : '—'}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: a.total ? (a.rule3Pass / a.total >= 0.7 ? C.green : C.amber) : C.text3 }}>{a.total ? `${Math.round((a.rule3Pass / a.total) * 100)}%` : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Filters */}
+          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem' }}>
+            <input
+              type="text" placeholder="Agent name…" value={grAgent}
+              onChange={e => setGrAgent(e.target.value)}
+              style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.6rem', fontSize: '0.85rem', width: 180 }}
+            />
+            <select value={grPass} onChange={e => setGrPass(e.target.value)} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.6rem', fontSize: '0.85rem' }}>
+              <option value="">All results</option>
+              <option value="1">All rules passed</option>
+              <option value="0">Any rule failed</option>
+            </select>
+            <button onClick={() => { const f = { agent: grAgent, pass: grPass }; setGrPendingFilters(f); fetchGrResults(1, f); }} style={{ background: C.blueDim, color: '#fff', border: 'none', borderRadius: 6, padding: '0.3rem 0.9rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+              Apply
+            </button>
+          </div>
+
+          {/* Results table */}
+          {grLoading ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: C.text3 }}>Loading…</div>
+          ) : (
+            <>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                <thead>
+                  <tr>
+                    {['Ticket', 'Agent', 'Score', 'R1', 'R2', 'R3', 'Priority', 'Date', ''].map(h => (
+                      <th key={h} style={th}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {grResults.length === 0
+                    ? <tr><td colSpan={9} style={{ padding: '2rem', textAlign: 'center', color: C.text3, fontSize: '0.875rem' }}>No results</td></tr>
+                    : grResults.map(r => {
+                        const key = `${r.IssueKey}-${r.CommentId}`;
+                        const expanded = grExpanded === key;
+                        const ruleColour = (pass: number) => pass ? C.green : C.red;
+                        return (
+                          <>
+                            <tr key={key} onClick={() => setGrExpanded(expanded ? null : key)} style={{ cursor: 'pointer', borderBottom: `1px solid ${C.border}` }}>
+                              <td style={{ padding: '0.55rem 0.75rem', fontFamily: 'monospace', color: C.blue, fontSize: '0.85rem' }}>{r.IssueKey}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: C.text1 }}>{r.Updater ?? r.Assignee ?? '—'}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', fontWeight: 700, color: Number(r.OverallScore) >= 2.5 ? C.green : Number(r.OverallScore) >= 1.5 ? C.amber : C.red }}>{r.OverallScore}/3</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: ruleColour(r.rule1Pass) }}>{r.rule1Pass ? '✓' : '✗'} {r.Rule1Score}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: ruleColour(r.rule2Pass) }}>{r.rule2Pass ? '✓' : '✗'} {r.Rule2Score}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: ruleColour(r.rule3Pass) }}>{r.rule3Pass ? '✓' : '✗'} {r.Rule3Score}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: C.text2, fontSize: '0.8rem' }}>{r.ticketPriority ?? '—'}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: C.text3, fontSize: '0.8rem' }}>{r.processedAt ? new Date(r.processedAt).toLocaleDateString() : '—'}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: C.text3, fontSize: '0.7rem', textAlign: 'right' }}>{expanded ? '▲' : '▼'}</td>
+                            </tr>
+                            {expanded && (
+                              <tr key={`${key}-detail`} style={{ background: C.bg0, borderBottom: `1px solid ${C.border}` }}>
+                                <td colSpan={9} style={{ padding: 0 }}>
+                                  <div style={{ padding: '0.875rem 1.25rem', borderLeft: `3px solid ${C.teal}`, marginLeft: '0.75rem' }}>
+                                    {r.Summary && <div style={{ fontSize: '0.85rem', color: C.text2, marginBottom: '0.5rem', lineHeight: 1.5 }}><strong style={{ color: C.text1 }}>Summary:</strong> {r.Summary}</div>}
+                                    {r.SuggestedRewrite && <div style={{ fontSize: '0.85rem', color: C.text2, lineHeight: 1.5 }}><strong style={{ color: C.text1 }}>Suggested Rewrite:</strong> {r.SuggestedRewrite}</div>}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        );
+                      })
+                  }
+                </tbody>
+              </table>
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', justifyContent: 'center', marginTop: '1rem', fontSize: '0.875rem', color: C.text2 }}>
+                <button disabled={grPage <= 1} onClick={() => fetchGrResults(grPage - 1, grPendingFilters)} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.75rem', cursor: grPage <= 1 ? 'default' : 'pointer', opacity: grPage <= 1 ? 0.4 : 1 }}>← Prev</button>
+                <span>Page {grPage}</span>
+                <button disabled={grResults.length < 25} onClick={() => fetchGrResults(grPage + 1, grPendingFilters)} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.75rem', cursor: grResults.length < 25 ? 'default' : 'pointer', opacity: grResults.length < 25 ? 0.4 : 1 }}>Next →</button>
+              </div>
+            </>
+          )}
+        </>
       )}
     </div>
   );
