@@ -527,7 +527,7 @@ export function App() {
   // Check if user can see an area (uses resolved area access from custom roles)
   // My NOVA (command) is always visible — it's the core area
   const canSeeArea = (area: Area): boolean => {
-    if (area === 'command') return true;
+    if (area === 'command' || area === 'wallboards') return true;
     return (areaAccess[area] || 'hidden') !== 'hidden';
   };
 
