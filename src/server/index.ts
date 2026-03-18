@@ -741,6 +741,119 @@ async function main() {
     }
   });
 
+  // Wallboard — server-rendered stat panels (Grafana replacement)
+  async function renderStatWallboard(
+    settingsQueries: any,
+    title: string,
+    subtitle: string,
+    panels: Array<{ label: string; kpi: string; altKpi?: string }>,
+    cols: number,
+  ): Promise<string> {
+    const settings = settingsQueries.getAll();
+    const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
+    if (!srv || !db || !usr || !pwd) throw new Error('KPI SQL not configured');
+    const sql = await import('mssql');
+    const pool = await new sql.default.ConnectionPool({
+      server: srv, database: db, user: usr, password: pwd,
+      options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
+    }).connect();
+    const result = await pool.request().query(`
+      SELECT KPI, [Count], RAG FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY KPI ORDER BY CreatedAt DESC) AS rn
+        FROM dbo.KpiSnapshot
+      ) t WHERE rn = 1
+    `);
+    await pool.close();
+    const kpis = new Map<string, { count: number; rag: number | null }>();
+    for (const r of result.recordset) kpis.set(r.KPI.toLowerCase(), { count: r.Count, rag: r.RAG });
+
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-GB');
+    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+    function lookup(kpi: string, altKpi?: string): { count: number; rag: number | null } {
+      const k = kpis.get(kpi.toLowerCase());
+      if (k) return k;
+      if (altKpi) {
+        const a = kpis.get(altKpi.toLowerCase());
+        if (a) return a;
+      }
+      return { count: 0, rag: null };
+    }
+
+    function ragColor(rag: number | null): string {
+      if (rag === 1) return '#10b981';
+      if (rag === 2) return '#eab308';
+      if (rag === 3) return '#ef4444';
+      return '#94a3b8';
+    }
+
+    const panelHtml = panels.map(p => {
+      const data = lookup(p.kpi, p.altKpi);
+      const color = ragColor(data.rag);
+      return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;align-items:center">
+        <div style="font-size:11px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:12px;letter-spacing:.3px">${p.label}</div>
+        <div style="font-size:72px;font-weight:800;letter-spacing:-3px;line-height:1;color:${color}">${data.count}</div>
+      </div>`;
+    }).join('');
+
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>${title}</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">${title}</h1><div style="font-size:10px;color:#64748b;margin-top:1px">${subtitle}</div></div>
+  <div style="font-size:10px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:14px;flex:1">
+${panelHtml}
+</div>
+<div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; ${title} &middot; ${dateStr}</div>
+</div></body></html>`;
+  }
+
+  // Customer Care wallboard
+  app.get('/wallboard/cc', async (_req, res) => {
+    try {
+      const html = await renderStatWallboard(settingsQueries, 'Customer Care', 'Live queue metrics', [
+        { label: 'CC Incidents', kpi: 'Number of Tickets in CC (Incidents)' },
+        { label: 'CC Service Requests', kpi: 'Number of Tickets in CC (Service Requests)' },
+        { label: 'Property Jungle', kpi: 'Number of Tickets in CC (TPJ)' },
+        { label: 'CC Incidents — No Update', kpi: 'Number of Tickets With No Reply in CC (Incidents)' },
+        { label: 'CC Service Requests — No Update', kpi: 'Number of Tickets With No Reply in CC (Service Requests)' },
+        { label: 'Property Jungle — No Update', kpi: 'Number of Tickets With No Reply in CC (TPJ)' },
+        { label: 'CC Incidents — Over SLA', kpi: 'CC Incidents over SLA (actionable)' },
+        { label: 'CC Service Requests — Over SLA', kpi: 'CC Service Requests over SLA (actionable)' },
+        { label: 'Property Jungle — Over SLA', kpi: 'CC TPJ over SLA (actionable)', altKpi: 'CC (TPJ) over SLA (actionable)' },
+      ], 3);
+      res.send(html);
+    } catch (err) {
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${err instanceof Error ? err.message : 'Unknown error'}</body></html>`);
+    }
+  });
+
+  // Backend tiers wallboard
+  app.get('/wallboard/backend', async (_req, res) => {
+    try {
+      const html = await renderStatWallboard(settingsQueries, 'Backend Tiers', 'Live queue metrics', [
+        { label: 'Production Active Tickets', kpi: 'Number of Tickets in Production' },
+        { label: 'Tier 2 Active Tickets', kpi: 'Number of Tickets in Tier 2' },
+        { label: 'Development Active Tickets', kpi: 'Number of Tickets in Development' },
+        { label: 'Production — No Reply', kpi: 'Number of Tickets With No Reply in Production' },
+        { label: 'Tier 2 — No Reply', kpi: 'Number of Tickets With No Reply in Tier 2' },
+        { label: 'Tier 3 — No Reply', kpi: 'Number of Tickets With No Reply in Tier 3' },
+        { label: 'Production — Over SLA', kpi: 'Production over SLA (actionable)' },
+        { label: 'Tier 2 — Over SLA', kpi: 'Tier 2 over SLA (actionable)' },
+        { label: 'Development — Over SLA', kpi: 'Development over SLA (actionable)' },
+      ], 3);
+      res.send(html);
+    } catch (err) {
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${err instanceof Error ? err.message : 'Unknown error'}</body></html>`);
+    }
+  });
+
   // Production: serve built Vite frontend
   if (isProduction) {
     const clientDist = path.resolve(__dirname, '../../client');
