@@ -26,6 +26,7 @@ import { KpiComparisonView } from './components/KpiComparisonView.js';
 import { KpiLeaderboardView } from './components/KpiLeaderboardView.js';
 import { KpiDailyHistoryView } from './components/KpiDailyHistoryView.js';
 import { KpiBreachedView } from './components/KpiBreachedView.js';
+import { QAView } from './components/QAView.js';
 import { SalesHotboxView } from './components/SalesHotboxView.js';
 import { TeamWorkloadView } from './components/TeamWorkloadView.js';
 import { NotificationBell } from './components/NotificationBell.js';
@@ -51,7 +52,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm'
   | 'sales-hotbox'
-  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached'
+  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'qa'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
@@ -142,6 +143,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-daily-history', label: 'Daily History' },
       { view: 'kpi-breached', label: 'Breached' },
       { view: 'kpi-team-breached', label: 'Team KPIs' },
+      { view: 'qa', label: 'QA' },
     ],
   },
   wallboards: {
@@ -168,7 +170,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -875,6 +877,9 @@ export function App() {
           )}
           {view === 'kpi-breached' && (
             <KpiBreachedView />
+          )}
+          {view === 'qa' && (
+            <QAView />
           )}
           {view === 'kpi-team-breached' && (
             <iframe

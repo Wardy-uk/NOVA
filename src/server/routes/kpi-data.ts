@@ -211,6 +211,98 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
     }
   });
 
+  // GET /api/kpi-data/qa-summary?env=uat|live&days=7
+  router.get('/qa-summary', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const days = Math.min(parseInt(req.query.days as string) || 7, 365);
+      const p = await getPool();
+      const result = await p.request().query(`
+        DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+        SELECT
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full') AS fullQA,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'excluded')   AS excluded,
+          ISNULL((SELECT CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(4,2)) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full'), 0) AS avgScore,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'GREEN') AS green,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'AMBER') AS amber,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'RED')   AS red,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND isConcerning = 1)     AS concerning
+      `);
+      res.json({ ok: true, data: result.recordset[0] ?? {}, env });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // GET /api/kpi-data/qa-results?env=uat|live&days=30&page=1&limit=25&grade=GREEN&agent=X&concerning=1
+  router.get('/qa-results', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const days  = Math.min(parseInt(req.query.days  as string) || 30, 365);
+      const page  = Math.max(parseInt(req.query.page  as string) || 1, 1);
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const offset = (page - 1) * limit;
+      const safeStr = (v: unknown) => String(v ?? '').replace(/[^a-zA-Z0-9 \-_@.]/g, '').slice(0, 100);
+      const grade = safeStr(req.query.grade).toUpperCase();
+      const agent = safeStr(req.query.agent);
+      const concerning = req.query.concerning === '1' || req.query.concerning === 'true';
+      const gradeFilter     = ['GREEN','AMBER','RED'].includes(grade) ? `AND r.grade = '${grade}'` : '';
+      const agentFilter     = agent ? `AND r.assigneeName = '${agent}'` : '';
+      const concerningFilter = concerning ? 'AND r.isConcerning = 1' : '';
+      const p = await getPool();
+      const result = await p.request().query(`
+        SELECT r.issueKey, r.assigneeName, r.grade,
+               CAST(r.overallScore  AS FLOAT) AS overallScore,
+               CAST(r.accuracyScore AS INT)   AS accuracyScore,
+               CAST(r.clarityScore  AS INT)   AS clarityScore,
+               CAST(r.toneScore     AS INT)   AS toneScore,
+               CAST(r.closureScore  AS INT)   AS closureScore,
+               r.category, r.issues, r.coachingPoints, r.suggestedReply, r.customerSentiment,
+               CAST(r.isConcerning AS INT) AS isConcerning,
+               r.ticketType, r.ticketPriority,
+               CONVERT(VARCHAR(23), r.processedAt, 126) AS processedAt
+        FROM dbo.jira_qa_results${s} r
+        WHERE CAST(r.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
+          AND r.qaType = 'ticket_full'
+          ${gradeFilter} ${agentFilter} ${concerningFilter}
+        ORDER BY r.processedAt DESC
+        OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+      `);
+      res.json({ ok: true, data: result.recordset, page, limit, env });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // GET /api/kpi-data/qa-agents?env=uat|live&days=30
+  router.get('/qa-agents', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const days = Math.min(parseInt(req.query.days as string) || 30, 365);
+      const p = await getPool();
+      const result = await p.request().query(`
+        SELECT assigneeName,
+               COUNT(*) AS total,
+               SUM(CASE WHEN grade = 'GREEN' THEN 1 ELSE 0 END) AS green,
+               SUM(CASE WHEN grade = 'AMBER' THEN 1 ELSE 0 END) AS amber,
+               SUM(CASE WHEN grade = 'RED'   THEN 1 ELSE 0 END) AS red,
+               CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore,
+               SUM(CAST(isConcerning AS INT)) AS concerning
+        FROM dbo.jira_qa_results${s}
+        WHERE CAST(processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
+          AND qaType = 'ticket_full'
+        GROUP BY assigneeName
+        ORDER BY avgScore ASC
+      `);
+      res.json({ ok: true, data: result.recordset, env });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
   // GET /api/admin/kpi-data/digest?env=live|uat&days=7
   router.get('/digest', async (req, res) => {
     try {
