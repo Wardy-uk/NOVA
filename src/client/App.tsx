@@ -46,7 +46,7 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'kpis' | 'wallboards';
+type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'kpis' | 'qa' | 'wallboards';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
@@ -72,7 +72,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', kpis: 'hidden', wallboards: 'view', admin: 'hidden',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', kpis: 'hidden', qa: 'hidden', wallboards: 'view', admin: 'hidden',
 };
 
 // Map certain command sub-tabs to their own permission area
@@ -143,7 +143,13 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-daily-history', label: 'Daily History' },
       { view: 'kpi-breached', label: 'Breached' },
       { view: 'kpi-team-breached', label: 'Team KPIs' },
-      { view: 'qa', label: 'QA' },
+    ],
+  },
+  qa: {
+    label: 'QA',
+    defaultView: 'qa',
+    tabs: [
+      { view: 'qa', label: 'QA Dashboard' },
     ],
   },
   wallboards: {
@@ -158,7 +164,7 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'kpis', 'wallboards'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'kpis', 'qa', 'wallboards'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {

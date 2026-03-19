@@ -283,18 +283,26 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const s = suffix(env);
       const days = Math.min(parseInt(req.query.days as string) || 30, 365);
       const p = await getPool();
+      const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
+      const hasDeptLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDept;
+      const deptJoin = hasDept.recordset.length > 0
+        ? `INNER JOIN dbo.Agent${s} ag ON ag.AgentName = q.assigneeName AND ag.Department = 'NT'`
+        : hasDeptLive.recordset.length > 0 && s
+          ? `INNER JOIN dbo.Agent ag ON ag.AgentName = q.assigneeName AND ag.Department = 'NT'`
+          : '';
       const result = await p.request().query(`
-        SELECT assigneeName,
+        SELECT q.assigneeName,
                COUNT(*) AS total,
-               SUM(CASE WHEN grade = 'GREEN' THEN 1 ELSE 0 END) AS green,
-               SUM(CASE WHEN grade = 'AMBER' THEN 1 ELSE 0 END) AS amber,
-               SUM(CASE WHEN grade = 'RED'   THEN 1 ELSE 0 END) AS red,
-               CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore,
-               SUM(CAST(isConcerning AS INT)) AS concerning
-        FROM dbo.jira_qa_results${s}
-        WHERE CAST(processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
-          AND qaType = 'ticket_full'
-        GROUP BY assigneeName
+               SUM(CASE WHEN q.grade = 'GREEN' THEN 1 ELSE 0 END) AS green,
+               SUM(CASE WHEN q.grade = 'AMBER' THEN 1 ELSE 0 END) AS amber,
+               SUM(CASE WHEN q.grade = 'RED'   THEN 1 ELSE 0 END) AS red,
+               CAST(AVG(CAST(q.overallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore,
+               SUM(CAST(q.isConcerning AS INT)) AS concerning
+        FROM dbo.jira_qa_results${s} q
+        ${deptJoin}
+        WHERE CAST(q.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
+          AND q.qaType = 'ticket_full'
+        GROUP BY q.assigneeName
         ORDER BY avgScore ASC
       `);
       res.json({ ok: true, data: result.recordset, env });
@@ -371,17 +379,25 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const s = suffix(env);
       const days = Math.min(parseInt(req.query.days as string) || 30, 365);
       const p = await getPool();
+      const hasDeptGr = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
+      const hasDeptGrLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDeptGr;
+      const grDeptJoin = hasDeptGr.recordset.length > 0
+        ? `INNER JOIN dbo.Agent${s} ag ON ag.AgentName = g.Updater AND ag.Department = 'NT'`
+        : hasDeptGrLive.recordset.length > 0 && s
+          ? `INNER JOIN dbo.Agent ag ON ag.AgentName = g.Updater AND ag.Department = 'NT'`
+          : '';
       const result = await p.request().query(`
-        SELECT Updater AS agentName,
+        SELECT g.Updater AS agentName,
                COUNT(*) AS total,
-               SUM(CAST(rule1Pass AS INT)) AS rule1Pass,
-               SUM(CAST(rule2Pass AS INT)) AS rule2Pass,
-               SUM(CAST(rule3Pass AS INT)) AS rule3Pass,
-               CAST(AVG(CAST(OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore
-        FROM dbo.Jira_QA_GoldenRules${s}
-        WHERE CAST(processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
-          AND Updater IS NOT NULL AND Updater <> ''
-        GROUP BY Updater
+               SUM(CAST(g.rule1Pass AS INT)) AS rule1Pass,
+               SUM(CAST(g.rule2Pass AS INT)) AS rule2Pass,
+               SUM(CAST(g.rule3Pass AS INT)) AS rule3Pass,
+               CAST(AVG(CAST(g.OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore
+        FROM dbo.Jira_QA_GoldenRules${s} g
+        ${grDeptJoin}
+        WHERE CAST(g.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
+          AND g.Updater IS NOT NULL AND g.Updater <> ''
+        GROUP BY g.Updater
         ORDER BY avgScore ASC
       `);
       res.json({ ok: true, data: result.recordset, env });
