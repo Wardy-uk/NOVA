@@ -87,6 +87,7 @@ const AREA_DEFS = [
   { id: 'onboarding', label: 'Onboarding' },
   { id: 'accounts', label: 'Account Management' },
   { id: 'kpis', label: 'KPIs' },
+  { id: 'qa', label: 'QA' },
 ] as const;
 
 const ACCESS_LEVELS = ['hidden', 'view', 'edit'] as const;
