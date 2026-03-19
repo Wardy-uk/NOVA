@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
+import { ssoLogger } from '../services/sso-logger.js';
 
 export interface AuthPayload {
   id: number;
@@ -64,6 +65,10 @@ export function createAreaAccessGuard(getRoles: () => CustomRole[]) {
       const userRoleIds = parseRoles(req.user!.role);
       const matched = allRoleDefs.filter(r => userRoleIds.includes(r.id));
       if (matched.length === 0) {
+        ssoLogger.warn('area_access', `Role not found in custom roles — denying`, {
+          user: req.user!.username, userRole: req.user!.role,
+          requiredAreas: areas, availableRoleIds: allRoleDefs.map(r => r.id),
+        });
         res.status(403).json({ ok: false, error: 'Unknown role' });
         return;
       }
@@ -79,6 +84,11 @@ export function createAreaAccessGuard(getRoles: () => CustomRole[]) {
           return;
         }
       }
+      ssoLogger.warn('area_access', `Insufficient area access — denying`, {
+        user: req.user!.username, userRole: req.user!.role,
+        requiredAreas: areas, level,
+        matchedRoles: matched.map(r => ({ id: r.id, areas: r.areas })),
+      });
       res.status(403).json({ ok: false, error: 'Insufficient permissions for this area' });
     };
   };
