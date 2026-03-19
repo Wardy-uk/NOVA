@@ -499,6 +499,7 @@ export function createAuthRoutes(
   // GET /api/auth/permissions — public, returns custom roles + caller's resolved area access
   router.get('/permissions', (req, res) => {
     const roles = getCustomRoles(settingsQueries);
+    console.log('[permissions] custom roles loaded:', JSON.stringify(roles.map(r => ({ id: r.id, name: r.name, areas: r.areas }))));
 
     // If caller is authenticated, resolve their access using the CURRENT role from DB
     // (not the token role, which may be stale after an admin role change)
@@ -507,10 +508,17 @@ export function createAuthRoutes(
     if (authHeader?.startsWith('Bearer ')) {
       try {
         const payload = jwt.verify(authHeader.slice(7), jwtSecret) as { id: number; role: string };
+        console.log('[permissions] token: id=%s role=%s', payload.id, payload.role);
         const currentUser = userQueries.getById(payload.id);
+        console.log('[permissions] db user:', currentUser ? `id=${currentUser.id} username=${currentUser.username} role=${currentUser.role}` : 'NOT FOUND');
         const currentRole = currentUser?.role ?? payload.role;
         areaAccess = resolveAreaAccess(currentRole, roles);
-      } catch { /* ignore invalid token */ }
+        console.log('[permissions] resolved areaAccess for role=%s:', currentRole, JSON.stringify(areaAccess));
+      } catch (err) {
+        console.log('[permissions] token verify error:', err instanceof Error ? err.message : err);
+      }
+    } else {
+      console.log('[permissions] no Bearer token present');
     }
 
     res.json({ ok: true, data: { roles, areaAccess } });
