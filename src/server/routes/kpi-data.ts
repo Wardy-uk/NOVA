@@ -352,6 +352,11 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const agentName = await resolveAgentScope(req);
       const agentFilter = agentName ? `AND ISNULL(Updater, '') = '${agentName.replace(/'/g, "''")}'` : '';
       const p = await getPool();
+      // Debug: log sample Updater values to compare with resolved agentName
+      if (agentName) {
+        const sample = await p.request().query(`SELECT DISTINCT TOP 10 Updater FROM dbo.Jira_QA_GoldenRules${s} WHERE Updater IS NOT NULL ORDER BY Updater`);
+        ssoLogger.log('agent_scope', `Golden rules Updater samples vs resolved name`, { agentName, sampleUpdaters: sample.recordset.map((r: any) => r.Updater) });
+      }
       const result = await p.request().query(`
         DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
         SELECT
