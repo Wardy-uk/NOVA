@@ -500,13 +500,16 @@ export function createAuthRoutes(
   router.get('/permissions', (req, res) => {
     const roles = getCustomRoles(settingsQueries);
 
-    // If caller is authenticated, resolve their access; otherwise return roles only
+    // If caller is authenticated, resolve their access using the CURRENT role from DB
+    // (not the token role, which may be stale after an admin role change)
     let areaAccess: Record<string, string> | null = null;
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) {
       try {
-        const payload = jwt.verify(authHeader.slice(7), jwtSecret) as { role: string };
-        areaAccess = resolveAreaAccess(payload.role, roles);
+        const payload = jwt.verify(authHeader.slice(7), jwtSecret) as { id: number; role: string };
+        const currentUser = userQueries.getById(payload.id);
+        const currentRole = currentUser?.role ?? payload.role;
+        areaAccess = resolveAreaAccess(currentRole, roles);
       } catch { /* ignore invalid token */ }
     }
 
