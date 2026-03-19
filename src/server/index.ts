@@ -374,8 +374,8 @@ async function main() {
     districtQueries,
   });
 
-  // Protected API routes
-  app.use('/api', authMiddleware(jwtSecret));
+  // Protected API routes — look up fresh role from DB so stale JWTs always reflect current role
+  app.use('/api', authMiddleware(jwtSecret, (id) => userQueries.getById(id)?.role));
 
   // Lightweight user list — any authenticated user
   app.get('/api/users/list', (_req, res) => {

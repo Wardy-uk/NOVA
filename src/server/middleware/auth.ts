@@ -96,7 +96,7 @@ export function createAreaAccessGuard(getRoles: () => CustomRole[]) {
 
 export type AreaAccessGuard = ReturnType<typeof createAreaAccessGuard>;
 
-export function authMiddleware(secret: string) {
+export function authMiddleware(secret: string, getUserRole?: (id: number) => string | undefined) {
   return (req: Request, res: Response, next: NextFunction): void => {
     // Accept token from Authorization header or ?token= query param (for <img src> etc.)
     let token: string | undefined;
@@ -115,6 +115,12 @@ export function authMiddleware(secret: string) {
     try {
       const payload = jwt.verify(token, secret) as AuthPayload;
       req.user = payload;
+      // If a role lookup is provided, refresh the role from DB so stale JWTs always
+      // reflect the current role (e.g. after admin changes a user's role without re-login)
+      if (getUserRole) {
+        const freshRole = getUserRole(payload.id);
+        if (freshRole !== undefined) req.user = { ...payload, role: freshRole };
+      }
       next();
     } catch {
       res.status(401).json({ ok: false, error: 'Invalid or expired token' });
