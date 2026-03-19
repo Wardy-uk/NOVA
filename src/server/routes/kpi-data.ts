@@ -283,13 +283,6 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const s = suffix(env);
       const days = Math.min(parseInt(req.query.days as string) || 30, 365);
       const p = await getPool();
-      const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
-      const hasDeptLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDept;
-      const deptJoin = hasDept.recordset.length > 0
-        ? `INNER JOIN dbo.Agent${s} ag ON ag.AgentName = q.assigneeName AND ag.Department = 'NT'`
-        : hasDeptLive.recordset.length > 0 && s
-          ? `INNER JOIN dbo.Agent ag ON ag.AgentName = q.assigneeName AND ag.Department = 'NT'`
-          : '';
       const result = await p.request().query(`
         SELECT q.assigneeName,
                COUNT(*) AS total,
@@ -299,9 +292,9 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
                CAST(AVG(CAST(q.overallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore,
                SUM(CAST(q.isConcerning AS INT)) AS concerning
         FROM dbo.jira_qa_results${s} q
-        ${deptJoin}
         WHERE CAST(q.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
           AND q.qaType = 'ticket_full'
+          AND q.issueKey LIKE 'NT-%'
         GROUP BY q.assigneeName
         ORDER BY avgScore ASC
       `);
@@ -379,13 +372,6 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const s = suffix(env);
       const days = Math.min(parseInt(req.query.days as string) || 30, 365);
       const p = await getPool();
-      const hasDeptGr = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
-      const hasDeptGrLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDeptGr;
-      const grDeptJoin = hasDeptGr.recordset.length > 0
-        ? `INNER JOIN dbo.Agent${s} ag ON ag.AgentName = g.Updater AND ag.Department = 'NT'`
-        : hasDeptGrLive.recordset.length > 0 && s
-          ? `INNER JOIN dbo.Agent ag ON ag.AgentName = g.Updater AND ag.Department = 'NT'`
-          : '';
       const result = await p.request().query(`
         SELECT g.Updater AS agentName,
                COUNT(*) AS total,
@@ -394,9 +380,9 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
                SUM(CAST(g.rule3Pass AS INT)) AS rule3Pass,
                CAST(AVG(CAST(g.OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore
         FROM dbo.Jira_QA_GoldenRules${s} g
-        ${grDeptJoin}
         WHERE CAST(g.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
           AND g.Updater IS NOT NULL AND g.Updater <> ''
+          AND g.IssueKey LIKE 'NT-%'
         GROUP BY g.Updater
         ORDER BY avgScore ASC
       `);
