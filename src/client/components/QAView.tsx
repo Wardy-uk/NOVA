@@ -84,6 +84,49 @@ interface GRAgent {
   avgScore: number;
 }
 
+interface CallQASummary {
+  total: number;
+  avgOverall: number;
+  avgTone: number;
+  avgConfidence: number;
+  avgKnowledge: number;
+  avgFlow: number;
+  avgSatisfaction: number;
+  green: number;
+  amber: number;
+  red: number;
+}
+
+interface CallQAAgent {
+  AgentName: string;
+  total: number;
+  avgOverall: number;
+  avgTone: number;
+  avgConfidence: number;
+  avgKnowledge: number;
+  avgFlow: number;
+  avgSatisfaction: number;
+  green: number;
+  amber: number;
+  red: number;
+}
+
+interface CallQAResult {
+  CallId: string | number;
+  AgentName: string;
+  CallEndTime: string;
+  CallSummary: string | null;
+  OverallScore: number;
+  ToneScore: number;         ToneReason: string | null;
+  ConfidenceScore: number;   ConfidenceReason: string | null;
+  KnowledgeScore: number;    KnowledgeReason: string | null;
+  FlowScore: number;         FlowReason: string | null;
+  SatisfactionScore: number; SatisfactionReason: string | null;
+  Strengths: string | null;
+  Improvements: string | null;
+  Recommendations: string | null;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Colours                                                            */
 /* ------------------------------------------------------------------ */
@@ -236,7 +279,7 @@ function ResultRow({ r, jiraBaseUrl }: { r: QAResult; jiraBaseUrl?: string | nul
 /*  Main view                                                          */
 /* ------------------------------------------------------------------ */
 
-type Section = 'overview' | 'results' | 'agents' | 'goldenRules';
+type Section = 'overview' | 'results' | 'agents' | 'goldenRules' | 'callQA';
 type Env = 'uat' | 'live';
 
 export function QAView() {
@@ -264,6 +307,16 @@ export function QAView() {
   const [grPass, setGrPass]         = useState('');
   const [grExpanded, setGrExpanded] = useState<string | null>(null);
   const [grPendingFilters, setGrPendingFilters] = useState({ agent: '', pass: '' });
+
+  const [callSummary, setCallSummary]   = useState<CallQASummary | null>(null);
+  const [callResults, setCallResults]   = useState<CallQAResult[]>([]);
+  const [callAgents, setCallAgents]     = useState<CallQAAgent[]>([]);
+  const [callPage, setCallPage]         = useState(1);
+  const [callLoading, setCallLoading]   = useState(false);
+  const [callAgent, setCallAgent]       = useState('');
+  const [callGrade, setCallGrade]       = useState('');
+  const [callExpanded, setCallExpanded] = useState<string | null>(null);
+  const [callPendingFilters, setCallPendingFilters] = useState({ agent: '', grade: '' });
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -324,6 +377,35 @@ export function QAView() {
     setLoading(false);
   }, [env, days]);
 
+  const fetchCallSummary = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/kpi-data/call-qa-summary?days=${days}`);
+      const d = await r.json();
+      if (d.ok) setCallSummary(d.data);
+    } catch { /* ignore */ }
+  }, [days]);
+
+  const fetchCallAgents = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/kpi-data/call-qa-agents?days=${days}`);
+      const d = await r.json();
+      if (d.ok) setCallAgents(d.data);
+    } catch { /* ignore */ }
+  }, [days]);
+
+  const fetchCallResults = useCallback(async (p: number, filters: typeof callPendingFilters) => {
+    setCallLoading(true);
+    try {
+      const params = new URLSearchParams({ days: String(days), page: String(p), limit: '25' });
+      if (filters.agent) params.set('agent', filters.agent);
+      if (filters.grade) params.set('grade', filters.grade);
+      const r = await fetch(`/api/kpi-data/call-qa-results?${params}`);
+      const d = await r.json();
+      if (d.ok) { setCallResults(d.data); setCallPage(p); }
+    } catch { /* ignore */ }
+    setCallLoading(false);
+  }, [days]);
+
   useEffect(() => {
     fetchSummary();
     fetchAgents();
@@ -331,6 +413,9 @@ export function QAView() {
     fetchGrSummary();
     fetchGrAgents();
     fetchGrResults(1, grPendingFilters);
+    fetchCallSummary();
+    fetchCallAgents();
+    fetchCallResults(1, callPendingFilters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [env, days]);
 
@@ -383,7 +468,7 @@ export function QAView() {
 
       {/* Section tabs */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}`, marginBottom: '1.25rem' }}>
-        {([['overview', 'Overview'], ['agents', 'Agents'], ['results', 'QA Results'], ['goldenRules', 'Golden Rules']] as [Section, string][]).map(([s, label]) => (
+        {([['overview', 'Overview'], ['agents', 'Agents'], ['results', 'QA Results'], ['goldenRules', 'Golden Rules'], ['callQA', 'Call QA']] as [Section, string][]).map(([s, label]) => (
           <button key={s} style={tabBtn(section === s)} onClick={() => setSection(s)}>{label}</button>
         ))}
       </div>
@@ -662,6 +747,155 @@ export function QAView() {
                 <button disabled={grPage <= 1} onClick={() => fetchGrResults(grPage - 1, grPendingFilters)} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.75rem', cursor: grPage <= 1 ? 'default' : 'pointer', opacity: grPage <= 1 ? 0.4 : 1 }}>← Prev</button>
                 <span>Page {grPage}</span>
                 <button disabled={grResults.length < 25} onClick={() => fetchGrResults(grPage + 1, grPendingFilters)} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.75rem', cursor: grResults.length < 25 ? 'default' : 'pointer', opacity: grResults.length < 25 ? 0.4 : 1 }}>Next →</button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {/* Call QA */}
+      {section === 'callQA' && (
+        <>
+          {/* Summary stats */}
+          {callSummary && callSummary.total > 0 && (
+            <>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+                <StatCard label="Calls QA'd"   value={callSummary.total} colour={C.teal} />
+                <StatCard label="Avg Score"    value={Number(callSummary.avgOverall).toFixed(1)} colour={scoreColour(Number(callSummary.avgOverall))} />
+                <StatCard label="Tone"         value={Number(callSummary.avgTone).toFixed(1)} colour={scoreColour(Number(callSummary.avgTone))} />
+                <StatCard label="Confidence"   value={Number(callSummary.avgConfidence).toFixed(1)} colour={scoreColour(Number(callSummary.avgConfidence))} />
+                <StatCard label="Knowledge"    value={Number(callSummary.avgKnowledge).toFixed(1)} colour={scoreColour(Number(callSummary.avgKnowledge))} />
+                <StatCard label="Flow"         value={Number(callSummary.avgFlow).toFixed(1)} colour={scoreColour(Number(callSummary.avgFlow))} />
+                <StatCard label="Satisfaction" value={Number(callSummary.avgSatisfaction).toFixed(1)} colour={scoreColour(Number(callSummary.avgSatisfaction))} />
+              </div>
+              <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text2, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>Grade Distribution</div>
+                <GradeBar green={callSummary.green} amber={callSummary.amber} red={callSummary.red} />
+              </div>
+            </>
+          )}
+          {callSummary && callSummary.total === 0 && (
+            <div style={{ color: C.text3, padding: '0.5rem 0', marginBottom: '1.25rem' }}>No call QA data for this period.</div>
+          )}
+
+          {/* Agent breakdown */}
+          {callAgents.length > 0 && (
+            <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text2, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>Agent Breakdown</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <thead>
+                  <tr>
+                    {['Agent', 'Calls', 'Avg', 'Tone', 'Confidence', 'Knowledge', 'Flow', 'Satisfaction', '🟢', '🟡', '🔴'].map(h => (
+                      <th key={h} style={th}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {callAgents.map(a => (
+                    <tr key={a.AgentName} style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <td style={{ padding: '0.5rem 0.75rem', color: C.text1, fontWeight: 500 }}>{a.AgentName}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: C.text2 }}>{a.total}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: scoreColour(Number(a.avgOverall)) }}>{Number(a.avgOverall).toFixed(1)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: scoreColour(Number(a.avgTone)) }}>{Number(a.avgTone).toFixed(1)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: scoreColour(Number(a.avgConfidence)) }}>{Number(a.avgConfidence).toFixed(1)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: scoreColour(Number(a.avgKnowledge)) }}>{Number(a.avgKnowledge).toFixed(1)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: scoreColour(Number(a.avgFlow)) }}>{Number(a.avgFlow).toFixed(1)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: scoreColour(Number(a.avgSatisfaction)) }}>{Number(a.avgSatisfaction).toFixed(1)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: C.green }}>{a.green}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: C.amber }}>{a.amber}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', color: C.red }}>{a.red}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Filters */}
+          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem' }}>
+            <input
+              type="text" placeholder="Agent name…" value={callAgent}
+              onChange={e => setCallAgent(e.target.value)}
+              style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.6rem', fontSize: '0.85rem', width: 180 }}
+            />
+            <select value={callGrade} onChange={e => setCallGrade(e.target.value)} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.6rem', fontSize: '0.85rem' }}>
+              <option value="">All grades</option>
+              <option value="GREEN">Green</option>
+              <option value="AMBER">Amber</option>
+              <option value="RED">Red</option>
+            </select>
+            <button onClick={() => { const f = { agent: callAgent, grade: callGrade }; setCallPendingFilters(f); fetchCallResults(1, f); }} style={{ background: C.blueDim, color: '#fff', border: 'none', borderRadius: 6, padding: '0.3rem 0.9rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+              Apply
+            </button>
+          </div>
+
+          {/* Results table */}
+          {callLoading ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: C.text3 }}>Loading…</div>
+          ) : (
+            <>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                <thead>
+                  <tr>
+                    {['Grade', 'Agent', 'Score', 'Tone', 'Conf.', 'Know.', 'Flow', 'Sat.', 'Date', ''].map(h => (
+                      <th key={h} style={th}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {callResults.length === 0
+                    ? <tr><td colSpan={10} style={{ padding: '2rem', textAlign: 'center', color: C.text3 }}>No results</td></tr>
+                    : callResults.map(r => {
+                        const key = String(r.CallId);
+                        const expanded = callExpanded === key;
+                        const grade = r.OverallScore >= 7.5 ? 'GREEN' : r.OverallScore >= 5.5 ? 'AMBER' : 'RED';
+                        const colour = gradeColour(grade);
+                        const bg = gradeBg(grade);
+                        return (
+                          <>
+                            <tr key={key} onClick={() => setCallExpanded(expanded ? null : key)} style={{ cursor: 'pointer', borderBottom: `1px solid ${C.border}` }}>
+                              <td style={{ padding: '0.55rem 0.75rem' }}>
+                                <span style={{ display: 'inline-block', padding: '0.2rem 0.55rem', background: bg, color: colour, border: `1px solid ${colour}`, borderRadius: 4, fontSize: '0.7rem', fontWeight: 700 }}>
+                                  {grade}
+                                </span>
+                              </td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: C.text1 }}>{r.AgentName}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', fontWeight: 700, color: scoreColour(r.OverallScore) }}>{Number(r.OverallScore).toFixed(1)}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: scoreColour(r.ToneScore) }}>{Number(r.ToneScore).toFixed(1)}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: scoreColour(r.ConfidenceScore) }}>{Number(r.ConfidenceScore).toFixed(1)}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: scoreColour(r.KnowledgeScore) }}>{Number(r.KnowledgeScore).toFixed(1)}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: scoreColour(r.FlowScore) }}>{Number(r.FlowScore).toFixed(1)}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: scoreColour(r.SatisfactionScore) }}>{Number(r.SatisfactionScore).toFixed(1)}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: C.text3, fontSize: '0.8rem' }}>{r.CallEndTime ? new Date(r.CallEndTime).toLocaleDateString() : '—'}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: C.text3, fontSize: '0.7rem', textAlign: 'right' }}>{expanded ? '▲' : '▼'}</td>
+                            </tr>
+                            {expanded && (
+                              <tr key={`${key}-detail`} style={{ background: C.bg0, borderBottom: `1px solid ${C.border}` }}>
+                                <td colSpan={10} style={{ padding: 0 }}>
+                                  <div style={{ padding: '0.875rem 1.25rem', borderLeft: `3px solid ${colour}`, marginLeft: '0.75rem' }}>
+                                    {r.CallSummary && <div style={{ fontSize: '0.85rem', color: C.text2, marginBottom: '0.5rem', lineHeight: 1.5 }}><strong style={{ color: C.text1 }}>Summary:</strong> {r.CallSummary}</div>}
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem 1.5rem', marginBottom: '0.5rem' }}>
+                                      {([['Tone', r.ToneReason], ['Confidence', r.ConfidenceReason], ['Knowledge', r.KnowledgeReason], ['Flow', r.FlowReason], ['Satisfaction', r.SatisfactionReason]] as [string, string | null][]).map(([label, reason]) => reason ? (
+                                        <div key={label} style={{ fontSize: '0.82rem', color: C.text2, lineHeight: 1.4 }}><strong style={{ color: C.text1 }}>{label}:</strong> {reason}</div>
+                                      ) : null)}
+                                    </div>
+                                    {r.Strengths     && <div style={{ fontSize: '0.85rem', color: C.text2, marginTop: '0.4rem', lineHeight: 1.5 }}><strong style={{ color: C.green }}>Strengths:</strong> {r.Strengths}</div>}
+                                    {r.Improvements  && <div style={{ fontSize: '0.85rem', color: C.text2, marginTop: '0.4rem', lineHeight: 1.5 }}><strong style={{ color: C.amber }}>Improvements:</strong> {r.Improvements}</div>}
+                                    {r.Recommendations && <div style={{ fontSize: '0.85rem', color: C.text2, marginTop: '0.4rem', lineHeight: 1.5 }}><strong style={{ color: C.blue }}>Recommendations:</strong> {r.Recommendations}</div>}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        );
+                      })
+                  }
+                </tbody>
+              </table>
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', justifyContent: 'center', marginTop: '1rem', fontSize: '0.875rem', color: C.text2 }}>
+                <button disabled={callPage <= 1} onClick={() => fetchCallResults(callPage - 1, callPendingFilters)} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.75rem', cursor: callPage <= 1 ? 'default' : 'pointer', opacity: callPage <= 1 ? 0.4 : 1 }}>← Prev</button>
+                <span>Page {callPage}</span>
+                <button disabled={callResults.length < 25} onClick={() => fetchCallResults(callPage + 1, callPendingFilters)} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.75rem', cursor: callResults.length < 25 ? 'default' : 'pointer', opacity: callResults.length < 25 ? 0.4 : 1 }}>Next →</button>
               </div>
             </>
           )}

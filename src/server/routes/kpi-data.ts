@@ -2,6 +2,8 @@ import { Router } from 'express';
 import sql from 'mssql';
 
 import type { SettingsQueries } from '../db/settings-store.js';
+import type { FileUserQueries } from '../db/user-store.js';
+import { isAdmin } from '../utils/role-helpers.js';
 
 const VALID_ENVS = ['live', 'uat'] as const;
 type Env = (typeof VALID_ENVS)[number];
@@ -10,7 +12,7 @@ function suffix(env: Env): string {
   return env === 'uat' ? 'UAT' : '';
 }
 
-export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
+export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQueries: FileUserQueries): Router {
   const router = Router();
 
 
@@ -48,6 +50,26 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
     const env = req.query.env as string;
     if (VALID_ENVS.includes(env as Env)) return env as Env;
     return 'uat'; // default to UAT for safety
+  }
+
+  /**
+   * For non-admin users: look up their email from the local user store,
+   * then find the matching AgentName in dbo.Agent (AgentKey stores the email).
+   * Returns null if the user is admin or no match is found.
+   */
+  async function resolveAgentScope(req: any): Promise<string | null> {
+    if (!req.user || isAdmin(req.user.role)) return null;
+    const user = userQueries.getById(req.user.id);
+    if (!user?.email) return null;
+    const p = await getPool();
+    const r = p.request();
+    r.input('email', sql.NVarChar, user.email.toLowerCase());
+    const result = await r.query(`
+      SELECT TOP 1 LTRIM(RTRIM(AgentName)) AS AgentName
+      FROM dbo.Agent
+      WHERE LOWER(LTRIM(RTRIM(AgentKey))) = @email
+    `);
+    return result.recordset[0]?.AgentName ?? null;
   }
 
   // GET /api/admin/kpi-data/team-snapshot?env=live|uat
@@ -217,17 +239,19 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const env = parseEnv(req);
       const s = suffix(env);
       const days = Math.min(parseInt(req.query.days as string) || 7, 365);
+      const agentName = await resolveAgentScope(req);
+      const agentFilter = agentName ? `AND assigneeName = '${agentName.replace(/'/g, "''")}'` : '';
       const p = await getPool();
       const result = await p.request().query(`
         DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
         SELECT
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full') AS fullQA,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'excluded')   AS excluded,
-          ISNULL((SELECT CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(4,2)) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full'), 0) AS avgScore,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'GREEN') AS green,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'AMBER') AS amber,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'RED')   AS red,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND isConcerning = 1)     AS concerning
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' ${agentFilter}) AS fullQA,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'excluded' ${agentFilter})   AS excluded,
+          ISNULL((SELECT CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(4,2)) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' ${agentFilter}), 0) AS avgScore,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'GREEN' ${agentFilter}) AS green,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'AMBER' ${agentFilter}) AS amber,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'RED' ${agentFilter})   AS red,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND isConcerning = 1 ${agentFilter})     AS concerning
       `);
       const jiraBaseUrl = settingsQueries.getAll().jira_url ?? null;
       res.json({ ok: true, data: { ...(result.recordset[0] ?? {}), jiraBaseUrl }, env });
@@ -247,11 +271,13 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const offset = (page - 1) * limit;
       const safeStr = (v: unknown) => String(v ?? '').replace(/[^a-zA-Z0-9 \-_@.]/g, '').slice(0, 100);
       const grade = safeStr(req.query.grade).toUpperCase();
-      const agent = safeStr(req.query.agent);
       const concerning = req.query.concerning === '1' || req.query.concerning === 'true';
       const gradeFilter     = ['GREEN','AMBER','RED'].includes(grade) ? `AND r.grade = '${grade}'` : '';
-      const agentFilter     = agent ? `AND r.assigneeName = '${agent}'` : '';
       const concerningFilter = concerning ? 'AND r.isConcerning = 1' : '';
+      // Non-admin: scope to own results; admin: honour ?agent= param
+      const scopedAgent = await resolveAgentScope(req);
+      const agent = scopedAgent ?? safeStr(req.query.agent);
+      const agentFilter     = agent ? `AND r.assigneeName = '${agent}'` : '';
       const p = await getPool();
       const result = await p.request().query(`
         SELECT r.issueKey, r.assigneeName, r.grade,
@@ -283,6 +309,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const env = parseEnv(req);
       const s = suffix(env);
       const days = Math.min(parseInt(req.query.days as string) || 30, 365);
+      const agentName = await resolveAgentScope(req);
+      const agentFilter = agentName ? `AND q.assigneeName = '${agentName.replace(/'/g, "''")}'` : '';
       const p = await getPool();
       const result = await p.request().query(`
         SELECT q.assigneeName,
@@ -296,6 +324,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         WHERE CAST(q.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
           AND q.qaType = 'ticket_full'
           AND q.assigneeName IS NOT NULL AND q.assigneeName <> ''
+          ${agentFilter}
         GROUP BY q.assigneeName
         ORDER BY avgScore ASC
       `);
@@ -311,6 +340,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const env = parseEnv(req);
       const s = suffix(env);
       const days = Math.min(parseInt(req.query.days as string) || 7, 365);
+      const agentName = await resolveAgentScope(req);
+      const agentFilter = agentName ? `AND ISNULL(Updater, '') = '${agentName.replace(/'/g, "''")}'` : '';
       const p = await getPool();
       const result = await p.request().query(`
         DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
@@ -325,6 +356,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
           CAST(AVG(CAST(Rule3Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule3
         FROM dbo.Jira_QA_GoldenRules${s}
         WHERE CAST(processedAt AS DATE) >= @start
+          ${agentFilter}
       `);
       res.json({ ok: true, data: result.recordset[0] ?? {}, env });
     } catch (err) {
@@ -342,10 +374,12 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
       const offset = (page - 1) * limit;
       const safeStr = (v: unknown) => String(v ?? '').replace(/[^a-zA-Z0-9 \-_@.]/g, '').slice(0, 100);
-      const agent = safeStr(req.query.agent);
       const passFilter = req.query.pass === '0' ? 'AND (rule1Pass = 0 OR rule2Pass = 0 OR rule3Pass = 0)'
                        : req.query.pass === '1' ? 'AND rule1Pass = 1 AND rule2Pass = 1 AND rule3Pass = 1'
                        : '';
+      // Non-admin: scope to own results; admin: honour ?agent= param
+      const scopedAgent = await resolveAgentScope(req);
+      const agent = scopedAgent ?? safeStr(req.query.agent);
       const agentFilter = agent ? `AND ISNULL(Updater, '') = '${agent}'` : '';
       const p = await getPool();
       const result = await p.request().query(`
@@ -372,6 +406,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
       const env = parseEnv(req);
       const s = suffix(env);
       const days = Math.min(parseInt(req.query.days as string) || 30, 365);
+      const agentName = await resolveAgentScope(req);
+      const agentFilter = agentName ? `AND ISNULL(g.Updater, '') = '${agentName.replace(/'/g, "''")}'` : '';
       const p = await getPool();
       const result = await p.request().query(`
         SELECT g.Updater AS agentName,
@@ -384,6 +420,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         WHERE CAST(g.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
           AND g.Updater IS NOT NULL AND g.Updater <> ''
           AND g.IssueKey LIKE 'NT-%'
+          ${agentFilter}
         GROUP BY g.Updater
         ORDER BY avgScore ASC
       `);
@@ -743,6 +780,119 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         agentDaily: dailyStats.recordset[0],
         eodSnapshot: eodStats.recordset[0],
       });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // ------------------------------------------------------------------ //
+  //  Call QA  (n8n.dbo.SupportCallAnalysis — same SQL Server)          //
+  // ------------------------------------------------------------------ //
+
+  // GET /api/kpi-data/call-qa-summary?days=7
+  router.get('/call-qa-summary', async (req, res) => {
+    try {
+      const days = Math.min(parseInt(req.query.days as string) || 7, 365);
+      const agentName = await resolveAgentScope(req);
+      const agentFilter = agentName ? `AND AgentName = '${agentName.replace(/'/g, "''")}'` : '';
+      const p = await getPool();
+      const result = await p.request().query(`
+        DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+        SELECT
+          COUNT(*)                                                                      AS total,
+          CAST(AVG(CAST(OverallScore      AS FLOAT)) AS DECIMAL(4,2))                 AS avgOverall,
+          CAST(AVG(CAST(ToneScore         AS FLOAT)) AS DECIMAL(4,2))                 AS avgTone,
+          CAST(AVG(CAST(ConfidenceScore   AS FLOAT)) AS DECIMAL(4,2))                 AS avgConfidence,
+          CAST(AVG(CAST(KnowledgeScore    AS FLOAT)) AS DECIMAL(4,2))                 AS avgKnowledge,
+          CAST(AVG(CAST(FlowScore         AS FLOAT)) AS DECIMAL(4,2))                 AS avgFlow,
+          CAST(AVG(CAST(SatisfactionScore AS FLOAT)) AS DECIMAL(4,2))                 AS avgSatisfaction,
+          SUM(CASE WHEN OverallScore >= 7.5 THEN 1 ELSE 0 END)                        AS green,
+          SUM(CASE WHEN OverallScore >= 5.5 AND OverallScore < 7.5 THEN 1 ELSE 0 END) AS amber,
+          SUM(CASE WHEN OverallScore < 5.5  THEN 1 ELSE 0 END)                        AS red
+        FROM n8n.dbo.SupportCallAnalysis
+        WHERE CAST(CallEndTime AS DATE) >= @start
+          ${agentFilter}
+      `);
+      res.json({ ok: true, data: result.recordset[0] ?? {} });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // GET /api/kpi-data/call-qa-agents?days=7
+  router.get('/call-qa-agents', async (req, res) => {
+    try {
+      const days = Math.min(parseInt(req.query.days as string) || 7, 365);
+      const agentName = await resolveAgentScope(req);
+      const agentFilter = agentName ? `AND AgentName = '${agentName.replace(/'/g, "''")}'` : '';
+      const p = await getPool();
+      const result = await p.request().query(`
+        DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+        SELECT
+          AgentName,
+          COUNT(*)                                                                      AS total,
+          CAST(AVG(CAST(OverallScore      AS FLOAT)) AS DECIMAL(4,2))                 AS avgOverall,
+          CAST(AVG(CAST(ToneScore         AS FLOAT)) AS DECIMAL(4,2))                 AS avgTone,
+          CAST(AVG(CAST(ConfidenceScore   AS FLOAT)) AS DECIMAL(4,2))                 AS avgConfidence,
+          CAST(AVG(CAST(KnowledgeScore    AS FLOAT)) AS DECIMAL(4,2))                 AS avgKnowledge,
+          CAST(AVG(CAST(FlowScore         AS FLOAT)) AS DECIMAL(4,2))                 AS avgFlow,
+          CAST(AVG(CAST(SatisfactionScore AS FLOAT)) AS DECIMAL(4,2))                 AS avgSatisfaction,
+          SUM(CASE WHEN OverallScore >= 7.5 THEN 1 ELSE 0 END)                        AS green,
+          SUM(CASE WHEN OverallScore >= 5.5 AND OverallScore < 7.5 THEN 1 ELSE 0 END) AS amber,
+          SUM(CASE WHEN OverallScore < 5.5  THEN 1 ELSE 0 END)                        AS red
+        FROM n8n.dbo.SupportCallAnalysis
+        WHERE CAST(CallEndTime AS DATE) >= @start
+          AND AgentName IS NOT NULL AND AgentName <> ''
+          ${agentFilter}
+        GROUP BY AgentName
+        ORDER BY avgOverall ASC
+      `);
+      res.json({ ok: true, data: result.recordset });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // GET /api/kpi-data/call-qa-results?days=7&page=1&limit=25&agent=X&grade=GREEN
+  router.get('/call-qa-results', async (req, res) => {
+    try {
+      const days  = Math.min(parseInt(req.query.days  as string) || 7, 365);
+      const page  = Math.max(parseInt(req.query.page  as string) || 1, 1);
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const offset = (page - 1) * limit;
+      const safeStr = (v: unknown) => String(v ?? '').replace(/[^a-zA-Z0-9 \-_@.]/g, '').slice(0, 100);
+      const gradeParam = safeStr(req.query.grade).toUpperCase();
+      // Non-admin: scope to own results; admin: honour ?agent= param
+      const scopedAgent = await resolveAgentScope(req);
+      const agent = scopedAgent ?? safeStr(req.query.agent);
+      const agentFilter = agent ? `AND AgentName = '${agent}'` : '';
+      const gradeFilter = gradeParam === 'GREEN'
+        ? 'AND OverallScore >= 7.5'
+        : gradeParam === 'AMBER'
+          ? 'AND OverallScore >= 5.5 AND OverallScore < 7.5'
+          : gradeParam === 'RED'
+            ? 'AND OverallScore < 5.5'
+            : '';
+      const p = await getPool();
+      const result = await p.request().query(`
+        DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+        SELECT
+          CallId, AgentName, CallEndTime, CallSummary,
+          CAST(OverallScore      AS FLOAT) AS OverallScore,
+          CAST(ToneScore         AS FLOAT) AS ToneScore,         ToneReason,
+          CAST(ConfidenceScore   AS FLOAT) AS ConfidenceScore,   ConfidenceReason,
+          CAST(KnowledgeScore    AS FLOAT) AS KnowledgeScore,    KnowledgeReason,
+          CAST(FlowScore         AS FLOAT) AS FlowScore,         FlowReason,
+          CAST(SatisfactionScore AS FLOAT) AS SatisfactionScore, SatisfactionReason,
+          Strengths, Improvements, Recommendations
+        FROM n8n.dbo.SupportCallAnalysis
+        WHERE CAST(CallEndTime AS DATE) >= @start
+          ${agentFilter}
+          ${gradeFilter}
+        ORDER BY CallEndTime DESC
+        OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+      `);
+      res.json({ ok: true, data: result.recordset });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
