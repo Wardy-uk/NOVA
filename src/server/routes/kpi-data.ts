@@ -69,11 +69,14 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
     const r = p.request();
     r.input('email', sql.NVarChar, user.email.toLowerCase());
     const result = await r.query(`
-      SELECT TOP 1 LTRIM(RTRIM(AgentName)) AS AgentName
+      SELECT TOP 1
+        LTRIM(RTRIM(AgentName)) + ' ' + LTRIM(RTRIM(AgentSurname)) AS FullName,
+        LTRIM(RTRIM(AgentName)) AS FirstName
       FROM dbo.Agent
       WHERE LOWER(LTRIM(RTRIM(AgentKey))) = @email
     `);
-    const agentName = result.recordset[0]?.AgentName ?? null;
+    const row = result.recordset[0];
+    const agentName = row ? (row.FullName?.trim() || row.FirstName?.trim() || null) : null;
     ssoLogger.log('agent_scope', `Resolved agent scope`, { userId: req.user.id, email: user.email, agentName: agentName ?? '(no match — showing all)' });
     return agentName;
   }
