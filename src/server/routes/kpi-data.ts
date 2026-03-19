@@ -229,7 +229,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
           (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'RED')   AS red,
           (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND isConcerning = 1)     AS concerning
       `);
-      res.json({ ok: true, data: result.recordset[0] ?? {}, env });
+      const jiraBaseUrl = settingsQueries.getAll().jira_url ?? null;
+      res.json({ ok: true, data: { ...(result.recordset[0] ?? {}), jiraBaseUrl }, env });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }

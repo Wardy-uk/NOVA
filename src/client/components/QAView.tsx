@@ -12,6 +12,7 @@ interface QASummary {
   amber: number;
   red: number;
   concerning: number;
+  jiraBaseUrl?: string | null;
 }
 
 interface QAResult {
@@ -172,7 +173,7 @@ function GradeBar({ green = 0, amber = 0, red = 0 }: { green?: number; amber?: n
 /*  Result row (expandable)                                            */
 /* ------------------------------------------------------------------ */
 
-function ResultRow({ r }: { r: QAResult }) {
+function ResultRow({ r, jiraBaseUrl }: { r: QAResult; jiraBaseUrl?: string | null }) {
   const [open, setOpen] = useState(false);
   const colour = gradeColour(r.grade);
   const bg = gradeBg(r.grade);
@@ -193,7 +194,12 @@ function ResultRow({ r }: { r: QAResult }) {
             {r.grade}
           </span>
         </td>
-        <td style={{ padding: '0.55rem 0.75rem', fontFamily: 'monospace', color: C.blue, fontSize: '0.85rem' }}>{r.issueKey}</td>
+        <td style={{ padding: '0.55rem 0.75rem', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+          {jiraBaseUrl
+            ? <a href={`${jiraBaseUrl}/browse/${r.issueKey}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ color: C.blue, textDecoration: 'none' }}>{r.issueKey}</a>
+            : <span style={{ color: C.blue }}>{r.issueKey}</span>
+          }
+        </td>
         <td style={{ padding: '0.55rem 0.75rem', color: C.text1, fontSize: '0.875rem' }}>{r.assigneeName}</td>
         <td style={{ padding: '0.55rem 0.75rem', fontWeight: 700, color: scoreColour(r.overallScore) }}>{Number(r.overallScore).toFixed(1)}</td>
         <td style={{ padding: '0.55rem 0.75rem', color: C.text2, fontSize: '0.85rem' }}>{r.category ?? '—'}</td>
@@ -377,7 +383,7 @@ export function QAView() {
 
       {/* Section tabs */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}`, marginBottom: '1.25rem' }}>
-        {([['overview', 'Overview'], ['results', 'Results'], ['agents', 'Agents'], ['goldenRules', 'Golden Rules']] as [Section, string][]).map(([s, label]) => (
+        {([['overview', 'Overview'], ['agents', 'Agents'], ['results', 'QA Results'], ['goldenRules', 'Golden Rules']] as [Section, string][]).map(([s, label]) => (
           <button key={s} style={tabBtn(section === s)} onClick={() => setSection(s)}>{label}</button>
         ))}
       </div>
@@ -467,7 +473,7 @@ export function QAView() {
                 </thead>
                 <tbody>
                   {results.length
-                    ? results.map(r => <ResultRow key={r.issueKey} r={r} />)
+                    ? results.map(r => <ResultRow key={r.issueKey} r={r} jiraBaseUrl={summary?.jiraBaseUrl} />)
                     : <tr><td colSpan={8} style={{ padding: '2rem', textAlign: 'center', color: C.text3, fontSize: '0.875rem' }}>No results</td></tr>
                   }
                 </tbody>
@@ -621,7 +627,12 @@ export function QAView() {
                         return (
                           <>
                             <tr key={key} onClick={() => setGrExpanded(expanded ? null : key)} style={{ cursor: 'pointer', borderBottom: `1px solid ${C.border}` }}>
-                              <td style={{ padding: '0.55rem 0.75rem', fontFamily: 'monospace', color: C.blue, fontSize: '0.85rem' }}>{r.IssueKey}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                                {summary?.jiraBaseUrl
+                                  ? <a href={`${summary.jiraBaseUrl}/browse/${r.IssueKey}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ color: C.blue, textDecoration: 'none' }}>{r.IssueKey}</a>
+                                  : <span style={{ color: C.blue }}>{r.IssueKey}</span>
+                                }
+                              </td>
                               <td style={{ padding: '0.55rem 0.75rem', color: C.text1 }}>{r.Updater ?? r.Assignee ?? '—'}</td>
                               <td style={{ padding: '0.55rem 0.75rem', fontWeight: 700, color: Number(r.OverallScore) >= 2.5 ? C.green : Number(r.OverallScore) >= 1.5 ? C.amber : C.red }}>{r.OverallScore}/3</td>
                               <td style={{ padding: '0.55rem 0.75rem', color: ruleColour(r.rule1Pass) }}>{r.rule1Pass ? '✓' : '✗'} {r.Rule1Score}</td>
