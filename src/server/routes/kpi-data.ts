@@ -4,6 +4,7 @@ import sql from 'mssql';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { FileUserQueries } from '../db/user-store.js';
 import { isAdmin } from '../utils/role-helpers.js';
+import { ssoLogger } from '../services/sso-logger.js';
 
 const VALID_ENVS = ['live', 'uat'] as const;
 type Env = (typeof VALID_ENVS)[number];
@@ -60,7 +61,10 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
   async function resolveAgentScope(req: any): Promise<string | null> {
     if (!req.user || isAdmin(req.user.role)) return null;
     const user = userQueries.getById(req.user.id);
-    if (!user?.email) return null;
+    if (!user?.email) {
+      ssoLogger.warn('agent_scope', `No email on user — cannot scope QA`, { userId: req.user.id, username: req.user.username });
+      return null;
+    }
     const p = await getPool();
     const r = p.request();
     r.input('email', sql.NVarChar, user.email.toLowerCase());
@@ -69,7 +73,9 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       FROM dbo.Agent
       WHERE LOWER(LTRIM(RTRIM(AgentKey))) = @email
     `);
-    return result.recordset[0]?.AgentName ?? null;
+    const agentName = result.recordset[0]?.AgentName ?? null;
+    ssoLogger.log('agent_scope', `Resolved agent scope`, { userId: req.user.id, email: user.email, agentName: agentName ?? '(no match — showing all)' });
+    return agentName;
   }
 
   // GET /api/admin/kpi-data/team-snapshot?env=live|uat
