@@ -499,7 +499,7 @@ export function createAuthRoutes(
   // GET /api/auth/permissions — public, returns custom roles + caller's resolved area access
   router.get('/permissions', (req, res) => {
     const roles = getCustomRoles(settingsQueries);
-    console.log('[permissions] custom roles loaded:', JSON.stringify(roles.map(r => ({ id: r.id, name: r.name, areas: r.areas }))));
+    ssoLogger.log('permissions', 'Custom roles loaded', { roles: roles.map(r => ({ id: r.id, name: r.name, areas: r.areas })) });
 
     // If caller is authenticated, resolve their access using the CURRENT role from DB
     // (not the token role, which may be stale after an admin role change)
@@ -508,17 +508,21 @@ export function createAuthRoutes(
     if (authHeader?.startsWith('Bearer ')) {
       try {
         const payload = jwt.verify(authHeader.slice(7), jwtSecret) as { id: number; role: string };
-        console.log('[permissions] token: id=%s role=%s', payload.id, payload.role);
+        ssoLogger.log('permissions', 'Token decoded', { id: payload.id, tokenRole: payload.role });
         const currentUser = userQueries.getById(payload.id);
-        console.log('[permissions] db user:', currentUser ? `id=${currentUser.id} username=${currentUser.username} role=${currentUser.role}` : 'NOT FOUND');
+        if (currentUser) {
+          ssoLogger.log('permissions', 'DB user found', { id: currentUser.id, username: currentUser.username, dbRole: currentUser.role });
+        } else {
+          ssoLogger.error('permissions', 'DB user NOT FOUND', { id: payload.id });
+        }
         const currentRole = currentUser?.role ?? payload.role;
         areaAccess = resolveAreaAccess(currentRole, roles);
-        console.log('[permissions] resolved areaAccess for role=%s:', currentRole, JSON.stringify(areaAccess));
+        ssoLogger.log('permissions', `areaAccess resolved for role: ${currentRole}`, { areaAccess });
       } catch (err) {
-        console.log('[permissions] token verify error:', err instanceof Error ? err.message : err);
+        ssoLogger.error('permissions', `Token verify failed: ${err instanceof Error ? err.message : err}`);
       }
     } else {
-      console.log('[permissions] no Bearer token present');
+      ssoLogger.warn('permissions', 'No Bearer token in request');
     }
 
     res.json({ ok: true, data: { roles, areaAccess } });
