@@ -45,9 +45,11 @@ const ACCESS_LEVELS: Record<string, number> = { hidden: 0, view: 1, edit: 2 };
 /**
  * Factory that creates area-aware access guard middleware.
  * Admin users always pass. Other users checked against their custom role's area access.
+ * Pass an array of area IDs to allow access if the user has the required level in ANY of them.
  */
 export function createAreaAccessGuard(getRoles: () => CustomRole[]) {
-  return function requireAreaAccess(area: string, level: 'view' | 'edit') {
+  return function requireAreaAccess(area: string | string[], level: 'view' | 'edit') {
+    const areas = Array.isArray(area) ? area : [area];
     return (req: Request, res: Response, next: NextFunction): void => {
       if (!req.user) {
         res.status(401).json({ ok: false, error: 'Not authenticated' });
@@ -65,14 +67,17 @@ export function createAreaAccessGuard(getRoles: () => CustomRole[]) {
         res.status(403).json({ ok: false, error: 'Unknown role' });
         return;
       }
-      // Merge: take highest access across all assigned roles
-      let bestAccess = 0;
-      for (const role of matched) {
-        bestAccess = Math.max(bestAccess, ACCESS_LEVELS[role.areas[area] || 'hidden'] ?? 0);
-      }
-      if (bestAccess >= (ACCESS_LEVELS[level] ?? 999)) {
-        next();
-        return;
+      // Pass if the user meets the required level in ANY of the specified areas
+      const required = ACCESS_LEVELS[level] ?? 999;
+      for (const a of areas) {
+        let bestAccess = 0;
+        for (const role of matched) {
+          bestAccess = Math.max(bestAccess, ACCESS_LEVELS[role.areas[a] || 'hidden'] ?? 0);
+        }
+        if (bestAccess >= required) {
+          next();
+          return;
+        }
       }
       res.status(403).json({ ok: false, error: 'Insufficient permissions for this area' });
     };
