@@ -385,6 +385,7 @@ export function QAView() {
       {/* Overview */}
       {section === 'overview' && (
         <>
+          <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Full QA</div>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
             <StatCard label="Full QA'd"  value={summary?.fullQA ?? null} />
             <StatCard label="Avg Score"  value={summary ? Number(summary.avgScore).toFixed(1) : null} colour={summary ? scoreColour(Number(summary.avgScore)) : undefined} />
@@ -393,11 +394,19 @@ export function QAView() {
             <StatCard label="Excluded"   value={summary?.excluded ?? null} colour={C.text3} />
           </div>
           {summary && (
-            <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: '1rem 1.25rem' }}>
+            <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text2, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>Grade Distribution</div>
               <GradeBar green={summary.green} amber={summary.amber} red={summary.red} />
             </div>
           )}
+          <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Golden Rules</div>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+            <StatCard label="Comments QA'd" value={grSummary?.total ?? null} colour={C.teal} />
+            <StatCard label="Avg Score" value={grSummary?.avgScore != null ? Number(grSummary.avgScore).toFixed(1) : null} colour={grSummary?.avgScore != null ? (Number(grSummary.avgScore) >= 2.5 ? C.green : Number(grSummary.avgScore) >= 1.5 ? C.amber : C.red) : undefined} />
+            <StatCard label="R1 Pass %" value={grSummary?.total ? `${Math.round((grSummary.rule1Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
+            <StatCard label="R2 Pass %" value={grSummary?.total ? `${Math.round((grSummary.rule2Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
+            <StatCard label="R3 Pass %" value={grSummary?.total ? `${Math.round((grSummary.rule3Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
+          </div>
         </>
       )}
 
