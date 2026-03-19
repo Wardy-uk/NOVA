@@ -410,8 +410,14 @@ export function createAuthRoutes(
         ssoLogger.log('user_resolved', `Matched existing user by OID`, { userId: user.id, username: user.username });
         // Update role from group mapping on each login (if mapping is active)
         if (resolvedRole) {
-          userQueries.update(user.id, { role: resolvedRole });
+          // Preserve any manually-assigned roles that aren't managed by SSO group mappings
+          const ssoManagedRoles = new Set(groupMappings.map(m => m.novaRole));
+          const existingRoles = parseRoles(user.role);
+          const manualRoles = existingRoles.filter(r => !ssoManagedRoles.has(r) && r !== 'admin');
+          const mergedRole = [...new Set([...parseRoles(resolvedRole), ...manualRoles])].join(',');
+          userQueries.update(user.id, { role: mergedRole });
           user = userQueries.getById(user.id);
+          ssoLogger.log('user_resolved', `Role merged (SSO + manual)`, { resolvedRole, manualRoles, mergedRole });
         }
       }
 
@@ -420,13 +426,20 @@ export function createAuthRoutes(
         const existing = userQueries.getByEmail(claims.email);
         if (existing) {
           ssoLogger.log('user_linked', `Linking existing local account by email`, { userId: existing.id, username: existing.username, email: claims.email });
-          // Link existing account to Entra, update role from group mapping
+          // Link existing account to Entra, update role from group mapping (preserve manual roles)
+          let linkedRole: string | undefined;
+          if (resolvedRole) {
+            const ssoManagedRoles = new Set(groupMappings.map(m => m.novaRole));
+            const existingRoles = parseRoles(existing.role);
+            const manualRoles = existingRoles.filter(r => !ssoManagedRoles.has(r) && r !== 'admin');
+            linkedRole = [...new Set([...parseRoles(resolvedRole), ...manualRoles])].join(',');
+          }
           userQueries.update(existing.id, {
             auth_provider: 'entra',
             provider_id: claims.oid,
             email: claims.email,
             display_name: claims.name || existing.display_name,
-            ...(resolvedRole ? { role: resolvedRole } : {}),
+            ...(linkedRole ? { role: linkedRole } : {}),
           });
           user = userQueries.getById(existing.id);
         } else {
