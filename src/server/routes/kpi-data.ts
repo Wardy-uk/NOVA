@@ -294,7 +294,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries): Router {
         FROM dbo.jira_qa_results${s} q
         WHERE CAST(q.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
           AND q.qaType = 'ticket_full'
-          AND q.issueKey LIKE 'NT-%'
+          AND q.assigneeName IS NOT NULL AND q.assigneeName <> ''
         GROUP BY q.assigneeName
         ORDER BY avgScore ASC
       `);
