@@ -35,9 +35,15 @@ export function SsoLogPanel() {
   const [filterLevel, setFilterLevel] = useState<string>('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
+  // /api/auth/* is excluded from the global fetch interceptor, so we add the token manually
+  function authHeaders(): HeadersInit {
+    const token = localStorage.getItem('nova_auth_token') ?? sessionStorage.getItem('nova_auth_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
   const fetchLogs = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/sso/logs');
+      const res = await fetch('/api/auth/sso/logs', { headers: authHeaders() });
       const json = await res.json();
       if (json.ok) setEntries(json.data);
     } catch { /* ignore */ }
@@ -54,7 +60,7 @@ export function SsoLogPanel() {
 
   const clearLogs = async () => {
     try {
-      await fetch('/api/auth/sso/logs', { method: 'DELETE' });
+      await fetch('/api/auth/sso/logs', { method: 'DELETE', headers: authHeaders() });
       setEntries([]);
     } catch { /* ignore */ }
   };
