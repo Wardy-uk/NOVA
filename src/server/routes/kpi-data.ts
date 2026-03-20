@@ -92,18 +92,27 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const s = suffix(env);
       const p = await getPool();
       // Fallback targets for KPIs where n8n writes 0/null as the target
+      // Keys are lowercase for case-insensitive matching
       const TARGET_FALLBACKS: Record<string, { target: number; direction: string }> = {
-        'FRT Compliance % (Open Queue)': { target: 95, direction: 'higher is better' },
-        'FRT Compliance % (Resolved Today)': { target: 95, direction: 'higher is better' },
-        'Resolution Compliance % (Open Queue)': { target: 95, direction: 'higher is better' },
-        'Resolution Compliance % (Resolved Today)': { target: 95, direction: 'higher is better' },
-        'CC Incidents over SLA (actionable)': { target: 0, direction: 'lower is better' },
-        'CC Service Requests over SLA (actionable)': { target: 0, direction: 'lower is better' },
-        'CC TPJ over SLA (actionable)': { target: 0, direction: 'lower is better' },
-        'Production over SLA (actionable)': { target: 0, direction: 'lower is better' },
-        'Tier 2 over SLA (actionable)': { target: 0, direction: 'lower is better' },
-        'Development over SLA (actionable)': { target: 0, direction: 'lower is better' },
+        'frt compliance % (open queue)': { target: 95, direction: 'higher is better' },
+        'frt compliance % (resolved today)': { target: 95, direction: 'higher is better' },
+        'resolution compliance % (open queue)': { target: 95, direction: 'higher is better' },
+        'resolution compliance % (resolved today)': { target: 95, direction: 'higher is better' },
+        'cc incidents over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'cc service requests over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'cc tpj over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'cc (tpj) over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'production over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'tier 2 over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'tier 3 over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'development over sla (actionable)': { target: 0, direction: 'lower is better' },
       };
+      // Also match any KPI containing these patterns (catch name variants)
+      const PATTERN_FALLBACKS: { pattern: RegExp; target: number; direction: string }[] = [
+        { pattern: /frt compliance/i, target: 95, direction: 'higher is better' },
+        { pattern: /resolution compliance/i, target: 95, direction: 'higher is better' },
+        { pattern: /over sla \(actionable\)/i, target: 0, direction: 'lower is better' },
+      ];
       const result = await p.request().query(`
         SELECT KPI, KPIGroup, [Count], KPITarget, KPIDirection, RAG, CreatedAt
         FROM (
@@ -114,10 +123,18 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       `);
       // Apply target fallbacks where KPITarget is 0 or null
       for (const row of result.recordset) {
-        const fb = TARGET_FALLBACKS[row.KPI];
-        if (fb && (!row.KPITarget || row.KPITarget === 0)) {
+        if (row.KPITarget && row.KPITarget !== 0) continue;
+        const fb = TARGET_FALLBACKS[row.KPI.toLowerCase().trim()];
+        if (fb) {
           row.KPITarget = fb.target;
           if (!row.KPIDirection) row.KPIDirection = fb.direction;
+        } else {
+          // Try pattern matching as fallback
+          const pf = PATTERN_FALLBACKS.find(p => p.pattern.test(row.KPI));
+          if (pf) {
+            row.KPITarget = pf.target;
+            if (!row.KPIDirection) row.KPIDirection = pf.direction;
+          }
         }
       }
       res.json({ ok: true, data: result.recordset, env });
@@ -192,7 +209,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
                  CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(3,2)) AS QAAvgScore,
                  COUNT(*) AS QACount
           FROM dbo.jira_qa_results${s}
-          WHERE CAST(processedAt AS DATE) >= DATEADD(DAY, -30, CAST(GETUTCDATE() AS DATE))
+          WHERE CAST(CreatedAt AS DATE) >= DATEADD(DAY, -30, CAST(GETUTCDATE() AS DATE))
             AND qaType = 'ticket_full'
           GROUP BY assigneeName
         ) qa ON qa.assigneeName = LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(a.AgentSurname))
@@ -289,13 +306,13 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const result = await p.request().query(`
         DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
         SELECT
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' ${agentFilter}) AS fullQA,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'excluded' ${agentFilter})   AS excluded,
-          ISNULL((SELECT CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(4,2)) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' ${agentFilter}), 0) AS avgScore,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'GREEN' ${agentFilter}) AS green,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'AMBER' ${agentFilter}) AS amber,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'RED' ${agentFilter})   AS red,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(processedAt AS DATE) >= @start AND isConcerning = 1 ${agentFilter})     AS concerning
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'ticket_full' ${agentFilter}) AS fullQA,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'excluded' ${agentFilter})   AS excluded,
+          ISNULL((SELECT CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(4,2)) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'ticket_full' ${agentFilter}), 0) AS avgScore,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'GREEN' ${agentFilter}) AS green,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'AMBER' ${agentFilter}) AS amber,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'RED' ${agentFilter})   AS red,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND isConcerning = 1 ${agentFilter})     AS concerning
       `);
       const jiraBaseUrl = settingsQueries.getAll().jira_url ?? null;
       res.json({ ok: true, data: { ...(result.recordset[0] ?? {}), jiraBaseUrl }, env });
@@ -333,12 +350,12 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
                r.category, r.issues, r.coachingPoints, r.suggestedReply, r.customerSentiment,
                CAST(r.isConcerning AS INT) AS isConcerning,
                r.ticketType, r.ticketPriority,
-               CONVERT(VARCHAR(23), r.processedAt, 126) AS processedAt
+               CONVERT(VARCHAR(23), r.CreatedAt, 126) AS processedAt
         FROM dbo.jira_qa_results${s} r
-        WHERE CAST(r.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
+        WHERE CAST(r.CreatedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
           AND r.qaType = 'ticket_full'
           ${gradeFilter} ${agentFilter} ${concerningFilter}
-        ORDER BY r.processedAt DESC
+        ORDER BY r.CreatedAt DESC
         OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
       `);
       res.json({ ok: true, data: result.recordset, page, limit, env });
