@@ -1,15 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 
 type Env = 'live' | 'uat';
-type Tab = 'team-snapshot' | 'agent-daily' | 'agents' | 'daily-history' | 'qa-scores' | 'digest';
+type Tab = 'team-snapshot' | 'agent-daily' | 'agents' | 'daily-history';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'team-snapshot', label: 'Team KPIs' },
   { id: 'agent-daily', label: 'Agent KPIs' },
   { id: 'agents', label: 'Agents' },
   { id: 'daily-history', label: 'Daily History' },
-  { id: 'qa-scores', label: 'QA Scores' },
-  { id: 'digest', label: 'AI Digest' },
 ];
 
 function ragBadge(rag: number | string | null) {
@@ -254,7 +252,7 @@ function DigestTable({ data }: { data: any[] }) {
 }
 
 export function KpiDataView() {
-  const [env, setEnv] = useState<Env>('uat');
+  const [env, setEnv] = useState<Env>('live');
   const [tab, setTab] = useState<Tab>('team-snapshot');
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -266,7 +264,7 @@ export function KpiDataView() {
     setError(null);
     try {
       const params = new URLSearchParams({ env });
-      if (['daily-history', 'agent-daily', 'qa-scores', 'digest'].includes(tab)) {
+      if (['daily-history', 'agent-daily'].includes(tab)) {
         params.set('days', String(days));
       }
       const res = await fetch(`/api/kpi-data/${tab}?${params}`);
@@ -287,7 +285,7 @@ export function KpiDataView() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const needsDays = ['daily-history', 'agent-daily', 'qa-scores', 'digest'].includes(tab);
+  const needsDays = ['daily-history', 'agent-daily'].includes(tab);
 
   return (
     <div className="space-y-4">
@@ -377,8 +375,6 @@ export function KpiDataView() {
             {tab === 'agent-daily' && <AgentDailyTable data={data} />}
             {tab === 'agents' && <AgentsTable data={data} />}
             {tab === 'daily-history' && <DailyHistoryTable data={data} />}
-            {tab === 'qa-scores' && <QaScoresTable data={data} />}
-            {tab === 'digest' && <DigestTable data={data} />}
           </>
         )}
       </div>

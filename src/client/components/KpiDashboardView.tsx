@@ -912,8 +912,8 @@ export function KpiDashboardView() {
           if (d.ok && d.data?.length > 0) {
             type DigestEntry = { period: string; summary: string; html: string | null; CreatedAt: string };
             const all = d.data as DigestEntry[];
-            setWeeklyDigests(all.filter((e: DigestEntry) => e.period === 'Weekly').slice(0, 4));
-            setDailyDigests(all.filter((e: DigestEntry) => e.period === 'Daily').slice(0, 28));
+            setWeeklyDigests(all.filter((e: DigestEntry) => e.period?.toLowerCase() === 'weekly').slice(0, 4));
+            setDailyDigests(all.filter((e: DigestEntry) => e.period?.toLowerCase() === 'daily').slice(0, 28));
           }
         } catch { /* ignore */ }
       }
@@ -1388,40 +1388,56 @@ export function KpiDashboardView() {
                   <p style={{ fontSize: 13, color: C.text2, lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>{current.summary}</p>
                 )}
               </div>
-              {/* Previous entries — click to expand */}
+              {/* Previous entries — horizontal scrollable carousel */}
               {previous.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <span style={{ fontSize: 11, fontWeight: 600, color: C.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                     Previous {digestMode === 'weekly' ? 'Weeks' : 'Days'}
                   </span>
-                  {previous.map((entry, i) => {
-                    const isOpen = expandedDigest === i;
-                    return (
-                      <div key={i} style={{
-                        background: C.glass, border: `1px solid ${C.border}`, borderRadius: 10,
-                        overflow: 'hidden', cursor: 'pointer', transition: 'border-color 0.2s',
-                      }} onClick={() => setExpandedDigest(isOpen ? null : i)}>
-                        <div style={{
-                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                          padding: '12px 20px',
-                        }}>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: C.text2 }}>
-                            {fmtTime(entry.CreatedAt)}
-                          </span>
-                          <span style={{ fontSize: 10, color: C.text3, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
-                        </div>
-                        {isOpen && (
-                          <div style={{ padding: '0 20px 16px' }}>
-                            {entry.html ? (
-                              <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: entry.html }} />
-                            ) : (
-                              <p style={{ fontSize: 13, color: C.text2, lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>{entry.summary}</p>
-                            )}
+                  <div style={{
+                    display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8,
+                    scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch',
+                  }}>
+                    {previous.map((entry, i) => {
+                      const isOpen = expandedDigest === i;
+                      return (
+                        <div key={i} style={{
+                          flex: '0 0 260px', scrollSnapAlign: 'start',
+                          background: C.glass,
+                          border: `1px solid ${isOpen ? `${C.teal}66` : C.border}`,
+                          borderRadius: 10, cursor: 'pointer', transition: 'border-color 0.2s',
+                          display: 'flex', flexDirection: 'column',
+                          maxHeight: isOpen ? 400 : 80, overflow: 'hidden',
+                        }} onClick={() => setExpandedDigest(isOpen ? null : i)}>
+                          <div style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            padding: '12px 16px', flexShrink: 0,
+                          }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: C.text2 }}>
+                              {fmtTime(entry.CreatedAt)}
+                            </span>
+                            <span style={{ fontSize: 10, color: C.text3, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                          {!isOpen && (
+                            <div style={{ padding: '0 16px 10px', overflow: 'hidden' }}>
+                              <p style={{ fontSize: 11, color: C.text3, lineHeight: 1.4, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as React.CSSProperties}>
+                                {entry.summary?.slice(0, 120) || 'No summary'}
+                              </p>
+                            </div>
+                          )}
+                          {isOpen && (
+                            <div style={{ padding: '0 16px 14px', overflowY: 'auto', flex: 1 }}>
+                              {entry.html ? (
+                                <div style={{ fontSize: 12, color: C.text2, lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: entry.html }} />
+                              ) : (
+                                <p style={{ fontSize: 12, color: C.text2, lineHeight: 1.5, margin: 0, whiteSpace: 'pre-wrap' }}>{entry.summary}</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
