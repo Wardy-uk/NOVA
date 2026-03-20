@@ -140,10 +140,9 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-dashboard', label: 'Dashboard' },
       { view: 'kpi-leaderboard', label: 'Leaderboard' },
       { view: 'kpi-data', label: 'KPI Data' },
-      { view: 'kpi-compare', label: 'Live vs UAT' },
       { view: 'kpi-daily-history', label: 'Daily History' },
-      { view: 'kpi-breached', label: 'Breached' },
-      { view: 'kpi-team-breached', label: 'Team KPIs' },
+      { view: 'kpi-breached', label: 'Agent Breaches' },
+      { view: 'kpi-team-breached', label: 'Team Breaches' },
     ],
   },
   qa: {

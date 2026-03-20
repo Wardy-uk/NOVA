@@ -753,11 +753,7 @@ export function KpiLeaderboardView() {
       </div>
 
       {/* ---- Agent Name Filter ---- */}
-      <div style={{
-        marginBottom: 16,
-        animation: 'kpiLbFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.07s forwards',
-        opacity: 0,
-      }}>
+      <div style={{ marginBottom: 16 }}>
         <input
           type="text"
           placeholder="Filter by agent name..."
