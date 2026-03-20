@@ -38,6 +38,7 @@ import { ReleaseNotesModal } from './components/ReleaseNotesModal.js';
 import { TourOverlay, useTour } from './components/TourOverlay.js';
 import { SetupPortal } from './components/SetupPortal.js';
 import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
+import { TrendsView } from './components/TrendsView.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -47,13 +48,13 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'kpis' | 'qa' | 'wallboards';
+type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'kpis' | 'trends' | 'qa' | 'wallboards';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm'
   | 'sales-hotbox'
-  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'qa'
+  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'qa'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
@@ -73,7 +74,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', kpis: 'hidden', qa: 'hidden', wallboards: 'view', admin: 'hidden',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', admin: 'hidden',
 };
 
 // Map certain command sub-tabs to their own permission area
@@ -145,6 +146,13 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-team-breached', label: 'Team Breaches' },
     ],
   },
+  trends: {
+    label: 'Trends',
+    defaultView: 'kpi-trends',
+    tabs: [
+      { view: 'kpi-trends', label: 'Trends' },
+    ],
+  },
   qa: {
     label: 'QA',
     defaultView: 'qa',
@@ -164,7 +172,7 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'kpis', 'qa', 'wallboards'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'kpis', 'trends', 'qa', 'wallboards'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
@@ -176,7 +184,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -895,6 +903,9 @@ export function App() {
           )}
           {view === 'kpi-breached' && (
             <KpiBreachedView />
+          )}
+          {view === 'kpi-trends' && (
+            <TrendsView />
           )}
           {view === 'qa' && (
             <QAView />
