@@ -40,6 +40,8 @@ interface Agent {
   SolvedTickets_Today: number;
   SolvedTickets_ThisWeek: number;
   TicketsSnapshotAt: string;
+  QAAvgScore: number | null;
+  QACount: number | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -652,7 +654,7 @@ function AgentLeaderboard({ data }: { data: Agent[] }) {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              {['Rank', 'Agent', 'Team', 'Tier', 'Solved Today', 'Solved Week', 'Open', '>2h Overdue', 'Stale'].map(h => (
+              {['Rank', 'Agent', 'Team', 'Tier', 'Solved Today', 'Solved Week', 'Open', '>2h Overdue', 'Stale', 'QA'].map(h => (
                 <th key={h} style={{
                   padding: '12px 16px',
                   textAlign: h === 'Agent' || h === 'Team' || h === 'Tier' ? 'left' : 'center',
@@ -794,6 +796,23 @@ function AgentLeaderboard({ data }: { data: Agent[] }) {
                       {agent.OpenTickets_NoUpdateToday}
                     </span>
                   </td>
+
+                  {/* QA Score */}
+                  <td style={{
+                    padding: '10px 16px', textAlign: 'center',
+                    borderBottom: `1px solid ${C.border}`,
+                  }}>
+                    {agent.QAAvgScore != null ? (
+                      <span style={{
+                        fontSize: 13, fontWeight: 700,
+                        color: agent.QAAvgScore >= 2.5 ? C.green : agent.QAAvgScore >= 1.5 ? C.amber : C.red,
+                      }}>
+                        {Number(agent.QAAvgScore).toFixed(1)}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 12, color: C.text3 }}>—</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -811,6 +830,8 @@ function AgentLeaderboard({ data }: { data: Agent[] }) {
 export function KpiDashboardView() {
   const [snapshots, setSnapshots] = useState<KpiSnapshot[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [qaSummary, setQaSummary] = useState<{ avgScore: number; green: number; amber: number; red: number; fullQA: number } | null>(null);
+  const [digest, setDigest] = useState<{ period: string; summary: string; html: string | null; CreatedAt: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -820,9 +841,11 @@ export function KpiDashboardView() {
   const fetchAll = useCallback(async () => {
     setError(null);
     try {
-      const [snapRes, agentRes] = await Promise.all([
+      const [snapRes, agentRes, qaRes, digestRes] = await Promise.all([
         fetch(`/api/kpi-data/team-snapshot?env=${env}`),
         fetch(`/api/kpi-data/agents?env=${env}`),
+        fetch(`/api/kpi-data/qa-summary?env=${env}&days=7`).catch(() => null),
+        fetch(`/api/kpi-data/digest?env=${env}&days=7`).catch(() => null),
       ]);
       const snapData = await snapRes.json();
       const agentData = await agentRes.json();
@@ -830,6 +853,14 @@ export function KpiDashboardView() {
       if (!agentData.ok) throw new Error(agentData.error || 'Failed to load agents');
       setSnapshots(snapData.data || []);
       setAgents(agentData.data || []);
+      // QA summary (non-critical)
+      if (qaRes) {
+        try { const d = await qaRes.json(); if (d.ok) setQaSummary(d.data); } catch { /* ignore */ }
+      }
+      // Digest (non-critical)
+      if (digestRes) {
+        try { const d = await digestRes.json(); if (d.ok && d.data?.length > 0) setDigest(d.data[0]); } catch { /* ignore */ }
+      }
       setLastRefresh(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -1021,14 +1052,268 @@ export function KpiDashboardView() {
         <KpiSummarySection data={snapshots} />
       </div>
 
-      {/* ---- Section 2: Agent Leaderboard ---- */}
+      {/* ---- Section 2: SLA Compliance by Tier (Gap 3) ---- */}
+      {(() => {
+        // Extract FRT/Resolution compliance KPIs per tier from snapshot data
+        const tiers: { tier: string; frt: KpiSnapshot | null; resolution: KpiSnapshot | null }[] = [];
+        const tierPatterns = [
+          { tier: 'CC Incidents', frtMatch: 'frt compliance % (cc incidents)', resMatch: 'resolution compliance % (cc incidents)' },
+          { tier: 'CC Service Requests', frtMatch: 'frt compliance % (cc service requests)', resMatch: 'resolution compliance % (cc service requests)' },
+          { tier: 'CC (TPJ)', frtMatch: 'frt compliance % (cc (tpj))', resMatch: 'resolution compliance % (cc (tpj))' },
+          { tier: 'CC TPJ', frtMatch: 'frt compliance % (cc tpj)', resMatch: 'resolution compliance % (cc tpj)' },
+          { tier: 'Production', frtMatch: 'frt compliance % (production)', resMatch: 'resolution compliance % (production)' },
+          { tier: 'Tier 2', frtMatch: 'frt compliance % (tier 2)', resMatch: 'resolution compliance % (tier 2)' },
+          { tier: 'Tier 3', frtMatch: 'frt compliance % (tier 3)', resMatch: 'resolution compliance % (tier 3)' },
+          { tier: 'Development', frtMatch: 'frt compliance % (development)', resMatch: 'resolution compliance % (development)' },
+        ];
+        // Also try generic patterns (Open Queue / Resolved Today)
+        const genericPatterns = [
+          { tier: 'Open Queue', frtMatch: 'frt compliance % (open queue)', resMatch: 'resolution compliance % (open queue)' },
+          { tier: 'Resolved Today', frtMatch: 'frt compliance % (resolved today)', resMatch: 'resolution compliance % (resolved today)' },
+        ];
+        const allPatterns = [...tierPatterns, ...genericPatterns];
+        for (const p of allPatterns) {
+          const frt = snapshots.find(s => s.KPI.toLowerCase() === p.frtMatch) || null;
+          const resolution = snapshots.find(s => s.KPI.toLowerCase() === p.resMatch) || null;
+          if (frt || resolution) tiers.push({ tier: p.tier, frt, resolution });
+        }
+
+        if (tiers.length === 0) return null;
+
+        return (
+          <div style={{
+            marginBottom: 40,
+            animation: 'kpiFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.05s both',
+          }}>
+            <SectionHeader title="SLA Compliance by Tier" subtitle="FRT & Resolution compliance across tiers" />
+            <div style={{
+              background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+              overflow: 'hidden',
+            }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {['Tier', 'FRT %', 'FRT RAG', 'Resolution %', 'Resolution RAG'].map(h => (
+                      <th key={h} style={{
+                        padding: '12px 16px',
+                        textAlign: h === 'Tier' ? 'left' : 'center',
+                        fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                        letterSpacing: '0.5px', color: C.text3,
+                        background: C.bg1, borderBottom: `1px solid ${C.border}`,
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tiers.map(({ tier, frt, resolution }) => (
+                    <tr key={tier}>
+                      <td style={{
+                        padding: '10px 16px', fontSize: 13, fontWeight: 600, color: C.text1,
+                        borderBottom: `1px solid ${C.border}`,
+                      }}>{tier}</td>
+                      <td style={{
+                        padding: '10px 16px', textAlign: 'center', fontSize: 14, fontWeight: 700,
+                        color: frt ? C.text1 : C.text3, borderBottom: `1px solid ${C.border}`,
+                      }}>{frt ? `${fmtNum(frt.Count)}%` : '—'}</td>
+                      <td style={{
+                        padding: '10px 16px', textAlign: 'center', borderBottom: `1px solid ${C.border}`,
+                      }}>
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, color: ragColor(frt?.RAG ?? null),
+                          padding: '2px 8px', borderRadius: 10, background: ragBg(frt?.RAG ?? null),
+                        }}>{frt ? ragLabel(frt.RAG) : '—'}</span>
+                      </td>
+                      <td style={{
+                        padding: '10px 16px', textAlign: 'center', fontSize: 14, fontWeight: 700,
+                        color: resolution ? C.text1 : C.text3, borderBottom: `1px solid ${C.border}`,
+                      }}>{resolution ? `${fmtNum(resolution.Count)}%` : '—'}</td>
+                      <td style={{
+                        padding: '10px 16px', textAlign: 'center', borderBottom: `1px solid ${C.border}`,
+                      }}>
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, color: ragColor(resolution?.RAG ?? null),
+                          padding: '2px 8px', borderRadius: 10, background: ragBg(resolution?.RAG ?? null),
+                        }}>{resolution ? ragLabel(resolution.RAG) : '—'}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ---- Section 3: QA Summary (Gap 4) ---- */}
+      {qaSummary && (
+        <div style={{
+          marginBottom: 40,
+          animation: 'kpiFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.1s both',
+        }}>
+          <SectionHeader title="QA Summary" subtitle="Last 7 days ticket quality" />
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12,
+          }}>
+            {/* Average Score */}
+            <div style={{
+              background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+              padding: '16px 20px', borderLeft: `3px solid ${
+                qaSummary.avgScore >= 2.4 ? C.green : qaSummary.avgScore >= 1.8 ? C.amber : C.red
+              }`,
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginBottom: 8 }}>Avg Score</div>
+              <div style={{
+                fontSize: 28, fontWeight: 800,
+                color: qaSummary.avgScore >= 2.4 ? C.green : qaSummary.avgScore >= 1.8 ? C.amber : C.red,
+              }}>{qaSummary.avgScore.toFixed(2)}</div>
+              <div style={{ fontSize: 10, color: C.text3, marginTop: 4 }}>/ 3.00</div>
+            </div>
+            {/* Green % */}
+            {(() => {
+              const total = qaSummary.green + qaSummary.amber + qaSummary.red;
+              const greenPct = total > 0 ? ((qaSummary.green / total) * 100).toFixed(0) : '0';
+              const amberPct = total > 0 ? ((qaSummary.amber / total) * 100).toFixed(0) : '0';
+              const redPct = total > 0 ? ((qaSummary.red / total) * 100).toFixed(0) : '0';
+              return (
+                <>
+                  <div style={{
+                    background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+                    padding: '16px 20px', borderLeft: `3px solid ${C.green}`,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginBottom: 8 }}>Green</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: C.green }}>{greenPct}%</div>
+                    <div style={{ fontSize: 10, color: C.text3, marginTop: 4 }}>{qaSummary.green} tickets</div>
+                  </div>
+                  <div style={{
+                    background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+                    padding: '16px 20px', borderLeft: `3px solid ${C.amber}`,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginBottom: 8 }}>Amber</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: C.amber }}>{amberPct}%</div>
+                    <div style={{ fontSize: 10, color: C.text3, marginTop: 4 }}>{qaSummary.amber} tickets</div>
+                  </div>
+                  <div style={{
+                    background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+                    padding: '16px 20px', borderLeft: `3px solid ${C.red}`,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginBottom: 8 }}>Red</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: C.red }}>{redPct}%</div>
+                    <div style={{ fontSize: 10, color: C.text3, marginTop: 4 }}>{qaSummary.red} tickets</div>
+                  </div>
+                </>
+              );
+            })()}
+            {/* Total Scored */}
+            <div style={{
+              background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+              padding: '16px 20px', borderLeft: `3px solid ${C.teal}`,
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginBottom: 8 }}>Total Scored</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: C.teal }}>{qaSummary.fullQA}</div>
+              <div style={{ fontSize: 10, color: C.text3, marginTop: 4 }}>last 7 days</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---- Section 4: CSAT & FCR Placeholders (Gaps 6 & 7) ---- */}
+      {(() => {
+        const csatKpi = snapshots.find(s => s.KPI.toLowerCase().includes('csat'));
+        const fcrKpi = snapshots.find(s => s.KPI.toLowerCase().includes('fcr'));
+        const showPlaceholders = !csatKpi || !fcrKpi;
+        if (!showPlaceholders) return null;
+        return (
+          <div style={{
+            marginBottom: 40,
+            animation: 'kpiFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.12s both',
+          }}>
+            <SectionHeader title="Coming Soon" subtitle="Metrics in pipeline" />
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12,
+            }}>
+              {csatKpi ? (
+                <KpiCard kpi={csatKpi} />
+              ) : (
+                <div style={{
+                  background: C.glass, border: `1px dashed ${C.border}`, borderRadius: 12,
+                  padding: '20px 24px', opacity: 0.6,
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.text3, marginBottom: 8 }}>CSAT</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: C.text2, marginBottom: 4 }}>Not yet configured</div>
+                  <div style={{ fontSize: 11, color: C.text3 }}>
+                    Customer satisfaction scores will appear here once the data pipeline is active.
+                  </div>
+                </div>
+              )}
+              {fcrKpi ? (
+                <KpiCard kpi={fcrKpi} />
+              ) : (
+                <div style={{
+                  background: C.glass, border: `1px dashed ${C.border}`, borderRadius: 12,
+                  padding: '20px 24px', opacity: 0.6,
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.text3, marginBottom: 8 }}>FCR Rate</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: C.text2, marginBottom: 4 }}>Pipeline not yet configured</div>
+                  <div style={{ fontSize: 11, color: C.text3 }}>
+                    First Contact Resolution rate will appear here once the n8n workflow is active.
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ---- Section 5: Agent Leaderboard ---- */}
       {agents.length > 0 && (
         <div style={{
+          marginBottom: 40,
           animation: 'kpiFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.15s both',
         }}>
           <AgentLeaderboard data={agents} />
         </div>
       )}
+
+      {/* ---- Section 6: Weekly Digest (Gap 5) ---- */}
+      <div style={{
+        marginBottom: 40,
+        animation: 'kpiFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.2s both',
+      }}>
+        <SectionHeader title="Weekly Digest" subtitle="AI-generated performance summary" />
+        {digest ? (
+          <div style={{
+            background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+            padding: '20px 24px',
+          }}>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: C.teal }}>{digest.period}</span>
+              <span style={{ fontSize: 10, color: C.text3 }}>{fmtTime(digest.CreatedAt)}</span>
+            </div>
+            {digest.html ? (
+              <div
+                style={{ fontSize: 13, color: C.text2, lineHeight: 1.6 }}
+                dangerouslySetInnerHTML={{ __html: digest.html }}
+              />
+            ) : (
+              <p style={{ fontSize: 13, color: C.text2, lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
+                {digest.summary}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div style={{
+            background: C.glass, border: `1px dashed ${C.border}`, borderRadius: 12,
+            padding: '20px 24px', opacity: 0.6, textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 13, color: C.text3 }}>No digest available yet</div>
+            <div style={{ fontSize: 11, color: C.text3, marginTop: 4 }}>
+              AI-generated summaries will appear here once the weekly digest workflow runs.
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -6,6 +6,10 @@ import type { FileUserQueries } from '../db/user-store.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import { ssoLogger } from '../services/sso-logger.js';
 
+// Expected future KPI names in dbo.KpiSnapshot (will render automatically once data flows):
+// - "CSAT" or "Customer Satisfaction" — CSAT score, direction: higher is better
+// - "FCR Rate" or "First Contact Resolution" — FCR %, direction: higher is better, target: 15% improvement
+
 const VALID_ENVS = ['live', 'uat'] as const;
 type Env = (typeof VALID_ENVS)[number];
 
@@ -87,6 +91,19 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const env = parseEnv(req);
       const s = suffix(env);
       const p = await getPool();
+      // Fallback targets for KPIs where n8n writes 0/null as the target
+      const TARGET_FALLBACKS: Record<string, { target: number; direction: string }> = {
+        'FRT Compliance % (Open Queue)': { target: 95, direction: 'higher is better' },
+        'FRT Compliance % (Resolved Today)': { target: 95, direction: 'higher is better' },
+        'Resolution Compliance % (Open Queue)': { target: 95, direction: 'higher is better' },
+        'Resolution Compliance % (Resolved Today)': { target: 95, direction: 'higher is better' },
+        'CC Incidents over SLA (actionable)': { target: 0, direction: 'lower is better' },
+        'CC Service Requests over SLA (actionable)': { target: 0, direction: 'lower is better' },
+        'CC TPJ over SLA (actionable)': { target: 0, direction: 'lower is better' },
+        'Production over SLA (actionable)': { target: 0, direction: 'lower is better' },
+        'Tier 2 over SLA (actionable)': { target: 0, direction: 'lower is better' },
+        'Development over SLA (actionable)': { target: 0, direction: 'lower is better' },
+      };
       const result = await p.request().query(`
         SELECT KPI, KPIGroup, [Count], KPITarget, KPIDirection, RAG, CreatedAt
         FROM (
@@ -95,6 +112,14 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         ) t WHERE rn = 1
         ORDER BY KPIGroup, KPI
       `);
+      // Apply target fallbacks where KPITarget is 0 or null
+      for (const row of result.recordset) {
+        const fb = TARGET_FALLBACKS[row.KPI];
+        if (fb && (!row.KPITarget || row.KPITarget === 0)) {
+          row.KPITarget = fb.target;
+          if (!row.KPIDirection) row.KPIDirection = fb.direction;
+        }
+      }
       res.json({ ok: true, data: result.recordset, env });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
@@ -144,25 +169,35 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const hasOldest = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'OldestTicketDays'`);
       const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
       const hasOldestKey = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'OldestTicketKey'`);
-      const oldestKeyCol = hasOldestKey.recordset.length > 0 ? ', OldestTicketKey' : '';
       // Check both Agent and AgentUAT for Department column
       const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
       const hasDeptLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDept;
-      const deptCol = hasDept.recordset.length > 0 ? ', Department' : '';
-      const deptFilter = hasDept.recordset.length > 0
-        ? "AND Department = 'NT'"
+      const oldestKeySelect = hasOldestKey.recordset.length > 0 ? ', a.OldestTicketKey' : '';
+      const deptSelect = hasDept.recordset.length > 0 ? ', a.Department' : '';
+      const deptWhere = hasDept.recordset.length > 0
+        ? "AND a.Department = 'NT'"
         : hasDeptLive.recordset.length > 0 && s
-          ? `AND AgentName IN (SELECT AgentName FROM dbo.Agent WHERE Department = 'NT')`
+          ? `AND a.AgentName IN (SELECT AgentName FROM dbo.Agent WHERE Department = 'NT')`
           : '';
       const result = await p.request().query(`
-        SELECT AgentId, AgentKey, AgentName, AgentSurname, TierCode, Team,
-               IsActive, IsAvailable, AccountId,
-               OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
-               ${oldestCol} AS OldestTicketDays${oldestKeyCol},
-               SolvedTickets_Today, SolvedTickets_ThisWeek, TicketsSnapshotAt${deptCol}
-        FROM dbo.Agent${s}
-        WHERE IsActive = 1 ${deptFilter}
-        ORDER BY Team, AgentName
+        SELECT a.AgentId, a.AgentKey, a.AgentName, a.AgentSurname, a.TierCode, a.Team,
+               a.IsActive, a.IsAvailable, a.AccountId,
+               a.OpenTickets_Total, a.OpenTickets_Over2Hours, a.OpenTickets_NoUpdateToday,
+               ${oldestCol} AS OldestTicketDays${oldestKeySelect},
+               a.SolvedTickets_Today, a.SolvedTickets_ThisWeek, a.TicketsSnapshotAt${deptSelect},
+               qa.QAAvgScore, qa.QACount
+        FROM dbo.Agent${s} a
+        LEFT JOIN (
+          SELECT assigneeName,
+                 CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(3,2)) AS QAAvgScore,
+                 COUNT(*) AS QACount
+          FROM dbo.jira_qa_results${s}
+          WHERE CAST(processedAt AS DATE) >= DATEADD(DAY, -30, CAST(GETUTCDATE() AS DATE))
+            AND qaType = 'ticket_full'
+          GROUP BY assigneeName
+        ) qa ON qa.assigneeName = LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(a.AgentSurname))
+        WHERE a.IsActive = 1 ${deptWhere}
+        ORDER BY a.Team, a.AgentName
       `);
       res.json({ ok: true, data: result.recordset, env });
     } catch (err) {
