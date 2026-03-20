@@ -350,24 +350,26 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const s = suffix(env);
       const days = Math.min(parseInt(req.query.days as string) || 7, 365);
       const agentName = await resolveAgentScope(req);
-      const agentFilter = agentName ? `AND ISNULL(g.Updater, '') = '${agentName.replace(/'/g, "''")}'` : '';
+      const agentFilter = agentName ? `AND ISNULL(Updater, '') = '${agentName.replace(/'/g, "''")}'` : '';
       const p = await getPool();
+      // Debug: log sample Updater values to compare with resolved agentName
+      if (agentName) {
+        const sample = await p.request().query(`SELECT DISTINCT TOP 10 Updater FROM dbo.Jira_QA_GoldenRules${s} WHERE Updater IS NOT NULL ORDER BY Updater`);
+        ssoLogger.log('agent_scope', `Golden rules Updater samples vs resolved name`, { agentName, sampleUpdaters: sample.recordset.map((r: any) => r.Updater) });
+      }
       const result = await p.request().query(`
         DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
         SELECT
           COUNT(*) AS total,
-          SUM(CAST(g.rule1Pass AS INT)) AS rule1Pass,
-          SUM(CAST(g.rule2Pass AS INT)) AS rule2Pass,
-          SUM(CAST(g.rule3Pass AS INT)) AS rule3Pass,
-          CAST(AVG(CAST(g.OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore,
-          CAST(AVG(CAST(g.Rule1Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule1,
-          CAST(AVG(CAST(g.Rule2Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule2,
-          CAST(AVG(CAST(g.Rule3Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule3
-        FROM dbo.Jira_QA_GoldenRules${s} g
-        INNER JOIN dbo.Agent ag
-          ON LTRIM(RTRIM(ag.AgentName)) + ' ' + LTRIM(RTRIM(ag.AgentSurname)) = g.Updater
-          AND ag.IsActive = 1
-        WHERE CAST(g.processedAt AS DATE) >= @start
+          SUM(CAST(rule1Pass AS INT)) AS rule1Pass,
+          SUM(CAST(rule2Pass AS INT)) AS rule2Pass,
+          SUM(CAST(rule3Pass AS INT)) AS rule3Pass,
+          CAST(AVG(CAST(OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore,
+          CAST(AVG(CAST(Rule1Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule1,
+          CAST(AVG(CAST(Rule2Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule2,
+          CAST(AVG(CAST(Rule3Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule3
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE CAST(processedAt AS DATE) >= @start
           ${agentFilter}
       `);
       res.json({ ok: true, data: result.recordset[0] ?? {}, env });
@@ -395,18 +397,15 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const agentFilter = agent ? `AND ISNULL(Updater, '') = '${agent}'` : '';
       const p = await getPool();
       const result = await p.request().query(`
-        SELECT g.IssueKey, g.CommentId, g.OverallScore, g.Rule1Score, g.Rule2Score, g.Rule3Score,
-               g.rule1Pass, g.rule2Pass, g.rule3Pass,
-               g.Summary, g.SuggestedRewrite, g.Assignee, g.Updater,
-               g.ticketPriority, g.ticketType,
-               CONVERT(VARCHAR(23), g.processedAt, 126) AS processedAt
-        FROM dbo.Jira_QA_GoldenRules${s} g
-        INNER JOIN dbo.Agent ag
-          ON LTRIM(RTRIM(ag.AgentName)) + ' ' + LTRIM(RTRIM(ag.AgentSurname)) = g.Updater
-          AND ag.IsActive = 1
-        WHERE CAST(g.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
+        SELECT IssueKey, CommentId, OverallScore, Rule1Score, Rule2Score, Rule3Score,
+               rule1Pass, rule2Pass, rule3Pass,
+               Summary, SuggestedRewrite, Assignee, Updater,
+               ticketPriority, ticketType,
+               CONVERT(VARCHAR(23), processedAt, 126) AS processedAt
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE CAST(processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
           ${agentFilter} ${passFilter}
-        ORDER BY g.processedAt DESC
+        ORDER BY processedAt DESC
         OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
       `);
       res.json({ ok: true, data: result.recordset, page, limit, env });
@@ -432,11 +431,9 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
                SUM(CAST(g.rule3Pass AS INT)) AS rule3Pass,
                CAST(AVG(CAST(g.OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore
         FROM dbo.Jira_QA_GoldenRules${s} g
-        INNER JOIN dbo.Agent ag
-          ON LTRIM(RTRIM(ag.AgentName)) + ' ' + LTRIM(RTRIM(ag.AgentSurname)) = g.Updater
-          AND ag.IsActive = 1
         WHERE CAST(g.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
           AND g.Updater IS NOT NULL AND g.Updater <> ''
+          AND g.IssueKey LIKE 'NT-%'
           ${agentFilter}
         GROUP BY g.Updater
         ORDER BY avgScore ASC
