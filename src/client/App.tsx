@@ -223,7 +223,10 @@ function getViewFromHash(): View | null {
     ...Object.values(AREAS).flatMap(a => a.tabs.map(t => t.view)),
     ...STANDALONE_VIEWS,
   ]);
-  return allViews.has(hash) ? (hash as View) : null;
+  // Allow area names as hash aliases (e.g. #trends → kpi-trends)
+  const HASH_ALIASES: Record<string, View> = { trends: 'kpi-trends' };
+  const resolved = HASH_ALIASES[hash] || hash;
+  return allViews.has(resolved) ? (resolved as View) : null;
 }
 
 export function App() {
@@ -556,6 +559,8 @@ export function App() {
   // My NOVA (command) is always visible — it's the core area
   const canSeeArea = (area: Area): boolean => {
     if (area === 'command' || area === 'wallboards') return true;
+    // Trends piggybacks on KPIs access (no separate role needed)
+    if (area === 'trends') return (areaAccess['kpis'] || 'hidden') !== 'hidden';
     return (areaAccess[area] || 'hidden') !== 'hidden';
   };
 
