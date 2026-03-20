@@ -233,10 +233,10 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       let deptJoin: string;
       let deptWhere: string;
       if (hasDept.recordset.length > 0) {
-        deptJoin = `INNER JOIN dbo.Agent${s} a ON a.AgentName = d.AgentName`;
+        deptJoin = `INNER JOIN dbo.Agent${s} a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
         deptWhere = "AND a.Department = 'NT'";
       } else if (hasDeptLive.recordset.length > 0) {
-        deptJoin = `INNER JOIN dbo.Agent a ON a.AgentName = d.AgentName`;
+        deptJoin = `INNER JOIN dbo.Agent a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
         deptWhere = "AND a.Department = 'NT'";
       } else {
         deptJoin = '';
