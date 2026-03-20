@@ -407,20 +407,20 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       // Detect which columns exist — live table may have different schema
       const cols = await p.request().query(`SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRules${s}')`);
       const colSet = new Set(cols.recordset.map((r: any) => r.name.toLowerCase()));
-      const hasRule3 = colSet.has('rule3pass');
-      const hasProcessedAt = colSet.has('processedat');
+      const has = (c: string) => colSet.has(c.toLowerCase());
+      const hasProcessedAt = has('processedAt');
       const dateCol = hasProcessedAt ? 'processedAt' : 'CreatedAt';
       const result = await p.request().query(`
         DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
         SELECT
           COUNT(*) AS total,
-          SUM(CAST(rule1Pass AS INT)) AS rule1Pass,
-          SUM(CAST(rule2Pass AS INT)) AS rule2Pass,
-          ${hasRule3 ? 'SUM(CAST(rule3Pass AS INT))' : '0'} AS rule3Pass,
+          ${has('rule1Pass') ? 'SUM(CAST(rule1Pass AS INT))' : '0'} AS rule1Pass,
+          ${has('rule2Pass') ? 'SUM(CAST(rule2Pass AS INT))' : '0'} AS rule2Pass,
+          ${has('rule3Pass') ? 'SUM(CAST(rule3Pass AS INT))' : '0'} AS rule3Pass,
           CAST(AVG(CAST(OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore,
-          CAST(AVG(CAST(Rule1Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule1,
-          CAST(AVG(CAST(Rule2Score AS FLOAT)) AS DECIMAL(4,2)) AS avgRule2,
-          ${colSet.has('rule3score') ? 'CAST(AVG(CAST(Rule3Score AS FLOAT)) AS DECIMAL(4,2))' : '0'} AS avgRule3
+          ${has('Rule1Score') ? 'CAST(AVG(CAST(Rule1Score AS FLOAT)) AS DECIMAL(4,2))' : '0'} AS avgRule1,
+          ${has('Rule2Score') ? 'CAST(AVG(CAST(Rule2Score AS FLOAT)) AS DECIMAL(4,2))' : '0'} AS avgRule2,
+          ${has('Rule3Score') ? 'CAST(AVG(CAST(Rule3Score AS FLOAT)) AS DECIMAL(4,2))' : '0'} AS avgRule3
         FROM dbo.Jira_QA_GoldenRules${s}
         WHERE CAST(${dateCol} AS DATE) >= @start
           ${agentFilter}
@@ -446,21 +446,29 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const agent = scopedAgent ?? safeStr(req.query.agent);
       const agentFilter = agent ? `AND ISNULL(Updater, '') = '${agent}'` : '';
       const p = await getPool();
-      // Detect columns
+      // Detect columns — live table may differ from UAT
       const cols = await p.request().query(`SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRules${s}')`);
       const colSet = new Set(cols.recordset.map((r: any) => r.name.toLowerCase()));
-      const hasRule3 = colSet.has('rule3pass');
-      const hasProcessedAt = colSet.has('processedat');
+      const has = (c: string) => colSet.has(c.toLowerCase());
+      const hasProcessedAt = has('processedAt');
       const dateCol = hasProcessedAt ? 'processedAt' : 'CreatedAt';
-      const passFilter = req.query.pass === '0' ? `AND (rule1Pass = 0 OR rule2Pass = 0${hasRule3 ? ' OR rule3Pass = 0' : ''})`
-                       : req.query.pass === '1' ? `AND rule1Pass = 1 AND rule2Pass = 1${hasRule3 ? ' AND rule3Pass = 1' : ''}`
+      // Build pass filter only for columns that exist
+      const passFailParts: string[] = [];
+      const passAllParts: string[] = [];
+      for (const rc of ['rule1Pass', 'rule2Pass', 'rule3Pass']) {
+        if (has(rc)) { passFailParts.push(`${rc} = 0`); passAllParts.push(`${rc} = 1`); }
+      }
+      const passFilter = req.query.pass === '0' && passFailParts.length ? `AND (${passFailParts.join(' OR ')})`
+                       : req.query.pass === '1' && passAllParts.length ? `AND ${passAllParts.join(' AND ')}`
                        : '';
+      // Build SELECT columns dynamically
+      const selCols = ['IssueKey', 'CommentId', 'OverallScore'];
+      for (const c of ['Rule1Score', 'Rule2Score', 'Rule3Score', 'rule1Pass', 'rule2Pass', 'rule3Pass',
+                        'Summary', 'SuggestedRewrite', 'Assignee', 'Updater', 'ticketPriority', 'ticketType']) {
+        if (has(c)) selCols.push(c);
+      }
       const result = await p.request().query(`
-        SELECT IssueKey, CommentId, OverallScore, Rule1Score, Rule2Score,
-               ${colSet.has('rule3score') ? 'Rule3Score,' : ''}
-               rule1Pass, rule2Pass, ${hasRule3 ? 'rule3Pass,' : ''}
-               Summary, SuggestedRewrite, Assignee, Updater,
-               ${colSet.has('ticketpriority') ? 'ticketPriority,' : ''} ${colSet.has('tickettype') ? 'ticketType,' : ''}
+        SELECT ${selCols.join(', ')},
                CONVERT(VARCHAR(23), ${dateCol}, 126) AS processedAt
         FROM dbo.Jira_QA_GoldenRules${s}
         WHERE CAST(${dateCol} AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
@@ -483,18 +491,18 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const agentName = await resolveAgentScope(req);
       const agentFilter = agentName ? `AND ISNULL(g.Updater, '') = '${agentName.replace(/'/g, "''")}'` : '';
       const p = await getPool();
-      // Detect columns
+      // Detect columns — live table may differ from UAT
       const cols = await p.request().query(`SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRules${s}')`);
       const colSet = new Set(cols.recordset.map((r: any) => r.name.toLowerCase()));
-      const hasRule3 = colSet.has('rule3pass');
-      const hasProcessedAt = colSet.has('processedat');
+      const has = (c: string) => colSet.has(c.toLowerCase());
+      const hasProcessedAt = has('processedAt');
       const dateCol = hasProcessedAt ? 'g.processedAt' : 'g.CreatedAt';
       const result = await p.request().query(`
         SELECT g.Updater AS agentName,
                COUNT(*) AS total,
-               SUM(CAST(g.rule1Pass AS INT)) AS rule1Pass,
-               SUM(CAST(g.rule2Pass AS INT)) AS rule2Pass,
-               ${hasRule3 ? 'SUM(CAST(g.rule3Pass AS INT))' : '0'} AS rule3Pass,
+               ${has('rule1Pass') ? 'SUM(CAST(g.rule1Pass AS INT))' : '0'} AS rule1Pass,
+               ${has('rule2Pass') ? 'SUM(CAST(g.rule2Pass AS INT))' : '0'} AS rule2Pass,
+               ${has('rule3Pass') ? 'SUM(CAST(g.rule3Pass AS INT))' : '0'} AS rule3Pass,
                CAST(AVG(CAST(g.OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore
         FROM dbo.Jira_QA_GoldenRules${s} g
         WHERE CAST(${dateCol} AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))

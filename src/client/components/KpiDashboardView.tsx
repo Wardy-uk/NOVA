@@ -876,7 +876,10 @@ export function KpiDashboardView() {
   const [snapshots, setSnapshots] = useState<KpiSnapshot[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [qaSummary, setQaSummary] = useState<{ avgScore: number; green: number; amber: number; red: number; fullQA: number } | null>(null);
-  const [digests, setDigests] = useState<{ period: string; summary: string; html: string | null; CreatedAt: string }[]>([]);
+  const [weeklyDigests, setWeeklyDigests] = useState<{ period: string; summary: string; html: string | null; CreatedAt: string }[]>([]);
+  const [dailyDigests, setDailyDigests] = useState<{ period: string; summary: string; html: string | null; CreatedAt: string }[]>([]);
+  const [digestMode, setDigestMode] = useState<'weekly' | 'daily'>('weekly');
+  const [expandedDigest, setExpandedDigest] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -902,14 +905,15 @@ export function KpiDashboardView() {
       if (qaRes) {
         try { const d = await qaRes.json(); if (d.ok) setQaSummary(d.data); } catch { /* ignore */ }
       }
-      // Digest (non-critical) — filter for Weekly entries, take last 4
+      // Digest (non-critical) — keep both Weekly (4) and Daily (28)
       if (digestRes) {
         try {
           const d = await digestRes.json();
           if (d.ok && d.data?.length > 0) {
-            const weekly = (d.data as { period: string; summary: string; html: string | null; CreatedAt: string }[])
-              .filter((e: { period: string }) => e.period === 'Weekly');
-            setDigests(weekly.slice(0, 4));
+            type DigestEntry = { period: string; summary: string; html: string | null; CreatedAt: string };
+            const all = d.data as DigestEntry[];
+            setWeeklyDigests(all.filter((e: DigestEntry) => e.period === 'Weekly').slice(0, 4));
+            setDailyDigests(all.filter((e: DigestEntry) => e.period === 'Daily').slice(0, 28));
           }
         } catch { /* ignore */ }
       }
@@ -1326,49 +1330,103 @@ export function KpiDashboardView() {
         </div>
       )}
 
-      {/* ---- Section 6: Weekly Performance Digest (Gap 5) ---- */}
+      {/* ---- Section 6: Weekly Performance Digest (Gap 5 / Snag 14) ---- */}
       <div style={{
         marginBottom: 40,
         animation: 'kpiFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.2s both',
       }}>
-        <SectionHeader title="Weekly Performance Digest" subtitle="AI-generated narrative summaries" />
-        {digests.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {digests.map((entry, i) => (
-              <div key={i} style={{
-                background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <SectionHeader title="Weekly Performance Digest" subtitle="AI-generated narrative summaries" />
+          <button
+            onClick={() => { setDigestMode(digestMode === 'weekly' ? 'daily' : 'weekly'); setExpandedDigest(null); }}
+            style={{
+              background: C.glass, border: `1px solid ${C.border}`, borderRadius: 8,
+              padding: '6px 14px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              color: digestMode === 'daily' ? C.teal : C.text2, transition: 'all 0.2s',
+            }}
+          >
+            {digestMode === 'weekly' ? 'Show Daily' : 'Show Weekly'}
+          </button>
+        </div>
+        {(() => {
+          const entries = digestMode === 'weekly' ? weeklyDigests : dailyDigests;
+          if (entries.length === 0) return (
+            <div style={{
+              background: C.glass, border: `1px dashed ${C.border}`, borderRadius: 12,
+              padding: '20px 24px', opacity: 0.6, textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 13, color: C.text3 }}>
+                {digestMode === 'weekly' ? 'Weekly digest runs Friday at 17:30' : 'No daily digests available'}
+              </div>
+              {digestMode === 'weekly' && (
+                <div style={{ fontSize: 11, color: C.text3, marginTop: 4 }}>
+                  First one will appear after this Friday.
+                </div>
+              )}
+            </div>
+          );
+          // First entry = prominent / current
+          const [current, ...previous] = entries;
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Current / most recent — always expanded */}
+              <div style={{
+                background: C.glass, border: `1px solid ${C.teal}44`, borderRadius: 12,
                 padding: '20px 24px',
               }}>
                 <div style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
                 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: C.teal }}>Weekly Summary</span>
-                  <span style={{ fontSize: 10, color: C.text3 }}>{fmtTime(entry.CreatedAt)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.teal }}>
+                    {digestMode === 'weekly' ? 'This Week' : 'Latest Daily'} Summary
+                  </span>
+                  <span style={{ fontSize: 10, color: C.text3 }}>{fmtTime(current.CreatedAt)}</span>
                 </div>
-                {entry.html ? (
-                  <div
-                    style={{ fontSize: 13, color: C.text2, lineHeight: 1.6 }}
-                    dangerouslySetInnerHTML={{ __html: entry.html }}
-                  />
+                {current.html ? (
+                  <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: current.html }} />
                 ) : (
-                  <p style={{ fontSize: 13, color: C.text2, lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
-                    {entry.summary}
-                  </p>
+                  <p style={{ fontSize: 13, color: C.text2, lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>{current.summary}</p>
                 )}
               </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{
-            background: C.glass, border: `1px dashed ${C.border}`, borderRadius: 12,
-            padding: '20px 24px', opacity: 0.6, textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 13, color: C.text3 }}>Weekly digest runs Friday at 17:30</div>
-            <div style={{ fontSize: 11, color: C.text3, marginTop: 4 }}>
-              First one will appear after this Friday.
+              {/* Previous entries — click to expand */}
+              {previous.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: C.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Previous {digestMode === 'weekly' ? 'Weeks' : 'Days'}
+                  </span>
+                  {previous.map((entry, i) => {
+                    const isOpen = expandedDigest === i;
+                    return (
+                      <div key={i} style={{
+                        background: C.glass, border: `1px solid ${C.border}`, borderRadius: 10,
+                        overflow: 'hidden', cursor: 'pointer', transition: 'border-color 0.2s',
+                      }} onClick={() => setExpandedDigest(isOpen ? null : i)}>
+                        <div style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          padding: '12px 20px',
+                        }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: C.text2 }}>
+                            {fmtTime(entry.CreatedAt)}
+                          </span>
+                          <span style={{ fontSize: 10, color: C.text3, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
+                        </div>
+                        {isOpen && (
+                          <div style={{ padding: '0 20px 16px' }}>
+                            {entry.html ? (
+                              <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: entry.html }} />
+                            ) : (
+                              <p style={{ fontSize: 13, color: C.text2, lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>{entry.summary}</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
