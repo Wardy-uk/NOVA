@@ -37,6 +37,7 @@ import { FeedbackModal } from './components/FeedbackModal.js';
 import { ReleaseNotesModal } from './components/ReleaseNotesModal.js';
 import { TourOverlay, useTour } from './components/TourOverlay.js';
 import { SetupPortal } from './components/SetupPortal.js';
+import { QueueWallboard } from './components/QueueWallboard.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -911,11 +912,7 @@ export function App() {
             />
           )}
           {view === 'wb-cc' && (
-            <iframe
-              src="/wallboard/cc"
-              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
-              title="Customer Care"
-            />
+            <QueueWallboard title="Customer Care" />
           )}
           {view === 'wb-tech-support' && (
             <iframe
