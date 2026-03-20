@@ -4,7 +4,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { TaskAggregator, SdFilter, SyncContext } from '../services/aggregator.js';
 import { JiraRestClient } from '../services/jira-client.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
-import { evaluateAttention } from '../services/jira-sla.js';
+import { evaluateAttention, isOverdueUpdate, isResolutionSlaBreached, getSlaRemainingMs } from '../services/jira-sla.js';
 import { getAllowedSources } from '../utils/source-filter.js';
 
 /** Check if Jira is enabled for this user (per-user first, admin falls back to global). */
@@ -303,6 +303,224 @@ export function createTaskRoutes(
       });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Dashboard fetch failed' });
+    }
+  });
+
+  // GET /api/tasks/service-desk/wallboard/drill-down — ticket list for a wallboard tile
+  // Query: ?kpi=<KPI name> or ?agent=<Agent Name>
+  router.get('/service-desk/wallboard/drill-down', async (req, res) => {
+    try {
+      const kpi = (req.query.kpi as string | undefined)?.trim();
+      const agent = (req.query.agent as string | undefined)?.trim();
+
+      if (!kpi && !agent) {
+        res.status(400).json({ ok: false, error: 'Provide ?kpi= or ?agent= query param' });
+        return;
+      }
+
+      if (settingsQueries?.get('jira_ob_enabled') !== 'true') {
+        res.json({ ok: true, data: [], label: kpi || agent || '' });
+        return;
+      }
+
+      const tickets = await aggregator.fetchServiceDeskTickets('all');
+      const now = new Date();
+
+      // Helpers to extract fields from raw_data (matching n8n KPI engine logic)
+      function extractTier(t: { raw_data?: unknown }): string | null {
+        const rd = (t.raw_data && typeof t.raw_data === 'object') ? t.raw_data as Record<string, unknown> : null;
+        if (!rd) return null;
+        const raw = rd.customfield_12981;
+        const val = typeof raw === 'string' ? raw : (raw && typeof raw === 'object') ? (raw as any).value ?? (raw as any).name : null;
+        if (!val) return null;
+        const lower = val.toString().trim().toLowerCase();
+        if (lower === 'customer care') return 'Customer Care';
+        if (lower === 'production') return 'Production';
+        if (lower === 'tier 2') return 'Tier 2';
+        if (lower === 'tier 3') return 'Tier 3';
+        if (lower === 'development') return 'Development';
+        return val.toString().trim();
+      }
+
+      function extractRequestType(t: { raw_data?: unknown }): string {
+        const rd = (t.raw_data && typeof t.raw_data === 'object') ? t.raw_data as Record<string, unknown> : null;
+        if (!rd) return '';
+        // customfield_13482 is the request type field (from n8n KPI engine)
+        const v1 = rd.customfield_13482;
+        const rt1 = typeof v1 === 'string' ? v1 : (v1 && typeof v1 === 'object') ? ((v1 as any).value ?? (v1 as any).name ?? '') : '';
+        if (rt1) return rt1.toString().trim();
+        // Fallback: customfield_12800.requestType
+        const v2 = rd.customfield_12800 as Record<string, unknown> | undefined;
+        const rt2 = v2?.requestType as Record<string, unknown> | undefined;
+        return ((rt2?.name ?? rt2?.value ?? rt2?.displayName ?? '') as string).toString().trim();
+      }
+
+      function extractAssignee(t: { raw_data?: unknown }): string {
+        const rd = (t.raw_data && typeof t.raw_data === 'object') ? t.raw_data as Record<string, unknown> : null;
+        if (!rd) return 'Unassigned';
+        const fields = (rd.fields as Record<string, unknown>) ?? rd;
+        const a = fields.assignee as Record<string, unknown> | undefined;
+        return ((a?.displayName ?? a?.name ?? 'Unassigned') as string).toString();
+      }
+
+      // CC bucket logic matching n8n: request types → bucket
+      const CC_INCIDENTS = new Set(['Incident', 'Chat', 'AI Request', 'Emailed Request', 'GDPR']);
+      const CC_SERVICE_REQUESTS = new Set(['Service Request']);
+      const CC_TPJ = new Set(['TPJ Request']);
+
+      function ccBucket(rt: string): string | null {
+        if (CC_INCIDENTS.has(rt)) return 'CC (Incidents)';
+        if (CC_SERVICE_REQUESTS.has(rt)) return 'CC (Service Requests)';
+        if (CC_TPJ.has(rt)) return 'CC (TPJ)';
+        return null;
+      }
+
+      // SLA actionable status set (matching n8n)
+      const SLA_ACTIONABLE = new Set(['open', 'reopened', 'work in progress']);
+      const EXCLUDED_STATUSES = new Set(['done', 'closed', 'resolved', 'waiting on requestor', 'waiting on partner']);
+
+      function isActionableSla(status: string): boolean {
+        return SLA_ACTIONABLE.has(status.toLowerCase());
+      }
+
+      // KPI → filter mapping
+      // Returns a filter function for a given KPI name, or null if not drillable
+      type TicketWithMeta = { ticket: typeof tickets[0]; tier: string | null; rt: string; issue: Record<string, unknown>; status: string };
+
+      function buildFilter(kpiName: string): ((t: TicketWithMeta) => boolean) | null {
+        const kn = kpiName.trim();
+
+        // Volume KPIs: "Number of Tickets in <tier/bucket>"
+        const volMatch = kn.match(/^Number of Tickets in (.+)$/i);
+        if (volMatch) {
+          const target = volMatch[1].trim();
+          return (t) => {
+            if (t.tier === 'Customer Care') {
+              return ccBucket(t.rt) === target;
+            }
+            return t.tier === target;
+          };
+        }
+
+        // No Reply KPIs: "Number of Tickets With No Reply in <tier/bucket>"
+        const nrMatch = kn.match(/^Number of Tickets With No Reply in (.+)$/i);
+        if (nrMatch) {
+          const target = nrMatch[1].trim();
+          return (t) => {
+            const tierMatch = t.tier === 'Customer Care' ? ccBucket(t.rt) === target : t.tier === target;
+            return tierMatch && isOverdueUpdate(t.issue, now);
+          };
+        }
+
+        // SLA breached KPIs: "<name> over SLA (actionable)" or "<name> over SLA (not actionable)"
+        const slaMatch = kn.match(/^(.+) over SLA \((actionable|not actionable)\)$/i);
+        if (slaMatch) {
+          const name = slaMatch[1].trim();
+          const actionable = slaMatch[2].toLowerCase() === 'actionable';
+          return (t) => {
+            // Map KPI name prefix to tier + bucket
+            let tierMatch = false;
+            if (name === 'CC Incidents') tierMatch = t.tier === 'Customer Care' && CC_INCIDENTS.has(t.rt);
+            else if (name === 'CC Service Requests') tierMatch = t.tier === 'Customer Care' && CC_SERVICE_REQUESTS.has(t.rt);
+            else if (name === 'CC TPJ' || name === 'CC (TPJ)') tierMatch = t.tier === 'Customer Care' && CC_TPJ.has(t.rt);
+            else tierMatch = t.tier === name;
+
+            if (!tierMatch) return false;
+            if (!isResolutionSlaBreached(t.issue)) return false;
+            // Check actionable status
+            const statusLower = t.status.toLowerCase();
+            if (EXCLUDED_STATUSES.has(statusLower)) return false;
+            return actionable === isActionableSla(statusLower);
+          };
+        }
+
+        // FRT breached KPIs (similar pattern)
+        const frtMatch = kn.match(/^(.+) FRT breached \((actionable|not actionable)\)$/i);
+        if (frtMatch) {
+          // FRT uses customfield_14046 — not currently in NOVA's jira-sla.ts
+          // Return null for now — could be added later
+          return null;
+        }
+
+        // Oldest actionable ticket KPIs — not directly drillable to a list
+        if (kn.startsWith('Oldest actionable')) return null;
+
+        // Compliance % KPIs — not drillable
+        if (kn.includes('Compliance %')) return null;
+
+        // KPIs that are just counts (like "KPIs Green") — not drillable
+        if (kn.startsWith('KPIs ') || kn.startsWith('Total KPIs') || kn.includes('Red %')) return null;
+
+        return null;
+      }
+
+      // Agent drill-down: filter by assignee name
+      if (agent) {
+        const agentLower = agent.toLowerCase();
+        const matching = tickets.filter(t => {
+          const assignee = extractAssignee(t).toLowerCase();
+          return assignee.includes(agentLower) || agentLower.includes(assignee);
+        });
+
+        const result = matching.map(t => {
+          const issue = (t.raw_data ?? {}) as Record<string, unknown>;
+          const att = evaluateAttention(issue, now, t.priority ?? 50);
+          return {
+            key: t.source_id,
+            summary: t.title,
+            status: t.status,
+            priority: t.priority,
+            assignee: extractAssignee(t),
+            source_url: t.source_url,
+            urgency_score: att.urgencyScore,
+            sla_remaining_ms: getSlaRemainingMs(issue),
+            attention_reasons: att.reasons,
+            created: ((issue.fields as Record<string, unknown>)?.created ?? issue.created ?? null) as string | null,
+          };
+        }).sort((a, b) => b.urgency_score - a.urgency_score);
+
+        res.json({ ok: true, data: result, label: agent });
+        return;
+      }
+
+      // KPI drill-down
+      const filter = buildFilter(kpi!);
+      if (!filter) {
+        res.json({ ok: true, data: null, label: kpi, message: 'No ticket drill-down available for this KPI' });
+        return;
+      }
+
+      const enriched: TicketWithMeta[] = tickets.map(t => {
+        const issue = (t.raw_data ?? {}) as Record<string, unknown>;
+        return {
+          ticket: t,
+          tier: extractTier(t),
+          rt: extractRequestType(t),
+          issue,
+          status: t.status ?? 'unknown',
+        };
+      });
+
+      const matching = enriched.filter(filter);
+      const result = matching.map(({ ticket: t, issue }) => {
+        const att = evaluateAttention(issue, now, t.priority ?? 50);
+        return {
+          key: t.source_id,
+          summary: t.title,
+          status: t.status,
+          priority: t.priority,
+          assignee: extractAssignee(t),
+          source_url: t.source_url,
+          urgency_score: att.urgencyScore,
+          sla_remaining_ms: getSlaRemainingMs(issue),
+          attention_reasons: att.reasons,
+          created: ((issue.fields as Record<string, unknown>)?.created ?? issue.created ?? null) as string | null,
+        };
+      }).sort((a, b) => b.urgency_score - a.urgency_score);
+
+      res.json({ ok: true, data: result, label: kpi });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Drill-down fetch failed' });
     }
   });
 

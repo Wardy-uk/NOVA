@@ -598,7 +598,8 @@ async function main() {
         const name = a.AgentSurname ? `${a.AgentName} ${a.AgentSurname}` : a.AgentName;
         const hasIssues = a.OpenTickets_Over2Hours > 0 || (a.OldestTicketDays || 0) > 7;
         const tc = TEAM_COLORS[a.TierCode || a.Team] || '#64748b';
-        return `<tr${hasIssues ? ' style="background:rgba(239,68,68,.04)"' : ''}>
+        const escapedName = name.replace(/'/g, "\\'");
+        return `<tr style="cursor:pointer;${hasIssues ? 'background:rgba(239,68,68,.04)' : ''}" onclick="window.parent.postMessage({type:'wallboard-drill',agent:'${escapedName}',label:'${escapedName}'},'*')">
           <td><span style="font-weight:600;color:${hasIssues ? '#fca5a5' : '#e2e8f0'}">${name}</span></td>
           <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:${tc}22;color:${tc};border:1px solid ${tc}33">${a.TierCode || a.Team || '—'}</span></td>
           <td class="c" style="color:#94a3b8;font-weight:600">${a.OpenTickets_Total}</td>
@@ -628,7 +629,7 @@ async function main() {
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="30">
 <title>SLA Breach Board</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:8px 12px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:7px 12px;border-bottom:1px solid #2f353d;font-size:13px}td.c{text-align:center}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:8px 12px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:7px 12px;border-bottom:1px solid #2f353d;font-size:13px}td.c{text-align:center}tr[onclick]:hover{background:rgba(94,193,202,.08)!important}</style>
 </head><body><div class="wrap">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
   <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">SLA Breach Board</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Live ticket health per agent</div></div>
@@ -702,7 +703,8 @@ async function main() {
           : { bg: 'rgba(245,158,11,.12)', fg: '#f59e0b', bd: 'rgba(245,158,11,.25)' };
         const rowBg = isRed ? 'background:rgba(239,68,68,.04)' : '';
         const target = k.KPITarget !== null ? k.KPITarget : '—';
-        return `<tr${rowBg ? ` style="${rowBg}"` : ''}>
+        const escapedKpi = k.KPI.replace(/'/g, "\\'");
+        return `<tr style="cursor:pointer;${rowBg}" onclick="window.parent.postMessage({type:'wallboard-drill',kpi:'${escapedKpi}',label:'${escapedKpi}'},'*')">
           <td><span style="font-weight:600;color:${isRed ? '#fca5a5' : '#fde68a'}">${k.KPI}</span></td>
           <td class="c"><span style="display:inline-block;padding:3px 10px;border-radius:7px;font-size:12px;font-weight:700;min-width:40px;text-align:center;background:${ragColors.bg};color:${ragColors.fg};border:1px solid ${ragColors.bd}">${k.Count}</span></td>
           <td class="c" style="color:#94a3b8;font-weight:600">${target}</td>
@@ -718,7 +720,7 @@ async function main() {
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="30">
 <title>KPI Breach Board</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:8px 12px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:7px 12px;border-bottom:1px solid #2f353d;font-size:13px}td.c{text-align:center}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:8px 12px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:7px 12px;border-bottom:1px solid #2f353d;font-size:13px}td.c{text-align:center}tr[onclick]:hover{background:rgba(94,193,202,.08)!important}</style>
 </head><body><div class="wrap">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
   <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">KPI Breach Board</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Breached team KPIs from Jira</div></div>
@@ -792,7 +794,8 @@ async function main() {
       const data = lookup(p.kpi, p.altKpi);
       const color = ragColor(data.rag);
       const flashClass = data.rag === 3 ? ' flash-red' : '';
-      return `<div class="${flashClass}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;align-items:center">
+      const escaped = p.kpi.replace(/'/g, "\\'");
+      return `<div class="${flashClass}" data-kpi="${p.kpi}" onclick="window.parent.postMessage({type:'wallboard-drill',kpi:'${escaped}',label:'${p.label.replace(/'/g, "\\'")}'},'*')" style="cursor:pointer;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;align-items:center;transition:transform .1s">
         <div style="font-size:16px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:12px;letter-spacing:.3px">${p.label}</div>
         <div style="font-size:96px;font-weight:800;letter-spacing:-3px;line-height:1;color:${color}">${data.count}</div>
       </div>`;
@@ -802,7 +805,7 @@ async function main() {
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="30">
 <title>${title}</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}[data-kpi]:hover{transform:scale(1.02);filter:brightness(1.1)}</style>
 </head><body><div class="wrap">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
   <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">${title}</h1><div style="font-size:10px;color:#64748b;margin-top:1px">${subtitle}</div></div>

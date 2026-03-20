@@ -37,6 +37,7 @@ import { FeedbackModal } from './components/FeedbackModal.js';
 import { ReleaseNotesModal } from './components/ReleaseNotesModal.js';
 import { TourOverlay, useTour } from './components/TourOverlay.js';
 import { SetupPortal } from './components/SetupPortal.js';
+import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -269,6 +270,18 @@ export function App() {
   const [sdIssueTypeFilter, setSdIssueTypeFilter] = useState<string | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const standupChecked = useRef(false);
+
+  // Wallboard drill-down panel state (triggered by postMessage from wallboard iframes)
+  const [wbDrill, setWbDrill] = useState<{ kpi?: string; agent?: string; label: string } | null>(null);
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (!e.data || e.data.type !== 'wallboard-drill') return;
+      const { kpi, agent, label } = e.data;
+      if (kpi || agent) setWbDrill({ kpi, agent, label: label || kpi || agent });
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
 
   const currentArea = getArea(view);
   const areaDef = AREAS[currentArea];
@@ -990,6 +1003,14 @@ export function App() {
       {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
       {showReleaseNotes && <ReleaseNotesModal onClose={() => setShowReleaseNotes(false)} />}
       <TourOverlay show={showTour} onClose={closeTour} />
+      {wbDrill && (
+        <WallboardDrillPanel
+          kpi={wbDrill.kpi}
+          agent={wbDrill.agent}
+          label={wbDrill.label}
+          onClose={() => setWbDrill(null)}
+        />
+      )}
     </ErrorBoundary>
   );
 }
