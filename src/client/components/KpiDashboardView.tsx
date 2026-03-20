@@ -346,8 +346,20 @@ function KpiCard({ kpi }: { kpi: KpiSnapshot }) {
 /*  Section 1: KPI Summary Cards                                       */
 /* ------------------------------------------------------------------ */
 
+const GLOSSARY: { term: string; meaning: string }[] = [
+  { term: 'FRT', meaning: 'First Reply Time — time from ticket creation to first public agent reply' },
+  { term: 'FRT %', meaning: '% of tickets where the first reply was sent within the SLA target' },
+  { term: 'Resolution %', meaning: '% of tickets resolved within the resolution SLA target' },
+  { term: 'FCR', meaning: 'First Contact Resolution — ticket resolved without reopening or re-escalation' },
+  { term: 'CSAT', meaning: 'Customer Satisfaction — score collected from post-ticket survey' },
+  { term: 'RAG', meaning: 'Red / Amber / Green — traffic light status vs target' },
+  { term: 'Actionable', meaning: 'Tickets the team can act on now (not waiting on customer or third party)' },
+  { term: 'Not actionable', meaning: 'Tickets waiting on customer reply or third party — SLA paused' },
+];
+
 function KpiSummarySection({ data }: { data: KpiSnapshot[] }) {
   const [sortBy, setSortBy] = useState<'type' | 'breached'>('type');
+  const [showGlossary, setShowGlossary] = useState(false);
 
   // Summary counts
   const greenCount = data.filter(d => d.RAG === 1).length;
@@ -387,7 +399,20 @@ function KpiSummarySection({ data }: { data: KpiSnapshot[] }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <SectionHeader title="KPI Overview" subtitle={`${data.length} metrics tracked`} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <SectionHeader title="KPI Overview" subtitle={`${data.length} metrics tracked`} />
+          <button
+            onClick={() => setShowGlossary(!showGlossary)}
+            title="Glossary"
+            style={{
+              width: 22, height: 22, borderRadius: '50%', border: `1px solid ${C.border}`,
+              background: showGlossary ? `${C.teal}20` : C.glass, cursor: 'pointer',
+              fontSize: 12, fontWeight: 700, color: showGlossary ? C.teal : C.text3,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.2s', marginTop: -8,
+            }}
+          >?</button>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {/* Sort toggle */}
           <div style={{
@@ -430,6 +455,26 @@ function KpiSummarySection({ data }: { data: KpiSnapshot[] }) {
           </div>
         </div>
       </div>
+
+      {showGlossary && (
+        <div style={{
+          marginBottom: 20, padding: '14px 20px', borderRadius: 10,
+          background: `${C.teal}08`, border: `1px solid ${C.teal}25`,
+          animation: 'kpiFadeIn 0.2s ease',
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.teal, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Glossary
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '6px 24px' }}>
+            {GLOSSARY.map(g => (
+              <div key={g.term} style={{ display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.5 }}>
+                <span style={{ fontWeight: 700, color: C.text1, minWidth: 90, flexShrink: 0 }}>{g.term}</span>
+                <span style={{ color: C.text2 }}>{g.meaning}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {groups.map(([group, kpis]) => (
         <div key={group} style={{ marginBottom: 24 }}>
@@ -831,7 +876,7 @@ export function KpiDashboardView() {
   const [snapshots, setSnapshots] = useState<KpiSnapshot[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [qaSummary, setQaSummary] = useState<{ avgScore: number; green: number; amber: number; red: number; fullQA: number } | null>(null);
-  const [digest, setDigest] = useState<{ period: string; summary: string; html: string | null; CreatedAt: string } | null>(null);
+  const [digests, setDigests] = useState<{ period: string; summary: string; html: string | null; CreatedAt: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -845,7 +890,7 @@ export function KpiDashboardView() {
         fetch(`/api/kpi-data/team-snapshot?env=${env}`),
         fetch(`/api/kpi-data/agents?env=${env}`),
         fetch(`/api/kpi-data/qa-summary?env=${env}&days=7`).catch(() => null),
-        fetch(`/api/kpi-data/digest?env=${env}&days=7`).catch(() => null),
+        fetch(`/api/kpi-data/digest?env=${env}&days=30`).catch(() => null),
       ]);
       const snapData = await snapRes.json();
       const agentData = await agentRes.json();
@@ -857,9 +902,16 @@ export function KpiDashboardView() {
       if (qaRes) {
         try { const d = await qaRes.json(); if (d.ok) setQaSummary(d.data); } catch { /* ignore */ }
       }
-      // Digest (non-critical)
+      // Digest (non-critical) — filter for Weekly entries, take last 4
       if (digestRes) {
-        try { const d = await digestRes.json(); if (d.ok && d.data?.length > 0) setDigest(d.data[0]); } catch { /* ignore */ }
+        try {
+          const d = await digestRes.json();
+          if (d.ok && d.data?.length > 0) {
+            const weekly = (d.data as { period: string; summary: string; html: string | null; CreatedAt: string }[])
+              .filter((e: { period: string }) => e.period === 'Weekly');
+            setDigests(weekly.slice(0, 4));
+          }
+        } catch { /* ignore */ }
       }
       setLastRefresh(new Date());
     } catch (err) {
@@ -1274,42 +1326,46 @@ export function KpiDashboardView() {
         </div>
       )}
 
-      {/* ---- Section 6: Weekly Digest (Gap 5) ---- */}
+      {/* ---- Section 6: Weekly Performance Digest (Gap 5) ---- */}
       <div style={{
         marginBottom: 40,
         animation: 'kpiFadeIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.2s both',
       }}>
-        <SectionHeader title="Weekly Digest" subtitle="AI-generated performance summary" />
-        {digest ? (
-          <div style={{
-            background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
-            padding: '20px 24px',
-          }}>
-            <div style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
-            }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: C.teal }}>{digest.period}</span>
-              <span style={{ fontSize: 10, color: C.text3 }}>{fmtTime(digest.CreatedAt)}</span>
-            </div>
-            {digest.html ? (
-              <div
-                style={{ fontSize: 13, color: C.text2, lineHeight: 1.6 }}
-                dangerouslySetInnerHTML={{ __html: digest.html }}
-              />
-            ) : (
-              <p style={{ fontSize: 13, color: C.text2, lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
-                {digest.summary}
-              </p>
-            )}
+        <SectionHeader title="Weekly Performance Digest" subtitle="AI-generated narrative summaries" />
+        {digests.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {digests.map((entry, i) => (
+              <div key={i} style={{
+                background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+                padding: '20px 24px',
+              }}>
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
+                }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.teal }}>Weekly Summary</span>
+                  <span style={{ fontSize: 10, color: C.text3 }}>{fmtTime(entry.CreatedAt)}</span>
+                </div>
+                {entry.html ? (
+                  <div
+                    style={{ fontSize: 13, color: C.text2, lineHeight: 1.6 }}
+                    dangerouslySetInnerHTML={{ __html: entry.html }}
+                  />
+                ) : (
+                  <p style={{ fontSize: 13, color: C.text2, lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {entry.summary}
+                  </p>
+                )}
+              </div>
+            ))}
           </div>
         ) : (
           <div style={{
             background: C.glass, border: `1px dashed ${C.border}`, borderRadius: 12,
             padding: '20px 24px', opacity: 0.6, textAlign: 'center',
           }}>
-            <div style={{ fontSize: 13, color: C.text3 }}>No digest available yet</div>
+            <div style={{ fontSize: 13, color: C.text3 }}>Weekly digest runs Friday at 17:30</div>
             <div style={{ fontSize: 11, color: C.text3, marginTop: 4 }}>
-              AI-generated summaries will appear here once the weekly digest workflow runs.
+              First one will appear after this Friday.
             </div>
           </div>
         )}

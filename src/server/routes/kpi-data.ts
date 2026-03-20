@@ -210,7 +210,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
                  COUNT(*) AS QACount
           FROM dbo.jira_qa_results${s}
           WHERE CAST(CreatedAt AS DATE) >= DATEADD(DAY, -30, CAST(GETUTCDATE() AS DATE))
-            AND qaType = 'ticket_full'
+            AND ISNULL(qaType, '') <> 'excluded'
           GROUP BY assigneeName
         ) qa ON qa.assigneeName = LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(a.AgentSurname))
         WHERE a.IsActive = 1 ${deptWhere}
@@ -306,12 +306,12 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const result = await p.request().query(`
         DECLARE @start DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
         SELECT
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'ticket_full' ${agentFilter}) AS fullQA,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND ISNULL(qaType, '') <> 'excluded' ${agentFilter}) AS fullQA,
           (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'excluded' ${agentFilter})   AS excluded,
-          ISNULL((SELECT CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(4,2)) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'ticket_full' ${agentFilter}), 0) AS avgScore,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'GREEN' ${agentFilter}) AS green,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'AMBER' ${agentFilter}) AS amber,
-          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND qaType = 'ticket_full' AND grade = 'RED' ${agentFilter})   AS red,
+          ISNULL((SELECT CAST(AVG(CAST(overallScore AS FLOAT)) AS DECIMAL(4,2)) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND ISNULL(qaType, '') <> 'excluded' ${agentFilter}), 0) AS avgScore,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND ISNULL(qaType, '') <> 'excluded' AND grade = 'GREEN' ${agentFilter}) AS green,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND ISNULL(qaType, '') <> 'excluded' AND grade = 'AMBER' ${agentFilter}) AS amber,
+          (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND ISNULL(qaType, '') <> 'excluded' AND grade = 'RED' ${agentFilter})   AS red,
           (SELECT COUNT(*) FROM dbo.jira_qa_results${s} WHERE CAST(CreatedAt AS DATE) >= @start AND isConcerning = 1 ${agentFilter})     AS concerning
       `);
       const jiraBaseUrl = settingsQueries.getAll().jira_url ?? null;
@@ -353,7 +353,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
                CONVERT(VARCHAR(23), r.CreatedAt, 126) AS processedAt
         FROM dbo.jira_qa_results${s} r
         WHERE CAST(r.CreatedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
-          AND r.qaType = 'ticket_full'
+          AND ISNULL(r.qaType, '') <> 'excluded'
           ${gradeFilter} ${agentFilter} ${concerningFilter}
         ORDER BY r.CreatedAt DESC
         OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
@@ -382,8 +382,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
                CAST(AVG(CAST(q.overallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore,
                SUM(CAST(q.isConcerning AS INT)) AS concerning
         FROM dbo.jira_qa_results${s} q
-        WHERE CAST(q.processedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
-          AND q.qaType = 'ticket_full'
+        WHERE CAST(q.CreatedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
+          AND ISNULL(q.qaType, '') <> 'excluded'
           AND q.assigneeName IS NOT NULL AND q.assigneeName <> ''
           ${agentFilter}
         GROUP BY q.assigneeName
