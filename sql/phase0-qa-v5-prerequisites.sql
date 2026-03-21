@@ -63,10 +63,10 @@ CREATE TABLE dbo.QA_Backfill_Progress (
 );
 GO
 
--- ── 0d: Populate with date windows (2025-12-20 to 2026-03-15) ──
+-- ── 0d: Populate with date windows (2025-11-01 to 2026-03-15) ──
 PRINT '=== Step 0d: Populating date windows ===';
 
-DECLARE @d DATE = '2025-12-20';
+DECLARE @d DATE = '2025-11-01';
 WHILE @d < '2026-03-16'
 BEGIN
   INSERT INTO dbo.QA_Backfill_Progress (BackfillDate, QAType, Status)
@@ -75,7 +75,7 @@ BEGIN
 END;
 
 SELECT COUNT(*) AS total_windows FROM dbo.QA_Backfill_Progress;
--- Expected: 172 rows (86 days x 2 QA types)
+-- Expected: 270 rows (135 days x 2 QA types)
 
 SELECT QAType, COUNT(*) AS windows
 FROM dbo.QA_Backfill_Progress

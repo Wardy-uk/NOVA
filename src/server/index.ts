@@ -68,6 +68,7 @@ import { SetupOrchestrator } from './services/setup-orchestrator.js';
 import { createAzDoRoutes } from './routes/azdo.js';
 import { createSetupExecutionRoutes } from './routes/setup-execution.js';
 import { createSetupPortalPublicRoutes, createSetupPortalRoutes } from './routes/setup-portal.js';
+import { createBackfillRoutes } from './routes/backfill.js';
 
 dotenv.config();
 
@@ -419,6 +420,7 @@ async function main() {
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries));
+  app.use('/api/backfill', requireAreaAccess('qa', 'view'), createBackfillRoutes(settingsQueries));
   app.use('/api/sales', requireAreaAccess('sales', 'view'), createSalesHotboxRoutes(salesQueries, requireAreaAccess));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries, userQueries, notificationQueries));

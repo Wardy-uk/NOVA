@@ -27,6 +27,7 @@ import { KpiLeaderboardView } from './components/KpiLeaderboardView.js';
 import { KpiDailyHistoryView } from './components/KpiDailyHistoryView.js';
 import { KpiBreachedView } from './components/KpiBreachedView.js';
 import { QAView } from './components/QAView.js';
+import { BackfillStatusView } from './components/BackfillStatusView.js';
 import { SalesHotboxView } from './components/SalesHotboxView.js';
 import { TeamWorkloadView } from './components/TeamWorkloadView.js';
 import { NotificationBell } from './components/NotificationBell.js';
@@ -56,6 +57,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'qa'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support'
+  | 'backfill-status'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -158,6 +160,7 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'qa',
     tabs: [
       { view: 'qa', label: 'QA Dashboard' },
+      { view: 'backfill-status', label: 'Backfill Status' },
     ],
   },
   wallboards: {
@@ -914,6 +917,9 @@ export function App() {
           )}
           {view === 'qa' && (
             <QAView />
+          )}
+          {view === 'backfill-status' && (
+            <BackfillStatusView />
           )}
           {view === 'kpi-team-breached' && (
             <iframe
