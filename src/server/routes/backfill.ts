@@ -48,6 +48,7 @@ export function createBackfillRoutes(settingsQueries: SettingsQueries): Router {
           SUM(CASE WHEN Status = 'failed'   THEN 1 ELSE 0 END)            AS failedCount,
           SUM(CASE WHEN Status = 'running'  THEN 1 ELSE 0 END)            AS runningCount,
           MAX(CASE WHEN Status = 'complete' THEN CompletedAt END)          AS lastCompletedAt,
+          MIN(StartedAt)                                                    AS firstStartedAt,
           ISNULL(SUM(TicketsProcessed), 0)                                 AS ticketsProcessed,
           ISNULL(SUM(TicketsSkipped), 0)                                   AS ticketsSkipped
         FROM dbo.QA_Backfill_Progress
@@ -80,6 +81,7 @@ export function createBackfillRoutes(settingsQueries: SettingsQueries): Router {
           failedCount: row.failedCount ?? 0,
           runningCount: row.runningCount ?? 0,
           lastCompletedAt: row.lastCompletedAt ?? null,
+          firstStartedAt: row.firstStartedAt ?? null,
           ticketsProcessed: row.ticketsProcessed ?? 0,
           ticketsSkipped: row.ticketsSkipped ?? 0,
           lastError,

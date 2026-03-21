@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface BackfillStatus {
   totalWindows: number;
@@ -7,6 +7,7 @@ interface BackfillStatus {
   failedCount: number;
   runningCount: number;
   lastCompletedAt: string | null;
+  firstStartedAt: string | null;
   ticketsProcessed: number;
   ticketsSkipped: number;
   lastError: {
@@ -16,10 +17,30 @@ interface BackfillStatus {
   } | null;
 }
 
+// ~2500 tickets/month, 135 days = ~4.5 months, 2 QA types per day
+// Total estimate: ~11,250 tickets across 270 windows
+const EST_TOTAL_TICKETS = 11250;
+
+function formatDuration(ms: number): string {
+  const totalSecs = Math.floor(ms / 1000);
+  const days = Math.floor(totalSecs / 86400);
+  const hours = Math.floor((totalSecs % 86400) / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  const secs = totalSecs % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (mins > 0) parts.push(`${mins}m`);
+  if (parts.length === 0 || (days === 0 && hours === 0)) parts.push(`${secs}s`);
+  return parts.join(' ');
+}
+
 export function BackfillStatusView() {
   const [status, setStatus] = useState<BackfillStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(Date.now());
+  const tickRef = useRef<ReturnType<typeof setInterval>>();
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -43,6 +64,12 @@ export function BackfillStatusView() {
     const interval = setInterval(fetchStatus, 30_000);
     return () => clearInterval(interval);
   }, [fetchStatus]);
+
+  // Tick every second for the live elapsed timer
+  useEffect(() => {
+    tickRef.current = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tickRef.current);
+  }, []);
 
   if (loading) {
     return (
@@ -68,6 +95,20 @@ export function BackfillStatusView() {
   const pct = status.totalWindows > 0
     ? Math.round((status.completeCount / status.totalWindows) * 100)
     : 0;
+
+  // Timer calculations
+  const started = status.firstStartedAt ? new Date(status.firstStartedAt).getTime() : null;
+  const elapsed = started ? now - started : 0;
+  const isRunning = status.runningCount > 0 || (status.completeCount > 0 && status.completeCount < status.totalWindows);
+  const isDone = status.completeCount === status.totalWindows && status.totalWindows > 0;
+
+  // ETA based on ticket throughput rate
+  let etaMs = 0;
+  if (started && status.ticketsProcessed > 0 && !isDone) {
+    const ticketsPerMs = status.ticketsProcessed / elapsed;
+    const remainingTickets = EST_TOTAL_TICKETS - status.ticketsProcessed;
+    etaMs = remainingTickets > 0 ? remainingTickets / ticketsPerMs : 0;
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
@@ -96,6 +137,47 @@ export function BackfillStatusView() {
           />
         </div>
       </div>
+
+      {/* Timer */}
+      {started && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-[#1E2228] rounded-lg p-5 border border-neutral-700/50">
+            <div className="text-xs text-neutral-500 uppercase tracking-wider mb-1">
+              {isDone ? 'Total Time' : 'Elapsed'}
+            </div>
+            <div className="text-2xl font-bold text-neutral-100 font-mono">
+              {formatDuration(elapsed)}
+            </div>
+            <div className="text-xs text-neutral-500 mt-1">
+              Started {new Date(started).toLocaleString()}
+            </div>
+          </div>
+          <div className="bg-[#1E2228] rounded-lg p-5 border border-neutral-700/50">
+            <div className="text-xs text-neutral-500 uppercase tracking-wider mb-1">
+              {isDone ? 'Avg per Ticket' : 'Estimated Time Left'}
+            </div>
+            <div className="text-2xl font-bold font-mono" style={{ color: isDone ? '#22c55e' : '#f97316' }}>
+              {isDone
+                ? status.ticketsProcessed > 0
+                  ? `${(elapsed / status.ticketsProcessed / 1000).toFixed(1)}s`
+                  : '--'
+                : etaMs > 0
+                  ? formatDuration(etaMs)
+                  : '--'}
+            </div>
+            {!isDone && etaMs > 0 && (
+              <div className="text-xs text-neutral-500 mt-1">
+                ~{(status.ticketsProcessed / (elapsed / 1000 / 60)).toFixed(1)} tickets/min
+              </div>
+            )}
+            {isDone && (
+              <div className="text-xs text-neutral-500 mt-1">
+                {status.ticketsProcessed.toLocaleString()} tickets in {formatDuration(elapsed)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Status counts grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
