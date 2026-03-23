@@ -24,6 +24,7 @@ import { createDeliveryRoutes } from './routes/delivery.js';
 import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
 import { createO365Routes } from './routes/o365.js';
+import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
 import { createTrendsRoutes } from './routes/trends.js';
@@ -417,6 +418,7 @@ async function main() {
   // app.use('/api/milestones', ...) is registered after buildOrchestrator
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/o365', createO365Routes(mcpManager));
+  app.use('/api/neuro-bridge', createNeuroBridgeRoutes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries));
