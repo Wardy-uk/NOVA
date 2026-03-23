@@ -47,8 +47,7 @@ export function createNeuroBridgeRoutes(mcpManager: McpClientManager): Router {
     if (!bridgeAuth(req, res)) return;
     const tools = mcpManager.getServerTools('msgraph');
     const toolName = tools.find(t =>
-      t === 'get-calendar-view' || t === 'list-specific-calendar-events' ||
-      t === 'list-calendar-events' || t === 'get-calendar-events' || t === 'list-events'
+      t === 'get-calendar-view' || t === 'list-calendar-events' || t === 'get-calendar-events'
     );
     if (!toolName) {
       res.status(501).json({ ok: false, error: 'Calendar events tool not available', tools });
@@ -71,9 +70,8 @@ export function createNeuroBridgeRoutes(mcpManager: McpClientManager): Router {
     if (!bridgeAuth(req, res)) return;
     const tools = mcpManager.getServerTools('msgraph');
     const toolName = tools.find(t =>
-      t === 'list-mail-messages' || t === 'get-mail-messages' || t === 'list-messages' ||
-      t === 'list-mail-folder-messages' || t.includes('mail') && t.includes('list')
-    ) || tools.find(t => t.includes('mail') || t.includes('message'));
+      t === 'list-mail-messages' || t === 'list-mail-folder-messages' || t === 'get-mail-messages'
+    );
     if (!toolName) {
       res.status(501).json({ ok: false, error: 'Mail list tool not available', tools });
       return;
@@ -96,7 +94,7 @@ export function createNeuroBridgeRoutes(mcpManager: McpClientManager): Router {
     const tools = mcpManager.getServerTools('msgraph');
     const toolName = tools.find(t =>
       t === 'list-planner-tasks' || t === 'get-planner-tasks' || t === 'list-my-planner-tasks'
-    ) || tools.find(t => t.includes('planner'));
+    );
     if (!toolName) {
       res.status(501).json({ ok: false, error: 'Planner tasks tool not available', tools });
       return;
@@ -117,7 +115,7 @@ export function createNeuroBridgeRoutes(mcpManager: McpClientManager): Router {
     const tools = mcpManager.getServerTools('msgraph');
     const toolName = tools.find(t =>
       t === 'list-todo-tasks' || t === 'get-todo-tasks' || t === 'list-tasks'
-    ) || tools.find(t => t.includes('todo'));
+    );
     if (!toolName) {
       res.status(501).json({ ok: false, error: 'ToDo tasks tool not available', tools });
       return;
