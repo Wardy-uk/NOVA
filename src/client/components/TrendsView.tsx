@@ -179,7 +179,7 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
           Export CSV
         </button>
       </div>
-      <p className="text-xs mb-3" style={{ color: C.text3 }}>Key performance snapshots at Day 1 baseline and each 30-day checkpoint through the 90-day period.</p>
+      <p className="text-xs mb-3" style={{ color: C.text3 }}>Performance snapshots at Day 1 baseline and each 30-day checkpoint.</p>
       <div className="overflow-x-auto">
         <table className="w-full text-xs" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
           <thead>
@@ -299,14 +299,10 @@ function QueueSection({ data }: { data: any[] | null }) {
   );
 
   const queueDisplayLabel = (kpi: string): string => {
-    // Extract the tier/queue name from parentheses, e.g. "Oldest actionable ticket (CC Incidents)" → "Oldest ticket — CC Incidents"
     const match = kpi.match(/\(([^)]+)\)/);
-    const tier = match ? match[1].trim() : '';
-    if (/oldest/i.test(kpi)) {
-      return tier ? `Oldest ticket \u2014 ${tier}` : 'Oldest ticket';
-    }
-    // Volume KPIs: keep parenthetical as suffix
-    return tier ? `${kpi.replace(/ *\(.*$/, '').trim()} \u2014 ${tier}` : kpi.trim();
+    const tier = match ? match[1].trim().replace('CC ', 'CC ') : '';
+    if (/oldest/i.test(kpi)) return tier || 'Oldest ticket';
+    return tier || kpi.trim();
   };
 
   const buildDataset = (filtered: any[]) => {
@@ -348,11 +344,19 @@ function EscalationSection({ data }: { data: any[] | null }) {
   const accuracyKpis = data.filter((r: any) => r.kpi?.toLowerCase().includes('accuracy'));
   const countKpis = data.filter((r: any) => !r.kpi?.toLowerCase().includes('accuracy'));
 
+  const escDisplayLabel = (kpi: string): string => {
+    const match = kpi.match(/to\s+(.+)$/i);
+    if (match) return `→ ${match[1].trim()}`;
+    const match2 = kpi.match(/by\s+(.+)$/i);
+    if (match2) return `← ${match2[1].trim()}`;
+    return kpi.trim();
+  };
+
   const buildLineData = (filtered: any[]) => {
     const kpis = [...new Set(filtered.map((r: any) => r.kpi))];
     const labels = [...new Set(filtered.map((r: any) => r.period))].sort();
     const datasets = kpis.map((kpi, i) => ({
-      label: kpi.replace(/ *\(.*$/, '').trim(),
+      label: escDisplayLabel(kpi),
       data: labels.map(l => filtered.find((r: any) => r.kpi === kpi && r.period === l)?.avg_value ?? null),
       borderColor: CHART_COLORS[i % CHART_COLORS.length],
       backgroundColor: `${CHART_COLORS[i % CHART_COLORS.length]}20`,
@@ -367,7 +371,7 @@ function EscalationSection({ data }: { data: any[] | null }) {
     const kpis = [...new Set(filtered.map((r: any) => r.kpi))].slice(0, 6);
     const labels = [...new Set(filtered.map((r: any) => r.period))].sort();
     const datasets = kpis.map((kpi, i) => ({
-      label: kpi.replace(/ *\(.*$/, '').trim(),
+      label: escDisplayLabel(kpi),
       data: labels.map(l => filtered.find((r: any) => r.kpi === kpi && r.period === l)?.avg_value ?? null),
       backgroundColor: `${CHART_COLORS[i % CHART_COLORS.length]}80`,
       borderColor: CHART_COLORS[i % CHART_COLORS.length],
@@ -595,28 +599,28 @@ export function TrendsView() {
           {/* Section 1: SLA Compliance */}
           <div>
             <h2 className="text-sm font-semibold mb-1" style={{ color: C.text1 }}>SLA Compliance</h2>
-            <p className="text-xs mb-3" style={{ color: C.text3 }}>Tracks the percentage of tickets meeting First Response and Resolution SLA targets across the team.</p>
+            <p className="text-xs mb-3" style={{ color: C.text3 }}>Percentage of tickets meeting First Response and Resolution SLA targets over time.</p>
             <SlaSection data={slaData} />
           </div>
 
           {/* Section 2: Queue Health */}
           <div>
             <h2 className="text-sm font-semibold mb-1" style={{ color: C.text1 }}>Queue Health</h2>
-            <p className="text-xs mb-3" style={{ color: C.text3 }}>Shows the volume and age of open tickets across each support tier over time.</p>
+            <p className="text-xs mb-3" style={{ color: C.text3 }}>Open ticket volumes and oldest ticket age across each support tier.</p>
             <QueueSection data={queueData} />
           </div>
 
           {/* Section 4: Escalation & Resolution */}
           <div>
             <h2 className="text-sm font-semibold mb-1" style={{ color: C.text1 }}>Escalation & Resolution Trend</h2>
-            <p className="text-xs mb-3" style={{ color: C.text3 }}>Monitors escalation rates to Tier 2, Tier 3, and Development alongside overall resolution volumes.</p>
+            <p className="text-xs mb-3" style={{ color: C.text3 }}>Escalation rates to Tier 2, Tier 3, and Development alongside resolution volumes.</p>
             <EscalationSection data={escalationData} />
           </div>
 
           {/* Section 3: QA & Golden Rules */}
           <div>
             <h2 className="text-sm font-semibold mb-1" style={{ color: C.text1 }}>QA & Golden Rules</h2>
-            <p className="text-xs mb-3" style={{ color: C.text3 }}>Measures average QA scores and Golden Rules compliance per agent over the selected period.</p>
+            <p className="text-xs mb-3" style={{ color: C.text3 }}>Average QA scores and Golden Rules compliance across the team.</p>
             <QaSection data={qaData} agent={qaAgent} onAgentChange={handleAgentChange} />
           </div>
         </>
