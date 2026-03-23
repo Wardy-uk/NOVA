@@ -377,6 +377,9 @@ async function main() {
     districtQueries,
   });
 
+  // NEURO bridge — uses its own shared-secret auth, must be registered before JWT middleware
+  app.use('/api/neuro-bridge', createNeuroBridgeRoutes(mcpManager));
+
   // Protected API routes — look up fresh role from DB so stale JWTs always reflect current role
   app.use('/api', authMiddleware(jwtSecret, (id) => userQueries.getById(id)?.role));
 
@@ -418,7 +421,6 @@ async function main() {
   // app.use('/api/milestones', ...) is registered after buildOrchestrator
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/o365', createO365Routes(mcpManager));
-  app.use('/api/neuro-bridge', createNeuroBridgeRoutes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries));
