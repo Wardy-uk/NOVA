@@ -46,9 +46,7 @@ export function createNeuroBridgeRoutes(mcpManager: McpClientManager): Router {
   router.get('/calendar', async (req, res) => {
     if (!bridgeAuth(req, res)) return;
     const tools = mcpManager.getServerTools('msgraph');
-    const toolName = tools.find(t =>
-      t === 'get-calendar-view' || t === 'list-calendar-events' || t === 'get-calendar-events'
-    );
+    const toolName = ['get-calendar-view', 'list-calendar-events', 'get-calendar-events'].find(n => tools.includes(n));
     if (!toolName) {
       res.status(501).json({ ok: false, error: 'Calendar events tool not available', tools });
       return;
@@ -69,9 +67,7 @@ export function createNeuroBridgeRoutes(mcpManager: McpClientManager): Router {
   router.get('/mail', async (req, res) => {
     if (!bridgeAuth(req, res)) return;
     const tools = mcpManager.getServerTools('msgraph');
-    const toolName = tools.find(t =>
-      t === 'list-mail-messages' || t === 'list-mail-folder-messages' || t === 'get-mail-messages'
-    );
+    const toolName = ['list-mail-messages', 'get-mail-messages'].find(n => tools.includes(n));
     if (!toolName) {
       res.status(501).json({ ok: false, error: 'Mail list tool not available', tools });
       return;
@@ -92,9 +88,7 @@ export function createNeuroBridgeRoutes(mcpManager: McpClientManager): Router {
   router.get('/planner/tasks', async (req, res) => {
     if (!bridgeAuth(req, res)) return;
     const tools = mcpManager.getServerTools('msgraph');
-    const toolName = tools.find(t =>
-      t === 'list-planner-tasks' || t === 'get-planner-tasks' || t === 'list-my-planner-tasks'
-    );
+    const toolName = ['list-planner-tasks', 'get-planner-tasks', 'list-my-planner-tasks'].find(n => tools.includes(n));
     if (!toolName) {
       res.status(501).json({ ok: false, error: 'Planner tasks tool not available', tools });
       return;
@@ -113,9 +107,7 @@ export function createNeuroBridgeRoutes(mcpManager: McpClientManager): Router {
   router.get('/todo/tasks', async (req, res) => {
     if (!bridgeAuth(req, res)) return;
     const tools = mcpManager.getServerTools('msgraph');
-    const toolName = tools.find(t =>
-      t === 'list-todo-tasks' || t === 'get-todo-tasks' || t === 'list-tasks'
-    );
+    const toolName = ['list-todo-tasks', 'get-todo-tasks', 'list-tasks'].find(n => tools.includes(n));
     if (!toolName) {
       res.status(501).json({ ok: false, error: 'ToDo tasks tool not available', tools });
       return;
