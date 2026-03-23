@@ -103,18 +103,107 @@ export function createNeuroBridgeRoutes(mcpManager: McpClientManager): Router {
     }
   });
 
-  // GET /api/neuro-bridge/todo/tasks
+  // GET /api/neuro-bridge/todo/lists — list all To-Do task lists
+  router.get('/todo/lists', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = ['list-todo-task-lists'].find(n => tools.includes(n));
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'ToDo task lists tool not available' });
+      return;
+    }
+    try {
+      const result = await mcpManager.callTool('msgraph', toolName, {});
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // GET /api/neuro-bridge/todo/tasks?listId=xxx
   router.get('/todo/tasks', async (req, res) => {
     if (!bridgeAuth(req, res)) return;
     const tools = mcpManager.getServerTools('msgraph');
-    const toolName = ['list-todo-tasks', 'get-todo-tasks', 'list-tasks'].find(n => tools.includes(n));
+    const toolName = ['list-todo-tasks', 'get-todo-tasks'].find(n => tools.includes(n));
     if (!toolName) {
-      res.status(501).json({ ok: false, error: 'ToDo tasks tool not available', tools });
+      res.status(501).json({ ok: false, error: 'ToDo tasks tool not available' });
       return;
     }
     try {
       const args: Record<string, unknown> = {};
-      if (req.query.listId) args.taskListId = req.query.listId;
+      if (req.query.listId) args.todoTaskListId = req.query.listId;
+      const result = await mcpManager.callTool('msgraph', toolName, args);
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // --- Write endpoints for 2-way sync ---
+
+  // POST /api/neuro-bridge/todo/tasks — create a To-Do task
+  router.post('/todo/tasks', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = ['create-todo-task'].find(n => tools.includes(n));
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'Create ToDo task tool not available' });
+      return;
+    }
+    try {
+      const result = await mcpManager.callTool('msgraph', toolName, req.body);
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // PATCH /api/neuro-bridge/todo/tasks/:taskId — update a To-Do task
+  router.patch('/todo/tasks/:taskId', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = ['update-todo-task'].find(n => tools.includes(n));
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'Update ToDo task tool not available' });
+      return;
+    }
+    try {
+      const args = { ...req.body, todoTaskId: req.params.taskId };
+      const result = await mcpManager.callTool('msgraph', toolName, args);
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // POST /api/neuro-bridge/planner/tasks — create a Planner task
+  router.post('/planner/tasks', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = ['create-planner-task'].find(n => tools.includes(n));
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'Create Planner task tool not available' });
+      return;
+    }
+    try {
+      const result = await mcpManager.callTool('msgraph', toolName, req.body);
+      res.json({ ok: true, data: parseToolResult(result) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // PATCH /api/neuro-bridge/planner/tasks/:taskId — update a Planner task
+  router.patch('/planner/tasks/:taskId', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const tools = mcpManager.getServerTools('msgraph');
+    const toolName = ['update-planner-task'].find(n => tools.includes(n));
+    if (!toolName) {
+      res.status(501).json({ ok: false, error: 'Update Planner task tool not available' });
+      return;
+    }
+    try {
+      const args = { ...req.body, taskId: req.params.taskId };
       const result = await mcpManager.callTool('msgraph', toolName, args);
       res.json({ ok: true, data: parseToolResult(result) });
     } catch (err) {
