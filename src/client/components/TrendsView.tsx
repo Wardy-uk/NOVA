@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, memo } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -292,17 +292,24 @@ function QueueSection({ data }: { data: any[] | null }) {
   if (!data || data.length === 0) return <Card title="Queue Health Trend"><p style={{ color: C.text3 }}>No data available</p></Card>;
 
   const volumeKpis = data.filter((r: any) =>
-    r.kpi?.toLowerCase().includes('open') && !r.kpi?.toLowerCase().includes('oldest') && !r.kpi?.toLowerCase().includes('age')
+    r.kpi?.toLowerCase().includes('number of tickets') && !r.kpi?.toLowerCase().includes('oldest')
   );
   const ageKpis = data.filter((r: any) =>
-    r.kpi?.toLowerCase().includes('oldest') || r.kpi?.toLowerCase().includes('age')
+    r.kpi?.toLowerCase().includes('oldest')
   );
 
   const queueDisplayLabel = (kpi: string): string => {
+    // Age KPIs: "Oldest actionable ticket (days) in CC Incidents" → "CC Incidents"
+    if (/oldest/i.test(kpi)) {
+      const inMatch = kpi.match(/\bin\s+(.+)$/i);
+      return inMatch ? inMatch[1].trim() : kpi.trim();
+    }
+    // Volume KPIs: "Number of Tickets in CC (Incidents)" → "CC Incidents"
     const match = kpi.match(/\(([^)]+)\)/);
-    const tier = match ? match[1].trim().replace('CC ', 'CC ') : '';
-    if (/oldest/i.test(kpi)) return tier || 'Oldest ticket';
-    return tier || kpi.trim();
+    if (match) return match[1].trim();
+    // "Number of Tickets in Production" → "Production"
+    const inMatch = kpi.match(/\bin\s+(.+)$/i);
+    return inMatch ? inMatch[1].trim() : kpi.trim();
   };
 
   const buildDataset = (filtered: any[]) => {
@@ -482,7 +489,7 @@ function QaSection({ data, agent, onAgentChange }: { data: QaData | null; agent:
 type DateRange = '4w' | '8w' | '12w' | 'custom';
 type Granularity = 'daily' | 'weekly';
 
-export function TrendsView() {
+export const TrendsView = memo(function TrendsView() {
   const [dateRange, setDateRange] = useState<DateRange>('12w');
   const [granularity, setGranularity] = useState<Granularity>('weekly');
   const [env, setEnv] = useState<'live' | 'uat'>('live');
@@ -504,44 +511,49 @@ export function TrendsView() {
     }
   };
 
+  const safeFetchJson = async (url: string) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+      const json = await res.json();
+      return json;
+    } catch (err) {
+      console.error(`Fetch error for ${url}:`, err);
+      return { ok: false, error: String(err) };
+    }
+  };
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const days = daysFromRange(dateRange);
     const qs = `days=${days}&granularity=${granularity}&env=${env}`;
 
-    try {
-      const [cpRes, slaRes, qRes, escRes, qaRes] = await Promise.all([
-        fetch(`/api/trends/checkpoint?env=${env}`),
-        fetch(`/api/trends/sla?${qs}`),
-        fetch(`/api/trends/queue?${qs}`),
-        fetch(`/api/trends/escalation?${qs}`),
-        fetch(`/api/trends/qa?${qs}&agent=${qaAgent}`),
-      ]);
+    const [cp, sla, q, esc, qa] = await Promise.all([
+      safeFetchJson(`/api/trends/checkpoint?env=${env}`),
+      safeFetchJson(`/api/trends/sla?${qs}`),
+      safeFetchJson(`/api/trends/queue?${qs}`),
+      safeFetchJson(`/api/trends/escalation?${qs}`),
+      safeFetchJson(`/api/trends/qa?${qs}&agent=all`),
+    ]);
 
-      const [cp, sla, q, esc, qa] = await Promise.all([cpRes.json(), slaRes.json(), qRes.json(), escRes.json(), qaRes.json()]);
+    if (cp.ok) setCheckpointData(cp.data);
+    else console.warn('Checkpoint fetch failed:', cp.error);
+    if (sla.ok) setSlaData(sla.data);
+    if (q.ok) setQueueData(q.data);
+    if (esc.ok) setEscalationData(esc.data);
+    if (qa.ok) setQaData(qa.data);
+    else console.warn('QA fetch failed:', qa.error);
 
-      if (cp.ok) setCheckpointData(cp.data);
-      if (sla.ok) setSlaData(sla.data);
-      if (q.ok) setQueueData(q.data);
-      if (esc.ok) setEscalationData(esc.data);
-      if (qa.ok) setQaData(qa.data);
-    } catch (err) {
-      console.error('Trends fetch error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [dateRange, granularity, env, qaAgent]);
+    setLoading(false);
+  }, [dateRange, granularity, env]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // Refetch QA only when agent changes
   const fetchQa = useCallback(async (agent: string) => {
     const days = daysFromRange(dateRange);
-    try {
-      const res = await fetch(`/api/trends/qa?days=${days}&granularity=${granularity}&env=${env}&agent=${agent}`);
-      const json = await res.json();
-      if (json.ok) setQaData(json.data);
-    } catch (err) { console.error('QA fetch error:', err); }
+    const json = await safeFetchJson(`/api/trends/qa?days=${days}&granularity=${granularity}&env=${env}&agent=${agent}`);
+    if (json.ok) setQaData(json.data);
   }, [dateRange, granularity, env]);
 
   const handleAgentChange = useCallback((a: string) => {
@@ -627,4 +639,4 @@ export function TrendsView() {
       )}
     </div>
   );
-}
+});
