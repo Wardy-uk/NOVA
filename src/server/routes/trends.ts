@@ -10,6 +10,14 @@ function suffix(env: Env): string {
   return env === 'uat' ? 'UAT' : '';
 }
 
+/** Active support team members — used to filter agent dropdowns across KPI/QA views */
+export const TEAM_AGENTS = [
+  'Naomi Wentworth', 'Nick Ward', 'Heidi Power', 'Sebastian Broome',
+  'Nathan Rutland', 'Isabel Busk', 'Arman Shazad', 'Zoe Rees',
+  'Kayleigh Russell', 'Hope Goodall', 'Abdi Mohamed', 'Willem Kruger',
+  'Stephen Mitchell', 'Luke Scaife',
+] as const;
+
 // Checkpoint dates for the 90-day framework
 const CHECKPOINTS = [
   { label: 'Day 1', date: '2026-03-16' },
@@ -321,26 +329,30 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         ORDER BY period
       `);
 
-      // Golden Rules
+      // Golden Rules — use commentTimestamp (actual comment date) instead of CreatedAt (insert date)
       const grAgentFilter = agent !== 'all' ? `AND Updater = @agent` : '';
+      const grDateGroup = granularity === 'weekly'
+        ? 'DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, commentTimestamp)), 1)'
+        : 'CAST(commentTimestamp AS DATE)';
       const grReq = p.request();
       grReq.input('days', sql.Int, days);
       if (agent !== 'all') grReq.input('agent', sql.NVarChar, agent);
       const grResult = await grReq.query(`
         SELECT
-          ${dateGroup} AS period,
+          ${grDateGroup} AS period,
           AVG(CASE WHEN rule1Pass = 1 THEN 100.0 ELSE 0 END) AS ownership_pct,
           AVG(CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END) AS next_action_pct,
           AVG(CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) AS timeframe_pct,
           COUNT(*) AS comment_count
         FROM ${grTbl}
-        WHERE CreatedAt >= DATEADD(DAY, -@days, GETUTCDATE())
+        WHERE commentTimestamp >= DATEADD(DAY, -@days, GETUTCDATE())
           ${grAgentFilter}
-        GROUP BY ${dateGroup}
+        GROUP BY ${grDateGroup}
         ORDER BY period
       `);
 
-      // Agent list for dropdown
+      // Agent list for dropdown — scoped to active team members
+      const teamIn = TEAM_AGENTS.map(n => `'${n}'`).join(',');
       const agentReq = p.request();
       agentReq.input('days', sql.Int, days);
       const agentResult = await agentReq.query(`
@@ -348,7 +360,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         FROM ${qaTbl}
         WHERE CreatedAt >= DATEADD(DAY, -@days, GETUTCDATE())
           AND qaType != 'excluded'
-          AND assigneeName IS NOT NULL
+          AND assigneeName IN (${teamIn})
         ORDER BY assigneeName
       `);
 

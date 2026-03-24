@@ -283,7 +283,7 @@ type Section = 'overview' | 'results' | 'agents' | 'goldenRules' | 'callQA';
 type Env = 'uat' | 'live';
 
 export function QAView() {
-  const [env, setEnv]     = useState<Env>('uat');
+  const env = 'live' as Env;
   const [days, setDays]   = useState(7);
   const [section, setSection] = useState<Section>('overview');
 
@@ -447,13 +447,6 @@ export function QAView() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
         <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600, color: C.text1 }}>QA Dashboard</h2>
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <label style={{ fontSize: '0.85rem', color: C.text2 }}>
-            Env:&nbsp;
-            <select value={env} onChange={e => setEnv(e.target.value as Env)} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.6rem', fontSize: '0.85rem' }}>
-              <option value="uat">UAT</option>
-              <option value="live">Live</option>
-            </select>
-          </label>
           <label style={{ fontSize: '0.85rem', color: C.text2 }}>
             Period:&nbsp;
             <select value={days} onChange={e => setDays(Number(e.target.value))} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.6rem', fontSize: '0.85rem' }}>

@@ -492,7 +492,7 @@ type Granularity = 'daily' | 'weekly';
 export const TrendsView = memo(function TrendsView() {
   const [dateRange, setDateRange] = useState<DateRange>('12w');
   const [granularity, setGranularity] = useState<Granularity>('weekly');
-  const [env, setEnv] = useState<'live' | 'uat'>('live');
+  const env = 'live' as const;
   const [loading, setLoading] = useState(true);
 
   const [checkpointData, setCheckpointData] = useState<CheckpointData | null>(null);
@@ -590,9 +590,6 @@ export const TrendsView = memo(function TrendsView() {
           <span className="mx-1 w-px h-5" style={{ background: C.border }} />
           {ctl('Daily', granularity === 'daily', () => setGranularity('daily'))}
           {ctl('Weekly', granularity === 'weekly', () => setGranularity('weekly'))}
-          <span className="mx-1 w-px h-5" style={{ background: C.border }} />
-          {ctl('Live', env === 'live', () => setEnv('live'))}
-          {ctl('UAT', env === 'uat', () => setEnv('uat'))}
         </div>
       </div>
 

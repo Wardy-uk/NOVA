@@ -5,6 +5,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { FileUserQueries } from '../db/user-store.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import { ssoLogger } from '../services/sso-logger.js';
+import { TEAM_AGENTS } from './trends.js';
 
 // Expected future KPI names in dbo.KpiSnapshot (will render automatically once data flows):
 // - "CSAT" or "Customer Satisfaction" — CSAT score, direction: higher is better
@@ -384,7 +385,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         FROM dbo.jira_qa_results${s} q
         WHERE CAST(q.CreatedAt AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
           AND ISNULL(q.qaType, '') <> 'excluded'
-          AND q.assigneeName IS NOT NULL AND q.assigneeName <> ''
+          AND q.assigneeName IN (${TEAM_AGENTS.map(n => `'${n}'`).join(',')})
           ${agentFilter}
         GROUP BY q.assigneeName
         ORDER BY avgScore ASC
@@ -506,7 +507,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
                CAST(AVG(CAST(g.OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore
         FROM dbo.Jira_QA_GoldenRules${s} g
         WHERE CAST(${dateCol} AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
-          AND g.Updater IS NOT NULL AND g.Updater <> ''
+          AND g.Updater IN (${TEAM_AGENTS.map(n => `'${n}'`).join(',')})
           AND g.IssueKey LIKE 'NT-%'
           ${agentFilter}
         GROUP BY g.Updater

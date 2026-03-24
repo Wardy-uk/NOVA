@@ -252,7 +252,7 @@ function DigestTable({ data }: { data: any[] }) {
 }
 
 export function KpiDataView() {
-  const [env, setEnv] = useState<Env>('live');
+  const env = 'live' as Env;
   const [tab, setTab] = useState<Tab>('team-snapshot');
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -304,24 +304,6 @@ export function KpiDataView() {
               ))}
             </select>
           )}
-          {/* Env toggle */}
-          <div className="flex rounded-lg overflow-hidden border border-[#3a424d]">
-            {(['uat', 'live'] as Env[]).map(e => (
-              <button
-                key={e}
-                onClick={() => setEnv(e)}
-                className={`px-4 py-1.5 text-[12px] font-semibold uppercase tracking-wider transition-colors ${
-                  env === e
-                    ? e === 'live'
-                      ? 'bg-red-600/30 text-red-300 border-red-500/40'
-                      : 'bg-[#5ec1ca]/20 text-[#5ec1ca]'
-                    : 'bg-[#272C33] text-neutral-500 hover:text-neutral-300'
-                }`}
-              >
-                {e}
-              </button>
-            ))}
-          </div>
           {/* Refresh */}
           <button onClick={fetchData} className="text-neutral-400 hover:text-[#5ec1ca] transition-colors" title="Refresh">
             <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -349,13 +331,6 @@ export function KpiDataView() {
       </div>
 
       {/* Status bar */}
-      {env === 'live' && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded bg-red-900/20 border border-red-800/30 text-[12px] text-red-300">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-          Viewing LIVE data. Changes here affect production tables.
-        </div>
-      )}
-
       {error && (
         <div className="px-3 py-2 rounded bg-red-900/20 border border-red-800/30 text-[12px] text-red-300">{error}</div>
       )}
