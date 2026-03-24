@@ -20,6 +20,7 @@ export const TEAM_AGENTS = [
 
 // Checkpoint dates for the 90-day framework
 const CHECKPOINTS = [
+  { label: 'Day 0', date: '2026-03-09' },
   { label: 'Day 1', date: '2026-03-16' },
   { label: 'Day 15', date: '2026-03-31' },
   { label: 'Day 30', date: '2026-04-15' },
@@ -44,8 +45,8 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
   { key: 'escalation_accuracy', label: 'Escalation Accuracy %', kpiPattern: 'Escalation Accuracy%', target: 90, direction: 'higher' },
   { key: 'team_qa_avg', label: 'Team QA Avg (V5)', source: 'qa', target: 8.0, direction: 'higher' },
   { key: 'golden_rules_avg', label: 'Golden Rules Avg %', source: 'golden', target: 80, direction: 'higher' },
-  { key: 'dev_queue_size', label: 'Dev Queue Size', kpiPattern: '%Dev%Open%', target: 125, direction: 'lower' },
-  { key: 'oldest_dev_ticket', label: 'Oldest Dev Ticket (days)', kpiPattern: '%Dev%Oldest%', target: 31, direction: 'lower' },
+  { key: 'dev_queue_size', label: 'Dev Queue Size', kpiPattern: 'Number of Tickets in Development', target: 125, direction: 'lower' },
+  { key: 'oldest_dev_ticket', label: 'Oldest Dev Ticket (days)', kpiPattern: 'Oldest actionable ticket (days) in Development', target: 31, direction: 'lower' },
   { key: 'csat', label: 'CSAT %', kpiPattern: 'CSAT%', target: null, direction: 'higher' },
   { key: 'fcr', label: 'FCR Rate %', kpiPattern: 'FCR%', target: null, direction: 'higher' },
 ];
@@ -101,7 +102,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         };
 
         if (metric.source === 'qa') {
-          // QA avg from jira_qa_results
+          // QA avg from jira_qa_results — V5 rows only (CreatedAt >= 2026-03-22)
           const tbl = `dbo.jira_qa_results${suffix(env)}`;
           for (const cp of CHECKPOINTS) {
             const r = p.request();
@@ -111,21 +112,23 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
               FROM ${tbl}
               WHERE CAST(CreatedAt AS DATE) = @cpDate
                 AND qaType != 'excluded'
+                AND CreatedAt >= '2026-03-22'
             `);
             row.checkpoints[cp.label] = result.recordset[0]?.avg_score ?? null;
           }
-          // Current: latest 7 days
+          // Current: latest 7 days, V5 only
           const cr = p.request();
           const currentResult = await cr.query(`
             SELECT AVG(CAST(overallScore AS FLOAT)) AS avg_score
             FROM ${tbl}
             WHERE CreatedAt >= DATEADD(DAY, -7, GETUTCDATE())
               AND qaType != 'excluded'
+              AND CreatedAt >= '2026-03-22'
           `);
           row.current = currentResult.recordset[0]?.avg_score ?? null;
 
         } else if (metric.source === 'golden') {
-          // Golden rules from Jira_QA_GoldenRules
+          // Golden rules from Jira_QA_GoldenRules — use commentTimestamp (actual comment date)
           const tbl = `dbo.Jira_QA_GoldenRules${suffix(env)}`;
           for (const cp of CHECKPOINTS) {
             const r = p.request();
@@ -136,7 +139,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
                     CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END +
                     CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
               FROM ${tbl}
-              WHERE CAST(CreatedAt AS DATE) = @cpDate
+              WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE) = @cpDate
             `);
             row.checkpoints[cp.label] = result.recordset[0]?.avg_pct ?? null;
           }
@@ -147,7 +150,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
                   CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END +
                   CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
             FROM ${tbl}
-            WHERE CreatedAt >= DATEADD(DAY, -7, GETUTCDATE())
+            WHERE COALESCE(commentTimestamp, CreatedAt) >= DATEADD(DAY, -7, GETUTCDATE())
           `);
           row.current = currentResult.recordset[0]?.avg_pct ?? null;
 

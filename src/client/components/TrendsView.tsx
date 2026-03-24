@@ -246,7 +246,7 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
         </table>
       </div>
       <div className="mt-3 text-[10px]" style={{ color: C.text3 }}>
-        Checkpoints: D1=16 Mar, D15=31 Mar, D30=15 Apr, D45=30 Apr, D60=15 May, D90=14 Jun &bull; Values auto-populate from closest daily snapshot
+        Checkpoints: D0=09 Mar, D1=16 Mar, D15=31 Mar, D30=15 Apr, D45=30 Apr, D60=15 May, D90=14 Jun &bull; Values auto-populate from closest daily snapshot
       </div>
     </Card>
   );
