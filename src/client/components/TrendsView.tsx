@@ -459,10 +459,10 @@ function QaSection({ data, agent, onAgentChange }: { data: QaData | null; agent:
   const grChartData = {
     labels: grLabels,
     datasets: [
-      { label: 'Overall %', data: data.goldenRules.map(r => +((r.ownership_pct + r.next_action_pct + r.timeframe_pct) / 3).toFixed(1)), borderColor: C.text1, backgroundColor: `${C.text1}10`, tension: 0.3, pointRadius: 3, borderWidth: 2.5 },
-      { label: 'Ownership %', data: data.goldenRules.map(r => r.ownership_pct), borderColor: C.teal, backgroundColor: `${C.teal}20`, tension: 0.3, pointRadius: 2, borderWidth: 2 },
-      { label: 'Next Action %', data: data.goldenRules.map(r => r.next_action_pct), borderColor: C.purple, backgroundColor: `${C.purple}20`, tension: 0.3, pointRadius: 2, borderWidth: 2, borderDash: [4, 3] },
-      { label: 'Timeframe %', data: data.goldenRules.map(r => r.timeframe_pct), borderColor: C.blue, backgroundColor: `${C.blue}20`, tension: 0.3, pointRadius: 2, borderWidth: 2 },
+      { label: 'Overall %', data: data.goldenRules.map(r => +((r.ownership_pct + r.next_action_pct + r.timeframe_pct) / 3).toFixed(1)), borderColor: C.text1, backgroundColor: 'transparent', tension: 0.3, pointRadius: 3, borderWidth: 2.5, fill: false, order: 3 },
+      { label: 'Ownership %', data: data.goldenRules.map(r => r.ownership_pct), borderColor: C.teal, backgroundColor: 'transparent', tension: 0.3, pointRadius: 2, borderWidth: 2, fill: false, order: 2 },
+      { label: 'Next Action %', data: data.goldenRules.map(r => r.next_action_pct), borderColor: C.pink, backgroundColor: 'transparent', tension: 0.3, pointRadius: 4, borderWidth: 2.5, borderDash: [6, 3], fill: false, order: 0 },
+      { label: 'Timeframe %', data: data.goldenRules.map(r => r.timeframe_pct), borderColor: C.blue, backgroundColor: 'transparent', tension: 0.3, pointRadius: 2, borderWidth: 2, fill: false, order: 1 },
     ],
   };
 
