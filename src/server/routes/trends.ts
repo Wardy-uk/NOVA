@@ -188,7 +188,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
       const granularity = req.query.granularity === 'daily' ? 'daily' : 'weekly';
 
       const dateGroup = granularity === 'weekly'
-        ? 'DATEADD(DAY, -(DATEPART(WEEKDAY, CreatedAt) - 1), CAST(CreatedAt AS DATE))'
+        ? 'DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, CreatedAt)), 1)'
         : 'CAST(CreatedAt AS DATE)';
 
       const r = p.request();
@@ -223,7 +223,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
       const granularity = req.query.granularity === 'daily' ? 'daily' : 'weekly';
 
       const dateGroup = granularity === 'weekly'
-        ? 'DATEADD(DAY, -(DATEPART(WEEKDAY, CreatedAt) - 1), CAST(CreatedAt AS DATE))'
+        ? 'DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, CreatedAt)), 1)'
         : 'CAST(CreatedAt AS DATE)';
 
       const r = p.request();
@@ -258,7 +258,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
       const granularity = req.query.granularity === 'daily' ? 'daily' : 'weekly';
 
       const dateGroup = granularity === 'weekly'
-        ? 'DATEADD(DAY, -(DATEPART(WEEKDAY, CreatedAt) - 1), CAST(CreatedAt AS DATE))'
+        ? 'DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, CreatedAt)), 1)'
         : 'CAST(CreatedAt AS DATE)';
 
       const r = p.request();
@@ -299,7 +299,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
       const grTbl = `dbo.Jira_QA_GoldenRules${suffix(env)}`;
 
       const dateGroup = granularity === 'weekly'
-        ? 'DATEADD(DAY, -(DATEPART(WEEKDAY, CreatedAt) - 1), CAST(CreatedAt AS DATE))'
+        ? 'DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, CreatedAt)), 1)'
         : 'CAST(CreatedAt AS DATE)';
 
       const agentFilter = agent !== 'all' ? `AND assigneeName = @agent` : '';
@@ -322,7 +322,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
       `);
 
       // Golden Rules
-      const grAgentFilter = agent !== 'all' ? `AND AgentName = @agent` : '';
+      const grAgentFilter = agent !== 'all' ? `AND Updater = @agent` : '';
       const grReq = p.request();
       grReq.input('days', sql.Int, days);
       if (agent !== 'all') grReq.input('agent', sql.NVarChar, agent);
