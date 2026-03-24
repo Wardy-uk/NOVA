@@ -212,6 +212,8 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
             kpi LIKE 'FRT Compliance%'
             OR kpi LIKE 'Resolution Compliance%'
           )
+          AND kpi NOT LIKE '%Dev%'
+          AND kpi NOT LIKE '%Development%'
         GROUP BY ${dateGroup}, kpi
         ORDER BY period
       `);
@@ -247,6 +249,8 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
             KPIGroup = 'Volume'
             OR KPIGroup = 'Age'
           )
+          AND kpi NOT LIKE '%Dev%'
+          AND kpi NOT LIKE '%Development%'
         GROUP BY ${dateGroup}, kpi
         ORDER BY period
       `);
@@ -332,8 +336,8 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
       // Golden Rules — use commentTimestamp (actual comment date) instead of CreatedAt (insert date)
       const grAgentFilter = agent !== 'all' ? `AND Updater = @agent` : '';
       const grDateGroup = granularity === 'weekly'
-        ? 'DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, commentTimestamp)), 1)'
-        : 'CAST(commentTimestamp AS DATE)';
+        ? 'DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, COALESCE(commentTimestamp, CreatedAt))), 1)'
+        : 'CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)';
       const grReq = p.request();
       grReq.input('days', sql.Int, days);
       if (agent !== 'all') grReq.input('agent', sql.NVarChar, agent);
@@ -345,7 +349,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
           AVG(CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) AS timeframe_pct,
           COUNT(*) AS comment_count
         FROM ${grTbl}
-        WHERE commentTimestamp >= DATEADD(DAY, -@days, GETUTCDATE())
+        WHERE COALESCE(commentTimestamp, CreatedAt) >= DATEADD(DAY, -@days, GETUTCDATE())
           ${grAgentFilter}
         GROUP BY ${grDateGroup}
         ORDER BY period

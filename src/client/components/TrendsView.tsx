@@ -7,6 +7,7 @@ import {
   LineElement,
   BarElement,
   Title,
+  SubTitle,
   Tooltip,
   Legend,
   Filler,
@@ -15,7 +16,7 @@ import {
 import annotationPlugin from 'chartjs-plugin-annotation';
 import { Line, Bar } from 'react-chartjs-2';
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler, annotationPlugin);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, SubTitle, Tooltip, Legend, Filler, annotationPlugin);
 
 /* ------------------------------------------------------------------ */
 /*  Colours & Tokens (matches KpiDashboardView)                        */
@@ -71,13 +72,14 @@ function ragColor(value: number | null, target: number | null, direction: string
 
 const DAY1_DATE = '2026-03-16';
 
-function baseLineOptions(title: string, targetValue?: number | null): ChartOptions<'line'> {
+function baseLineOptions(title: string, targetValue?: number | null, opts?: { subtitle?: string; showV5Transition?: boolean }): ChartOptions<'line'> {
   return {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: { position: 'bottom', labels: { color: C.text2, boxWidth: 12, padding: 16, font: { size: 11 } } },
-      title: { display: true, text: title, color: C.text1, font: { size: 14, weight: 'bold' as const }, padding: { bottom: 16 } },
+      title: { display: true, text: title, color: C.text1, font: { size: 14, weight: 'bold' as const }, padding: { bottom: opts?.subtitle ? 4 : 16 } },
+      subtitle: opts?.subtitle ? { display: true, text: opts.subtitle, color: C.text3, font: { size: 10 }, padding: { bottom: 8 } } : { display: false },
       annotation: {
         annotations: {
           day1Line: {
@@ -98,6 +100,17 @@ function baseLineOptions(title: string, targetValue?: number | null): ChartOptio
               borderWidth: 1.5,
               borderDash: [6, 3],
               label: { display: true, content: `Target: ${targetValue}`, color: C.green, font: { size: 10 }, position: 'end' as const },
+            },
+          } : {}),
+          ...(opts?.showV5Transition ? {
+            v5TransitionLine: {
+              type: 'line' as const,
+              xMin: '2026-03-22',
+              xMax: '2026-03-22',
+              borderColor: C.amber,
+              borderWidth: 1.5,
+              borderDash: [3, 3],
+              label: { display: true, content: 'V5 methodology', color: C.amber, font: { size: 10 }, position: 'start' as const },
             },
           } : {}),
         },
@@ -446,8 +459,9 @@ function QaSection({ data, agent, onAgentChange }: { data: QaData | null; agent:
   const grChartData = {
     labels: grLabels,
     datasets: [
+      { label: 'Overall %', data: data.goldenRules.map(r => +((r.ownership_pct + r.next_action_pct + r.timeframe_pct) / 3).toFixed(1)), borderColor: C.text1, backgroundColor: `${C.text1}10`, tension: 0.3, pointRadius: 3, borderWidth: 2.5 },
       { label: 'Ownership %', data: data.goldenRules.map(r => r.ownership_pct), borderColor: C.teal, backgroundColor: `${C.teal}20`, tension: 0.3, pointRadius: 2, borderWidth: 2 },
-      { label: 'Next Action %', data: data.goldenRules.map(r => r.next_action_pct), borderColor: C.purple, backgroundColor: `${C.purple}20`, tension: 0.3, pointRadius: 2, borderWidth: 2 },
+      { label: 'Next Action %', data: data.goldenRules.map(r => r.next_action_pct), borderColor: C.purple, backgroundColor: `${C.purple}20`, tension: 0.3, pointRadius: 2, borderWidth: 2, borderDash: [4, 3] },
       { label: 'Timeframe %', data: data.goldenRules.map(r => r.timeframe_pct), borderColor: C.blue, backgroundColor: `${C.blue}20`, tension: 0.3, pointRadius: 2, borderWidth: 2 },
     ],
   };
@@ -469,7 +483,7 @@ function QaSection({ data, agent, onAgentChange }: { data: QaData | null; agent:
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
           <div style={{ height: 280 }}>
-            <Line data={qaChartData} options={baseLineOptions('Team QA Average Score', 8.0)} />
+            <Line data={qaChartData} options={baseLineOptions('Team QA Average Score', 8.0, { subtitle: 'Pre-Mar 22 scores transformed from V4 methodology (1\u20135 scale)', showV5Transition: true })} />
           </div>
         </Card>
         <Card>
