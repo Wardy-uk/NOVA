@@ -20,7 +20,7 @@ export const TEAM_AGENTS = [
 
 // Checkpoint dates for the 90-day framework
 const CHECKPOINTS = [
-  { label: 'Day 0', date: '2026-03-09' },
+  { label: 'Day 0', date: '2026-03-01' },
   { label: 'Day 1', date: '2026-03-16' },
   { label: 'Day 15', date: '2026-03-31' },
   { label: 'Day 30', date: '2026-04-15' },

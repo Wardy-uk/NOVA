@@ -72,7 +72,7 @@ function ragColor(value: number | null, target: number | null, direction: string
 
 const DAY1_DATE = '2026-03-16';
 
-function baseLineOptions(title: string, targetValue?: number | null, opts?: { subtitle?: string; showV5Transition?: boolean }): ChartOptions<'line'> {
+function baseLineOptions(title: string, targetValue?: number | null, opts?: { subtitle?: string }): ChartOptions<'line'> {
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -100,17 +100,6 @@ function baseLineOptions(title: string, targetValue?: number | null, opts?: { su
               borderWidth: 1.5,
               borderDash: [6, 3],
               label: { display: true, content: `Target: ${targetValue}`, color: C.green, font: { size: 10 }, position: 'end' as const },
-            },
-          } : {}),
-          ...(opts?.showV5Transition ? {
-            v5TransitionLine: {
-              type: 'line' as const,
-              xMin: '2026-03-22',
-              xMax: '2026-03-22',
-              borderColor: C.amber,
-              borderWidth: 1.5,
-              borderDash: [3, 3],
-              label: { display: true, content: 'V5 methodology', color: C.amber, font: { size: 10 }, position: 'start' as const },
             },
           } : {}),
         },
@@ -246,7 +235,7 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
         </table>
       </div>
       <div className="mt-3 text-[10px]" style={{ color: C.text3 }}>
-        Checkpoints: D0=09 Mar, D1=16 Mar, D15=31 Mar, D30=15 Apr, D45=30 Apr, D60=15 May, D90=14 Jun &bull; Values auto-populate from closest daily snapshot
+        Checkpoints: D0=01 Mar, D1=16 Mar, D15=31 Mar, D30=15 Apr, D45=30 Apr, D60=15 May, D90=14 Jun &bull; Values auto-populate from closest daily snapshot
       </div>
     </Card>
   );
@@ -483,7 +472,7 @@ function QaSection({ data, agent, onAgentChange }: { data: QaData | null; agent:
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
           <div style={{ height: 280 }}>
-            <Line data={qaChartData} options={baseLineOptions('Team QA Average Score', 8.0, { subtitle: 'Pre-Mar 22 scores transformed from V4 methodology (1\u20135 scale)', showV5Transition: true })} />
+            <Line data={qaChartData} options={baseLineOptions('Team QA Average Score', 8.0)} />
           </div>
         </Card>
         <Card>
