@@ -334,7 +334,7 @@ export function KpiDailyHistoryView() {
 
   const [fromDate, setFromDate] = useState(fmtDate(monday));
   const [toDate, setToDate] = useState(fmtDate(today));
-  const [env, setEnv] = useState<'live' | 'uat'>('uat');
+  const env = 'live' as const;
   const [subTab, setSubTab] = useState<SubTab>('departmental');
 
   const [deptData, setDeptData] = useState<DailyKpi[]>([]);
@@ -475,25 +475,6 @@ export function KpiDailyHistoryView() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {/* Env toggle */}
-          <div style={{
-            display: 'flex', borderRadius: 20, overflow: 'hidden',
-            border: `1px solid ${C.border}`,
-          }}>
-            {(['live', 'uat'] as const).map(e => (
-              <button
-                key={e}
-                onClick={() => setEnv(e)}
-                style={{
-                  padding: '6px 14px', border: 'none', cursor: 'pointer',
-                  fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
-                  letterSpacing: '0.5px', transition: 'all 0.2s',
-                  background: env === e ? (e === 'live' ? `${C.red}25` : `${C.teal}20`) : 'transparent',
-                  color: env === e ? (e === 'live' ? C.red : C.teal) : C.text3,
-                }}
-              >{e}</button>
-            ))}
-          </div>
 
           {/* Refresh */}
           <button

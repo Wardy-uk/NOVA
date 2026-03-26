@@ -65,7 +65,7 @@ function DailySnapshotPanel({ onToast }: { onToast: (t: Toast) => void }) {
   const [backfillStart, setBackfillStart] = useState('');
   const [backfillEnd, setBackfillEnd] = useState('');
   const [running, setRunning] = useState(false);
-  const [env, setEnv] = useState<'live' | 'uat'>('live');
+  const env = 'live' as const;
   const [status, setStatus] = useState<{
     agentDaily: { earliest: string; latest: string; distinctDays: number; totalRows: number };
     eodSnapshot: { earliest: string; latest: string; distinctDays: number };
@@ -138,22 +138,6 @@ function DailySnapshotPanel({ onToast }: { onToast: (t: Toast) => void }) {
     <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-bold text-neutral-100">Daily Agent KPI Snapshot</h3>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-neutral-500 uppercase tracking-wide">Env:</span>
-          {(['live', 'uat'] as const).map(e => (
-            <button
-              key={e}
-              onClick={() => setEnv(e)}
-              className={`px-2.5 py-1 text-[10px] font-semibold uppercase rounded transition-colors ${
-                env === e
-                  ? e === 'live' ? 'bg-red-900/30 text-red-400 border border-red-800/30' : 'bg-[#5ec1ca]/15 text-[#5ec1ca] border border-[#5ec1ca]/25'
-                  : 'text-neutral-500 border border-transparent'
-              }`}
-            >
-              {e}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* Status cards */}
