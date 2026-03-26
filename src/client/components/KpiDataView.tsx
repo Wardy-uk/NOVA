@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 
 type Env = 'live' | 'uat';
-type Tab = 'team-snapshot' | 'agent-daily' | 'agents' | 'daily-history';
+type Tab = 'eod-snapshot' | 'team-snapshot' | 'agent-daily' | 'agents' | 'daily-history';
 
 const TABS: Array<{ id: Tab; label: string }> = [
-  { id: 'team-snapshot', label: 'Team KPIs' },
+  { id: 'eod-snapshot', label: 'EOD Snapshot' },
+  { id: 'team-snapshot', label: 'Live Snapshot' },
   { id: 'agent-daily', label: 'Agent KPIs' },
   { id: 'agents', label: 'Agents' },
   { id: 'daily-history', label: 'Daily History' },
@@ -253,11 +254,14 @@ function DigestTable({ data }: { data: any[] }) {
 
 export function KpiDataView() {
   const env = 'live' as Env;
-  const [tab, setTab] = useState<Tab>('team-snapshot');
+  const [tab, setTab] = useState<Tab>('eod-snapshot');
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState(7);
+  const [eodDate, setEodDate] = useState<string>(''); // empty = server default (prev working day)
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [activeDate, setActiveDate] = useState<string>(''); // the date the server actually returned
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -267,10 +271,17 @@ export function KpiDataView() {
       if (['daily-history', 'agent-daily'].includes(tab)) {
         params.set('days', String(days));
       }
+      if (tab === 'eod-snapshot' && eodDate) {
+        params.set('date', eodDate);
+      }
       const res = await fetch(`/api/kpi-data/${tab}?${params}`);
       const json = await res.json();
       if (json.ok) {
         setData(json.data);
+        if (tab === 'eod-snapshot') {
+          if (json.date) setActiveDate(json.date);
+          if (json.availableDates) setAvailableDates(json.availableDates);
+        }
       } else {
         setError(json.error || 'Unknown error');
         setData([]);
@@ -281,7 +292,7 @@ export function KpiDataView() {
     } finally {
       setLoading(false);
     }
-  }, [env, tab, days]);
+  }, [env, tab, days, eodDate]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -292,6 +303,23 @@ export function KpiDataView() {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold font-[var(--font-heading)] text-neutral-100">KPI Data Explorer</h2>
         <div className="flex items-center gap-3">
+          {/* EOD date selector */}
+          {tab === 'eod-snapshot' && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-neutral-500">Date:</span>
+              <select
+                value={eodDate || activeDate}
+                onChange={e => setEodDate(e.target.value)}
+                className="bg-[#272C33] border border-[#3a424d] rounded px-2 py-1 text-[12px] text-neutral-300"
+              >
+                {availableDates.map(d => (
+                  <option key={d} value={d}>
+                    {new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {/* Days selector */}
           {needsDays && (
             <select
@@ -335,9 +363,19 @@ export function KpiDataView() {
         <div className="px-3 py-2 rounded bg-red-900/20 border border-red-800/30 text-[12px] text-red-300">{error}</div>
       )}
 
-      {/* Row count */}
+      {/* Row count + context */}
       {!loading && !error && (
-        <div className="text-[11px] text-neutral-500">{data.length} row{data.length !== 1 ? 's' : ''}</div>
+        <div className="flex items-center gap-3 text-[11px] text-neutral-500">
+          <span>{data.length} row{data.length !== 1 ? 's' : ''}</span>
+          {tab === 'eod-snapshot' && activeDate && (
+            <span className="text-[#5ec1ca]">
+              EOD data for {new Date(activeDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}
+            </span>
+          )}
+          {tab === 'team-snapshot' && (
+            <span className="text-amber-400/70">Live rolling snapshot (updates every 3 min during business hours)</span>
+          )}
+        </div>
       )}
 
       {/* Table */}
@@ -346,6 +384,7 @@ export function KpiDataView() {
           <div className="flex items-center justify-center py-12 text-neutral-500">Loading...</div>
         ) : (
           <>
+            {tab === 'eod-snapshot' && <TeamSnapshotTable data={data} />}
             {tab === 'team-snapshot' && <TeamSnapshotTable data={data} />}
             {tab === 'agent-daily' && <AgentDailyTable data={data} />}
             {tab === 'agents' && <AgentsTable data={data} />}

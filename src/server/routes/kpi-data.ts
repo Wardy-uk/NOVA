@@ -144,6 +144,95 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
     }
   });
 
+  // GET /api/admin/kpi-data/eod-snapshot?env=live|uat&date=YYYY-MM-DD
+  // Returns EOD KPI data for a specific date from jira_kpi_daily.
+  // If no date param, defaults to the previous working day (skips weekends).
+  router.get('/eod-snapshot', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const p = await getPool();
+
+      // Determine target date: param or previous working day
+      let targetDate: string;
+      if (req.query.date && typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)) {
+        targetDate = req.query.date;
+      } else {
+        // Previous working day (skip weekends)
+        const now = new Date();
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const day = d.getDay(); // 0=Sun, 6=Sat
+        if (day === 0) d.setDate(d.getDate() - 2);      // Sun → Fri
+        else if (day === 1) d.setDate(d.getDate() - 3);  // Mon → Fri
+        else if (day === 6) d.setDate(d.getDate() - 1);  // Sat → Fri
+        else d.setDate(d.getDate() - 1);                  // Tue-Fri → previous day
+        targetDate = d.toISOString().slice(0, 10);
+      }
+
+      const request = p.request();
+      request.input('date', sql.Date, targetDate);
+      const result = await request.query(`
+        SELECT kpi AS KPI, kpiGroup AS KPIGroup, [count] AS [Count],
+               target AS KPITarget, direction AS KPIDirection, rag AS RAG, CreatedAt
+        FROM dbo.jira_kpi_daily${s}
+        WHERE CAST(CreatedAt AS DATE) = @date
+        ORDER BY kpiGroup, kpi
+      `);
+
+      // Apply same target fallbacks as team-snapshot
+      const TARGET_FALLBACKS: Record<string, { target: number; direction: string }> = {
+        'frt compliance % (open queue)': { target: 95, direction: 'higher is better' },
+        'frt compliance % (resolved today)': { target: 95, direction: 'higher is better' },
+        'resolution compliance % (open queue)': { target: 95, direction: 'higher is better' },
+        'resolution compliance % (resolved today)': { target: 95, direction: 'higher is better' },
+        'cc incidents over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'cc service requests over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'cc tpj over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'cc (tpj) over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'production over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'tier 2 over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'tier 3 over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'development over sla (actionable)': { target: 0, direction: 'lower is better' },
+      };
+      const PATTERN_FALLBACKS: { pattern: RegExp; target: number; direction: string }[] = [
+        { pattern: /frt compliance/i, target: 95, direction: 'higher is better' },
+        { pattern: /resolution compliance/i, target: 95, direction: 'higher is better' },
+        { pattern: /over sla \(actionable\)/i, target: 0, direction: 'lower is better' },
+      ];
+      for (const row of result.recordset) {
+        if (row.KPITarget && row.KPITarget !== 0) continue;
+        const fb = TARGET_FALLBACKS[(row.KPI || '').toLowerCase().trim()];
+        if (fb) {
+          row.KPITarget = fb.target;
+          if (!row.KPIDirection) row.KPIDirection = fb.direction;
+        } else {
+          const pf = PATTERN_FALLBACKS.find(p => p.pattern.test(row.KPI || ''));
+          if (pf) {
+            row.KPITarget = pf.target;
+            if (!row.KPIDirection) row.KPIDirection = pf.direction;
+          }
+        }
+      }
+
+      // Also fetch available dates for the date picker
+      const datesResult = await p.request().query(`
+        SELECT DISTINCT CAST(CreatedAt AS DATE) AS d
+        FROM dbo.jira_kpi_daily${s}
+        WHERE CreatedAt >= DATEADD(day, -90, GETDATE())
+        ORDER BY d DESC
+      `);
+      const availableDates = datesResult.recordset.map((r: any) => {
+        const val = r.d;
+        if (val instanceof Date) return val.toISOString().slice(0, 10);
+        return String(val).slice(0, 10);
+      });
+
+      res.json({ ok: true, data: result.recordset, date: targetDate, availableDates, env });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
   // GET /api/admin/kpi-data/daily-history?env=live|uat&days=7&from=YYYY-MM-DD&to=YYYY-MM-DD
   router.get('/daily-history', async (req, res) => {
     try {
