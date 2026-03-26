@@ -49,6 +49,8 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
   { key: 'oldest_dev_ticket', label: 'Oldest Dev Ticket (days)', kpiPattern: 'Oldest actionable ticket (days) in Development', target: 31, direction: 'lower' },
   { key: 'csat', label: 'CSAT %', kpiPattern: 'CSAT%', target: null, direction: 'higher' },
   { key: 'fcr', label: 'FCR Rate %', kpiPattern: 'FCR%', target: null, direction: 'higher' },
+  { key: 'l1_resolution', label: '1st Line Resolution Rate %', kpiPattern: '1st Line Resolution Rate%', target: null, direction: 'higher' },
+  { key: 'bug_ack', label: 'Bug Ack Time (hours)', kpiPattern: 'Bug Escalation-to-Ack%', target: null, direction: 'lower' },
 ];
 
 export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQueries: FileUserQueries): Router {
@@ -102,7 +104,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         };
 
         if (metric.source === 'qa') {
-          // QA avg from jira_qa_results — V5 rows only (CreatedAt >= 2026-03-22)
+          // QA avg from jira_qa_results — 7-day window ending on checkpoint date
           const tbl = `dbo.jira_qa_results${suffix(env)}`;
           for (const cp of CHECKPOINTS) {
             const r = p.request();
@@ -110,25 +112,23 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
             const result = await r.query(`
               SELECT AVG(CAST(overallScore AS FLOAT)) AS avg_score
               FROM ${tbl}
-              WHERE CAST(CreatedAt AS DATE) = @cpDate
+              WHERE CAST(CreatedAt AS DATE) BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
                 AND qaType != 'excluded'
-                AND CreatedAt >= '2026-03-22'
             `);
             row.checkpoints[cp.label] = result.recordset[0]?.avg_score ?? null;
           }
-          // Current: latest 7 days, V5 only
+          // Current: latest 7 days
           const cr = p.request();
           const currentResult = await cr.query(`
             SELECT AVG(CAST(overallScore AS FLOAT)) AS avg_score
             FROM ${tbl}
             WHERE CreatedAt >= DATEADD(DAY, -7, GETUTCDATE())
               AND qaType != 'excluded'
-              AND CreatedAt >= '2026-03-22'
           `);
           row.current = currentResult.recordset[0]?.avg_score ?? null;
 
         } else if (metric.source === 'golden') {
-          // Golden rules from Jira_QA_GoldenRules — use commentTimestamp (actual comment date)
+          // Golden rules from Jira_QA_GoldenRules — 7-day window ending on checkpoint date
           const tbl = `dbo.Jira_QA_GoldenRules${suffix(env)}`;
           for (const cp of CHECKPOINTS) {
             const r = p.request();
@@ -139,7 +139,8 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
                     CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END +
                     CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
               FROM ${tbl}
-              WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE) = @cpDate
+              WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)
+                    BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
             `);
             row.checkpoints[cp.label] = result.recordset[0]?.avg_pct ?? null;
           }
@@ -379,6 +380,152 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
           agents: agentResult.recordset.map((r: any) => r.assigneeName),
         },
       });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/trends/data-audit ───
+  // Diagnostic: check data coverage across all checkpoint tables
+  router.get('/data-audit', async (req, res) => {
+    try {
+      const p = await getPool();
+      const env = parseEnv(req);
+      const qaTbl = `dbo.jira_qa_results${suffix(env)}`;
+      const grTbl = `dbo.Jira_QA_GoldenRules${suffix(env)}`;
+
+      const audit: any = { checkpoints: CHECKPOINTS, tables: {}, checkpointCoverage: {} };
+
+      // 1. Table-level overview: row counts + date ranges
+      const tables = [
+        { key: 'jira_kpi_daily', tbl: 'dbo.jira_kpi_daily', dateCol: 'CreatedAt' },
+        { key: 'jira_qa_results', tbl: qaTbl, dateCol: 'CreatedAt' },
+        { key: 'Jira_QA_GoldenRules', tbl: grTbl, dateCol: 'COALESCE(commentTimestamp, CreatedAt)' },
+        { key: 'jira_agent_kpi_daily', tbl: `dbo.jira_agent_kpi_daily${suffix(env)}`, dateCol: 'CreatedAt' },
+      ];
+
+      for (const t of tables) {
+        try {
+          const r = p.request();
+          const result = await r.query(`
+            SELECT
+              COUNT(*) AS total_rows,
+              MIN(CAST(${t.dateCol} AS DATE)) AS earliest,
+              MAX(CAST(${t.dateCol} AS DATE)) AS latest
+            FROM ${t.tbl}
+          `);
+          audit.tables[t.key] = result.recordset[0];
+        } catch (e: any) {
+          audit.tables[t.key] = { error: e.message };
+        }
+      }
+
+      // 2. Per-checkpoint date window coverage for each metric source
+      for (const cp of CHECKPOINTS) {
+        const cpAudit: any = { date: cp.date };
+
+        // KPI daily: exact date row count + which KPIs exist
+        const kpiReq = p.request();
+        kpiReq.input('cpDate', sql.Date, cp.date);
+        const kpiResult = await kpiReq.query(`
+          SELECT kpi, [Count] AS val
+          FROM dbo.jira_kpi_daily
+          WHERE CAST(CreatedAt AS DATE) = @cpDate
+          ORDER BY kpi
+        `);
+        cpAudit.kpi_exact_day = {
+          rows: kpiResult.recordset.length,
+          kpis: kpiResult.recordset.map((r: any) => `${r.kpi}: ${r.val}`),
+        };
+
+        // KPI daily: 7-day window
+        const kpiWinReq = p.request();
+        kpiWinReq.input('cpDate', sql.Date, cp.date);
+        const kpiWinResult = await kpiWinReq.query(`
+          SELECT COUNT(DISTINCT CAST(CreatedAt AS DATE)) AS days_with_data,
+                 COUNT(*) AS total_rows
+          FROM dbo.jira_kpi_daily
+          WHERE CAST(CreatedAt AS DATE) BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
+        `);
+        cpAudit.kpi_7day_window = kpiWinResult.recordset[0];
+
+        // QA: exact day + 7-day window
+        const qaExReq = p.request();
+        qaExReq.input('cpDate', sql.Date, cp.date);
+        const qaExResult = await qaExReq.query(`
+          SELECT COUNT(*) AS rows, AVG(CAST(overallScore AS FLOAT)) AS avg_score
+          FROM ${qaTbl}
+          WHERE CAST(CreatedAt AS DATE) = @cpDate AND qaType != 'excluded'
+        `);
+        cpAudit.qa_exact_day = qaExResult.recordset[0];
+
+        const qaWinReq = p.request();
+        qaWinReq.input('cpDate', sql.Date, cp.date);
+        const qaWinResult = await qaWinReq.query(`
+          SELECT COUNT(*) AS rows, AVG(CAST(overallScore AS FLOAT)) AS avg_score,
+                 COUNT(DISTINCT CAST(CreatedAt AS DATE)) AS days_with_data
+          FROM ${qaTbl}
+          WHERE CAST(CreatedAt AS DATE) BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
+            AND qaType != 'excluded'
+        `);
+        cpAudit.qa_7day_window = qaWinResult.recordset[0];
+
+        // Golden Rules: exact day + 7-day window
+        const grExReq = p.request();
+        grExReq.input('cpDate', sql.Date, cp.date);
+        const grExResult = await grExReq.query(`
+          SELECT COUNT(*) AS rows,
+            AVG(CASE WHEN rule1Pass=1 THEN 100.0 ELSE 0 END +
+                CASE WHEN rule2Pass=1 THEN 100.0 ELSE 0 END +
+                CASE WHEN rule3Pass=1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+          FROM ${grTbl}
+          WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE) = @cpDate
+        `);
+        cpAudit.gr_exact_day = grExResult.recordset[0];
+
+        const grWinReq = p.request();
+        grWinReq.input('cpDate', sql.Date, cp.date);
+        const grWinResult = await grWinReq.query(`
+          SELECT COUNT(*) AS rows,
+            AVG(CASE WHEN rule1Pass=1 THEN 100.0 ELSE 0 END +
+                CASE WHEN rule2Pass=1 THEN 100.0 ELSE 0 END +
+                CASE WHEN rule3Pass=1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct,
+            COUNT(DISTINCT CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)) AS days_with_data
+          FROM ${grTbl}
+          WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)
+                BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
+        `);
+        cpAudit.gr_7day_window = grWinResult.recordset[0];
+
+        audit.checkpointCoverage[cp.label] = cpAudit;
+      }
+
+      // 3. Daily row counts for QA and GR (last 60 days) to see gaps
+      const qaDaily = p.request();
+      const qaDailyResult = await qaDaily.query(`
+        SELECT CAST(CreatedAt AS DATE) AS day, COUNT(*) AS rows,
+               AVG(CAST(overallScore AS FLOAT)) AS avg_score
+        FROM ${qaTbl}
+        WHERE CreatedAt >= '2026-02-01' AND qaType != 'excluded'
+        GROUP BY CAST(CreatedAt AS DATE)
+        ORDER BY day
+      `);
+      audit.qa_daily_coverage = qaDailyResult.recordset;
+
+      const grDaily = p.request();
+      const grDailyResult = await grDaily.query(`
+        SELECT CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE) AS day, COUNT(*) AS rows,
+               AVG(CASE WHEN rule1Pass=1 THEN 100.0 ELSE 0 END +
+                   CASE WHEN rule2Pass=1 THEN 100.0 ELSE 0 END +
+                   CASE WHEN rule3Pass=1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+        FROM ${grTbl}
+        WHERE COALESCE(commentTimestamp, CreatedAt) >= '2026-02-01'
+        GROUP BY CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)
+        ORDER BY day
+      `);
+      audit.gr_daily_coverage = grDailyResult.recordset;
+
+      res.json({ ok: true, data: audit });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }
