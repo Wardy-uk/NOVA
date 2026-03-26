@@ -20,7 +20,7 @@ export const TEAM_AGENTS = [
 
 // Checkpoint dates for the 90-day framework
 const CHECKPOINTS = [
-  { label: 'Day 0', date: '2026-03-01' },
+  { label: 'Day 0', date: '2026-03-02' },
   { label: 'Day 1', date: '2026-03-16' },
   { label: 'Day 15', date: '2026-03-31' },
   { label: 'Day 30', date: '2026-04-15' },
@@ -50,7 +50,7 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
   { key: 'csat', label: 'CSAT %', kpiPattern: 'CSAT%', target: null, direction: 'higher' },
   { key: 'fcr', label: 'FCR Rate %', kpiPattern: 'FCR%', target: null, direction: 'higher' },
   { key: 'l1_resolution', label: '1st Line Resolution Rate %', kpiPattern: '1st Line Resolution Rate%', target: null, direction: 'higher' },
-  { key: 'bug_ack', label: 'Bug Ack Time (hours)', kpiPattern: 'Bug Escalation-to-Ack%', target: null, direction: 'lower' },
+  { key: 'bug_ack', label: 'Bug Ack Time (hours)', kpiPattern: 'Bug Escalation-to-Ack%hours%', target: null, direction: 'lower' },
 ];
 
 export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQueries: FileUserQueries): Router {
