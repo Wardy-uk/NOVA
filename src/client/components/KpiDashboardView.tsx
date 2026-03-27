@@ -221,6 +221,49 @@ function rankColor(n: number): string {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Reportable KPIs — case-insensitive match list (display order)      */
+/* ------------------------------------------------------------------ */
+
+const REPORTABLE_KPIS: string[] = [
+  'Number of Tickets in CC (Incidents)',
+  'Number of Tickets in CC (Service Requests)',
+  'Number of Tickets in CC (TPJ)',
+  'Number of Tickets in Production',
+  'Number of Tickets in Tier 2',
+  'Number of Tickets in Tier 3',
+  'Number of Tickets in Development',
+  'Number of Tickets With No Reply in CC (Incidents)',
+  'Number of Tickets With No Reply in CC (Production)',
+  'Number of Tickets With No Reply in CC (TPJ)',
+  'Number of Tickets With No Reply in Tier 2',
+  'Number of Tickets With No Reply in Tier 3',
+  'Number of CC tickets over SLA (actionable) (Incidents)',
+  'Number of CC tickets over SLA (actionable) (Production)',
+  'Number of CC tickets over SLA (actionable) (TPJ)',
+  'Number of Tier 2 tickets over SLA (actionable)',
+  'Number of Tier 3 tickets over SLA (actionable)',
+  'Number of CC tickets over SLA (Not actionable) (Incidents)',
+  'Number of CC tickets over SLA (Not actionable) (Production)',
+  'Number of CC tickets over SLA (Not actionable) (TPJ)',
+  'Number of Tier 2 tickets over SLA (not actionable)',
+  'Number of Tier 3 tickets over SLA (not actionable)',
+  'Tickets escalated to Tier 2',
+  'Tickets escalated to Tier 3',
+  'Tickets escalated to Development',
+  'Tickets rejected by Tier 2',
+  'Tickets rejected by Tier 3',
+  'Tickets rejected by Development',
+  'Oldest actionable ticket (days) in CC (Incident)',
+  'Oldest actionable ticket (days) in CC (Production)',
+  'Oldest actionable ticket (days) in CC (TPJ)',
+  'Oldest actionable ticket (days) in Production',
+  'Oldest actionable ticket (days) in Tier 2',
+  'Oldest actionable ticket (days) in Tier 3',
+];
+
+const REPORTABLE_SET = new Set(REPORTABLE_KPIS.map(k => k.toLowerCase()));
+
+/* ------------------------------------------------------------------ */
 /*  Sub-components                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -359,15 +402,19 @@ const GLOSSARY: { term: string; meaning: string }[] = [
 
 function KpiSummarySection({ data }: { data: KpiSnapshot[] }) {
   const [sortBy, setSortBy] = useState<'type' | 'breached'>('type');
+  const [reportableOnly, setReportableOnly] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
 
+  // Apply reportable filter
+  const filtered = reportableOnly ? data.filter(d => REPORTABLE_SET.has(d.KPI.toLowerCase())) : data;
+
   // Summary counts
-  const greenCount = data.filter(d => d.RAG === 1).length;
-  const amberCount = data.filter(d => d.RAG === 2).length;
-  const redCount = data.filter(d => d.RAG === 3).length;
+  const greenCount = filtered.filter(d => d.RAG === 1).length;
+  const amberCount = filtered.filter(d => d.RAG === 2).length;
+  const redCount = filtered.filter(d => d.RAG === 3).length;
 
   // Sort data using defined KPI order
-  const sorted = sortKpis(data);
+  const sorted = sortKpis(filtered);
   console.log('[KPI DEBUG] Raw data KPI names:', data.map(d => d.KPI));
   console.log('[KPI DEBUG] Sorted order:', sorted.map(d => `${d.KPI} (pos=${KPI_ORDER_MAP.get(d.KPI.toLowerCase()) ?? 'MISS'})`));
 
@@ -387,7 +434,7 @@ function KpiSummarySection({ data }: { data: KpiSnapshot[] }) {
     // Sort by RAG: Red (3) first, then Amber (2), then Green (1), then unset
     const ragOrder = (rag: number | null) => rag === 3 ? 0 : rag === 2 ? 1 : rag === 1 ? 2 : 3;
     const ragLabels: Record<number, string> = { 0: 'Red - Breached', 1: 'Amber - At Risk', 2: 'Green - On Target', 3: 'No Target' };
-    const sorted = [...data].sort((a, b) => ragOrder(a.RAG) - ragOrder(b.RAG));
+    const sorted = [...filtered].sort((a, b) => ragOrder(a.RAG) - ragOrder(b.RAG));
     const grouped = sorted.reduce<Record<string, KpiSnapshot[]>>((acc, row) => {
       const key = ragLabels[ragOrder(row.RAG)];
       (acc[key] = acc[key] || []).push(row);
@@ -400,7 +447,7 @@ function KpiSummarySection({ data }: { data: KpiSnapshot[] }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <SectionHeader title="KPI Overview" subtitle={`${data.length} metrics tracked`} />
+          <SectionHeader title="KPI Overview" subtitle={`${filtered.length}${reportableOnly ? ` of ${data.length}` : ''} metrics tracked`} />
           <button
             onClick={() => setShowGlossary(!showGlossary)}
             title="Glossary"
@@ -435,6 +482,16 @@ function KpiSummarySection({ data }: { data: KpiSnapshot[] }) {
               >{s.label}</button>
             ))}
           </div>
+          {/* Reportable filter toggle */}
+          <button
+            onClick={() => setReportableOnly(!reportableOnly)}
+            style={{
+              padding: '4px 12px', borderRadius: 20, border: `1px solid ${reportableOnly ? `${C.teal}40` : C.border}`,
+              cursor: 'pointer', fontSize: 10, fontWeight: 600, transition: 'all 0.2s',
+              background: reportableOnly ? `${C.teal}20` : 'transparent',
+              color: reportableOnly ? C.teal : C.text3,
+            }}
+          >Reportable</button>
           {/* RAG summary pills */}
           <div style={{ display: 'flex', gap: 12 }}>
             {[
