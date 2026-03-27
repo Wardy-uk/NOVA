@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, memo } from 'react';
+import { useState, useEffect, useCallback, memo, Fragment } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -127,26 +127,55 @@ function Card({ title, children, className = '' }: { title?: string; children: R
 
 /* ── Section 5: Checkpoint Evidence Panel ── */
 
+interface TierData {
+  key: string;
+  label: string;
+  target: number | null;
+  checkpoints: Record<string, number | null>;
+  current: number | null;
+}
+
+interface CheckpointMetricData {
+  key: string;
+  label: string;
+  target: number | null;
+  direction: string;
+  expandable: boolean;
+  checkpoints: Record<string, number | null>;
+  current: number | null;
+  tiers: TierData[] | null;
+}
+
 interface CheckpointData {
   checkpoints: Array<{ label: string; date: string }>;
-  metrics: Array<{
-    key: string;
-    label: string;
-    target: number | null;
-    direction: string;
-    checkpoints: Record<string, number | null>;
-    current: number | null;
-  }>;
+  metrics: CheckpointMetricData[];
+}
+
+function statusInfo(current: number | null, target: number | null, direction: string): { color: string; label: string } {
+  const color = ragColor(current, target, direction);
+  const label = current !== null && target !== null
+    ? (direction === 'higher' ? (current >= target ? 'On Track' : 'Behind') : (current <= target ? 'On Track' : 'Behind'))
+    : 'TBD';
+  return { color, label };
 }
 
 function CheckpointPanel({ data }: { data: CheckpointData | null }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleExpand = useCallback((key: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   const downloadCsv = useCallback(() => {
     if (!data) return;
     const headers = ['Metric', ...data.checkpoints.map(c => `${c.label} (${c.date})`), 'Current', 'Target', 'Status'];
     const rows = data.metrics.map(m => {
-      const status = m.current !== null && m.target !== null
-        ? (m.direction === 'higher' ? (m.current >= m.target ? 'On Track' : 'Behind') : (m.current <= m.target ? 'On Track' : 'Behind'))
-        : 'TBD';
+      const { label: status } = statusInfo(m.current, m.target, m.direction);
       return [
         m.label,
         ...data.checkpoints.map(c => fmtNum(m.checkpoints[c.label], 1)),
@@ -200,35 +229,93 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
           </thead>
           <tbody>
             {data.metrics.map(m => {
-              const statusColor = ragColor(m.current, m.target, m.direction);
-              const statusLabel = m.current !== null && m.target !== null
-                ? (m.direction === 'higher' ? (m.current >= m.target ? 'On Track' : 'Behind') : (m.current <= m.target ? 'On Track' : 'Behind'))
-                : 'TBD';
+              const { color: statusColor, label: statusLabel } = statusInfo(m.current, m.target, m.direction);
+              const isExpanded = expanded.has(m.key);
+              const canExpand = m.expandable && m.tiers && m.tiers.length > 0;
+
               return (
-                <tr key={m.key}>
-                  <td className="py-2.5 px-3 font-medium sticky left-0" style={{ color: C.text1, background: C.bg2, borderBottom: `1px solid ${C.border}` }}>{m.label}</td>
-                  {data.checkpoints.map(cp => {
-                    const val = m.checkpoints[cp.label];
-                    const isPast = new Date(cp.date) <= new Date();
+                <Fragment key={m.key}>
+                  {/* Parent metric row */}
+                  <tr
+                    onClick={canExpand ? () => toggleExpand(m.key) : undefined}
+                    style={{ cursor: canExpand ? 'pointer' : 'default' }}
+                    onMouseEnter={e => { if (canExpand) e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; }}
+                    onMouseLeave={e => { if (canExpand) e.currentTarget.style.background = ''; }}
+                  >
+                    <td className="py-2.5 px-3 font-medium sticky left-0" style={{ color: C.text1, background: C.bg2, borderBottom: `1px solid ${C.border}` }}>
+                      <span className="inline-flex items-center gap-1.5">
+                        {canExpand && (
+                          <svg
+                            width="10" height="10" viewBox="0 0 10 10"
+                            style={{
+                              color: C.text3,
+                              transition: 'transform 0.2s ease',
+                              transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <path d="M3 1.5 L7 5 L3 8.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                        {!canExpand && <span style={{ width: 10, display: 'inline-block' }} />}
+                        {m.label}
+                      </span>
+                    </td>
+                    {data.checkpoints.map(cp => {
+                      const val = m.checkpoints[cp.label];
+                      return (
+                        <td key={cp.label} className="text-center py-2.5 px-3" style={{ color: val !== null ? C.text1 : C.text3, borderBottom: `1px solid ${C.border}` }}>
+                          {val !== null ? fmtNum(val, 1) : '\u2014'}
+                        </td>
+                      );
+                    })}
+                    <td className="text-center py-2.5 px-3 font-semibold" style={{ color: statusColor, borderBottom: `1px solid ${C.border}` }}>
+                      {fmtNum(m.current, 1)}
+                    </td>
+                    <td className="text-center py-2.5 px-3" style={{ color: C.text2, borderBottom: `1px solid ${C.border}` }}>
+                      {m.target !== null ? String(m.target) : 'TBD'}
+                    </td>
+                    <td className="text-center py-2.5 px-3" style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ color: statusColor, background: `${statusColor}15` }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor }} />
+                        {statusLabel}
+                      </span>
+                    </td>
+                  </tr>
+
+                  {/* Expanded tier sub-rows */}
+                  {isExpanded && m.tiers?.map(tier => {
+                    const tierTarget = tier.target ?? m.target;
+                    const { color: tierStatusColor, label: tierStatusLabel } = statusInfo(tier.current, tierTarget, m.direction);
                     return (
-                      <td key={cp.label} className="text-center py-2.5 px-3" style={{ color: val !== null ? C.text1 : C.text3, borderBottom: `1px solid ${C.border}` }}>
-                        {val !== null ? fmtNum(val, 1) : (isPast ? '\u2014' : '\u2014')}
-                      </td>
+                      <tr key={`${m.key}-${tier.key}`} style={{ background: 'rgba(0,0,0,0.15)' }}>
+                        <td className="py-2 px-3 sticky left-0" style={{ color: C.text3, background: C.bg1, borderBottom: `1px solid ${C.border}`, paddingLeft: 32 }}>
+                          <span className="text-[11px]">{tier.label}</span>
+                        </td>
+                        {data.checkpoints.map(cp => {
+                          const val = tier.checkpoints[cp.label];
+                          return (
+                            <td key={cp.label} className="text-center py-2 px-3" style={{ color: val !== null ? C.text2 : C.text3, borderBottom: `1px solid ${C.border}` }}>
+                              {val !== null ? fmtNum(val, 1) : '\u2014'}
+                            </td>
+                          );
+                        })}
+                        <td className="text-center py-2 px-3 font-medium" style={{ color: tierStatusColor, borderBottom: `1px solid ${C.border}` }}>
+                          {fmtNum(tier.current, 1)}
+                        </td>
+                        <td className="text-center py-2 px-3" style={{ color: C.text3, borderBottom: `1px solid ${C.border}` }}>
+                          {tierTarget !== null ? String(tierTarget) : '\u2014'}
+                        </td>
+                        <td className="text-center py-2 px-3" style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <span className="inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ color: tierStatusColor, background: `${tierStatusColor}10` }}>
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: tierStatusColor }} />
+                            {tierStatusLabel}
+                          </span>
+                        </td>
+                      </tr>
                     );
                   })}
-                  <td className="text-center py-2.5 px-3 font-semibold" style={{ color: statusColor, borderBottom: `1px solid ${C.border}` }}>
-                    {fmtNum(m.current, 1)}
-                  </td>
-                  <td className="text-center py-2.5 px-3" style={{ color: C.text2, borderBottom: `1px solid ${C.border}` }}>
-                    {m.target !== null ? String(m.target) : 'TBD'}
-                  </td>
-                  <td className="text-center py-2.5 px-3" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ color: statusColor, background: `${statusColor}15` }}>
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor }} />
-                      {statusLabel}
-                    </span>
-                  </td>
-                </tr>
+                </Fragment>
               );
             })}
           </tbody>

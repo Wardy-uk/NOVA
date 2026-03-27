@@ -4,6 +4,7 @@ import { AuditLogView } from './AuditPanel.js';
 import { SsoLogPanel } from './SsoLogPanel.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
 import { AgentAdminView } from './AgentAdminView.js';
+import { WallboardLogPanel } from './WallboardLogPanel.js';
 
 
 
@@ -1825,6 +1826,10 @@ export function AdminView() {
 
       <CollapsibleSection title="SSO Log">
         <SsoLogPanel />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Wallboard Log">
+        <WallboardLogPanel />
       </CollapsibleSection>
 
       {/* Test Connection Log Modal */}

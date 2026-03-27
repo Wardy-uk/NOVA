@@ -77,7 +77,52 @@ Total live rows: **27,678**. V4 rows distinguishable by `createdAt < 2026-03-22`
 
 The QA trend chart now has data back to **Dec 2025**.
 
-**Verdict: ✅ COMPLETE**
+**Verdict: ✅ COMPLETE — but superseded by QA RESET below**
+
+---
+
+## Stream 3b — QA FullQA RESET (2026-03-24 afternoon) 🔄 IN PROGRESS
+
+### What went wrong:
+The V4→V5 transform merge inserted 20,161 rows with `CreatedAt = SYSUTCDATETIME()` — all historical rows got today's date, not the ticket resolution date. This made historical data invisible to the trend chart (all rows appeared as Mar 24). The V5 backfill workflow `QA_FullQA_Backfill` had the same problem — `CreatedAt = SYSUTCDATETIME()` throughout.
+
+### Actions taken:
+1. Renamed `dbo.jira_qa_results` → `dbo.jira_qa_results_backup` (data preserved)
+2. Created fresh empty `dbo.jira_qa_results` via `SELECT TOP 0 * INTO`
+3. Updated backfill workflow `QA_FullQA_Backfill` (`eNxDaODJbTP3edSe`) — 6 nodes modified:
+   - Target table: `jira_qa_resultsUAT` → `jira_qa_results`
+   - `CreatedAt`: `SYSUTCDATETIME()` → `{{ $json.resolutionDate }}` (from `fields.resolutiondate`)
+   - `processedAt`: unchanged — still `SYSUTCDATETIME()`
+   - Dedup check: `jira_qa_resultsUAT` → `jira_qa_results`
+
+### Backfill plan (batches — run manually with server access):
+| Batch | Start | End | Status |
+|---|---|---|---|
+| 1 | 2026-03-01 | 2026-03-20 | 🔄 Running |
+| 2 | 2026-02-01 | 2026-02-28 | ⏳ Pending |
+| 3 | 2026-01-01 | 2026-01-31 | ⏳ Pending |
+| 4 | 2025-12-05 | 2025-12-31 | ⏳ Pending |
+
+### Verification query (run after each batch):
+```sql
+SELECT 
+  CAST(CreatedAt AS DATE) AS day,
+  COUNT(*) AS rows,
+  ROUND(AVG(CAST(overallScore AS FLOAT)), 2) AS avg_score,
+  MIN(overallScore) AS min_score,
+  MAX(overallScore) AS max_score
+FROM dbo.jira_qa_results
+GROUP BY CAST(CreatedAt AS DATE)
+ORDER BY day
+```
+Scores should be varied (e.g. 6.5, 7.2, 8.1) — NOT discrete 2/4/6/8/10 values.
+
+### After all batches complete:
+- Remove `AND CreatedAt >= '2026-03-22'` filter from checkpoint QA query in `trends.ts`
+- Checkpoint QA panel will then show real V5 scores for Day 0 and Day 1
+- Consider deleting `jira_qa_results_backup` once data is confirmed good
+
+**Verdict: 🔄 IN PROGRESS**
 
 ---
 

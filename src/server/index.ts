@@ -70,6 +70,7 @@ import { createAzDoRoutes } from './routes/azdo.js';
 import { createSetupExecutionRoutes } from './routes/setup-execution.js';
 import { createSetupPortalPublicRoutes, createSetupPortalRoutes } from './routes/setup-portal.js';
 import { createBackfillRoutes } from './routes/backfill.js';
+import { logWallboard, getWallboardLogs, clearWallboardLogs } from './services/wallboard-logger.js';
 
 dotenv.config();
 
@@ -422,6 +423,18 @@ async function main() {
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
+
+  // Wallboard diagnostics log endpoints (admin-only)
+  app.get('/api/admin/wallboard-logs', (req, res) => {
+    if (!isAdmin((req as any).user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    res.json({ ok: true, data: getWallboardLogs() });
+  });
+  app.delete('/api/admin/wallboard-logs', (req, res) => {
+    if (!isAdmin((req as any).user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    clearWallboardLogs();
+    res.json({ ok: true });
+  });
+
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries));
   app.use('/api/backfill', requireAreaAccess('qa', 'view'), createBackfillRoutes(settingsQueries));
@@ -550,10 +563,14 @@ async function main() {
 
   // Wallboard — server-rendered page for TV displays (no auth, no JS required)
   app.get('/wallboard/breached', async (_req, res) => {
+    const wbStart = Date.now();
     try {
       const settings = settingsQueries.getAll();
       const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
-      if (!srv || !db || !usr || !pwd) { res.status(500).send('KPI SQL not configured'); return; }
+      if (!srv || !db || !usr || !pwd) {
+        logWallboard('/wallboard/breached', 'error', 500, Date.now() - wbStart, 'KPI SQL not configured');
+        res.status(500).send('KPI SQL not configured'); return;
+      }
       const sql = await import('mssql');
       const pool = await new sql.default.ConnectionPool({
         server: srv, database: db, user: usr, password: pwd,
@@ -654,17 +671,24 @@ async function main() {
 <tbody>${rows}</tbody></table></div>
 <div style="text-align:center;margin-top:10px;font-size:10px;color:#475569">nurtur.tech &middot; SLA Breach Board &middot; ${dateStr}</div>
 </div></body></html>`);
+      logWallboard('/wallboard/breached', 'info', 200, Date.now() - wbStart, `OK — ${data.length} agents`, { sqlServer: srv });
     } catch (err) {
-      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${err instanceof Error ? err.message : 'Unknown error'}</body></html>`);
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard('/wallboard/breached', 'error', 500, Date.now() - wbStart, msg, { sqlServer: settingsQueries.getAll().kpi_sql_server, error: msg, stack: err instanceof Error ? err.stack : undefined });
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
 
   // Wallboard — server-rendered Breached KPIs page for TV displays
   app.get('/wallboard/team-kpis', async (_req, res) => {
+    const wbStart = Date.now();
     try {
       const settings = settingsQueries.getAll();
       const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
-      if (!srv || !db || !usr || !pwd) { res.status(500).send('KPI SQL not configured'); return; }
+      if (!srv || !db || !usr || !pwd) {
+        logWallboard('/wallboard/team-kpis', 'error', 500, Date.now() - wbStart, 'KPI SQL not configured');
+        res.status(500).send('KPI SQL not configured'); return;
+      }
       const sql = await import('mssql');
       const pool = await new sql.default.ConnectionPool({
         server: srv, database: db, user: usr, password: pwd,
@@ -746,8 +770,11 @@ async function main() {
 <tbody>${emptyRow}${rows}</tbody></table></div>
 <div style="text-align:center;margin-top:10px;font-size:10px;color:#475569">nurtur.tech &middot; KPI Breach Board &middot; ${dateStr}</div>
 </div></body></html>`);
+      logWallboard('/wallboard/team-kpis', 'info', 200, Date.now() - wbStart, `OK — ${allKpis.length} KPIs, ${breachedKpis.length} breached`, { sqlServer: srv });
     } catch (err) {
-      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${err instanceof Error ? err.message : 'Unknown error'}</body></html>`);
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard('/wallboard/team-kpis', 'error', 500, Date.now() - wbStart, msg, { sqlServer: settingsQueries.getAll().kpi_sql_server, error: msg, stack: err instanceof Error ? err.stack : undefined });
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
 
@@ -828,6 +855,7 @@ ${panelHtml}
 
   // Customer Care wallboard
   app.get('/wallboard/cc', async (_req, res) => {
+    const wbStart = Date.now();
     try {
       const html = await renderStatWallboard(settingsQueries, 'Customer Care', 'Live queue metrics', [
         { label: 'CC Incidents', kpi: 'Number of Tickets in CC (Incidents)' },
@@ -841,13 +869,17 @@ ${panelHtml}
         { label: 'Property Jungle — Over SLA', kpi: 'CC TPJ over SLA (actionable)', altKpi: 'CC (TPJ) over SLA (actionable)' },
       ], 3);
       res.send(html);
+      logWallboard('/wallboard/cc', 'info', 200, Date.now() - wbStart, 'OK', { sqlServer: settingsQueries.getAll().kpi_sql_server });
     } catch (err) {
-      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${err instanceof Error ? err.message : 'Unknown error'}</body></html>`);
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard('/wallboard/cc', 'error', 500, Date.now() - wbStart, msg, { sqlServer: settingsQueries.getAll().kpi_sql_server, error: msg, stack: err instanceof Error ? err.stack : undefined });
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
 
   // Technical Support wallboard
   app.get('/wallboard/tech-support', async (_req, res) => {
+    const wbStart = Date.now();
     try {
       const html = await renderStatWallboard(settingsQueries, 'Technical Support', 'Live queue metrics', [
         { label: 'Production Active Tickets', kpi: 'Number of Tickets in Production' },
@@ -861,8 +893,11 @@ ${panelHtml}
         { label: 'Development — Over SLA', kpi: 'Development over SLA (actionable)' },
       ], 3);
       res.send(html);
+      logWallboard('/wallboard/tech-support', 'info', 200, Date.now() - wbStart, 'OK', { sqlServer: settingsQueries.getAll().kpi_sql_server });
     } catch (err) {
-      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${err instanceof Error ? err.message : 'Unknown error'}</body></html>`);
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard('/wallboard/tech-support', 'error', 500, Date.now() - wbStart, msg, { sqlServer: settingsQueries.getAll().kpi_sql_server, error: msg, stack: err instanceof Error ? err.stack : undefined });
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
 
