@@ -84,8 +84,8 @@ function baseLineOptions(title: string, targetValue?: number | null, opts?: { su
         annotations: {
           day1Line: {
             type: 'line' as const,
-            xMin: DAY1_DATE,
-            xMax: DAY1_DATE,
+            xMin: fmtDate(DAY1_DATE),
+            xMax: fmtDate(DAY1_DATE),
             borderColor: C.teal,
             borderWidth: 1.5,
             borderDash: [4, 4],
