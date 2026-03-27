@@ -71,8 +71,28 @@ function ragColor(value: number | null, target: number | null, direction: string
 /* ------------------------------------------------------------------ */
 
 const DAY1_DATE = '2026-03-16';
+const DAY1_TS = new Date(DAY1_DATE).getTime();
 
-function baseLineOptions(title: string, targetValue?: number | null, opts?: { subtitle?: string }): ChartOptions<'line'> {
+/** Find the label index closest to Day 1 in a formatted label array */
+function day1AnnotationIndex(labels: string[]): number | null {
+  if (!labels || labels.length === 0) return null;
+  // labels are "DD Mon" format — parse them back to compare
+  let bestIdx = -1;
+  let bestDist = Infinity;
+  for (let i = 0; i < labels.length; i++) {
+    // Parse "16 Mar" style back to a date — use current year context
+    const parsed = new Date(`${labels[i]} 2026`);
+    if (isNaN(parsed.getTime())) continue;
+    const dist = Math.abs(parsed.getTime() - DAY1_TS);
+    if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+  }
+  return bestIdx >= 0 ? bestIdx : null;
+}
+
+function baseLineOptions(title: string, targetValue?: number | null, opts?: { subtitle?: string; labels?: string[] }): ChartOptions<'line'> {
+  // Find the nearest label index for the Day 1 annotation line
+  const day1Idx = opts?.labels ? day1AnnotationIndex(opts.labels) : null;
+
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -82,15 +102,17 @@ function baseLineOptions(title: string, targetValue?: number | null, opts?: { su
       subtitle: opts?.subtitle ? { display: true, text: opts.subtitle, color: C.text3, font: { size: 10 }, padding: { bottom: 8 } } : { display: false },
       annotation: {
         annotations: {
-          day1Line: {
-            type: 'line' as const,
-            xMin: fmtDate(DAY1_DATE),
-            xMax: fmtDate(DAY1_DATE),
-            borderColor: C.teal,
-            borderWidth: 1.5,
-            borderDash: [4, 4],
-            label: { display: true, content: 'Day 1', color: C.teal, font: { size: 10 }, position: 'start' as const },
-          },
+          ...(day1Idx !== null ? {
+            day1Line: {
+              type: 'line' as const,
+              xMin: day1Idx,
+              xMax: day1Idx,
+              borderColor: C.teal,
+              borderWidth: 1.5,
+              borderDash: [4, 4],
+              label: { display: true, content: 'Day 1', color: C.teal, font: { size: 10 }, position: 'start' as const },
+            },
+          } : {}),
           ...(targetValue != null ? {
             targetLine: {
               type: 'line' as const,
@@ -359,16 +381,19 @@ function SlaSection({ data }: { data: any[] | null }) {
     return { labels: labels.map(l => fmtDate(l)), datasets };
   };
 
+  const frtData = buildDataset(frtKpis);
+  const resData = buildDataset(resKpis);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card>
         <div style={{ height: 280 }}>
-          <Line data={buildDataset(frtKpis)} options={baseLineOptions('FRT Compliance %', 95)} />
+          <Line data={frtData} options={baseLineOptions('FRT Compliance %', 95, { labels: frtData.labels as string[] })} />
         </div>
       </Card>
       <Card>
         <div style={{ height: 280 }}>
-          <Line data={buildDataset(resKpis)} options={baseLineOptions('Resolution Compliance %', 95)} />
+          <Line data={resData} options={baseLineOptions('Resolution Compliance %', 95, { labels: resData.labels as string[] })} />
         </div>
       </Card>
     </div>
@@ -416,16 +441,19 @@ function QueueSection({ data }: { data: any[] | null }) {
     return { labels: labels.map(l => fmtDate(l)), datasets };
   };
 
+  const volData = buildDataset(volumeKpis);
+  const ageData = buildDataset(ageKpis);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card>
         <div style={{ height: 280 }}>
-          <Line data={buildDataset(volumeKpis)} options={baseLineOptions('Open Tickets by Tier')} />
+          <Line data={volData} options={baseLineOptions('Open Tickets by Tier', undefined, { labels: volData.labels as string[] })} />
         </div>
       </Card>
       <Card>
         <div style={{ height: 280 }}>
-          <Line data={buildDataset(ageKpis)} options={baseLineOptions('Oldest Actionable Ticket Age (days)')} />
+          <Line data={ageData} options={baseLineOptions('Oldest Actionable Ticket Age (days)', undefined, { labels: ageData.labels as string[] })} />
         </div>
       </Card>
     </div>
@@ -489,11 +517,13 @@ function EscalationSection({ data }: { data: any[] | null }) {
     },
   };
 
+  const accData = buildLineData(accuracyKpis);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card>
         <div style={{ height: 280 }}>
-          <Line data={buildLineData(accuracyKpis)} options={baseLineOptions('Escalation Accuracy %', 90)} />
+          <Line data={accData} options={baseLineOptions('Escalation Accuracy %', 90, { labels: accData.labels as string[] })} />
         </div>
       </Card>
       <Card>
@@ -559,12 +589,12 @@ function QaSection({ data, agent, onAgentChange }: { data: QaData | null; agent:
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
           <div style={{ height: 280 }}>
-            <Line data={qaChartData} options={baseLineOptions('Team QA Average Score', 8.0)} />
+            <Line data={qaChartData} options={baseLineOptions('Team QA Average Score', 8.0, { labels: qaLabels })} />
           </div>
         </Card>
         <Card>
           <div style={{ height: 280 }}>
-            <Line data={grChartData} options={baseLineOptions('Golden Rules Compliance %', 80)} />
+            <Line data={grChartData} options={baseLineOptions('Golden Rules Compliance %', 80, { labels: grLabels })} />
           </div>
         </Card>
       </div>
