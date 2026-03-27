@@ -38,28 +38,96 @@ const TIERS = [
   { key: 'development', label: 'Development' },
 ] as const;
 
+// Map jira_agent_kpi_daily.TierCode → our tier keys for QA/GR per-tier JOINs
+const TIER_CODE_MAP: Record<string, string> = {
+  T1: 'customer_care',
+  NTL: 'production',
+  TPJM: 'production',   // TPJ managed → rolls into Production
+  T2: 'tier2',
+  // T3, Development not present as agent TierCodes — agents don't sit in those tiers
+  // AI tier excluded — not a support tier
+};
+
 // Core metrics tracked in checkpoint evidence panel
 interface CheckpointMetric {
   key: string;
   label: string;
   kpiPattern?: string;
-  source?: 'qa' | 'golden';
+  source?: 'qa' | 'golden' | 'derived_compliance' | 'derived_escalation';
   target: number | null;
   direction: string;
   expandable: boolean;
   /** KPI patterns per tier for expandable metrics (key = tier key) */
   tierPatterns?: Record<string, string>;
+  /** For derived_compliance: breach pattern per tier */
+  tierBreachPatterns?: Record<string, string[]>;
+  /** For derived_compliance: volume pattern per tier */
+  tierVolumePatterns?: Record<string, string[]>;
+  /** For derived_escalation: escalation pattern per tier */
+  tierEscPatterns?: Record<string, string>;
+  /** For derived_escalation: rejection pattern per tier */
+  tierRejPatterns?: Record<string, string>;
 }
 
 const CHECKPOINT_METRICS: CheckpointMetric[] = [
-  { key: 'frt_compliance', label: 'FRT Compliance %', kpiPattern: 'FRT Compliance%Open Queue%', target: 95, direction: 'higher', expandable: false },  // No per-tier compliance % in jira_kpi_daily
-  { key: 'resolution_compliance', label: 'Resolution Compliance %', kpiPattern: 'Resolution Compliance%Open Queue%', target: 95, direction: 'higher', expandable: false },  // No per-tier compliance % in jira_kpi_daily
-  { key: 'escalation_accuracy', label: 'Escalation Accuracy %', kpiPattern: 'Escalation Accuracy%', target: 90, direction: 'higher', expandable: false },  // Aggregate only
-  { key: 'team_qa_avg', label: 'Team QA Avg (V5)', source: 'qa', target: 8.0, direction: 'higher', expandable: false },  // No per-tier QA data
-  { key: 'golden_rules_avg', label: 'Golden Rules Avg %', source: 'golden', target: 80, direction: 'higher', expandable: false },  // No per-tier GR data
+  {
+    key: 'frt_compliance', label: 'FRT Compliance %',
+    kpiPattern: 'FRT Compliance%Open Queue%', target: 95, direction: 'higher',
+    expandable: true, source: 'derived_compliance',
+    tierBreachPatterns: {
+      customer_care: ['CC Incidents FRT breached (actionable)', 'CC Service Requests FRT breached (actionable)', 'CC (TPJ) FRT breached (actionable)'],
+      production:    ['Production FRT breached (actionable)'],
+      tier2:         ['Tier 2 FRT breached (actionable)'],
+      tier3:         ['Tier 3 FRT breached (actionable)'],
+      development:   ['Development FRT breached (actionable)'],
+    },
+    tierVolumePatterns: {
+      customer_care: ['Number of Tickets in CC%'],
+      production:    ['Number of Tickets in Production%'],
+      tier2:         ['Number of Tickets in Tier 2%'],
+      tier3:         ['Number of Tickets in Tier 3%'],
+      development:   ['Number of Tickets in Development%'],
+    },
+  },
+  {
+    key: 'resolution_compliance', label: 'Resolution Compliance %',
+    kpiPattern: 'Resolution Compliance%Open Queue%', target: 95, direction: 'higher',
+    expandable: true, source: 'derived_compliance',
+    tierBreachPatterns: {
+      customer_care: ['CC Incidents over SLA (actionable)', 'CC Service Requests over SLA (actionable)', 'CC (TPJ) over SLA (actionable)'],
+      production:    ['Production over SLA (actionable)'],
+      tier2:         ['Tier 2 over SLA (actionable)'],
+      tier3:         ['Tier 3 over SLA (actionable)'],
+      development:   ['Development over SLA (actionable)'],
+    },
+    tierVolumePatterns: {
+      customer_care: ['Number of Tickets in CC%'],
+      production:    ['Number of Tickets in Production%'],
+      tier2:         ['Number of Tickets in Tier 2%'],
+      tier3:         ['Number of Tickets in Tier 3%'],
+      development:   ['Number of Tickets in Development%'],
+    },
+  },
+  {
+    key: 'escalation_accuracy', label: 'Escalation Accuracy %',
+    kpiPattern: 'Escalation Accuracy%', target: 90, direction: 'higher',
+    expandable: true, source: 'derived_escalation',
+    tierEscPatterns: {
+      tier2:       'Tickets escalated to Tier 2',
+      tier3:       'Tickets escalated to Tier 3',
+      development: 'Tickets escalated to Development',
+    },
+    tierRejPatterns: {
+      tier2:       'Tickets rejected by Tier 2',
+      tier3:       'Tickets rejected by Tier 3',
+      development: 'Tickets rejected by Development',
+    },
+  },
+  { key: 'team_qa_avg', label: 'Team QA Avg (V5)', source: 'qa', target: 8.0, direction: 'higher', expandable: true },
+  { key: 'golden_rules_avg', label: 'Golden Rules Avg %', source: 'golden', target: 80, direction: 'higher', expandable: true },
   {
     key: 'total_queue_size', label: 'Total Queue Size',
-    kpiPattern: 'Number of Tickets in%',  // All tiers combined
+    kpiPattern: 'Number of Tickets in%',
     target: 125, direction: 'lower', expandable: true,
     tierPatterns: {
       customer_care: 'Number of Tickets in CC%',
@@ -71,7 +139,7 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
   },
   {
     key: 'oldest_support_ticket', label: 'Oldest Support Ticket (days)',
-    kpiPattern: 'Oldest actionable ticket (days)%',  // Max across all tiers
+    kpiPattern: 'Oldest actionable ticket (days)%',
     target: 31, direction: 'lower', expandable: true,
     tierPatterns: {
       customer_care: 'Oldest actionable ticket (days) in CC%',
@@ -81,8 +149,8 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
       development: 'Oldest actionable ticket (days) in Development%',
     },
   },
-  { key: 'csat', label: 'CSAT %', kpiPattern: 'CSAT%', target: null, direction: 'higher', expandable: false },  // Aggregate only
-  { key: 'fcr', label: 'FCR Rate %', kpiPattern: 'FCR%', target: null, direction: 'higher', expandable: false },  // Aggregate only
+  { key: 'csat', label: 'CSAT %', kpiPattern: 'CSAT%', target: null, direction: 'higher', expandable: false },
+  { key: 'fcr', label: 'FCR Rate %', kpiPattern: 'FCR%', target: null, direction: 'higher', expandable: false },
   { key: 'l1_resolution', label: '1st Line Resolution Rate %', kpiPattern: '1st Line Resolution Rate%', target: null, direction: 'higher', expandable: false },
   { key: 'bug_ack', label: 'Bug Ack Time (hours)', kpiPattern: 'Bug Escalation-to-Ack%hours%', target: null, direction: 'lower', expandable: false },
 ];
@@ -231,7 +299,71 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
           tiers: null,
         };
 
-        if (metric.source === 'qa') {
+        if (metric.source === 'derived_compliance') {
+          // FRT/Resolution Compliance: aggregate from jira_kpi_daily as before
+          for (const cp of CHECKPOINTS) {
+            row.checkpoints[cp.label] = await fetchKpiAtCheckpoint(metric.kpiPattern as string, cp.date);
+          }
+          row.current = await fetchKpiCurrent(metric.kpiPattern as string);
+
+          // Per-tier: derive compliance from breach counts + volume counts
+          // compliance = ((volume - breaches) / volume) * 100
+          if (metric.expandable && metric.tierBreachPatterns && metric.tierVolumePatterns) {
+            row.tiers = [];
+            for (const tier of TIERS) {
+              const breachPats = metric.tierBreachPatterns[tier.key];
+              const volPats = metric.tierVolumePatterns[tier.key];
+              if (!breachPats || !volPats) {
+                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
+                continue;
+              }
+              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {}, current: null };
+              for (const cp of CHECKPOINTS) {
+                const breaches = await fetchKpiSumAtCheckpoint(breachPats, cp.date);
+                const volume = await fetchKpiSumAtCheckpoint(volPats, cp.date);
+                tierRow.checkpoints[cp.label] = (volume && volume > 0 && breaches !== null) ? +((1 - breaches / volume) * 100).toFixed(1) : null;
+              }
+              const breachesCur = await fetchKpiSumCurrent(breachPats);
+              const volumeCur = await fetchKpiSumCurrent(volPats);
+              tierRow.current = (volumeCur && volumeCur > 0 && breachesCur !== null) ? +((1 - breachesCur / volumeCur) * 100).toFixed(1) : null;
+              row.tiers.push(tierRow);
+            }
+          }
+
+        } else if (metric.source === 'derived_escalation') {
+          // Escalation Accuracy aggregate
+          for (const cp of CHECKPOINTS) {
+            row.checkpoints[cp.label] = await fetchKpiAtCheckpoint(metric.kpiPattern as string, cp.date);
+          }
+          row.current = await fetchKpiCurrent(metric.kpiPattern as string);
+
+          // Per destination tier: accuracy = escalated / (escalated + rejected) * 100
+          if (metric.expandable && metric.tierEscPatterns && metric.tierRejPatterns) {
+            row.tiers = [];
+            for (const tier of TIERS) {
+              const escPat = metric.tierEscPatterns[tier.key];
+              const rejPat = metric.tierRejPatterns[tier.key];
+              if (!escPat || !rejPat) {
+                // CC doesn't receive escalations — skip with nulls
+                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
+                continue;
+              }
+              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {}, current: null };
+              for (const cp of CHECKPOINTS) {
+                const esc = await fetchKpiAtCheckpoint(escPat, cp.date);
+                const rej = await fetchKpiAtCheckpoint(rejPat, cp.date);
+                const total = (esc ?? 0) + (rej ?? 0);
+                tierRow.checkpoints[cp.label] = (total > 0 && esc !== null) ? +((esc / total) * 100).toFixed(1) : null;
+              }
+              const escCur = await fetchKpiCurrent(escPat);
+              const rejCur = await fetchKpiCurrent(rejPat);
+              const totalCur = (escCur ?? 0) + (rejCur ?? 0);
+              tierRow.current = (totalCur > 0 && escCur !== null) ? +((escCur / totalCur) * 100).toFixed(1) : null;
+              row.tiers.push(tierRow);
+            }
+          }
+
+        } else if (metric.source === 'qa') {
           // QA avg from jira_qa_results — 7-day window ending on checkpoint date
           const tbl = `dbo.jira_qa_results${suffix(env)}`;
           for (const cp of CHECKPOINTS) {
@@ -245,7 +377,6 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
             `);
             row.checkpoints[cp.label] = result.recordset[0]?.avg_score ?? null;
           }
-          // Current: latest 7 days
           const cr = p.request();
           const currentResult = await cr.query(`
             SELECT AVG(CAST(overallScore AS FLOAT)) AS avg_score
@@ -255,15 +386,52 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
           `);
           row.current = currentResult.recordset[0]?.avg_score ?? null;
 
-          // TODO: wire tier data — QA scores are not currently broken down by tier in jira_qa_results
+          // Per-tier: JOIN jira_qa_results to jira_agent_kpi_daily to get TierCode
           if (metric.expandable) {
-            row.tiers = TIERS.map(t => ({
-              key: t.key,
-              label: t.label,
-              target: metric.target,
-              checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])),
-              current: null,
-            }));
+            row.tiers = [];
+            // Build tier code IN clause for each of our tiers
+            const tierCodeGroups: Record<string, string[]> = {};
+            for (const [code, tierKey] of Object.entries(TIER_CODE_MAP)) {
+              if (!tierCodeGroups[tierKey]) tierCodeGroups[tierKey] = [];
+              tierCodeGroups[tierKey].push(code);
+            }
+            for (const tier of TIERS) {
+              const codes = tierCodeGroups[tier.key];
+              if (!codes || codes.length === 0) {
+                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
+                continue;
+              }
+              const codeList = codes.map(c => `'${c}'`).join(',');
+              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {}, current: null };
+              for (const cp of CHECKPOINTS) {
+                const r = p.request();
+                r.input('cpDate', sql.Date, cp.date);
+                const result = await r.query(`
+                  SELECT AVG(CAST(q.overallScore AS FLOAT)) AS avg_score
+                  FROM ${tbl} q
+                  INNER JOIN (
+                    SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
+                    WHERE TierCode IN (${codeList})
+                  ) a ON q.assigneeName = a.AgentName
+                  WHERE CAST(q.CreatedAt AS DATE) BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
+                    AND q.qaType != 'excluded'
+                `);
+                tierRow.checkpoints[cp.label] = result.recordset[0]?.avg_score ?? null;
+              }
+              const curR = p.request();
+              const curResult = await curR.query(`
+                SELECT AVG(CAST(q.overallScore AS FLOAT)) AS avg_score
+                FROM ${tbl} q
+                INNER JOIN (
+                  SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
+                  WHERE TierCode IN (${codeList})
+                ) a ON q.assigneeName = a.AgentName
+                WHERE q.CreatedAt >= DATEADD(DAY, -7, GETUTCDATE())
+                  AND q.qaType != 'excluded'
+              `);
+              tierRow.current = curResult.recordset[0]?.avg_score ?? null;
+              row.tiers.push(tierRow);
+            }
           }
 
         } else if (metric.source === 'golden') {
@@ -294,15 +462,56 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
           `);
           row.current = currentResult.recordset[0]?.avg_pct ?? null;
 
-          // TODO: wire tier data — Golden Rules are not currently broken down by tier
+          // Per-tier: JOIN Jira_QA_GoldenRules to jira_agent_kpi_daily via Updater → AgentName
           if (metric.expandable) {
-            row.tiers = TIERS.map(t => ({
-              key: t.key,
-              label: t.label,
-              target: metric.target,
-              checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])),
-              current: null,
-            }));
+            row.tiers = [];
+            const tierCodeGroups: Record<string, string[]> = {};
+            for (const [code, tierKey] of Object.entries(TIER_CODE_MAP)) {
+              if (!tierCodeGroups[tierKey]) tierCodeGroups[tierKey] = [];
+              tierCodeGroups[tierKey].push(code);
+            }
+            for (const tier of TIERS) {
+              const codes = tierCodeGroups[tier.key];
+              if (!codes || codes.length === 0) {
+                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
+                continue;
+              }
+              const codeList = codes.map(c => `'${c}'`).join(',');
+              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {}, current: null };
+              for (const cp of CHECKPOINTS) {
+                const r = p.request();
+                r.input('cpDate', sql.Date, cp.date);
+                const result = await r.query(`
+                  SELECT
+                    AVG(CASE WHEN g.rule1Pass = 1 THEN 100.0 ELSE 0 END +
+                        CASE WHEN g.rule2Pass = 1 THEN 100.0 ELSE 0 END +
+                        CASE WHEN g.rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+                  FROM ${tbl} g
+                  INNER JOIN (
+                    SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
+                    WHERE TierCode IN (${codeList})
+                  ) a ON g.Updater = a.AgentName
+                  WHERE CAST(COALESCE(g.commentTimestamp, g.CreatedAt) AS DATE)
+                        BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
+                `);
+                tierRow.checkpoints[cp.label] = result.recordset[0]?.avg_pct ?? null;
+              }
+              const curR = p.request();
+              const curResult = await curR.query(`
+                SELECT
+                  AVG(CASE WHEN g.rule1Pass = 1 THEN 100.0 ELSE 0 END +
+                      CASE WHEN g.rule2Pass = 1 THEN 100.0 ELSE 0 END +
+                      CASE WHEN g.rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+                FROM ${tbl} g
+                INNER JOIN (
+                  SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
+                  WHERE TierCode IN (${codeList})
+                ) a ON g.Updater = a.AgentName
+                WHERE COALESCE(g.commentTimestamp, g.CreatedAt) >= DATEADD(DAY, -7, GETUTCDATE())
+              `);
+              tierRow.current = curResult.recordset[0]?.avg_pct ?? null;
+              row.tiers.push(tierRow);
+            }
           }
 
         } else if (metric.key === 'total_queue_size' && metric.tierPatterns) {
@@ -354,22 +563,11 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
           }
 
         } else {
-          // Standard KPI from jira_kpi_daily
+          // Standard KPI from jira_kpi_daily (CSAT, FCR, 1st Line, Bug Ack — all non-expandable)
           for (const cp of CHECKPOINTS) {
             row.checkpoints[cp.label] = await fetchKpiAtCheckpoint(metric.kpiPattern as string, cp.date);
           }
           row.current = await fetchKpiCurrent(metric.kpiPattern as string);
-
-          // TODO: wire tier data — most KPIs don't have per-tier breakdowns in jira_kpi_daily
-          if (metric.expandable) {
-            row.tiers = TIERS.map(t => ({
-              key: t.key,
-              label: t.label,
-              target: metric.target,
-              checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])),
-              current: null,
-            }));
-          }
         }
 
         metrics.push(row);
