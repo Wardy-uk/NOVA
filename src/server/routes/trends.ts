@@ -52,11 +52,11 @@ interface CheckpointMetric {
 }
 
 const CHECKPOINT_METRICS: CheckpointMetric[] = [
-  { key: 'frt_compliance', label: 'FRT Compliance %', kpiPattern: 'FRT Compliance%Open Queue%', target: 95, direction: 'higher', expandable: true },
-  { key: 'resolution_compliance', label: 'Resolution Compliance %', kpiPattern: 'Resolution Compliance%Open Queue%', target: 95, direction: 'higher', expandable: true },
-  { key: 'escalation_accuracy', label: 'Escalation Accuracy %', kpiPattern: 'Escalation Accuracy%', target: 90, direction: 'higher', expandable: true },
-  { key: 'team_qa_avg', label: 'Team QA Avg (V5)', source: 'qa', target: 8.0, direction: 'higher', expandable: true },
-  { key: 'golden_rules_avg', label: 'Golden Rules Avg %', source: 'golden', target: 80, direction: 'higher', expandable: true },
+  { key: 'frt_compliance', label: 'FRT Compliance %', kpiPattern: 'FRT Compliance%Open Queue%', target: 95, direction: 'higher', expandable: false },  // No per-tier compliance % in jira_kpi_daily
+  { key: 'resolution_compliance', label: 'Resolution Compliance %', kpiPattern: 'Resolution Compliance%Open Queue%', target: 95, direction: 'higher', expandable: false },  // No per-tier compliance % in jira_kpi_daily
+  { key: 'escalation_accuracy', label: 'Escalation Accuracy %', kpiPattern: 'Escalation Accuracy%', target: 90, direction: 'higher', expandable: false },  // Aggregate only
+  { key: 'team_qa_avg', label: 'Team QA Avg (V5)', source: 'qa', target: 8.0, direction: 'higher', expandable: false },  // No per-tier QA data
+  { key: 'golden_rules_avg', label: 'Golden Rules Avg %', source: 'golden', target: 80, direction: 'higher', expandable: false },  // No per-tier GR data
   {
     key: 'total_queue_size', label: 'Total Queue Size',
     kpiPattern: 'Number of Tickets in%',  // All tiers combined
@@ -81,8 +81,8 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
       development: 'Oldest actionable ticket (days) in Development%',
     },
   },
-  { key: 'csat', label: 'CSAT %', kpiPattern: 'CSAT%', target: null, direction: 'higher', expandable: true },
-  { key: 'fcr', label: 'FCR Rate %', kpiPattern: 'FCR%', target: null, direction: 'higher', expandable: true },
+  { key: 'csat', label: 'CSAT %', kpiPattern: 'CSAT%', target: null, direction: 'higher', expandable: false },  // Aggregate only
+  { key: 'fcr', label: 'FCR Rate %', kpiPattern: 'FCR%', target: null, direction: 'higher', expandable: false },  // Aggregate only
   { key: 'l1_resolution', label: '1st Line Resolution Rate %', kpiPattern: '1st Line Resolution Rate%', target: null, direction: 'higher', expandable: false },
   { key: 'bug_ack', label: 'Bug Ack Time (hours)', kpiPattern: 'Bug Escalation-to-Ack%hours%', target: null, direction: 'lower', expandable: false },
 ];
