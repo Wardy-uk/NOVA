@@ -126,6 +126,45 @@ function fmtPct(v: number | null | undefined): string {
   return (v * 100).toFixed(2) + '%';
 }
 
+/* ---- Reportable KPIs ---- */
+
+const REPORTABLE_KPIS = new Set([
+  'Number of Tickets in CC (Incidents)',
+  'Number of Tickets in CC (Service Requests)',
+  'Number of Tickets in CC (TPJ)',
+  'Number of Tickets in Production',
+  'Number of Tickets in Tier 2',
+  'Number of Tickets in Tier 3',
+  'Number of Tickets in Development',
+  'Number of Tickets With No Reply in CC (Incidents)',
+  'Number of Tickets With No Reply in CC (Production)',
+  'Number of Tickets With No Reply in CC (TPJ)',
+  'Number of Tickets With No Reply in Tier 2',
+  'Number of Tickets With No Reply in Tier 3',
+  'Number of CC tickets over SLA (actionable) (Incidents)',
+  'Number of CC tickets over SLA (actionable) (Production)',
+  'Number of CC tickets over SLA (actionable) (TPJ)',
+  'Number of Tier 2 tickets over SLA (actionable)',
+  'Number of Tier 3 tickets over SLA (actionable)',
+  'Number of CC tickets over SLA (Not actionable) (Incidents)',
+  'Number of CC tickets over SLA (Not actionable) (Production)',
+  'Number of CC tickets over SLA (Not actionable) (TPJ)',
+  'Number of Tier 2 tickets over SLA (not actionable)',
+  'Number of Tier 3 tickets over SLA (not actionable)',
+  'Tickets escalated to Tier 2',
+  'Tickets escalated to Tier 3',
+  'Tickets escalated to Development',
+  'Tickets rejected by Tier 2',
+  'Tickets rejected by Tier 3',
+  'Tickets rejected by Development',
+  'Oldest actionable ticket (days) in CC (Incident)',
+  'Oldest actionable ticket (days) in CC (Production)',
+  'Oldest actionable ticket (days) in CC (TPJ)',
+  'Oldest actionable ticket (days) in Production',
+  'Oldest actionable ticket (days) in Tier 2',
+  'Oldest actionable ticket (days) in Tier 3',
+].map(k => k.toLowerCase()));
+
 /* ---- RAG calculation ---- */
 type Direction = 'higher' | 'lower';
 
@@ -341,6 +380,7 @@ export function KpiDailyHistoryView() {
   const [agentData, setAgentData] = useState<AgentDaily[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reportableOnly, setReportableOnly] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -530,27 +570,41 @@ export function KpiDailyHistoryView() {
       </div>
 
       {/* ---- Sub-tabs ---- */}
-      <div style={{
-        display: 'flex', gap: 4, marginBottom: 24,
-        background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
-        padding: 4, width: 'fit-content',
-      }}>
-        {([
-          { id: 'departmental' as SubTab, label: 'Departmental KPIs' },
-          { id: 'agents' as SubTab, label: 'Agent KPIs' },
-        ]).map(t => (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+        <div style={{
+          display: 'flex', gap: 4,
+          background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
+          padding: 4, width: 'fit-content',
+        }}>
+          {([
+            { id: 'departmental' as SubTab, label: 'Departmental KPIs' },
+            { id: 'agents' as SubTab, label: 'Agent KPIs' },
+          ]).map(t => (
+            <button
+              key={t.id}
+              onClick={() => setSubTab(t.id)}
+              style={{
+                padding: '8px 20px', border: 'none', cursor: 'pointer',
+                fontSize: 12, fontWeight: 600, borderRadius: 10,
+                transition: 'all 0.2s',
+                background: subTab === t.id ? `${C.teal}20` : 'transparent',
+                color: subTab === t.id ? C.teal : C.text3,
+              }}
+            >{t.label}</button>
+          ))}
+        </div>
+        {subTab === 'departmental' && (
           <button
-            key={t.id}
-            onClick={() => setSubTab(t.id)}
+            onClick={() => setReportableOnly(!reportableOnly)}
             style={{
-              padding: '8px 20px', border: 'none', cursor: 'pointer',
-              fontSize: 12, fontWeight: 600, borderRadius: 10,
-              transition: 'all 0.2s',
-              background: subTab === t.id ? `${C.teal}20` : 'transparent',
-              color: subTab === t.id ? C.teal : C.text3,
+              padding: '8px 16px', borderRadius: 10, cursor: 'pointer',
+              fontSize: 12, fontWeight: 600, transition: 'all 0.2s',
+              border: `1px solid ${reportableOnly ? `${C.teal}40` : C.border}`,
+              background: reportableOnly ? `${C.teal}20` : C.glass,
+              color: reportableOnly ? C.teal : C.text3,
             }}
-          >{t.label}</button>
-        ))}
+          >Reportable</button>
+        )}
       </div>
 
       {/* ---- Error ---- */}
@@ -632,10 +686,13 @@ export function KpiDailyHistoryView() {
         deptData.forEach(d => groupMap.set(d.kpi, d.kpiGroup));
         // Order all KPIs: known ones first in fixed order, then any unknown ones at the end
         const allKpiNames = [...new Set(deptData.map(d => d.kpi))];
-        const orderedKpis = [
+        const allOrdered = [
           ...KPI_ORDER.filter(k => allKpiNames.includes(k)),
           ...allKpiNames.filter(k => !KPI_ORDER.includes(k)),
         ];
+        const orderedKpis = reportableOnly
+          ? allOrdered.filter(k => REPORTABLE_KPIS.has(k.toLowerCase()))
+          : allOrdered;
         // Build grouped structure preserving the fixed order
         const seenGroups: string[] = [];
         for (const kpi of orderedKpis) {
