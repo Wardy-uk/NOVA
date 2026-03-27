@@ -92,6 +92,47 @@ const KPI_ORDER: string[] = [
 const KPI_ORDER_MAP = new Map<string, number>();
 KPI_ORDER.forEach((name, i) => KPI_ORDER_MAP.set(name.toLowerCase(), i));
 
+/* ---- Reportable KPIs filter ---- */
+
+const REPORTABLE_KPIS: string[] = [
+  'Number of Tickets in CC (Incidents)',
+  'Number of Tickets in CC (Service Requests)',
+  'Number of Tickets in CC (TPJ)',
+  'Number of Tickets in Production',
+  'Number of Tickets in Tier 2',
+  'Number of Tickets in Tier 3',
+  'Number of Tickets in Development',
+  'Number of Tickets With No Reply in CC (Incidents)',
+  'Number of Tickets With No Reply in CC (Production)',
+  'Number of Tickets With No Reply in CC (TPJ)',
+  'Number of Tickets With No Reply in Tier 2',
+  'Number of Tickets With No Reply in Tier 3',
+  'Number of CC tickets over SLA (actionable) (Incidents)',
+  'Number of CC tickets over SLA (actionable) (Production)',
+  'Number of CC tickets over SLA (actionable) (TPJ)',
+  'Number of Tier 2 tickets over SLA (actionable)',
+  'Number of Tier 3 tickets over SLA (actionable)',
+  'Number of CC tickets over SLA (Not actionable) (Incidents)',
+  'Number of CC tickets over SLA (Not actionable) (Production)',
+  'Number of CC tickets over SLA (Not actionable) (TPJ)',
+  'Number of Tier 2 tickets over SLA (not actionable)',
+  'Number of Tier 3 tickets over SLA (not actionable)',
+  'Tickets escalated to Tier 2',
+  'Tickets escalated to Tier 3',
+  'Tickets escalated to Development',
+  'Tickets rejected by Tier 2',
+  'Tickets rejected by Tier 3',
+  'Tickets rejected by Development',
+  'Oldest actionable ticket (days) in CC (Incident)',
+  'Oldest actionable ticket (days) in CC (Production)',
+  'Oldest actionable ticket (days) in CC (TPJ)',
+  'Oldest actionable ticket (days) in Production',
+  'Oldest actionable ticket (days) in Tier 2',
+  'Oldest actionable ticket (days) in Tier 3',
+];
+
+const REPORTABLE_SET = new Set(REPORTABLE_KPIS.map(k => k.toLowerCase()));
+
 function sortKpiRows<T extends { KPI?: string; KPIGroup?: string }>(data: T[]): T[] {
   return [...data].sort((a, b) => {
     const ia = KPI_ORDER_MAP.get((a.KPI ?? '').toLowerCase());
@@ -262,6 +303,7 @@ export function KpiDataView() {
   const [eodDate, setEodDate] = useState<string>(''); // empty = server default (prev working day)
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [activeDate, setActiveDate] = useState<string>(''); // the date the server actually returned
+  const [reportableOnly, setReportableOnly] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -298,6 +340,11 @@ export function KpiDataView() {
 
   const needsDays = ['daily-history', 'agent-daily'].includes(tab);
 
+  // Apply reportable filter (daily-history tab uses lowercase 'kpi' field)
+  const filteredData = (reportableOnly && tab === 'daily-history')
+    ? data.filter(r => REPORTABLE_SET.has((r.kpi || r.KPI || '').toLowerCase()))
+    : data;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -331,6 +378,17 @@ export function KpiDataView() {
                 <option key={d} value={d}>{d} day{d > 1 ? 's' : ''}</option>
               ))}
             </select>
+          )}
+          {/* Reportable filter */}
+          {tab === 'daily-history' && (
+            <button
+              onClick={() => setReportableOnly(!reportableOnly)}
+              className={`px-3 py-1 rounded-full text-[11px] font-semibold border transition-all ${
+                reportableOnly
+                  ? 'bg-[#5ec1ca]/15 border-[#5ec1ca]/40 text-[#5ec1ca]'
+                  : 'bg-transparent border-[#3a424d] text-neutral-500 hover:text-neutral-300'
+              }`}
+            >Reportable</button>
           )}
           {/* Refresh */}
           <button onClick={fetchData} className="text-neutral-400 hover:text-[#5ec1ca] transition-colors" title="Refresh">
@@ -366,7 +424,7 @@ export function KpiDataView() {
       {/* Row count + context */}
       {!loading && !error && (
         <div className="flex items-center gap-3 text-[11px] text-neutral-500">
-          <span>{data.length} row{data.length !== 1 ? 's' : ''}</span>
+          <span>{filteredData.length}{reportableOnly && tab === 'daily-history' ? ` of ${data.length}` : ''} row{filteredData.length !== 1 ? 's' : ''}</span>
           {tab === 'eod-snapshot' && activeDate && (
             <span className="text-[#5ec1ca]">
               EOD data for {new Date(activeDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}
@@ -384,11 +442,11 @@ export function KpiDataView() {
           <div className="flex items-center justify-center py-12 text-neutral-500">Loading...</div>
         ) : (
           <>
-            {tab === 'eod-snapshot' && <TeamSnapshotTable data={data} />}
-            {tab === 'team-snapshot' && <TeamSnapshotTable data={data} />}
-            {tab === 'agent-daily' && <AgentDailyTable data={data} />}
-            {tab === 'agents' && <AgentsTable data={data} />}
-            {tab === 'daily-history' && <DailyHistoryTable data={data} />}
+            {tab === 'eod-snapshot' && <TeamSnapshotTable data={filteredData} />}
+            {tab === 'team-snapshot' && <TeamSnapshotTable data={filteredData} />}
+            {tab === 'agent-daily' && <AgentDailyTable data={filteredData} />}
+            {tab === 'agents' && <AgentsTable data={filteredData} />}
+            {tab === 'daily-history' && <DailyHistoryTable data={filteredData} />}
           </>
         )}
       </div>
