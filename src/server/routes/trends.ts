@@ -53,16 +53,12 @@ interface CheckpointMetric {
   key: string;
   label: string;
   kpiPattern?: string;
-  source?: 'qa' | 'golden' | 'derived_compliance' | 'derived_escalation';
+  source?: 'qa' | 'golden' | 'derived_escalation';
   target: number | null;
   direction: string;
   expandable: boolean;
   /** KPI patterns per tier for expandable metrics (key = tier key) */
   tierPatterns?: Record<string, string>;
-  /** For derived_compliance: breach pattern per tier */
-  tierBreachPatterns?: Record<string, string[]>;
-  /** For derived_compliance: volume pattern per tier */
-  tierVolumePatterns?: Record<string, string[]>;
   /** For derived_escalation: escalation pattern per tier */
   tierEscPatterns?: Record<string, string>;
   /** For derived_escalation: rejection pattern per tier */
@@ -72,40 +68,26 @@ interface CheckpointMetric {
 const CHECKPOINT_METRICS: CheckpointMetric[] = [
   {
     key: 'frt_compliance', label: 'FRT Compliance %',
-    kpiPattern: 'FRT Compliance%Open Queue%', target: 95, direction: 'higher',
-    expandable: true, source: 'derived_compliance',
-    tierBreachPatterns: {
-      customer_care: ['CC Incidents FRT breached (actionable)', 'CC Service Requests FRT breached (actionable)', 'CC (TPJ) FRT breached (actionable)'],
-      production:    ['Production FRT breached (actionable)'],
-      tier2:         ['Tier 2 FRT breached (actionable)'],
-      tier3:         ['Tier 3 FRT breached (actionable)'],
-      development:   ['Development FRT breached (actionable)'],
-    },
-    tierVolumePatterns: {
-      customer_care: ['Number of Tickets in CC%'],
-      production:    ['Number of Tickets in Production%'],
-      tier2:         ['Number of Tickets in Tier 2%'],
-      tier3:         ['Number of Tickets in Tier 3%'],
-      development:   ['Number of Tickets in Development%'],
+    kpiPattern: 'FRT Compliance % (Resolved Today)', target: 95, direction: 'higher',
+    expandable: true,
+    tierPatterns: {
+      customer_care: 'FRT Compliance % (Customer Care)',
+      production:    'FRT Compliance % (Production)',
+      tier2:         'FRT Compliance % (Tier 2)',
+      tier3:         'FRT Compliance % (Tier 3)',
+      development:   'FRT Compliance % (Development)',
     },
   },
   {
     key: 'resolution_compliance', label: 'Resolution Compliance %',
-    kpiPattern: 'Resolution Compliance%Open Queue%', target: 95, direction: 'higher',
-    expandable: true, source: 'derived_compliance',
-    tierBreachPatterns: {
-      customer_care: ['CC Incidents over SLA (actionable)', 'CC Service Requests over SLA (actionable)', 'CC (TPJ) over SLA (actionable)'],
-      production:    ['Production over SLA (actionable)'],
-      tier2:         ['Tier 2 over SLA (actionable)'],
-      tier3:         ['Tier 3 over SLA (actionable)'],
-      development:   ['Development over SLA (actionable)'],
-    },
-    tierVolumePatterns: {
-      customer_care: ['Number of Tickets in CC%'],
-      production:    ['Number of Tickets in Production%'],
-      tier2:         ['Number of Tickets in Tier 2%'],
-      tier3:         ['Number of Tickets in Tier 3%'],
-      development:   ['Number of Tickets in Development%'],
+    kpiPattern: 'Resolution Compliance % (Resolved Today)', target: 95, direction: 'higher',
+    expandable: true,
+    tierPatterns: {
+      customer_care: 'Resolution Compliance % (Customer Care)',
+      production:    'Resolution Compliance % (Production)',
+      tier2:         'Resolution Compliance % (Tier 2)',
+      tier3:         'Resolution Compliance % (Tier 3)',
+      development:   'Resolution Compliance % (Development)',
     },
   },
   {
@@ -299,38 +281,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
           tiers: null,
         };
 
-        if (metric.source === 'derived_compliance') {
-          // FRT/Resolution Compliance: aggregate from jira_kpi_daily as before
-          for (const cp of CHECKPOINTS) {
-            row.checkpoints[cp.label] = await fetchKpiAtCheckpoint(metric.kpiPattern as string, cp.date);
-          }
-          row.current = await fetchKpiCurrent(metric.kpiPattern as string);
-
-          // Per-tier: derive compliance from breach counts + volume counts
-          // compliance = ((volume - breaches) / volume) * 100
-          if (metric.expandable && metric.tierBreachPatterns && metric.tierVolumePatterns) {
-            row.tiers = [];
-            for (const tier of TIERS) {
-              const breachPats = metric.tierBreachPatterns[tier.key];
-              const volPats = metric.tierVolumePatterns[tier.key];
-              if (!breachPats || !volPats) {
-                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
-                continue;
-              }
-              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {}, current: null };
-              for (const cp of CHECKPOINTS) {
-                const breaches = await fetchKpiSumAtCheckpoint(breachPats, cp.date);
-                const volume = await fetchKpiSumAtCheckpoint(volPats, cp.date);
-                tierRow.checkpoints[cp.label] = (volume && volume > 0 && breaches !== null) ? +((1 - breaches / volume) * 100).toFixed(1) : null;
-              }
-              const breachesCur = await fetchKpiSumCurrent(breachPats);
-              const volumeCur = await fetchKpiSumCurrent(volPats);
-              tierRow.current = (volumeCur && volumeCur > 0 && breachesCur !== null) ? +((1 - breachesCur / volumeCur) * 100).toFixed(1) : null;
-              row.tiers.push(tierRow);
-            }
-          }
-
-        } else if (metric.source === 'derived_escalation') {
+        if (metric.source === 'derived_escalation') {
           // Escalation Accuracy aggregate
           for (const cp of CHECKPOINTS) {
             row.checkpoints[cp.label] = await fetchKpiAtCheckpoint(metric.kpiPattern as string, cp.date);
@@ -514,44 +465,37 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
             }
           }
 
-        } else if (metric.key === 'total_queue_size' && metric.tierPatterns) {
-          // Total Queue Size: SUM of all tier ticket counts
-          const allPatterns = Object.values(metric.tierPatterns);
-          for (const cp of CHECKPOINTS) {
-            row.checkpoints[cp.label] = await fetchKpiSumAtCheckpoint(allPatterns, cp.date);
-          }
-          row.current = await fetchKpiSumCurrent(allPatterns);
-
-          // Per-tier breakdown
-          row.tiers = [];
-          for (const tier of TIERS) {
-            const tierPattern = metric.tierPatterns[tier.key];
-            if (!tierPattern) {
-              row.tiers.push({ key: tier.key, label: tier.label, target: null, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
-              continue;
-            }
-            const tierRow: any = { key: tier.key, label: tier.label, target: null, checkpoints: {}, current: null };
+        } else if (metric.tierPatterns) {
+          // Metric with direct per-tier KPI patterns in jira_kpi_daily
+          // Aggregate: use kpiPattern for the parent row
+          if (metric.key === 'total_queue_size') {
+            // SUM across all tier patterns
+            const allPatterns = Object.values(metric.tierPatterns);
             for (const cp of CHECKPOINTS) {
-              tierRow.checkpoints[cp.label] = await fetchKpiAtCheckpoint(tierPattern, cp.date);
+              row.checkpoints[cp.label] = await fetchKpiSumAtCheckpoint(allPatterns, cp.date);
             }
-            tierRow.current = await fetchKpiCurrent(tierPattern);
-            row.tiers.push(tierRow);
+            row.current = await fetchKpiSumCurrent(allPatterns);
+          } else if (metric.key === 'oldest_support_ticket') {
+            // MAX across all tier patterns
+            const allPatterns = Object.values(metric.tierPatterns);
+            for (const cp of CHECKPOINTS) {
+              row.checkpoints[cp.label] = await fetchKpiMaxAtCheckpoint(allPatterns, cp.date);
+            }
+            row.current = await fetchKpiMaxCurrent(allPatterns);
+          } else {
+            // Standard aggregate from kpiPattern
+            for (const cp of CHECKPOINTS) {
+              row.checkpoints[cp.label] = await fetchKpiAtCheckpoint(metric.kpiPattern as string, cp.date);
+            }
+            row.current = await fetchKpiCurrent(metric.kpiPattern as string);
           }
 
-        } else if (metric.key === 'oldest_support_ticket' && metric.tierPatterns) {
-          // Oldest Support Ticket: MAX across all tier patterns
-          const allPatterns = Object.values(metric.tierPatterns);
-          for (const cp of CHECKPOINTS) {
-            row.checkpoints[cp.label] = await fetchKpiMaxAtCheckpoint(allPatterns, cp.date);
-          }
-          row.current = await fetchKpiMaxCurrent(allPatterns);
-
-          // Per-tier breakdown
+          // Per-tier breakdown (same for all tierPatterns metrics)
           row.tiers = [];
           for (const tier of TIERS) {
             const tierPattern = metric.tierPatterns[tier.key];
             if (!tierPattern) {
-              row.tiers.push({ key: tier.key, label: tier.label, target: null, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
+              row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
               continue;
             }
             const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {}, current: null };
