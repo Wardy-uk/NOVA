@@ -257,8 +257,11 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
 
       // ── Helpers ──
 
+      const todayStr = new Date().toISOString().slice(0, 10);
+
       // Fetch KPI value at or before a date (falls back up to 4 days for weekends/gaps)
       async function fetchKpiAtDate(pattern: string, cpDate: string): Promise<number | null> {
+        if (cpDate > todayStr) return null;  // Future date — no data yet
         const r = p.request();
         r.input('cpDate', sql.Date, cpDate);
         r.input('pattern', sql.NVarChar, pattern);
@@ -275,6 +278,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
 
       // Fetch KPI SUM at a single date across multiple patterns
       async function fetchKpiSumAtDate(patterns: string[], cpDate: string): Promise<number | null> {
+        if (cpDate > todayStr) return null;
         const r = p.request();
         r.input('cpDate', sql.Date, cpDate);
         const likes = patterns.map((_, i) => `kpi LIKE @p${i}`).join(' OR ');
@@ -295,6 +299,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
 
       // Fetch KPI MAX at a single date across multiple patterns
       async function fetchKpiMaxAtDate(patterns: string[], cpDate: string): Promise<number | null> {
+        if (cpDate > todayStr) return null;
         const r = p.request();
         r.input('cpDate', sql.Date, cpDate);
         const likes = patterns.map((_, i) => `kpi LIKE @p${i}`).join(' OR ');
@@ -315,9 +320,11 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
 
       // Fetch SUM of a KPI across a date range (for escalation/rejection counts)
       async function fetchKpiSumRange(pattern: string, startDate: string, endDate: string): Promise<number | null> {
+        if (startDate > todayStr) return null;
+        const cappedEnd = endDate > todayStr ? todayStr : endDate;
         const r = p.request();
         r.input('startDate', sql.Date, startDate);
-        r.input('endDate', sql.Date, endDate);
+        r.input('endDate', sql.Date, cappedEnd);
         r.input('pattern', sql.NVarChar, pattern);
         const result = await r.query(`
           SELECT SUM([Count]) AS total
@@ -330,9 +337,11 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
 
       // Compute compliance % from raw met/breached KPI counts over a date range
       async function fetchComplianceForRange(metKpi: string, breachedKpi: string, startDate: string, endDate: string): Promise<number | null> {
+        if (startDate > todayStr) return null;
+        const cappedEnd = endDate > todayStr ? todayStr : endDate;
         const r = p.request();
         r.input('startDate', sql.Date, startDate);
-        r.input('endDate', sql.Date, endDate);
+        r.input('endDate', sql.Date, cappedEnd);
         r.input('metKpi', sql.NVarChar, metKpi);
         r.input('breachedKpi', sql.NVarChar, breachedKpi);
         const result = await r.query(`
