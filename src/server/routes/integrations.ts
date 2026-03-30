@@ -38,7 +38,7 @@ const ms365Env = {
 };
 
 // Admin-only integrations: credentials stay in global settings.json
-const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo', 'kpi-sql']);
+const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign']);
 
 const execFileAsync = promisify(execFile);
 
@@ -73,7 +73,7 @@ export function createIntegrationRoutes(
   async function checkMs365LoggedIn(): Promise<boolean> {
     try {
       const { stdout } = await execFileAsync('npx', ['@softeria/ms-365-mcp-server', '--list-accounts'], {
-        timeout: 30000,
+        timeout: 5000,
         shell: true,
         env: ms365Env,
       });

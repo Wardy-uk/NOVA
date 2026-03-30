@@ -24,14 +24,15 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://127.0.0.1:3069',
         changeOrigin: true,
       },
       '/wallboard': {
-        target: 'http://localhost:3001',
+        target: 'http://127.0.0.1:3069',
         changeOrigin: true,
       },
     },

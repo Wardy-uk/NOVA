@@ -160,6 +160,20 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
     ],
   },
   {
+    id: 'business-central',
+    name: 'Business Central',
+    description: 'Microsoft Dynamics 365 Business Central. Syncs customers and sales orders for the Contracts screen.',
+    enabledKey: 'bc_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'bc_tenant_id', label: 'Tenant ID', type: 'text', placeholder: 'Azure AD directory (tenant) ID', required: true },
+      { key: 'bc_client_id', label: 'Client ID', type: 'text', placeholder: 'App registration client ID', required: true },
+      { key: 'bc_client_secret', label: 'Client Secret', type: 'password', placeholder: 'App registration client secret', required: true },
+      { key: 'bc_environment', label: 'Environment', type: 'text', placeholder: 'Production', required: true },
+      { key: 'bc_company_id', label: 'Company ID', type: 'text', placeholder: 'BC company GUID', required: true },
+    ],
+  },
+  {
     id: 'kpi-sql',
     name: 'KPI SQL Server',
     description: 'SQL Server connection for Jira Support DB KPI data. Used by the KPIs area to display team and agent metrics.',
@@ -170,6 +184,20 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'kpi_sql_database', label: 'Database', type: 'text', placeholder: 'JiraSupportDB', required: true },
       { key: 'kpi_sql_user', label: 'Username', type: 'text', placeholder: 'SQL username', required: true },
       { key: 'kpi_sql_password', label: 'Password', type: 'password', placeholder: 'SQL password', required: true },
+    ],
+  },
+  {
+    id: 'adobe-sign',
+    name: 'Adobe Sign',
+    description: 'Adobe Acrobat Sign e-signature service. Send contracts for signature and track agreement status.',
+    enabledKey: 'adobe_sign_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'adobe_sign_client_id', label: 'OAuth Client ID', type: 'text', placeholder: 'From Adobe Developer Console', required: true },
+      { key: 'adobe_sign_client_secret', label: 'OAuth Client Secret', type: 'password', placeholder: 'From Adobe Developer Console', required: true },
+      { key: 'adobe_sign_redirect_uri', label: 'Redirect URI', type: 'url', placeholder: 'https://nova.yourorg.com/api/adobe-sign/callback', required: true },
+      { key: 'adobe_sign_api_base_url', label: 'API Base URL', type: 'text', placeholder: 'https://api.na1.adobesign.com (region-dependent)', required: true },
+      { key: 'adobe_sign_refresh_token', label: 'Refresh Token', type: 'password', placeholder: 'Auto-populated after OAuth connection', required: false },
     ],
   },
 ];

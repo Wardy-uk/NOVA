@@ -7,7 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { getDb, initializeSchema, saveDb, createBackup } from './db/schema.js';
-import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries } from './db/queries.js';
+import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries } from './db/queries.js';
 import { FileUserQueries } from './db/user-store.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
@@ -71,6 +71,9 @@ import { createSetupExecutionRoutes } from './routes/setup-execution.js';
 import { createSetupPortalPublicRoutes, createSetupPortalRoutes } from './routes/setup-portal.js';
 import { createBackfillRoutes } from './routes/backfill.js';
 import { logWallboard, getWallboardLogs, clearWallboardLogs } from './services/wallboard-logger.js';
+import { createContractsRoutes } from './routes/contracts.js';
+import { createAdobeSignRoutes } from './routes/adobe-sign.js';
+import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
 
 dotenv.config();
 
@@ -113,6 +116,10 @@ async function main() {
   const portalAccountQueries = new PortalAccountQueries(db);
   const districtQueries = new BranchDistrictQueries(db);
   const welcomePackQueries = new WelcomePackQueries(db);
+  const bcCustomerQueries = new BcCustomerQueries(db);
+  const contractsQueries = new ContractsQueries(db);
+  const contractTemplateQueries = new ContractTemplateQueries(db);
+  const adobeSignAgreementQueries = new AdobeSignAgreementQueries(db);
 
   // Purge transient MS365 data from previous session
   const purgedCount = taskQueries.deleteTransientTasks();
@@ -365,6 +372,19 @@ async function main() {
   }
   buildBymService();
 
+  // Adobe Sign — OAuth REST client
+  let adobeSignClient: AdobeSignClient | null = null;
+  function buildAdobeSignService() {
+    const s = settingsQueries.getAll();
+    adobeSignClient = buildAdobeSignClient(s, (newToken) => {
+      settingsQueries.set('adobe_sign_refresh_token', newToken);
+    });
+    if (adobeSignClient) {
+      console.log('[N.O.V.A] Adobe Sign: Service configured');
+    }
+  }
+  buildAdobeSignService();
+
   // Setup orchestrator — coordinates direct BYM API execution
   const setupOrchestrator = new SetupOrchestrator({
     getBym: () => bymClient,
@@ -380,6 +400,26 @@ async function main() {
 
   // NEURO bridge — uses its own shared-secret auth, must be registered before JWT middleware
   app.use('/api/neuro-bridge', createNeuroBridgeRoutes(mcpManager));
+
+  // Adobe Sign OAuth callback — public (redirect from Adobe, no NOVA JWT)
+  app.get('/api/adobe-sign/callback', async (req, res) => {
+    const client = adobeSignClient;
+    const code = req.query.code as string | undefined;
+    if (!client) { res.status(503).json({ ok: false, error: 'Adobe Sign is not configured.' }); return; }
+    if (!code) {
+      const error = req.query.error as string | undefined;
+      res.status(400).json({ ok: false, error: error ?? 'No authorization code received' });
+      return;
+    }
+    try {
+      await client.exchangeCode(code);
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      res.redirect(`${frontendUrl}/#adobe-sign?connected=1`);
+    } catch (err) {
+      console.error('[Adobe Sign] OAuth callback error:', err);
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'OAuth exchange failed' });
+    }
+  });
 
   // Protected API routes — look up fresh role from DB so stale JWTs always reflect current role
   app.use('/api', authMiddleware(jwtSecret, (id) => userQueries.getById(id)?.role));
@@ -406,11 +446,13 @@ async function main() {
     // Rebuild AzDO / BYM services
     if (key.startsWith('azdo_')) buildAzDoService();
     if (key.startsWith('bym_')) buildBymService();
+    if (key.startsWith('adobe_sign_')) buildAdobeSignService();
   }));
   app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, userSettingsQueries, uvxCommand, () => d365Service, (key) => {
     if (key.startsWith('d365_')) buildD365Service();
     if (key.startsWith('azdo_')) buildAzDoService();
     if (key.startsWith('bym_')) buildBymService();
+    if (key.startsWith('adobe_sign_')) buildAdobeSignService();
   }, buildOnboardingJiraClient, () => bymClient));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
@@ -421,6 +463,8 @@ async function main() {
   // Milestone routes — wired with workflow engine after buildOrchestrator is defined (see below)
   // app.use('/api/milestones', ...) is registered after buildOrchestrator
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
+  app.use('/api/contracts', createContractsRoutes(bcCustomerQueries, contractsQueries, settingsQueries));
+  app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, contractTemplateQueries, settingsQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
 
@@ -1079,6 +1123,38 @@ ${panelHtml}
       console.error('[ProblemTicketScanner] Initial scan failed:', err instanceof Error ? err.message : err);
     }
   }, 30_000);
+
+  // Adobe Sign agreement sync — every 5 minutes
+  setInterval(async () => {
+    if (!adobeSignClient || adobeSignClient.getStatus().status !== 'connected') return;
+    try {
+      const remoteAgreements = await adobeSignClient.listAgreements();
+      for (const a of remoteAgreements) {
+        const signerEmails = a.participantSetsInfo
+          ?.filter(ps => ps.role === 'SIGNER')
+          .flatMap(ps => ps.memberInfos.map(m => m.email)) ?? [];
+        adobeSignAgreementQueries.upsert({
+          agreement_id: a.id,
+          contract_id: null,
+          template_id: null,
+          name: a.name,
+          status: a.status,
+          sender_email: a.senderEmail ?? null,
+          signer_emails: JSON.stringify(signerEmails),
+          filled_fields: null,
+          created_via_nova: 0,
+          adobe_created_date: a.createdDate ?? null,
+          adobe_expiration_date: a.expirationDate ?? null,
+          signed_document_url: null,
+          raw_data: JSON.stringify(a),
+          synced_at: new Date().toISOString(),
+        });
+      }
+      console.log(`[Adobe Sign] Synced ${remoteAgreements.length} agreements`);
+    } catch (err) {
+      console.error('[Adobe Sign] Auto-sync failed:', err instanceof Error ? err.message : err);
+    }
+  }, 5 * 60 * 1000);
 
   // Expose last sync time + per-source intervals
   app.get('/api/sync/status', (_req, res) => {
