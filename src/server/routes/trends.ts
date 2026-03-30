@@ -257,7 +257,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
 
       // ── Helpers ──
 
-      // Fetch KPI value at a single date (point-in-time lookup)
+      // Fetch KPI value at or before a date (falls back up to 4 days for weekends/gaps)
       async function fetchKpiAtDate(pattern: string, cpDate: string): Promise<number | null> {
         const r = p.request();
         r.input('cpDate', sql.Date, cpDate);
@@ -266,7 +266,8 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
           SELECT TOP 1 [Count] AS val
           FROM dbo.jira_kpi_daily
           WHERE kpi LIKE @pattern
-            AND CAST(CreatedAt AS DATE) = @cpDate
+            AND CAST(CreatedAt AS DATE) <= @cpDate
+            AND CAST(CreatedAt AS DATE) >= DATEADD(DAY, -4, @cpDate)
           ORDER BY CreatedAt DESC
         `);
         return result.recordset[0]?.val ?? null;
@@ -280,11 +281,13 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         patterns.forEach((pat, i) => r.input(`p${i}`, sql.NVarChar, pat));
         const result = await r.query(`
           SELECT SUM(val) AS total FROM (
-            SELECT kpi, MAX([Count]) AS val
-            FROM dbo.jira_kpi_daily
-            WHERE (${likes})
-              AND CAST(CreatedAt AS DATE) = @cpDate
-            GROUP BY kpi
+            SELECT kpi, (SELECT TOP 1 [Count] FROM dbo.jira_kpi_daily k2
+              WHERE k2.kpi = k1.kpi AND CAST(k2.CreatedAt AS DATE) <= @cpDate
+                AND CAST(k2.CreatedAt AS DATE) >= DATEADD(DAY, -4, @cpDate)
+              ORDER BY k2.CreatedAt DESC) AS val
+            FROM (SELECT DISTINCT kpi FROM dbo.jira_kpi_daily WHERE (${likes})
+              AND CAST(CreatedAt AS DATE) <= @cpDate
+              AND CAST(CreatedAt AS DATE) >= DATEADD(DAY, -4, @cpDate)) k1
           ) sub
         `);
         return result.recordset[0]?.total ?? null;
@@ -298,11 +301,13 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         patterns.forEach((pat, i) => r.input(`p${i}`, sql.NVarChar, pat));
         const result = await r.query(`
           SELECT MAX(val) AS oldest FROM (
-            SELECT kpi, MAX([Count]) AS val
-            FROM dbo.jira_kpi_daily
-            WHERE (${likes})
-              AND CAST(CreatedAt AS DATE) = @cpDate
-            GROUP BY kpi
+            SELECT kpi, (SELECT TOP 1 [Count] FROM dbo.jira_kpi_daily k2
+              WHERE k2.kpi = k1.kpi AND CAST(k2.CreatedAt AS DATE) <= @cpDate
+                AND CAST(k2.CreatedAt AS DATE) >= DATEADD(DAY, -4, @cpDate)
+              ORDER BY k2.CreatedAt DESC) AS val
+            FROM (SELECT DISTINCT kpi FROM dbo.jira_kpi_daily WHERE (${likes})
+              AND CAST(CreatedAt AS DATE) <= @cpDate
+              AND CAST(CreatedAt AS DATE) >= DATEADD(DAY, -4, @cpDate)) k1
           ) sub
         `);
         return result.recordset[0]?.oldest ?? null;
