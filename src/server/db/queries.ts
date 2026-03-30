@@ -3342,3 +3342,351 @@ export class WelcomePackQueries {
     return row;
   }
 }
+
+// ── Business Central Customers ──
+
+export interface BcCustomer {
+  id: number;
+  bc_id: string;
+  number: string | null;
+  display_name: string;
+  email: string | null;
+  phone_number: string | null;
+  address: string | null;
+  city: string | null;
+  country: string | null;
+  currency_code: string | null;
+  balance: number | null;
+  blocked: string | null;
+  last_synced: string;
+  created_at: string;
+}
+
+export interface Contract {
+  id: number;
+  bc_customer_id: string | null;
+  customer_name: string;
+  contract_number: string | null;
+  title: string;
+  status: string;
+  start_date: string | null;
+  end_date: string | null;
+  value: number | null;
+  currency: string;
+  renewal_type: string | null;
+  notes: string | null;
+  bc_order_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export class BcCustomerQueries {
+  constructor(private db: Database) {}
+
+  getAll(search?: string): BcCustomer[] {
+    let sql = `SELECT * FROM bc_customers WHERE 1=1`;
+    const params: string[] = [];
+    if (search?.trim()) {
+      sql += ` AND (display_name LIKE ? OR number LIKE ? OR city LIKE ?)`;
+      const like = `%${search.trim()}%`;
+      params.push(like, like, like);
+    }
+    sql += ` ORDER BY display_name ASC`;
+    const stmt = this.db.prepare(sql);
+    if (params.length) stmt.bind(params);
+    const rows: BcCustomer[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as BcCustomer);
+    stmt.free();
+    return rows;
+  }
+
+  getByBcId(bcId: string): BcCustomer | null {
+    const stmt = this.db.prepare(`SELECT * FROM bc_customers WHERE bc_id = ?`);
+    stmt.bind([bcId]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as BcCustomer) : null;
+    stmt.free();
+    return row;
+  }
+
+  upsert(c: Omit<BcCustomer, 'id' | 'created_at'>): void {
+    this.db.run(
+      `INSERT INTO bc_customers (bc_id, number, display_name, email, phone_number, address, city, country, currency_code, balance, blocked, last_synced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(bc_id) DO UPDATE SET
+         number=excluded.number, display_name=excluded.display_name, email=excluded.email,
+         phone_number=excluded.phone_number, address=excluded.address, city=excluded.city,
+         country=excluded.country, currency_code=excluded.currency_code, balance=excluded.balance,
+         blocked=excluded.blocked, last_synced=datetime('now')`,
+      [c.bc_id, c.number ?? null, c.display_name, c.email ?? null, c.phone_number ?? null,
+       c.address ?? null, c.city ?? null, c.country ?? null, c.currency_code ?? null,
+       c.balance ?? null, c.blocked ?? null]
+    );
+    saveDb();
+  }
+
+  count(): number {
+    const r = this.db.exec(`SELECT COUNT(*) as c FROM bc_customers`);
+    return (r[0]?.values[0]?.[0] as number) ?? 0;
+  }
+}
+
+export class ContractsQueries {
+  constructor(private db: Database) {}
+
+  getAll(filters?: { bc_customer_id?: string; status?: string; search?: string }): Contract[] {
+    let sql = `SELECT * FROM contracts WHERE 1=1`;
+    const params: (string | number)[] = [];
+    if (filters?.bc_customer_id) { sql += ` AND bc_customer_id = ?`; params.push(filters.bc_customer_id); }
+    if (filters?.status) { sql += ` AND status = ?`; params.push(filters.status); }
+    if (filters?.search?.trim()) {
+      sql += ` AND (title LIKE ? OR contract_number LIKE ? OR customer_name LIKE ?)`;
+      const like = `%${filters.search.trim()}%`;
+      params.push(like, like, like);
+    }
+    sql += ` ORDER BY end_date ASC NULLS LAST, title ASC`;
+    const stmt = this.db.prepare(sql);
+    if (params.length) stmt.bind(params as string[]);
+    const rows: Contract[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as Contract);
+    stmt.free();
+    return rows;
+  }
+
+  getById(id: number): Contract | null {
+    const stmt = this.db.prepare(`SELECT * FROM contracts WHERE id = ?`);
+    stmt.bind([id]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as Contract) : null;
+    stmt.free();
+    return row;
+  }
+
+  create(c: Omit<Contract, 'id' | 'created_at' | 'updated_at'>): number {
+    this.db.run(
+      `INSERT INTO contracts (bc_customer_id, customer_name, contract_number, title, status, start_date, end_date, value, currency, renewal_type, notes, bc_order_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [c.bc_customer_id ?? null, c.customer_name, c.contract_number ?? null, c.title,
+       c.status ?? 'active', c.start_date ?? null, c.end_date ?? null, c.value ?? null,
+       c.currency ?? 'GBP', c.renewal_type ?? null, c.notes ?? null, c.bc_order_id ?? null]
+    );
+    const r = this.db.exec(`SELECT last_insert_rowid() as id`);
+    const id = (r[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  update(id: number, c: Partial<Omit<Contract, 'id' | 'created_at' | 'updated_at'>>): boolean {
+    const existing = this.getById(id);
+    if (!existing) return false;
+    this.db.run(
+      `UPDATE contracts SET bc_customer_id=?, customer_name=?, contract_number=?, title=?, status=?, start_date=?, end_date=?, value=?, currency=?, renewal_type=?, notes=?, bc_order_id=?, updated_at=datetime('now') WHERE id=?`,
+      [c.bc_customer_id ?? existing.bc_customer_id, c.customer_name ?? existing.customer_name,
+       c.contract_number ?? existing.contract_number, c.title ?? existing.title,
+       c.status ?? existing.status, c.start_date ?? existing.start_date,
+       c.end_date ?? existing.end_date, c.value ?? existing.value,
+       c.currency ?? existing.currency, c.renewal_type ?? existing.renewal_type,
+       c.notes ?? existing.notes, c.bc_order_id ?? existing.bc_order_id, id]
+    );
+    saveDb();
+    return true;
+  }
+
+  delete(id: number): boolean {
+    const existing = this.getById(id);
+    if (!existing) return false;
+    this.db.run(`DELETE FROM contracts WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+}
+
+// ── Contract Templates ──
+
+export interface ContractTemplateFieldDef {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'email' | 'select' | 'textarea';
+  required?: boolean;
+  defaultValue?: string;
+  options?: string[]; // for select type
+}
+
+export interface ContractTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  category: string | null;
+  fields_schema: string | null; // JSON string of ContractTemplateFieldDef[]
+  adobe_library_doc_id: string | null;
+  file_data: Buffer | null;
+  file_name: string | null;
+  file_mime: string | null;
+  status: string;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export class ContractTemplateQueries {
+  constructor(private db: Database) {}
+
+  getAll(filters?: { status?: string; category?: string; search?: string }): Omit<ContractTemplate, 'file_data'>[] {
+    let sql = `SELECT id, name, description, category, fields_schema, adobe_library_doc_id, file_name, file_mime, status, created_by, created_at, updated_at FROM contract_templates WHERE 1=1`;
+    const params: (string | number)[] = [];
+    if (filters?.status) { sql += ` AND status = ?`; params.push(filters.status); }
+    if (filters?.category) { sql += ` AND category = ?`; params.push(filters.category); }
+    if (filters?.search?.trim()) {
+      sql += ` AND (name LIKE ? OR description LIKE ?)`;
+      const like = `%${filters.search.trim()}%`;
+      params.push(like, like);
+    }
+    sql += ` ORDER BY name ASC`;
+    const stmt = this.db.prepare(sql);
+    if (params.length) stmt.bind(params as string[]);
+    const rows: Omit<ContractTemplate, 'file_data'>[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as Omit<ContractTemplate, 'file_data'>);
+    stmt.free();
+    return rows;
+  }
+
+  getById(id: number): ContractTemplate | null {
+    const stmt = this.db.prepare(`SELECT * FROM contract_templates WHERE id = ?`);
+    stmt.bind([id]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as ContractTemplate) : null;
+    stmt.free();
+    return row;
+  }
+
+  create(t: { name: string; description?: string; category?: string; fields_schema?: string; adobe_library_doc_id?: string; file_data?: Buffer; file_name?: string; file_mime?: string; created_by?: number }): number {
+    this.db.run(
+      `INSERT INTO contract_templates (name, description, category, fields_schema, adobe_library_doc_id, file_data, file_name, file_mime, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [t.name, t.description ?? null, t.category ?? null, t.fields_schema ?? null,
+       t.adobe_library_doc_id ?? null, t.file_data ?? null, t.file_name ?? null,
+       t.file_mime ?? null, t.created_by ?? null],
+    );
+    const r = this.db.exec(`SELECT last_insert_rowid() as id`);
+    const id = (r[0]?.values[0]?.[0] as number) ?? 0;
+    saveDb();
+    return id;
+  }
+
+  update(id: number, t: Partial<Omit<ContractTemplate, 'id' | 'created_at' | 'updated_at'>>): boolean {
+    const existing = this.getById(id);
+    if (!existing) return false;
+    this.db.run(
+      `UPDATE contract_templates SET name=?, description=?, category=?, fields_schema=?, adobe_library_doc_id=?, file_data=?, file_name=?, file_mime=?, status=?, updated_at=datetime('now') WHERE id=?`,
+      [t.name ?? existing.name, t.description ?? existing.description,
+       t.category ?? existing.category, t.fields_schema ?? existing.fields_schema,
+       t.adobe_library_doc_id ?? existing.adobe_library_doc_id,
+       t.file_data ?? existing.file_data, t.file_name ?? existing.file_name,
+       t.file_mime ?? existing.file_mime, t.status ?? existing.status, id],
+    );
+    saveDb();
+    return true;
+  }
+
+  delete(id: number): boolean {
+    const existing = this.getById(id);
+    if (!existing) return false;
+    this.db.run(`DELETE FROM contract_templates WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+}
+
+// ── Adobe Sign Agreements ──
+
+export interface AdobeSignAgreement {
+  id: number;
+  agreement_id: string;
+  contract_id: number | null;
+  template_id: number | null;
+  name: string;
+  status: string;
+  sender_email: string | null;
+  signer_emails: string | null; // JSON array
+  filled_fields: string | null; // JSON object
+  created_via_nova: number;
+  adobe_created_date: string | null;
+  adobe_expiration_date: string | null;
+  signed_document_url: string | null;
+  raw_data: string | null; // JSON
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export class AdobeSignAgreementQueries {
+  constructor(private db: Database) {}
+
+  getAll(filters?: { contract_id?: number; template_id?: number; status?: string; search?: string }): AdobeSignAgreement[] {
+    let sql = `SELECT * FROM adobe_sign_agreements WHERE 1=1`;
+    const params: (string | number)[] = [];
+    if (filters?.contract_id) { sql += ` AND contract_id = ?`; params.push(filters.contract_id); }
+    if (filters?.template_id) { sql += ` AND template_id = ?`; params.push(filters.template_id); }
+    if (filters?.status) { sql += ` AND status = ?`; params.push(filters.status); }
+    if (filters?.search?.trim()) {
+      sql += ` AND (name LIKE ? OR sender_email LIKE ? OR signer_emails LIKE ?)`;
+      const like = `%${filters.search.trim()}%`;
+      params.push(like, like, like);
+    }
+    sql += ` ORDER BY created_at DESC`;
+    const stmt = this.db.prepare(sql);
+    if (params.length) stmt.bind(params as string[]);
+    const rows: AdobeSignAgreement[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as AdobeSignAgreement);
+    stmt.free();
+    return rows;
+  }
+
+  getById(id: number): AdobeSignAgreement | null {
+    const stmt = this.db.prepare(`SELECT * FROM adobe_sign_agreements WHERE id = ?`);
+    stmt.bind([id]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as AdobeSignAgreement) : null;
+    stmt.free();
+    return row;
+  }
+
+  getByAgreementId(agreementId: string): AdobeSignAgreement | null {
+    const stmt = this.db.prepare(`SELECT * FROM adobe_sign_agreements WHERE agreement_id = ?`);
+    stmt.bind([agreementId]);
+    const row = stmt.step() ? (stmt.getAsObject() as unknown as AdobeSignAgreement) : null;
+    stmt.free();
+    return row;
+  }
+
+  upsert(a: Omit<AdobeSignAgreement, 'id' | 'created_at' | 'updated_at'>): void {
+    this.db.run(
+      `INSERT INTO adobe_sign_agreements (agreement_id, contract_id, template_id, name, status, sender_email, signer_emails, filled_fields, created_via_nova, adobe_created_date, adobe_expiration_date, signed_document_url, raw_data, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(agreement_id) DO UPDATE SET
+         status=excluded.status, sender_email=excluded.sender_email, signer_emails=excluded.signer_emails,
+         adobe_expiration_date=excluded.adobe_expiration_date, signed_document_url=excluded.signed_document_url,
+         raw_data=excluded.raw_data, synced_at=excluded.synced_at, updated_at=datetime('now')`,
+      [a.agreement_id, a.contract_id ?? null, a.template_id ?? null, a.name,
+       a.status, a.sender_email ?? null, a.signer_emails ?? null,
+       a.filled_fields ?? null, a.created_via_nova ? 1 : 0,
+       a.adobe_created_date ?? null, a.adobe_expiration_date ?? null,
+       a.signed_document_url ?? null, a.raw_data ?? null,
+       a.synced_at ?? new Date().toISOString()],
+    );
+    saveDb();
+  }
+
+  delete(id: number): boolean {
+    const existing = this.getById(id);
+    if (!existing) return false;
+    this.db.run(`DELETE FROM adobe_sign_agreements WHERE id = ?`, [id]);
+    saveDb();
+    return true;
+  }
+
+  getByContractId(contractId: number): AdobeSignAgreement[] {
+    const stmt = this.db.prepare(`SELECT * FROM adobe_sign_agreements WHERE contract_id = ? ORDER BY created_at DESC`);
+    stmt.bind([contractId]);
+    const rows: AdobeSignAgreement[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as AdobeSignAgreement);
+    stmt.free();
+    return rows;
+  }
+}

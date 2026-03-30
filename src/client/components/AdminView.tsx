@@ -101,6 +101,11 @@ export function AdminView() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Business Central company detect
+  const [bcDetecting, setBcDetecting] = useState(false);
+  const [bcCompanies, setBcCompanies] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [bcDetectError, setBcDetectError] = useState<string | null>(null);
+
   // AI key state
   const [globalKeyInfo, setGlobalKeyInfo] = useState<{ masked: string; hasKey: boolean }>({ masked: '', hasKey: false });
   const [newGlobalKey, setNewGlobalKey] = useState('');
@@ -195,7 +200,7 @@ export function AdminView() {
       const res = await fetch('/api/integrations');
       const json = await res.json();
       if (json.ok) {
-        const ADMIN_ONLY = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp', 'bym-setup', 'azdo', 'kpi-sql']);
+        const ADMIN_ONLY = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign']);
         const withFields = (json.data as IntegrationConfig[]).filter(i => ADMIN_ONLY.has(i.id));
         setIntegrations(withFields);
         const vals: Record<string, Record<string, string>> = {};
@@ -1296,13 +1301,14 @@ export function AdminView() {
                       </div>
                     );
                   }
+                  const isBcCompanyField = integ.id === 'business-central' && field.key === 'bc_company_id';
                   return (
                   <div key={field.key}>
                     <label className="block text-xs text-neutral-400 mb-1">
                       {field.label}
                       {field.required && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
-                    <div className="relative">
+                    <div className="relative flex gap-2">
                       <input
                         type={field.type === 'password' && !integShowPasswords.has(integ.id) ? 'password' : 'text'}
                         value={integValues[integ.id]?.[field.key] ?? ''}
@@ -1322,7 +1328,7 @@ export function AdminView() {
                           }
                         }}
                         placeholder={field.placeholder}
-                        className="w-full bg-[#272C33] border border-[#3a424d] rounded px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-[#5ec1ca] focus:outline-none"
+                        className="flex-1 bg-[#272C33] border border-[#3a424d] rounded px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-[#5ec1ca] focus:outline-none"
                       />
                       {field.type === 'password' && (
                         <button
@@ -1337,7 +1343,70 @@ export function AdminView() {
                           {integShowPasswords.has(integ.id) ? 'Hide' : 'Show'}
                         </button>
                       )}
+                      {isBcCompanyField && (
+                        <button
+                          type="button"
+                          disabled={bcDetecting}
+                          onClick={async () => {
+                            setBcDetecting(true);
+                            setBcCompanies(null);
+                            setBcDetectError(null);
+                            try {
+                              const vals = integValues['business-central'] ?? {};
+                              const res = await fetch('/api/contracts/bc/detect-companies', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  tenant_id: vals.bc_tenant_id ?? '',
+                                  client_id: vals.bc_client_id ?? '',
+                                  client_secret: vals.bc_client_secret?.includes('****') ? '' : (vals.bc_client_secret ?? ''),
+                                  environment: vals.bc_environment ?? 'Production',
+                                }),
+                              });
+                              const text = await res.text();
+                              let json: any;
+                              try { json = JSON.parse(text); } catch { json = { ok: false, error: `Server returned (${res.status}): ${text.slice(0, 200)}` }; }
+                              if (json.ok) {
+                                setBcCompanies(json.data);
+                              } else {
+                                setBcDetectError(json.error ?? `HTTP ${res.status}`);
+                              }
+                            } catch (e: any) {
+                              setBcDetectError(`Request failed: ${e?.message ?? 'unknown'}`);
+                            } finally {
+                              setBcDetecting(false);
+                            }
+                          }}
+                          className="flex-shrink-0 px-3 py-1.5 text-[11px] rounded bg-[#5ec1ca]/10 border border-[#5ec1ca]/30 text-[#5ec1ca] hover:bg-[#5ec1ca]/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+                        >
+                          {bcDetecting ? 'Detecting…' : 'Detect'}
+                        </button>
+                      )}
                     </div>
+                    {isBcCompanyField && bcDetectError && (
+                      <p className="mt-1 text-[11px] text-red-400">{bcDetectError}</p>
+                    )}
+                    {isBcCompanyField && bcCompanies && bcCompanies.length > 0 && (
+                      <div className="mt-1.5 border border-[#3a424d] rounded bg-[#272C33] divide-y divide-[#3a424d]">
+                        {bcCompanies.map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setIntegValues(prev => ({
+                                ...prev,
+                                'business-central': { ...prev['business-central'], bc_company_id: c.id },
+                              }));
+                              setBcCompanies(null);
+                            }}
+                            className="w-full text-left px-3 py-2 hover:bg-[#2f353d] transition-colors"
+                          >
+                            <span className="text-[12px] text-neutral-200">{c.name}</span>
+                            <span className="ml-2 text-[10px] text-neutral-500">{c.id}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   );
                 })}

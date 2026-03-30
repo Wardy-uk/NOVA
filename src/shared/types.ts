@@ -112,3 +112,48 @@ export const TaskUpdateSchema = z.object({
   status: TaskStatusSchema.optional(),
 });
 export type TaskUpdate = z.infer<typeof TaskUpdateSchema>;
+
+// ---------- Adobe Sign ----------
+export interface ContractTemplateFieldDef {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'email' | 'select' | 'textarea';
+  required?: boolean;
+  defaultValue?: string;
+  options?: string[];
+}
+
+export interface ContractTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  category: string | null;
+  fields_schema: string | null;
+  adobe_library_doc_id: string | null;
+  file_name: string | null;
+  file_mime: string | null;
+  has_file?: boolean;
+  status: string;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdobeSignAgreement {
+  id: number;
+  agreement_id: string;
+  contract_id: number | null;
+  template_id: number | null;
+  name: string;
+  status: string;
+  sender_email: string | null;
+  signer_emails: string | null;
+  filled_fields: string | null;
+  created_via_nova: number;
+  adobe_created_date: string | null;
+  adobe_expiration_date: string | null;
+  signed_document_url: string | null;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}

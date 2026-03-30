@@ -78,6 +78,7 @@ export function saveDb(): void {
   const tmpPath = DB_PATH + '.tmp';
   try {
     fs.writeFileSync(tmpPath, buffer);
+    try { fs.unlinkSync(DB_PATH); } catch { /* ignore if not exists */ }
     fs.renameSync(tmpPath, DB_PATH);
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
@@ -1054,6 +1055,89 @@ export function initializeSchema(database: Database): void {
       [key, value]
     );
   }
+
+  // ── Business Central / Contracts ──
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS bc_customers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bc_id TEXT UNIQUE NOT NULL,
+      number TEXT,
+      display_name TEXT NOT NULL,
+      email TEXT,
+      phone_number TEXT,
+      address TEXT,
+      city TEXT,
+      country TEXT,
+      currency_code TEXT,
+      balance REAL,
+      blocked TEXT,
+      last_synced TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS contracts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bc_customer_id TEXT,
+      customer_name TEXT NOT NULL,
+      contract_number TEXT,
+      title TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      start_date TEXT,
+      end_date TEXT,
+      value REAL,
+      currency TEXT DEFAULT 'GBP',
+      renewal_type TEXT,
+      notes TEXT,
+      bc_order_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // ── Adobe Sign: contract templates with dynamic field schemas ──
+  database.run(`
+    CREATE TABLE IF NOT EXISTS contract_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      category TEXT,
+      fields_schema TEXT,
+      adobe_library_doc_id TEXT,
+      file_data BLOB,
+      file_name TEXT,
+      file_mime TEXT,
+      status TEXT DEFAULT 'active',
+      created_by INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // ── Adobe Sign: agreement tracking ──
+  database.run(`
+    CREATE TABLE IF NOT EXISTS adobe_sign_agreements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agreement_id TEXT UNIQUE NOT NULL,
+      contract_id INTEGER,
+      template_id INTEGER,
+      name TEXT NOT NULL,
+      status TEXT DEFAULT 'DRAFT',
+      sender_email TEXT,
+      signer_emails TEXT,
+      filled_fields TEXT,
+      created_via_nova INTEGER DEFAULT 0,
+      adobe_created_date TEXT,
+      adobe_expiration_date TEXT,
+      signed_document_url TEXT,
+      raw_data TEXT,
+      synced_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
 
   saveDb();
 }

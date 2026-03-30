@@ -6,6 +6,9 @@ import { DailyStatsView } from './components/DailyStatsView.js';
 import { KpisView } from './components/KpisView.js';
 import { DeliveryView } from './components/DeliveryView.js';
 import { CrmView } from './components/CrmView.js';
+import { ContractsView } from './components/ContractsView.js';
+import { AdobeSignView } from './components/AdobeSignView.js';
+import { NewContractWizard } from './components/NewContractWizard.js';
 import { MyFocusView } from './components/MyFocusView.js';
 import { LoginView } from './components/LoginView.js';
 import { HelpView } from './components/HelpView.js';
@@ -53,7 +56,7 @@ type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'k
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
-  | 'crm'
+  | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'qa'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support'
@@ -134,6 +137,9 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'crm',
     tabs: [
       { view: 'crm', label: 'CRM' },
+      { view: 'contracts', label: 'Contracts' },
+      { view: 'adobe-sign', label: 'Adobe Sign' },
+      { view: 'new-contract', label: 'New Contract' },
     ],
   },
   kpis: {
@@ -187,7 +193,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -979,6 +985,17 @@ export function App() {
           {/* Account Management */}
           {view === 'crm' && (
             <CrmView canWrite={areaAccess.accounts === 'edit'} />
+          )}
+          {view === 'contracts' && (
+            <ContractsView />
+          )}
+
+          {view === 'adobe-sign' && (
+            <AdobeSignView />
+          )}
+
+          {view === 'new-contract' && (
+            <NewContractWizard onNavigateToAgreements={() => setView('adobe-sign')} />
           )}
 
           {/* Sales Hotbox */}
