@@ -19,15 +19,70 @@ export const TEAM_AGENTS = [
 ] as const;
 
 // Checkpoint dates for the 90-day framework
+const CHECKPOINT_DATES = {
+  day0: '2026-03-02',
+  day1: '2026-03-16',
+  day15: '2026-03-31',
+  day30: '2026-04-15',
+} as const;
+
+interface CheckpointColumn {
+  label: string;
+  subtitle: string;
+  type: 'range' | 'point';
+  start: string;
+  end: string;
+}
+
+function fmtSubtitle(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+
+function fmtMonthYear(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+}
+
+// Build dynamic checkpoint columns with date ranges
+function buildCheckpointColumns(): CheckpointColumn[] {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+
+  // Last month: previous calendar month
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0); // last day of prev month
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lmStart = lastMonthStart.toISOString().slice(0, 10);
+  const lmEnd = lastMonthEnd.toISOString().slice(0, 10);
+
+  // Week to date: Monday of current week → today
+  const dayOfWeek = now.getDay(); // 0=Sun
+  const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - mondayOffset);
+  const wtdStart = monday.toISOString().slice(0, 10);
+
+  // Month to date: 1st of current month → today
+  const mtdStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+
+  return [
+    { label: 'Last Month', subtitle: fmtMonthYear(lmStart), type: 'range', start: lmStart, end: lmEnd },
+    { label: 'Day 0', subtitle: fmtSubtitle(CHECKPOINT_DATES.day0), type: 'point', start: CHECKPOINT_DATES.day0, end: CHECKPOINT_DATES.day0 },
+    { label: 'Day 1', subtitle: fmtSubtitle(CHECKPOINT_DATES.day1), type: 'point', start: CHECKPOINT_DATES.day1, end: CHECKPOINT_DATES.day1 },
+    { label: 'WTD', subtitle: `${fmtSubtitle(wtdStart)} – ${fmtSubtitle(today)}`, type: 'range', start: wtdStart, end: today },
+    { label: 'MTD', subtitle: `${fmtSubtitle(mtdStart)} – ${fmtSubtitle(today)}`, type: 'range', start: mtdStart, end: today },
+    { label: 'Day 15', subtitle: fmtSubtitle(CHECKPOINT_DATES.day15), type: 'point', start: CHECKPOINT_DATES.day15, end: CHECKPOINT_DATES.day15 },
+    { label: 'Day 30', subtitle: fmtSubtitle(CHECKPOINT_DATES.day30), type: 'point', start: CHECKPOINT_DATES.day30, end: CHECKPOINT_DATES.day30 },
+  ];
+}
+
+// Fixed checkpoint dates for backward compat (used by data-audit route)
 const CHECKPOINTS = [
-  { label: 'Day 0', date: '2026-03-02' },
-  { label: 'Day 1', date: '2026-03-16' },
-  { label: 'Day 15', date: '2026-03-31' },
-  { label: 'Day 30', date: '2026-04-15' },
-  { label: 'Day 45', date: '2026-04-30' },
-  { label: 'Day 60', date: '2026-05-15' },
-  { label: 'Day 90', date: '2026-06-14' },
-] as const;
+  { label: 'Day 0', date: CHECKPOINT_DATES.day0 },
+  { label: 'Day 1', date: CHECKPOINT_DATES.day1 },
+  { label: 'Day 15', date: CHECKPOINT_DATES.day15 },
+  { label: 'Day 30', date: CHECKPOINT_DATES.day30 },
+];
 
 // Tier definitions for expandable checkpoint rows
 const TIERS = [
@@ -53,7 +108,7 @@ interface CheckpointMetric {
   key: string;
   label: string;
   kpiPattern?: string;
-  source?: 'qa' | 'golden' | 'derived_escalation';
+  source?: 'qa' | 'golden' | 'derived_escalation' | 'compliance';
   target: number | null;
   direction: string;
   expandable: boolean;
@@ -63,31 +118,53 @@ interface CheckpointMetric {
   tierEscPatterns?: Record<string, string>;
   /** For derived_escalation: rejection pattern per tier */
   tierRejPatterns?: Record<string, string>;
+  /** For compliance source: raw met/breached KPI names for range aggregation */
+  metKpi?: string;
+  breachedKpi?: string;
+  /** Per-tier met/breached KPI names */
+  tierMetKpis?: Record<string, string>;
+  tierBreachedKpis?: Record<string, string>;
 }
 
 const CHECKPOINT_METRICS: CheckpointMetric[] = [
   {
     key: 'frt_compliance', label: 'FRT Compliance %',
-    kpiPattern: 'FRT Compliance % (Resolved Today)', target: 95, direction: 'higher',
-    expandable: true,
-    tierPatterns: {
-      customer_care: 'FRT Compliance % (Customer Care)',
-      production:    'FRT Compliance % (Production)',
-      tier2:         'FRT Compliance % (Tier 2)',
-      tier3:         'FRT Compliance % (Tier 3)',
-      development:   'FRT Compliance % (Development)',
+    kpiPattern: 'FRT Compliance % (Resolved Today)', source: 'compliance',
+    target: 95, direction: 'higher', expandable: true,
+    metKpi: 'FRT Met (All)', breachedKpi: 'FRT Breached (All)',
+    tierMetKpis: {
+      customer_care: 'FRT Met (Customer Care)',
+      production:    'FRT Met (Production)',
+      tier2:         'FRT Met (Tier 2)',
+      tier3:         'FRT Met (Tier 3)',
+      development:   'FRT Met (Development)',
+    },
+    tierBreachedKpis: {
+      customer_care: 'FRT Breached (Customer Care)',
+      production:    'FRT Breached (Production)',
+      tier2:         'FRT Breached (Tier 2)',
+      tier3:         'FRT Breached (Tier 3)',
+      development:   'FRT Breached (Development)',
     },
   },
   {
     key: 'resolution_compliance', label: 'Resolution Compliance %',
-    kpiPattern: 'Resolution Compliance % (Resolved Today)', target: 95, direction: 'higher',
-    expandable: true,
-    tierPatterns: {
-      customer_care: 'Resolution Compliance % (Customer Care)',
-      production:    'Resolution Compliance % (Production)',
-      tier2:         'Resolution Compliance % (Tier 2)',
-      tier3:         'Resolution Compliance % (Tier 3)',
-      development:   'Resolution Compliance % (Development)',
+    kpiPattern: 'Resolution Compliance % (Resolved Today)', source: 'compliance',
+    target: 95, direction: 'higher', expandable: true,
+    metKpi: 'Resolution Met (All)', breachedKpi: 'Resolution Breached (All)',
+    tierMetKpis: {
+      customer_care: 'Resolution Met (Customer Care)',
+      production:    'Resolution Met (Production)',
+      tier2:         'Resolution Met (Tier 2)',
+      tier3:         'Resolution Met (Tier 3)',
+      development:   'Resolution Met (Development)',
+    },
+    tierBreachedKpis: {
+      customer_care: 'Resolution Breached (Customer Care)',
+      production:    'Resolution Breached (Production)',
+      tier2:         'Resolution Breached (Tier 2)',
+      tier3:         'Resolution Breached (Tier 3)',
+      development:   'Resolution Breached (Development)',
     },
   },
   {
@@ -174,11 +251,14 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
     try {
       const p = await getPool();
       const env = parseEnv(req);
+      const columns = buildCheckpointColumns();
 
       const metrics: any[] = [];
 
-      // Helper: fetch KPI value for a pattern at a checkpoint date
-      async function fetchKpiAtCheckpoint(pattern: string, cpDate: string): Promise<number | null> {
+      // ── Helpers ──
+
+      // Fetch KPI value at a single date (point-in-time lookup)
+      async function fetchKpiAtDate(pattern: string, cpDate: string): Promise<number | null> {
         const r = p.request();
         r.input('cpDate', sql.Date, cpDate);
         r.input('pattern', sql.NVarChar, pattern);
@@ -192,82 +272,93 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         return result.recordset[0]?.val ?? null;
       }
 
-      // Helper: fetch most recent KPI value for a pattern
-      async function fetchKpiCurrent(pattern: string): Promise<number | null> {
+      // Fetch KPI SUM at a single date across multiple patterns
+      async function fetchKpiSumAtDate(patterns: string[], cpDate: string): Promise<number | null> {
         const r = p.request();
+        r.input('cpDate', sql.Date, cpDate);
+        const likes = patterns.map((_, i) => `kpi LIKE @p${i}`).join(' OR ');
+        patterns.forEach((pat, i) => r.input(`p${i}`, sql.NVarChar, pat));
+        const result = await r.query(`
+          SELECT SUM(val) AS total FROM (
+            SELECT kpi, MAX([Count]) AS val
+            FROM dbo.jira_kpi_daily
+            WHERE (${likes})
+              AND CAST(CreatedAt AS DATE) = @cpDate
+            GROUP BY kpi
+          ) sub
+        `);
+        return result.recordset[0]?.total ?? null;
+      }
+
+      // Fetch KPI MAX at a single date across multiple patterns
+      async function fetchKpiMaxAtDate(patterns: string[], cpDate: string): Promise<number | null> {
+        const r = p.request();
+        r.input('cpDate', sql.Date, cpDate);
+        const likes = patterns.map((_, i) => `kpi LIKE @p${i}`).join(' OR ');
+        patterns.forEach((pat, i) => r.input(`p${i}`, sql.NVarChar, pat));
+        const result = await r.query(`
+          SELECT MAX(val) AS oldest FROM (
+            SELECT kpi, MAX([Count]) AS val
+            FROM dbo.jira_kpi_daily
+            WHERE (${likes})
+              AND CAST(CreatedAt AS DATE) = @cpDate
+            GROUP BY kpi
+          ) sub
+        `);
+        return result.recordset[0]?.oldest ?? null;
+      }
+
+      // Fetch SUM of a KPI across a date range (for escalation/rejection counts)
+      async function fetchKpiSumRange(pattern: string, startDate: string, endDate: string): Promise<number | null> {
+        const r = p.request();
+        r.input('startDate', sql.Date, startDate);
+        r.input('endDate', sql.Date, endDate);
         r.input('pattern', sql.NVarChar, pattern);
         const result = await r.query(`
-          SELECT TOP 1 [Count] AS val
+          SELECT SUM([Count]) AS total
           FROM dbo.jira_kpi_daily
           WHERE kpi LIKE @pattern
-          ORDER BY CreatedAt DESC
-        `);
-        return result.recordset[0]?.val ?? null;
-      }
-
-      // Helper: aggregate KPI values across multiple patterns (SUM for queue size)
-      async function fetchKpiSumAtCheckpoint(patterns: string[], cpDate: string): Promise<number | null> {
-        const r = p.request();
-        r.input('cpDate', sql.Date, cpDate);
-        const likes = patterns.map((_, i) => `kpi LIKE @p${i}`).join(' OR ');
-        patterns.forEach((pat, i) => r.input(`p${i}`, sql.NVarChar, pat));
-        const result = await r.query(`
-          SELECT SUM(val) AS total FROM (
-            SELECT kpi, MAX([Count]) AS val
-            FROM dbo.jira_kpi_daily
-            WHERE (${likes})
-              AND CAST(CreatedAt AS DATE) = @cpDate
-            GROUP BY kpi
-          ) sub
+            AND CAST(CreatedAt AS DATE) BETWEEN @startDate AND @endDate
         `);
         return result.recordset[0]?.total ?? null;
       }
 
-      async function fetchKpiSumCurrent(patterns: string[]): Promise<number | null> {
+      // Compute compliance % from raw met/breached KPI counts over a date range
+      async function fetchComplianceForRange(metKpi: string, breachedKpi: string, startDate: string, endDate: string): Promise<number | null> {
         const r = p.request();
-        const likes = patterns.map((_, i) => `kpi LIKE @p${i}`).join(' OR ');
-        patterns.forEach((pat, i) => r.input(`p${i}`, sql.NVarChar, pat));
+        r.input('startDate', sql.Date, startDate);
+        r.input('endDate', sql.Date, endDate);
+        r.input('metKpi', sql.NVarChar, metKpi);
+        r.input('breachedKpi', sql.NVarChar, breachedKpi);
         const result = await r.query(`
-          SELECT SUM(val) AS total FROM (
-            SELECT kpi, (SELECT TOP 1 [Count] FROM dbo.jira_kpi_daily k2
-                         WHERE k2.kpi = k1.kpi ORDER BY k2.CreatedAt DESC) AS val
-            FROM (SELECT DISTINCT kpi FROM dbo.jira_kpi_daily WHERE ${likes}) k1
-          ) sub
+          SELECT
+            SUM(CASE WHEN kpi = @metKpi THEN [Count] ELSE 0 END) AS met,
+            SUM(CASE WHEN kpi = @breachedKpi THEN [Count] ELSE 0 END) AS breached
+          FROM dbo.jira_kpi_daily
+          WHERE kpi IN (@metKpi, @breachedKpi)
+            AND CAST(CreatedAt AS DATE) BETWEEN @startDate AND @endDate
         `);
-        return result.recordset[0]?.total ?? null;
+        const met = result.recordset[0]?.met ?? 0;
+        const breached = result.recordset[0]?.breached ?? 0;
+        const total = met + breached;
+        if (total === 0) return null;
+        return +((met / total) * 100).toFixed(1);
       }
 
-      // Helper: aggregate KPI values across patterns (MAX for oldest ticket)
-      async function fetchKpiMaxAtCheckpoint(patterns: string[], cpDate: string): Promise<number | null> {
-        const r = p.request();
-        r.input('cpDate', sql.Date, cpDate);
-        const likes = patterns.map((_, i) => `kpi LIKE @p${i}`).join(' OR ');
-        patterns.forEach((pat, i) => r.input(`p${i}`, sql.NVarChar, pat));
-        const result = await r.query(`
-          SELECT MAX(val) AS oldest FROM (
-            SELECT kpi, MAX([Count]) AS val
-            FROM dbo.jira_kpi_daily
-            WHERE (${likes})
-              AND CAST(CreatedAt AS DATE) = @cpDate
-            GROUP BY kpi
-          ) sub
-        `);
-        return result.recordset[0]?.oldest ?? null;
+      // Compute escalation accuracy over a date range: escalated / (escalated + rejected) * 100
+      async function fetchEscAccuracyForRange(escPat: string, rejPat: string, startDate: string, endDate: string): Promise<number | null> {
+        const esc = await fetchKpiSumRange(escPat, startDate, endDate);
+        const rej = await fetchKpiSumRange(rejPat, startDate, endDate);
+        const total = (esc ?? 0) + (rej ?? 0);
+        if (total === 0 || esc === null) return null;
+        return +((esc / total) * 100).toFixed(1);
       }
 
-      async function fetchKpiMaxCurrent(patterns: string[]): Promise<number | null> {
-        const r = p.request();
-        const likes = patterns.map((_, i) => `kpi LIKE @p${i}`).join(' OR ');
-        patterns.forEach((pat, i) => r.input(`p${i}`, sql.NVarChar, pat));
-        const result = await r.query(`
-          SELECT MAX(val) AS oldest FROM (
-            SELECT kpi, (SELECT TOP 1 [Count] FROM dbo.jira_kpi_daily k2
-                         WHERE k2.kpi = k1.kpi ORDER BY k2.CreatedAt DESC) AS val
-            FROM (SELECT DISTINCT kpi FROM dbo.jira_kpi_daily WHERE ${likes}) k1
-          ) sub
-        `);
-        return result.recordset[0]?.oldest ?? null;
-      }
+      // Fetch value for a column: uses the column's date range + type
+      // For 'point' columns, just use the end date.
+      // For 'range' columns, behavior depends on the metric type (handled by caller).
+
+      // ── Build metric rows ──
 
       for (const metric of CHECKPOINT_METRICS) {
         const row: any = {
@@ -277,70 +368,137 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
           direction: metric.direction,
           expandable: metric.expandable,
           checkpoints: {},
-          current: null,
           tiers: null,
         };
 
-        if (metric.source === 'derived_escalation') {
-          // Escalation Accuracy aggregate
-          for (const cp of CHECKPOINTS) {
-            row.checkpoints[cp.label] = await fetchKpiAtCheckpoint(metric.kpiPattern as string, cp.date);
-          }
-          row.current = await fetchKpiCurrent(metric.kpiPattern as string);
+        const nullCheckpoints = () => Object.fromEntries(columns.map(c => [c.label, null]));
 
-          // Per destination tier: accuracy = escalated / (escalated + rejected) * 100
+        if (metric.source === 'compliance') {
+          // FRT / Resolution compliance
+          // For point columns: use the pre-computed compliance % KPI at that date
+          // For range columns: compute from raw met/breached counts
+          for (const col of columns) {
+            if (col.type === 'point') {
+              row.checkpoints[col.label] = await fetchKpiAtDate(metric.kpiPattern as string, col.end);
+            } else {
+              row.checkpoints[col.label] = await fetchComplianceForRange(
+                metric.metKpi as string, metric.breachedKpi as string, col.start, col.end
+              );
+            }
+          }
+
+          // Per-tier breakdown
+          if (metric.expandable && metric.tierMetKpis && metric.tierBreachedKpis) {
+            row.tiers = [];
+            for (const tier of TIERS) {
+              const metK = metric.tierMetKpis[tier.key];
+              const breachedK = metric.tierBreachedKpis[tier.key];
+              if (!metK || !breachedK) {
+                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: nullCheckpoints() });
+                continue;
+              }
+              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {} };
+              for (const col of columns) {
+                if (col.type === 'point') {
+                  // Use per-tier compliance KPI pattern if available, fallback to raw counts
+                  // The old tierPatterns had "FRT Compliance % (Customer Care)" etc. — keep that for point lookups
+                  const tierCompliancePattern = metric.key === 'frt_compliance'
+                    ? `FRT Compliance % (${tier.label.split(' (')[0]})`
+                    : `Resolution Compliance % (${tier.label.split(' (')[0]})`;
+                  tierRow.checkpoints[col.label] = await fetchKpiAtDate(tierCompliancePattern, col.end);
+                } else {
+                  tierRow.checkpoints[col.label] = await fetchComplianceForRange(metK, breachedK, col.start, col.end);
+                }
+              }
+              row.tiers.push(tierRow);
+            }
+          }
+
+        } else if (metric.source === 'derived_escalation') {
+          // Escalation Accuracy
+          // Point: use pre-computed KPI at that date
+          // Range: sum escalated & rejected over range, compute accuracy
+          for (const col of columns) {
+            if (col.type === 'point') {
+              row.checkpoints[col.label] = await fetchKpiAtDate(metric.kpiPattern as string, col.end);
+            } else {
+              // Sum all esc and rej across tiers for aggregate accuracy
+              if (metric.tierEscPatterns && metric.tierRejPatterns) {
+                let totalEsc = 0, totalRej = 0, hasData = false;
+                for (const tierKey of Object.keys(metric.tierEscPatterns)) {
+                  const escPat = metric.tierEscPatterns[tierKey];
+                  const rejPat = metric.tierRejPatterns[tierKey];
+                  if (!escPat || !rejPat) continue;
+                  const esc = await fetchKpiSumRange(escPat, col.start, col.end);
+                  const rej = await fetchKpiSumRange(rejPat, col.start, col.end);
+                  if (esc !== null) { totalEsc += esc; hasData = true; }
+                  if (rej !== null) totalRej += rej;
+                }
+                const total = totalEsc + totalRej;
+                row.checkpoints[col.label] = (hasData && total > 0) ? +((totalEsc / total) * 100).toFixed(1) : null;
+              } else {
+                row.checkpoints[col.label] = null;
+              }
+            }
+          }
+
+          // Per destination tier
           if (metric.expandable && metric.tierEscPatterns && metric.tierRejPatterns) {
             row.tiers = [];
             for (const tier of TIERS) {
               const escPat = metric.tierEscPatterns[tier.key];
               const rejPat = metric.tierRejPatterns[tier.key];
               if (!escPat || !rejPat) {
-                // CC doesn't receive escalations — skip with nulls
-                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
+                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: nullCheckpoints() });
                 continue;
               }
-              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {}, current: null };
-              for (const cp of CHECKPOINTS) {
-                const esc = await fetchKpiAtCheckpoint(escPat, cp.date);
-                const rej = await fetchKpiAtCheckpoint(rejPat, cp.date);
-                const total = (esc ?? 0) + (rej ?? 0);
-                tierRow.checkpoints[cp.label] = (total > 0 && esc !== null) ? +((esc / total) * 100).toFixed(1) : null;
+              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {} };
+              for (const col of columns) {
+                if (col.type === 'point') {
+                  const esc = await fetchKpiAtDate(escPat, col.end);
+                  const rej = await fetchKpiAtDate(rejPat, col.end);
+                  const total = (esc ?? 0) + (rej ?? 0);
+                  tierRow.checkpoints[col.label] = (total > 0 && esc !== null) ? +((esc / total) * 100).toFixed(1) : null;
+                } else {
+                  tierRow.checkpoints[col.label] = await fetchEscAccuracyForRange(escPat, rejPat, col.start, col.end);
+                }
               }
-              const escCur = await fetchKpiCurrent(escPat);
-              const rejCur = await fetchKpiCurrent(rejPat);
-              const totalCur = (escCur ?? 0) + (rejCur ?? 0);
-              tierRow.current = (totalCur > 0 && escCur !== null) ? +((escCur / totalCur) * 100).toFixed(1) : null;
               row.tiers.push(tierRow);
             }
           }
 
         } else if (metric.source === 'qa') {
-          // QA avg from jira_qa_results — 7-day window ending on checkpoint date
+          // QA avg from jira_qa_results
+          // Point: 7-day window ending on checkpoint date
+          // Range: average over the range
           const tbl = `dbo.jira_qa_results${suffix(env)}`;
-          for (const cp of CHECKPOINTS) {
+          for (const col of columns) {
             const r = p.request();
-            r.input('cpDate', sql.Date, cp.date);
-            const result = await r.query(`
-              SELECT AVG(CAST(overallScore AS FLOAT)) AS avg_score
-              FROM ${tbl}
-              WHERE CAST(CreatedAt AS DATE) BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
-                AND qaType != 'excluded'
-            `);
-            row.checkpoints[cp.label] = result.recordset[0]?.avg_score ?? null;
+            if (col.type === 'point') {
+              r.input('cpDate', sql.Date, col.end);
+              const result = await r.query(`
+                SELECT AVG(CAST(overallScore AS FLOAT)) AS avg_score
+                FROM ${tbl}
+                WHERE CAST(CreatedAt AS DATE) BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
+                  AND qaType != 'excluded'
+              `);
+              row.checkpoints[col.label] = result.recordset[0]?.avg_score ?? null;
+            } else {
+              r.input('startDate', sql.Date, col.start);
+              r.input('endDate', sql.Date, col.end);
+              const result = await r.query(`
+                SELECT AVG(CAST(overallScore AS FLOAT)) AS avg_score
+                FROM ${tbl}
+                WHERE CAST(CreatedAt AS DATE) BETWEEN @startDate AND @endDate
+                  AND qaType != 'excluded'
+              `);
+              row.checkpoints[col.label] = result.recordset[0]?.avg_score ?? null;
+            }
           }
-          const cr = p.request();
-          const currentResult = await cr.query(`
-            SELECT AVG(CAST(overallScore AS FLOAT)) AS avg_score
-            FROM ${tbl}
-            WHERE CreatedAt >= DATEADD(DAY, -7, GETUTCDATE())
-              AND qaType != 'excluded'
-          `);
-          row.current = currentResult.recordset[0]?.avg_score ?? null;
 
-          // Per-tier: JOIN jira_qa_results to jira_agent_kpi_daily to get TierCode
+          // Per-tier
           if (metric.expandable) {
             row.tiers = [];
-            // Build tier code IN clause for each of our tiers
             const tierCodeGroups: Record<string, string[]> = {};
             for (const [code, tierKey] of Object.entries(TIER_CODE_MAP)) {
               if (!tierCodeGroups[tierKey]) tierCodeGroups[tierKey] = [];
@@ -349,71 +507,82 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
             for (const tier of TIERS) {
               const codes = tierCodeGroups[tier.key];
               if (!codes || codes.length === 0) {
-                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
+                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: nullCheckpoints() });
                 continue;
               }
               const codeList = codes.map(c => `'${c}'`).join(',');
-              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {}, current: null };
-              for (const cp of CHECKPOINTS) {
+              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {} };
+              for (const col of columns) {
                 const r = p.request();
-                r.input('cpDate', sql.Date, cp.date);
-                const result = await r.query(`
-                  SELECT AVG(CAST(q.overallScore AS FLOAT)) AS avg_score
-                  FROM ${tbl} q
-                  INNER JOIN (
-                    SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
-                    WHERE TierCode IN (${codeList})
-                  ) a ON q.assigneeName = a.AgentName
-                  WHERE CAST(q.CreatedAt AS DATE) BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
-                    AND q.qaType != 'excluded'
-                `);
-                tierRow.checkpoints[cp.label] = result.recordset[0]?.avg_score ?? null;
+                if (col.type === 'point') {
+                  r.input('cpDate', sql.Date, col.end);
+                  const result = await r.query(`
+                    SELECT AVG(CAST(q.overallScore AS FLOAT)) AS avg_score
+                    FROM ${tbl} q
+                    INNER JOIN (
+                      SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
+                      WHERE TierCode IN (${codeList})
+                    ) a ON q.assigneeName = a.AgentName
+                    WHERE CAST(q.CreatedAt AS DATE) BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
+                      AND q.qaType != 'excluded'
+                  `);
+                  tierRow.checkpoints[col.label] = result.recordset[0]?.avg_score ?? null;
+                } else {
+                  r.input('startDate', sql.Date, col.start);
+                  r.input('endDate', sql.Date, col.end);
+                  const result = await r.query(`
+                    SELECT AVG(CAST(q.overallScore AS FLOAT)) AS avg_score
+                    FROM ${tbl} q
+                    INNER JOIN (
+                      SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
+                      WHERE TierCode IN (${codeList})
+                    ) a ON q.assigneeName = a.AgentName
+                    WHERE CAST(q.CreatedAt AS DATE) BETWEEN @startDate AND @endDate
+                      AND q.qaType != 'excluded'
+                  `);
+                  tierRow.checkpoints[col.label] = result.recordset[0]?.avg_score ?? null;
+                }
               }
-              const curR = p.request();
-              const curResult = await curR.query(`
-                SELECT AVG(CAST(q.overallScore AS FLOAT)) AS avg_score
-                FROM ${tbl} q
-                INNER JOIN (
-                  SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
-                  WHERE TierCode IN (${codeList})
-                ) a ON q.assigneeName = a.AgentName
-                WHERE q.CreatedAt >= DATEADD(DAY, -7, GETUTCDATE())
-                  AND q.qaType != 'excluded'
-              `);
-              tierRow.current = curResult.recordset[0]?.avg_score ?? null;
               row.tiers.push(tierRow);
             }
           }
 
         } else if (metric.source === 'golden') {
-          // Golden rules from Jira_QA_GoldenRules — 7-day window ending on checkpoint date
+          // Golden rules from Jira_QA_GoldenRules
+          // Point: 7-day window ending on checkpoint date
+          // Range: average over the range
           const tbl = `dbo.Jira_QA_GoldenRules${suffix(env)}`;
-          for (const cp of CHECKPOINTS) {
+          for (const col of columns) {
             const r = p.request();
-            r.input('cpDate', sql.Date, cp.date);
-            const result = await r.query(`
-              SELECT
-                AVG(CASE WHEN rule1Pass = 1 THEN 100.0 ELSE 0 END +
-                    CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END +
-                    CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
-              FROM ${tbl}
-              WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)
-                    BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
-            `);
-            row.checkpoints[cp.label] = result.recordset[0]?.avg_pct ?? null;
+            if (col.type === 'point') {
+              r.input('cpDate', sql.Date, col.end);
+              const result = await r.query(`
+                SELECT
+                  AVG(CASE WHEN rule1Pass = 1 THEN 100.0 ELSE 0 END +
+                      CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END +
+                      CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+                FROM ${tbl}
+                WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)
+                      BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
+              `);
+              row.checkpoints[col.label] = result.recordset[0]?.avg_pct ?? null;
+            } else {
+              r.input('startDate', sql.Date, col.start);
+              r.input('endDate', sql.Date, col.end);
+              const result = await r.query(`
+                SELECT
+                  AVG(CASE WHEN rule1Pass = 1 THEN 100.0 ELSE 0 END +
+                      CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END +
+                      CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+                FROM ${tbl}
+                WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)
+                      BETWEEN @startDate AND @endDate
+              `);
+              row.checkpoints[col.label] = result.recordset[0]?.avg_pct ?? null;
+            }
           }
-          const cr = p.request();
-          const currentResult = await cr.query(`
-            SELECT
-              AVG(CASE WHEN rule1Pass = 1 THEN 100.0 ELSE 0 END +
-                  CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END +
-                  CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
-            FROM ${tbl}
-            WHERE COALESCE(commentTimestamp, CreatedAt) >= DATEADD(DAY, -7, GETUTCDATE())
-          `);
-          row.current = currentResult.recordset[0]?.avg_pct ?? null;
 
-          // Per-tier: JOIN Jira_QA_GoldenRules to jira_agent_kpi_daily via Updater → AgentName
+          // Per-tier
           if (metric.expandable) {
             row.tiers = [];
             const tierCodeGroups: Record<string, string[]> = {};
@@ -424,100 +593,100 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
             for (const tier of TIERS) {
               const codes = tierCodeGroups[tier.key];
               if (!codes || codes.length === 0) {
-                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
+                row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: nullCheckpoints() });
                 continue;
               }
               const codeList = codes.map(c => `'${c}'`).join(',');
-              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {}, current: null };
-              for (const cp of CHECKPOINTS) {
+              const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {} };
+              for (const col of columns) {
                 const r = p.request();
-                r.input('cpDate', sql.Date, cp.date);
-                const result = await r.query(`
-                  SELECT
-                    AVG(CASE WHEN g.rule1Pass = 1 THEN 100.0 ELSE 0 END +
-                        CASE WHEN g.rule2Pass = 1 THEN 100.0 ELSE 0 END +
-                        CASE WHEN g.rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
-                  FROM ${tbl} g
-                  INNER JOIN (
-                    SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
-                    WHERE TierCode IN (${codeList})
-                  ) a ON g.Updater = a.AgentName
-                  WHERE CAST(COALESCE(g.commentTimestamp, g.CreatedAt) AS DATE)
-                        BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
-                `);
-                tierRow.checkpoints[cp.label] = result.recordset[0]?.avg_pct ?? null;
+                if (col.type === 'point') {
+                  r.input('cpDate', sql.Date, col.end);
+                  const result = await r.query(`
+                    SELECT
+                      AVG(CASE WHEN g.rule1Pass = 1 THEN 100.0 ELSE 0 END +
+                          CASE WHEN g.rule2Pass = 1 THEN 100.0 ELSE 0 END +
+                          CASE WHEN g.rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+                    FROM ${tbl} g
+                    INNER JOIN (
+                      SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
+                      WHERE TierCode IN (${codeList})
+                    ) a ON g.Updater = a.AgentName
+                    WHERE CAST(COALESCE(g.commentTimestamp, g.CreatedAt) AS DATE)
+                          BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
+                  `);
+                  tierRow.checkpoints[col.label] = result.recordset[0]?.avg_pct ?? null;
+                } else {
+                  r.input('startDate', sql.Date, col.start);
+                  r.input('endDate', sql.Date, col.end);
+                  const result = await r.query(`
+                    SELECT
+                      AVG(CASE WHEN g.rule1Pass = 1 THEN 100.0 ELSE 0 END +
+                          CASE WHEN g.rule2Pass = 1 THEN 100.0 ELSE 0 END +
+                          CASE WHEN g.rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+                    FROM ${tbl} g
+                    INNER JOIN (
+                      SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
+                      WHERE TierCode IN (${codeList})
+                    ) a ON g.Updater = a.AgentName
+                    WHERE CAST(COALESCE(g.commentTimestamp, g.CreatedAt) AS DATE)
+                          BETWEEN @startDate AND @endDate
+                  `);
+                  tierRow.checkpoints[col.label] = result.recordset[0]?.avg_pct ?? null;
+                }
               }
-              const curR = p.request();
-              const curResult = await curR.query(`
-                SELECT
-                  AVG(CASE WHEN g.rule1Pass = 1 THEN 100.0 ELSE 0 END +
-                      CASE WHEN g.rule2Pass = 1 THEN 100.0 ELSE 0 END +
-                      CASE WHEN g.rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
-                FROM ${tbl} g
-                INNER JOIN (
-                  SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
-                  WHERE TierCode IN (${codeList})
-                ) a ON g.Updater = a.AgentName
-                WHERE COALESCE(g.commentTimestamp, g.CreatedAt) >= DATEADD(DAY, -7, GETUTCDATE())
-              `);
-              tierRow.current = curResult.recordset[0]?.avg_pct ?? null;
               row.tiers.push(tierRow);
             }
           }
 
         } else if (metric.tierPatterns) {
-          // Metric with direct per-tier KPI patterns in jira_kpi_daily
-          // Aggregate: use kpiPattern for the parent row
+          // Point-in-time metrics with per-tier KPI patterns (queue size, oldest ticket)
+          // Point columns: use end date. Range columns: use end date (last day in range).
           if (metric.key === 'total_queue_size') {
-            // SUM across all tier patterns
             const allPatterns = Object.values(metric.tierPatterns);
-            for (const cp of CHECKPOINTS) {
-              row.checkpoints[cp.label] = await fetchKpiSumAtCheckpoint(allPatterns, cp.date);
+            for (const col of columns) {
+              row.checkpoints[col.label] = await fetchKpiSumAtDate(allPatterns, col.end);
             }
-            row.current = await fetchKpiSumCurrent(allPatterns);
           } else if (metric.key === 'oldest_support_ticket') {
-            // MAX across all tier patterns
             const allPatterns = Object.values(metric.tierPatterns);
-            for (const cp of CHECKPOINTS) {
-              row.checkpoints[cp.label] = await fetchKpiMaxAtCheckpoint(allPatterns, cp.date);
+            for (const col of columns) {
+              row.checkpoints[col.label] = await fetchKpiMaxAtDate(allPatterns, col.end);
             }
-            row.current = await fetchKpiMaxCurrent(allPatterns);
           } else {
-            // Standard aggregate from kpiPattern
-            for (const cp of CHECKPOINTS) {
-              row.checkpoints[cp.label] = await fetchKpiAtCheckpoint(metric.kpiPattern as string, cp.date);
+            for (const col of columns) {
+              row.checkpoints[col.label] = await fetchKpiAtDate(metric.kpiPattern as string, col.end);
             }
-            row.current = await fetchKpiCurrent(metric.kpiPattern as string);
           }
 
-          // Per-tier breakdown (same for all tierPatterns metrics)
+          // Per-tier breakdown
           row.tiers = [];
           for (const tier of TIERS) {
             const tierPattern = metric.tierPatterns[tier.key];
             if (!tierPattern) {
-              row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: Object.fromEntries(CHECKPOINTS.map(cp => [cp.label, null])), current: null });
+              row.tiers.push({ key: tier.key, label: tier.label, target: metric.target, checkpoints: nullCheckpoints() });
               continue;
             }
-            const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {}, current: null };
-            for (const cp of CHECKPOINTS) {
-              tierRow.checkpoints[cp.label] = await fetchKpiAtCheckpoint(tierPattern, cp.date);
+            const tierRow: any = { key: tier.key, label: tier.label, target: metric.target, checkpoints: {} };
+            for (const col of columns) {
+              tierRow.checkpoints[col.label] = await fetchKpiAtDate(tierPattern, col.end);
             }
-            tierRow.current = await fetchKpiCurrent(tierPattern);
             row.tiers.push(tierRow);
           }
 
         } else {
           // Standard KPI from jira_kpi_daily (CSAT, FCR, 1st Line, Bug Ack — all non-expandable)
-          for (const cp of CHECKPOINTS) {
-            row.checkpoints[cp.label] = await fetchKpiAtCheckpoint(metric.kpiPattern as string, cp.date);
+          // These are point-in-time metrics: use end date for all columns
+          for (const col of columns) {
+            row.checkpoints[col.label] = await fetchKpiAtDate(metric.kpiPattern as string, col.end);
           }
-          row.current = await fetchKpiCurrent(metric.kpiPattern as string);
         }
 
         metrics.push(row);
       }
 
-      res.json({ ok: true, data: { checkpoints: CHECKPOINTS, metrics } });
+      // Return columns with metadata for the frontend
+      const checkpoints = columns.map(c => ({ label: c.label, subtitle: c.subtitle, start: c.start, end: c.end }));
+      res.json({ ok: true, data: { checkpoints, metrics } });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }

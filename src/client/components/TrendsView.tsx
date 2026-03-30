@@ -154,7 +154,6 @@ interface TierData {
   label: string;
   target: number | null;
   checkpoints: Record<string, number | null>;
-  current: number | null;
 }
 
 interface CheckpointMetricData {
@@ -164,13 +163,44 @@ interface CheckpointMetricData {
   direction: string;
   expandable: boolean;
   checkpoints: Record<string, number | null>;
-  current: number | null;
   tiers: TierData[] | null;
 }
 
+interface CheckpointColumnDef {
+  label: string;
+  subtitle: string;
+  start: string;
+  end: string;
+}
+
 interface CheckpointData {
-  checkpoints: Array<{ label: string; date: string }>;
+  checkpoints: CheckpointColumnDef[];
   metrics: CheckpointMetricData[];
+}
+
+/** Get the "current" value for status computation — use MTD, then WTD, then last non-null */
+function getStatusValue(m: CheckpointMetricData, columns: CheckpointColumnDef[]): number | null {
+  // Prefer MTD
+  if (m.checkpoints['MTD'] !== null && m.checkpoints['MTD'] !== undefined) return m.checkpoints['MTD'];
+  // Fallback to WTD
+  if (m.checkpoints['WTD'] !== null && m.checkpoints['WTD'] !== undefined) return m.checkpoints['WTD'];
+  // Fallback to last non-null value (iterate columns in reverse)
+  for (let i = columns.length - 1; i >= 0; i--) {
+    const val = m.checkpoints[columns[i].label];
+    if (val !== null && val !== undefined) return val;
+  }
+  return null;
+}
+
+/** Same logic for tier rows */
+function getTierStatusValue(t: TierData, columns: CheckpointColumnDef[]): number | null {
+  if (t.checkpoints['MTD'] !== null && t.checkpoints['MTD'] !== undefined) return t.checkpoints['MTD'];
+  if (t.checkpoints['WTD'] !== null && t.checkpoints['WTD'] !== undefined) return t.checkpoints['WTD'];
+  for (let i = columns.length - 1; i >= 0; i--) {
+    const val = t.checkpoints[columns[i].label];
+    if (val !== null && val !== undefined) return val;
+  }
+  return null;
 }
 
 function statusInfo(current: number | null, target: number | null, direction: string): { color: string; label: string } {
@@ -195,13 +225,13 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
 
   const downloadCsv = useCallback(() => {
     if (!data) return;
-    const headers = ['Metric', ...data.checkpoints.map(c => `${c.label} (${c.date})`), 'Current', 'Target', 'Status'];
+    const headers = ['Metric', ...data.checkpoints.map(c => `${c.label} (${c.subtitle})`), 'Target', 'Status'];
     const rows = data.metrics.map(m => {
-      const { label: status } = statusInfo(m.current, m.target, m.direction);
+      const currentVal = getStatusValue(m, data.checkpoints);
+      const { label: status } = statusInfo(currentVal, m.target, m.direction);
       return [
         m.label,
         ...data.checkpoints.map(c => fmtNum(m.checkpoints[c.label], 1)),
-        fmtNum(m.current, 1),
         m.target !== null ? String(m.target) : 'TBD',
         status,
       ];
@@ -218,6 +248,9 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
 
   if (!data) return <Card title="Checkpoint Evidence Panel"><p style={{ color: C.text3 }}>Loading...</p></Card>;
 
+  // Highlight columns: WTD and MTD get a subtle teal tint
+  const highlightLabels = new Set(['WTD', 'MTD']);
+
   return (
     <Card>
       <div className="flex items-center justify-between mb-2">
@@ -232,26 +265,34 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
           Export CSV
         </button>
       </div>
-      <p className="text-xs mb-3" style={{ color: C.text3 }}>Performance snapshots at Day 1 baseline and each 30-day checkpoint.</p>
+      <p className="text-xs mb-3" style={{ color: C.text3 }}>Performance snapshots at Day 1 baseline and each checkpoint. WTD/MTD show rolling aggregates.</p>
       <div className="overflow-x-auto">
         <table className="w-full text-xs" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
           <thead>
             <tr>
-              <th className="text-left py-2 px-3 font-medium sticky left-0" style={{ color: C.text2, background: C.bg2, borderBottom: `1px solid ${C.border}` }}>Metric</th>
+              <th className="text-left py-2 px-3 font-medium sticky left-0" style={{ color: C.text2, background: C.bg2, borderBottom: `1px solid ${C.border}`, zIndex: 1 }}>Metric</th>
               {data.checkpoints.map(cp => (
-                <th key={cp.label} className="text-center py-2 px-3 font-medium" style={{ color: C.text2, borderBottom: `1px solid ${C.border}` }}>
+                <th
+                  key={cp.label}
+                  className="text-center py-2 px-3 font-medium"
+                  style={{
+                    color: highlightLabels.has(cp.label) ? C.teal : C.text2,
+                    borderBottom: `1px solid ${C.border}`,
+                    background: highlightLabels.has(cp.label) ? `${C.teal}08` : undefined,
+                  }}
+                >
                   {cp.label}
-                  <div className="text-[10px] font-normal" style={{ color: C.text3 }}>{fmtDate(cp.date)}</div>
+                  <div className="text-[10px] font-normal" style={{ color: C.text3 }}>{cp.subtitle}</div>
                 </th>
               ))}
-              <th className="text-center py-2 px-3 font-medium" style={{ color: C.teal, borderBottom: `1px solid ${C.border}` }}>Current</th>
               <th className="text-center py-2 px-3 font-medium" style={{ color: C.text2, borderBottom: `1px solid ${C.border}` }}>Target</th>
               <th className="text-center py-2 px-3 font-medium" style={{ color: C.text2, borderBottom: `1px solid ${C.border}` }}>Status</th>
             </tr>
           </thead>
           <tbody>
             {data.metrics.map(m => {
-              const { color: statusColor, label: statusLabel } = statusInfo(m.current, m.target, m.direction);
+              const currentVal = getStatusValue(m, data.checkpoints);
+              const { color: statusColor, label: statusLabel } = statusInfo(currentVal, m.target, m.direction);
               const isExpanded = expanded.has(m.key);
               const canExpand = m.expandable && m.tiers && m.tiers.length > 0;
 
@@ -264,7 +305,7 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
                     onMouseEnter={e => { if (canExpand) e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; }}
                     onMouseLeave={e => { if (canExpand) e.currentTarget.style.background = ''; }}
                   >
-                    <td className="py-2.5 px-3 font-medium sticky left-0" style={{ color: C.text1, background: C.bg2, borderBottom: `1px solid ${C.border}` }}>
+                    <td className="py-2.5 px-3 font-medium sticky left-0" style={{ color: C.text1, background: C.bg2, borderBottom: `1px solid ${C.border}`, zIndex: 1 }}>
                       <span className="inline-flex items-center gap-1.5">
                         {canExpand && (
                           <svg
@@ -285,15 +326,22 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
                     </td>
                     {data.checkpoints.map(cp => {
                       const val = m.checkpoints[cp.label];
+                      const isHighlight = highlightLabels.has(cp.label);
                       return (
-                        <td key={cp.label} className="text-center py-2.5 px-3" style={{ color: val !== null ? C.text1 : C.text3, borderBottom: `1px solid ${C.border}` }}>
+                        <td
+                          key={cp.label}
+                          className="text-center py-2.5 px-3"
+                          style={{
+                            color: val !== null ? (isHighlight ? C.teal : C.text1) : C.text3,
+                            fontWeight: isHighlight && val !== null ? 600 : undefined,
+                            borderBottom: `1px solid ${C.border}`,
+                            background: isHighlight ? `${C.teal}08` : undefined,
+                          }}
+                        >
                           {val !== null ? fmtNum(val, 1) : '\u2014'}
                         </td>
                       );
                     })}
-                    <td className="text-center py-2.5 px-3 font-semibold" style={{ color: statusColor, borderBottom: `1px solid ${C.border}` }}>
-                      {fmtNum(m.current, 1)}
-                    </td>
                     <td className="text-center py-2.5 px-3" style={{ color: C.text2, borderBottom: `1px solid ${C.border}` }}>
                       {m.target !== null ? String(m.target) : 'TBD'}
                     </td>
@@ -308,23 +356,31 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
                   {/* Expanded tier sub-rows */}
                   {isExpanded && m.tiers?.map(tier => {
                     const tierTarget = tier.target ?? m.target;
-                    const { color: tierStatusColor, label: tierStatusLabel } = statusInfo(tier.current, tierTarget, m.direction);
+                    const tierCurrentVal = getTierStatusValue(tier, data.checkpoints);
+                    const { color: tierStatusColor, label: tierStatusLabel } = statusInfo(tierCurrentVal, tierTarget, m.direction);
                     return (
                       <tr key={`${m.key}-${tier.key}`} style={{ background: 'rgba(0,0,0,0.15)' }}>
-                        <td className="py-2 px-3 sticky left-0" style={{ color: C.text3, background: C.bg1, borderBottom: `1px solid ${C.border}`, paddingLeft: 32 }}>
+                        <td className="py-2 px-3 sticky left-0" style={{ color: C.text3, background: C.bg1, borderBottom: `1px solid ${C.border}`, paddingLeft: 32, zIndex: 1 }}>
                           <span className="text-[11px]">{tier.label}</span>
                         </td>
                         {data.checkpoints.map(cp => {
                           const val = tier.checkpoints[cp.label];
+                          const isHighlight = highlightLabels.has(cp.label);
                           return (
-                            <td key={cp.label} className="text-center py-2 px-3" style={{ color: val !== null ? C.text2 : C.text3, borderBottom: `1px solid ${C.border}` }}>
+                            <td
+                              key={cp.label}
+                              className="text-center py-2 px-3"
+                              style={{
+                                color: val !== null ? (isHighlight ? C.teal : C.text2) : C.text3,
+                                fontWeight: isHighlight && val !== null ? 500 : undefined,
+                                borderBottom: `1px solid ${C.border}`,
+                                background: isHighlight ? `${C.teal}06` : undefined,
+                              }}
+                            >
                               {val !== null ? fmtNum(val, 1) : '\u2014'}
                             </td>
                           );
                         })}
-                        <td className="text-center py-2 px-3 font-medium" style={{ color: tierStatusColor, borderBottom: `1px solid ${C.border}` }}>
-                          {fmtNum(tier.current, 1)}
-                        </td>
                         <td className="text-center py-2 px-3" style={{ color: C.text3, borderBottom: `1px solid ${C.border}` }}>
                           {tierTarget !== null ? String(tierTarget) : '\u2014'}
                         </td>
@@ -344,7 +400,7 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
         </table>
       </div>
       <div className="mt-3 text-[10px]" style={{ color: C.text3 }}>
-        Checkpoints: D0=01 Mar, D1=16 Mar, D15=31 Mar, D30=15 Apr, D45=30 Apr, D60=15 May, D90=14 Jun &bull; Values auto-populate from closest daily snapshot
+        D0=02 Mar, D1=16 Mar, D15=31 Mar, D30=15 Apr &bull; WTD = Week to Date (Mon&ndash;today) &bull; MTD = Month to Date (1st&ndash;today) &bull; Last Month = previous calendar month
       </div>
     </Card>
   );
