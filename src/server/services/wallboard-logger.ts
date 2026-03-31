@@ -59,3 +59,16 @@ export function getWallboardLogs(): WallboardLogEntry[] {
 export function clearWallboardLogs(): void {
   entries.length = 0;
 }
+
+/** Log a client-side error reported by the wallboard page itself */
+export function logWallboardClient(
+  route: string,
+  errorStatus: number,
+  message: string,
+  consecutiveFailures: number,
+  downSince?: string,
+): WallboardLogEntry {
+  return logWallboard(route, 'error', errorStatus, 0, message, {
+    error: `Client-reported: ${consecutiveFailures} consecutive failures${downSince ? ` — down since ${downSince}` : ''}`,
+  });
+}

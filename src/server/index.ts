@@ -70,7 +70,7 @@ import { createAzDoRoutes } from './routes/azdo.js';
 import { createSetupExecutionRoutes } from './routes/setup-execution.js';
 import { createSetupPortalPublicRoutes, createSetupPortalRoutes } from './routes/setup-portal.js';
 import { createBackfillRoutes } from './routes/backfill.js';
-import { logWallboard, getWallboardLogs, clearWallboardLogs } from './services/wallboard-logger.js';
+import { logWallboard, getWallboardLogs, clearWallboardLogs, logWallboardClient } from './services/wallboard-logger.js';
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
@@ -605,6 +605,59 @@ async function main() {
     }
   });
 
+  // Wallboard health-check (ultra-lightweight, no SQL)
+  app.get('/wallboard/ping', (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, ts: Date.now() });
+  });
+
+  // Client-side error reporting — wallboard pages POST here when they detect failures
+  app.post('/wallboard/report-error', express.json(), (req, res) => {
+    const { route, status, message, consecutiveFailures, downSince } = req.body || {};
+    if (route && status) {
+      logWallboardClient(route, status, message || 'Client-reported error', consecutiveFailures || 1, downSince);
+    }
+    res.json({ ok: true });
+  });
+
+  /** JS-based auto-refresh for wallboard pages — detects 502s and reports them back */
+  function wallboardRefreshScript(route: string): string {
+    return `<script>
+(function(){
+  var fails=0, downSince=null, INTERVAL=30000, RETRY=5000, route='${route}';
+  function refresh(){
+    fetch(location.href,{cache:'no-store',redirect:'follow'}).then(function(r){
+      if(r.ok) return r.text().then(function(html){
+        if(fails>0){
+          // recovered — report the outage to server
+          fetch('/wallboard/report-error',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({route:route,status:502,message:'Recovered after '+fails+' failures',consecutiveFailures:fails,downSince:downSince})
+          }).catch(function(){});
+        }
+        fails=0; downSince=null;
+        document.open(); document.write(html); document.close();
+      });
+      // non-ok response (502, 500, etc)
+      fails++;
+      if(!downSince) downSince=new Date().toISOString();
+      if(fails===1||fails%5===0){
+        fetch('/wallboard/report-error',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({route:route,status:r.status,message:'HTTP '+r.status+' on refresh',consecutiveFailures:fails,downSince:downSince})
+        }).catch(function(){});
+      }
+      setTimeout(refresh, RETRY);
+    }).catch(function(err){
+      // network error — IIS completely unreachable
+      fails++;
+      if(!downSince) downSince=new Date().toISOString();
+      setTimeout(refresh, RETRY);
+    });
+  }
+  setTimeout(refresh, INTERVAL);
+})();
+</script>`;
+  }
+
   // Wallboard — server-rendered page for TV displays (no auth, no JS required)
   app.get('/wallboard/breached', async (_req, res) => {
     const wbStart = Date.now();
@@ -696,8 +749,8 @@ async function main() {
 
       res.send(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="30">
 <title>SLA Breach Board</title>
+${wallboardRefreshScript('/wallboard/breached')}
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:8px 12px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:7px 12px;border-bottom:1px solid #2f353d;font-size:13px}td.c{text-align:center}tr[onclick]:hover{background:rgba(94,193,202,.08)!important}</style>
 </head><body><div class="wrap">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -794,8 +847,8 @@ async function main() {
 
       res.send(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="30">
 <title>KPI Breach Board</title>
+${wallboardRefreshScript('/wallboard/team-kpis')}
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:8px 12px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:7px 12px;border-bottom:1px solid #2f353d;font-size:13px}td.c{text-align:center}tr[onclick]:hover{background:rgba(94,193,202,.08)!important}</style>
 </head><body><div class="wrap">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -829,6 +882,7 @@ async function main() {
     subtitle: string,
     panels: Array<{ label: string; kpi: string; altKpi?: string }>,
     cols: number,
+    route: string,
   ): Promise<string> {
     const settings = settingsQueries.getAll();
     const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
@@ -882,8 +936,8 @@ async function main() {
 
     return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="30">
 <title>${title}</title>
+${wallboardRefreshScript(route)}
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}[data-kpi]:hover{transform:scale(1.02);filter:brightness(1.1)}</style>
 </head><body><div class="wrap">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
@@ -911,7 +965,7 @@ ${panelHtml}
         { label: 'CC Incidents — Over SLA', kpi: 'CC Incidents over SLA (actionable)' },
         { label: 'CC Service Requests — Over SLA', kpi: 'CC Service Requests over SLA (actionable)' },
         { label: 'Property Jungle — Over SLA', kpi: 'CC TPJ over SLA (actionable)', altKpi: 'CC (TPJ) over SLA (actionable)' },
-      ], 3);
+      ], 3, '/wallboard/cc');
       res.send(html);
       logWallboard('/wallboard/cc', 'info', 200, Date.now() - wbStart, 'OK', { sqlServer: settingsQueries.getAll().kpi_sql_server });
     } catch (err) {
@@ -935,7 +989,7 @@ ${panelHtml}
         { label: 'Production — Over SLA', kpi: 'Production over SLA (actionable)' },
         { label: 'Tier 2 — Over SLA', kpi: 'Tier 2 over SLA (actionable)' },
         { label: 'Development — Over SLA', kpi: 'Development over SLA (actionable)' },
-      ], 3);
+      ], 3, '/wallboard/tech-support');
       res.send(html);
       logWallboard('/wallboard/tech-support', 'info', 200, Date.now() - wbStart, 'OK', { sqlServer: settingsQueries.getAll().kpi_sql_server });
     } catch (err) {
