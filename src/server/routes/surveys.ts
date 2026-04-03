@@ -155,66 +155,136 @@ async function sendReminders(db: Database, surveyId: number, emailService: Email
   return sent;
 }
 
+// ── Helper: aggregate results for a survey (anonymised) ────────────────
+
+function aggregateResults(db: Database, surveyId: number, questions: QuestionRow[]) {
+  const responses = queryAll<ResponseRow>(db, 'SELECT * FROM survey_responses WHERE survey_id = ?', [surveyId]);
+  return questions.map(q => {
+    const answers = responses
+      .map(r => {
+        const parsed = JSON.parse(r.answers) as Array<{ question_id: number; value: string | number }>;
+        return parsed.find(a => a.question_id === q.id);
+      })
+      .filter(Boolean) as Array<{ question_id: number; value: string | number }>;
+
+    if (q.question_type === 'scale_5') {
+      const values = answers.map(a => Number(a.value)).filter(v => !isNaN(v));
+      const distribution = [0, 0, 0, 0, 0];
+      for (const v of values) if (v >= 1 && v <= 5) distribution[v - 1]++;
+      const avg = values.length > 0 ? values.reduce((s, v) => s + v, 0) / values.length : 0;
+      return { question_id: q.id, question_text: q.question_text, question_type: q.question_type, average: Math.round(avg * 100) / 100, distribution, response_count: values.length };
+    } else {
+      const texts = answers.map(a => String(a.value)).filter(t => t.trim());
+      for (let i = texts.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [texts[i], texts[j]] = [texts[j], texts[i]];
+      }
+      return { question_id: q.id, question_text: q.question_text, question_type: q.question_type, responses: texts, response_count: texts.length };
+    }
+  });
+}
+
 // ── Route factory ──────────────────────────────────────────────────────
 
-export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQueries): Router {
+interface UserLookup {
+  getById(id: number): { id: number; username: string; email: string | null; team_id: number | null; role: string } | undefined;
+}
+
+interface TeamLookup {
+  getById(id: number): { id: number; name: string } | undefined;
+}
+
+export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQueries, userQueries: UserLookup, teamQueries: TeamLookup): Router {
   const router = Router();
   const emailService = new EmailService(() => settingsQueries.getAll());
 
-  // ── Admin: list all surveys ──
-  router.get('/', (req, res) => {
-    if (!isAdmin(req.user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+  /** Resolve the team name(s) the current user belongs to */
+  function getUserTeamName(userId: number): string | null {
+    const user = userQueries.getById(userId);
+    if (!user?.team_id) return null;
+    const team = teamQueries.getById(user.team_id);
+    return team?.name ?? null;
+  }
 
-    const surveys = queryAll<SurveyRow>(db, 'SELECT * FROM surveys ORDER BY created_at DESC');
+  /** Check if the user is admin and can manage this survey's team */
+  function canManageSurvey(req: Express.Request, survey: SurveyRow): boolean {
+    if (!req.user) return false;
+    if (isAdmin(req.user.role)) return true; // admin can manage all
+    return false;
+  }
+
+  // ── List surveys ──
+  // Admins: see surveys for their team (or all if no team)
+  // Non-admins: see surveys they've been invited to
+  router.get('/', (req, res) => {
+    if (!req.user) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
+
+    const admin = isAdmin(req.user.role);
+    let surveys: SurveyRow[];
+
+    if (admin) {
+      // Admin: all surveys (they can manage any team)
+      surveys = queryAll<SurveyRow>(db, 'SELECT * FROM surveys ORDER BY created_at DESC');
+    } else {
+      // Non-admin: only surveys they've been invited to (match by email)
+      const user = userQueries.getById(req.user.id);
+      if (!user?.email) {
+        res.json({ ok: true, data: [] }); return;
+      }
+      surveys = queryAll<SurveyRow>(
+        db,
+        `SELECT DISTINCT s.* FROM surveys s
+         JOIN survey_recipients sr ON sr.survey_id = s.id
+         WHERE sr.email = ? ORDER BY s.created_at DESC`,
+        [user.email]
+      );
+    }
+
     const data = surveys.map(s => {
       const total = queryOne<{ c: number }>(db, 'SELECT COUNT(*) as c FROM survey_recipients WHERE survey_id = ?', [s.id])?.c ?? 0;
       const done = queryOne<{ c: number }>(db, 'SELECT COUNT(*) as c FROM survey_recipients WHERE survey_id = ? AND completed = 1', [s.id])?.c ?? 0;
       return { ...s, recipients_total: total, recipients_completed: done };
     });
-    res.json({ ok: true, data });
+    res.json({ ok: true, data, is_admin: admin });
   });
 
-  // ── Admin: get survey detail ──
+  // ── Get available teams (for team selector in create form) ──
+  router.get('/teams', (req, res) => {
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    const teams = queryAll<{ id: number; name: string }>(db, 'SELECT id, name FROM teams ORDER BY name');
+    res.json({ ok: true, data: teams });
+  });
+
+  // ── Get survey detail ──
   router.get('/:id', (req, res) => {
-    if (!isAdmin(req.user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!req.user) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
 
     const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
     if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
 
+    const admin = isAdmin(req.user.role);
+
+    // Non-admins can only view surveys they're invited to
+    if (!admin) {
+      const user = userQueries.getById(req.user.id);
+      if (!user?.email) { res.status(403).json({ ok: false, error: 'Access denied' }); return; }
+      const invited = queryOne<RecipientRow>(
+        db, 'SELECT * FROM survey_recipients WHERE survey_id = ? AND email = ?', [survey.id, user.email]
+      );
+      if (!invited) { res.status(403).json({ ok: false, error: 'Access denied' }); return; }
+    }
+
     const questions = queryAll<QuestionRow>(db, 'SELECT * FROM survey_questions WHERE survey_id = ? ORDER BY order_index', [survey.id]);
 
-    // Recipients: name + email + completed status only — NO answers
-    const recipients = queryAll<RecipientRow>(db, 'SELECT id, survey_id, display_name, email, invite_sent, completed, completed_at FROM survey_recipients WHERE survey_id = ?', [survey.id]);
+    // Only admins see recipient list
+    const recipients = admin
+      ? queryAll<RecipientRow>(db, 'SELECT id, survey_id, display_name, email, invite_sent, completed, completed_at FROM survey_recipients WHERE survey_id = ?', [survey.id])
+      : [];
 
-    // Aggregated results — anonymised
-    const responses = queryAll<ResponseRow>(db, 'SELECT * FROM survey_responses WHERE survey_id = ?', [survey.id]);
-    const aggregated = questions.map(q => {
-      const answers = responses
-        .map(r => {
-          const parsed = JSON.parse(r.answers) as Array<{ question_id: number; value: string | number }>;
-          return parsed.find(a => a.question_id === q.id);
-        })
-        .filter(Boolean) as Array<{ question_id: number; value: string | number }>;
+    const aggregated = aggregateResults(db, survey.id, questions);
 
-      if (q.question_type === 'scale_5') {
-        const values = answers.map(a => Number(a.value)).filter(v => !isNaN(v));
-        const distribution = [0, 0, 0, 0, 0];
-        for (const v of values) if (v >= 1 && v <= 5) distribution[v - 1]++;
-        const avg = values.length > 0 ? values.reduce((s, v) => s + v, 0) / values.length : 0;
-        return { question_id: q.id, question_text: q.question_text, question_type: q.question_type, average: Math.round(avg * 100) / 100, distribution, response_count: values.length };
-      } else {
-        // Open text — shuffle to prevent ordering-based identification
-        const texts = answers.map(a => String(a.value)).filter(t => t.trim());
-        for (let i = texts.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [texts[i], texts[j]] = [texts[j], texts[i]];
-        }
-        return { question_id: q.id, question_text: q.question_text, question_type: q.question_type, responses: texts, response_count: texts.length };
-      }
-    });
-
-    const total = recipients.length;
-    const done = recipients.filter(r => r.completed).length;
+    const total = queryOne<{ c: number }>(db, 'SELECT COUNT(*) as c FROM survey_recipients WHERE survey_id = ?', [survey.id])?.c ?? 0;
+    const done = queryOne<{ c: number }>(db, 'SELECT COUNT(*) as c FROM survey_recipients WHERE survey_id = ? AND completed = 1', [survey.id])?.c ?? 0;
 
     res.json({
       ok: true,
@@ -225,13 +295,14 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
         results: aggregated,
         recipients_total: total,
         recipients_completed: done,
+        is_admin: admin,
       },
     });
   });
 
   // ── Admin: create survey ──
   router.post('/', (req, res) => {
-    if (!isAdmin(req.user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const { title, description, team_name, start_date, end_date, invite_send_date, reminder_interval_days, questions, recipients } = req.body;
     if (!title || !team_name || !questions?.length || !recipients?.length) {
@@ -242,7 +313,7 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     db.run(
       `INSERT INTO surveys (title, description, team_name, start_date, end_date, invite_send_date, reminder_interval_days, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [title, description || null, team_name, start_date || null, end_date || null, invite_send_date || null, reminder_interval_days ?? 2, req.user?.username || 'admin']
+      [title, description || null, team_name, start_date || null, end_date || null, invite_send_date || null, reminder_interval_days ?? 2, req.user.username]
     );
 
     const surveyId = (db.exec('SELECT last_insert_rowid() as id')[0].values[0][0] as number);
@@ -268,7 +339,7 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
 
   // ── Admin: update draft survey ──
   router.put('/:id', (req, res) => {
-    if (!isAdmin(req.user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
     if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
@@ -310,7 +381,7 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
 
   // ── Admin: activate survey ──
   router.post('/:id/activate', async (req, res) => {
-    if (!isAdmin(req.user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
     if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
@@ -328,7 +399,7 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
 
   // ── Admin: close survey ──
   router.post('/:id/close', (req, res) => {
-    if (!isAdmin(req.user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
     if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
@@ -339,7 +410,7 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
 
   // ── Admin: delete draft survey ──
   router.delete('/:id', (req, res) => {
-    if (!isAdmin(req.user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
     if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
@@ -354,7 +425,7 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
 
   // ── Admin: send reminders ──
   router.post('/:id/send-reminders', async (req, res) => {
-    if (!isAdmin(req.user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
     if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
@@ -367,7 +438,7 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
 
   // ── Admin: export CSV ──
   router.get('/:id/export', (req, res) => {
-    if (!isAdmin(req.user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
     if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }

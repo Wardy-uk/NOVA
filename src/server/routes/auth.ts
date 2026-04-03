@@ -27,8 +27,8 @@ function signToken(user: { id: number; username: string; role: string }, secret:
   return jwt.sign({ id: user.id, username: user.username, role: user.role }, secret, { expiresIn: '7d' });
 }
 
-function safeUser(u: { id: number; username: string; display_name: string | null; email: string | null; role: string; auth_provider: string }) {
-  return { id: u.id, username: u.username, display_name: u.display_name, email: u.email, role: u.role, auth_provider: u.auth_provider };
+function safeUser(u: { id: number; username: string; display_name: string | null; email: string | null; role: string; auth_provider: string; team_id?: number | null }) {
+  return { id: u.id, username: u.username, display_name: u.display_name, email: u.email, role: u.role, auth_provider: u.auth_provider, team_id: u.team_id ?? null };
 }
 
 import type { CustomRole } from '../middleware/auth.js';

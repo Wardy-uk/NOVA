@@ -40,6 +40,7 @@ interface SurveyDetail extends Survey {
   questions: Question[];
   recipients: Recipient[];
   results: AggResult[];
+  is_admin: boolean;
 }
 
 interface DraftQuestion {
@@ -48,6 +49,10 @@ interface DraftQuestion {
 
 interface DraftRecipient {
   display_name: string; email: string;
+}
+
+interface Team {
+  id: number; name: string;
 }
 
 // ── Baseline template ──────────────────────────────────────────────────
@@ -88,9 +93,11 @@ function fmtDateTime(d: string | null): string {
 
 // ── Component ──────────────────────────────────────────────────────────
 
-export function SurveyAdminView() {
-  const [tab, setTab] = useState<'list' | 'create'>('list');
+export function SurveyAdminView({ userRole }: { userRole?: string }) {
+  const isUserAdmin = userRole === 'admin';
+  const [tab, setTab] = useState<'list' | 'create'>(isUserAdmin ? 'list' : 'list');
   const [surveys, setSurveys] = useState<Survey[]>([]);
+  const [serverIsAdmin, setServerIsAdmin] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<SurveyDetail | null>(null);
   const [detailTab, setDetailTab] = useState<'recipients' | 'results' | 'questions'>('recipients');
@@ -104,7 +111,10 @@ export function SurveyAdminView() {
     try {
       const res = await fetch('/api/surveys');
       const json = await res.json();
-      if (json.ok) setSurveys(json.data);
+      if (json.ok) {
+        setSurveys(json.data);
+        setServerIsAdmin(json.is_admin === true);
+      }
     } catch { /* ignore */ }
     setLoading(false);
   }, []);
@@ -143,14 +153,14 @@ export function SurveyAdminView() {
     window.open(`/api/surveys/${id}/export`, '_blank');
   };
 
-  // ── Survey List Tab ──
+  // ── Survey List ──
   const renderList = () => (
     <div>
       {loading && <p className="text-sm text-slate-400 py-4">Loading...</p>}
       {!loading && surveys.length === 0 && (
         <div className="text-center py-16 text-slate-400">
           <i className="fa-solid fa-clipboard-question text-4xl mb-3 opacity-40"></i>
-          <p className="text-sm">No surveys yet. Create your first survey to get started.</p>
+          <p className="text-sm">{serverIsAdmin ? 'No surveys yet. Create your first survey to get started.' : 'No surveys have been sent to you yet.'}</p>
         </div>
       )}
       {surveys.length > 0 && (
@@ -172,7 +182,7 @@ export function SurveyAdminView() {
                 return (
                   <tr
                     key={s.id}
-                    onClick={() => { setSelectedId(s.id); setDetailTab('recipients'); }}
+                    onClick={() => { setSelectedId(s.id); setDetailTab(serverIsAdmin ? 'recipients' : 'results'); }}
                     className={`border-b border-slate-50 cursor-pointer transition-colors hover:bg-slate-50 ${selectedId === s.id ? 'bg-teal-50/50' : ''}`}
                   >
                     <td className="py-3 px-4 font-medium text-slate-800">{s.title}</td>
@@ -204,6 +214,7 @@ export function SurveyAdminView() {
   const renderDetail = () => {
     if (!detail) return null;
     const pct = detail.recipients_total > 0 ? Math.round((detail.recipients_completed / detail.recipients_total) * 100) : 0;
+    const isDetailAdmin = detail.is_admin;
 
     return (
       <div className="border-t border-slate-100 mt-4 pt-4">
@@ -225,58 +236,68 @@ export function SurveyAdminView() {
           <button onClick={() => setSelectedId(null)} className="text-slate-400 hover:text-slate-600 text-lg"><i className="fa-solid fa-xmark" /></button>
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-2 mb-4 flex-wrap">
-          {(detail.status === 'draft' || detail.status === 'scheduled') && (
-            <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/activate`)}
-              className="px-4 py-2 rounded-full text-xs font-semibold bg-gradient-to-r from-teal-500 to-teal-400 text-white hover:shadow-lg disabled:opacity-50 transition">
-              <i className="fa-solid fa-rocket mr-1.5" />Activate & Send Invites
-            </button>
-          )}
-          {detail.status === 'active' && (
-            <>
-              <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/send-reminders`)}
-                className="px-4 py-2 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50 transition">
-                <i className="fa-solid fa-bell mr-1.5" />Send Reminders
+        {/* Admin Actions */}
+        {isDetailAdmin && (
+          <div className="flex gap-2 mb-4 flex-wrap">
+            {(detail.status === 'draft' || detail.status === 'scheduled') && (
+              <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/activate`)}
+                className="px-4 py-2 rounded-full text-xs font-semibold bg-gradient-to-r from-teal-500 to-teal-400 text-white hover:shadow-lg disabled:opacity-50 transition">
+                <i className="fa-solid fa-rocket mr-1.5" />Activate & Send Invites
               </button>
-              <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/close`)}
-                className="px-4 py-2 rounded-full text-xs font-semibold bg-slate-200 text-slate-600 hover:bg-slate-300 disabled:opacity-50 transition">
-                <i className="fa-solid fa-lock mr-1.5" />Close Survey
+            )}
+            {detail.status === 'active' && (
+              <>
+                <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/send-reminders`)}
+                  className="px-4 py-2 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50 transition">
+                  <i className="fa-solid fa-bell mr-1.5" />Send Reminders
+                </button>
+                <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/close`)}
+                  className="px-4 py-2 rounded-full text-xs font-semibold bg-slate-200 text-slate-600 hover:bg-slate-300 disabled:opacity-50 transition">
+                  <i className="fa-solid fa-lock mr-1.5" />Close Survey
+                </button>
+              </>
+            )}
+            {detail.recipients_completed > 0 && (
+              <button onClick={() => handleExport(detail.id)}
+                className="px-4 py-2 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 hover:bg-purple-200 transition">
+                <i className="fa-solid fa-file-csv mr-1.5" />Export CSV
               </button>
-            </>
-          )}
-          {detail.recipients_completed > 0 && (
-            <button onClick={() => handleExport(detail.id)}
-              className="px-4 py-2 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 hover:bg-purple-200 transition">
-              <i className="fa-solid fa-file-csv mr-1.5" />Export CSV
-            </button>
-          )}
-          {detail.status === 'draft' && (
-            <button disabled={actionLoading} onClick={async () => {
-              if (!confirm('Delete this draft survey?')) return;
-              await doAction(`/api/surveys/${detail.id}`, 'DELETE');
-              setSelectedId(null);
-            }}
-              className="px-4 py-2 rounded-full text-xs font-semibold bg-red-100 text-red-600 hover:bg-red-200 disabled:opacity-50 transition">
-              <i className="fa-solid fa-trash mr-1.5" />Delete
-            </button>
-          )}
-        </div>
+            )}
+            {detail.status === 'draft' && (
+              <button disabled={actionLoading} onClick={async () => {
+                if (!confirm('Delete this draft survey?')) return;
+                await doAction(`/api/surveys/${detail.id}`, 'DELETE');
+                setSelectedId(null);
+              }}
+                className="px-4 py-2 rounded-full text-xs font-semibold bg-red-100 text-red-600 hover:bg-red-200 disabled:opacity-50 transition">
+                <i className="fa-solid fa-trash mr-1.5" />Delete
+              </button>
+            )}
+          </div>
+        )}
 
         {error && <p className="text-sm text-red-500 mb-3">{error}</p>}
 
         {/* Sub-tabs */}
         <div className="flex gap-1 border-b border-slate-100 mb-4">
-          {(['recipients', 'results', 'questions'] as const).map(t => (
-            <button key={t} onClick={() => setDetailTab(t)}
-              className={`px-4 py-2 text-xs font-semibold capitalize rounded-t transition ${detailTab === t ? 'text-teal-600 border-b-2 border-teal-500' : 'text-slate-400 hover:text-slate-600'}`}>
-              {t}
+          {isDetailAdmin && (
+            <button onClick={() => setDetailTab('recipients')}
+              className={`px-4 py-2 text-xs font-semibold capitalize rounded-t transition ${detailTab === 'recipients' ? 'text-teal-600 border-b-2 border-teal-500' : 'text-slate-400 hover:text-slate-600'}`}>
+              Recipients
             </button>
-          ))}
+          )}
+          <button onClick={() => setDetailTab('results')}
+            className={`px-4 py-2 text-xs font-semibold capitalize rounded-t transition ${detailTab === 'results' ? 'text-teal-600 border-b-2 border-teal-500' : 'text-slate-400 hover:text-slate-600'}`}>
+            Results
+          </button>
+          <button onClick={() => setDetailTab('questions')}
+            className={`px-4 py-2 text-xs font-semibold capitalize rounded-t transition ${detailTab === 'questions' ? 'text-teal-600 border-b-2 border-teal-500' : 'text-slate-400 hover:text-slate-600'}`}>
+            Questions
+          </button>
         </div>
 
-        {/* Recipients tab */}
-        {detailTab === 'recipients' && (
+        {/* Recipients tab (admin only) */}
+        {detailTab === 'recipients' && isDetailAdmin && (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-400 border-b border-slate-100">
@@ -382,28 +403,31 @@ export function SurveyAdminView() {
     );
   };
 
-  // ── Create Tab ──
-  const renderCreate = () => <CreateSurveyForm onCreated={() => { setTab('list'); fetchSurveys(); }} />;
-
   return (
     <div className="max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">Team Surveys</h1>
-          <p className="text-xs text-slate-400 mt-0.5">Create, manage and analyse anonymous team surveys</p>
+          <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">
+            {serverIsAdmin ? 'Team Surveys' : 'My Surveys'}
+          </h1>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {serverIsAdmin ? 'Create, manage and analyse anonymous team surveys' : 'Surveys you have been invited to participate in'}
+          </p>
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs — only admins see Create */}
       <div className="flex gap-1 mb-6">
         <button onClick={() => setTab('list')}
           className={`px-5 py-2 rounded-full text-xs font-semibold transition ${tab === 'list' ? 'bg-teal-500 text-white shadow' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
-          <i className="fa-solid fa-list mr-1.5" />Surveys
+          <i className={`fa-solid ${serverIsAdmin ? 'fa-list' : 'fa-inbox'} mr-1.5`} />{serverIsAdmin ? 'Surveys' : 'My Surveys'}
         </button>
-        <button onClick={() => setTab('create')}
-          className={`px-5 py-2 rounded-full text-xs font-semibold transition ${tab === 'create' ? 'bg-teal-500 text-white shadow' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
-          <i className="fa-solid fa-plus mr-1.5" />Create Survey
-        </button>
+        {serverIsAdmin && (
+          <button onClick={() => setTab('create')}
+            className={`px-5 py-2 rounded-full text-xs font-semibold transition ${tab === 'create' ? 'bg-teal-500 text-white shadow' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+            <i className="fa-solid fa-plus mr-1.5" />Create Survey
+          </button>
+        )}
       </div>
 
       <div className="bg-white/65 backdrop-blur-xl border border-black/[0.07] rounded-2xl p-6 shadow-sm">
@@ -413,7 +437,7 @@ export function SurveyAdminView() {
             {selectedId && renderDetail()}
           </>
         )}
-        {tab === 'create' && renderCreate()}
+        {tab === 'create' && serverIsAdmin && <CreateSurveyForm onCreated={() => { setTab('list'); fetchSurveys(); }} />}
       </div>
     </div>
   );
@@ -424,6 +448,7 @@ export function SurveyAdminView() {
 function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
   const [title, setTitle] = useState('');
   const [teamName, setTeamName] = useState('');
+  const [teams, setTeams] = useState<Team[]>([]);
   const [description, setDescription] = useState('');
   const [inviteSendDate, setInviteSendDate] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -434,6 +459,17 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch teams for dropdown
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/surveys/teams');
+        const json = await res.json();
+        if (json.ok) setTeams(json.data);
+      } catch { /* ignore */ }
+    })();
+  }, []);
 
   const addQuestion = () => setQuestions([...questions, { question_text: '', question_type: 'scale_5', required: true }]);
   const removeQuestion = (idx: number) => setQuestions(questions.filter((_, i) => i !== idx));
@@ -468,7 +504,7 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
       const imported: DraftRecipient[] = [];
       for (let i = 0; i < lines.length; i++) {
         const parts = lines[i].split(',').map(p => p.replace(/^"|"$/g, '').trim());
-        if (i === 0 && parts[0].toLowerCase() === 'name') continue; // skip header
+        if (i === 0 && parts[0].toLowerCase() === 'name') continue;
         if (parts.length >= 2 && parts[1].includes('@')) {
           imported.push({ display_name: parts[0], email: parts[1] });
         }
@@ -520,8 +556,19 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
           <input value={title} onChange={e => setTitle(e.target.value)} className={inputCls} placeholder="e.g. Q2 Team Satisfaction" />
         </div>
         <div>
-          <label className={labelCls}>Team Name *</label>
-          <input value={teamName} onChange={e => setTeamName(e.target.value)} className={inputCls} placeholder="e.g. Engineering" />
+          <label className={labelCls}>Team *</label>
+          {teams.length > 0 ? (
+            <select value={teamName} onChange={e => setTeamName(e.target.value)} className={inputCls}>
+              <option value="">Select a team...</option>
+              {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+              <option value="__custom">Other (type below)...</option>
+            </select>
+          ) : (
+            <input value={teamName} onChange={e => setTeamName(e.target.value)} className={inputCls} placeholder="e.g. Engineering" />
+          )}
+          {teamName === '__custom' && (
+            <input value="" onChange={e => setTeamName(e.target.value)} className={inputCls + ' mt-2'} placeholder="Type team name..." autoFocus />
+          )}
         </div>
         <div className="md:col-span-2">
           <label className={labelCls}>Description</label>
@@ -588,7 +635,7 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
               <button onClick={() => removeQuestion(i)} className="text-slate-300 hover:text-red-400 mt-2"><i className="fa-solid fa-xmark" /></button>
             </div>
           ))}
-          {questions.length === 0 && <p className="text-xs text-slate-300 text-center py-4">No questions added yet.</p>}
+          {questions.length === 0 && <p className="text-xs text-slate-300 text-center py-4">No questions added yet. Use the template button above to get started quickly.</p>}
         </div>
       </div>
 

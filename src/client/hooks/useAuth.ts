@@ -7,6 +7,7 @@ export interface AuthUser {
   email: string | null;
   role: string;
   auth_provider: string;
+  team_id: number | null;
 }
 
 interface AuthState {

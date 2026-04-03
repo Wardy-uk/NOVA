@@ -469,7 +469,7 @@ async function main() {
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/contracts', createContractsRoutes(bcCustomerQueries, contractsQueries, settingsQueries));
   app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, contractTemplateQueries, settingsQueries));
-  app.use('/api/surveys', createSurveyRoutes(db, settingsQueries));
+  app.use('/api/surveys', createSurveyRoutes(db, settingsQueries, userQueries, teamQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
 

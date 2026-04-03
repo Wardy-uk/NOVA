@@ -54,7 +54,7 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'kpis' | 'trends' | 'qa' | 'wallboards';
+type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
@@ -82,7 +82,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', admin: 'hidden',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', admin: 'hidden',
 };
 
 // Map certain command sub-tabs to their own permission area
@@ -104,7 +104,6 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'standup', label: 'NOVA Briefing' },
       { view: 'team-workload', label: 'My Team' },
       { view: 'chat', label: 'My Chat' },
-      { view: 'surveys', label: 'Surveys' },
     ],
   },
   servicedesk: {
@@ -146,6 +145,13 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'new-contract', label: 'New Contract' },
     ],
   },
+  people: {
+    label: 'People',
+    defaultView: 'surveys',
+    tabs: [
+      { view: 'surveys', label: 'Team Surveys' },
+    ],
+  },
   kpis: {
     label: 'KPIs',
     defaultView: 'kpi-dashboard',
@@ -185,7 +191,7 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'kpis', 'trends', 'qa', 'wallboards'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
@@ -1011,9 +1017,9 @@ export function App() {
             <SalesHotboxView canWrite={areaAccess.sales === 'edit'} />
           )}
 
-          {/* Surveys */}
+          {/* People — Surveys */}
           {view === 'surveys' && (
-            <SurveyAdminView />
+            <SurveyAdminView userRole={auth.user?.role} />
           )}
 
           {/* Administration */}
