@@ -481,7 +481,7 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                         } catch { setError('Network error'); }
                         setActionLoading(false);
                       }}
-                      className="opacity-0 group-hover:opacity-100 text-neutral-600 hover:text-red-400 transition-all text-xs disabled:opacity-50"
+                      className="text-neutral-600 hover:text-red-400 transition-colors text-xs disabled:opacity-50"
                       title="Remove recipient"
                     >
                       <i className="fa-solid fa-xmark" />
