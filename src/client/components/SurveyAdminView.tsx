@@ -71,13 +71,13 @@ const BASELINE_QUESTIONS: DraftQuestion[] = [
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-function statusColor(status: string): string {
+function statusBadge(status: string): string {
   switch (status) {
-    case 'draft': return 'bg-gray-100 text-gray-600';
-    case 'scheduled': return 'bg-blue-100 text-blue-700';
-    case 'active': return 'bg-emerald-100 text-emerald-700';
-    case 'closed': return 'bg-slate-200 text-slate-600';
-    default: return 'bg-gray-100 text-gray-600';
+    case 'draft': return 'bg-neutral-700 text-neutral-400 border border-neutral-600';
+    case 'scheduled': return 'bg-blue-900/40 text-blue-400 border border-blue-800/50';
+    case 'active': return 'bg-green-900/40 text-green-400 border border-green-800/50';
+    case 'closed': return 'bg-neutral-800 text-neutral-500 border border-neutral-700';
+    default: return 'bg-neutral-700 text-neutral-400 border border-neutral-600';
   }
 }
 
@@ -91,11 +91,15 @@ function fmtDateTime(d: string | null): string {
   return new Date(d).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// ── Shared styles ──────────────────────────────────────────────────────
+
+const inputCls = 'w-full bg-[#272C33] text-neutral-200 text-[12px] rounded-lg px-3 py-2 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors placeholder:text-neutral-600';
+const labelCls = 'block text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-1';
+
 // ── Component ──────────────────────────────────────────────────────────
 
 export function SurveyAdminView({ userRole }: { userRole?: string }) {
-  const isUserAdmin = userRole === 'admin';
-  const [tab, setTab] = useState<'list' | 'create'>(isUserAdmin ? 'list' : 'list');
+  const [tab, setTab] = useState<'list' | 'create'>('list');
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [serverIsAdmin, setServerIsAdmin] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -105,7 +109,6 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // ── Fetch list ──
   const fetchSurveys = useCallback(async () => {
     setLoading(true);
     try {
@@ -121,7 +124,6 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
 
   useEffect(() => { fetchSurveys(); }, [fetchSurveys]);
 
-  // ── Fetch detail ──
   const fetchDetail = useCallback(async (id: number) => {
     try {
       const res = await fetch(`/api/surveys/${id}`);
@@ -135,7 +137,6 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
     else setDetail(null);
   }, [selectedId, fetchDetail]);
 
-  // ── Actions ──
   const doAction = async (url: string, method = 'POST') => {
     setActionLoading(true);
     setError('');
@@ -156,24 +157,24 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
   // ── Survey List ──
   const renderList = () => (
     <div>
-      {loading && <p className="text-sm text-slate-400 py-4">Loading...</p>}
+      {loading && <p className="text-xs text-neutral-500 py-4">Loading...</p>}
       {!loading && surveys.length === 0 && (
-        <div className="text-center py-16 text-slate-400">
+        <div className="text-center py-16 text-neutral-500">
           <i className="fa-solid fa-clipboard-question text-4xl mb-3 opacity-40"></i>
-          <p className="text-sm">{serverIsAdmin ? 'No surveys yet. Create your first survey to get started.' : 'No surveys have been sent to you yet.'}</p>
+          <p className="text-xs">{serverIsAdmin ? 'No surveys yet. Create your first survey to get started.' : 'No surveys have been sent to you yet.'}</p>
         </div>
       )}
       {surveys.length > 0 && (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-xs">
             <thead>
-              <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-400 border-b border-slate-100">
-                <th className="py-3 px-4">Title</th>
-                <th className="py-3 px-4">Team</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4">Start</th>
-                <th className="py-3 px-4">End</th>
-                <th className="py-3 px-4">Completion</th>
+              <tr className="text-left text-[10px] font-bold uppercase tracking-wider text-neutral-500 border-b border-[#3a424d]">
+                <th className="py-2.5 px-4">Title</th>
+                <th className="py-2.5 px-4">Team</th>
+                <th className="py-2.5 px-4">Status</th>
+                <th className="py-2.5 px-4">Start</th>
+                <th className="py-2.5 px-4">End</th>
+                <th className="py-2.5 px-4">Completion</th>
               </tr>
             </thead>
             <tbody>
@@ -183,21 +184,21 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                   <tr
                     key={s.id}
                     onClick={() => { setSelectedId(s.id); setDetailTab(serverIsAdmin ? 'recipients' : 'results'); }}
-                    className={`border-b border-slate-50 cursor-pointer transition-colors hover:bg-slate-50 ${selectedId === s.id ? 'bg-teal-50/50' : ''}`}
+                    className={`border-b border-[#3a424d]/50 cursor-pointer transition-colors hover:bg-[#363d47] ${selectedId === s.id ? 'bg-[#363d47]' : ''}`}
                   >
-                    <td className="py-3 px-4 font-medium text-slate-800">{s.title}</td>
-                    <td className="py-3 px-4 text-slate-500">{s.team_name}</td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold capitalize ${statusColor(s.status)}`}>{s.status}</span>
+                    <td className="py-2.5 px-4 font-medium text-neutral-100">{s.title}</td>
+                    <td className="py-2.5 px-4 text-neutral-400">{s.team_name}</td>
+                    <td className="py-2.5 px-4">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold capitalize ${statusBadge(s.status)}`}>{s.status}</span>
                     </td>
-                    <td className="py-3 px-4 text-slate-500">{fmtDate(s.start_date)}</td>
-                    <td className="py-3 px-4 text-slate-500">{fmtDate(s.end_date)}</td>
-                    <td className="py-3 px-4">
+                    <td className="py-2.5 px-4 text-neutral-500">{fmtDate(s.start_date)}</td>
+                    <td className="py-2.5 px-4 text-neutral-500">{fmtDate(s.end_date)}</td>
+                    <td className="py-2.5 px-4">
                       <div className="flex items-center gap-2">
-                        <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden max-w-[100px]">
-                          <div className="h-full bg-teal-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        <div className="flex-1 h-1.5 bg-[#272C33] rounded-full overflow-hidden max-w-[80px]">
+                          <div className="h-full bg-[#5ec1ca] rounded-full transition-all" style={{ width: `${pct}%` }} />
                         </div>
-                        <span className="text-xs text-slate-500">{s.recipients_completed}/{s.recipients_total} ({pct}%)</span>
+                        <span className="text-[10px] text-neutral-500">{s.recipients_completed}/{s.recipients_total} ({pct}%)</span>
                       </div>
                     </td>
                   </tr>
@@ -217,23 +218,23 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
     const isDetailAdmin = detail.is_admin;
 
     return (
-      <div className="border-t border-slate-100 mt-4 pt-4">
+      <div className="border-t border-[#3a424d] mt-4 pt-4">
         {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <div>
             <div className="flex items-center gap-3 mb-1">
-              <h3 className="text-lg font-bold text-slate-800">{detail.title}</h3>
-              <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold capitalize ${statusColor(detail.status)}`}>{detail.status}</span>
+              <h3 className="text-[15px] font-bold text-neutral-100">{detail.title}</h3>
+              <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold capitalize ${statusBadge(detail.status)}`}>{detail.status}</span>
             </div>
-            <p className="text-sm text-slate-500">{detail.team_name} &middot; Created {fmtDate(detail.created_at)} by {detail.created_by}</p>
-            {detail.description && <p className="text-sm text-slate-400 mt-1">{detail.description}</p>}
-            <div className="flex items-center gap-4 mt-2 text-xs text-slate-400">
+            <p className="text-[11px] text-neutral-400">{detail.team_name} &middot; Created {fmtDate(detail.created_at)} by {detail.created_by}</p>
+            {detail.description && <p className="text-[11px] text-neutral-500 mt-1">{detail.description}</p>}
+            <div className="flex items-center gap-4 mt-2 text-[10px] text-neutral-600">
               <span>Start: {fmtDateTime(detail.start_date)}</span>
               <span>End: {fmtDateTime(detail.end_date)}</span>
               <span>Completion: {pct}% ({detail.recipients_completed}/{detail.recipients_total})</span>
             </div>
           </div>
-          <button onClick={() => setSelectedId(null)} className="text-slate-400 hover:text-slate-600 text-lg"><i className="fa-solid fa-xmark" /></button>
+          <button onClick={() => setSelectedId(null)} className="text-neutral-500 hover:text-neutral-300 text-sm"><i className="fa-solid fa-xmark" /></button>
         </div>
 
         {/* Admin Actions */}
@@ -241,25 +242,25 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
           <div className="flex gap-2 mb-4 flex-wrap">
             {(detail.status === 'draft' || detail.status === 'scheduled') && (
               <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/activate`)}
-                className="px-4 py-2 rounded-full text-xs font-semibold bg-gradient-to-r from-teal-500 to-teal-400 text-white hover:shadow-lg disabled:opacity-50 transition">
+                className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9] disabled:opacity-50 transition-colors">
                 <i className="fa-solid fa-rocket mr-1.5" />Activate & Send Invites
               </button>
             )}
             {detail.status === 'active' && (
               <>
                 <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/send-reminders`)}
-                  className="px-4 py-2 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50 transition">
+                  className="px-3 py-1.5 rounded text-[10px] font-semibold bg-amber-900/40 text-amber-400 border border-amber-800/50 hover:bg-amber-900/60 disabled:opacity-50 transition-colors">
                   <i className="fa-solid fa-bell mr-1.5" />Send Reminders
                 </button>
                 <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/close`)}
-                  className="px-4 py-2 rounded-full text-xs font-semibold bg-slate-200 text-slate-600 hover:bg-slate-300 disabled:opacity-50 transition">
+                  className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:bg-[#363d47] disabled:opacity-50 transition-colors">
                   <i className="fa-solid fa-lock mr-1.5" />Close Survey
                 </button>
               </>
             )}
             {detail.recipients_completed > 0 && (
               <button onClick={() => handleExport(detail.id)}
-                className="px-4 py-2 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 hover:bg-purple-200 transition">
+                className="px-3 py-1.5 rounded text-[10px] font-semibold bg-purple-900/40 text-purple-400 border border-purple-800/50 hover:bg-purple-900/60 transition-colors">
                 <i className="fa-solid fa-file-csv mr-1.5" />Export CSV
               </button>
             )}
@@ -269,38 +270,38 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                 await doAction(`/api/surveys/${detail.id}`, 'DELETE');
                 setSelectedId(null);
               }}
-                className="px-4 py-2 rounded-full text-xs font-semibold bg-red-100 text-red-600 hover:bg-red-200 disabled:opacity-50 transition">
+                className="px-3 py-1.5 rounded text-[10px] font-semibold bg-red-900/30 text-red-400 border border-red-800/50 hover:bg-red-900/50 disabled:opacity-50 transition-colors">
                 <i className="fa-solid fa-trash mr-1.5" />Delete
               </button>
             )}
           </div>
         )}
 
-        {error && <p className="text-sm text-red-500 mb-3">{error}</p>}
+        {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
 
         {/* Sub-tabs */}
-        <div className="flex gap-1 border-b border-slate-100 mb-4">
+        <div className="flex gap-1 border-b border-[#3a424d] mb-4">
           {isDetailAdmin && (
             <button onClick={() => setDetailTab('recipients')}
-              className={`px-4 py-2 text-xs font-semibold capitalize rounded-t transition ${detailTab === 'recipients' ? 'text-teal-600 border-b-2 border-teal-500' : 'text-slate-400 hover:text-slate-600'}`}>
+              className={`px-4 py-2 text-[10px] font-semibold uppercase tracking-wider rounded-t transition-colors ${detailTab === 'recipients' ? 'text-[#5ec1ca] border-b-2 border-[#5ec1ca]' : 'text-neutral-500 hover:text-neutral-300'}`}>
               Recipients
             </button>
           )}
           <button onClick={() => setDetailTab('results')}
-            className={`px-4 py-2 text-xs font-semibold capitalize rounded-t transition ${detailTab === 'results' ? 'text-teal-600 border-b-2 border-teal-500' : 'text-slate-400 hover:text-slate-600'}`}>
+            className={`px-4 py-2 text-[10px] font-semibold uppercase tracking-wider rounded-t transition-colors ${detailTab === 'results' ? 'text-[#5ec1ca] border-b-2 border-[#5ec1ca]' : 'text-neutral-500 hover:text-neutral-300'}`}>
             Results
           </button>
           <button onClick={() => setDetailTab('questions')}
-            className={`px-4 py-2 text-xs font-semibold capitalize rounded-t transition ${detailTab === 'questions' ? 'text-teal-600 border-b-2 border-teal-500' : 'text-slate-400 hover:text-slate-600'}`}>
+            className={`px-4 py-2 text-[10px] font-semibold uppercase tracking-wider rounded-t transition-colors ${detailTab === 'questions' ? 'text-[#5ec1ca] border-b-2 border-[#5ec1ca]' : 'text-neutral-500 hover:text-neutral-300'}`}>
             Questions
           </button>
         </div>
 
         {/* Recipients tab (admin only) */}
         {detailTab === 'recipients' && isDetailAdmin && (
-          <table className="w-full text-sm">
+          <table className="w-full text-xs">
             <thead>
-              <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-400 border-b border-slate-100">
+              <tr className="text-left text-[10px] font-bold uppercase tracking-wider text-neutral-500 border-b border-[#3a424d]">
                 <th className="py-2 px-3">Name</th>
                 <th className="py-2 px-3">Email</th>
                 <th className="py-2 px-3">Invited</th>
@@ -310,16 +311,16 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
             </thead>
             <tbody>
               {detail.recipients.map((r, i) => (
-                <tr key={i} className="border-b border-slate-50">
-                  <td className="py-2 px-3 font-medium text-slate-700">{r.display_name}</td>
-                  <td className="py-2 px-3 text-slate-500">{r.email}</td>
+                <tr key={i} className="border-b border-[#3a424d]/50">
+                  <td className="py-2 px-3 font-medium text-neutral-200">{r.display_name}</td>
+                  <td className="py-2 px-3 text-neutral-400">{r.email}</td>
                   <td className="py-2 px-3">
-                    {r.invite_sent ? <i className="fa-solid fa-check text-emerald-500" /> : <i className="fa-solid fa-clock text-amber-400" />}
+                    {r.invite_sent ? <i className="fa-solid fa-check text-green-400" /> : <i className="fa-solid fa-clock text-amber-400" />}
                   </td>
                   <td className="py-2 px-3">
-                    {r.completed ? <i className="fa-solid fa-circle-check text-emerald-500" /> : <i className="fa-solid fa-circle-xmark text-slate-300" />}
+                    {r.completed ? <i className="fa-solid fa-circle-check text-green-400" /> : <i className="fa-solid fa-circle-xmark text-neutral-600" />}
                   </td>
-                  <td className="py-2 px-3 text-slate-400 text-xs">{fmtDateTime(r.completed_at)}</td>
+                  <td className="py-2 px-3 text-neutral-600 text-[10px]">{fmtDateTime(r.completed_at)}</td>
                 </tr>
               ))}
             </tbody>
@@ -328,19 +329,19 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
 
         {/* Results tab */}
         {detailTab === 'results' && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {detail.results.length === 0 || detail.recipients_completed === 0 ? (
-              <p className="text-sm text-slate-400 py-8 text-center">No responses yet.</p>
+              <p className="text-xs text-neutral-500 py-8 text-center">No responses yet.</p>
             ) : (
               detail.results.map((r, i) => (
-                <div key={i} className="bg-slate-50 rounded-xl p-4">
-                  <h4 className="text-sm font-semibold text-slate-700 mb-3">{r.question_text}</h4>
+                <div key={i} className="bg-[#272C33] rounded-lg border border-[#3a424d] p-4">
+                  <h4 className="text-[12px] font-semibold text-neutral-200 mb-3">{r.question_text}</h4>
                   {r.question_type === 'scale_5' ? (
                     <div className="flex items-center gap-6">
                       <div className="text-center">
-                        <div className="text-3xl font-extrabold text-teal-600">{(r as ScaleResult).average.toFixed(1)}</div>
-                        <div className="text-[10px] text-slate-400 uppercase tracking-wide mt-1">Average</div>
-                        <div className="text-[10px] text-slate-400">{r.response_count} responses</div>
+                        <div className="text-2xl font-extrabold text-[#5ec1ca]">{(r as ScaleResult).average.toFixed(1)}</div>
+                        <div className="text-[9px] text-neutral-500 uppercase tracking-wider mt-1">Average</div>
+                        <div className="text-[9px] text-neutral-600">{r.response_count} responses</div>
                       </div>
                       <div className="flex-1 max-w-sm">
                         <Bar
@@ -349,8 +350,8 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                             datasets: [{
                               data: (r as ScaleResult).distribution,
                               backgroundColor: ['#f87171', '#fb923c', '#fbbf24', '#a3e635', '#34d399'],
-                              borderRadius: 4,
-                              barThickness: 28,
+                              borderRadius: 3,
+                              barThickness: 22,
                             }],
                           }}
                           options={{
@@ -360,20 +361,20 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                             plugins: { legend: { display: false }, tooltip: { enabled: true } },
                             scales: {
                               x: { display: false, beginAtZero: true },
-                              y: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' as const } } },
+                              y: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 10, weight: 'bold' as const } } },
                             },
                           }}
-                          height={120}
+                          height={110}
                         />
                       </div>
                     </div>
                   ) : (
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
                       {(r as TextResult).responses.length === 0 ? (
-                        <p className="text-xs text-slate-400">No responses.</p>
+                        <p className="text-[10px] text-neutral-600">No responses.</p>
                       ) : (
                         (r as TextResult).responses.map((text, j) => (
-                          <div key={j} className="bg-white rounded-lg px-3 py-2 text-sm text-slate-600 border border-slate-100">
+                          <div key={j} className="bg-[#2f353d] rounded px-3 py-2 text-[11px] text-neutral-300 border border-[#3a424d]/50">
                             {text}
                           </div>
                         ))
@@ -388,13 +389,13 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
 
         {/* Questions tab */}
         {detailTab === 'questions' && (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {detail.questions.map((q, i) => (
-              <div key={q.id} className="flex items-center gap-3 py-2 px-3 bg-slate-50 rounded-lg">
-                <span className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-700 text-xs font-bold">{i + 1}</span>
-                <span className="flex-1 text-sm text-slate-700">{q.question_text}</span>
-                <span className="text-[10px] text-slate-400 uppercase tracking-wide">{q.question_type === 'scale_5' ? '1-5 Scale' : 'Open Text'}</span>
-                {!q.required && <span className="text-[10px] text-slate-300">(optional)</span>}
+              <div key={q.id} className="flex items-center gap-3 py-2 px-3 bg-[#272C33] rounded-lg border border-[#3a424d]/50">
+                <span className="w-5 h-5 flex items-center justify-center rounded-full bg-[#5ec1ca]/20 text-[#5ec1ca] text-[10px] font-bold">{i + 1}</span>
+                <span className="flex-1 text-[11px] text-neutral-200">{q.question_text}</span>
+                <span className="text-[9px] text-neutral-500 uppercase tracking-wider">{q.question_type === 'scale_5' ? '1-5 Scale' : 'Open Text'}</span>
+                {!q.required && <span className="text-[9px] text-neutral-600">(optional)</span>}
               </div>
             ))}
           </div>
@@ -405,32 +406,32 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
 
   return (
     <div className="max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">
+          <h1 className="text-[18px] font-bold text-neutral-100 tracking-tight">
             {serverIsAdmin ? 'Team Surveys' : 'My Surveys'}
           </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-[10px] text-neutral-500 mt-0.5">
             {serverIsAdmin ? 'Create, manage and analyse anonymous team surveys' : 'Surveys you have been invited to participate in'}
           </p>
         </div>
       </div>
 
-      {/* Tabs — only admins see Create */}
-      <div className="flex gap-1 mb-6">
+      {/* Tabs */}
+      <div className="flex gap-1.5 mb-5">
         <button onClick={() => setTab('list')}
-          className={`px-5 py-2 rounded-full text-xs font-semibold transition ${tab === 'list' ? 'bg-teal-500 text-white shadow' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+          className={`px-4 py-1.5 rounded text-[11px] font-semibold transition-colors ${tab === 'list' ? 'bg-[#5ec1ca] text-[#272C33]' : 'bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:bg-[#363d47]'}`}>
           <i className={`fa-solid ${serverIsAdmin ? 'fa-list' : 'fa-inbox'} mr-1.5`} />{serverIsAdmin ? 'Surveys' : 'My Surveys'}
         </button>
         {serverIsAdmin && (
           <button onClick={() => setTab('create')}
-            className={`px-5 py-2 rounded-full text-xs font-semibold transition ${tab === 'create' ? 'bg-teal-500 text-white shadow' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+            className={`px-4 py-1.5 rounded text-[11px] font-semibold transition-colors ${tab === 'create' ? 'bg-[#5ec1ca] text-[#272C33]' : 'bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:bg-[#363d47]'}`}>
             <i className="fa-solid fa-plus mr-1.5" />Create Survey
           </button>
         )}
       </div>
 
-      <div className="bg-white/65 backdrop-blur-xl border border-black/[0.07] rounded-2xl p-6 shadow-sm">
+      <div className="bg-[#2f353d] rounded-lg border border-[#3a424d] p-5">
         {tab === 'list' && (
           <>
             {renderList()}
@@ -449,6 +450,7 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
   const [title, setTitle] = useState('');
   const [teamName, setTeamName] = useState('');
   const [teams, setTeams] = useState<Team[]>([]);
+  const [customTeam, setCustomTeam] = useState(false);
   const [description, setDescription] = useState('');
   const [inviteSendDate, setInviteSendDate] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -460,7 +462,6 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch teams for dropdown
   useEffect(() => {
     (async () => {
       try {
@@ -490,9 +491,7 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
     setRecipients(recipients.map((r, i) => i === idx ? { ...r, ...patch } : r));
   };
 
-  const loadTemplate = () => {
-    setQuestions([...BASELINE_QUESTIONS]);
-  };
+  const loadTemplate = () => setQuestions([...BASELINE_QUESTIONS]);
 
   const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -544,11 +543,8 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
     setSaving(false);
   };
 
-  const inputCls = 'w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white/80 focus:outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 transition';
-  const labelCls = 'block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1';
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Basic info */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -557,22 +553,22 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
         </div>
         <div>
           <label className={labelCls}>Team *</label>
-          {teams.length > 0 ? (
-            <select value={teamName} onChange={e => setTeamName(e.target.value)} className={inputCls}>
+          {teams.length > 0 && !customTeam ? (
+            <select value={teamName} onChange={e => {
+              if (e.target.value === '__custom') { setCustomTeam(true); setTeamName(''); }
+              else setTeamName(e.target.value);
+            }} className={inputCls}>
               <option value="">Select a team...</option>
               {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
               <option value="__custom">Other (type below)...</option>
             </select>
           ) : (
-            <input value={teamName} onChange={e => setTeamName(e.target.value)} className={inputCls} placeholder="e.g. Engineering" />
-          )}
-          {teamName === '__custom' && (
-            <input value="" onChange={e => setTeamName(e.target.value)} className={inputCls + ' mt-2'} placeholder="Type team name..." autoFocus />
+            <input value={teamName} onChange={e => setTeamName(e.target.value)} className={inputCls} placeholder="e.g. Engineering" autoFocus={customTeam} />
           )}
         </div>
         <div className="md:col-span-2">
           <label className={labelCls}>Description</label>
-          <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} className={inputCls} placeholder="Brief description shown to respondents..." />
+          <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} className={inputCls + ' resize-none'} placeholder="Brief description shown to respondents..." />
         </div>
       </div>
 
@@ -601,41 +597,41 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
         <div className="flex items-center justify-between mb-3">
           <label className={labelCls + ' mb-0'}>Questions</label>
           <div className="flex gap-2">
-            <button onClick={loadTemplate} className="px-3 py-1.5 rounded-full text-[11px] font-semibold bg-purple-100 text-purple-700 hover:bg-purple-200 transition">
+            <button onClick={loadTemplate} className="px-3 py-1.5 rounded text-[10px] font-semibold bg-purple-900/40 text-purple-400 border border-purple-800/50 hover:bg-purple-900/60 transition-colors">
               <i className="fa-solid fa-wand-magic-sparkles mr-1" />Load Team Satisfaction Baseline
             </button>
-            <button onClick={addQuestion} className="px-3 py-1.5 rounded-full text-[11px] font-semibold bg-teal-100 text-teal-700 hover:bg-teal-200 transition">
+            <button onClick={addQuestion} className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#5ec1ca]/20 text-[#5ec1ca] border border-[#5ec1ca]/30 hover:bg-[#5ec1ca]/30 transition-colors">
               <i className="fa-solid fa-plus mr-1" />Add Question
             </button>
           </div>
         </div>
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {questions.map((q, i) => (
-            <div key={i} className="flex items-start gap-2 bg-slate-50 rounded-xl px-3 py-2">
+            <div key={i} className="flex items-start gap-2 bg-[#272C33] rounded-lg border border-[#3a424d]/50 px-3 py-2">
               <div className="flex flex-col gap-0.5 mt-2">
-                <button onClick={() => moveQuestion(i, -1)} disabled={i === 0} className="text-slate-300 hover:text-slate-500 disabled:opacity-30 text-xs"><i className="fa-solid fa-chevron-up" /></button>
-                <button onClick={() => moveQuestion(i, 1)} disabled={i === questions.length - 1} className="text-slate-300 hover:text-slate-500 disabled:opacity-30 text-xs"><i className="fa-solid fa-chevron-down" /></button>
+                <button onClick={() => moveQuestion(i, -1)} disabled={i === 0} className="text-neutral-600 hover:text-neutral-400 disabled:opacity-30 text-[10px]"><i className="fa-solid fa-chevron-up" /></button>
+                <button onClick={() => moveQuestion(i, 1)} disabled={i === questions.length - 1} className="text-neutral-600 hover:text-neutral-400 disabled:opacity-30 text-[10px]"><i className="fa-solid fa-chevron-down" /></button>
               </div>
-              <span className="w-6 h-6 flex items-center justify-center rounded-full bg-teal-100 text-teal-700 text-xs font-bold mt-2">{i + 1}</span>
+              <span className="w-5 h-5 flex items-center justify-center rounded-full bg-[#5ec1ca]/20 text-[#5ec1ca] text-[10px] font-bold mt-1.5">{i + 1}</span>
               <div className="flex-1 space-y-1">
                 <input value={q.question_text} onChange={e => updateQuestion(i, { question_text: e.target.value })}
-                  className="w-full px-2 py-1.5 text-sm rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-teal-400" placeholder="Question text..." />
+                  className="w-full bg-[#2f353d] text-neutral-200 text-[11px] rounded px-2 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca]" placeholder="Question text..." />
                 <div className="flex gap-3 items-center">
                   <select value={q.question_type} onChange={e => updateQuestion(i, { question_type: e.target.value as 'scale_5' | 'open_text' })}
-                    className="text-xs px-2 py-1 rounded-lg border border-slate-200 bg-white text-slate-600">
+                    className="text-[10px] bg-[#2f353d] text-neutral-300 px-2 py-1 rounded border border-[#3a424d] outline-none">
                     <option value="scale_5">1-5 Scale</option>
                     <option value="open_text">Open Text</option>
                   </select>
-                  <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
+                  <label className="flex items-center gap-1.5 text-[10px] text-neutral-500 cursor-pointer">
                     <input type="checkbox" checked={q.required} onChange={e => updateQuestion(i, { required: e.target.checked })} className="rounded" />
                     Required
                   </label>
                 </div>
               </div>
-              <button onClick={() => removeQuestion(i)} className="text-slate-300 hover:text-red-400 mt-2"><i className="fa-solid fa-xmark" /></button>
+              <button onClick={() => removeQuestion(i)} className="text-neutral-600 hover:text-red-400 mt-2 text-xs"><i className="fa-solid fa-xmark" /></button>
             </div>
           ))}
-          {questions.length === 0 && <p className="text-xs text-slate-300 text-center py-4">No questions added yet. Use the template button above to get started quickly.</p>}
+          {questions.length === 0 && <p className="text-[10px] text-neutral-600 text-center py-4">No questions added yet. Use the template button above to get started quickly.</p>}
         </div>
       </div>
 
@@ -644,11 +640,11 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
         <div className="flex items-center justify-between mb-3">
           <label className={labelCls + ' mb-0'}>Recipients</label>
           <div className="flex gap-2">
-            <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition">
+            <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:bg-[#363d47] transition-colors">
               <i className="fa-solid fa-file-csv mr-1" />Import CSV
             </button>
             <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCsvImport} className="hidden" />
-            <button onClick={addRecipient} className="px-3 py-1.5 rounded-full text-[11px] font-semibold bg-teal-100 text-teal-700 hover:bg-teal-200 transition">
+            <button onClick={addRecipient} className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#5ec1ca]/20 text-[#5ec1ca] border border-[#5ec1ca]/30 hover:bg-[#5ec1ca]/30 transition-colors">
               <i className="fa-solid fa-plus mr-1" />Add Recipient
             </button>
           </div>
@@ -657,26 +653,26 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
           {recipients.map((r, i) => (
             <div key={i} className="flex items-center gap-2">
               <input value={r.display_name} onChange={e => updateRecipient(i, { display_name: e.target.value })}
-                className="flex-1 px-2 py-1.5 text-sm rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-teal-400" placeholder="Name" />
+                className="flex-1 bg-[#272C33] text-neutral-200 text-[11px] rounded px-2 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca]" placeholder="Name" />
               <input value={r.email} onChange={e => updateRecipient(i, { email: e.target.value })}
-                className="flex-1 px-2 py-1.5 text-sm rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-teal-400" placeholder="email@example.com" />
-              <button onClick={() => removeRecipient(i)} className="text-slate-300 hover:text-red-400"><i className="fa-solid fa-xmark" /></button>
+                className="flex-1 bg-[#272C33] text-neutral-200 text-[11px] rounded px-2 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca]" placeholder="email@example.com" />
+              <button onClick={() => removeRecipient(i)} className="text-neutral-600 hover:text-red-400 text-xs"><i className="fa-solid fa-xmark" /></button>
             </div>
           ))}
-          {recipients.length === 0 && <p className="text-xs text-slate-300 text-center py-4">No recipients added yet.</p>}
+          {recipients.length === 0 && <p className="text-[10px] text-neutral-600 text-center py-4">No recipients added yet.</p>}
         </div>
       </div>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-xs text-red-400">{error}</p>}
 
       {/* Submit */}
-      <div className="flex gap-3 pt-2">
+      <div className="flex gap-2 pt-2">
         <button disabled={saving} onClick={() => submit(false)}
-          className="px-5 py-2.5 rounded-full text-xs font-semibold bg-slate-200 text-slate-600 hover:bg-slate-300 disabled:opacity-50 transition">
+          className="px-4 py-2 rounded text-[11px] font-semibold bg-[#2f353d] text-neutral-300 border border-[#3a424d] hover:bg-[#363d47] disabled:opacity-50 transition-colors">
           <i className="fa-solid fa-floppy-disk mr-1.5" />Save as Draft
         </button>
         <button disabled={saving} onClick={() => submit(true)}
-          className="px-5 py-2.5 rounded-full text-xs font-semibold bg-gradient-to-r from-teal-500 to-teal-400 text-white hover:shadow-lg disabled:opacity-50 transition">
+          className="px-4 py-2 rounded text-[11px] font-semibold bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9] disabled:opacity-50 transition-colors">
           <i className="fa-solid fa-rocket mr-1.5" />Save & Activate Now
         </button>
       </div>
