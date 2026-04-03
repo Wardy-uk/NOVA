@@ -87,6 +87,7 @@ const AREA_DEFS = [
   { id: 'sales', label: 'Sales Hotbox' },
   { id: 'onboarding', label: 'Onboarding' },
   { id: 'accounts', label: 'Account Management' },
+  { id: 'people', label: 'People / Surveys' },
   { id: 'kpis', label: 'KPIs' },
   { id: 'qa', label: 'QA' },
 ] as const;
