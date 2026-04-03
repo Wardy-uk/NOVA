@@ -35,10 +35,10 @@ import type { CustomRole } from '../middleware/auth.js';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 
 const DEFAULT_CUSTOM_ROLES: CustomRole[] = [
-  { id: 'editor', name: 'Editor', areas: { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit' } },
-  { id: 'design', name: 'Design', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'edit', accounts: 'view', azdo_push: 'edit', kpis: 'view' } },
-  { id: 'viewer', name: 'Viewer', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', kpis: 'hidden' } },
-  { id: 'report_viewer', name: 'Report Viewer', areas: { command: 'view', nova_features: 'hidden', servicedesk: 'view', sales: 'hidden', onboarding: 'hidden', accounts: 'hidden', kpis: 'view' } },
+  { id: 'editor', name: 'Editor', areas: { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'view', kpis: 'edit' } },
+  { id: 'design', name: 'Design', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'edit', accounts: 'view', people: 'view', azdo_push: 'edit', kpis: 'view' } },
+  { id: 'viewer', name: 'Viewer', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden' } },
+  { id: 'report_viewer', name: 'Report Viewer', areas: { command: 'view', nova_features: 'hidden', servicedesk: 'view', sales: 'hidden', onboarding: 'hidden', accounts: 'hidden', people: 'hidden', kpis: 'view' } },
 ];
 
 function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {

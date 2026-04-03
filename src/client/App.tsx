@@ -323,7 +323,7 @@ export function App() {
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
     userRole.split(',').map(r => r.trim()).includes('admin')
-      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit' }
+      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit' }
       : DEFAULT_AREA_ACCESS,
   );
   useEffect(() => {
