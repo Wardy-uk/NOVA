@@ -146,7 +146,7 @@ const AREAS: Record<Area, AreaDef> = {
     ],
   },
   people: {
-    label: 'People',
+    label: 'Surveys',
     defaultView: 'surveys',
     tabs: [
       { view: 'surveys', label: 'Team Surveys' },
