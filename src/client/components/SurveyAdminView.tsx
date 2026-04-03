@@ -295,16 +295,14 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                 <i className="fa-solid fa-rotate-right mr-1.5" />Create Follow-up Now
               </button>
             )}
-            {detail.status === 'draft' && (
-              <button disabled={actionLoading} onClick={async () => {
-                if (!confirm('Delete this draft survey?')) return;
-                await doAction(`/api/surveys/${detail.id}`, 'DELETE');
-                setSelectedId(null);
-              }}
-                className="px-3 py-1.5 rounded text-[10px] font-semibold bg-red-900/30 text-red-400 border border-red-800/50 hover:bg-red-900/50 disabled:opacity-50 transition-colors">
-                <i className="fa-solid fa-trash mr-1.5" />Delete
-              </button>
-            )}
+            <button disabled={actionLoading} onClick={async () => {
+              if (!confirm(`Delete this survey "${detail.title}"? This cannot be undone.`)) return;
+              await doAction(`/api/surveys/${detail.id}`, 'DELETE');
+              setSelectedId(null);
+            }}
+              className="px-3 py-1.5 rounded text-[10px] font-semibold bg-red-900/30 text-red-400 border border-red-800/50 hover:bg-red-900/50 disabled:opacity-50 transition-colors">
+              <i className="fa-solid fa-trash mr-1.5" />Delete
+            </button>
           </div>
         )}
 

@@ -558,13 +558,12 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     res.json({ ok: true });
   });
 
-  // ── Admin: delete draft survey ──
+  // ── Admin: delete survey (any status) ──
   router.delete('/:id', (req, res) => {
     if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
     if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
-    if (survey.status !== 'draft') { res.status(400).json({ ok: false, error: 'Only draft surveys can be deleted' }); return; }
 
     db.run('DELETE FROM survey_responses WHERE survey_id = ?', [survey.id]);
     db.run('DELETE FROM survey_recipients WHERE survey_id = ?', [survey.id]);
