@@ -108,6 +108,7 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [followUpFromId, setFollowUpFromId] = useState<number | null>(null);
 
   const fetchSurveys = useCallback(async () => {
     setLoading(true);
@@ -262,6 +263,31 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
               <button onClick={() => handleExport(detail.id)}
                 className="px-3 py-1.5 rounded text-[10px] font-semibold bg-purple-900/40 text-purple-400 border border-purple-800/50 hover:bg-purple-900/60 transition-colors">
                 <i className="fa-solid fa-file-csv mr-1.5" />Export CSV
+              </button>
+            )}
+            {detail.status === 'closed' && (
+              <button disabled={actionLoading} onClick={async () => {
+                setActionLoading(true);
+                try {
+                  const res = await fetch(`/api/surveys/${detail.id}/follow-up`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({}),
+                  });
+                  const json = await res.json();
+                  if (json.ok) {
+                    setSelectedId(null);
+                    fetchSurveys();
+                    setFollowUpFromId(json.data.id);
+                    setTab('list');
+                    // Select the new follow-up draft
+                    setTimeout(() => { setSelectedId(json.data.id); setDetailTab('recipients'); }, 300);
+                  } else { setError(json.error || 'Failed to create follow-up'); }
+                } catch { setError('Network error'); }
+                setActionLoading(false);
+              }}
+                className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#5ec1ca]/20 text-[#5ec1ca] border border-[#5ec1ca]/30 hover:bg-[#5ec1ca]/30 disabled:opacity-50 transition-colors">
+                <i className="fa-solid fa-rotate-right mr-1.5" />Create Follow-up Now
               </button>
             )}
             {detail.status === 'draft' && (
@@ -438,7 +464,7 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
             {selectedId && renderDetail()}
           </>
         )}
-        {tab === 'create' && serverIsAdmin && <CreateSurveyForm onCreated={() => { setTab('list'); fetchSurveys(); }} />}
+        {tab === 'create' && serverIsAdmin && <CreateSurveyForm surveys={surveys} onCreated={() => { setTab('list'); fetchSurveys(); }} />}
       </div>
     </div>
   );
@@ -446,7 +472,7 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
 
 // ── Create Survey Form ─────────────────────────────────────────────────
 
-function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
+function CreateSurveyForm({ surveys, onCreated }: { surveys: Survey[]; onCreated: () => void }) {
   const [title, setTitle] = useState('');
   const [selectedTeams, setSelectedTeams] = useState<string[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -460,6 +486,7 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
   const [recipients, setRecipients] = useState<DraftRecipient[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [loadingFollowUp, setLoadingFollowUp] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -471,6 +498,31 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
       } catch { /* ignore */ }
     })();
   }, []);
+
+  const loadFromSurvey = async (surveyId: number) => {
+    setLoadingFollowUp(true);
+    try {
+      const res = await fetch(`/api/surveys/${surveyId}`);
+      const json = await res.json();
+      if (json.ok) {
+        const s = json.data as SurveyDetail;
+        setTitle(`${s.title} (Follow-up)`);
+        setDescription(s.description || '');
+        setSelectedTeams(s.team_name.split(',').map((t: string) => t.trim()).filter(Boolean));
+        setReminderDays(s.reminder_interval_days);
+        setQuestions(s.questions.map((q: Question) => ({
+          question_text: q.question_text,
+          question_type: q.question_type as 'scale_5' | 'open_text',
+          required: !!q.required,
+        })));
+        setRecipients(s.recipients.map((r: Recipient) => ({
+          display_name: r.display_name,
+          email: r.email,
+        })));
+      }
+    } catch { /* ignore */ }
+    setLoadingFollowUp(false);
+  };
 
   const addQuestion = () => setQuestions([...questions, { question_text: '', question_type: 'scale_5', required: true }]);
   const removeQuestion = (idx: number) => setQuestions(questions.filter((_, i) => i !== idx));
@@ -545,6 +597,29 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
 
   return (
     <div className="space-y-5">
+      {/* Follow-up from existing survey */}
+      {surveys.filter(s => s.status === 'closed' || s.status === 'active').length > 0 && (
+        <div className="bg-[#272C33] rounded-lg border border-[#3a424d]/50 p-3">
+          <div className="flex items-center gap-3">
+            <i className="fa-solid fa-rotate-right text-[#5ec1ca] text-xs" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Follow up from existing survey</span>
+            <select
+              defaultValue=""
+              onChange={e => { if (e.target.value) loadFromSurvey(Number(e.target.value)); }}
+              disabled={loadingFollowUp}
+              className={inputCls + ' flex-1 max-w-xs'}
+            >
+              <option value="">Select a survey...</option>
+              {surveys.filter(s => s.status === 'closed' || s.status === 'active').map(s => (
+                <option key={s.id} value={s.id}>{s.title} ({s.team_name})</option>
+              ))}
+            </select>
+            {loadingFollowUp && <i className="fa-solid fa-spinner fa-spin text-neutral-500 text-xs" />}
+          </div>
+          <p className="text-[9px] text-neutral-600 mt-1.5 ml-6">Copies questions, recipients and team from the selected survey</p>
+        </div>
+      )}
+
       {/* Basic info */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>

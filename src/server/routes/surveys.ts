@@ -469,6 +469,46 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     res.send(csv);
   });
 
+  // ── Admin: create follow-up (clone questions + recipients as new draft) ──
+  router.post('/:id/follow-up', (req, res) => {
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+
+    const source = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
+    if (!source) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
+
+    const { title, start_date } = req.body;
+    const newTitle = title || `${source.title} (Follow-up)`;
+
+    db.run(
+      `INSERT INTO surveys (title, description, team_name, start_date, status, reminder_interval_days, created_by)
+       VALUES (?, ?, ?, ?, 'draft', ?, ?)`,
+      [newTitle, source.description, source.team_name, start_date || null, source.reminder_interval_days, req.user.username]
+    );
+
+    const newId = (db.exec('SELECT last_insert_rowid() as id')[0].values[0][0] as number);
+
+    // Clone questions
+    const questions = queryAll<QuestionRow>(db, 'SELECT * FROM survey_questions WHERE survey_id = ? ORDER BY order_index', [source.id]);
+    for (const q of questions) {
+      db.run(
+        `INSERT INTO survey_questions (survey_id, order_index, question_text, question_type, required) VALUES (?, ?, ?, ?, ?)`,
+        [newId, q.order_index, q.question_text, q.question_type, q.required]
+      );
+    }
+
+    // Clone recipients (fresh tokens, not completed)
+    const recipients = queryAll<RecipientRow>(db, 'SELECT display_name, email FROM survey_recipients WHERE survey_id = ?', [source.id]);
+    for (const r of recipients) {
+      const token = crypto.randomUUID();
+      db.run(
+        `INSERT INTO survey_recipients (survey_id, display_name, email, token) VALUES (?, ?, ?, ?)`,
+        [newId, r.display_name, r.email, token]
+      );
+    }
+
+    res.json({ ok: true, data: { id: newId } });
+  });
+
   return router;
 }
 
