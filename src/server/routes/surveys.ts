@@ -578,6 +578,25 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     }
   });
 
+  // ── Admin: remove a recipient ──
+  router.delete('/:id/recipients/:recipientId', (req, res) => {
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+
+    const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
+    if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
+
+    const recipient = queryOne<RecipientRow>(db, 'SELECT * FROM survey_recipients WHERE id = ? AND survey_id = ?', [req.params.recipientId, survey.id]);
+    if (!recipient) { res.status(404).json({ ok: false, error: 'Recipient not found' }); return; }
+
+    // Delete their response if they completed
+    if (recipient.completed) {
+      db.run('DELETE FROM survey_responses WHERE token = ?', [recipient.token]);
+    }
+    db.run('DELETE FROM survey_recipients WHERE id = ?', [recipient.id]);
+
+    res.json({ ok: true });
+  });
+
   // ── Admin: activate survey ──
   router.post('/:id/activate', async (req, res) => {
     if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }

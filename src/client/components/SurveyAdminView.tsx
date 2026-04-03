@@ -452,11 +452,12 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                 <th className="py-2 px-3">Invited</th>
                 <th className="py-2 px-3">Completed</th>
                 <th className="py-2 px-3">Completed At</th>
+                <th className="py-2 px-3 w-8"></th>
               </tr>
             </thead>
             <tbody>
               {detail.recipients.map((r, i) => (
-                <tr key={i} className="border-b border-[#3a424d]/50">
+                <tr key={i} className="border-b border-[#3a424d]/50 group">
                   <td className="py-2 px-3 font-medium text-neutral-200">{r.display_name}</td>
                   <td className="py-2 px-3 text-neutral-400">{r.email}</td>
                   <td className="py-2 px-3">
@@ -466,6 +467,26 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                     {r.completed ? <i className="fa-solid fa-circle-check text-green-400" /> : <i className="fa-solid fa-circle-xmark text-neutral-600" />}
                   </td>
                   <td className="py-2 px-3 text-neutral-600 text-[10px]">{fmtDateTime(r.completed_at)}</td>
+                  <td className="py-2 px-3">
+                    <button
+                      disabled={actionLoading}
+                      onClick={async () => {
+                        if (!confirm(`Remove ${r.display_name} from this survey?`)) return;
+                        setActionLoading(true);
+                        try {
+                          const res = await fetch(`/api/surveys/${detail.id}/recipients/${r.id}`, { method: 'DELETE' });
+                          const json = await res.json();
+                          if (json.ok) { fetchDetail(detail.id); fetchSurveys(); }
+                          else setError(json.error || 'Failed to remove');
+                        } catch { setError('Network error'); }
+                        setActionLoading(false);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 text-neutral-600 hover:text-red-400 transition-all text-xs disabled:opacity-50"
+                      title="Remove recipient"
+                    >
+                      <i className="fa-solid fa-xmark" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
