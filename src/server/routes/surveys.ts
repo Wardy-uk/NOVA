@@ -640,6 +640,22 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     res.json({ ok: true });
   });
 
+  // ── Admin: resend invites (reset invite_sent flag and re-send) ──
+  router.post('/:id/resend-invites', async (req, res) => {
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+
+    const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
+    if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
+    if (survey.status !== 'active') { res.status(400).json({ ok: false, error: 'Survey is not active' }); return; }
+
+    // Reset all unsent flags so sendInvites picks them up
+    db.run('UPDATE survey_recipients SET invite_sent = 0 WHERE survey_id = ? AND completed = 0', [survey.id]);
+
+    const baseUrl = getSurveyBaseUrl(settingsQueries, req.get('host'));
+    const sent = await sendInvites(db, survey.id, emailService, baseUrl);
+    res.json({ ok: true, data: { invites_sent: sent } });
+  });
+
   // ── Admin: send reminders ──
   router.post('/:id/send-reminders', async (req, res) => {
     if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }

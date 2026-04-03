@@ -262,6 +262,10 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
             )}
             {detail.status === 'active' && (
               <>
+                <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/resend-invites`)}
+                  className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:bg-[#363d47] disabled:opacity-50 transition-colors">
+                  <i className="fa-solid fa-envelope mr-1.5" />Resend Invites
+                </button>
                 <button disabled={actionLoading} onClick={() => doAction(`/api/surveys/${detail.id}/send-reminders`)}
                   className="px-3 py-1.5 rounded text-[10px] font-semibold bg-amber-900/40 text-amber-400 border border-amber-800/50 hover:bg-amber-900/60 disabled:opacity-50 transition-colors">
                   <i className="fa-solid fa-bell mr-1.5" />Send Reminders
