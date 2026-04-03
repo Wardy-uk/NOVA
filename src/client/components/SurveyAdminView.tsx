@@ -778,8 +778,8 @@ function CreateSurveyForm({ surveys, onCreated }: { surveys: Survey[]; onCreated
           <div className="flex gap-2">
             {templates.length > 0 && (
               <select defaultValue="" onChange={e => { if (e.target.value) loadTemplate(e.target.value); }}
-                className="px-3 py-1.5 rounded text-[10px] font-semibold bg-purple-900/40 text-purple-400 border border-purple-800/50 outline-none cursor-pointer">
-                <option value="" disabled><i className="fa-solid fa-wand-magic-sparkles" /> Load template...</option>
+                className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#272C33] text-neutral-300 border border-[#3a424d] outline-none cursor-pointer">
+                <option value="" disabled>Load template...</option>
                 {templates.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
             )}
