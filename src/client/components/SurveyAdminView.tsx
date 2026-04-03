@@ -448,9 +448,9 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
 
 function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
   const [title, setTitle] = useState('');
-  const [teamName, setTeamName] = useState('');
+  const [selectedTeams, setSelectedTeams] = useState<string[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [customTeam, setCustomTeam] = useState(false);
+  const [customTeamInput, setCustomTeamInput] = useState('');
   const [description, setDescription] = useState('');
   const [inviteSendDate, setInviteSendDate] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -517,7 +517,7 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
   const submit = async (activate: boolean) => {
     setError('');
     if (!title.trim()) { setError('Title is required'); return; }
-    if (!teamName.trim()) { setError('Team name is required'); return; }
+    if (selectedTeams.length === 0) { setError('Select at least one team'); return; }
     if (questions.length === 0) { setError('Add at least one question'); return; }
     if (questions.some(q => !q.question_text.trim())) { setError('All questions need text'); return; }
     if (recipients.length === 0) { setError('Add at least one recipient'); return; }
@@ -526,7 +526,7 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
     setSaving(true);
     try {
       const body = {
-        title: title.trim(), description: description.trim() || null, team_name: teamName.trim(),
+        title: title.trim(), description: description.trim() || null, team_name: selectedTeams.join(', '),
         start_date: startDate || null, end_date: endDate || null,
         invite_send_date: inviteSendDate || null, reminder_interval_days: reminderDays,
         questions, recipients,
@@ -552,18 +552,52 @@ function CreateSurveyForm({ onCreated }: { onCreated: () => void }) {
           <input value={title} onChange={e => setTitle(e.target.value)} className={inputCls} placeholder="e.g. Q2 Team Satisfaction" />
         </div>
         <div>
-          <label className={labelCls}>Team *</label>
-          {teams.length > 0 && !customTeam ? (
-            <select value={teamName} onChange={e => {
-              if (e.target.value === '__custom') { setCustomTeam(true); setTeamName(''); }
-              else setTeamName(e.target.value);
-            }} className={inputCls}>
-              <option value="">Select a team...</option>
-              {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
-              <option value="__custom">Other (type below)...</option>
-            </select>
-          ) : (
-            <input value={teamName} onChange={e => setTeamName(e.target.value)} className={inputCls} placeholder="e.g. Engineering" autoFocus={customTeam} />
+          <label className={labelCls}>Team(s) *</label>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {teams.map(t => {
+              const selected = selectedTeams.includes(t.name);
+              return (
+                <button key={t.id} type="button" onClick={() => {
+                  setSelectedTeams(prev => selected ? prev.filter(n => n !== t.name) : [...prev, t.name]);
+                }}
+                  className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-colors border ${selected
+                    ? 'bg-[#5ec1ca]/20 text-[#5ec1ca] border-[#5ec1ca]/40'
+                    : 'bg-[#272C33] text-neutral-400 border-[#3a424d] hover:border-neutral-500'}`}>
+                  {selected && <i className="fa-solid fa-check mr-1 text-[8px]" />}{t.name}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex gap-2">
+            <input value={customTeamInput} onChange={e => setCustomTeamInput(e.target.value)}
+              className={inputCls + ' flex-1'} placeholder="Add custom team name..."
+              onKeyDown={e => {
+                if (e.key === 'Enter' && customTeamInput.trim()) {
+                  e.preventDefault();
+                  if (!selectedTeams.includes(customTeamInput.trim())) {
+                    setSelectedTeams(prev => [...prev, customTeamInput.trim()]);
+                  }
+                  setCustomTeamInput('');
+                }
+              }} />
+            <button type="button" onClick={() => {
+              if (customTeamInput.trim() && !selectedTeams.includes(customTeamInput.trim())) {
+                setSelectedTeams(prev => [...prev, customTeamInput.trim()]);
+                setCustomTeamInput('');
+              }
+            }} className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:bg-[#363d47] transition-colors">
+              Add
+            </button>
+          </div>
+          {selectedTeams.filter(t => !teams.find(tt => tt.name === t)).length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {selectedTeams.filter(t => !teams.find(tt => tt.name === t)).map(t => (
+                <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-[#5ec1ca]/20 text-[#5ec1ca] border border-[#5ec1ca]/40">
+                  {t}
+                  <button type="button" onClick={() => setSelectedTeams(prev => prev.filter(n => n !== t))} className="text-[#5ec1ca]/60 hover:text-[#5ec1ca] text-[8px]"><i className="fa-solid fa-xmark" /></button>
+                </span>
+              ))}
+            </div>
           )}
         </div>
         <div className="md:col-span-2">
