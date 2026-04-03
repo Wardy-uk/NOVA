@@ -114,6 +114,14 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
   const [followUpFromId, setFollowUpFromId] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editRecurrence, setEditRecurrence] = useState('');
+  const [addingRecipients, setAddingRecipients] = useState(false);
+  const [newRecipName, setNewRecipName] = useState('');
+  const [newRecipEmail, setNewRecipEmail] = useState('');
 
   const fetchSurveys = useCallback(async () => {
     setLoading(true);
@@ -295,6 +303,18 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                 <i className="fa-solid fa-rotate-right mr-1.5" />Create Follow-up Now
               </button>
             )}
+            <button onClick={() => {
+              setEditing(!editing); setAddingRecipients(false);
+              setEditTitle(detail.title); setEditDesc(detail.description || '');
+              setEditCategory((detail as any).category || ''); setEditRecurrence(String((detail as any).recurrence_interval_days || ''));
+            }}
+              className={`px-3 py-1.5 rounded text-[10px] font-semibold transition-colors ${editing ? 'bg-[#5ec1ca] text-[#272C33]' : 'bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:bg-[#363d47]'}`}>
+              <i className="fa-solid fa-pen mr-1.5" />Edit
+            </button>
+            <button onClick={() => { setAddingRecipients(!addingRecipients); setEditing(false); setNewRecipName(''); setNewRecipEmail(''); }}
+              className={`px-3 py-1.5 rounded text-[10px] font-semibold transition-colors ${addingRecipients ? 'bg-[#5ec1ca] text-[#272C33]' : 'bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:bg-[#363d47]'}`}>
+              <i className="fa-solid fa-user-plus mr-1.5" />Add Recipients
+            </button>
             <button disabled={actionLoading} onClick={async () => {
               if (!confirm(`Delete this survey "${detail.title}"? This cannot be undone.`)) return;
               await doAction(`/api/surveys/${detail.id}`, 'DELETE');
@@ -303,6 +323,94 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
               className="px-3 py-1.5 rounded text-[10px] font-semibold bg-red-900/30 text-red-400 border border-red-800/50 hover:bg-red-900/50 disabled:opacity-50 transition-colors">
               <i className="fa-solid fa-trash mr-1.5" />Delete
             </button>
+          </div>
+        )}
+
+        {/* Inline edit panel */}
+        {editing && isDetailAdmin && (
+          <div className="bg-[#272C33] rounded-lg border border-[#3a424d] p-4 mb-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Title</label>
+                <input value={editTitle} onChange={e => setEditTitle(e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Category</label>
+                <select value={editCategory} onChange={e => setEditCategory(e.target.value)} className={inputCls}>
+                  <option value="">No category</option>
+                  <option value="team_satisfaction">Team Satisfaction</option>
+                  <option value="kam_satisfaction">KAM Satisfaction</option>
+                  <option value="csm_satisfaction">CSM Satisfaction</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <label className={labelCls}>Description</label>
+                <textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={3} className={inputCls + ' resize-none'} />
+              </div>
+              <div>
+                <label className={labelCls}>Recurrence</label>
+                <select value={editRecurrence} onChange={e => setEditRecurrence(e.target.value)} className={inputCls}>
+                  {RECURRENCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button disabled={actionLoading} onClick={async () => {
+                setActionLoading(true);
+                try {
+                  const res = await fetch(`/api/surveys/${detail.id}`, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: editTitle, description: editDesc, category: editCategory || null, recurrence_interval_days: editRecurrence ? Number(editRecurrence) : null }),
+                  });
+                  const json = await res.json();
+                  if (json.ok) { setEditing(false); fetchSurveys(); fetchDetail(detail.id); }
+                  else setError(json.error || 'Save failed');
+                } catch { setError('Network error'); }
+                setActionLoading(false);
+              }}
+                className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9] disabled:opacity-50 transition-colors">
+                <i className="fa-solid fa-check mr-1" />Save Changes
+              </button>
+              <button onClick={() => setEditing(false)} className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:bg-[#363d47] transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Add recipients panel */}
+        {addingRecipients && isDetailAdmin && (
+          <div className="bg-[#272C33] rounded-lg border border-[#3a424d] p-4 mb-4 space-y-3">
+            <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">Add new recipients</p>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <label className={labelCls}>Name</label>
+                <input value={newRecipName} onChange={e => setNewRecipName(e.target.value)} className={inputCls} placeholder="Display name" />
+              </div>
+              <div className="flex-1">
+                <label className={labelCls}>Email</label>
+                <input value={newRecipEmail} onChange={e => setNewRecipEmail(e.target.value)} className={inputCls} placeholder="email@example.com"
+                  onKeyDown={e => { if (e.key === 'Enter') document.getElementById('btn-add-recip')?.click(); }} />
+              </div>
+              <button id="btn-add-recip" disabled={actionLoading || !newRecipName.trim() || !newRecipEmail.includes('@')} onClick={async () => {
+                setActionLoading(true);
+                try {
+                  const res = await fetch(`/api/surveys/${detail.id}/add-recipients`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ recipients: [{ display_name: newRecipName.trim(), email: newRecipEmail.trim() }] }),
+                  });
+                  const json = await res.json();
+                  if (json.ok) { setNewRecipName(''); setNewRecipEmail(''); fetchDetail(detail.id); fetchSurveys(); }
+                  else setError(json.error || 'Failed to add');
+                } catch { setError('Network error'); }
+                setActionLoading(false);
+              }}
+                className="px-3 py-2 rounded text-[10px] font-semibold bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9] disabled:opacity-50 transition-colors whitespace-nowrap">
+                <i className="fa-solid fa-plus mr-1" />Add & Send Invite
+              </button>
+            </div>
+            <p className="text-[9px] text-neutral-600">New recipients on active surveys are sent an invite immediately.</p>
           </div>
         )}
 

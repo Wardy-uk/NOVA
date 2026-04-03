@@ -487,24 +487,25 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     res.json({ ok: true, data: { id: surveyId } });
   });
 
-  // ── Admin: update draft survey ──
+  // ── Admin: update survey (any status — metadata always editable) ──
   router.put('/:id', (req, res) => {
     if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
     const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
     if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
-    if (survey.status !== 'draft') { res.status(400).json({ ok: false, error: 'Only draft surveys can be edited' }); return; }
 
-    const { title, description, team_name, start_date, end_date, invite_send_date, reminder_interval_days, questions, recipients } = req.body;
+    const { title, description, team_name, start_date, end_date, invite_send_date, reminder_interval_days, questions, recipients, category, recurrence_interval_days } = req.body;
 
     db.run(
-      `UPDATE surveys SET title = ?, description = ?, team_name = ?, start_date = ?, end_date = ?, invite_send_date = ?, reminder_interval_days = ? WHERE id = ?`,
+      `UPDATE surveys SET title = ?, description = ?, team_name = ?, start_date = ?, end_date = ?, invite_send_date = ?, reminder_interval_days = ?, category = ?, recurrence_interval_days = ? WHERE id = ?`,
       [title ?? survey.title, description ?? survey.description, team_name ?? survey.team_name,
        start_date ?? survey.start_date, end_date ?? survey.end_date, invite_send_date ?? survey.invite_send_date,
-       reminder_interval_days ?? survey.reminder_interval_days, survey.id]
+       reminder_interval_days ?? survey.reminder_interval_days, category !== undefined ? category : survey.category,
+       recurrence_interval_days !== undefined ? recurrence_interval_days : survey.recurrence_interval_days, survey.id]
     );
 
-    if (questions) {
+    // Questions can only be replaced on drafts (active surveys have responses linked to question IDs)
+    if (questions && survey.status === 'draft') {
       db.run('DELETE FROM survey_questions WHERE survey_id = ?', [survey.id]);
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
@@ -515,7 +516,8 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
       }
     }
 
-    if (recipients) {
+    // Full recipient replacement only on drafts; for active/scheduled, use add-recipients endpoint
+    if (recipients && survey.status === 'draft') {
       db.run('DELETE FROM survey_recipients WHERE survey_id = ?', [survey.id]);
       for (const r of recipients) {
         const token = crypto.randomUUID();
@@ -527,6 +529,53 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     }
 
     res.json({ ok: true });
+  });
+
+  // ── Admin: add recipients to an existing survey (any status) ──
+  router.post('/:id/add-recipients', async (req, res) => {
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+
+    const survey = queryOne<SurveyRow>(db, 'SELECT * FROM surveys WHERE id = ?', [req.params.id]);
+    if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
+
+    const { recipients } = req.body;
+    if (!recipients?.length) { res.status(400).json({ ok: false, error: 'No recipients provided' }); return; }
+
+    // Get existing emails to avoid duplicates
+    const existing = queryAll<RecipientRow>(db, 'SELECT email FROM survey_recipients WHERE survey_id = ?', [survey.id]);
+    const existingEmails = new Set(existing.map(r => r.email.toLowerCase()));
+
+    let added = 0;
+    for (const r of recipients) {
+      if (existingEmails.has(r.email.toLowerCase())) continue;
+      const token = crypto.randomUUID();
+      db.run(
+        `INSERT INTO survey_recipients (survey_id, display_name, email, token) VALUES (?, ?, ?, ?)`,
+        [survey.id, r.display_name, r.email, token]
+      );
+      added++;
+    }
+
+    // If survey is active, send invites to the new recipients immediately
+    if (survey.status === 'active' && added > 0) {
+      const baseUrl = getSurveyBaseUrl(settingsQueries, req.get('host'));
+      const newRecipients = queryAll<RecipientRow>(
+        db, 'SELECT * FROM survey_recipients WHERE survey_id = ? AND invite_sent = 0', [survey.id]
+      );
+      let sent = 0;
+      for (const nr of newRecipients) {
+        const link = `${baseUrl}/survey/${nr.token}`;
+        const html = buildSurveyInviteHtml(survey.title, survey.team_name, survey.description, link);
+        try {
+          await emailService.send({ to: nr.email, subject: `Survey: ${survey.title}`, text: `Survey invite: ${link}`, html });
+          db.run('UPDATE survey_recipients SET invite_sent = 1 WHERE id = ?', [nr.id]);
+          sent++;
+        } catch { /* ignore individual failures */ }
+      }
+      res.json({ ok: true, data: { added, invites_sent: sent } });
+    } else {
+      res.json({ ok: true, data: { added } });
+    }
   });
 
   // ── Admin: activate survey ──
