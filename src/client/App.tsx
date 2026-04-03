@@ -41,6 +41,8 @@ import { FeedbackModal } from './components/FeedbackModal.js';
 import { ReleaseNotesModal } from './components/ReleaseNotesModal.js';
 import { TourOverlay, useTour } from './components/TourOverlay.js';
 import { SetupPortal } from './components/SetupPortal.js';
+import { SurveyAdminView } from './components/SurveyAdminView.js';
+import { SurveyRespondView } from './components/SurveyRespondView.js';
 import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
 import { TrendsView } from './components/TrendsView.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
@@ -61,6 +63,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'qa'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support'
   | 'backfill-status'
+  | 'surveys'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -101,6 +104,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'standup', label: 'NOVA Briefing' },
       { view: 'team-workload', label: 'My Team' },
       { view: 'chat', label: 'My Chat' },
+      { view: 'surveys', label: 'Surveys' },
     ],
   },
   servicedesk: {
@@ -242,6 +246,10 @@ export function App() {
   // Customer setup portal — standalone public page (no NOVA auth)
   const setupMatch = window.location.pathname.match(/^\/setup\/([a-f0-9]{64})$/);
   if (setupMatch) return <SetupPortal token={setupMatch[1]} />;
+
+  // Public survey response page — token-based, no auth
+  const surveyMatch = window.location.pathname.match(/^\/survey\/([0-9a-f-]{36})$/);
+  if (surveyMatch) return <SurveyRespondView token={surveyMatch[1]} />;
 
   // Public wallboard — no auth required
   if (window.location.hash === '#wallboard') {
@@ -1001,6 +1009,11 @@ export function App() {
           {/* Sales Hotbox */}
           {view === 'sales-hotbox' && (
             <SalesHotboxView canWrite={areaAccess.sales === 'edit'} />
+          )}
+
+          {/* Surveys */}
+          {view === 'surveys' && (
+            <SurveyAdminView />
           )}
 
           {/* Administration */}

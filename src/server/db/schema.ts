@@ -1139,6 +1139,65 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  // ── Team Surveys ──────────────────────────────────────────────────────
+  database.run(`
+    CREATE TABLE IF NOT EXISTS surveys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      team_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft',
+      start_date TEXT,
+      end_date TEXT,
+      invite_send_date TEXT,
+      reminder_interval_days INTEGER DEFAULT 2,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      closed_at TEXT,
+      created_by TEXT NOT NULL
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS survey_questions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      survey_id INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+      order_index INTEGER NOT NULL,
+      question_text TEXT NOT NULL,
+      question_type TEXT NOT NULL,
+      required INTEGER NOT NULL DEFAULT 1
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS survey_recipients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      survey_id INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+      display_name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      invite_sent INTEGER NOT NULL DEFAULT 0,
+      last_reminder_sent TEXT,
+      completed INTEGER NOT NULL DEFAULT 0,
+      completed_at TEXT
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS survey_responses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      survey_id INTEGER NOT NULL REFERENCES surveys(id),
+      token TEXT NOT NULL UNIQUE REFERENCES survey_recipients(token),
+      submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      answers TEXT NOT NULL
+    )
+  `);
+
+  database.run(`CREATE INDEX IF NOT EXISTS idx_surveys_status ON surveys(status)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_survey_questions_survey ON survey_questions(survey_id, order_index)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_survey_recipients_survey ON survey_recipients(survey_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_survey_recipients_token ON survey_recipients(token)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_survey_responses_survey ON survey_responses(survey_id)`);
+
   saveDb();
 }
 

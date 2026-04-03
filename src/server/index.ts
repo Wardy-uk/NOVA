@@ -74,6 +74,7 @@ import { logWallboard, getWallboardLogs, clearWallboardLogs, logWallboardClient 
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
+import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
 
 dotenv.config();
 
@@ -314,6 +315,9 @@ async function main() {
   });
   app.use('/api/public/setup', portalLimiter, createSetupPortalPublicRoutes(portalQueries, brandSettingsQueries, branchQueries, logoQueries, deliveryQueries, portalAccountQueries, districtQueries));
 
+  // Public survey routes — token-based, no auth
+  app.use('/api/survey', createSurveyPublicRoutes(db));
+
   // KPI Wallboard — public route for TV displays (no auth required)
   app.use('/api/public/wallboard', createKpiWallboardRoutes(settingsQueries));
 
@@ -465,6 +469,7 @@ async function main() {
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/contracts', createContractsRoutes(bcCustomerQueries, contractsQueries, settingsQueries));
   app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, contractTemplateQueries, settingsQueries));
+  app.use('/api/surveys', createSurveyRoutes(db, settingsQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
 
@@ -1236,6 +1241,9 @@ ${panelHtml}
   // Also save after the initial auto-seed completes
   saveDb();
 
+  // Survey scheduler: auto-activate, auto-close, send invites/reminders every 15 min
+  const surveyTimer = setInterval(() => runSurveyScheduler(db, settingsQueries), 15 * 60 * 1000);
+
   // Expired portal token cleanup: every 6 hours
   const portalCleanupTimer = setInterval(() => {
     try {
@@ -1262,6 +1270,7 @@ ${panelHtml}
     clearInterval(workflowTimer);
     clearInterval(ptScanTimer);
     clearInterval(portalCleanupTimer);
+    clearInterval(surveyTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     watcher.stop();
     try { saveDb(); console.log('[N.O.V.A] Database saved to disk'); } catch (err) {
