@@ -484,7 +484,7 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                       className="text-neutral-600 hover:text-red-400 transition-colors text-xs disabled:opacity-50"
                       title="Remove recipient"
                     >
-                      <i className="fa-solid fa-xmark" />
+                      <i className="fa-solid fa-times" />
                     </button>
                   </td>
                 </tr>
