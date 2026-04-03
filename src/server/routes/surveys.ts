@@ -291,28 +291,46 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
 
     const questions = queryAll<QuestionRow>(db, 'SELECT * FROM survey_questions WHERE survey_id = ? ORDER BY order_index', [survey.id]);
 
-    // Only admins see recipient list
-    const recipients = admin
-      ? queryAll<RecipientRow>(db, 'SELECT id, survey_id, display_name, email, invite_sent, completed, completed_at FROM survey_recipients WHERE survey_id = ?', [survey.id])
-      : [];
-
-    const aggregated = aggregateResults(db, survey.id, questions);
-
     const total = queryOne<{ c: number }>(db, 'SELECT COUNT(*) as c FROM survey_recipients WHERE survey_id = ?', [survey.id])?.c ?? 0;
     const done = queryOne<{ c: number }>(db, 'SELECT COUNT(*) as c FROM survey_recipients WHERE survey_id = ? AND completed = 1', [survey.id])?.c ?? 0;
 
-    res.json({
-      ok: true,
-      data: {
-        ...survey,
-        questions,
-        recipients,
-        results: aggregated,
-        recipients_total: total,
-        recipients_completed: done,
-        is_admin: admin,
-      },
-    });
+    if (admin) {
+      // Admins: full recipient list + aggregated results
+      const recipients = queryAll<RecipientRow>(db, 'SELECT id, survey_id, display_name, email, invite_sent, completed, completed_at FROM survey_recipients WHERE survey_id = ?', [survey.id]);
+      const aggregated = aggregateResults(db, survey.id, questions);
+
+      res.json({
+        ok: true,
+        data: {
+          ...survey, questions, recipients, results: aggregated,
+          recipients_total: total, recipients_completed: done, is_admin: true,
+        },
+      });
+    } else {
+      // Non-admins: their own token + completed status, NO aggregated results
+      const user = userQueries.getById(req.user.id);
+      const myRecipient = queryOne<RecipientRow>(
+        db, 'SELECT * FROM survey_recipients WHERE survey_id = ? AND email = ?', [survey.id, user!.email]
+      );
+
+      // If they completed, return their own answers
+      let my_answers: Array<{ question_id: number; value: string | number }> | null = null;
+      if (myRecipient?.completed) {
+        const resp = queryOne<ResponseRow>(db, 'SELECT * FROM survey_responses WHERE token = ?', [myRecipient.token]);
+        if (resp) my_answers = JSON.parse(resp.answers);
+      }
+
+      res.json({
+        ok: true,
+        data: {
+          ...survey, questions, recipients: [], results: [],
+          recipients_total: total, recipients_completed: done, is_admin: false,
+          my_token: myRecipient?.token ?? null,
+          my_completed: !!myRecipient?.completed,
+          my_answers,
+        },
+      });
+    }
   });
 
   // ── Admin: create survey ──

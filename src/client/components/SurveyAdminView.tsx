@@ -41,6 +41,9 @@ interface SurveyDetail extends Survey {
   recipients: Recipient[];
   results: AggResult[];
   is_admin: boolean;
+  my_token?: string | null;
+  my_completed?: boolean;
+  my_answers?: Array<{ question_id: number; value: string | number }> | null;
 }
 
 interface DraftQuestion {
@@ -317,10 +320,18 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
               Recipients
             </button>
           )}
-          <button onClick={() => setDetailTab('results')}
-            className={`px-4 py-2 text-[10px] font-semibold uppercase tracking-wider rounded-t transition-colors ${detailTab === 'results' ? 'text-[#5ec1ca] border-b-2 border-[#5ec1ca]' : 'text-neutral-500 hover:text-neutral-300'}`}>
-            Results
-          </button>
+          {isDetailAdmin && (
+            <button onClick={() => setDetailTab('results')}
+              className={`px-4 py-2 text-[10px] font-semibold uppercase tracking-wider rounded-t transition-colors ${detailTab === 'results' ? 'text-[#5ec1ca] border-b-2 border-[#5ec1ca]' : 'text-neutral-500 hover:text-neutral-300'}`}>
+              Results
+            </button>
+          )}
+          {!isDetailAdmin && (
+            <button onClick={() => setDetailTab('results')}
+              className={`px-4 py-2 text-[10px] font-semibold uppercase tracking-wider rounded-t transition-colors ${detailTab === 'results' ? 'text-[#5ec1ca] border-b-2 border-[#5ec1ca]' : 'text-neutral-500 hover:text-neutral-300'}`}>
+              {detail.my_completed ? 'My Response' : 'Respond'}
+            </button>
+          )}
           <button onClick={() => setDetailTab('questions')}
             className={`px-4 py-2 text-[10px] font-semibold uppercase tracking-wider rounded-t transition-colors ${detailTab === 'questions' ? 'text-[#5ec1ca] border-b-2 border-[#5ec1ca]' : 'text-neutral-500 hover:text-neutral-300'}`}>
             Questions
@@ -357,8 +368,8 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
           </table>
         )}
 
-        {/* Results tab */}
-        {detailTab === 'results' && (
+        {/* Results tab — admin: aggregated results, non-admin: respond/view own */}
+        {detailTab === 'results' && isDetailAdmin && (
           <div className="space-y-4">
             {detail.results.length === 0 || detail.recipients_completed === 0 ? (
               <p className="text-xs text-neutral-500 py-8 text-center">No responses yet.</p>
@@ -415,6 +426,11 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
               ))
             )}
           </div>
+        )}
+
+        {/* Non-admin: inline respond / view own response */}
+        {detailTab === 'results' && !isDetailAdmin && (
+          <InlineSurveyResponse detail={detail} onSubmitted={() => fetchDetail(detail.id)} />
         )}
 
         {/* Questions tab */}
@@ -801,6 +817,177 @@ function CreateSurveyForm({ surveys, onCreated }: { surveys: Survey[]; onCreated
           className="px-4 py-2 rounded text-[11px] font-semibold bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9] disabled:opacity-50 transition-colors">
           <i className="fa-solid fa-rocket mr-1.5" />Save & Activate Now
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Inline Survey Response (non-admin, within NOVA) ────────────────────
+
+const SCALE_LABELS = ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree'];
+
+function InlineSurveyResponse({ detail, onSubmitted }: { detail: SurveyDetail; onSubmitted: () => void }) {
+  const [answers, setAnswers] = useState<Record<number, string | number>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+
+  // Pre-fill if already completed
+  useEffect(() => {
+    if (detail.my_completed && detail.my_answers) {
+      const filled: Record<number, string | number> = {};
+      for (const a of detail.my_answers) filled[a.question_id] = a.value;
+      setAnswers(filled);
+    }
+  }, [detail.my_completed, detail.my_answers]);
+
+  const readOnly = detail.my_completed || submitted;
+  const isActive = detail.status === 'active';
+
+  const allRequiredAnswered = detail.questions
+    .filter(q => q.required)
+    .every(q => {
+      const a = answers[q.id];
+      if (q.question_type === 'scale_5') return typeof a === 'number';
+      return typeof a === 'string' && a.trim().length > 0;
+    });
+
+  const handleSubmit = async () => {
+    if (!detail.my_token || !allRequiredAnswered) return;
+    setSubmitting(true);
+    setSubmitError('');
+    try {
+      const payload = detail.questions
+        .filter(q => answers[q.id] !== undefined && answers[q.id] !== '')
+        .map(q => ({ question_id: q.id, value: answers[q.id] }));
+
+      const res = await fetch(`/api/survey/${detail.my_token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers: payload }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setSubmitted(true);
+        onSubmitted();
+      } else {
+        setSubmitError(json.error || 'Failed to submit');
+      }
+    } catch { setSubmitError('Network error'); }
+    setSubmitting(false);
+  };
+
+  if (readOnly) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 mb-2">
+          <i className="fa-solid fa-circle-check text-green-400" />
+          <span className="text-[11px] text-green-400 font-semibold">
+            {submitted ? 'Response submitted successfully' : 'You have already completed this survey'}
+          </span>
+        </div>
+        {detail.questions.map((q, i) => {
+          const a = answers[q.id];
+          return (
+            <div key={q.id} className="bg-[#272C33] rounded-lg border border-[#3a424d]/50 p-3">
+              <div className="flex items-start gap-2 mb-2">
+                <span className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-full bg-[#5ec1ca]/20 text-[#5ec1ca] text-[9px] font-bold">{i + 1}</span>
+                <p className="text-[11px] text-neutral-200">{q.question_text}</p>
+              </div>
+              {q.question_type === 'scale_5' ? (
+                <div className="flex gap-1.5 ml-7">
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <div key={n} className={`px-2.5 py-1 rounded text-[10px] font-semibold border ${a === n ? 'bg-[#5ec1ca]/20 text-[#5ec1ca] border-[#5ec1ca]/40' : 'bg-[#2f353d] text-neutral-600 border-[#3a424d]/30'}`}>
+                      {n}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="ml-7 text-[11px] text-neutral-400 bg-[#2f353d] rounded px-2.5 py-1.5 border border-[#3a424d]/30">{a || '—'}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (!isActive) {
+    return (
+      <div className="text-center py-8">
+        <i className="fa-solid fa-lock text-neutral-600 text-2xl mb-2" />
+        <p className="text-xs text-neutral-500">This survey is no longer accepting responses.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 mb-2">
+        <i className="fa-solid fa-shield-halved text-green-400 text-xs" />
+        <span className="text-[10px] text-neutral-500">Your response is completely anonymous</span>
+      </div>
+
+      {detail.questions.map((q, i) => (
+        <div key={q.id} className="bg-[#272C33] rounded-lg border border-[#3a424d]/50 p-3">
+          <div className="flex items-start gap-2 mb-2.5">
+            <span className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-full bg-[#5ec1ca]/20 text-[#5ec1ca] text-[9px] font-bold">{i + 1}</span>
+            <div>
+              <p className="text-[11px] font-medium text-neutral-200">{q.question_text}</p>
+              {!q.required && <span className="text-[9px] text-neutral-600 uppercase">Optional</span>}
+            </div>
+          </div>
+
+          {q.question_type === 'scale_5' ? (
+            <div className="flex gap-1.5 ml-7">
+              {[1, 2, 3, 4, 5].map(n => {
+                const selected = answers[q.id] === n;
+                return (
+                  <button key={n} onClick={() => setAnswers(prev => ({ ...prev, [q.id]: n }))}
+                    className={`flex flex-col items-center gap-0.5 px-3 py-2 rounded border transition-colors cursor-pointer ${
+                      selected
+                        ? 'bg-[#5ec1ca]/20 text-[#5ec1ca] border-[#5ec1ca]/40'
+                        : 'bg-[#2f353d] text-neutral-400 border-[#3a424d] hover:border-neutral-500'
+                    }`}>
+                    <span className="text-sm font-bold">{n}</span>
+                    <span className="text-[8px] leading-tight">{SCALE_LABELS[n - 1]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="ml-7">
+              <textarea
+                value={(answers[q.id] as string) || ''}
+                onChange={e => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                rows={2}
+                maxLength={2000}
+                className="w-full bg-[#2f353d] text-neutral-200 text-[11px] rounded px-2.5 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors resize-none placeholder:text-neutral-600"
+                placeholder="Type your answer here..."
+              />
+              <div className="text-right text-[9px] text-neutral-600 mt-0.5">
+                {((answers[q.id] as string) || '').length}/2000
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {submitError && <p className="text-xs text-red-400">{submitError}</p>}
+
+      <div className="pt-2">
+        <button
+          disabled={!allRequiredAnswered || submitting}
+          onClick={handleSubmit}
+          className={`px-4 py-2 rounded text-[11px] font-semibold transition-colors ${
+            allRequiredAnswered
+              ? 'bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9]'
+              : 'bg-[#2f353d] text-neutral-600 cursor-not-allowed'
+          } disabled:opacity-50`}
+        >
+          {submitting ? <><i className="fa-solid fa-spinner fa-spin mr-1.5" />Submitting...</> : <><i className="fa-solid fa-paper-plane mr-1.5" />Submit Response</>}
+        </button>
+        {!allRequiredAnswered && <p className="text-[9px] text-neutral-600 mt-1">Answer all required questions to submit</p>}
       </div>
     </div>
   );
