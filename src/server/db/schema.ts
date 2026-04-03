@@ -1197,6 +1197,12 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_survey_recipients_survey ON survey_recipients(survey_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_survey_recipients_token ON survey_recipients(token)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_survey_responses_survey ON survey_responses(survey_id)`);
+  // Survey migrations
+  try { database.run(`ALTER TABLE surveys ADD COLUMN category TEXT`); } catch { /* already exists */ }
+  try { database.run(`ALTER TABLE surveys ADD COLUMN recurrence_interval_days INTEGER`); } catch { /* already exists */ }
+  try { database.run(`ALTER TABLE surveys ADD COLUMN next_recurrence_date TEXT`); } catch { /* already exists */ }
+  try { database.run(`ALTER TABLE surveys ADD COLUMN parent_survey_id INTEGER`); } catch { /* already exists */ }
+  database.run(`CREATE INDEX IF NOT EXISTS idx_surveys_category ON surveys(category)`);
 
   saveDb();
 }

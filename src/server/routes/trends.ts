@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import sql from 'mssql';
+import type { Database } from 'sql.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { FileUserQueries } from '../db/user-store.js';
 
@@ -108,7 +109,7 @@ interface CheckpointMetric {
   key: string;
   label: string;
   kpiPattern?: string;
-  source?: 'qa' | 'golden' | 'derived_escalation' | 'compliance';
+  source?: 'qa' | 'golden' | 'derived_escalation' | 'compliance' | 'survey';
   target: number | null;
   direction: string;
   expandable: boolean;
@@ -212,9 +213,13 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
   { key: 'fcr', label: 'FCR Rate %', kpiPattern: 'FCR%', target: null, direction: 'higher', expandable: false },
   { key: 'l1_resolution', label: '1st Line Resolution Rate %', kpiPattern: '1st Line Resolution Rate%', target: null, direction: 'higher', expandable: false },
   { key: 'bug_ack', label: 'Bug Ack Time (hours)', kpiPattern: 'Bug Escalation-to-Ack%hours%', target: null, direction: 'lower', expandable: false },
+  // Survey satisfaction scores (sourced from local SQLite, not SQL Server)
+  { key: 'survey_team_sat', label: 'Support Team Satisfaction', source: 'survey', target: 4.0, direction: 'higher', expandable: false, kpiPattern: 'team_satisfaction' },
+  { key: 'survey_kam_sat', label: 'KAM Satisfaction with Support', source: 'survey', target: 4.0, direction: 'higher', expandable: false, kpiPattern: 'kam_satisfaction' },
+  { key: 'survey_csm_sat', label: 'CSM Satisfaction with Support', source: 'survey', target: 4.0, direction: 'higher', expandable: false, kpiPattern: 'csm_satisfaction' },
 ];
 
-export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQueries: FileUserQueries): Router {
+export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQueries: FileUserQueries, localDb?: Database): Router {
   const router = Router();
 
   let pool: sql.ConnectionPool | null = null;
@@ -685,6 +690,35 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
               tierRow.checkpoints[col.label] = await fetchKpiAtDate(tierPattern, col.end);
             }
             row.tiers.push(tierRow);
+          }
+
+        } else if (metric.source === 'survey' && localDb) {
+          // Survey satisfaction score from local SQLite — show latest score for this category
+          const category = metric.kpiPattern as string;
+          const result = localDb.exec(
+            `SELECT s.id, s.closed_at, s.start_date, s.created_at FROM surveys s
+             WHERE s.category = ? AND s.status IN ('active', 'closed')
+             ORDER BY COALESCE(s.closed_at, s.start_date, s.created_at) DESC LIMIT 1`,
+            [category]
+          );
+          if (result.length > 0 && result[0].values.length > 0) {
+            const surveyId = result[0].values[0][0] as number;
+            const responses = localDb.exec('SELECT answers FROM survey_responses WHERE survey_id = ?', [surveyId]);
+            const scaleQs = localDb.exec(`SELECT id FROM survey_questions WHERE survey_id = ? AND question_type = 'scale_5'`, [surveyId]);
+            const qIds = new Set((scaleQs[0]?.values ?? []).map(v => v[0] as number));
+
+            let total = 0, count = 0;
+            for (const row2 of (responses[0]?.values ?? [])) {
+              const answers = JSON.parse(row2[0] as string) as Array<{ question_id: number; value: number }>;
+              for (const a of answers) {
+                if (qIds.has(a.question_id)) { const v = Number(a.value); if (!isNaN(v) && v >= 1 && v <= 5) { total += v; count++; } }
+              }
+            }
+            const avg = count > 0 ? Math.round((total / count) * 100) / 100 : null;
+            // Set the same score for all columns (it's a point-in-time latest score)
+            for (const col of columns) { row.checkpoints[col.label] = avg; }
+          } else {
+            for (const col of columns) { row.checkpoints[col.label] = null; }
           }
 
         } else {

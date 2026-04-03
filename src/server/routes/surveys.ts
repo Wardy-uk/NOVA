@@ -12,7 +12,77 @@ interface SurveyRow {
   status: string; start_date: string | null; end_date: string | null;
   invite_send_date: string | null; reminder_interval_days: number;
   created_at: string; closed_at: string | null; created_by: string;
+  category: string | null; recurrence_interval_days: number | null;
+  next_recurrence_date: string | null; parent_survey_id: number | null;
 }
+
+// ── Survey categories & templates ──────────────────────────────────────
+
+const SURVEY_CATEGORIES = [
+  { id: 'team_satisfaction', label: 'Team Satisfaction' },
+  { id: 'kam_satisfaction', label: 'Key Account Management Satisfaction' },
+  { id: 'csm_satisfaction', label: 'Customer Success Management Satisfaction' },
+  { id: 'custom', label: 'Custom' },
+] as const;
+
+interface SurveyTemplate {
+  id: string; label: string; category: string; description: string;
+  questions: Array<{ question_text: string; question_type: string; required: boolean }>;
+}
+
+const SURVEY_TEMPLATES: SurveyTemplate[] = [
+  {
+    id: 'support_team_satisfaction',
+    label: 'Support Team Satisfaction',
+    category: 'team_satisfaction',
+    description: 'Baseline satisfaction survey for your support team',
+    questions: [
+      { question_text: 'Overall, how satisfied are you in your role right now?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you feel your workload is manageable?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you have the tools and information you need to do your job well?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you know what is expected of you in your role?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you feel supported when you are stuck or struggling?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you feel like you are learning and growing in this role?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you feel like part of a team that works well together?', question_type: 'scale_5', required: true },
+      { question_text: 'What one thing would make the biggest difference to how you feel at work?', question_type: 'open_text', required: true },
+      { question_text: 'Is there anything else you want to share?', question_type: 'open_text', required: false },
+    ],
+  },
+  {
+    id: 'kam_satisfaction',
+    label: 'Key Account Management Satisfaction',
+    category: 'kam_satisfaction',
+    description: 'How satisfied are your Key Account Managers with the support they receive?',
+    questions: [
+      { question_text: 'How satisfied are you with the quality of support your clients receive?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you feel support tickets for your clients are resolved in a timely manner?', question_type: 'scale_5', required: true },
+      { question_text: 'How well does the support team communicate with you about client issues?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you feel confident handing client issues to the support team?', question_type: 'scale_5', required: true },
+      { question_text: 'How would you rate the escalation process when issues arise?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you feel your feedback about support processes is heard and acted on?', question_type: 'scale_5', required: true },
+      { question_text: 'Overall, how satisfied are you with the support provided to your accounts?', question_type: 'scale_5', required: true },
+      { question_text: 'What one improvement would make the biggest difference to how support helps your accounts?', question_type: 'open_text', required: true },
+      { question_text: 'Any other comments or feedback?', question_type: 'open_text', required: false },
+    ],
+  },
+  {
+    id: 'csm_satisfaction',
+    label: 'Customer Success Management Satisfaction',
+    category: 'csm_satisfaction',
+    description: 'How satisfied are your Customer Success Managers with the support experience?',
+    questions: [
+      { question_text: 'How satisfied are you with the onboarding support your customers receive?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you feel the support team understands your customers\' needs?', question_type: 'scale_5', required: true },
+      { question_text: 'How well are customer issues prioritised by the support team?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you feel proactive about preventing customer issues, based on the support you get?', question_type: 'scale_5', required: true },
+      { question_text: 'How would you rate the quality of communication from support to your customers?', question_type: 'scale_5', required: true },
+      { question_text: 'Do you feel the support team contributes positively to customer retention?', question_type: 'scale_5', required: true },
+      { question_text: 'Overall, how satisfied are you with the partnership between CS and support?', question_type: 'scale_5', required: true },
+      { question_text: 'What one change would most improve the CS-support relationship?', question_type: 'open_text', required: true },
+      { question_text: 'Any other comments or feedback?', question_type: 'open_text', required: false },
+    ],
+  },
+];
 
 interface QuestionRow {
   id: number; survey_id: number; order_index: number;
@@ -270,6 +340,53 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     res.json({ ok: true, data: teamsWithMembers });
   });
 
+  // ── Get survey categories + templates ──
+  router.get('/categories', (_req, res) => {
+    res.json({ ok: true, data: { categories: SURVEY_CATEGORIES, templates: SURVEY_TEMPLATES } });
+  });
+
+  // ── Get satisfaction scores (for Trends panel) ──
+  router.get('/satisfaction-scores', (req, res) => {
+    // Returns average scale_5 score for each category across all closed/active surveys
+    const categories = ['team_satisfaction', 'kam_satisfaction', 'csm_satisfaction'];
+    const scores: Record<string, { average: number | null; response_count: number; survey_count: number }> = {};
+
+    for (const cat of categories) {
+      const surveys = queryAll<SurveyRow>(db, `SELECT id FROM surveys WHERE category = ? AND status IN ('active', 'closed')`, [cat]);
+      if (surveys.length === 0) { scores[cat] = { average: null, response_count: 0, survey_count: 0 }; continue; }
+
+      // Get the most recent completed survey in this category
+      const latest = queryOne<SurveyRow>(
+        db, `SELECT * FROM surveys WHERE category = ? AND status IN ('active', 'closed') ORDER BY COALESCE(closed_at, start_date, created_at) DESC LIMIT 1`, [cat]
+      );
+      if (!latest) { scores[cat] = { average: null, response_count: 0, survey_count: surveys.length }; continue; }
+
+      const responses = queryAll<ResponseRow>(db, 'SELECT * FROM survey_responses WHERE survey_id = ?', [latest.id]);
+      const questions = queryAll<QuestionRow>(db, `SELECT id FROM survey_questions WHERE survey_id = ? AND question_type = 'scale_5'`, [latest.id]);
+      const qIds = new Set(questions.map(q => q.id));
+
+      let totalScore = 0;
+      let count = 0;
+      for (const r of responses) {
+        const answers = JSON.parse(r.answers) as Array<{ question_id: number; value: string | number }>;
+        for (const a of answers) {
+          if (qIds.has(a.question_id)) {
+            const v = Number(a.value);
+            if (!isNaN(v) && v >= 1 && v <= 5) { totalScore += v; count++; }
+          }
+        }
+      }
+
+      scores[cat] = {
+        average: count > 0 ? Math.round((totalScore / count) * 100) / 100 : null,
+        response_count: responses.length,
+        survey_count: surveys.length,
+      };
+    }
+
+    res.json({ ok: true, data: scores });
+  });
+
   // ── Get survey detail ──
   router.get('/:id', (req, res) => {
     if (!req.user) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
@@ -337,16 +454,16 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
   router.post('/', (req, res) => {
     if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
 
-    const { title, description, team_name, start_date, end_date, invite_send_date, reminder_interval_days, questions, recipients } = req.body;
+    const { title, description, team_name, start_date, end_date, invite_send_date, reminder_interval_days, questions, recipients, category, recurrence_interval_days } = req.body;
     if (!title || !team_name || !questions?.length || !recipients?.length) {
       res.status(400).json({ ok: false, error: 'Missing required fields: title, team_name, questions, recipients' });
       return;
     }
 
     db.run(
-      `INSERT INTO surveys (title, description, team_name, start_date, end_date, invite_send_date, reminder_interval_days, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [title, description || null, team_name, start_date || null, end_date || null, invite_send_date || null, reminder_interval_days ?? 2, req.user.username]
+      `INSERT INTO surveys (title, description, team_name, start_date, end_date, invite_send_date, reminder_interval_days, created_by, category, recurrence_interval_days)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [title, description || null, team_name, start_date || null, end_date || null, invite_send_date || null, reminder_interval_days ?? 2, req.user.username, category || null, recurrence_interval_days || null]
     );
 
     const surveyId = (db.exec('SELECT last_insert_rowid() as id')[0].values[0][0] as number);
@@ -513,9 +630,9 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     const newTitle = title || `${source.title} (Follow-up)`;
 
     db.run(
-      `INSERT INTO surveys (title, description, team_name, start_date, status, reminder_interval_days, created_by)
-       VALUES (?, ?, ?, ?, 'draft', ?, ?)`,
-      [newTitle, source.description, source.team_name, start_date || null, source.reminder_interval_days, req.user.username]
+      `INSERT INTO surveys (title, description, team_name, start_date, status, reminder_interval_days, created_by, category, recurrence_interval_days, parent_survey_id)
+       VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)`,
+      [newTitle, source.description, source.team_name, start_date || null, source.reminder_interval_days, req.user.username, source.category, source.recurrence_interval_days, source.id]
     );
 
     const newId = (db.exec('SELECT last_insert_rowid() as id')[0].values[0][0] as number);
@@ -654,6 +771,45 @@ export function runSurveyScheduler(db: Database, settingsQueries: FileSettingsQu
       for (const s of active) {
         const sent = await sendReminders(db, s.id, emailService, baseUrl);
         if (sent > 0) console.log(`[Surveys] Sent ${sent} reminders for "${s.title}"`);
+      }
+
+      // Auto-create recurring surveys: closed surveys with recurrence that haven't spawned a child yet
+      const recurring = queryAll<SurveyRow>(
+        db, `SELECT * FROM surveys WHERE status = 'closed' AND recurrence_interval_days IS NOT NULL AND recurrence_interval_days > 0`
+      );
+      for (const s of recurring) {
+        // Check if a child survey already exists
+        const child = queryOne<SurveyRow>(db, 'SELECT id FROM surveys WHERE parent_survey_id = ? ORDER BY id DESC LIMIT 1', [s.id]);
+        if (child) continue; // Already spawned
+
+        // Calculate next start date from closed_at + recurrence interval
+        const closedAt = s.closed_at ? new Date(s.closed_at) : new Date();
+        const nextStart = new Date(closedAt.getTime() + s.recurrence_interval_days! * 24 * 60 * 60 * 1000);
+        const nextStartStr = nextStart.toISOString();
+
+        // Create the follow-up as scheduled
+        db.run(
+          `INSERT INTO surveys (title, description, team_name, start_date, status, reminder_interval_days, created_by, category, recurrence_interval_days, parent_survey_id)
+           VALUES (?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?)`,
+          [s.title, s.description, s.team_name, nextStartStr, s.reminder_interval_days, s.created_by, s.category, s.recurrence_interval_days, s.id]
+        );
+        const newId = (db.exec('SELECT last_insert_rowid() as id')[0].values[0][0] as number);
+
+        // Clone questions
+        const questions = queryAll<QuestionRow>(db, 'SELECT * FROM survey_questions WHERE survey_id = ? ORDER BY order_index', [s.id]);
+        for (const q of questions) {
+          db.run(`INSERT INTO survey_questions (survey_id, order_index, question_text, question_type, required) VALUES (?, ?, ?, ?, ?)`,
+            [newId, q.order_index, q.question_text, q.question_type, q.required]);
+        }
+
+        // Clone recipients with fresh tokens
+        const recipients = queryAll<RecipientRow>(db, 'SELECT display_name, email FROM survey_recipients WHERE survey_id = ?', [s.id]);
+        for (const r of recipients) {
+          db.run(`INSERT INTO survey_recipients (survey_id, display_name, email, token) VALUES (?, ?, ?, ?)`,
+            [newId, r.display_name, r.email, crypto.randomUUID()]);
+        }
+
+        console.log(`[Surveys] Auto-created recurring survey "${s.title}" (id=${newId}), scheduled for ${nextStartStr}`);
       }
     } catch (err) {
       console.error('[Surveys] Scheduler error:', err instanceof Error ? err.message : err);

@@ -62,18 +62,16 @@ interface Team {
   id: number; name: string; members: TeamMember[];
 }
 
-// ── Baseline template ──────────────────────────────────────────────────
+interface CategoryDef { id: string; label: string }
+interface TemplateDef { id: string; label: string; category: string; description: string; questions: DraftQuestion[] }
 
-const BASELINE_QUESTIONS: DraftQuestion[] = [
-  { question_text: 'Overall, how satisfied are you in your role right now?', question_type: 'scale_5', required: true },
-  { question_text: 'Do you feel your workload is manageable?', question_type: 'scale_5', required: true },
-  { question_text: 'Do you have the tools and information you need to do your job well?', question_type: 'scale_5', required: true },
-  { question_text: 'Do you know what is expected of you in your role?', question_type: 'scale_5', required: true },
-  { question_text: 'Do you feel supported when you are stuck or struggling?', question_type: 'scale_5', required: true },
-  { question_text: 'Do you feel like you are learning and growing in this role?', question_type: 'scale_5', required: true },
-  { question_text: 'Do you feel like part of a team that works well together?', question_type: 'scale_5', required: true },
-  { question_text: 'What one thing would make the biggest difference to how you feel at work?', question_type: 'open_text', required: true },
-  { question_text: 'Is there anything else you want to share?', question_type: 'open_text', required: false },
+const RECURRENCE_OPTIONS = [
+  { value: '', label: 'No recurrence (one-off)' },
+  { value: '30', label: 'Monthly (every 30 days)' },
+  { value: '42', label: 'Every 6 weeks (42 days)' },
+  { value: '90', label: 'Quarterly (every 90 days)' },
+  { value: '180', label: 'Every 6 months' },
+  { value: '365', label: 'Annually' },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -507,17 +505,38 @@ function CreateSurveyForm({ surveys, onCreated }: { surveys: Survey[]; onCreated
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [loadingFollowUp, setLoadingFollowUp] = useState(false);
+  const [category, setCategory] = useState('');
+  const [recurrence, setRecurrence] = useState('');
+  const [categories, setCategories] = useState<CategoryDef[]>([]);
+  const [templates, setTemplates] = useState<TemplateDef[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/surveys/teams');
-        const json = await res.json();
-        if (json.ok) setTeams(json.data);
+        const [teamsRes, catsRes] = await Promise.all([
+          fetch('/api/surveys/teams'),
+          fetch('/api/surveys/categories'),
+        ]);
+        const teamsJson = await teamsRes.json();
+        if (teamsJson.ok) setTeams(teamsJson.data);
+        const catsJson = await catsRes.json();
+        if (catsJson.ok) {
+          setCategories(catsJson.data.categories);
+          setTemplates(catsJson.data.templates);
+        }
       } catch { /* ignore */ }
     })();
   }, []);
+
+  const loadTemplate = (templateId: string) => {
+    const tmpl = templates.find(t => t.id === templateId);
+    if (!tmpl) return;
+    setTitle(tmpl.label);
+    setDescription(tmpl.description);
+    setCategory(tmpl.category);
+    setQuestions(tmpl.questions.map(q => ({ ...q, question_type: q.question_type as 'scale_5' | 'open_text' })));
+  };
 
   const loadFromSurvey = async (surveyId: number) => {
     setLoadingFollowUp(true);
@@ -530,6 +549,8 @@ function CreateSurveyForm({ surveys, onCreated }: { surveys: Survey[]; onCreated
         setDescription(s.description || '');
         setSelectedTeams(s.team_name.split(',').map((t: string) => t.trim()).filter(Boolean));
         setReminderDays(s.reminder_interval_days);
+        if ((s as any).category) setCategory((s as any).category);
+        if ((s as any).recurrence_interval_days) setRecurrence(String((s as any).recurrence_interval_days));
         setQuestions(s.questions.map((q: Question) => ({
           question_text: q.question_text,
           question_type: q.question_type as 'scale_5' | 'open_text',
@@ -562,8 +583,6 @@ function CreateSurveyForm({ surveys, onCreated }: { surveys: Survey[]; onCreated
   const updateRecipient = (idx: number, patch: Partial<DraftRecipient>) => {
     setRecipients(recipients.map((r, i) => i === idx ? { ...r, ...patch } : r));
   };
-
-  const loadTemplate = () => setQuestions([...BASELINE_QUESTIONS]);
 
   const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -602,6 +621,8 @@ function CreateSurveyForm({ surveys, onCreated }: { surveys: Survey[]; onCreated
         start_date: startDate || null, end_date: endDate || null,
         invite_send_date: inviteSendDate || null, reminder_interval_days: reminderDays,
         questions, recipients,
+        category: category || null,
+        recurrence_interval_days: recurrence ? Number(recurrence) : null,
       };
       const res = await fetch('/api/surveys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const json = await res.json();
@@ -714,6 +735,24 @@ function CreateSurveyForm({ surveys, onCreated }: { surveys: Survey[]; onCreated
         </div>
       </div>
 
+      {/* Category + Recurrence */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className={labelCls}>Category</label>
+          <select value={category} onChange={e => setCategory(e.target.value)} className={inputCls}>
+            <option value="">No category</option>
+            {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>Recurrence</label>
+          <select value={recurrence} onChange={e => setRecurrence(e.target.value)} className={inputCls}>
+            {RECURRENCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {recurrence && <p className="text-[9px] text-neutral-600 mt-1">A new survey will be auto-created {recurrence} days after this one closes</p>}
+        </div>
+      </div>
+
       {/* Dates */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         <div>
@@ -739,9 +778,13 @@ function CreateSurveyForm({ surveys, onCreated }: { surveys: Survey[]; onCreated
         <div className="flex items-center justify-between mb-3">
           <label className={labelCls + ' mb-0'}>Questions</label>
           <div className="flex gap-2">
-            <button onClick={loadTemplate} className="px-3 py-1.5 rounded text-[10px] font-semibold bg-purple-900/40 text-purple-400 border border-purple-800/50 hover:bg-purple-900/60 transition-colors">
-              <i className="fa-solid fa-wand-magic-sparkles mr-1" />Load Team Satisfaction Baseline
-            </button>
+            {templates.length > 0 && (
+              <select defaultValue="" onChange={e => { if (e.target.value) loadTemplate(e.target.value); }}
+                className="px-3 py-1.5 rounded text-[10px] font-semibold bg-purple-900/40 text-purple-400 border border-purple-800/50 outline-none cursor-pointer">
+                <option value="" disabled><i className="fa-solid fa-wand-magic-sparkles" /> Load template...</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            )}
             <button onClick={addQuestion} className="px-3 py-1.5 rounded text-[10px] font-semibold bg-[#5ec1ca]/20 text-[#5ec1ca] border border-[#5ec1ca]/30 hover:bg-[#5ec1ca]/30 transition-colors">
               <i className="fa-solid fa-plus mr-1" />Add Question
             </button>
