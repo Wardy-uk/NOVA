@@ -481,10 +481,10 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                         } catch { setError('Network error'); }
                         setActionLoading(false);
                       }}
-                      className="text-neutral-600 hover:text-red-400 transition-colors text-xs disabled:opacity-50"
+                      className="px-2 py-0.5 rounded text-[9px] font-semibold text-red-400 bg-red-900/20 border border-red-800/30 hover:bg-red-900/40 transition-colors disabled:opacity-50"
                       title="Remove recipient"
                     >
-                      <i className="fa-solid fa-times" />
+                      Remove
                     </button>
                   </td>
                 </tr>
