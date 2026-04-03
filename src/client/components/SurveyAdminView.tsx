@@ -51,8 +51,12 @@ interface DraftRecipient {
   display_name: string; email: string;
 }
 
+interface TeamMember {
+  display_name: string; email: string;
+}
+
 interface Team {
-  id: number; name: string;
+  id: number; name: string; members: TeamMember[];
 }
 
 // ── Baseline template ──────────────────────────────────────────────────
@@ -633,7 +637,20 @@ function CreateSurveyForm({ surveys, onCreated }: { surveys: Survey[]; onCreated
               const selected = selectedTeams.includes(t.name);
               return (
                 <button key={t.id} type="button" onClick={() => {
-                  setSelectedTeams(prev => selected ? prev.filter(n => n !== t.name) : [...prev, t.name]);
+                  if (selected) {
+                    setSelectedTeams(prev => prev.filter(n => n !== t.name));
+                    // Remove members of this team from recipients
+                    const teamEmails = new Set(t.members.map(m => m.email));
+                    setRecipients(prev => prev.filter(r => !teamEmails.has(r.email)));
+                  } else {
+                    setSelectedTeams(prev => [...prev, t.name]);
+                    // Add members of this team to recipients (avoid duplicates)
+                    setRecipients(prev => {
+                      const existing = new Set(prev.map(r => r.email));
+                      const newMembers = t.members.filter(m => !existing.has(m.email));
+                      return [...prev, ...newMembers];
+                    });
+                  }
                 }}
                   className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-colors border ${selected
                     ? 'bg-[#5ec1ca]/20 text-[#5ec1ca] border-[#5ec1ca]/40'

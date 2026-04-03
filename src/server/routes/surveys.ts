@@ -49,9 +49,13 @@ function queryOne<T>(db: Database, sql: string, params: unknown[] = []): T | nul
 
 // ── Email helpers ──────────────────────────────────────────────────────
 
-function getSurveyBaseUrl(settingsQueries: FileSettingsQueries): string {
+function getSurveyBaseUrl(settingsQueries: FileSettingsQueries, reqHost?: string): string {
   const s = settingsQueries.getAll();
-  return s.app_base_url || s.sso_base_url || process.env.FRONTEND_URL || 'http://localhost:5173';
+  if (s.app_base_url) return s.app_base_url.replace(/\/+$/, '');
+  if (s.sso_base_url) return s.sso_base_url.replace(/\/+$/, '');
+  if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL.replace(/\/+$/, '');
+  if (reqHost) return `https://${reqHost}`;
+  return 'http://localhost:5173';
 }
 
 function buildSurveyInviteHtml(title: string, teamName: string, description: string | null, link: string): string {
@@ -188,6 +192,7 @@ function aggregateResults(db: Database, surveyId: number, questions: QuestionRow
 
 interface UserLookup {
   getById(id: number): { id: number; username: string; email: string | null; team_id: number | null; role: string } | undefined;
+  getAll(): Array<{ id: number; username: string; display_name: string | null; email: string | null; team_id: number | null; role: string }>;
 }
 
 interface TeamLookup {
@@ -248,11 +253,21 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     res.json({ ok: true, data, is_admin: admin });
   });
 
-  // ── Get available teams (for team selector in create form) ──
+  // ── Get available teams with members (for team selector + auto-populate recipients) ──
   router.get('/teams', (req, res) => {
     if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
     const teams = queryAll<{ id: number; name: string }>(db, 'SELECT id, name FROM teams ORDER BY name');
-    res.json({ ok: true, data: teams });
+
+    // Get all users and attach to their teams
+    const allUsers = userQueries.getAll();
+    const teamsWithMembers = teams.map(t => ({
+      ...t,
+      members: allUsers
+        .filter(u => u.team_id === t.id && u.email)
+        .map(u => ({ display_name: u.display_name || u.username, email: u.email! })),
+    }));
+
+    res.json({ ok: true, data: teamsWithMembers });
   });
 
   // ── Get survey detail ──
@@ -391,7 +406,7 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
 
     db.run(`UPDATE surveys SET status = 'active', start_date = COALESCE(start_date, datetime('now')) WHERE id = ?`, [survey.id]);
 
-    const baseUrl = getSurveyBaseUrl(settingsQueries);
+    const baseUrl = getSurveyBaseUrl(settingsQueries, req.get('host'));
     const sent = await sendInvites(db, survey.id, emailService, baseUrl);
 
     res.json({ ok: true, data: { invites_sent: sent } });
@@ -431,7 +446,7 @@ export function createSurveyRoutes(db: Database, settingsQueries: FileSettingsQu
     if (!survey) { res.status(404).json({ ok: false, error: 'Survey not found' }); return; }
     if (survey.status !== 'active') { res.status(400).json({ ok: false, error: 'Survey is not active' }); return; }
 
-    const baseUrl = getSurveyBaseUrl(settingsQueries);
+    const baseUrl = getSurveyBaseUrl(settingsQueries, req.get('host'));
     const sent = await sendReminders(db, survey.id, emailService, baseUrl);
     res.json({ ok: true, data: { reminders_sent: sent } });
   });
