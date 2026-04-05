@@ -406,6 +406,47 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
   );
 }
 
+/* ── Section 0: AI Support Trend ── */
+
+function AiSection({ data }: { data: any[] | null }) {
+  if (!data || data.length === 0) return <Card title="AI Support Trend"><p style={{ color: C.text3 }}>No data available yet — metrics will appear once the KPI engine captures its first snapshot.</p></Card>;
+
+  const resolvedData = data.filter((r: any) => r.kpi?.includes('Resolved'));
+  const rateData = data.filter((r: any) => r.kpi?.includes('Rate'));
+
+  const buildDataset = (filtered: any[], label: string, color: string) => {
+    const labels = [...new Set(filtered.map((r: any) => r.period))].sort();
+    return {
+      labels: labels.map(l => fmtDate(l)),
+      datasets: [{
+        label,
+        data: labels.map(l => filtered.find((r: any) => r.period === l)?.avg_value ?? null),
+        borderColor: color,
+        backgroundColor: `${color}20`,
+        tension: 0.3,
+        pointRadius: 2,
+        borderWidth: 2,
+        fill: true,
+      }],
+    };
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <Card>
+        <div style={{ height: 280 }}>
+          <Line data={buildDataset(resolvedData, 'AI Tickets Resolved', '#5ec1ca')} options={baseLineOptions('AI Tickets Resolved (Daily)', undefined, { labels: [] })} />
+        </div>
+      </Card>
+      <Card>
+        <div style={{ height: 280 }}>
+          <Line data={buildDataset(rateData, 'AI Resolution Rate %', '#7c3aed')} options={baseLineOptions('AI Resolution Rate %', undefined, { labels: [] })} />
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 /* ── Section 1: SLA Compliance Trend ── */
 
 function SlaSection({ data }: { data: any[] | null }) {
@@ -677,6 +718,7 @@ export const TrendsView = memo(function TrendsView() {
   const [escalationData, setEscalationData] = useState<any[] | null>(null);
   const [qaData, setQaData] = useState<QaData | null>(null);
   const [qaAgent, setQaAgent] = useState('all');
+  const [aiData, setAiData] = useState<any[] | null>(null);
 
   const daysFromRange = (r: DateRange) => {
     switch (r) {
@@ -704,12 +746,13 @@ export const TrendsView = memo(function TrendsView() {
     const days = daysFromRange(dateRange);
     const qs = `days=${days}&granularity=${granularity}&env=${env}`;
 
-    const [cp, sla, q, esc, qa] = await Promise.all([
+    const [cp, sla, q, esc, qa, ai] = await Promise.all([
       safeFetchJson(`/api/trends/checkpoint?env=${env}`),
       safeFetchJson(`/api/trends/sla?${qs}`),
       safeFetchJson(`/api/trends/queue?${qs}`),
       safeFetchJson(`/api/trends/escalation?${qs}`),
       safeFetchJson(`/api/trends/qa?${qs}&agent=all`),
+      safeFetchJson(`/api/trends/ai?${qs}`),
     ]);
 
     if (cp.ok) setCheckpointData(cp.data);
@@ -719,6 +762,7 @@ export const TrendsView = memo(function TrendsView() {
     if (esc.ok) setEscalationData(esc.data);
     if (qa.ok) setQaData(qa.data);
     else console.warn('QA fetch failed:', qa.error);
+    if (ai.ok) setAiData(ai.data);
 
     setLoading(false);
   }, [dateRange, granularity, env]);
@@ -786,6 +830,13 @@ export const TrendsView = memo(function TrendsView() {
             <h2 className="text-sm font-semibold mb-1" style={{ color: C.text1 }}>SLA Compliance</h2>
             <p className="text-xs mb-3" style={{ color: C.text3 }}>Percentage of tickets meeting First Response and Resolution SLA targets over time.</p>
             <SlaSection data={slaData} />
+          </div>
+
+          {/* Section: AI Support */}
+          <div>
+            <h2 className="text-sm font-semibold mb-1" style={{ color: C.text1 }}>AI Support</h2>
+            <p className="text-xs mb-3" style={{ color: C.text3 }}>AI ticket resolution volume and approval success rate over time.</p>
+            <AiSection data={aiData} />
           </div>
 
           {/* Section 2: Queue Health */}

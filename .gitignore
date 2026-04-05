@@ -17,3 +17,6 @@ appsettings*.json
 OnboardingMatix.xlsx
 jirajson.txt
 monday-board-debug.json
+
+# Local Netlify folder
+.netlify

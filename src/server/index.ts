@@ -343,6 +343,13 @@ async function main() {
     res.json({ ok: true, data: { id } });
   });
 
+  // AI Approval KPI stats for n8n (no auth required)
+  app.get('/api/public/approvals/kpi-stats', (_req, res) => {
+    const today = approvalQueries.getTodayStats();
+    const daily = approvalQueries.getDailyStats(90);
+    res.json({ ok: true, data: { today, daily } });
+  });
+
   // Debug endpoints are registered after auth middleware below (admin-only)
 
   // Dynamics 365 — direct Web API with delegated auth (device code flow)

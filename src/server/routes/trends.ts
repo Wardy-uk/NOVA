@@ -217,6 +217,15 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
   { key: 'survey_team_sat', label: 'Support Team Satisfaction', source: 'survey', target: 4.0, direction: 'higher', expandable: false, kpiPattern: 'team_satisfaction' },
   { key: 'survey_kam_sat', label: 'KAM Satisfaction with Support', source: 'survey', target: 4.0, direction: 'higher', expandable: false, kpiPattern: 'kam_satisfaction' },
   { key: 'survey_csm_sat', label: 'CSM Satisfaction with Support', source: 'survey', target: 4.0, direction: 'higher', expandable: false, kpiPattern: 'csm_satisfaction' },
+  {
+    key: 'ai_tickets_resolved',
+    label: 'AI Tickets Resolved',
+    kpiPattern: 'AI Tickets Resolved%',
+    source: 'compliance' as const,
+    target: null,
+    direction: 'higher',
+    expandable: false,
+  },
 ];
 
 export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQueries: FileUserQueries, localDb?: Database): Router {
@@ -732,6 +741,14 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         metrics.push(row);
       }
 
+      // Hardcode Day 0 and Day 1 for AI metrics (feature didn't exist yet)
+      for (const metric of metrics) {
+        if (metric.key === 'ai_tickets_resolved') {
+          if (metric.checkpoints['Day 0'] === null) metric.checkpoints['Day 0'] = 0;
+          if (metric.checkpoints['Day 1'] === null) metric.checkpoints['Day 1'] = 0;
+        }
+      }
+
       // Return columns with metadata for the frontend
       const checkpoints = columns.map(c => ({ label: c.label, subtitle: c.subtitle, start: c.start, end: c.end }));
       res.json({ ok: true, data: { checkpoints, metrics } });
@@ -1075,6 +1092,38 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
       audit.gr_daily_coverage = grDailyResult.recordset;
 
       res.json({ ok: true, data: audit });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── GET /api/trends/ai ───
+  // AI approval trends over time
+  router.get('/ai', async (req, res) => {
+    try {
+      const p = await getPool();
+      const days = Math.min(Number(req.query.days) || 90, 365);
+      const granularity = req.query.granularity === 'daily' ? 'daily' : 'weekly';
+
+      const dateGroup = granularity === 'weekly'
+        ? 'DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, CreatedAt)), 1)'
+        : 'CAST(CreatedAt AS DATE)';
+
+      const r = p.request();
+      r.input('days', sql.Int, days);
+      const result = await r.query(`
+        SELECT
+          ${dateGroup} AS period,
+          kpi,
+          AVG([Count]) AS avg_value
+        FROM dbo.jira_kpi_daily
+        WHERE CreatedAt >= DATEADD(DAY, -@days, GETUTCDATE())
+          AND kpi LIKE 'AI %'
+        GROUP BY ${dateGroup}, kpi
+        ORDER BY period
+      `);
+
+      res.json({ ok: true, data: result.recordset });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }

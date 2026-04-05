@@ -116,6 +116,10 @@ const KPI_ORDER: string[] = [
   // — Raised / Solved today —
   'New Tickets Today',
   'Tickets Solved Today',
+  // — AI —
+  'AI Tickets Resolved (Today)',
+  'AI Tickets Pending Approval',
+  'AI Resolution Rate %',
   // — Open ticket counts —
   'Number of Tickets in Customer Care',
   'Number of Tickets in CC (Incidents)',

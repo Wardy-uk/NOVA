@@ -3747,6 +3747,66 @@ export class ApprovalQueries {
     return true;
   }
 
+  getDailyStats(days: number = 90): Array<{ date: string; approved: number; declined: number; timed_out: number; total_decisions: number }> {
+    const stmt = this.db.prepare(`
+      SELECT
+        DATE(decided_at) as date,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END) as timed_out,
+        COUNT(*) as total_decisions
+      FROM approval_queue
+      WHERE status IN ('approved', 'declined', 'timed_out')
+        AND decided_at >= datetime('now', '-' || ? || ' days')
+      GROUP BY DATE(decided_at)
+      ORDER BY date ASC
+    `);
+    stmt.bind([days]);
+    const results: Array<{ date: string; approved: number; declined: number; timed_out: number; total_decisions: number }> = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      results.push({
+        date: row.date as string,
+        approved: (row.approved as number) || 0,
+        declined: (row.declined as number) || 0,
+        timed_out: (row.timed_out as number) || 0,
+        total_decisions: (row.total_decisions as number) || 0,
+      });
+    }
+    stmt.free();
+    return results;
+  }
+
+  getTodayStats(): { approved: number; declined: number; timed_out: number; pending: number; resolution_rate: number } {
+    // Auto-expire first
+    this.db.run(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= datetime('now')`);
+
+    const stmt = this.db.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'approved' AND DATE(decided_at) = DATE('now') THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN status = 'declined' AND DATE(decided_at) = DATE('now') THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN status = 'timed_out' AND DATE(decided_at) = DATE('now') THEN 1 ELSE 0 END) as timed_out,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as total_approved,
+        SUM(CASE WHEN status IN ('approved', 'declined', 'timed_out') THEN 1 ELSE 0 END) as total_decisions
+      FROM approval_queue
+    `);
+    stmt.step();
+    const row = stmt.getAsObject() as Record<string, unknown>;
+    stmt.free();
+
+    const totalApproved = (row.total_approved as number) || 0;
+    const totalDecisions = (row.total_decisions as number) || 0;
+
+    return {
+      approved: (row.approved as number) || 0,
+      declined: (row.declined as number) || 0,
+      timed_out: (row.timed_out as number) || 0,
+      pending: (row.pending as number) || 0,
+      resolution_rate: totalDecisions > 0 ? Math.round((totalApproved / totalDecisions) * 100 * 10) / 10 : 0,
+    };
+  }
+
   private rowToItem(row: Record<string, unknown>): ApprovalItem {
     return {
       id: row.id as number,
