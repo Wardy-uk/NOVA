@@ -90,6 +90,7 @@ const AREA_DEFS = [
   { id: 'people', label: 'People / Surveys' },
   { id: 'kpis', label: 'KPIs' },
   { id: 'qa', label: 'QA' },
+  { id: 'ai_approvals', label: 'AI Ticket Approvals' },
 ] as const;
 
 const ACCESS_LEVELS = ['hidden', 'view', 'edit'] as const;

@@ -52,7 +52,7 @@ function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
 function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string, string> {
   const userRoles = parseRoles(roleStr);
   if (userRoles.includes('admin')) {
-    return { command: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', azdo_push: 'edit', admin: 'edit' };
+    return { command: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', azdo_push: 'edit', ai_approvals: 'edit', admin: 'edit' };
   }
   const matched = roles.filter(r => userRoles.includes(r.id));
   if (matched.length === 0) {
