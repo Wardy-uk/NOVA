@@ -56,7 +56,7 @@ import { JiraOAuthService } from './services/jira-oauth.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
 import { createNotificationRoutes } from './routes/notifications.js';
-import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries, PortalAccountQueries, BranchDistrictQueries, WelcomePackQueries } from './db/queries.js';
+import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries, PortalAccountQueries, BranchDistrictQueries, WelcomePackQueries, ApprovalQueries } from './db/queries.js';
 import { createInstanceSetupRoutes } from './routes/instance-setup.js';
 import { createBranchRoutes } from './routes/branches.js';
 import { createBrandSettingsRoutes } from './routes/brand-settings.js';
@@ -75,6 +75,7 @@ import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
 import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
+import { createApprovalRoutes } from './routes/approvals.js';
 
 dotenv.config();
 
@@ -121,6 +122,7 @@ async function main() {
   const contractsQueries = new ContractsQueries(db);
   const contractTemplateQueries = new ContractTemplateQueries(db);
   const adobeSignAgreementQueries = new AdobeSignAgreementQueries(db);
+  const approvalQueries = new ApprovalQueries(db);
 
   // Purge transient MS365 data from previous session
   const purgedCount = taskQueries.deleteTransientTasks();
@@ -321,6 +323,25 @@ async function main() {
   // KPI Wallboard — public route for TV displays (no auth required)
   app.use('/api/public/wallboard', createKpiWallboardRoutes(settingsQueries));
 
+  // AI Approval ingest from n8n (no auth required)
+  app.post('/api/approvals/ingest', (req, res) => {
+    const { ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, expires_in_minutes } = req.body;
+    if (!ticket_id || !ticket_summary || !resume_url) {
+      res.status(400).json({ ok: false, error: 'ticket_id, ticket_summary, and resume_url are required' });
+      return;
+    }
+    const expiresMinutes = expires_in_minutes || 120;
+    const expiresAt = new Date(Date.now() + expiresMinutes * 60 * 1000).toISOString().replace('T', ' ').replace('Z', '');
+    const id = approvalQueries.create({
+      ticket_id, ticket_summary, reporter_name, reporter_email,
+      ai_response_adf: typeof ai_response_adf === 'string' ? ai_response_adf : JSON.stringify(ai_response_adf),
+      conversation_json: typeof conversation_json === 'string' ? conversation_json : JSON.stringify(conversation_json),
+      kb_sources: typeof kb_sources === 'string' ? kb_sources : JSON.stringify(kb_sources),
+      resume_url, priority, expires_at: expiresAt,
+    });
+    res.json({ ok: true, data: { id } });
+  });
+
   // Debug endpoints are registered after auth middleware below (admin-only)
 
   // Dynamics 365 — direct Web API with delegated auth (device code flow)
@@ -470,6 +491,7 @@ async function main() {
   app.use('/api/contracts', createContractsRoutes(bcCustomerQueries, contractsQueries, settingsQueries));
   app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, contractTemplateQueries, settingsQueries));
   app.use('/api/surveys', createSurveyRoutes(db, settingsQueries, userQueries, teamQueries));
+  app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
 

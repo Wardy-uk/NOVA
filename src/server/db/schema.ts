@@ -1204,6 +1204,31 @@ export function initializeSchema(database: Database): void {
   try { database.run(`ALTER TABLE surveys ADD COLUMN parent_survey_id INTEGER`); } catch { /* already exists */ }
   database.run(`CREATE INDEX IF NOT EXISTS idx_surveys_category ON surveys(category)`);
 
+  // ── AI Approval Queue ──────────────────────────────────────────────────
+  database.run(`
+    CREATE TABLE IF NOT EXISTS approval_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id TEXT NOT NULL,
+      ticket_summary TEXT NOT NULL,
+      reporter_name TEXT,
+      reporter_email TEXT,
+      ai_response_adf TEXT,
+      conversation_json TEXT,
+      kb_sources TEXT,
+      resume_url TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      decided_by TEXT,
+      decided_at TEXT,
+      edited_response_adf TEXT,
+      priority TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_approval_queue_status ON approval_queue(status)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_approval_queue_ticket ON approval_queue(ticket_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_approval_queue_expires ON approval_queue(expires_at)`);
+
   saveDb();
 }
 

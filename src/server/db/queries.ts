@@ -3616,6 +3616,159 @@ export interface AdobeSignAgreement {
   updated_at: string;
 }
 
+export interface ApprovalItem {
+  id: number;
+  ticket_id: string;
+  ticket_summary: string;
+  reporter_name: string | null;
+  reporter_email: string | null;
+  ai_response_adf: string | null;
+  conversation_json: string | null;
+  kb_sources: string | null;
+  resume_url: string;
+  status: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  edited_response_adf: string | null;
+  priority: string | null;
+  created_at: string;
+  expires_at: string;
+}
+
+export class ApprovalQueries {
+  constructor(private db: Database) {}
+
+  getAll(status?: string): ApprovalItem[] {
+    // Auto-expire any pending items past their expiry
+    this.db.run(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= datetime('now')`);
+    saveDb();
+
+    let sql = `SELECT * FROM approval_queue`;
+    const params: string[] = [];
+    if (status) {
+      sql += ` WHERE status = ?`;
+      params.push(status);
+    }
+    sql += ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`;
+    const stmt = this.db.prepare(sql);
+    if (params.length > 0) stmt.bind(params);
+    const items: ApprovalItem[] = [];
+    while (stmt.step()) {
+      items.push(this.rowToItem(stmt.getAsObject() as Record<string, unknown>));
+    }
+    stmt.free();
+    return items;
+  }
+
+  getById(id: number): ApprovalItem | undefined {
+    const stmt = this.db.prepare(`SELECT * FROM approval_queue WHERE id = ?`);
+    stmt.bind([id]);
+    if (stmt.step()) {
+      const item = this.rowToItem(stmt.getAsObject() as Record<string, unknown>);
+      stmt.free();
+      return item;
+    }
+    stmt.free();
+    return undefined;
+  }
+
+  getPending(): ApprovalItem[] {
+    return this.getAll('pending');
+  }
+
+  getPendingCount(): number {
+    this.db.run(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= datetime('now')`);
+    const stmt = this.db.prepare(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
+    stmt.step();
+    const row = stmt.getAsObject() as Record<string, unknown>;
+    stmt.free();
+    return (row.count as number) || 0;
+  }
+
+  getStats(): { pending: number; approved: number; declined: number; timed_out: number; today_decided: number } {
+    this.db.run(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= datetime('now')`);
+    const stmt = this.db.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END) as timed_out,
+        SUM(CASE WHEN decided_at >= date('now') AND status IN ('approved', 'declined') THEN 1 ELSE 0 END) as today_decided
+      FROM approval_queue
+    `);
+    stmt.step();
+    const row = stmt.getAsObject() as Record<string, unknown>;
+    stmt.free();
+    return {
+      pending: (row.pending as number) || 0,
+      approved: (row.approved as number) || 0,
+      declined: (row.declined as number) || 0,
+      timed_out: (row.timed_out as number) || 0,
+      today_decided: (row.today_decided as number) || 0,
+    };
+  }
+
+  create(item: {
+    ticket_id: string;
+    ticket_summary: string;
+    reporter_name?: string;
+    reporter_email?: string;
+    ai_response_adf?: string;
+    conversation_json?: string;
+    kb_sources?: string;
+    resume_url: string;
+    priority?: string;
+    expires_at: string;
+  }): number {
+    this.db.run(
+      `INSERT INTO approval_queue (ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [item.ticket_id, item.ticket_summary, item.reporter_name || null, item.reporter_email || null,
+       item.ai_response_adf || null, item.conversation_json || null, item.kb_sources || null,
+       item.resume_url, item.priority || null, item.expires_at]
+    );
+    saveDb();
+    const stmt = this.db.prepare(`SELECT last_insert_rowid() as id`);
+    stmt.step();
+    const row = stmt.getAsObject() as Record<string, unknown>;
+    stmt.free();
+    return row.id as number;
+  }
+
+  decide(id: number, action: 'approved' | 'declined', decidedBy: string, editedResponseAdf?: string): boolean {
+    const item = this.getById(id);
+    if (!item || item.status !== 'pending') return false;
+
+    this.db.run(
+      `UPDATE approval_queue SET status = ?, decided_by = ?, decided_at = datetime('now'), edited_response_adf = ? WHERE id = ?`,
+      [action, decidedBy, editedResponseAdf || null, id]
+    );
+    saveDb();
+    return true;
+  }
+
+  private rowToItem(row: Record<string, unknown>): ApprovalItem {
+    return {
+      id: row.id as number,
+      ticket_id: row.ticket_id as string,
+      ticket_summary: row.ticket_summary as string,
+      reporter_name: (row.reporter_name as string) || null,
+      reporter_email: (row.reporter_email as string) || null,
+      ai_response_adf: (row.ai_response_adf as string) || null,
+      conversation_json: (row.conversation_json as string) || null,
+      kb_sources: (row.kb_sources as string) || null,
+      resume_url: row.resume_url as string,
+      status: row.status as string,
+      decided_by: (row.decided_by as string) || null,
+      decided_at: (row.decided_at as string) || null,
+      edited_response_adf: (row.edited_response_adf as string) || null,
+      priority: (row.priority as string) || null,
+      created_at: row.created_at as string,
+      expires_at: row.expires_at as string,
+    };
+  }
+}
+
 export class AdobeSignAgreementQueries {
   constructor(private db: Database) {}
 

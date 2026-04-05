@@ -23,6 +23,7 @@ import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
 import { ServiceDeskDashboard } from './components/ServiceDeskDashboard.js';
+import { AIApprovalQueue } from './components/AIApprovalQueue.js';
 import { KpiDashboardView } from './components/KpiDashboardView.js';
 import { KpiDataView } from './components/KpiDataView.js';
 import { KpiComparisonView } from './components/KpiComparisonView.js';
@@ -56,7 +57,7 @@ declare const __APP_VERSION__: string;
 
 type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
-  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'team-workload' | 'chat'
+  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
@@ -115,6 +116,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
       { view: 'attention', label: 'My Breached' },
+      { view: 'ai-approvals', label: 'AI Ticket Approvals' },
     ],
   },
   sales: {
@@ -203,7 +205,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -301,6 +303,7 @@ export function App() {
     return stored as OwnershipFilter;
   });
   const [sdIssueTypeFilter, setSdIssueTypeFilter] = useState<string | null>(null);
+  const [approvalBadge, setApprovalBadge] = useState(0);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const standupChecked = useRef(false);
 
@@ -323,7 +326,7 @@ export function App() {
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
     userRole.split(',').map(r => r.trim()).includes('admin')
-      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit' }
+      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit' }
       : DEFAULT_AREA_ACCESS,
   );
   useEffect(() => {
@@ -394,6 +397,20 @@ export function App() {
       })
       .catch(() => {});
   }, [auth.isAuthenticated, setView, homepage]);
+
+  // Poll approval queue badge count
+  useEffect(() => {
+    if (!auth.isAuthenticated) return;
+    const poll = () => {
+      fetch('/api/approvals/count')
+        .then(r => r.json())
+        .then(json => { if (json.ok) setApprovalBadge(json.data.count); })
+        .catch(() => {});
+    };
+    poll();
+    const iv = setInterval(poll, 30000);
+    return () => clearInterval(iv);
+  }, [auth.isAuthenticated]);
 
   useEffect(() => {
     if (view !== 'debug') return;
@@ -765,6 +782,9 @@ export function App() {
                   }`}
                 >
                   {tab.label}
+                  {tab.view === 'ai-approvals' && approvalBadge > 0 && (
+                    <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-400">{approvalBadge}</span>
+                  )}
                 </button>
               ))}
 
@@ -912,6 +932,9 @@ export function App() {
           )}
           {view === 'sd-dashboard' && !sdFilter && (
             <ServiceDeskDashboard />
+          )}
+          {view === 'ai-approvals' && !sdFilter && (
+            <AIApprovalQueue canInteract={(areaAccess['ai_approvals'] || 'hidden') === 'edit'} />
           )}
           {/* KPIs */}
           {view === 'kpi-dashboard' && (
