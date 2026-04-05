@@ -1108,29 +1108,68 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
   // AI approval trends over time
   router.get('/ai', async (req, res) => {
     try {
-      const p = await getPool();
       const days = Math.min(Number(req.query.days) || 90, 365);
       const granularity = req.query.granularity === 'daily' ? 'daily' : 'weekly';
 
-      const dateGroup = granularity === 'weekly'
-        ? 'DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, CreatedAt)), 1)'
-        : 'CAST(CreatedAt AS DATE)';
+      // AI feature launch: Day 0 of checkpoint framework
+      const AI_LAUNCH = CHECKPOINT_DATES.day0; // '2026-03-02'
+      const kpis = ['AI Tickets Resolved (Today)', 'AI Resolution Rate %'];
 
-      const r = p.request();
-      r.input('days', sql.Int, days);
-      const result = await r.query(`
-        SELECT
-          ${dateGroup} AS period,
-          kpi,
-          AVG([Count]) AS avg_value
-        FROM dbo.jira_kpi_daily
-        WHERE CreatedAt >= DATEADD(DAY, -@days, GETUTCDATE())
-          AND kpi LIKE 'AI %'
-        GROUP BY ${dateGroup}, kpi
-        ORDER BY period
-      `);
+      let dbRows: Array<{ period: string; kpi: string; avg_value: number }> = [];
+      try {
+        const p = await getPool();
+        const dateGroup = granularity === 'weekly'
+          ? 'DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, CreatedAt)), 1)'
+          : 'CAST(CreatedAt AS DATE)';
+        const r = p.request();
+        r.input('days', sql.Int, days);
+        const result = await r.query(`
+          SELECT ${dateGroup} AS period, kpi, AVG([Count]) AS avg_value
+          FROM dbo.jira_kpi_daily
+          WHERE CreatedAt >= DATEADD(DAY, -@days, GETUTCDATE()) AND kpi LIKE 'AI %'
+          GROUP BY ${dateGroup}, kpi ORDER BY period
+        `);
+        dbRows = result.recordset;
+      } catch { /* SQL Server unavailable — continue with zeros only */ }
 
-      res.json({ ok: true, data: result.recordset });
+      // Build date range from AI_LAUNCH (or N days ago, whichever is later) to yesterday
+      const rangeStart = new Date(Math.max(new Date(AI_LAUNCH).getTime(), Date.now() - days * 86400000));
+      const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+      const periods: string[] = [];
+      const cursor = new Date(rangeStart);
+      if (granularity === 'daily') {
+        while (cursor <= yesterday) {
+          periods.push(cursor.toISOString().split('T')[0]);
+          cursor.setDate(cursor.getDate() + 1);
+        }
+      } else {
+        // Weekly: snap to Monday
+        cursor.setDate(cursor.getDate() - ((cursor.getDay() + 6) % 7));
+        while (cursor <= yesterday) {
+          periods.push(cursor.toISOString().split('T')[0]);
+          cursor.setDate(cursor.getDate() + 7);
+        }
+      }
+
+      // Merge: fill zeros for missing periods
+      const dbLookup = new Map<string, number>();
+      for (const row of dbRows) {
+        const key = `${(row.period instanceof Date ? row.period.toISOString().split('T')[0] : String(row.period).split('T')[0])}|${row.kpi}`;
+        dbLookup.set(key, row.avg_value);
+      }
+
+      const data: Array<{ period: string; kpi: string; avg_value: number }> = [];
+      for (const period of periods) {
+        for (const kpi of kpis) {
+          data.push({
+            period,
+            kpi,
+            avg_value: dbLookup.get(`${period}|${kpi}`) ?? 0,
+          });
+        }
+      }
+
+      res.json({ ok: true, data });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }
