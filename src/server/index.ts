@@ -325,7 +325,7 @@ async function main() {
   app.use('/api/public/wallboard', createKpiWallboardRoutes(settingsQueries));
 
   // AI Approval ingest from n8n (no auth required)
-  app.post('/api/approvals/ingest', (req, res) => {
+  app.post('/api/public/approvals/ingest', (req, res) => {
     const { ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, business_hours } = req.body;
     if (!ticket_id || !ticket_summary || !resume_url) {
       res.status(400).json({ ok: false, error: 'ticket_id, ticket_summary, and resume_url are required' });
