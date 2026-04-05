@@ -312,7 +312,7 @@ export function AIApprovalQueue({ canInteract }: AIApprovalQueueProps) {
   return (
     <div className="space-y-4">
       {/* Read-only banner */}
-      {!canInteract && (
+      {!canInteract && !loading && (
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2.5 text-[13px] text-amber-400 flex items-center gap-2">
           <i className="fas fa-lock text-[12px]" />
           Read-only — you need AI Approver permissions to approve or decline tickets
