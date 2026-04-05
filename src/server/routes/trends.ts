@@ -741,11 +741,18 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         metrics.push(row);
       }
 
-      // Hardcode Day 0 and Day 1 for AI metrics (feature didn't exist yet)
+      // Hardcode all checkpoint dates before today to 0 for AI metrics (feature launched 2026-04-05)
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
       for (const metric of metrics) {
         if (metric.key === 'ai_tickets_resolved') {
-          if (metric.checkpoints['Day 0'] === null) metric.checkpoints['Day 0'] = 0;
-          if (metric.checkpoints['Day 1'] === null) metric.checkpoints['Day 1'] = 0;
+          for (const col of columns) {
+            const colEnd = col.end || col.start;
+            if (colEnd && colEnd <= yesterdayStr && metric.checkpoints[col.label] === null) {
+              metric.checkpoints[col.label] = 0;
+            }
+          }
         }
       }
 
