@@ -76,6 +76,7 @@ import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
 import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
 import { createApprovalRoutes } from './routes/approvals.js';
+import { addBusinessHours, toSqliteDatetime } from './utils/business-hours.js';
 
 dotenv.config();
 
@@ -325,13 +326,13 @@ async function main() {
 
   // AI Approval ingest from n8n (no auth required)
   app.post('/api/approvals/ingest', (req, res) => {
-    const { ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, expires_in_minutes } = req.body;
+    const { ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, business_hours } = req.body;
     if (!ticket_id || !ticket_summary || !resume_url) {
       res.status(400).json({ ok: false, error: 'ticket_id, ticket_summary, and resume_url are required' });
       return;
     }
-    const expiresMinutes = expires_in_minutes || 120;
-    const expiresAt = new Date(Date.now() + expiresMinutes * 60 * 1000).toISOString().replace('T', ' ').replace('Z', '');
+    const businessHours = business_hours || 2;
+    const expiresAt = toSqliteDatetime(addBusinessHours(new Date(), businessHours));
     const id = approvalQueries.create({
       ticket_id, ticket_summary, reporter_name, reporter_email,
       ai_response_adf: typeof ai_response_adf === 'string' ? ai_response_adf : JSON.stringify(ai_response_adf),
@@ -1275,6 +1276,29 @@ ${panelHtml}
       console.error('[SetupPortal] Cleanup failed:', err instanceof Error ? err.message : err);
     }
   }, 6 * 60 * 60 * 1000);
+
+  // Auto-expire approval queue items and hit n8n resume URLs
+  setInterval(async () => {
+    try {
+      // Find approvals that just expired (still pending but past expires_at)
+      const expired = approvalQueries.getAll('pending').filter(
+        (item) => new Date(item.expires_at) <= new Date()
+      );
+      for (const item of expired) {
+        // Mark as timed_out
+        approvalQueries.decide(item.id, 'timed_out', 'system');
+        // Hit n8n resume URL to trigger fallback path
+        try {
+          await fetch(`${item.resume_url}?action=timeout`, { method: 'GET' });
+          console.log(`[Approvals] Auto-expired approval ${item.id} (${item.ticket_id}), triggered n8n resume`);
+        } catch (err) {
+          console.error(`[Approvals] Failed to hit resume URL for expired approval ${item.id}:`, err instanceof Error ? err.message : err);
+        }
+      }
+    } catch (err) {
+      console.error('[Approvals] Expiry check error:', err instanceof Error ? err.message : err);
+    }
+  }, 60_000); // Check every minute
 
   // Daily backup: check hourly, create one backup per day (7-day rotation)
   createBackup();

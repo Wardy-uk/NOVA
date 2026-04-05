@@ -3735,7 +3735,7 @@ export class ApprovalQueries {
     return row.id as number;
   }
 
-  decide(id: number, action: 'approved' | 'declined', decidedBy: string, editedResponseAdf?: string): boolean {
+  decide(id: number, action: 'approved' | 'declined' | 'timed_out', decidedBy: string, editedResponseAdf?: string): boolean {
     const item = this.getById(id);
     if (!item || item.status !== 'pending') return false;
 
