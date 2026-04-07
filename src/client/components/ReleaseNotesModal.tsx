@@ -8,6 +8,44 @@ interface ReleaseEntry {
 
 const RELEASE_NOTES: ReleaseEntry[] = [
   {
+    version: '1.1.29',
+    date: '7 Apr 2026',
+    items: [
+      'Training Matrix — new area replacing the spreadsheet. Inline score editing, category sidebar, collapsible sections, colour-coded scores',
+      'Training Dashboard — team leaderboard, per-category progress bars, skills heatmap',
+      'Team / My Matrix toggle — switch between full team view and personal scores',
+      'XLSX Import — upload the training spreadsheet directly from the browser, auto-matches users',
+      'Add categories with knowledge items in one go, editable tech lead column',
+      'Undo button for score changes (50-step history)',
+      'Weekly reminder emails — Mondays at 9am for users with >10% incomplete, filtered by active Agent status',
+      'Send Reminders button — manually trigger training reminder emails',
+    ],
+  },
+  {
+    version: '1.1.23',
+    date: '31 Mar 2026',
+    items: [
+      'AI Ticket Approvals — review and approve/decline AI-generated support responses before they are sent',
+      'Mandatory decline reason when rejecting AI responses',
+      'Auto-cancel approvals when ticket is already resolved in Jira',
+      'AI Support KPI reporting — dashboard cards, trends graphs, n8n webhook integration',
+      'Business-hours timeout for approval queue (UK working hours)',
+    ],
+  },
+  {
+    version: '1.1.19',
+    date: '18 Mar 2026',
+    items: [
+      'Surveys overhaul — categories, templates, recurring surveys with auto-scheduling',
+      'Follow-up surveys — clone from closed surveys or create fresh',
+      'Multi-team recipient selector with custom team input',
+      'Non-admin survey view — inline response form without aggregated results',
+      'Survey edit and add-recipients for any status, delete in any status',
+      'Resend invites button for active surveys',
+      'Trends integration — satisfaction scores from surveys on the Trends dashboard',
+    ],
+  },
+  {
     version: '1.1.16',
     date: '5 Mar 2026',
     items: [
