@@ -3905,3 +3905,206 @@ export class AdobeSignAgreementQueries {
     return rows;
   }
 }
+
+// ── Training Matrix ──────────────────────────────────────────────────
+
+export interface TrainingCategory {
+  id: number;
+  name: string;
+  sort_order: number;
+}
+
+export interface TrainingItem {
+  id: number;
+  category_id: number;
+  section: string;
+  name: string;
+  tech_lead: string | null;
+  max_score: number;
+  sort_order: number;
+}
+
+export interface TrainingScore {
+  id: number;
+  item_id: number;
+  user_id: number;
+  score: number;
+  updated_at: string;
+}
+
+export class TrainingQueries {
+  constructor(private db: Database) {}
+
+  // ── Categories ──
+
+  getCategories(): TrainingCategory[] {
+    const stmt = this.db.prepare(`SELECT * FROM training_categories ORDER BY sort_order, id`);
+    const rows: TrainingCategory[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as TrainingCategory);
+    stmt.free();
+    return rows;
+  }
+
+  createCategory(name: string, sort_order: number): number {
+    this.db.run(`INSERT INTO training_categories (name, sort_order) VALUES (?, ?)`, [name, sort_order]);
+    const r = this.db.exec(`SELECT last_insert_rowid() as id`);
+    saveDb();
+    return Number(r[0].values[0][0]);
+  }
+
+  updateCategory(id: number, name: string, sort_order: number): void {
+    this.db.run(`UPDATE training_categories SET name = ?, sort_order = ? WHERE id = ?`, [name, sort_order, id]);
+    saveDb();
+  }
+
+  deleteCategory(id: number): void {
+    this.db.run(`DELETE FROM training_categories WHERE id = ?`, [id]);
+    saveDb();
+  }
+
+  // ── Items ──
+
+  getItems(categoryId?: number): TrainingItem[] {
+    let sql = `SELECT * FROM training_items`;
+    const params: number[] = [];
+    if (categoryId != null) {
+      sql += ` WHERE category_id = ?`;
+      params.push(categoryId);
+    }
+    sql += ` ORDER BY sort_order, id`;
+    const stmt = this.db.prepare(sql);
+    if (params.length) stmt.bind(params);
+    const rows: TrainingItem[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as TrainingItem);
+    stmt.free();
+    return rows;
+  }
+
+  createItem(item: Omit<TrainingItem, 'id'>): number {
+    this.db.run(
+      `INSERT INTO training_items (category_id, section, name, tech_lead, max_score, sort_order) VALUES (?, ?, ?, ?, ?, ?)`,
+      [item.category_id, item.section, item.name, item.tech_lead, item.max_score, item.sort_order]
+    );
+    const r = this.db.exec(`SELECT last_insert_rowid() as id`);
+    saveDb();
+    return Number(r[0].values[0][0]);
+  }
+
+  updateItem(id: number, updates: Partial<Omit<TrainingItem, 'id'>>): void {
+    const fields: string[] = [];
+    const vals: (string | number | null)[] = [];
+    if (updates.category_id != null) { fields.push('category_id = ?'); vals.push(updates.category_id); }
+    if (updates.section != null) { fields.push('section = ?'); vals.push(updates.section); }
+    if (updates.name != null) { fields.push('name = ?'); vals.push(updates.name); }
+    if ('tech_lead' in updates) { fields.push('tech_lead = ?'); vals.push(updates.tech_lead ?? null); }
+    if (updates.max_score != null) { fields.push('max_score = ?'); vals.push(updates.max_score); }
+    if (updates.sort_order != null) { fields.push('sort_order = ?'); vals.push(updates.sort_order); }
+    if (fields.length === 0) return;
+    vals.push(id);
+    this.db.run(`UPDATE training_items SET ${fields.join(', ')} WHERE id = ?`, vals);
+    saveDb();
+  }
+
+  deleteItem(id: number): void {
+    this.db.run(`DELETE FROM training_items WHERE id = ?`, [id]);
+    saveDb();
+  }
+
+  // ── Scores ──
+
+  getScores(categoryId?: number, userId?: number): TrainingScore[] {
+    let sql = `SELECT ts.* FROM training_scores ts`;
+    const params: number[] = [];
+    if (categoryId != null) {
+      sql += ` JOIN training_items ti ON ts.item_id = ti.id WHERE ti.category_id = ?`;
+      params.push(categoryId);
+      if (userId != null) { sql += ` AND ts.user_id = ?`; params.push(userId); }
+    } else if (userId != null) {
+      sql += ` WHERE ts.user_id = ?`;
+      params.push(userId);
+    }
+    const stmt = this.db.prepare(sql);
+    if (params.length) stmt.bind(params);
+    const rows: TrainingScore[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as TrainingScore);
+    stmt.free();
+    return rows;
+  }
+
+  upsertScore(item_id: number, user_id: number, score: number): void {
+    this.db.run(
+      `INSERT INTO training_scores (item_id, user_id, score, updated_at) VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(item_id, user_id) DO UPDATE SET score = excluded.score, updated_at = excluded.updated_at`,
+      [item_id, user_id, score]
+    );
+    saveDb();
+  }
+
+  bulkUpsertScores(scores: Array<{ item_id: number; user_id: number; score: number }>): void {
+    for (const s of scores) {
+      this.db.run(
+        `INSERT INTO training_scores (item_id, user_id, score, updated_at) VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT(item_id, user_id) DO UPDATE SET score = excluded.score, updated_at = excluded.updated_at`,
+        [s.item_id, s.user_id, s.score]
+      );
+    }
+    saveDb();
+  }
+
+  // ── Bulk import (for xlsx seeding) ──
+
+  bulkImport(data: {
+    categories: Array<{ name: string; sort_order: number }>;
+    items: Array<{ categoryName: string; section: string; name: string; tech_lead: string | null; max_score: number; sort_order: number }>;
+    scores: Array<{ itemCategoryName: string; itemSection: string; itemName: string; user_id: number; score: number }>;
+  }): { categories: number; items: number; scores: number } {
+    let catCount = 0, itemCount = 0, scoreCount = 0;
+
+    // Insert categories
+    const catMap = new Map<string, number>();
+    for (const cat of data.categories) {
+      try {
+        this.db.run(`INSERT INTO training_categories (name, sort_order) VALUES (?, ?)`, [cat.name, cat.sort_order]);
+        const r = this.db.exec(`SELECT last_insert_rowid() as id`);
+        catMap.set(cat.name, Number(r[0].values[0][0]));
+        catCount++;
+      } catch {
+        // Already exists — find its id
+        const stmt = this.db.prepare(`SELECT id FROM training_categories WHERE name = ?`);
+        stmt.bind([cat.name]);
+        if (stmt.step()) catMap.set(cat.name, (stmt.getAsObject() as { id: number }).id);
+        stmt.free();
+      }
+    }
+
+    // Insert items
+    const itemMap = new Map<string, number>(); // key: "catName||section||name"
+    for (const item of data.items) {
+      const catId = catMap.get(item.categoryName);
+      if (catId == null) continue;
+      this.db.run(
+        `INSERT INTO training_items (category_id, section, name, tech_lead, max_score, sort_order) VALUES (?, ?, ?, ?, ?, ?)`,
+        [catId, item.section, item.name, item.tech_lead, item.max_score, item.sort_order]
+      );
+      const r = this.db.exec(`SELECT last_insert_rowid() as id`);
+      const itemId = Number(r[0].values[0][0]);
+      itemMap.set(`${item.categoryName}||${item.section}||${item.name}`, itemId);
+      itemCount++;
+    }
+
+    // Insert scores
+    for (const s of data.scores) {
+      const itemId = itemMap.get(`${s.itemCategoryName}||${s.itemSection}||${s.itemName}`);
+      if (itemId == null) continue;
+      this.db.run(
+        `INSERT INTO training_scores (item_id, user_id, score, updated_at) VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT(item_id, user_id) DO UPDATE SET score = excluded.score, updated_at = excluded.updated_at`,
+        [itemId, s.user_id, s.score]
+      );
+      scoreCount++;
+    }
+
+    saveDb();
+    return { categories: catCount, items: itemCount, scores: scoreCount };
+  }
+}

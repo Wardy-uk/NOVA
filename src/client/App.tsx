@@ -46,6 +46,8 @@ import { SurveyAdminView } from './components/SurveyAdminView.js';
 import { SurveyRespondView } from './components/SurveyRespondView.js';
 import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
 import { TrendsView } from './components/TrendsView.js';
+import { TrainingMatrixView } from './components/TrainingMatrixView.js';
+import { TrainingSummaryView } from './components/TrainingSummaryView.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -55,7 +57,7 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards';
+type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
@@ -65,6 +67,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support'
   | 'backfill-status'
   | 'surveys'
+  | 'training-matrix' | 'training-summary'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -83,7 +86,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', admin: 'hidden',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden',
 };
 
 // Map certain command sub-tabs to their own permission area
@@ -191,9 +194,17 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'wb-tech-support', label: 'Technical Support' },
     ],
   },
+  training: {
+    label: 'Training',
+    defaultView: 'training-matrix',
+    tabs: [
+      { view: 'training-matrix', label: 'Matrix' },
+      { view: 'training-summary', label: 'Dashboard' },
+    ],
+  },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
@@ -205,7 +216,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1043,6 +1054,14 @@ export function App() {
           {/* People — Surveys */}
           {view === 'surveys' && (
             <SurveyAdminView userRole={auth.user?.role} />
+          )}
+
+          {/* Training */}
+          {view === 'training-matrix' && (
+            <TrainingMatrixView userId={auth.user?.id ?? 0} isAdmin={admin} />
+          )}
+          {view === 'training-summary' && (
+            <TrainingSummaryView />
           )}
 
           {/* Administration */}

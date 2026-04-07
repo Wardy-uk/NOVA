@@ -1230,6 +1230,43 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_approval_queue_ticket ON approval_queue(ticket_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_approval_queue_expires ON approval_queue(expires_at)`);
 
+  // ── Training Matrix ──────────────────────────────────────────────────
+  database.run(`
+    CREATE TABLE IF NOT EXISTS training_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      sort_order INTEGER DEFAULT 0
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS training_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category_id INTEGER NOT NULL,
+      section TEXT DEFAULT '',
+      name TEXT NOT NULL,
+      tech_lead TEXT,
+      max_score INTEGER DEFAULT 5,
+      sort_order INTEGER DEFAULT 0,
+      FOREIGN KEY (category_id) REFERENCES training_categories(id) ON DELETE CASCADE
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_training_items_category ON training_items(category_id)`);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS training_scores (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      score INTEGER DEFAULT 0,
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (item_id) REFERENCES training_items(id) ON DELETE CASCADE,
+      UNIQUE(item_id, user_id)
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_training_scores_item ON training_scores(item_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_training_scores_user ON training_scores(user_id)`);
+
   saveDb();
 }
 

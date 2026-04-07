@@ -7,7 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { getDb, initializeSchema, saveDb, createBackup } from './db/schema.js';
-import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries } from './db/queries.js';
+import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries, TrainingQueries } from './db/queries.js';
 import { FileUserQueries } from './db/user-store.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
@@ -76,6 +76,7 @@ import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
 import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
 import { createApprovalRoutes } from './routes/approvals.js';
+import { createTrainingRoutes } from './routes/training.js';
 import { addBusinessHours, toSqliteDatetime } from './utils/business-hours.js';
 
 dotenv.config();
@@ -124,6 +125,7 @@ async function main() {
   const contractTemplateQueries = new ContractTemplateQueries(db);
   const adobeSignAgreementQueries = new AdobeSignAgreementQueries(db);
   const approvalQueries = new ApprovalQueries(db);
+  const trainingQueries = new TrainingQueries(db);
 
   // Purge transient MS365 data from previous session
   const purgedCount = taskQueries.deleteTransientTasks();
@@ -500,6 +502,7 @@ async function main() {
   app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, contractTemplateQueries, settingsQueries));
   app.use('/api/surveys', createSurveyRoutes(db, settingsQueries, userQueries, teamQueries));
   app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries));
+  app.use('/api/training', createTrainingRoutes(trainingQueries, userQueries, requireAreaAccess));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
 

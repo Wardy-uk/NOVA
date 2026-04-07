@@ -35,10 +35,10 @@ import type { CustomRole } from '../middleware/auth.js';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 
 const DEFAULT_CUSTOM_ROLES: CustomRole[] = [
-  { id: 'editor', name: 'Editor', areas: { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'view', kpis: 'edit' } },
-  { id: 'design', name: 'Design', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'edit', accounts: 'view', people: 'view', azdo_push: 'edit', kpis: 'view' } },
-  { id: 'viewer', name: 'Viewer', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden' } },
-  { id: 'report_viewer', name: 'Report Viewer', areas: { command: 'view', nova_features: 'hidden', servicedesk: 'view', sales: 'hidden', onboarding: 'hidden', accounts: 'hidden', people: 'hidden', kpis: 'view' } },
+  { id: 'editor', name: 'Editor', areas: { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'view', kpis: 'edit', training: 'edit' } },
+  { id: 'design', name: 'Design', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'edit', accounts: 'view', people: 'view', azdo_push: 'edit', kpis: 'view', training: 'edit' } },
+  { id: 'viewer', name: 'Viewer', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', training: 'edit' } },
+  { id: 'report_viewer', name: 'Report Viewer', areas: { command: 'view', nova_features: 'hidden', servicedesk: 'view', sales: 'hidden', onboarding: 'hidden', accounts: 'hidden', people: 'hidden', kpis: 'view', training: 'view' } },
 ];
 
 function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
@@ -52,7 +52,7 @@ function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
 function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string, string> {
   const userRoles = parseRoles(roleStr);
   if (userRoles.includes('admin')) {
-    return { command: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', azdo_push: 'edit', ai_approvals: 'edit', admin: 'edit' };
+    return { command: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', azdo_push: 'edit', ai_approvals: 'edit', training: 'edit', admin: 'edit' };
   }
   const matched = roles.filter(r => userRoles.includes(r.id));
   if (matched.length === 0) {

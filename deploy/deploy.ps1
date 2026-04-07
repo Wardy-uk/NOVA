@@ -52,8 +52,27 @@ try {
     Write-Host "Build output verified: $entry" -ForegroundColor Green
     Write-Host ""
 
+    # ── Run data migrations ─────────────────────────────────────────────────
+    Write-Host "[4/5] Running data migrations..." -ForegroundColor Yellow
+
+    # Training Matrix import (idempotent — clears and re-imports from xlsx)
+    $trainingXlsx = "C:\Users\NickW\Downloads\Training Matrix - 2026.xlsx"
+    $trainingScript = Join-Path $AppDir "scripts\import-training-matrix.mjs"
+    if ((Test-Path $trainingScript) -and (Test-Path $trainingXlsx)) {
+        Write-Host "  Importing training matrix from $trainingXlsx..."
+        # Service must be stopped so sql.js doesn't overwrite our DB changes
+        nssm stop $ServiceName 2>$null
+        Start-Sleep -Seconds 2
+        node $trainingScript $trainingXlsx
+        if ($LASTEXITCODE -ne 0) { Write-Host "  WARNING: Training import failed (non-fatal)" -ForegroundColor Yellow }
+        else { Write-Host "  Training matrix imported successfully" -ForegroundColor Green }
+    } else {
+        Write-Host "  Skipping training import (xlsx or script not found)" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+
     # ── Restart service ──────────────────────────────────────────────────────
-    Write-Host "[4/4] Restarting $ServiceName service..." -ForegroundColor Yellow
+    Write-Host "[5/5] Restarting $ServiceName service..." -ForegroundColor Yellow
     nssm restart $ServiceName
     Start-Sleep -Seconds 3
 
