@@ -38,14 +38,18 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editingCell, setEditingCell] = useState<string | null>(null);
+  const [editingLead, setEditingLead] = useState<number | null>(null);
+  const [editingLeadValue, setEditingLeadValue] = useState('');
   const [showAddItem, setShowAddItem] = useState(false);
   const [newItem, setNewItem] = useState({ name: '', section: '', tech_lead: '' });
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryItems, setNewCategoryItems] = useState<Array<{ name: string; section: string; tech_lead: string }>>([{ name: '', section: '', tech_lead: '' }]);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ categories: number; items: number; scores: number; unmatchedColumns?: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [undoStack, setUndoStack] = useState<Array<{ item_id: number; user_id: number; oldScore: number; newScore: number }>>([]);
+  const [viewMode, setViewMode] = useState<'team' | 'my'>('team');
   const pendingScores = useRef<Map<string, { item_id: number; user_id: number; score: number }>>(new Map());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -152,9 +156,12 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
     });
   };
 
+  // Users visible in the matrix based on view mode
+  const visibleUsers = viewMode === 'my' ? users.filter(u => u.id === userId) : users;
+
   const itemTotal = (itemId: number): number => {
     let total = 0;
-    for (const u of users) total += getScore(itemId, u.id);
+    for (const u of visibleUsers) total += getScore(itemId, u.id);
     return total;
   };
 
@@ -195,13 +202,41 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
 
   const addCategory = async () => {
     if (!newCategoryName.trim()) return;
-    await fetch(`${API}/categories`, {
+    const catRes = await fetch(`${API}/categories`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newCategoryName.trim(), sort_order: categories.length }),
-    });
+    }).then(r => r.json());
+    // Create any items that were filled in
+    if (catRes.ok) {
+      const catId = catRes.data.id;
+      const validItems = newCategoryItems.filter(i => i.name.trim());
+      for (let idx = 0; idx < validItems.length; idx++) {
+        const it = validItems[idx];
+        await fetch(`${API}/items`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            category_id: catId, section: it.section.trim(), name: it.name.trim(),
+            tech_lead: it.tech_lead.trim() || null, sort_order: idx,
+          }),
+        });
+      }
+    }
     setNewCategoryName('');
+    setNewCategoryItems([{ name: '', section: '', tech_lead: '' }]);
     setShowAddCategory(false);
+    fetchAll();
+  };
+
+  const saveLead = async (itemId: number) => {
+    await fetch(`${API}/items/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tech_lead: editingLeadValue.trim() || null }),
+    });
+    setEditingLead(null);
+    setEditingLeadValue('');
     fetchAll();
   };
 
@@ -283,31 +318,12 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
         </div>
         {isAdmin && (
           <div className="p-2 border-t border-[#3a424d]">
-            {showAddCategory ? (
-              <div className="flex gap-1">
-                <input
-                  value={newCategoryName}
-                  onChange={e => setNewCategoryName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addCategory()}
-                  placeholder="Category name..."
-                  className="flex-1 bg-[#1e2228] text-neutral-200 text-xs rounded px-2 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca]"
-                  autoFocus
-                />
-                <button onClick={addCategory} className="text-[#5ec1ca] text-xs px-2 hover:bg-[#5ec1ca]/10 rounded">
-                  <i className="fa-solid fa-check" />
-                </button>
-                <button onClick={() => { setShowAddCategory(false); setNewCategoryName(''); }} className="text-neutral-500 text-xs px-1 hover:text-neutral-300">
-                  <i className="fa-solid fa-xmark" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowAddCategory(true)}
-                className="w-full text-left px-3 py-1.5 text-xs text-neutral-500 hover:text-[#5ec1ca] transition-colors"
-              >
-                <i className="fa-solid fa-plus mr-1" />Add Category
-              </button>
-            )}
+            <button
+              onClick={() => setShowAddCategory(true)}
+              className="w-full text-left px-3 py-1.5 text-xs text-neutral-500 hover:text-[#5ec1ca] transition-colors"
+            >
+              <i className="fa-solid fa-plus mr-1" />Add Category
+            </button>
           </div>
         )}
       </div>
@@ -329,6 +345,22 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
                 <i className="fa-solid fa-xmark text-xs" />
               </button>
             )}
+          </div>
+
+          {/* Team / My toggle */}
+          <div className="flex bg-[#1e2228] rounded-full border border-[#3a424d] p-0.5">
+            <button
+              onClick={() => setViewMode('team')}
+              className={`px-3 py-1 text-[11px] rounded-full transition-colors ${viewMode === 'team' ? 'bg-[#5ec1ca] text-[#272C33] font-semibold' : 'text-neutral-400 hover:text-neutral-200'}`}
+            >
+              <i className="fa-solid fa-users mr-1" />Team
+            </button>
+            <button
+              onClick={() => setViewMode('my')}
+              className={`px-3 py-1 text-[11px] rounded-full transition-colors ${viewMode === 'my' ? 'bg-[#5ec1ca] text-[#272C33] font-semibold' : 'text-neutral-400 hover:text-neutral-200'}`}
+            >
+              <i className="fa-solid fa-user mr-1" />My Matrix
+            </button>
           </div>
 
           <span className="text-xs text-neutral-500">
@@ -456,7 +488,7 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
                 <th className="px-2 py-2.5 text-[10px] uppercase tracking-wider text-neutral-400 font-bold w-14 text-center">
                   Total
                 </th>
-                {users.map(u => (
+                {visibleUsers.map(u => (
                   <th key={u.id} className="px-1 py-2.5 text-center min-w-[52px] max-w-[70px]">
                     <div className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold leading-tight truncate" title={displayName(u)}>
                       {(displayName(u)).split(' ')[0]}
@@ -474,7 +506,7 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
                   {/* Section header */}
                   <tr className="bg-[#1e2228]/60">
                     <td
-                      colSpan={3 + users.length + (isAdmin ? 1 : 0)}
+                      colSpan={3 + visibleUsers.length + (isAdmin ? 1 : 0)}
                       className="px-3 py-2 cursor-pointer select-none sticky left-0"
                       onClick={() => toggleSection(sectionName)}
                     >
@@ -497,12 +529,29 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
                         <span className="truncate block max-w-[260px]" title={item.name}>{item.name}</span>
                       </td>
                       <td className="px-2 py-1.5 text-center text-[11px] text-neutral-500">
-                        {item.tech_lead || '-'}
+                        {editingLead === item.id ? (
+                          <input
+                            value={editingLeadValue}
+                            onChange={e => setEditingLeadValue(e.target.value)}
+                            onBlur={() => saveLead(item.id)}
+                            onKeyDown={e => { if (e.key === 'Enter') saveLead(item.id); if (e.key === 'Escape') { setEditingLead(null); setEditingLeadValue(''); } }}
+                            className="w-16 bg-[#1e2228] text-center text-[11px] rounded border border-[#5ec1ca] outline-none text-neutral-200 py-0.5 px-1"
+                            autoFocus
+                          />
+                        ) : (
+                          <span
+                            className={isAdmin ? 'cursor-pointer hover:text-[#5ec1ca] transition-colors' : ''}
+                            onClick={() => { if (isAdmin) { setEditingLead(item.id); setEditingLeadValue(item.tech_lead || ''); } }}
+                            title={isAdmin ? 'Click to edit lead' : undefined}
+                          >
+                            {item.tech_lead || '-'}
+                          </span>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 text-center text-[12px] font-semibold text-neutral-300">
                         {itemTotal(item.id)}
                       </td>
-                      {users.map(u => {
+                      {visibleUsers.map(u => {
                         const score = getScore(item.id, u.id);
                         const canEdit = isAdmin || u.id === userId;
                         const cellKey = `${item.id}-${u.id}`;
@@ -570,7 +619,7 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
                   <td className="px-2 py-2 text-center text-[12px] font-bold text-[#5ec1ca]">
                     {filteredItems.reduce((s, i) => s + itemTotal(i.id), 0)}
                   </td>
-                  {users.map(u => {
+                  {visibleUsers.map(u => {
                     const total = userTotal(u.id);
                     const max = userMaxTotal();
                     const pct = max > 0 ? Math.round((total / max) * 100) : 0;
@@ -607,6 +656,92 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
           <span className="ml-auto">Click cell to cycle score &middot; Right-click to type</span>
         </div>
       </div>
+
+      {/* Add Category modal */}
+      {showAddCategory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setShowAddCategory(false)}>
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          <div className="relative bg-[#272C33] rounded-xl border border-[#3a424d] w-[600px] max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-[#3a424d] flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-neutral-200">Add Category</h3>
+              <button onClick={() => { setShowAddCategory(false); setNewCategoryName(''); setNewCategoryItems([{ name: '', section: '', tech_lead: '' }]); }} className="text-neutral-500 hover:text-neutral-300">
+                <i className="fa-solid fa-xmark" />
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto space-y-4">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-neutral-500 mb-1 block">Category Name</label>
+                <input
+                  value={newCategoryName}
+                  onChange={e => setNewCategoryName(e.target.value)}
+                  placeholder="e.g. Nurtur AI"
+                  className="w-full bg-[#1e2228] text-neutral-200 text-sm rounded px-3 py-2 border border-[#3a424d] outline-none focus:border-[#5ec1ca] placeholder:text-neutral-600"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[10px] uppercase tracking-wider text-neutral-500">Knowledge Items (optional)</label>
+                  <button
+                    onClick={() => setNewCategoryItems(prev => [...prev, { name: '', section: '', tech_lead: '' }])}
+                    className="text-[10px] text-[#5ec1ca] hover:text-[#4db0b9] transition-colors"
+                  >
+                    <i className="fa-solid fa-plus mr-1" />Add Row
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-[1fr_120px_100px_28px] gap-1.5 text-[9px] uppercase tracking-wider text-neutral-600 px-1">
+                    <span>Item Name</span><span>Section</span><span>Lead</span><span />
+                  </div>
+                  {newCategoryItems.map((item, idx) => (
+                    <div key={idx} className="grid grid-cols-[1fr_120px_100px_28px] gap-1.5">
+                      <input
+                        value={item.name}
+                        onChange={e => setNewCategoryItems(prev => prev.map((it, i) => i === idx ? { ...it, name: e.target.value } : it))}
+                        placeholder="Item name..."
+                        className="bg-[#1e2228] text-neutral-200 text-xs rounded px-2 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] placeholder:text-neutral-600"
+                      />
+                      <input
+                        value={item.section}
+                        onChange={e => setNewCategoryItems(prev => prev.map((it, i) => i === idx ? { ...it, section: e.target.value } : it))}
+                        placeholder="Section"
+                        className="bg-[#1e2228] text-neutral-200 text-xs rounded px-2 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] placeholder:text-neutral-600"
+                      />
+                      <input
+                        value={item.tech_lead}
+                        onChange={e => setNewCategoryItems(prev => prev.map((it, i) => i === idx ? { ...it, tech_lead: e.target.value } : it))}
+                        placeholder="Lead"
+                        className="bg-[#1e2228] text-neutral-200 text-xs rounded px-2 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] placeholder:text-neutral-600"
+                      />
+                      <button
+                        onClick={() => setNewCategoryItems(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev)}
+                        className="text-neutral-600 hover:text-red-400 transition-colors text-xs"
+                      >
+                        <i className="fa-solid fa-xmark" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-[#3a424d] flex justify-end gap-2">
+              <button
+                onClick={() => { setShowAddCategory(false); setNewCategoryName(''); setNewCategoryItems([{ name: '', section: '', tech_lead: '' }]); }}
+                className="px-4 py-1.5 text-xs text-neutral-400 hover:text-neutral-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={addCategory}
+                disabled={!newCategoryName.trim()}
+                className="px-4 py-1.5 bg-[#5ec1ca] text-[#272C33] text-xs font-semibold rounded hover:bg-[#4db0b9] disabled:opacity-40"
+              >
+                Create Category
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
