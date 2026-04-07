@@ -47,6 +47,8 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
   const [newCategoryItems, setNewCategoryItems] = useState<Array<{ name: string; section: string; tech_lead: string }>>([{ name: '', section: '', tech_lead: '' }]);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ categories: number; items: number; scores: number; unmatchedColumns?: string[] } | null>(null);
+  const [sendingReminders, setSendingReminders] = useState(false);
+  const [reminderResult, setReminderResult] = useState<{ sent: number; skipped: number; errors: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [undoStack, setUndoStack] = useState<Array<{ item_id: number; user_id: number; oldScore: number; newScore: number }>>([]);
   const [viewMode, setViewMode] = useState<'team' | 'my'>('team');
@@ -273,6 +275,21 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const handleSendReminders = async () => {
+    if (!confirm('Send training reminder emails to all active users with incomplete matrices?')) return;
+    setSendingReminders(true);
+    setReminderResult(null);
+    try {
+      const resp = await fetch(`${API}/send-reminders`, { method: 'POST' });
+      const result = await resp.json();
+      if (result.ok) setReminderResult(result.data);
+      else alert('Failed: ' + (result.error || 'Unknown error'));
+    } catch (err) {
+      alert('Failed: ' + (err instanceof Error ? err.message : err));
+    }
+    setSendingReminders(false);
+  };
+
   const displayName = (u: User) => u.display_name || u.username;
 
   if (loading) {
@@ -413,6 +430,18 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
                   <><i className="fa-solid fa-file-import mr-1" />Import XLSX</>
                 )}
               </button>
+              <button
+                onClick={handleSendReminders}
+                disabled={sendingReminders}
+                className="px-3 py-1.5 bg-[#2f353d] text-neutral-300 text-xs font-semibold rounded-full border border-[#3a424d] hover:bg-[#363d47] hover:text-amber-400 hover:border-amber-500/30 transition-colors disabled:opacity-50"
+                title="Send reminder emails to active users with incomplete matrices"
+              >
+                {sendingReminders ? (
+                  <><i className="fa-solid fa-spinner fa-spin mr-1" />Sending...</>
+                ) : (
+                  <><i className="fa-solid fa-envelope mr-1" />Send Reminders</>
+                )}
+              </button>
             </>
           )}
         </div>
@@ -431,6 +460,25 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
               )}
             </span>
             <button onClick={() => setImportResult(null)} className="text-neutral-500 hover:text-neutral-300 text-xs ml-2">
+              <i className="fa-solid fa-xmark" />
+            </button>
+          </div>
+        )}
+
+        {/* Reminder result banner */}
+        {reminderResult && (
+          <div className="bg-blue-900/30 border border-blue-700/40 rounded-lg px-4 py-2 mb-3 flex items-center justify-between">
+            <span className="text-xs text-blue-300">
+              <i className="fa-solid fa-envelope-circle-check mr-1" />
+              Reminders sent: {reminderResult.sent}, skipped: {reminderResult.skipped}
+              {reminderResult.errors.length > 0 && (
+                <span className="text-red-400 ml-2">
+                  <i className="fa-solid fa-triangle-exclamation mr-1" />
+                  {reminderResult.errors.length} error{reminderResult.errors.length !== 1 ? 's' : ''}: {reminderResult.errors.join(', ')}
+                </span>
+              )}
+            </span>
+            <button onClick={() => setReminderResult(null)} className="text-neutral-500 hover:text-neutral-300 text-xs ml-2">
               <i className="fa-solid fa-xmark" />
             </button>
           </div>
