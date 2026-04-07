@@ -576,18 +576,14 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
                               />
                             ) : (
                               <button
-                                onClick={() => canEdit && cycleScore(item.id, u.id, item.max_score)}
-                                onContextMenu={e => {
-                                  e.preventDefault();
-                                  if (canEdit) setEditingCell(cellKey);
-                                }}
+                                onClick={() => { if (canEdit) setEditingCell(cellKey); }}
                                 disabled={!canEdit}
                                 className={`w-9 h-7 rounded text-xs font-semibold transition-all ${scoreColor(score, item.max_score)} ${
                                   canEdit ? 'cursor-pointer hover:ring-1 hover:ring-[#5ec1ca]/40' : 'cursor-default opacity-60'
                                 }`}
-                                title={canEdit ? `Click to cycle (0-${item.max_score}), right-click to type` : `${displayName(u)}: ${score}/${item.max_score}`}
+                                title={canEdit ? `Click to edit (0-${item.max_score})` : `${displayName(u)}: ${score}/${item.max_score}`}
                               >
-                                {score > 0 ? score : ''}
+                                {score}
                               </button>
                             )}
                           </td>
@@ -653,7 +649,7 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
           <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-amber-900/40" /> 3 (Competent)</span>
           <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-green-900/30" /> 4 (Proficient)</span>
           <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-emerald-900/40" /> 5 (Expert)</span>
-          <span className="ml-auto">Click cell to cycle score &middot; Right-click to type</span>
+          <span className="ml-auto">Click cell to edit score</span>
         </div>
       </div>
 
