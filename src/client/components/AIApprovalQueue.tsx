@@ -40,6 +40,7 @@ const STATUS_FILTERS = [
   { key: 'approved', label: 'Approved' },
   { key: 'declined', label: 'Declined' },
   { key: 'timed_out', label: 'Timed Out' },
+  { key: 'cancelled', label: 'Cancelled' },
 ];
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -178,7 +179,7 @@ export function AIApprovalQueue({ canInteract }: AIApprovalQueueProps) {
 
   // ---- Actions ----
 
-  async function handleDecide(id: number, action: 'approve' | 'decline', editedResponse?: string) {
+  async function handleDecide(id: number, action: 'approve' | 'decline' | 'cancel', editedResponse?: string) {
     try {
       const res = await fetch(`${API_BASE}/${id}/decide`, {
         method: 'POST',

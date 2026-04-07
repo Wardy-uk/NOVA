@@ -63,17 +63,19 @@ export function createApprovalRoutes(
   // POST /api/approvals/:id/decide — approve or decline
   router.post('/:id/decide', async (req: Request, res: Response) => {
     const user = (req as any).user;
-    if (!isApprover(req)) {
-      res.status(403).json({ ok: false, error: 'You do not have AI Approver permissions' });
-      return;
-    }
 
     const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid ID' }); return; }
 
     const { action, editedResponse } = req.body;
-    if (!action || !['approve', 'decline'].includes(action)) {
-      res.status(400).json({ ok: false, error: 'action must be "approve" or "decline"' });
+    if (!action || !['approve', 'decline', 'cancel'].includes(action)) {
+      res.status(400).json({ ok: false, error: 'action must be "approve", "decline", or "cancel"' });
+      return;
+    }
+
+    // Cancel (dismiss) is allowed for any authenticated user; approve/decline requires approver permissions
+    if (action !== 'cancel' && !isApprover(req)) {
+      res.status(403).json({ ok: false, error: 'You do not have AI Approver permissions' });
       return;
     }
 
@@ -85,25 +87,29 @@ export function createApprovalRoutes(
     }
 
     // Update local status
-    const updated = approvalQueries.decide(id, action === 'approve' ? 'approved' : 'declined', user.username, editedResponse);
+    const statusMap: Record<string, string> = { approve: 'approved', decline: 'declined', cancel: 'cancelled' };
+    const newStatus = statusMap[action] as 'approved' | 'declined' | 'cancelled';
+    const updated = approvalQueries.decide(id, newStatus, user.username, editedResponse);
     if (!updated) {
       res.status(500).json({ ok: false, error: 'Failed to update' });
       return;
     }
 
-    // Hit the n8n resume URL to continue the workflow
-    try {
-      const resumeUrl = `${item.resume_url}?action=${action}`;
-      const response = await fetch(resumeUrl, { method: 'GET' });
-      if (!response.ok) {
-        console.warn(`[Approvals] n8n resume returned ${response.status} for approval ${id}`);
+    // Hit the n8n resume URL to continue the workflow (skip for cancel — ticket resolved externally)
+    if (action !== 'cancel') {
+      try {
+        const resumeUrl = `${item.resume_url}?action=${action}`;
+        const response = await fetch(resumeUrl, { method: 'GET' });
+        if (!response.ok) {
+          console.warn(`[Approvals] n8n resume returned ${response.status} for approval ${id}`);
+        }
+      } catch (err) {
+        console.error(`[Approvals] Failed to hit n8n resume URL for approval ${id}:`, err instanceof Error ? err.message : err);
+        // Don't fail the request — the decision is recorded locally even if n8n resume fails
       }
-    } catch (err) {
-      console.error(`[Approvals] Failed to hit n8n resume URL for approval ${id}:`, err instanceof Error ? err.message : err);
-      // Don't fail the request — the decision is recorded locally even if n8n resume fails
     }
 
-    res.json({ ok: true, data: { id, status: action === 'approve' ? 'approved' : 'declined' } });
+    res.json({ ok: true, data: { id, status: newStatus } });
   });
 
   return router;

@@ -23,7 +23,7 @@ interface AIApprovalDrawerProps {
   item: ApprovalItem;
   canInteract: boolean;
   onClose: () => void;
-  onDecide: (id: number, action: 'approve' | 'decline', editedResponse?: string) => void;
+  onDecide: (id: number, action: 'approve' | 'decline' | 'cancel', editedResponse?: string) => void;
   onPrev?: () => void;
   onNext?: () => void;
   hasPrev?: boolean;
@@ -144,6 +144,7 @@ const STATUS_STYLES: Record<string, string> = {
   approved: 'bg-green-500/20 text-green-400',
   declined: 'bg-red-500/20 text-red-400',
   timed_out: 'bg-neutral-500/20 text-neutral-500',
+  cancelled: 'bg-neutral-500/20 text-neutral-400',
 };
 
 export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev, onNext, hasPrev, hasNext }: AIApprovalDrawerProps) {
@@ -184,6 +185,10 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
 
   function handleDecline() {
     onDecide(item.id, 'decline');
+  }
+
+  function handleCancel() {
+    onDecide(item.id, 'cancel');
   }
 
   return (
@@ -376,7 +381,7 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
         </div>
 
         {/* Action Bar (sticky bottom) */}
-        {canInteract && isPending && (
+        {isPending && (
           <div className="px-5 py-4 border-t border-[#3a424d] bg-[#1f242b] flex items-center justify-between">
             <div className={`text-[12px] ${URGENCY_COLORS[expiryDisplay.urgency]}`}>
               <i className="fas fa-clock mr-1" />
@@ -384,25 +389,35 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={handleDecline}
-                className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                onClick={handleCancel}
+                className="border border-[#3a424d] text-neutral-400 hover:text-neutral-200 hover:border-neutral-500 px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
               >
-                Decline
+                Dismiss
               </button>
-              {hasEdits ? (
-                <button
-                  onClick={handleApprove}
-                  className="bg-[#5ec1ca] hover:bg-[#4db0ba] text-[#272C33] px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
-                >
-                  Edit & Approve
-                </button>
-              ) : (
-                <button
-                  onClick={handleApprove}
-                  className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
-                >
-                  Approve
-                </button>
+              {canInteract && (
+                <>
+                  <button
+                    onClick={handleDecline}
+                    className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                  >
+                    Decline
+                  </button>
+                  {hasEdits ? (
+                    <button
+                      onClick={handleApprove}
+                      className="bg-[#5ec1ca] hover:bg-[#4db0ba] text-[#272C33] px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                    >
+                      Edit & Approve
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleApprove}
+                      className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                    >
+                      Approve
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -415,6 +430,7 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
               {item.status === 'approved' && <span className="text-green-400">Approved</span>}
               {item.status === 'declined' && <span className="text-red-400">Declined</span>}
               {item.status === 'timed_out' && <span className="text-neutral-500">Timed Out</span>}
+              {item.status === 'cancelled' && <span className="text-neutral-400">Cancelled</span>}
               {item.decided_by && <span> by {item.decided_by}</span>}
               {item.decided_at && <span> {timeAgo(item.decided_at)}</span>}
             </div>
