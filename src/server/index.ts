@@ -1284,22 +1284,43 @@ ${panelHtml}
     }
   }, 6 * 60 * 60 * 1000);
 
-  // Auto-expire approval queue items and hit n8n resume URLs
+  // Auto-expire approval queue items and check Jira status every minute
   setInterval(async () => {
     try {
-      // Find approvals that just expired (still pending but past expires_at)
-      const expired = approvalQueries.getAll('pending').filter(
-        (item) => new Date(item.expires_at) <= new Date()
-      );
+      const pending = approvalQueries.getAll('pending');
+
+      // 1. Expire items past their business-hours deadline
+      const expired = pending.filter((item) => new Date(item.expires_at) <= new Date());
       for (const item of expired) {
-        // Mark as timed_out
         approvalQueries.decide(item.id, 'timed_out', 'system');
-        // Hit n8n resume URL to trigger fallback path
         try {
           await fetch(`${item.resume_url}?action=timeout`, { method: 'GET' });
           console.log(`[Approvals] Auto-expired approval ${item.id} (${item.ticket_id}), triggered n8n resume`);
         } catch (err) {
           console.error(`[Approvals] Failed to hit resume URL for expired approval ${item.id}:`, err instanceof Error ? err.message : err);
+        }
+      }
+
+      // 2. Check Jira status for remaining pending items — auto-cancel if resolved/closed
+      const s = settingsQueries.getAll();
+      if (s.jira_enabled === 'true' && s.jira_username && s.jira_token) {
+        const stillPending = pending.filter((item) => new Date(item.expires_at) > new Date());
+        const auth = 'Basic ' + Buffer.from(`${s.jira_username}:${s.jira_token}`).toString('base64');
+        const cloudId = '9357a1ba-0ad9-4ff0-964d-fad84dd30f96';
+        for (const item of stillPending) {
+          try {
+            const resp = await fetch(
+              `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${item.ticket_id}?fields=status`,
+              { headers: { Authorization: auth, Accept: 'application/json' } }
+            );
+            if (!resp.ok) continue;
+            const data = await resp.json() as { fields?: { status?: { statusCategory?: { key?: string } } } };
+            if (data.fields?.status?.statusCategory?.key === 'done') {
+              approvalQueries.decide(item.id, 'cancelled', 'system');
+              try { await fetch(`${item.resume_url}?action=decline`, { method: 'GET' }); } catch { /* ignore */ }
+              console.log(`[Approvals] Auto-cancelled approval ${item.id} (${item.ticket_id}) — already resolved in Jira`);
+            }
+          } catch { /* skip, try next */ }
         }
       }
     } catch (err) {
