@@ -122,13 +122,21 @@ export function createTrainingRoutes(
   // ── Users (people in the matrix) ──
 
   router.get('/users', (_req: Request, res: Response) => {
-    // Only return users who have at least one training score recorded
-    const scores = trainingQueries.getScores();
-    const userIdsWithScores = new Set(scores.map(s => s.user_id));
+    // Only return users who are training members (imported from spreadsheet)
+    const memberIds = trainingQueries.getMembers();
+    if (memberIds.length === 0) {
+      // No members table yet — fall back to all users
+      const allUsers = userQueries.getAll();
+      res.json({ ok: true, data: allUsers.map(u => ({ id: u.id, username: u.username, display_name: u.display_name })) });
+      return;
+    }
+    const memberSet = new Set(memberIds);
     const allUsers = userQueries.getAll();
-    const users = allUsers
-      .filter(u => userIdsWithScores.has(u.id))
-      .map(u => ({ id: u.id, username: u.username, display_name: u.display_name }));
+    // Preserve the sort order from training_members
+    const users = memberIds
+      .map(id => allUsers.find(u => u.id === id))
+      .filter(Boolean)
+      .map(u => ({ id: u!.id, username: u!.username, display_name: u!.display_name }));
     res.json({ ok: true, data: users });
   });
 
@@ -204,6 +212,7 @@ export function createTrainingRoutes(
 
     let totalCategories = 0, totalItems = 0, totalScores = 0;
     const unmatchedColumns: string[] = [];
+    const matchedUserIds = new Set<number>();
 
     for (let catIdx = 0; catIdx < sheets.length; catIdx++) {
       const sheet = sheets[catIdx];
@@ -224,6 +233,7 @@ export function createTrainingRoutes(
         const uid = matchUser(h, allUsers);
         if (uid != null) {
           personCols.push({ colIdx: c, userId: uid, name: h });
+          matchedUserIds.add(uid);
         } else if (!unmatchedColumns.includes(h)) {
           unmatchedColumns.push(h);
         }
@@ -281,9 +291,15 @@ export function createTrainingRoutes(
       }
     }
 
+    // Save matched users as training members (preserving spreadsheet column order)
+    let memberOrder = 0;
+    for (const uid of matchedUserIds) {
+      trainingQueries.addMember(uid, memberOrder++);
+    }
+
     res.json({
       ok: true,
-      data: { categories: totalCategories, items: totalItems, scores: totalScores, unmatchedColumns },
+      data: { categories: totalCategories, items: totalItems, scores: totalScores, members: matchedUserIds.size, unmatchedColumns },
     });
   });
 
@@ -295,9 +311,10 @@ export function createTrainingRoutes(
     const scores = trainingQueries.getScores();
     const allUsers = userQueries.getAll();
 
-    // Only include users who have at least one score
-    const userIdsWithScores = new Set(scores.map(s => s.user_id));
-    const activeUsers = allUsers.filter(u => userIdsWithScores.has(u.id));
+    // Only include training members (from spreadsheet import)
+    const memberIds = trainingQueries.getMembers();
+    const memberSet = memberIds.length > 0 ? new Set(memberIds) : null;
+    const activeUsers = memberSet ? allUsers.filter(u => memberSet.has(u.id)) : allUsers;
 
     // Per-user, per-category stats
     const summary = activeUsers.map(u => {

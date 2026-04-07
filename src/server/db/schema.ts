@@ -1267,6 +1267,13 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_training_scores_item ON training_scores(item_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_training_scores_user ON training_scores(user_id)`);
 
+  database.run(`
+    CREATE TABLE IF NOT EXISTS training_members (
+      user_id INTEGER PRIMARY KEY,
+      sort_order INTEGER DEFAULT 0
+    )
+  `);
+
   saveDb();
 }
 

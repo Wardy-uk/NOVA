@@ -3966,6 +3966,22 @@ export class TrainingQueries {
     this.db.run(`DELETE FROM training_scores`);
     this.db.run(`DELETE FROM training_items`);
     this.db.run(`DELETE FROM training_categories`);
+    this.db.run(`DELETE FROM training_members`);
+    saveDb();
+  }
+
+  // ── Members (users included in the matrix) ──
+
+  getMembers(): number[] {
+    const stmt = this.db.prepare(`SELECT user_id FROM training_members ORDER BY sort_order, user_id`);
+    const ids: number[] = [];
+    while (stmt.step()) ids.push((stmt.getAsObject() as { user_id: number }).user_id);
+    stmt.free();
+    return ids;
+  }
+
+  addMember(userId: number, sortOrder: number): void {
+    this.db.run(`INSERT OR IGNORE INTO training_members (user_id, sort_order) VALUES (?, ?)`, [userId, sortOrder]);
     saveDb();
   }
 

@@ -161,6 +161,8 @@ console.log(`[Import] All ${Object.keys(COLUMN_TO_USERNAME).length} column mappi
 db.run(`DELETE FROM training_scores`);
 db.run(`DELETE FROM training_items`);
 db.run(`DELETE FROM training_categories`);
+db.run(`CREATE TABLE IF NOT EXISTS training_members (user_id INTEGER PRIMARY KEY, sort_order INTEGER DEFAULT 0)`);
+db.run(`DELETE FROM training_members`);
 console.log('[Import] Cleared existing training data\n');
 
 // ── Parse XLSX ──
@@ -169,6 +171,7 @@ const wb = XLSX.readFile(XLSX_PATH);
 function norm(s) { return String(s || '').trim().replace(/\s+/g, ' '); }
 
 let totalCategories = 0, totalItems = 0, totalScores = 0;
+const allMemberIds = new Set();
 
 for (let catIdx = 0; catIdx < wb.SheetNames.length; catIdx++) {
   const sheetName = wb.SheetNames[catIdx];
@@ -194,7 +197,9 @@ for (let catIdx = 0; catIdx < wb.SheetNames.length; catIdx++) {
     // Try all mappings
     const username = COLUMN_TO_USERNAME[h];
     if (username) {
-      personCols.push({ colIdx: c, userId: usernameToId.get(username), name: h });
+      const uid = usernameToId.get(username);
+      personCols.push({ colIdx: c, userId: uid, name: h });
+      allMemberIds.add(uid);
     }
   }
 
@@ -268,6 +273,13 @@ for (let catIdx = 0; catIdx < wb.SheetNames.length; catIdx++) {
     }
   }
 }
+
+// ── Save training members ──
+let memberOrder = 0;
+for (const uid of allMemberIds) {
+  db.run(`INSERT OR IGNORE INTO training_members (user_id, sort_order) VALUES (?, ?)`, [uid, memberOrder++]);
+}
+console.log(`[Import] Saved ${allMemberIds.size} training members`);
 
 // ── Save ──
 const dbData = db.export();
