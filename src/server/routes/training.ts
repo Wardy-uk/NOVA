@@ -122,8 +122,13 @@ export function createTrainingRoutes(
   // ── Users (people in the matrix) ──
 
   router.get('/users', (_req: Request, res: Response) => {
+    // Only return users who have at least one training score recorded
+    const scores = trainingQueries.getScores();
+    const userIdsWithScores = new Set(scores.map(s => s.user_id));
     const allUsers = userQueries.getAll();
-    const users = allUsers.map(u => ({ id: u.id, username: u.username, display_name: u.display_name }));
+    const users = allUsers
+      .filter(u => userIdsWithScores.has(u.id))
+      .map(u => ({ id: u.id, username: u.username, display_name: u.display_name }));
     res.json({ ok: true, data: users });
   });
 
@@ -290,8 +295,12 @@ export function createTrainingRoutes(
     const scores = trainingQueries.getScores();
     const allUsers = userQueries.getAll();
 
+    // Only include users who have at least one score
+    const userIdsWithScores = new Set(scores.map(s => s.user_id));
+    const activeUsers = allUsers.filter(u => userIdsWithScores.has(u.id));
+
     // Per-user, per-category stats
-    const summary = allUsers.map(u => {
+    const summary = activeUsers.map(u => {
       const userScores = scores.filter(s => s.user_id === u.id);
       const categoryStats = categories.map(cat => {
         const catItems = items.filter(i => i.category_id === cat.id);
