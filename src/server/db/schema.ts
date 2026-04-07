@@ -411,6 +411,7 @@ export function initializeSchema(database: Database): void {
     ['milestone_templates', 'tickets_enabled INTEGER DEFAULT 0'],
     ['onboarding_ticket_groups', 'display_name TEXT'],
     ['onboarding_ticket_groups', 'traffic_light_group TEXT'],
+    ['approval_queue', 'decline_reason TEXT'],
   ];
   // Data migration: consolidate 'user' role → 'viewer'
   try { database.run(`UPDATE users SET role = 'viewer' WHERE role = 'user'`); } catch { /* ignore */ }

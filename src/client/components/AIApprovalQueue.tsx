@@ -15,6 +15,7 @@ interface ApprovalItem {
   decided_by: string | null;
   decided_at: string | null;
   edited_response_adf: string | null;
+  decline_reason: string | null;
   priority: string | null;
   created_at: string;
   expires_at: string;
@@ -179,12 +180,12 @@ export function AIApprovalQueue({ canInteract }: AIApprovalQueueProps) {
 
   // ---- Actions ----
 
-  async function handleDecide(id: number, action: 'approve' | 'decline' | 'cancel', editedResponse?: string) {
+  async function handleDecide(id: number, action: 'approve' | 'decline' | 'cancel', editedResponse?: string, declineReason?: string) {
     try {
       const res = await fetch(`${API_BASE}/${id}/decide`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, editedResponse }),
+        body: JSON.stringify({ action, editedResponse, declineReason }),
       });
       const json = await res.json();
       if (json.ok) {

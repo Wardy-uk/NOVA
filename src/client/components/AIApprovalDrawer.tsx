@@ -14,6 +14,7 @@ interface ApprovalItem {
   decided_by: string | null;
   decided_at: string | null;
   edited_response_adf: string | null;
+  decline_reason: string | null;
   priority: string | null;
   created_at: string;
   expires_at: string;
@@ -23,7 +24,7 @@ interface AIApprovalDrawerProps {
   item: ApprovalItem;
   canInteract: boolean;
   onClose: () => void;
-  onDecide: (id: number, action: 'approve' | 'decline' | 'cancel', editedResponse?: string) => void;
+  onDecide: (id: number, action: 'approve' | 'decline' | 'cancel', editedResponse?: string, declineReason?: string) => void;
   onPrev?: () => void;
   onNext?: () => void;
   hasPrev?: boolean;
@@ -183,8 +184,16 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
     }
   }
 
+  const [showDeclineForm, setShowDeclineForm] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
+
   function handleDecline() {
-    onDecide(item.id, 'decline');
+    if (!showDeclineForm) {
+      setShowDeclineForm(true);
+      return;
+    }
+    if (!declineReason.trim()) return;
+    onDecide(item.id, 'decline', undefined, declineReason.trim());
   }
 
   function handleCancel() {
@@ -382,43 +391,61 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
 
         {/* Action Bar (sticky bottom) */}
         {isPending && (
-          <div className="px-5 py-4 border-t border-[#3a424d] bg-[#1f242b] flex items-center justify-between">
-            <div className={`text-[12px] ${URGENCY_COLORS[expiryDisplay.urgency]}`}>
-              <i className="fas fa-clock mr-1" />
-              Expires: {expiryDisplay.text}
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleCancel}
-                className="border border-[#3a424d] text-neutral-400 hover:text-neutral-200 hover:border-neutral-500 px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
-              >
-                Dismiss
-              </button>
-              {canInteract && (
-                <>
-                  <button
-                    onClick={handleDecline}
-                    className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
-                  >
-                    Decline
-                  </button>
-                  {hasEdits ? (
+          <div className="px-5 py-4 border-t border-[#3a424d] bg-[#1f242b]">
+            {showDeclineForm && (
+              <div className="mb-3">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-1.5 block">Decline Reason (required)</label>
+                <textarea
+                  value={declineReason}
+                  onChange={(e) => setDeclineReason(e.target.value)}
+                  placeholder="Why is this resolution being declined?"
+                  className="w-full bg-[#272C33] border border-[#3a424d] rounded-lg px-3 py-2 text-[13px] text-neutral-200 placeholder-neutral-600 focus:border-red-500/50 focus:outline-none resize-none"
+                  rows={3}
+                  autoFocus
+                />
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <div className={`text-[12px] ${URGENCY_COLORS[expiryDisplay.urgency]}`}>
+                <i className="fas fa-clock mr-1" />
+                Expires: {expiryDisplay.text}
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => { if (showDeclineForm) { setShowDeclineForm(false); setDeclineReason(''); } else { handleCancel(); } }}
+                  className="border border-[#3a424d] text-neutral-400 hover:text-neutral-200 hover:border-neutral-500 px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                >
+                  {showDeclineForm ? 'Cancel' : 'Dismiss'}
+                </button>
+                {canInteract && (
+                  <>
                     <button
-                      onClick={handleApprove}
-                      className="bg-[#5ec1ca] hover:bg-[#4db0ba] text-[#272C33] px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                      onClick={handleDecline}
+                      disabled={showDeclineForm && !declineReason.trim()}
+                      className={`bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors ${showDeclineForm && !declineReason.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      Edit & Approve
+                      {showDeclineForm ? 'Confirm Decline' : 'Decline'}
                     </button>
-                  ) : (
-                    <button
-                      onClick={handleApprove}
-                      className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
-                    >
-                      Approve
-                    </button>
-                  )}
-                </>
-              )}
+                    {!showDeclineForm && (
+                      hasEdits ? (
+                        <button
+                          onClick={handleApprove}
+                          className="bg-[#5ec1ca] hover:bg-[#4db0ba] text-[#272C33] px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                        >
+                          Edit & Approve
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleApprove}
+                          className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                        >
+                          Approve
+                        </button>
+                      )
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -434,6 +461,11 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
               {item.decided_by && <span> by {item.decided_by}</span>}
               {item.decided_at && <span> {timeAgo(item.decided_at)}</span>}
             </div>
+            {item.status === 'declined' && item.decline_reason && (
+              <div className="mt-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 text-[12px] text-red-300">
+                <span className="font-semibold text-red-400">Reason: </span>{item.decline_reason}
+              </div>
+            )}
           </div>
         )}
       </div>

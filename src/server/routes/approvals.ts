@@ -67,9 +67,15 @@ export function createApprovalRoutes(
     const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid ID' }); return; }
 
-    const { action, editedResponse } = req.body;
+    const { action, editedResponse, declineReason } = req.body;
     if (!action || !['approve', 'decline', 'cancel'].includes(action)) {
       res.status(400).json({ ok: false, error: 'action must be "approve", "decline", or "cancel"' });
+      return;
+    }
+
+    // Decline requires a reason
+    if (action === 'decline' && (!declineReason || !declineReason.trim())) {
+      res.status(400).json({ ok: false, error: 'A reason is required when declining' });
       return;
     }
 
@@ -89,7 +95,7 @@ export function createApprovalRoutes(
     // Update local status
     const statusMap: Record<string, string> = { approve: 'approved', decline: 'declined', cancel: 'cancelled' };
     const newStatus = statusMap[action] as 'approved' | 'declined' | 'cancelled';
-    const updated = approvalQueries.decide(id, newStatus, user.username, editedResponse);
+    const updated = approvalQueries.decide(id, newStatus, user.username, editedResponse, action === 'decline' ? declineReason.trim() : undefined);
     if (!updated) {
       res.status(500).json({ ok: false, error: 'Failed to update' });
       return;

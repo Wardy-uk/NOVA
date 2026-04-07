@@ -3630,6 +3630,7 @@ export interface ApprovalItem {
   decided_by: string | null;
   decided_at: string | null;
   edited_response_adf: string | null;
+  decline_reason: string | null;
   priority: string | null;
   created_at: string;
   expires_at: string;
@@ -3735,13 +3736,13 @@ export class ApprovalQueries {
     return row.id as number;
   }
 
-  decide(id: number, action: 'approved' | 'declined' | 'timed_out' | 'cancelled', decidedBy: string, editedResponseAdf?: string): boolean {
+  decide(id: number, action: 'approved' | 'declined' | 'timed_out' | 'cancelled', decidedBy: string, editedResponseAdf?: string, declineReason?: string): boolean {
     const item = this.getById(id);
     if (!item || item.status !== 'pending') return false;
 
     this.db.run(
-      `UPDATE approval_queue SET status = ?, decided_by = ?, decided_at = datetime('now'), edited_response_adf = ? WHERE id = ?`,
-      [action, decidedBy, editedResponseAdf || null, id]
+      `UPDATE approval_queue SET status = ?, decided_by = ?, decided_at = datetime('now'), edited_response_adf = ?, decline_reason = ? WHERE id = ?`,
+      [action, decidedBy, editedResponseAdf || null, declineReason || null, id]
     );
     saveDb();
     return true;
@@ -3822,6 +3823,7 @@ export class ApprovalQueries {
       decided_by: (row.decided_by as string) || null,
       decided_at: (row.decided_at as string) || null,
       edited_response_adf: (row.edited_response_adf as string) || null,
+      decline_reason: (row.decline_reason as string) || null,
       priority: (row.priority as string) || null,
       created_at: row.created_at as string,
       expires_at: row.expires_at as string,
