@@ -1058,7 +1058,7 @@ export function App() {
 
           {/* Training */}
           {view === 'training-matrix' && (
-            <TrainingMatrixView userId={auth.user?.id ?? 0} isAdmin={admin} />
+            <TrainingMatrixView userId={auth.user?.id ?? 0} isAdmin={areaAccess.admin === 'edit'} />
           )}
           {view === 'training-summary' && (
             <TrainingSummaryView />
