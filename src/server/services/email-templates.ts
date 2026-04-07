@@ -95,3 +95,38 @@ export function setupPortalHtml(opts: {
     <p style="margin:16px 0 0;color:#6b7280;font-size:11px">This link expires in ${opts.expiryDays} days. If you have any questions, reply to this email.</p>
   `);
 }
+
+export function trainingReminderHtml(opts: {
+  displayName: string;
+  completionPct: number;
+  totalItems: number;
+  missingCount: number;
+  novaUrl: string;
+  categories: Array<{ name: string; scored: number; total: number; pct: number }>;
+}): string {
+  const categoryRows = opts.categories
+    .filter(c => c.pct < 100)
+    .map(c => {
+      const barColor = c.pct < 40 ? '#ef4444' : c.pct < 70 ? '#d97706' : '#059669';
+      return `<tr>
+        <td style="padding:6px 0;color:#e5e5e5;font-size:13px">${c.name}</td>
+        <td style="padding:6px 8px;width:120px">
+          <div style="background:#1e2228;border-radius:4px;height:8px;overflow:hidden">
+            <div style="background:${barColor};height:100%;width:${c.pct}%;border-radius:4px"></div>
+          </div>
+        </td>
+        <td style="padding:6px 0;color:#a0a0a0;font-size:12px;text-align:right;white-space:nowrap">${c.scored}/${c.total} (${c.pct}%)</td>
+      </tr>`;
+    })
+    .join('');
+
+  return wrap(`
+    <p style="margin:0 0 20px;color:#e5e5e5;font-size:15px">Hi ${opts.displayName},</p>
+    <p style="margin:0 0 16px;color:#a0a0a0;font-size:13px">Your training matrix is <strong style="color:#e5e5e5">${opts.completionPct}% complete</strong> — ${opts.missingCount} of ${opts.totalItems} items still need a score.</p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px">
+      ${categoryRows}
+    </table>
+    <p style="margin:0 0 24px;color:#a0a0a0;font-size:13px">Please take a few minutes to update your scores. It helps us understand team capability and identify training needs.</p>
+    ${button(opts.novaUrl, 'Update My Training Matrix')}
+  `);
+}

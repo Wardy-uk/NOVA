@@ -77,6 +77,7 @@ import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-cli
 import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
 import { createApprovalRoutes } from './routes/approvals.js';
 import { createTrainingRoutes } from './routes/training.js';
+import { sendTrainingReminders } from './services/training-reminder.js';
 import { addBusinessHours, toSqliteDatetime } from './utils/business-hours.js';
 
 dotenv.config();
@@ -502,7 +503,7 @@ async function main() {
   app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, contractTemplateQueries, settingsQueries));
   app.use('/api/surveys', createSurveyRoutes(db, settingsQueries, userQueries, teamQueries));
   app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries));
-  app.use('/api/training', createTrainingRoutes(trainingQueries, userQueries, requireAreaAccess));
+  app.use('/api/training', createTrainingRoutes(trainingQueries, userQueries, requireAreaAccess, settingsQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries));
 
@@ -1339,6 +1340,23 @@ ${panelHtml}
     }
   }, 60 * 60 * 1000);
 
+  // Weekly training matrix reminder — check hourly, send on Mondays at 9am
+  let lastTrainingReminderDate = '';
+  const trainingReminderTimer = setInterval(async () => {
+    try {
+      const now = new Date();
+      if (now.getDay() !== 1) return; // Monday only
+      if (now.getHours() < 9) return; // After 9am
+      const today = now.toISOString().split('T')[0];
+      if (lastTrainingReminderDate === today) return; // Already sent today
+      lastTrainingReminderDate = today;
+      console.log('[TrainingReminder] Monday 9am — sending weekly reminders...');
+      await sendTrainingReminders(trainingQueries, userQueries, settingsQueries);
+    } catch (err) {
+      console.error('[TrainingReminder] Error:', err instanceof Error ? err.message : err);
+    }
+  }, 60 * 60 * 1000); // Check hourly
+
   // Graceful shutdown
   const shutdown = async () => {
     console.log('[N.O.V.A] Shutting down...');
@@ -1348,6 +1366,7 @@ ${panelHtml}
     clearInterval(ptScanTimer);
     clearInterval(portalCleanupTimer);
     clearInterval(surveyTimer);
+    clearInterval(trainingReminderTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     watcher.stop();
     try { saveDb(); console.log('[N.O.V.A] Database saved to disk'); } catch (err) {

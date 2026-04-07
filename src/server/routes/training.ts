@@ -1,13 +1,16 @@
 import { Router, type Request, type Response } from 'express';
 import type { TrainingQueries } from '../db/queries.js';
 import type { FileUserQueries } from '../db/user-store.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import type { AreaAccessGuard } from '../middleware/auth.js';
+import { sendTrainingReminders } from '../services/training-reminder.js';
 
 export function createTrainingRoutes(
   trainingQueries: TrainingQueries,
   userQueries: FileUserQueries,
   requireAreaAccess: AreaAccessGuard,
+  settingsQueries?: SettingsQueries,
 ): Router {
   const router = Router();
 
@@ -348,6 +351,21 @@ export function createTrainingRoutes(
     });
 
     res.json({ ok: true, data: { categories, summary } });
+  });
+
+  // ── Manual reminder trigger (admin only) ──
+
+  router.post('/send-reminders', async (req: Request, res: Response) => {
+    if (!req.user || !isAdmin(req.user.role)) {
+      res.status(403).json({ ok: false, error: 'Admin only' });
+      return;
+    }
+    if (!settingsQueries) {
+      res.status(500).json({ ok: false, error: 'Settings not available' });
+      return;
+    }
+    const result = await sendTrainingReminders(trainingQueries, userQueries, settingsQueries);
+    res.json({ ok: true, data: result });
   });
 
   return router;
