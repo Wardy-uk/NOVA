@@ -3962,6 +3962,13 @@ export class TrainingQueries {
     saveDb();
   }
 
+  deleteAllData(): void {
+    this.db.run(`DELETE FROM training_scores`);
+    this.db.run(`DELETE FROM training_items`);
+    this.db.run(`DELETE FROM training_categories`);
+    saveDb();
+  }
+
   // ── Items ──
 
   getItems(categoryId?: number): TrainingItem[] {

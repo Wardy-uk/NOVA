@@ -127,15 +127,159 @@ export function createTrainingRoutes(
     res.json({ ok: true, data: users });
   });
 
-  // ── Bulk import (xlsx seeding) ──
+  // ── XLSX import (client uploads parsed sheet data) ──
+  // Body: { sheets: Array<{ name: string, rows: any[][] }> }
+  // Each sheet becomes a category. Row 0 = headers. Section headers detected automatically.
 
-  router.post('/import', (req: Request, res: Response) => {
+  // Spreadsheet column name → display name / username fuzzy matching
+  const COLUMN_ALIASES: Record<string, string[]> = {
+    'Hiedi': ['Heidi Power', 'heidi'],
+    'Willem': ['Willem Kruger', 'willem'],
+    'Willem Kruger': ['Willem', 'willem'],
+    'Stephen': ['Stephen Mitchell', 'stephen'],
+    'Naomi': ['Naomi Wentworth', 'naomi'],
+    'Zoe': ['Zoe Rees', 'zoe'],
+    'Hope': ['Hope Goodall', 'hope'],
+    'Arman': ['Arman Shazad', 'arman'],
+    'Abdi': ['Abdi Mohamed', 'abdi'],
+    'Luke': ['Luke Scaife', 'luke'],
+    'Seb': ['Sebastian Broome', 'seb'],
+    'Nick Ward': ['Nick W', 'nickw'],
+    'Nathan Rutland': ['Nathan Rutland', 'nathan'],
+    'Kayleigh Russell': ['Kayleigh Russell', 'kayleigh'],
+    'Isabel Busk': ['Isabel Busk', 'isabel'],
+  };
+
+  function matchUser(colName: string, allUsers: Array<{ id: number; username: string; display_name: string | null }>): number | null {
+    const norm = colName.trim().toLowerCase();
+    // Direct match on display_name or username
+    for (const u of allUsers) {
+      if ((u.display_name || '').toLowerCase() === norm) return u.id;
+      if (u.username.toLowerCase() === norm) return u.id;
+    }
+    // First-name match
+    const firstName = norm.split(' ')[0];
+    for (const u of allUsers) {
+      if (u.username.toLowerCase() === firstName) return u.id;
+      if ((u.display_name || '').toLowerCase().startsWith(firstName + ' ')) return u.id;
+      if ((u.display_name || '').toLowerCase() === firstName) return u.id;
+    }
+    // Alias match
+    const aliases = COLUMN_ALIASES[colName.trim()];
+    if (aliases) {
+      for (const alias of aliases) {
+        const a = alias.toLowerCase();
+        for (const u of allUsers) {
+          if ((u.display_name || '').toLowerCase() === a) return u.id;
+          if (u.username.toLowerCase() === a) return u.id;
+          if ((u.display_name || '').toLowerCase().startsWith(a)) return u.id;
+        }
+      }
+    }
+    return null;
+  }
+
+  router.post('/import-xlsx', (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) {
       res.status(403).json({ ok: false, error: 'Admin only' });
       return;
     }
-    const result = trainingQueries.bulkImport(req.body);
-    res.json({ ok: true, data: result });
+
+    const { sheets } = req.body as { sheets: Array<{ name: string; rows: unknown[][] }> };
+    if (!sheets?.length) {
+      res.status(400).json({ ok: false, error: 'No sheet data provided' });
+      return;
+    }
+
+    const allUsers = userQueries.getAll();
+    const skipCols = new Set(['Knowledge Item', 'Total', 'Team Total Score', 'Tech Lead', 'Udemy', '']);
+
+    // Clear existing data
+    trainingQueries.deleteAllData();
+
+    let totalCategories = 0, totalItems = 0, totalScores = 0;
+    const unmatchedColumns: string[] = [];
+
+    for (let catIdx = 0; catIdx < sheets.length; catIdx++) {
+      const sheet = sheets[catIdx];
+      if (!sheet.rows || sheet.rows.length < 2) continue;
+
+      // Create category
+      const catId = trainingQueries.createCategory(sheet.name, catIdx);
+      totalCategories++;
+
+      // Parse headers — find person columns
+      const headers = sheet.rows[0].map(h => String(h ?? '').trim());
+      const techLeadCol = headers.findIndex(h => h === 'Tech Lead');
+      const personCols: Array<{ colIdx: number; userId: number; name: string }> = [];
+
+      for (let c = 0; c < headers.length; c++) {
+        const h = headers[c];
+        if (!h || skipCols.has(h)) continue;
+        const uid = matchUser(h, allUsers);
+        if (uid != null) {
+          personCols.push({ colIdx: c, userId: uid, name: h });
+        } else if (!unmatchedColumns.includes(h)) {
+          unmatchedColumns.push(h);
+        }
+      }
+
+      // Parse rows
+      let currentSection = '';
+      let sortOrder = 0;
+
+      for (let r = 1; r < sheet.rows.length; r++) {
+        const row = sheet.rows[r];
+        const raw = String(row[0] ?? '').trim();
+        if (!raw || /^\d+(\.\d+)?$/.test(raw)) continue;
+
+        const allEmpty = personCols.every(p => {
+          const v = row[p.colIdx];
+          return v === '' || v === undefined || v === null;
+        });
+
+        // Detect section headers
+        const endsWithColon = raw.endsWith(':');
+        const totalColIdx = headers.indexOf('Total') >= 0 ? headers.indexOf('Total') :
+          headers.indexOf('Team Total Score') >= 0 ? headers.indexOf('Team Total Score') : 1;
+        const totalVal = row[totalColIdx];
+
+        if (allEmpty && (endsWithColon || totalVal === '' || totalVal === undefined || totalVal === null || totalVal === 0)) {
+          currentSection = raw.replace(/:$/, '').trim();
+          continue;
+        }
+
+        const cleanName = raw.replace(/:$/, '').trim();
+        if (!cleanName) continue;
+
+        const techLead = techLeadCol >= 0 ? String(row[techLeadCol] ?? '').trim() || null : null;
+
+        const itemId = trainingQueries.createItem({
+          category_id: catId, section: currentSection, name: cleanName,
+          tech_lead: techLead, max_score: 5, sort_order: sortOrder++,
+        });
+        totalItems++;
+
+        // Insert scores
+        const scoreBatch: Array<{ item_id: number; user_id: number; score: number }> = [];
+        for (const pc of personCols) {
+          const rawScore = row[pc.colIdx];
+          if (rawScore === '' || rawScore === undefined || rawScore === null) continue;
+          const score = Number(rawScore);
+          if (!Number.isFinite(score) || score < 0) continue;
+          scoreBatch.push({ item_id: itemId, user_id: pc.userId, score: Math.min(score, 5) });
+        }
+        if (scoreBatch.length > 0) {
+          trainingQueries.bulkUpsertScores(scoreBatch);
+          totalScores += scoreBatch.length;
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      data: { categories: totalCategories, items: totalItems, scores: totalScores, unmatchedColumns },
+    });
   });
 
   // ── Summary stats ──

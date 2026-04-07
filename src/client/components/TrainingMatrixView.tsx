@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import * as XLSX from 'xlsx';
 
 interface Category { id: number; name: string; sort_order: number }
 interface TrainingItem { id: number; category_id: number; section: string; name: string; tech_lead: string | null; max_score: number; sort_order: number }
@@ -42,6 +43,9 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
   const [newItem, setNewItem] = useState({ name: '', section: '', tech_lead: '' });
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ categories: number; items: number; scores: number; unmatchedColumns?: string[] } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingScores = useRef<Map<string, { item_id: number; user_id: number; score: number }>>(new Map());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -190,6 +194,38 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
     fetchAll();
   };
 
+  const handleImportXlsx = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const sheets = wb.SheetNames.map(name => {
+        const ws = wb.Sheets[name];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][];
+        return { name, rows };
+      });
+      const resp = await fetch(`${API}/import-xlsx`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheets }),
+      });
+      const result = await resp.json();
+      if (result.ok) {
+        setImportResult(result.data);
+        fetchAll();
+      } else {
+        alert('Import failed: ' + (result.error || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Import failed: ' + (err instanceof Error ? err.message : err));
+    }
+    setImporting(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const displayName = (u: User) => u.display_name || u.username;
 
   if (loading) {
@@ -301,7 +337,49 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
               <i className="fa-solid fa-plus mr-1" />Add Item
             </button>
           )}
+
+          {isAdmin && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleImportXlsx}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
+                className="px-3 py-1.5 bg-[#2f353d] text-neutral-300 text-xs font-semibold rounded-full border border-[#3a424d] hover:bg-[#363d47] hover:text-[#5ec1ca] hover:border-[#5ec1ca]/30 transition-colors disabled:opacity-50"
+              >
+                {importing ? (
+                  <><i className="fa-solid fa-spinner fa-spin mr-1" />Importing...</>
+                ) : (
+                  <><i className="fa-solid fa-file-import mr-1" />Import XLSX</>
+                )}
+              </button>
+            </>
+          )}
         </div>
+
+        {/* Import result banner */}
+        {importResult && (
+          <div className="bg-emerald-900/30 border border-emerald-700/40 rounded-lg px-4 py-2 mb-3 flex items-center justify-between">
+            <span className="text-xs text-emerald-300">
+              <i className="fa-solid fa-check-circle mr-1" />
+              Imported {importResult.categories} categories, {importResult.items} items, {importResult.scores} scores
+              {importResult.unmatchedColumns && importResult.unmatchedColumns.length > 0 && (
+                <span className="text-amber-400 ml-2">
+                  <i className="fa-solid fa-triangle-exclamation mr-1" />
+                  Unmatched columns: {importResult.unmatchedColumns.join(', ')}
+                </span>
+              )}
+            </span>
+            <button onClick={() => setImportResult(null)} className="text-neutral-500 hover:text-neutral-300 text-xs ml-2">
+              <i className="fa-solid fa-xmark" />
+            </button>
+          </div>
+        )}
 
         {/* Add item form */}
         {showAddItem && (
