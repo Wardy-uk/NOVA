@@ -45,6 +45,7 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ categories: number; items: number; scores: number; unmatchedColumns?: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [undoStack, setUndoStack] = useState<Array<{ item_id: number; user_id: number; oldScore: number; newScore: number }>>([]);
   const pendingScores = useRef<Map<string, { item_id: number; user_id: number; score: number }>>(new Map());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -96,16 +97,27 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
     setSaving(false);
   }, [selectedCategory]);
 
-  const setScore = (itemId: number, uid: number, score: number) => {
+  const setScore = (itemId: number, uid: number, score: number, skipUndo = false) => {
     // Permission check: non-admins can only edit their own
     if (!isAdmin && uid !== userId) return;
     const key = `${itemId}-${uid}`;
+    if (!skipUndo) {
+      const oldScore = getScore(itemId, uid);
+      setUndoStack(prev => [...prev.slice(-49), { item_id: itemId, user_id: uid, oldScore, newScore: score }]);
+    }
     pendingScores.current.set(key, { item_id: itemId, user_id: uid, score });
     // Force re-render
     setScores(prev => [...prev]);
     // Debounce save
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(flushScores, 1500);
+  };
+
+  const undo = () => {
+    if (undoStack.length === 0) return;
+    const last = undoStack[undoStack.length - 1];
+    setUndoStack(prev => prev.slice(0, -1));
+    setScore(last.item_id, last.user_id, last.oldScore, true);
   };
 
   const cycleScore = (itemId: number, uid: number, max: number) => {
@@ -327,6 +339,17 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
             <span className="text-xs text-amber-400 flex items-center gap-1">
               <i className="fa-solid fa-spinner fa-spin" />Saving...
             </span>
+          )}
+
+          {undoStack.length > 0 && (
+            <button
+              onClick={undo}
+              className="px-3 py-1.5 bg-[#2f353d] text-neutral-300 text-xs font-semibold rounded-full border border-[#3a424d] hover:bg-[#363d47] hover:text-amber-400 hover:border-amber-500/30 transition-colors flex items-center gap-1"
+              title={`Undo last change (${undoStack.length} in history)`}
+            >
+              <i className="fa-solid fa-rotate-left" />Undo
+              <span className="text-neutral-500 text-[10px]">({undoStack.length})</span>
+            </button>
           )}
 
           {isAdmin && selectedCategory && (
