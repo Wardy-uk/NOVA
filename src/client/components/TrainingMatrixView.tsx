@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import * as XLSX from 'xlsx';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 
 interface Category { id: number; name: string; sort_order: number }
 interface TrainingItem { id: number; category_id: number; section: string; name: string; tech_lead: string | null; max_score: number; sort_order: number }
@@ -201,6 +200,7 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
     setImportResult(null);
     try {
       const buffer = await file.arrayBuffer();
+      const XLSX = await import('xlsx');
       const wb = XLSX.read(buffer, { type: 'array' });
       const sheets = wb.SheetNames.map(name => {
         const ws = wb.Sheets[name];
@@ -447,9 +447,9 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
             </thead>
             <tbody>
               {Array.from(sections.entries()).map(([sectionName, sectionItems]) => (
-                <>
+                <Fragment key={sectionName}>
                   {/* Section header */}
-                  <tr key={`sec-${sectionName}`} className="bg-[#1e2228]/60">
+                  <tr className="bg-[#1e2228]/60">
                     <td
                       colSpan={3 + users.length + (isAdmin ? 1 : 0)}
                       className="px-3 py-2 cursor-pointer select-none sticky left-0"
@@ -534,7 +534,7 @@ export function TrainingMatrixView({ userId, isAdmin }: { userId: number; isAdmi
                       )}
                     </tr>
                   ))}
-                </>
+                </Fragment>
               ))}
 
               {/* Totals row */}

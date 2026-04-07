@@ -1154,7 +1154,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
       // Merge: fill zeros for missing periods
       const dbLookup = new Map<string, number>();
       for (const row of dbRows) {
-        const key = `${(row.period instanceof Date ? row.period.toISOString().split('T')[0] : String(row.period).split('T')[0])}|${row.kpi}`;
+        const key = `${String(row.period ?? '').split('T')[0]}|${row.kpi}`;
         dbLookup.set(key, row.avg_value);
       }
 
