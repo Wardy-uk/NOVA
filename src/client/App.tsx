@@ -337,7 +337,7 @@ export function App() {
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
     userRole.split(',').map(r => r.trim()).includes('admin')
-      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit' }
+      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit', training: 'edit' }
       : DEFAULT_AREA_ACCESS,
   );
   useEffect(() => {
@@ -347,7 +347,10 @@ export function App() {
     })
       .then(r => r.json())
       .then(json => {
-        if (json.ok && json.data?.areaAccess) setAreaAccess(json.data.areaAccess);
+        if (json.ok && json.data?.areaAccess) {
+          // Merge with defaults so new areas don't become hidden if missing from saved roles
+          setAreaAccess({ ...DEFAULT_AREA_ACCESS, ...json.data.areaAccess });
+        }
       })
       .catch(() => {});
   }, [auth.isAuthenticated, auth.token]);
