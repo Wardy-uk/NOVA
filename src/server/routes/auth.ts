@@ -540,8 +540,11 @@ export function createAuthRoutes(
           ssoLogger.error('permissions', 'DB user NOT FOUND', { id: payload.id });
         }
         const currentRole = currentUser?.role ?? payload.role;
+        const matchedRoleIds = parseRoles(currentRole).filter(r => roles.some(cr => cr.id === r));
+        const matchedRoleAreas = roles.filter(r => matchedRoleIds.includes(r.id)).map(r => ({ id: r.id, areas: r.areas }));
+        ssoLogger.log('permissions', `Resolving for user=${currentUser?.username}, roles=[${currentRole}], matched=[${matchedRoleIds.join(',')}]`, { matchedRoleAreas });
         areaAccess = resolveAreaAccess(currentRole, roles);
-        ssoLogger.log('permissions', `areaAccess resolved for role: ${currentRole}`, { areaAccess });
+        ssoLogger.log('permissions', `Result: training=${areaAccess['training'] ?? 'MISSING'}`, { areaAccess });
       } catch (err) {
         ssoLogger.error('permissions', `Token verify failed: ${err instanceof Error ? err.message : err}`);
       }
