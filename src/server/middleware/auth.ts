@@ -3,6 +3,13 @@ import jwt from 'jsonwebtoken';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 import { ssoLogger } from '../services/sso-logger.js';
 
+// Default access for areas not explicitly set in saved custom roles.
+// Prevents new areas from being invisible until admin manually updates every role.
+const AREA_DEFAULTS: Record<string, string> = {
+  training: 'edit',
+  wallboards: 'view',
+};
+
 export interface AuthPayload {
   id: number;
   username: string;
@@ -76,8 +83,17 @@ export function createAreaAccessGuard(getRoles: () => CustomRole[]) {
       const required = ACCESS_LEVELS[level] ?? 999;
       for (const a of areas) {
         let bestAccess = 0;
+        // Check if ANY matched role has this area defined
+        let areaDefinedInAnyRole = false;
         for (const role of matched) {
-          bestAccess = Math.max(bestAccess, ACCESS_LEVELS[role.areas[a] || 'hidden'] ?? 0);
+          if (a in role.areas) {
+            areaDefinedInAnyRole = true;
+            bestAccess = Math.max(bestAccess, ACCESS_LEVELS[role.areas[a] || 'hidden'] ?? 0);
+          }
+        }
+        // If no role defines this area, fall back to AREA_DEFAULTS
+        if (!areaDefinedInAnyRole && a in AREA_DEFAULTS) {
+          bestAccess = ACCESS_LEVELS[AREA_DEFAULTS[a]] ?? 0;
         }
         if (bestAccess >= required) {
           next();
