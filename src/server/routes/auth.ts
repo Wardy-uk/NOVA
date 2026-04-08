@@ -49,6 +49,13 @@ function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
   return DEFAULT_CUSTOM_ROLES;
 }
 
+// Default access for areas not explicitly set in custom roles.
+// When new areas are added, they get these defaults so existing saved roles don't block access.
+const AREA_DEFAULTS: Record<string, string> = {
+  training: 'edit',   // everyone can edit their own training scores
+  wallboards: 'view', // everyone can see wallboards
+};
+
 function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string, string> {
   const userRoles = parseRoles(roleStr);
   if (userRoles.includes('admin')) {
@@ -56,7 +63,7 @@ function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string,
   }
   const matched = roles.filter(r => userRoles.includes(r.id));
   if (matched.length === 0) {
-    return { command: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden' };
+    return { command: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', ...AREA_DEFAULTS };
   }
   // Merge: take highest access per area across all assigned roles
   const RANK: Record<string, number> = { hidden: 0, view: 1, edit: 2 };
@@ -68,6 +75,10 @@ function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string,
     let best = 0;
     for (const r of matched) best = Math.max(best, RANK[r.areas[area] || 'hidden'] ?? 0);
     merged[area] = RANK_TO_ACCESS[best];
+  }
+  // Apply defaults for areas not present in any saved role definition
+  for (const [area, level] of Object.entries(AREA_DEFAULTS)) {
+    if (!(area in merged)) merged[area] = level;
   }
   merged.admin = 'hidden';
   return merged;
