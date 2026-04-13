@@ -173,14 +173,27 @@ export function createDevReviewRoutes(
       // If the user's team has no products set (NULL or empty), they see all
       // (this is the default for the Support team). Otherwise only tickets
       // whose productToTeam value matches one of the allowed products.
+      //
+      // Override: ?showAll=1 bypasses the filter. The UI exposes this as a
+      // toggle so a dev can temporarily see the full queue (useful for
+      // covering another team or spotting cross-product issues). We also
+      // report whether the current user has a team filter so the UI can
+      // show/hide the toggle accordingly.
+      const showAll = req.query.showAll === '1';
+      let userTeamFilterActive = false;
+      let userTeamName: string | null = null;
       if (req.user && !isAdmin(req.user.role)) {
         const user = userQueries.getById(req.user.id);
         if (user?.team_id) {
           const team = teamQueries.getById(user.team_id);
           const allowed = team?.jira_products;
           if (allowed && allowed.length > 0) {
-            const allowedSet = new Set(allowed);
-            enriched = enriched.filter((item) => allowedSet.has(item.team));
+            userTeamFilterActive = true;
+            userTeamName = team?.name ?? null;
+            if (!showAll) {
+              const allowedSet = new Set(allowed);
+              enriched = enriched.filter((item) => allowedSet.has(item.team));
+            }
           }
         }
       }
@@ -197,7 +210,15 @@ export function createDevReviewRoutes(
         return (b.state?.last_action_at || '').localeCompare(a.state?.last_action_at || '');
       });
 
-      res.json({ ok: true, data: enriched });
+      res.json({
+        ok: true,
+        data: enriched,
+        meta: {
+          userTeamFilterActive,
+          userTeamName,
+          showingAll: showAll || !userTeamFilterActive,
+        },
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'queue failed' });
     }

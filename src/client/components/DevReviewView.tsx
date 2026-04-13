@@ -228,6 +228,10 @@ export function DevReviewView() {
   const [filter, setFilter] = useState<'all' | 'mine' | 'unclaimed' | 'fasttrack'>('all');
   const [teamFilter, setTeamFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [showAll, setShowAll] = useState<boolean>(() => {
+    try { return localStorage.getItem('dev_review_show_all') === '1'; } catch { return false; }
+  });
+  const [queueMeta, setQueueMeta] = useState<{ userTeamFilterActive: boolean; userTeamName: string | null; showingAll: boolean } | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
   const [returnDraft, setReturnDraft] = useState('');
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -256,14 +260,20 @@ export function DevReviewView() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api<QueueItem[]>('/queue');
-      setItems(data);
+      const qs = showAll ? '?showAll=1' : '';
+      const res = await fetch(`/api/dev-review/queue${qs}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` },
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'Failed to load queue');
+      setItems(json.data as QueueItem[]);
+      setQueueMeta(json.meta || null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load queue');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showAll]);
 
   const loadDetail = useCallback(async (key: string) => {
     setDetailLoading(true);
@@ -276,6 +286,14 @@ export function DevReviewView() {
       setDetailLoading(false);
     }
   }, []);
+
+  const toggleShowAll = () => {
+    setShowAll((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('dev_review_show_all', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
   useEffect(() => {
@@ -492,7 +510,7 @@ export function DevReviewView() {
                 style={{ background: 'rgba(255,255,255,0.03)' }}
               />
             </div>
-            <div className="mb-3">
+            <div className="mb-3 space-y-2">
               <select
                 value={teamFilter}
                 onChange={(e) => setTeamFilter(e.target.value)}
@@ -506,6 +524,29 @@ export function DevReviewView() {
                   </option>
                 ))}
               </select>
+              {queueMeta?.userTeamFilterActive && (
+                <button
+                  onClick={toggleShowAll}
+                  className="w-full flex items-center justify-between px-3 py-2 text-[11px] rounded-lg border transition-all"
+                  style={{
+                    background: showAll
+                      ? 'linear-gradient(135deg, rgba(249,115,22,0.12), rgba(239,68,68,0.08))'
+                      : 'rgba(94,193,202,0.08)',
+                    borderColor: showAll ? 'rgba(249,115,22,0.4)' : 'rgba(94,193,202,0.3)',
+                    color: showAll ? '#fb923c' : '#5ec1ca',
+                  }}
+                  title={showAll
+                    ? `Currently showing every dev review ticket. Click to return to only ${queueMeta.userTeamName || 'your team'}'s tickets.`
+                    : `Currently showing only ${queueMeta.userTeamName || 'your team'}'s tickets. Click to show all.`}
+                >
+                  <span className="font-semibold">
+                    {showAll ? '👁 Showing all teams' : `◉ My team only${queueMeta.userTeamName ? ` (${queueMeta.userTeamName})` : ''}`}
+                  </span>
+                  <span className="text-[10px] opacity-70">
+                    {showAll ? 'click to narrow' : 'click to show all'}
+                  </span>
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-1 mb-3 text-[11px]">
               {(['all', 'mine', 'unclaimed', 'fasttrack'] as const).map((f) => (
