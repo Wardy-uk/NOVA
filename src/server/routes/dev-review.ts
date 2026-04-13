@@ -369,19 +369,23 @@ export function createDevReviewRoutes(
         return;
       }
 
-      const requiredFieldIds = Object.entries(waitTransition.fields || {})
-        .filter(([, m]) => m.required)
-        .map(([id]) => id)
+      // Include EVERY field on the transition screen, not just the ones
+      // flagged `required: true`. Jira's workflow validators can run on any
+      // field on the screen, and `required` in the API response doesn't
+      // always match what the validator actually checks (we've seen
+      // "Nurtur Product Must Be Set" fail even with required=false in the
+      // transitions response). Passing all current values is the safe bet.
+      const screenFieldIds = Object.keys(waitTransition.fields || {})
         // "comment" is a special pseudo-field on the transition screen — we
         // handle it via the update.comment block, not the fields block.
         .filter((id) => id !== 'comment');
 
-      // Step 2: fetch current values of those required fields
+      // Step 2: fetch current values of those screen fields
       const passFields: Record<string, unknown> = {};
-      if (requiredFieldIds.length > 0) {
-        const issue = await client.getIssue(key, requiredFieldIds);
+      if (screenFieldIds.length > 0) {
+        const issue = await client.getIssue(key, screenFieldIds);
         const currentFields = (issue?.fields || {}) as Record<string, unknown>;
-        for (const fieldId of requiredFieldIds) {
+        for (const fieldId of screenFieldIds) {
           const val = currentFields[fieldId];
           if (val === null || val === undefined) continue;
           // Normalise shape for write — option/select fields round-trip
