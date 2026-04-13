@@ -48,6 +48,7 @@ import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
 import { TrendsView } from './components/TrendsView.js';
 import { TrainingMatrixView } from './components/TrainingMatrixView.js';
 import { TrainingSummaryView } from './components/TrainingSummaryView.js';
+import { BoardMiView } from './components/BoardMiView.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -57,7 +58,7 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training';
+type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
@@ -68,6 +69,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'backfill-status'
   | 'surveys'
   | 'training-matrix' | 'training-summary'
+  | 'board-mi'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -202,9 +204,16 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'training-summary', label: 'Dashboard' },
     ],
   },
+  board: {
+    label: 'Board MI',
+    defaultView: 'board-mi',
+    tabs: [
+      { view: 'board-mi', label: 'Monthly Pack' },
+    ],
+  },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'board'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
@@ -216,7 +225,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -613,6 +622,8 @@ export function App() {
   // My NOVA (command) is always visible — it's the core area
   const canSeeArea = (area: Area): boolean => {
     if (area === 'command' || area === 'wallboards') return true;
+    // Board MI is locked to nickw only for now
+    if (area === 'board') return auth.user?.username === 'nickw';
     // Trends piggybacks on KPIs access (no separate role needed)
     if (area === 'trends') return (areaAccess['kpis'] || 'hidden') !== 'hidden';
     return (areaAccess[area] || 'hidden') !== 'hidden';
@@ -1065,6 +1076,11 @@ export function App() {
           )}
           {view === 'training-summary' && (
             <TrainingSummaryView />
+          )}
+
+          {/* Board MI — admin (nickw) only */}
+          {view === 'board-mi' && auth.user?.username === 'nickw' && (
+            <BoardMiView />
           )}
 
           {/* Administration */}

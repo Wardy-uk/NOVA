@@ -27,6 +27,7 @@ import { createO365Routes } from './routes/o365.js';
 import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
+import { createBoardMiRoutes } from './routes/board-mi.js';
 import { createTrendsRoutes } from './routes/trends.js';
 import { createFeedbackRoutes } from './routes/feedback.js';
 import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
@@ -519,6 +520,11 @@ async function main() {
   });
 
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
+  app.use('/api/board-mi', (req, res, next) => {
+    const u = (req as any).user;
+    if (!u || u.username !== 'nickw') { res.status(403).json({ ok: false, error: 'Restricted' }); return; }
+    next();
+  }, createBoardMiRoutes(settingsQueries));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries, db));
   app.use('/api/backfill', requireAreaAccess('qa', 'view'), createBackfillRoutes(settingsQueries));
   app.use('/api/sales', requireAreaAccess('sales', 'view'), createSalesHotboxRoutes(salesQueries, requireAreaAccess));
