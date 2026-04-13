@@ -67,7 +67,7 @@ export function createDevReviewRoutes(
       const client = getJiraClient();
       if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
 
-      const jql = `project = NT AND cf[12981] = "Tier 3" ORDER BY updated DESC`;
+      const jql = `project = NT AND cf[12981] = "Tier 3" AND resolution = Unresolved ORDER BY updated DESC`;
       const fields = [
         'summary', 'status', 'assignee', 'reporter', 'priority', 'created', 'updated',
         'duedate', 'issuetype',
