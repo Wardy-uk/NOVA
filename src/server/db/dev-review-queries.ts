@@ -307,4 +307,242 @@ export class DevReviewQueries {
     );
     saveDb();
   }
+
+  // ── Dashboard aggregations ────────────────────────────────────────────────
+
+  /** Run a single-row aggregate query and return the first column as a number. */
+  private scalar(sql: string, params: (string | number)[] = []): number {
+    const stmt = this.db.prepare(sql);
+    if (params.length > 0) stmt.bind(params);
+    let n = 0;
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      const first = Object.values(row)[0];
+      n = typeof first === 'number' ? first : Number(first ?? 0);
+    }
+    stmt.free();
+    return n;
+  }
+
+  /** Run an aggregate query returning an array of rows. */
+  private rows<T>(sql: string, params: (string | number)[] = []): T[] {
+    const stmt = this.db.prepare(sql);
+    if (params.length > 0) stmt.bind(params);
+    const out: T[] = [];
+    while (stmt.step()) out.push(stmt.getAsObject() as unknown as T);
+    stmt.free();
+    return out;
+  }
+
+  /** Top-level snapshot for the Dev Review dashboard. All times in server local TZ. */
+  getDashboard(): {
+    queue: { total: number; pending: number; in_review: number; fast_track: number; unclaimed: number };
+    today: { new: number; accepted: number; returned: number; processed: number };
+    week: { new: number; accepted: number; returned: number };
+    allTime: { accepted: number; returned: number };
+    averages: {
+      acceptanceRatePct: number | null;
+      avgTimeToClaimMinutes: number | null;
+      avgTimeToDecisionMinutes: number | null;
+      oldestPendingHours: number | null;
+    };
+    perDeveloper: Array<{
+      user_id: number;
+      display: string;
+      claimed_now: number;
+      accepted_today: number;
+      returned_today: number;
+      accepted_week: number;
+      returned_week: number;
+      accepted_all: number;
+      returned_all: number;
+    }>;
+    arrivals14d: Array<{ date: string; count: number }>;
+    decisions14d: Array<{ date: string; accepted: number; returned: number }>;
+  } {
+    // ── Queue snapshot ──────────────────────────────────────────────────
+    const queue = {
+      total: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE status NOT IN ('archived','accepted','returned')`,
+      ),
+      pending: this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE status = 'pending'`),
+      in_review: this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE status = 'in_review'`),
+      fast_track: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE fast_track = 1 AND status NOT IN ('archived','accepted','returned')`,
+      ),
+      unclaimed: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE claimed_by_user_id IS NULL AND status NOT IN ('archived','accepted','returned')`,
+      ),
+    };
+
+    // ── Today / Week ─────────────────────────────────────────────────────
+    const today = {
+      new: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE date(first_seen_at) = date('now', 'localtime')`,
+      ),
+      accepted: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE date(accepted_at) = date('now', 'localtime')`,
+      ),
+      returned: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE date(returned_at) = date('now', 'localtime')`,
+      ),
+      processed: 0,
+    };
+    today.processed = today.accepted + today.returned;
+
+    const week = {
+      new: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE first_seen_at >= datetime('now', '-7 days')`,
+      ),
+      accepted: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE accepted_at >= datetime('now', '-7 days')`,
+      ),
+      returned: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE returned_at >= datetime('now', '-7 days')`,
+      ),
+    };
+
+    const allTime = {
+      accepted: this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE accepted_at IS NOT NULL`),
+      returned: this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE returned_at IS NOT NULL`),
+    };
+
+    // ── Averages ─────────────────────────────────────────────────────────
+    const decisionTotal = allTime.accepted + allTime.returned;
+    const acceptanceRatePct =
+      decisionTotal > 0 ? Math.round((allTime.accepted / decisionTotal) * 1000) / 10 : null;
+
+    const avgTimeToClaimSec = this.scalar(
+      `SELECT AVG((julianday(claimed_at) - julianday(first_seen_at)) * 86400)
+       FROM dev_review_state
+       WHERE claimed_at IS NOT NULL AND first_seen_at IS NOT NULL`,
+    );
+    const avgTimeToClaimMinutes = avgTimeToClaimSec > 0 ? Math.round(avgTimeToClaimSec / 60) : null;
+
+    const avgDecisionSec = this.scalar(
+      `SELECT AVG((julianday(COALESCE(accepted_at, returned_at)) - julianday(claimed_at)) * 86400)
+       FROM dev_review_state
+       WHERE claimed_at IS NOT NULL AND (accepted_at IS NOT NULL OR returned_at IS NOT NULL)`,
+    );
+    const avgTimeToDecisionMinutes = avgDecisionSec > 0 ? Math.round(avgDecisionSec / 60) : null;
+
+    const oldestSec = this.scalar(
+      `SELECT MAX((julianday('now') - julianday(first_seen_at)) * 86400)
+       FROM dev_review_state
+       WHERE status NOT IN ('archived','accepted','returned')`,
+    );
+    const oldestPendingHours = oldestSec > 0 ? Math.round(oldestSec / 3600) : null;
+
+    // ── Per developer ────────────────────────────────────────────────────
+    // Currently claimed (pulled from dev_review_state)
+    const claimedRows = this.rows<{ user_id: number; cnt: number }>(
+      `SELECT claimed_by_user_id AS user_id, COUNT(*) AS cnt
+       FROM dev_review_state
+       WHERE claimed_by_user_id IS NOT NULL AND status NOT IN ('archived','accepted','returned')
+       GROUP BY claimed_by_user_id`,
+    );
+    // Accept/return counts come from the thread table (which records who took the action)
+    const threadCounts = this.rows<{
+      user_id: number;
+      display: string;
+      kind: string;
+      total: number;
+      today: number;
+      week: number;
+    }>(
+      `SELECT user_id, user_display AS display, kind,
+              COUNT(*) AS total,
+              SUM(CASE WHEN date(created_at) = date('now','localtime') THEN 1 ELSE 0 END) AS today,
+              SUM(CASE WHEN created_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) AS week
+       FROM dev_review_thread
+       WHERE kind IN ('accept','return')
+       GROUP BY user_id, user_display, kind`,
+    );
+
+    const perDevMap = new Map<number, {
+      user_id: number; display: string;
+      claimed_now: number;
+      accepted_today: number; returned_today: number;
+      accepted_week: number; returned_week: number;
+      accepted_all: number; returned_all: number;
+    }>();
+
+    for (const r of threadCounts) {
+      const existing = perDevMap.get(r.user_id) || {
+        user_id: r.user_id, display: r.display,
+        claimed_now: 0,
+        accepted_today: 0, returned_today: 0,
+        accepted_week: 0, returned_week: 0,
+        accepted_all: 0, returned_all: 0,
+      };
+      if (r.kind === 'accept') {
+        existing.accepted_today += r.today;
+        existing.accepted_week += r.week;
+        existing.accepted_all += r.total;
+      } else if (r.kind === 'return') {
+        existing.returned_today += r.today;
+        existing.returned_week += r.week;
+        existing.returned_all += r.total;
+      }
+      perDevMap.set(r.user_id, existing);
+    }
+    for (const c of claimedRows) {
+      const existing = perDevMap.get(c.user_id) || {
+        user_id: c.user_id, display: `User #${c.user_id}`,
+        claimed_now: 0,
+        accepted_today: 0, returned_today: 0,
+        accepted_week: 0, returned_week: 0,
+        accepted_all: 0, returned_all: 0,
+      };
+      existing.claimed_now = c.cnt;
+      perDevMap.set(c.user_id, existing);
+    }
+
+    const perDeveloper = Array.from(perDevMap.values()).sort(
+      (a, b) => (b.claimed_now + b.accepted_week + b.returned_week) - (a.claimed_now + a.accepted_week + a.returned_week),
+    );
+
+    // ── 14-day arrival + decision sparklines ─────────────────────────────
+    const arrivals14d = this.rows<{ date: string; count: number }>(
+      `SELECT date(first_seen_at, 'localtime') AS date, COUNT(*) AS count
+       FROM dev_review_state
+       WHERE first_seen_at >= datetime('now','-14 days')
+       GROUP BY date(first_seen_at, 'localtime')
+       ORDER BY date ASC`,
+    );
+
+    const decisionRowsByDay = this.rows<{ date: string; kind: string; cnt: number }>(
+      `SELECT date(created_at, 'localtime') AS date, kind, COUNT(*) AS cnt
+       FROM dev_review_thread
+       WHERE kind IN ('accept','return') AND created_at >= datetime('now','-14 days')
+       GROUP BY date(created_at, 'localtime'), kind
+       ORDER BY date ASC`,
+    );
+    const decByDay = new Map<string, { accepted: number; returned: number }>();
+    for (const r of decisionRowsByDay) {
+      const e = decByDay.get(r.date) || { accepted: 0, returned: 0 };
+      if (r.kind === 'accept') e.accepted += r.cnt;
+      else if (r.kind === 'return') e.returned += r.cnt;
+      decByDay.set(r.date, e);
+    }
+    const decisions14d = Array.from(decByDay.entries())
+      .map(([date, v]) => ({ date, ...v }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      queue,
+      today,
+      week,
+      allTime,
+      averages: {
+        acceptanceRatePct,
+        avgTimeToClaimMinutes,
+        avgTimeToDecisionMinutes,
+        oldestPendingHours,
+      },
+      perDeveloper,
+      arrivals14d,
+      decisions14d,
+    };
+  }
 }

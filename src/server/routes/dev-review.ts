@@ -67,7 +67,7 @@ export function createDevReviewRoutes(
       const client = getJiraClient();
       if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
 
-      const jql = `project = NT AND cf[12981] = "Tier 3" AND resolution = Unresolved ORDER BY updated DESC`;
+      const jql = `project = NT AND cf[12981] = "Tier 3" AND statusCategory != Done ORDER BY updated DESC`;
       const fields = [
         'summary', 'status', 'assignee', 'reporter', 'priority', 'created', 'updated',
         'duedate', 'issuetype',
@@ -378,6 +378,17 @@ export function createDevReviewRoutes(
         payload: { returnTransitionId, commentText, nextSteps },
       });
       res.status(502).json({ ok: false, error: msg });
+    }
+  });
+
+  // ── Dashboard aggregations ────────────────────────────────────────────
+
+  router.get('/dashboard', (_req: Request, res: Response) => {
+    try {
+      const data = devQueries.getDashboard();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'dashboard failed' });
     }
   });
 

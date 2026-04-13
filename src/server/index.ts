@@ -1322,7 +1322,7 @@ ${panelHtml}
       const client = buildServiceDeskJiraClient();
       if (!client) return;
       const result = await client.searchJqlAll(
-        `project = NT AND cf[12981] = "Tier 3" AND resolution = Unresolved`,
+        `project = NT AND cf[12981] = "Tier 3" AND statusCategory != Done`,
         ['summary', 'updated', 'reporter'],
         200,
       );

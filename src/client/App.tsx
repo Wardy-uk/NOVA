@@ -50,6 +50,7 @@ import { TrainingMatrixView } from './components/TrainingMatrixView.js';
 import { TrainingSummaryView } from './components/TrainingSummaryView.js';
 import { BoardMiView } from './components/BoardMiView.js';
 import { DevReviewView } from './components/DevReviewView.js';
+import { DevReviewDashboard } from './components/DevReviewDashboard.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -71,7 +72,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'surveys'
   | 'training-matrix' | 'training-summary'
   | 'board-mi'
-  | 'dev-review'
+  | 'dev-review' | 'dev-review-dashboard'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -218,6 +219,7 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'dev-review',
     tabs: [
       { view: 'dev-review', label: 'Queue' },
+      { view: 'dev-review-dashboard', label: 'Dashboard' },
     ],
   },
 };
@@ -234,7 +236,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1100,6 +1102,9 @@ export function App() {
           {/* Dev Review Queue — developer + admin */}
           {view === 'dev-review' && canSeeArea('devreview') && (
             <DevReviewView />
+          )}
+          {view === 'dev-review-dashboard' && canSeeArea('devreview') && (
+            <DevReviewDashboard />
           )}
 
           {/* Administration */}
