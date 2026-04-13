@@ -1296,6 +1296,9 @@ export function initializeSchema(database: Database): void {
   `);
   database.run(`CREATE INDEX IF NOT EXISTS idx_dev_review_status ON dev_review_state(status)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_dev_review_claimed ON dev_review_state(claimed_by_user_id)`);
+  // Idempotent ALTER — add `team` column if missing (populated from Nurtur Product)
+  try { database.run(`ALTER TABLE dev_review_state ADD COLUMN team TEXT`); } catch { /* already exists */ }
+  database.run(`CREATE INDEX IF NOT EXISTS idx_dev_review_team ON dev_review_state(team)`);
 
   database.run(`
     CREATE TABLE IF NOT EXISTS dev_review_thread (

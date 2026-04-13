@@ -34,6 +34,15 @@ const CF_DEVELOPMENT_DETAILS = 'customfield_13215';
 const TIER_ID_T3 = '13063';
 const TIER_ID_T2 = '13062';
 
+/** Map a Jira Nurtur Product value to a Dev Team bucket. All TPJ variants
+ *  collapse into a single "TPJ" bucket. Unknown products pass through as-is;
+ *  null/undefined → 'Unassigned'. */
+export function productToTeam(product: string | null | undefined): string {
+  if (!product) return 'Unassigned';
+  if (product.startsWith('The Property Jungle')) return 'TPJ';
+  return product;
+}
+
 /** Build an ADF doc from plain text — Jira Cloud rich text fields require this. */
 function adfDoc(text: string): object {
   const paragraphs = text.split(/\n\n+/).map((para) => ({
@@ -57,6 +66,38 @@ export function createDevReviewRoutes(
   getJiraClient: () => JiraRestClient | null,
 ): Router {
   const router = Router();
+
+  // Auto-discover transition IDs per target status, cached in-memory for the
+  // life of the server process. Falls back to the setting override if set.
+  const transitionCache = new Map<string, string>();
+  async function resolveTransitionId(
+    client: JiraRestClient,
+    sampleKey: string,
+    targetStatusName: string,
+    overrideSettingKey?: string,
+  ): Promise<string | null> {
+    if (overrideSettingKey) {
+      const s = settingsQueries.getAll();
+      const override = s[overrideSettingKey];
+      if (override) return String(override);
+    }
+    const cached = transitionCache.get(targetStatusName.toLowerCase());
+    if (cached) return cached;
+    try {
+      const meta = await client.getTransitionsWithFields(sampleKey) as { transitions?: Array<{ id: string; name?: string; to?: { name?: string } }> };
+      const transitions = meta.transitions || [];
+      const want = targetStatusName.toLowerCase();
+      const match = transitions.find((t) =>
+        (t.name || '').toLowerCase().includes(want) ||
+        (t.to?.name || '').toLowerCase() === want,
+      );
+      if (match) {
+        transitionCache.set(want, match.id);
+        return match.id;
+      }
+    } catch { /* fall through */ }
+    return null;
+  }
 
   // Gate: developer role or admin
   router.use((req: Request, res: Response, next) => {
@@ -106,19 +147,23 @@ export function createDevReviewRoutes(
       for (const issue of issues) {
         const submitter = (issue.fields.assignee as { emailAddress?: string } | null)?.emailAddress || null;
         devQueries.upsertFromPoll(issue.key, submitter);
+        const product = (issue.fields as { customfield_13183?: { value?: string } }).customfield_13183?.value || null;
+        devQueries.setTeam(issue.key, productToTeam(product));
       }
       // Archive stale rows
       for (const row of devQueries.listQueue()) {
         if (!liveKeys.has(row.jira_key)) devQueries.archive(row.jira_key);
       }
 
-      // Merge: for each live issue, attach NOVA state
+      // Merge: for each live issue, attach NOVA state + resolved team
       const enriched = issues.map((issue) => {
         const state = devQueries.getState(issue.key);
+        const product = (issue.fields as { customfield_13183?: { value?: string } }).customfield_13183?.value || null;
         return {
           key: issue.key,
           fields: issue.fields,
           state: state || null,
+          team: productToTeam(product),
         };
       });
 
@@ -215,16 +260,21 @@ export function createDevReviewRoutes(
     res.json({ ok: true });
   });
 
-  // ── Comment (posts internal Jira comment tagged with dev name) ────────
+  // ── Comment (posts internal Jira comment + transitions Waiting On Assignee) ──
+  // Internal comment only — never falls back to public. If the internal post
+  // fails, the request fails; nothing leaks to the customer portal. After a
+  // successful post, transitions the ticket to "Waiting On Assignee" and
+  // mirrors that state in NOVA so the queue shows who's waiting on whom.
 
   router.post('/ticket/:key/comment', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
     const body = String(req.body?.body ?? '').trim();
     if (!body) { res.status(400).json({ ok: false, error: 'Body required' }); return; }
 
+    const key = String(req.params.key);
     const display = userDisplay(req);
     const threadId = devQueries.addThreadEntry({
-      jira_key: String(req.params.key),
+      jira_key: key,
       user_id: req.user.id,
       user_display: display,
       kind: 'comment',
@@ -235,28 +285,38 @@ export function createDevReviewRoutes(
     const client = getJiraClient();
     if (!client) {
       devQueries.markThreadSyncFailed(threadId, 'Jira not configured');
-      res.json({ ok: true, warning: 'Saved locally — Jira not configured' });
+      res.status(503).json({ ok: false, error: 'Jira not configured' });
       return;
     }
 
     const prefixed = `🛠️ Developer comment — ${display}\n\n${body}`;
     try {
-      const result = await client.addComment(String(req.params.key), prefixed, {
-        visibility: { type: 'role', value: 'Service Desk Team' },
-      });
-      devQueries.markThreadSynced(threadId, (result as { id?: string } | null)?.id ?? null);
-      res.json({ ok: true });
-    } catch (e) {
-      // Fall back: retry without internal visibility (some instances lack the role)
-      try {
-        const result = await client.addComment(String(req.params.key), prefixed);
-        devQueries.markThreadSynced(threadId, (result as { id?: string } | null)?.id ?? null);
-        res.json({ ok: true, warning: 'Posted as public comment (internal role not found)' });
-      } catch (e2) {
-        const msg = e2 instanceof Error ? e2.message : 'unknown';
-        devQueries.markThreadSyncFailed(threadId, msg);
-        res.status(502).json({ ok: false, error: msg });
+      const result = await client.addComment(key, prefixed, { internal: true });
+      const jiraCommentId = (result as { id?: string } | null)?.id ?? null;
+      devQueries.markThreadSynced(threadId, jiraCommentId);
+
+      // Transition → Waiting On Assignee (auto-discovered or overridden via setting)
+      let waitingSet = false;
+      const waitTransitionId = await resolveTransitionId(
+        client, key, 'Waiting On Assignee', 'dev_review_wait_transition_id',
+      );
+      if (waitTransitionId) {
+        try {
+          await client.transitionIssue(key, waitTransitionId);
+          devQueries.setStatus(key, 'waiting_on_assignee');
+          waitingSet = true;
+        } catch (transErr) {
+          console.warn(`[DevReview] Transition to Waiting On Assignee failed for ${key}: ${transErr instanceof Error ? transErr.message : transErr}`);
+        }
+      } else {
+        console.warn(`[DevReview] Could not resolve 'Waiting On Assignee' transition for ${key}`);
       }
+
+      res.json({ ok: true, waitingSet });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'unknown';
+      devQueries.markThreadSyncFailed(threadId, msg);
+      res.status(502).json({ ok: false, error: `Failed to post internal comment: ${msg}` });
     }
   });
 

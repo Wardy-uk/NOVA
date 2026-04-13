@@ -26,6 +26,15 @@ interface Dashboard {
   }>;
   arrivals14d: Array<{ date: string; count: number }>;
   decisions14d: Array<{ date: string; accepted: number; returned: number }>;
+  perTeam: Array<{
+    team: string;
+    in_queue: number;
+    waiting: number;
+    accepted_week: number;
+    returned_week: number;
+    accepted_all: number;
+    returned_all: number;
+  }>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -367,6 +376,57 @@ export function DevReviewDashboard() {
                 </div>
               </GlassCard>
             </div>
+
+            {/* Per-team breakdown */}
+            <GlassCard accent className="dr-fade p-5" >
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-[10px] uppercase tracking-wider text-[#5ec1ca] font-bold">By Team (from Nurtur Product)</div>
+                <div className="text-[10px] text-neutral-500">{data.perTeam.length} teams</div>
+              </div>
+              {data.perTeam.length === 0 ? (
+                <div className="text-[12px] text-neutral-500 italic text-center py-6">No team data yet — teams populate as tickets flow through the queue.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold">
+                        <th className="text-left py-2 pr-4">Team</th>
+                        <th className="text-right py-2 px-3" style={{ color: '#5ec1ca' }}>In queue</th>
+                        <th className="text-right py-2 px-3" style={{ color: '#ec4899' }}>Waiting on agent</th>
+                        <th className="text-right py-2 px-3" style={{ color: '#10b981' }}>Accepted (7d)</th>
+                        <th className="text-right py-2 px-3" style={{ color: '#9b6aed' }}>Returned (7d)</th>
+                        <th className="text-right py-2 px-3">Accepted (all)</th>
+                        <th className="text-right py-2 pl-3">Returned (all)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.perTeam.map((t) => (
+                        <tr key={t.team} className="text-[12px] border-t border-white/5 hover:bg-white/[0.02] transition-colors">
+                          <td className="py-3 pr-4">
+                            <span
+                              className="px-2 py-1 rounded font-bold text-[11px]"
+                              style={{
+                                background: 'linear-gradient(135deg, rgba(94,193,202,0.15), rgba(155,106,237,0.15))',
+                                color: '#c4b5fd',
+                                border: '1px solid rgba(155,106,237,0.25)',
+                              }}
+                            >
+                              {t.team}
+                            </span>
+                          </td>
+                          <td className="text-right px-3 font-bold text-[#5ec1ca]">{t.in_queue || '—'}</td>
+                          <td className="text-right px-3 font-bold text-pink-400">{t.waiting || '—'}</td>
+                          <td className="text-right px-3 text-emerald-400 font-semibold">{t.accepted_week || '—'}</td>
+                          <td className="text-right px-3 text-purple-400 font-semibold">{t.returned_week || '—'}</td>
+                          <td className="text-right px-3 text-neutral-400">{t.accepted_all || '—'}</td>
+                          <td className="text-right pl-3 text-neutral-400">{t.returned_all || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </GlassCard>
 
             {/* Per-developer table */}
             <GlassCard accent className="dr-fade p-5" >

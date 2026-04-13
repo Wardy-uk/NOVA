@@ -31,7 +31,7 @@ interface JiraFields {
 
 interface DevReviewState {
   jira_key: string;
-  status: 'pending' | 'in_review' | 'accepted' | 'returned' | 'archived';
+  status: 'pending' | 'in_review' | 'waiting_on_assignee' | 'accepted' | 'returned' | 'archived';
   fast_track: number;
   nova_priority: 'low' | 'normal' | 'high';
   claimed_by_user_id: number | null;
@@ -47,6 +47,7 @@ interface QueueItem {
   key: string;
   fields: JiraFields;
   state: DevReviewState | null;
+  team: string;
 }
 
 interface ThreadEntry {
@@ -56,6 +57,7 @@ interface ThreadEntry {
   user_display: string;
   kind: 'comment' | 'state_change' | 'accept' | 'return' | 'claim' | 'fasttrack';
   body: string | null;
+  meta_json?: string | null;
   jira_sync_state: 'pending' | 'synced' | 'failed' | 'skip';
   jira_sync_error: string | null;
   created_at: string;
@@ -153,6 +155,7 @@ function StatusPill({ status }: { status: string | undefined }) {
   const map: Record<string, { bg: string; fg: string; label: string }> = {
     pending: { bg: 'rgba(245,158,11,0.15)', fg: '#f59e0b', label: 'Pending' },
     in_review: { bg: 'rgba(94,193,202,0.15)', fg: '#5ec1ca', label: 'In Review' },
+    waiting_on_assignee: { bg: 'rgba(236,72,153,0.15)', fg: '#ec4899', label: 'Waiting on Agent' },
     accepted: { bg: 'rgba(16,185,129,0.15)', fg: '#10b981', label: 'Accepted' },
     returned: { bg: 'rgba(155,106,237,0.15)', fg: '#9b6aed', label: 'Returned' },
     archived: { bg: 'rgba(100,116,139,0.15)', fg: '#64748b', label: 'Archived' },
@@ -166,6 +169,13 @@ function StatusPill({ status }: { status: string | undefined }) {
       {m.label}
     </span>
   );
+}
+
+// Mirror of the backend productToTeam — keep in sync
+function productToTeamClient(product: string | null | undefined): string {
+  if (!product) return 'Unassigned';
+  if (product.startsWith('The Property Jungle')) return 'TPJ';
+  return product;
 }
 
 function FastTrackFlame() {
@@ -216,6 +226,7 @@ export function DevReviewView() {
   const [detail, setDetail] = useState<TicketDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'mine' | 'unclaimed' | 'fasttrack'>('all');
+  const [teamFilter, setTeamFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
   const [returnDraft, setReturnDraft] = useState('');
@@ -283,6 +294,7 @@ export function DevReviewView() {
       if (filter === 'mine' && i.state?.claimed_by_user_id !== currentUserId) return false;
       if (filter === 'unclaimed' && i.state?.claimed_by_user_id != null) return false;
       if (filter === 'fasttrack' && !i.state?.fast_track) return false;
+      if (teamFilter !== 'all' && i.team !== teamFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         const match = i.key.toLowerCase().includes(q) ||
@@ -292,7 +304,16 @@ export function DevReviewView() {
       }
       return true;
     });
-  }, [items, filter, search, currentUserId]);
+  }, [items, filter, teamFilter, search, currentUserId]);
+
+  // Build sorted team list with counts for the dropdown
+  const teamOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const i of items) counts.set(i.team, (counts.get(i.team) || 0) + 1);
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([team, count]) => ({ team, count }));
+  }, [items]);
 
   const counts = useMemo(() => ({
     total: items.length,
@@ -470,6 +491,21 @@ export function DevReviewView() {
                 className="flex-1 px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600"
                 style={{ background: 'rgba(255,255,255,0.03)' }}
               />
+            </div>
+            <div className="mb-3">
+              <select
+                value={teamFilter}
+                onChange={(e) => setTeamFilter(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-100 font-medium"
+                style={{ background: 'rgba(255,255,255,0.04)' }}
+              >
+                <option value="all" className="bg-[#272C33]">All teams ({items.length})</option>
+                {teamOptions.map((t) => (
+                  <option key={t.team} value={t.team} className="bg-[#272C33]">
+                    {t.team} ({t.count})
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="flex items-center gap-1 mb-3 text-[11px]">
               {(['all', 'mine', 'unclaimed', 'fasttrack'] as const).map((f) => (
@@ -711,7 +747,7 @@ function QueueRow({
 }: { item: QueueItem; selected: boolean; isMine: boolean; onClick: () => void }) {
   const tldr = adfToText(item.fields.customfield_13184);
   const summary = item.fields.summary || '(no summary)';
-  const product = item.fields.customfield_13183?.value;
+  const team = item.team;
   const updated = item.fields.updated;
   const claimed = item.state?.claimed_by_user_id;
 
@@ -743,7 +779,18 @@ function QueueRow({
       )}
       <div className="flex items-center justify-between text-[10px] text-neutral-400">
         <div className="flex items-center gap-2">
-          {product && <span className="px-1.5 py-0.5 rounded bg-white/10 text-neutral-200">{product}</span>}
+          {team && team !== 'Unassigned' && (
+            <span
+              className="px-1.5 py-0.5 rounded font-semibold"
+              style={{
+                background: 'linear-gradient(135deg, rgba(94,193,202,0.15), rgba(155,106,237,0.15))',
+                color: '#c4b5fd',
+                border: '1px solid rgba(155,106,237,0.25)',
+              }}
+            >
+              {team}
+            </span>
+          )}
           {claimed ? (
             <span className="text-[#c4b5fd]">◉ claimed</span>
           ) : (
@@ -944,39 +991,60 @@ function TicketDetailPane({
 }
 
 function ThreadEntryRow({ entry }: { entry: ThreadEntry }) {
-  const kindColour = {
-    comment: '#5ec1ca',
-    accept: '#10b981',
-    return: '#9b6aed',
-    claim: '#64748b',
-    fasttrack: '#f97316',
-    state_change: '#64748b',
-  }[entry.kind];
-  const icon = {
+  // Parse meta to detect Jira-origin (agent replies from Jira)
+  let isJiraOrigin = false;
+  try {
+    if (entry.meta_json) {
+      const meta = JSON.parse(entry.meta_json) as { source?: string };
+      isJiraOrigin = meta.source === 'jira';
+    }
+  } catch { /* ignore */ }
+
+  const kindColour = isJiraOrigin
+    ? '#f59e0b'
+    : ({
+        comment: '#5ec1ca',
+        accept: '#10b981',
+        return: '#9b6aed',
+        claim: '#64748b',
+        fasttrack: '#f97316',
+        state_change: '#64748b',
+      } as const)[entry.kind];
+  const icon = isJiraOrigin ? '📥' : ({
     comment: '💬',
     accept: '✓',
     return: '↩',
     claim: '◉',
     fasttrack: '🔥',
     state_change: '◈',
-  }[entry.kind];
+  } as const)[entry.kind];
+  const label = isJiraOrigin ? 'AGENT REPLY' : entry.kind;
 
   return (
-    <div className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+    <div
+      className="p-3 rounded-lg"
+      style={{
+        background: isJiraOrigin ? 'rgba(245,158,11,0.06)' : 'rgba(255,255,255,0.05)',
+        border: `1px solid ${isJiraOrigin ? 'rgba(245,158,11,0.25)' : 'rgba(255,255,255,0.1)'}`,
+      }}
+    >
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2 text-[10px] font-bold" style={{ color: kindColour }}>
           <span>{icon}</span>
-          <span className="uppercase tracking-wider">{entry.kind}</span>
+          <span className="uppercase tracking-wider">{label}</span>
           <span className="text-neutral-300 font-normal">· {entry.user_display}</span>
+          {isJiraOrigin && (
+            <span className="text-[9px] text-neutral-500 font-normal">· from Jira</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          {entry.jira_sync_state === 'pending' && (
+          {!isJiraOrigin && entry.jira_sync_state === 'pending' && (
             <span className="text-[9px] text-amber-400">syncing…</span>
           )}
-          {entry.jira_sync_state === 'failed' && (
+          {!isJiraOrigin && entry.jira_sync_state === 'failed' && (
             <span className="text-[9px] text-red-400" title={entry.jira_sync_error || ''}>sync failed</span>
           )}
-          {entry.jira_sync_state === 'synced' && (
+          {!isJiraOrigin && entry.jira_sync_state === 'synced' && (
             <span className="text-[9px] text-emerald-400">✓ jira</span>
           )}
           <span className="text-[10px] text-neutral-400">{timeAgo(entry.created_at)}</span>

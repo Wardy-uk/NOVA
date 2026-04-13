@@ -69,10 +69,12 @@ export interface JiraIssueLink {
 
 export interface JiraComment {
   id: string;
-  author: { displayName: string; emailAddress?: string };
+  author: { displayName: string; emailAddress?: string; accountId?: string };
   body: unknown;
   created: string;
   updated: string;
+  jsdPublic?: boolean;
+  properties?: Array<{ key: string; value: unknown }>;
 }
 
 export interface JiraCommentPage {
@@ -294,11 +296,15 @@ export class JiraRestClient {
     );
   }
 
-  /** Add a comment with optional visibility (internal notes for JSM) */
+  /** Add a comment with optional visibility or JSM internal flag.
+   *  - `visibility` = classic role/group restriction (legacy)
+   *  - `internal: true` = JSM "Add internal comment" marker
+   *    (uses properties [{key:'sd.public.comment', value:{internal:true}}])
+   */
   async addComment(
     issueKey: string,
     bodyText: string,
-    options?: { visibility?: { type: string; value: string } }
+    options?: { visibility?: { type: string; value: string }; internal?: boolean }
   ): Promise<unknown> {
     const payload: Record<string, unknown> = {
       body: {
@@ -309,6 +315,9 @@ export class JiraRestClient {
     };
     if (options?.visibility) {
       payload.visibility = options.visibility;
+    }
+    if (options?.internal) {
+      payload.properties = [{ key: 'sd.public.comment', value: { internal: true } }];
     }
     return this.request<unknown>('POST', `issue/${issueKey}/comment`, payload);
   }
@@ -377,10 +386,11 @@ export class JiraRestClient {
     );
   }
 
-  /** Get comments for an issue, newest first */
+  /** Get comments for an issue, newest first. Requests the jsdPublic and
+   *  properties expands so internal/public can be distinguished. */
   async getComments(issueKey: string, maxResults = 5): Promise<JiraComment[]> {
     const result = await this.request<JiraCommentPage>(
-      'GET', `issue/${issueKey}/comment?orderBy=-created&maxResults=${maxResults}`
+      'GET', `issue/${issueKey}/comment?orderBy=-created&maxResults=${maxResults}&expand=properties`
     );
     return result?.comments ?? [];
   }

@@ -1414,6 +1414,69 @@ ${panelHtml}
   setInterval(devWatch, 5 * 60 * 1000);
   setTimeout(devWatch, 45_000);
 
+  // ── Dev Review comment watcher — pulls external (agent) Jira comments ──
+  // Every 2 min, for each active dev_review_state row, fetches the last 20
+  // Jira comments. Any comment whose ID isn't already in dev_review_thread
+  // is an external agent reply — insert it into the thread and, if the
+  // ticket is currently 'waiting_on_assignee', flip it back to 'in_review'.
+  //
+  // Simple text-walker for Atlassian Doc Format → plain text.
+  const adfToPlain = (adf: unknown): string => {
+    const walk = (n: unknown): string => {
+      if (!n) return '';
+      if (typeof n === 'string') return n;
+      const node = n as { text?: string; type?: string; content?: unknown[] };
+      if (node.text) return node.text;
+      if (Array.isArray(node.content)) {
+        const inner = node.content.map(walk).join('');
+        return node.type === 'paragraph' || node.type === 'heading' ? inner + '\n' : inner;
+      }
+      return '';
+    };
+    return walk(adf).trim();
+  };
+
+  const commentWatch = async () => {
+    try {
+      const client = buildServiceDeskJiraClient();
+      if (!client) return;
+      const keys = devReviewQueries.getActiveKeys();
+      if (keys.length === 0) return;
+      let newCount = 0;
+      for (const key of keys) {
+        try {
+          const comments = await client.getComments(key, 20);
+          for (const c of comments) {
+            if (devReviewQueries.hasJiraComment(key, c.id)) continue;
+            const body = adfToPlain(c.body);
+            const authorName = c.author?.displayName || 'Unknown';
+            devReviewQueries.addExternalJiraComment({
+              jira_key: key,
+              author_display: authorName,
+              body,
+              jira_comment_id: c.id,
+              author_account_id: c.author?.accountId,
+              internal: c.jsdPublic === false,
+            });
+            newCount++;
+            // Flip waiting → in_review if this is the first external reply
+            const state = devReviewQueries.getState(key);
+            if (state?.status === 'waiting_on_assignee') {
+              devReviewQueries.setStatus(key, 'in_review');
+            }
+          }
+        } catch (err) {
+          console.warn(`[DevReviewComments] Failed to fetch ${key}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      if (newCount > 0) console.log(`[DevReviewComments] Imported ${newCount} new external comment(s)`);
+    } catch (err) {
+      console.error('[DevReviewComments] Watcher failed:', err instanceof Error ? err.message : err);
+    }
+  };
+  setInterval(commentWatch, 2 * 60 * 1000);
+  setTimeout(commentWatch, 60_000);
+
   // Expose last sync time + per-source intervals
   app.get('/api/sync/status', (_req, res) => {
     const globalMinutes = parseInt(settingsQueries.get('refresh_interval_minutes') ?? '5', 10) || 5;

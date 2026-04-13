@@ -3,7 +3,7 @@ import { saveDb } from './schema.js';
 
 export interface DevReviewState {
   jira_key: string;
-  status: 'pending' | 'in_review' | 'accepted' | 'returned' | 'archived';
+  status: 'pending' | 'in_review' | 'waiting_on_assignee' | 'accepted' | 'returned' | 'archived';
   fast_track: number;
   nova_priority: 'low' | 'normal' | 'high';
   claimed_by_user_id: number | null;
@@ -14,6 +14,7 @@ export interface DevReviewState {
   accepted_at: string | null;
   returned_at: string | null;
   archived_at: string | null;
+  team: string | null;
 }
 
 export interface DevReviewThreadEntry {
@@ -216,6 +217,24 @@ export class DevReviewQueries {
     saveDb();
   }
 
+  /** Backfill team from the Nurtur Product field on each queue sync. */
+  setTeam(jiraKey: string, team: string): void {
+    this.db.run(
+      `UPDATE dev_review_state SET team=? WHERE jira_key=? AND (team IS NULL OR team != ?)`,
+      [team, jiraKey, team],
+    );
+    saveDb();
+  }
+
+  /** Generic status update — used for the waiting_on_assignee round-trip. */
+  setStatus(jiraKey: string, status: DevReviewState['status']): void {
+    this.db.run(
+      `UPDATE dev_review_state SET status=?, last_action_at=datetime('now') WHERE jira_key=?`,
+      [status, jiraKey],
+    );
+    saveDb();
+  }
+
   markReturned(jiraKey: string): void {
     this.db.run(
       `UPDATE dev_review_state
@@ -276,6 +295,56 @@ export class DevReviewQueries {
       [jiraCommentId, id],
     );
     saveDb();
+  }
+
+  /** Insert an externally-sourced Jira comment into the thread. Used by the
+   *  watcher when an agent replies in Jira directly — the entry is created
+   *  already-synced with the Jira comment ID set so we don't re-import it. */
+  addExternalJiraComment(entry: {
+    jira_key: string;
+    author_display: string;
+    body: string;
+    jira_comment_id: string;
+    author_account_id?: string;
+    internal?: boolean;
+  }): void {
+    this.db.run(
+      `INSERT INTO dev_review_thread
+       (jira_key, user_id, user_display, kind, body, meta_json, jira_sync_state, jira_comment_id)
+       VALUES (?, 0, ?, 'comment', ?, ?, 'synced', ?)`,
+      [
+        entry.jira_key,
+        entry.author_display,
+        entry.body,
+        JSON.stringify({ source: 'jira', author_account_id: entry.author_account_id, internal: !!entry.internal }),
+        entry.jira_comment_id,
+      ],
+    );
+    saveDb();
+  }
+
+  /** Check whether a given Jira comment ID has already been recorded in the
+   *  thread for a ticket — used by the comment watcher to avoid duplicates. */
+  hasJiraComment(jiraKey: string, jiraCommentId: string): boolean {
+    const stmt = this.db.prepare(
+      `SELECT 1 FROM dev_review_thread WHERE jira_key = ? AND jira_comment_id = ? LIMIT 1`,
+    );
+    stmt.bind([jiraKey, jiraCommentId]);
+    const exists = stmt.step();
+    stmt.free();
+    return exists;
+  }
+
+  /** Get all keys currently in an active review state — used by the comment
+   *  watcher to know which tickets to poll for new Jira comments. */
+  getActiveKeys(): string[] {
+    const stmt = this.db.prepare(
+      `SELECT jira_key FROM dev_review_state WHERE status NOT IN ('archived','accepted','returned')`,
+    );
+    const out: string[] = [];
+    while (stmt.step()) out.push((stmt.getAsObject() as { jira_key: string }).jira_key);
+    stmt.free();
+    return out;
   }
 
   markThreadSyncFailed(id: number, error: string): void {
@@ -384,6 +453,15 @@ export class DevReviewQueries {
     }>;
     arrivals14d: Array<{ date: string; count: number }>;
     decisions14d: Array<{ date: string; accepted: number; returned: number }>;
+    perTeam: Array<{
+      team: string;
+      in_queue: number;
+      waiting: number;
+      accepted_week: number;
+      returned_week: number;
+      accepted_all: number;
+      returned_all: number;
+    }>;
   } {
     // ── Queue snapshot ──────────────────────────────────────────────────
     const queue = {
@@ -558,6 +636,62 @@ export class DevReviewQueries {
       .map(([date, v]) => ({ date, ...v }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
+    // ── Per team breakdown ───────────────────────────────────────────────
+    // In-queue + waiting now per team, and week/all-time decisions per team.
+    // Team comes from dev_review_state.team (populated during queue sync).
+    const teamQueueRows = this.rows<{ team: string; in_queue: number; waiting: number }>(
+      `SELECT COALESCE(team, 'Unassigned') AS team,
+              SUM(CASE WHEN status NOT IN ('archived','accepted','returned','waiting_on_assignee') THEN 1 ELSE 0 END) AS in_queue,
+              SUM(CASE WHEN status = 'waiting_on_assignee' THEN 1 ELSE 0 END) AS waiting
+       FROM dev_review_state
+       WHERE status NOT IN ('archived')
+       GROUP BY COALESCE(team, 'Unassigned')`,
+    );
+    const teamDecisionRows = this.rows<{ team: string; kind: string; total: number; week: number }>(
+      `SELECT COALESCE(s.team, 'Unassigned') AS team, t.kind,
+              COUNT(*) AS total,
+              SUM(CASE WHEN t.created_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) AS week
+       FROM dev_review_thread t
+       LEFT JOIN dev_review_state s ON s.jira_key = t.jira_key
+       WHERE t.kind IN ('accept','return')
+       GROUP BY COALESCE(s.team, 'Unassigned'), t.kind`,
+    );
+
+    const teamMap = new Map<string, {
+      team: string;
+      in_queue: number;
+      waiting: number;
+      accepted_week: number;
+      returned_week: number;
+      accepted_all: number;
+      returned_all: number;
+    }>();
+    for (const r of teamQueueRows) {
+      teamMap.set(r.team, {
+        team: r.team,
+        in_queue: r.in_queue,
+        waiting: r.waiting,
+        accepted_week: 0, returned_week: 0, accepted_all: 0, returned_all: 0,
+      });
+    }
+    for (const r of teamDecisionRows) {
+      const existing = teamMap.get(r.team) || {
+        team: r.team, in_queue: 0, waiting: 0,
+        accepted_week: 0, returned_week: 0, accepted_all: 0, returned_all: 0,
+      };
+      if (r.kind === 'accept') {
+        existing.accepted_week = r.week;
+        existing.accepted_all = r.total;
+      } else if (r.kind === 'return') {
+        existing.returned_week = r.week;
+        existing.returned_all = r.total;
+      }
+      teamMap.set(r.team, existing);
+    }
+    const perTeam = Array.from(teamMap.values()).sort(
+      (a, b) => (b.in_queue + b.waiting + b.accepted_week + b.returned_week) - (a.in_queue + a.waiting + a.accepted_week + a.returned_week),
+    );
+
     return {
       queue,
       today,
@@ -572,6 +706,7 @@ export class DevReviewQueries {
       perDeveloper,
       arrivals14d,
       decisions14d,
+      perTeam,
     };
   }
 }
