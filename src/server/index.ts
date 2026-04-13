@@ -1344,16 +1344,20 @@ ${panelHtml}
       }
       devReviewLastSeen = liveKeys;
 
-      // Backfill submitter username via Jira changelog for any state row missing it.
-      // Looks for the most recent change to customfield_12981 (CurrentTier) where the
-      // new value is "Tier 3" and uses that change's author as the submitter.
+      // Backfill submitter + actual escalation time via Jira changelog for any
+      // state row still missing the submitter. Looks for the most recent change
+      // to customfield_12981 (CurrentTier) where the new value is "Tier 3"; that
+      // change's author becomes the submitter and its timestamp becomes
+      // first_seen_at — fixing the bootstrap problem where every long-standing
+      // T3 ticket was inserted with first_seen_at = now.
       const missing = devReviewQueries.getKeysMissingSubmitter(15);
       for (const key of missing) {
         try {
           const issue = await client.getIssue(key, ['summary'], { expand: ['changelog'] });
-          const changelog = (issue as { changelog?: { histories?: Array<{ author?: { emailAddress?: string; displayName?: string }; items?: Array<{ field?: string; fieldId?: string; toString?: string }> }> } } | null)?.changelog;
+          const changelog = (issue as { changelog?: { histories?: Array<{ created?: string; author?: { emailAddress?: string; displayName?: string }; items?: Array<{ field?: string; fieldId?: string; toString?: string }> }> } } | null)?.changelog;
           const histories = changelog?.histories || [];
           let submitter: string | null = null;
+          let escalationIso: string | null = null;
           for (let i = histories.length - 1; i >= 0; i--) {
             const h = histories[i];
             const tierChange = h.items?.find((it) =>
@@ -1362,14 +1366,15 @@ ${panelHtml}
             );
             if (tierChange) {
               submitter = h.author?.emailAddress || h.author?.displayName || null;
+              escalationIso = h.created || null;
               break;
             }
           }
-          if (submitter) {
-            devReviewQueries.setSubmitter(key, submitter);
+          if (submitter || escalationIso) {
+            devReviewQueries.setEscalationMetadata(key, submitter, escalationIso);
           }
         } catch (e) {
-          console.warn(`[DevReviewWatcher] Failed to resolve submitter for ${key}: ${e instanceof Error ? e.message : e}`);
+          console.warn(`[DevReviewWatcher] Failed to resolve metadata for ${key}: ${e instanceof Error ? e.message : e}`);
         }
       }
 

@@ -95,6 +95,31 @@ export class DevReviewQueries {
     saveDb();
   }
 
+  /** Backfill both submitter AND escalation time from the Jira changelog.
+   *  Overwrites first_seen_at so dashboards reflect the actual escalation
+   *  time rather than the time NOVA first noticed the ticket on bootstrap. */
+  setEscalationMetadata(jiraKey: string, submitter: string | null, escalationIso: string | null): void {
+    if (submitter && escalationIso) {
+      this.db.run(
+        `UPDATE dev_review_state
+         SET submitted_by_username=?, first_seen_at=?
+         WHERE jira_key=?`,
+        [submitter, escalationIso, jiraKey],
+      );
+    } else if (submitter) {
+      this.db.run(
+        `UPDATE dev_review_state SET submitted_by_username=? WHERE jira_key=?`,
+        [submitter, jiraKey],
+      );
+    } else if (escalationIso) {
+      this.db.run(
+        `UPDATE dev_review_state SET first_seen_at=? WHERE jira_key=?`,
+        [escalationIso, jiraKey],
+      );
+    }
+    saveDb();
+  }
+
   /** Get all keys missing a submitter — for background backfill. */
   getKeysMissingSubmitter(limit = 25): string[] {
     const stmt = this.db.prepare(
@@ -376,9 +401,12 @@ export class DevReviewQueries {
     };
 
     // ── Today / Week ─────────────────────────────────────────────────────
+    // Exclude archived rows from "new" counts — they were either closed
+    // or never actually escalated to T3 (cleaned up by the watcher).
     const today = {
       new: this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE date(first_seen_at) = date('now', 'localtime')`,
+        `SELECT COUNT(*) FROM dev_review_state
+         WHERE date(first_seen_at) = date('now', 'localtime') AND status != 'archived'`,
       ),
       accepted: this.scalar(
         `SELECT COUNT(*) FROM dev_review_state WHERE date(accepted_at) = date('now', 'localtime')`,
@@ -392,7 +420,8 @@ export class DevReviewQueries {
 
     const week = {
       new: this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE first_seen_at >= datetime('now', '-7 days')`,
+        `SELECT COUNT(*) FROM dev_review_state
+         WHERE first_seen_at >= datetime('now', '-7 days') AND status != 'archived'`,
       ),
       accepted: this.scalar(
         `SELECT COUNT(*) FROM dev_review_state WHERE accepted_at >= datetime('now', '-7 days')`,
@@ -506,7 +535,7 @@ export class DevReviewQueries {
     const arrivals14d = this.rows<{ date: string; count: number }>(
       `SELECT date(first_seen_at, 'localtime') AS date, COUNT(*) AS count
        FROM dev_review_state
-       WHERE first_seen_at >= datetime('now','-14 days')
+       WHERE first_seen_at >= datetime('now','-14 days') AND status != 'archived'
        GROUP BY date(first_seen_at, 'localtime')
        ORDER BY date ASC`,
     );
