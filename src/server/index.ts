@@ -28,6 +28,8 @@ import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
 import { createBoardMiRoutes } from './routes/board-mi.js';
+import { createDevReviewRoutes } from './routes/dev-review.js';
+import { DevReviewQueries } from './db/dev-review-queries.js';
 import { createTrendsRoutes } from './routes/trends.js';
 import { createFeedbackRoutes } from './routes/feedback.js';
 import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
@@ -128,6 +130,7 @@ async function main() {
   const adobeSignAgreementQueries = new AdobeSignAgreementQueries(db);
   const approvalQueries = new ApprovalQueries(db);
   const trainingQueries = new TrainingQueries(db);
+  const devReviewQueries = new DevReviewQueries(db);
 
   // Purge transient MS365 data from previous session
   const purgedCount = taskQueries.deleteTransientTasks();
@@ -525,6 +528,12 @@ async function main() {
     if (!u || u.username !== 'nickw') { res.status(403).json({ ok: false, error: 'Restricted' }); return; }
     next();
   }, createBoardMiRoutes(settingsQueries));
+  app.use('/api/dev-review', createDevReviewRoutes(
+    devReviewQueries,
+    settingsQueries,
+    userQueries,
+    buildServiceDeskJiraClient,
+  ));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries, db));
   app.use('/api/backfill', requireAreaAccess('qa', 'view'), createBackfillRoutes(settingsQueries));
   app.use('/api/sales', requireAreaAccess('sales', 'view'), createSalesHotboxRoutes(salesQueries, requireAreaAccess));

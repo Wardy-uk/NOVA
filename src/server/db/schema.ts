@@ -1274,6 +1274,62 @@ export function initializeSchema(database: Database): void {
     )
   `);
 
+  // ── Dev Review Queue ──
+  // Tickets that have been escalated to Tier 3 (CurrentTier=13063) in NT live here
+  // as a thin overlay on top of the Jira ticket. Auto-populated on first sight,
+  // auto-archived when the ticket leaves Tier 3.
+  database.run(`
+    CREATE TABLE IF NOT EXISTS dev_review_state (
+      jira_key TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'pending',   -- pending | in_review | accepted | returned | archived
+      fast_track INTEGER NOT NULL DEFAULT 0,
+      nova_priority TEXT DEFAULT 'normal',      -- low | normal | high
+      claimed_by_user_id INTEGER,
+      claimed_at TEXT,
+      submitted_by_username TEXT,               -- agent who last escalated to T3 (resolved via Jira changelog)
+      first_seen_at TEXT DEFAULT (datetime('now')),
+      last_action_at TEXT DEFAULT (datetime('now')),
+      accepted_at TEXT,
+      returned_at TEXT,
+      archived_at TEXT
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_dev_review_status ON dev_review_state(status)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_dev_review_claimed ON dev_review_state(claimed_by_user_id)`);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS dev_review_thread (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      jira_key TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      user_display TEXT NOT NULL,
+      kind TEXT NOT NULL,                       -- comment | state_change | accept | return | claim | fasttrack
+      body TEXT,
+      meta_json TEXT,
+      jira_sync_state TEXT DEFAULT 'pending',   -- pending | synced | failed | skip
+      jira_sync_error TEXT,
+      jira_comment_id TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_dev_thread_key ON dev_review_thread(jira_key, created_at DESC)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_dev_thread_sync ON dev_review_thread(jira_sync_state) WHERE jira_sync_state = 'pending'`);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS dev_review_outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      jira_key TEXT NOT NULL,
+      op TEXT NOT NULL,                         -- comment | accept | return
+      payload_json TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',   -- pending | done | failed
+      last_error TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      processed_at TEXT
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_dev_outbox_status ON dev_review_outbox(status, created_at)`);
+
   saveDb();
 }
 

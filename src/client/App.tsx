@@ -49,6 +49,7 @@ import { TrendsView } from './components/TrendsView.js';
 import { TrainingMatrixView } from './components/TrainingMatrixView.js';
 import { TrainingSummaryView } from './components/TrainingSummaryView.js';
 import { BoardMiView } from './components/BoardMiView.js';
+import { DevReviewView } from './components/DevReviewView.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -58,7 +59,7 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board';
+type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
@@ -70,6 +71,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'surveys'
   | 'training-matrix' | 'training-summary'
   | 'board-mi'
+  | 'dev-review'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -211,9 +213,16 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'board-mi', label: 'Monthly Pack' },
     ],
   },
+  devreview: {
+    label: 'Dev Review',
+    defaultView: 'dev-review',
+    tabs: [
+      { view: 'dev-review', label: 'Queue' },
+    ],
+  },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'board'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
@@ -225,7 +234,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -624,6 +633,11 @@ export function App() {
     if (area === 'command' || area === 'wallboards') return true;
     // Board MI is locked to nickw only for now
     if (area === 'board') return auth.user?.username === 'nickw';
+    // Dev Review is gated to anyone with the 'developer' role (admins always)
+    if (area === 'devreview') {
+      const roles = (auth.user?.role || '').split(',').map((r) => r.trim());
+      return roles.includes('admin') || roles.includes('developer');
+    }
     // Trends piggybacks on KPIs access (no separate role needed)
     if (area === 'trends') return (areaAccess['kpis'] || 'hidden') !== 'hidden';
     return (areaAccess[area] || 'hidden') !== 'hidden';
@@ -1081,6 +1095,11 @@ export function App() {
           {/* Board MI — admin (nickw) only */}
           {view === 'board-mi' && auth.user?.username === 'nickw' && (
             <BoardMiView />
+          )}
+
+          {/* Dev Review Queue — developer + admin */}
+          {view === 'dev-review' && canSeeArea('devreview') && (
+            <DevReviewView />
           )}
 
           {/* Administration */}
