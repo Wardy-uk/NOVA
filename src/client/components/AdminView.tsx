@@ -1298,15 +1298,31 @@ export function AdminView() {
               <div className="grid grid-cols-2 gap-2 mb-5 max-h-[50vh] overflow-y-auto">
                 {productPickerOptions.map((p) => {
                   const checked = productPickerSelection.has(p);
+                  // "Owned" = mapped to at least one OTHER team (so admin can
+                  // see at a glance which products already have coverage).
+                  const ownedByOtherTeams = teams
+                    .filter((t) => t.id !== productPickerTeam.id)
+                    .filter((t) => (t.jira_products || []).includes(p));
+                  const ownedElsewhere = ownedByOtherTeams.length > 0;
                   return (
                     <label
                       key={p}
+                      title={ownedByOtherTeams.length > 0 ? `Also owned by: ${ownedByOtherTeams.map((t) => t.name).join(', ')}` : undefined}
                       className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-all text-[12px] ${
-                        checked ? 'text-[#5ec1ca] font-semibold' : 'text-neutral-300'
+                        checked ? 'text-[#5ec1ca] font-semibold' : ownedElsewhere ? 'text-emerald-300' : 'text-neutral-300'
                       }`}
                       style={{
-                        background: checked ? 'rgba(94,193,202,0.1)' : 'rgba(255,255,255,0.03)',
-                        borderColor: checked ? 'rgba(94,193,202,0.4)' : 'rgba(255,255,255,0.08)',
+                        background: checked
+                          ? 'rgba(94,193,202,0.1)'
+                          : ownedElsewhere
+                            ? 'rgba(16,185,129,0.08)'
+                            : 'rgba(255,255,255,0.03)',
+                        borderColor: checked
+                          ? 'rgba(94,193,202,0.4)'
+                          : ownedElsewhere
+                            ? 'rgba(16,185,129,0.5)'
+                            : 'rgba(255,255,255,0.08)',
+                        boxShadow: ownedElsewhere && !checked ? '0 0 12px rgba(16,185,129,0.15)' : undefined,
                       }}
                     >
                       <input
@@ -1326,6 +1342,20 @@ export function AdminView() {
                 })}
               </div>
 
+              <div className="flex items-center gap-3 mb-3 text-[10px] text-neutral-500">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded border border-[rgba(94,193,202,0.4)] bg-[rgba(94,193,202,0.1)]" />
+                  Selected
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded border border-[rgba(16,185,129,0.5)] bg-[rgba(16,185,129,0.08)]" />
+                  Owned by another team
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded border border-white/10 bg-white/5" />
+                  Unowned
+                </span>
+              </div>
               <div className="flex items-center justify-between pt-3 border-t border-white/5">
                 <button
                   onClick={() => setProductPickerSelection(new Set())}
