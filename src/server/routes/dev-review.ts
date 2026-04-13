@@ -341,12 +341,15 @@ export function createDevReviewRoutes(
     const prefixed = `🛠️ Developer comment — ${display}\n\n${body}`;
 
     try {
-      // Step 1: discover transitions + required fields
+      // Step 1: discover transitions + field schemas
       const meta = await client.getTransitionsWithFields(key) as {
         transitions?: Array<{
           id: string;
           name?: string;
-          fields?: Record<string, { required?: boolean }>;
+          fields?: Record<string, {
+            required?: boolean;
+            schema?: { type?: string; custom?: string; items?: string };
+          }>;
         }>;
       };
       const transitions = meta.transitions || [];
@@ -380,31 +383,85 @@ export function createDevReviewRoutes(
         // handle it via the update.comment block, not the fields block.
         .filter((id) => id !== 'comment');
 
-      // Step 2: fetch current values of those screen fields
+      // Step 2: fetch current values of those screen fields and normalise
+      // for write-back using the schema from the transitions response.
+      // Different Jira field types need different write shapes:
+      //   string          → plain string OR ADF doc object (for textareas)
+      //   option/priority → { id }
+      //   user            → { accountId }
+      //   date/datetime   → ISO string
+      //   number          → number
+      //   array           → pass through as-is
       const passFields: Record<string, unknown> = {};
       if (screenFieldIds.length > 0) {
         const issue = await client.getIssue(key, screenFieldIds);
         const currentFields = (issue?.fields || {}) as Record<string, unknown>;
+        const fieldMetas = waitTransition.fields || {};
+
         for (const fieldId of screenFieldIds) {
           const val = currentFields[fieldId];
           if (val === null || val === undefined) continue;
-          // Normalise shape for write — option/select fields round-trip
-          // cleanly as {id}; rich-text textareas round-trip as ADF docs;
-          // scalars pass through unchanged.
-          if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
-            const obj = val as Record<string, unknown>;
-            if ('id' in obj && obj.id !== null && obj.id !== undefined) {
-              passFields[fieldId] = { id: String(obj.id) };
-            } else if ('value' in obj) {
-              passFields[fieldId] = { value: obj.value };
-            } else if ('accountId' in obj) {
-              passFields[fieldId] = { accountId: obj.accountId };
-            } else {
-              // ADF doc, date string-as-object, etc — pass through
+          const schemaType = fieldMetas[fieldId]?.schema?.type;
+
+          // Detect an ADF doc — some textareas return rich-text as a doc
+          const isAdfDoc = typeof val === 'object' && val !== null && !Array.isArray(val)
+            && (val as { type?: string }).type === 'doc';
+
+          switch (schemaType) {
+            case 'string':
+              // Textarea fields send ADF back in; simple text fields want a
+              // plain string. Preserve whichever format we read.
+              if (isAdfDoc) {
+                passFields[fieldId] = val;
+              } else if (typeof val === 'string') {
+                passFields[fieldId] = val;
+              } else {
+                passFields[fieldId] = String(val);
+              }
+              break;
+            case 'option':
+            case 'priority':
+            case 'issuetype':
+            case 'resolution':
+            case 'securitylevel':
+              if (typeof val === 'object' && val !== null) {
+                const obj = val as Record<string, unknown>;
+                if ('id' in obj && obj.id != null) passFields[fieldId] = { id: String(obj.id) };
+                else if ('value' in obj) passFields[fieldId] = { value: obj.value };
+                else if ('name' in obj) passFields[fieldId] = { name: obj.name };
+              }
+              break;
+            case 'user':
+              if (typeof val === 'object' && val !== null) {
+                const obj = val as Record<string, unknown>;
+                if ('accountId' in obj) passFields[fieldId] = { accountId: obj.accountId };
+              }
+              break;
+            case 'date':
+            case 'datetime':
+            case 'number':
               passFields[fieldId] = val;
-            }
-          } else {
-            passFields[fieldId] = val;
+              break;
+            case 'array':
+              if (Array.isArray(val)) passFields[fieldId] = val;
+              break;
+            case 'any':
+            default:
+              // Unknown schema — pass through as-is, but if it's a plain
+              // object-with-id that looks like an option, wrap it to be safe.
+              if (typeof val === 'object' && val !== null && !Array.isArray(val) && !isAdfDoc) {
+                const obj = val as Record<string, unknown>;
+                if ('id' in obj && obj.id != null) {
+                  passFields[fieldId] = { id: String(obj.id) };
+                  break;
+                }
+                if ('value' in obj) {
+                  passFields[fieldId] = { value: obj.value };
+                  break;
+                }
+              }
+              passFields[fieldId] = val;
+              break;
           }
         }
       }
