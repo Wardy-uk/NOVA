@@ -280,7 +280,7 @@ export class DevReviewQueries {
 
   getThread(jiraKey: string): DevReviewThreadEntry[] {
     const stmt = this.db.prepare(
-      'SELECT * FROM dev_review_thread WHERE jira_key = ? ORDER BY created_at ASC, id ASC',
+      'SELECT * FROM dev_review_thread WHERE jira_key = ? ORDER BY created_at DESC, id DESC',
     );
     stmt.bind([jiraKey]);
     const out: DevReviewThreadEntry[] = [];

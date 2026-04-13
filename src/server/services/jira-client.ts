@@ -328,13 +328,18 @@ export class JiraRestClient {
   }
 
   /** Transition an issue to a new status, optionally including fields and comment
-   *  in the same request (required by transition validators). */
+   *  in the same request (required by transition validators).
+   *  `comment.internal: true` marks the comment as a JSM internal note. */
   async transitionIssue(
     issueKey: string,
     transitionId: string,
     options?: {
       fields?: Record<string, unknown>;
-      comment?: { body: object; visibility?: { type: string; value: string } };
+      comment?: {
+        body: object;
+        visibility?: { type: string; value: string };
+        internal?: boolean;
+      };
     }
   ): Promise<void> {
     const payload: Record<string, unknown> = {
@@ -344,8 +349,13 @@ export class JiraRestClient {
       payload.fields = options.fields;
     }
     if (options?.comment) {
+      const commentAdd: Record<string, unknown> = { body: options.comment.body };
+      if (options.comment.visibility) commentAdd.visibility = options.comment.visibility;
+      if (options.comment.internal) {
+        commentAdd.properties = [{ key: 'sd.public.comment', value: { internal: true } }];
+      }
       payload.update = {
-        comment: [{ add: options.comment }],
+        comment: [{ add: commentAdd }],
       };
     }
     await this.request<void>('POST', `issue/${issueKey}/transitions`, payload);

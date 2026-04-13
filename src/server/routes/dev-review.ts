@@ -299,11 +299,21 @@ export function createDevReviewRoutes(
     res.json({ ok: true });
   });
 
-  // ── Comment (posts internal Jira comment + transitions Waiting On Assignee) ──
-  // Internal comment only — never falls back to public. If the internal post
-  // fails, the request fails; nothing leaks to the customer portal. After a
-  // successful post, transitions the ticket to "Waiting On Assignee" and
-  // mirrors that state in NOVA so the queue shows who's waiting on whom.
+  // ── Comment (single-shot Waiting On Assignee transition with internal note) ──
+  //
+  // The "Waiting On Assignee" transition in Jira has a mandatory internal
+  // comment field on its transition screen PLUS a handful of other required
+  // fields (TL;DR, Nurtur Product, Sub Category, Priority, Due date, Agent
+  // Next Update). A standalone addComment followed by an unadorned transition
+  // fails the workflow validator.
+  //
+  // Single-shot approach:
+  //   1. Discover the transition + its required fields via getTransitionsWithFields
+  //   2. Fetch current values of those required fields from the issue
+  //   3. Normalise each value for write-back shape
+  //   4. POST the transition with fields + internal comment in one call
+  //   5. Fetch the newest comment afterwards and store its Jira ID so the
+  //      watcher doesn't re-import it as an external reply
 
   router.post('/ticket/:key/comment', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
@@ -329,33 +339,106 @@ export function createDevReviewRoutes(
     }
 
     const prefixed = `🛠️ Developer comment — ${display}\n\n${body}`;
-    try {
-      const result = await client.addComment(key, prefixed, { internal: true });
-      const jiraCommentId = (result as { id?: string } | null)?.id ?? null;
-      devQueries.markThreadSynced(threadId, jiraCommentId);
 
-      // Transition → Waiting On Assignee (auto-discovered or overridden via setting)
-      let waitingSet = false;
-      const waitTransitionId = await resolveTransitionId(
-        client, key, 'Waiting On Assignee', 'dev_review_wait_transition_id',
-      );
-      if (waitTransitionId) {
+    try {
+      // Step 1: discover transitions + required fields
+      const meta = await client.getTransitionsWithFields(key) as {
+        transitions?: Array<{
+          id: string;
+          name?: string;
+          fields?: Record<string, { required?: boolean }>;
+        }>;
+      };
+      const transitions = meta.transitions || [];
+      const settingOverride = settingsQueries.getAll().dev_review_wait_transition_id;
+      let waitTransition = settingOverride
+        ? transitions.find((t) => t.id === String(settingOverride))
+        : transitions.find((t) => /waiting on assignee/i.test(t.name || ''));
+      if (!waitTransition) waitTransition = transitions.find((t) => /waiting/i.test(t.name || ''));
+
+      if (!waitTransition) {
+        // No transition available — post a standalone internal comment so the
+        // dev's note isn't lost, and warn the caller.
         try {
-          await client.transitionIssue(key, waitTransitionId);
-          devQueries.setStatus(key, 'waiting_on_assignee');
-          waitingSet = true;
-        } catch (transErr) {
-          console.warn(`[DevReview] Transition to Waiting On Assignee failed for ${key}: ${transErr instanceof Error ? transErr.message : transErr}`);
+          const r = await client.addComment(key, prefixed, { internal: true });
+          devQueries.markThreadSynced(threadId, (r as { id?: string } | null)?.id ?? null);
+        } catch (e) {
+          devQueries.markThreadSyncFailed(threadId, e instanceof Error ? e.message : 'comment failed');
         }
-      } else {
-        console.warn(`[DevReview] Could not resolve 'Waiting On Assignee' transition for ${key}`);
+        res.json({ ok: true, waitingSet: false, warning: 'Waiting On Assignee transition not found — comment posted but status not changed' });
+        return;
       }
 
-      res.json({ ok: true, waitingSet });
+      const requiredFieldIds = Object.entries(waitTransition.fields || {})
+        .filter(([, m]) => m.required)
+        .map(([id]) => id)
+        // "comment" is a special pseudo-field on the transition screen — we
+        // handle it via the update.comment block, not the fields block.
+        .filter((id) => id !== 'comment');
+
+      // Step 2: fetch current values of those required fields
+      const passFields: Record<string, unknown> = {};
+      if (requiredFieldIds.length > 0) {
+        const issue = await client.getIssue(key, requiredFieldIds);
+        const currentFields = (issue?.fields || {}) as Record<string, unknown>;
+        for (const fieldId of requiredFieldIds) {
+          const val = currentFields[fieldId];
+          if (val === null || val === undefined) continue;
+          // Normalise shape for write — option/select fields round-trip
+          // cleanly as {id}; rich-text textareas round-trip as ADF docs;
+          // scalars pass through unchanged.
+          if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+            const obj = val as Record<string, unknown>;
+            if ('id' in obj && obj.id !== null && obj.id !== undefined) {
+              passFields[fieldId] = { id: String(obj.id) };
+            } else if ('value' in obj) {
+              passFields[fieldId] = { value: obj.value };
+            } else if ('accountId' in obj) {
+              passFields[fieldId] = { accountId: obj.accountId };
+            } else {
+              // ADF doc, date string-as-object, etc — pass through
+              passFields[fieldId] = val;
+            }
+          } else {
+            passFields[fieldId] = val;
+          }
+        }
+      }
+
+      // Step 3: single-shot transition + internal comment
+      await client.transitionIssue(key, waitTransition.id, {
+        fields: passFields,
+        comment: { body: adfDoc(prefixed), internal: true },
+      });
+
+      devQueries.setStatus(key, 'waiting_on_assignee');
+
+      // Step 4: find the comment we just added so the watcher doesn't
+      // re-import it as an external reply (matches by body prefix).
+      let newCommentId: string | null = null;
+      try {
+        const recent = await client.getComments(key, 5);
+        const mine = recent.find((c) => {
+          const walk = (n: unknown): string => {
+            if (!n) return '';
+            if (typeof n === 'string') return n;
+            const node = n as { text?: string; content?: unknown[] };
+            if (node.text) return node.text;
+            if (Array.isArray(node.content)) return node.content.map(walk).join('');
+            return '';
+          };
+          const text = walk(c.body);
+          return text.startsWith(`🛠️ Developer comment — ${display}`);
+        });
+        if (mine) newCommentId = mine.id;
+      } catch { /* non-fatal */ }
+
+      devQueries.markThreadSynced(threadId, newCommentId);
+      res.json({ ok: true, waitingSet: true });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'unknown';
+      const msg = e instanceof Error ? e.message : 'Transition failed';
       devQueries.markThreadSyncFailed(threadId, msg);
-      res.status(502).json({ ok: false, error: `Failed to post internal comment: ${msg}` });
+      res.status(502).json({ ok: false, error: `Failed to transition to Waiting On Assignee: ${msg}` });
     }
   });
 
