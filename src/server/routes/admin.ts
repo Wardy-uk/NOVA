@@ -300,8 +300,16 @@ export function createAdminRoutes(
 
   router.put('/teams/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
-    const { name, description } = req.body;
-    teamQueries.update(id, { name: name?.trim(), description: description?.trim() });
+    const { name, description, jira_products } = req.body;
+    const updates: { name?: string; description?: string; jira_products?: string[] | null } = {};
+    if (name !== undefined) updates.name = name?.trim();
+    if (description !== undefined) updates.description = description?.trim();
+    if (jira_products !== undefined) {
+      updates.jira_products = Array.isArray(jira_products)
+        ? jira_products.filter((p) => typeof p === 'string')
+        : null;
+    }
+    teamQueries.update(id, updates);
     res.json({ ok: true });
   });
 

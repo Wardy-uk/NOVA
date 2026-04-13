@@ -3,6 +3,7 @@ import type { DevReviewQueries } from '../db/dev-review-queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { FileUserQueries } from '../db/user-store.js';
 import type { NotificationQueries } from '../db/notifications.js';
+import type { TeamQueries } from '../db/queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
@@ -63,6 +64,7 @@ export function createDevReviewRoutes(
   settingsQueries: SettingsQueries,
   userQueries: FileUserQueries,
   notificationQueries: NotificationQueries,
+  teamQueries: TeamQueries,
   getJiraClient: () => JiraRestClient | null,
 ): Router {
   const router = Router();
@@ -156,7 +158,7 @@ export function createDevReviewRoutes(
       }
 
       // Merge: for each live issue, attach NOVA state + resolved team
-      const enriched = issues.map((issue) => {
+      let enriched = issues.map((issue) => {
         const state = devQueries.getState(issue.key);
         const product = (issue.fields as { customfield_13183?: { value?: string } }).customfield_13183?.value || null;
         return {
@@ -166,6 +168,22 @@ export function createDevReviewRoutes(
           team: productToTeam(product),
         };
       });
+
+      // Filter by user's NOVA team jira_products. Admins always see all.
+      // If the user's team has no products set (NULL or empty), they see all
+      // (this is the default for the Support team). Otherwise only tickets
+      // whose productToTeam value matches one of the allowed products.
+      if (req.user && !isAdmin(req.user.role)) {
+        const user = userQueries.getById(req.user.id);
+        if (user?.team_id) {
+          const team = teamQueries.getById(user.team_id);
+          const allowed = team?.jira_products;
+          if (allowed && allowed.length > 0) {
+            const allowedSet = new Set(allowed);
+            enriched = enriched.filter((item) => allowedSet.has(item.team));
+          }
+        }
+      }
 
       // Sort: fast_track first, then pending/in_review, then last_action_at
       enriched.sort((a, b) => {

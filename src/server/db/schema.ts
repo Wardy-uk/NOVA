@@ -245,6 +245,9 @@ export function initializeSchema(database: Database): void {
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
+  // Idempotent ALTER — JSON array of Nurtur Product values this team owns for
+  // Dev Review visibility. NULL or [] = team sees all tickets.
+  try { database.run(`ALTER TABLE teams ADD COLUMN jira_products TEXT`); } catch { /* already exists */ }
 
   database.run(`
     CREATE TABLE IF NOT EXISTS user_settings (

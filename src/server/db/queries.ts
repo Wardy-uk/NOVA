@@ -1070,15 +1070,31 @@ export interface Team {
   name: string;
   description: string | null;
   created_at: string;
+  jira_products: string[] | null; // empty/null = sees all Dev Review tickets
 }
 
 export class TeamQueries {
   constructor(private db: Database) {}
 
+  private rowToTeam(row: Record<string, unknown>): Team {
+    const raw = row.jira_products as string | null;
+    let products: string[] | null = null;
+    if (raw) {
+      try { products = JSON.parse(raw); } catch { products = null; }
+    }
+    return {
+      id: row.id as number,
+      name: row.name as string,
+      description: (row.description as string | null) ?? null,
+      created_at: row.created_at as string,
+      jira_products: products,
+    };
+  }
+
   getAll(): Team[] {
     const stmt = this.db.prepare(`SELECT * FROM teams ORDER BY name`);
     const teams: Team[] = [];
-    while (stmt.step()) { teams.push(stmt.getAsObject() as unknown as Team); }
+    while (stmt.step()) { teams.push(this.rowToTeam(stmt.getAsObject())); }
     stmt.free();
     return teams;
   }
@@ -1086,9 +1102,10 @@ export class TeamQueries {
   getById(id: number): Team | undefined {
     const stmt = this.db.prepare(`SELECT * FROM teams WHERE id = ?`);
     stmt.bind([id]);
-    if (stmt.step()) { const t = stmt.getAsObject() as unknown as Team; stmt.free(); return t; }
+    let team: Team | undefined;
+    if (stmt.step()) team = this.rowToTeam(stmt.getAsObject());
     stmt.free();
-    return undefined;
+    return team;
   }
 
   create(name: string, description?: string): number {
@@ -1099,11 +1116,15 @@ export class TeamQueries {
     return id;
   }
 
-  update(id: number, updates: { name?: string; description?: string }): boolean {
+  update(id: number, updates: { name?: string; description?: string; jira_products?: string[] | null }): boolean {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
     if (updates.description !== undefined) { fields.push('description = ?'); params.push(updates.description); }
+    if (updates.jira_products !== undefined) {
+      fields.push('jira_products = ?');
+      params.push(updates.jira_products && updates.jira_products.length > 0 ? JSON.stringify(updates.jira_products) : null);
+    }
     if (fields.length === 0) return false;
     params.push(id);
     this.db.run(`UPDATE teams SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);

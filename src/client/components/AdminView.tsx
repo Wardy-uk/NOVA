@@ -23,7 +23,25 @@ interface Team {
   id: number;
   name: string;
   description: string | null;
+  jira_products?: string[] | null;
 }
+
+// Hardcoded Nurtur Product list for Dev Review team owner-picker
+const NURTUR_PRODUCTS: string[] = [
+  'Nurtur Direct Communications',
+  'Nurtur Build',
+  'Nurtur Lead Management',
+  'EcoSystem',
+  'Members Hub',
+  'Franchise Hub',
+  'Starberry Websites',
+  'Yomdel',
+  'Nexus (and Internal Tooling)',
+  'Nurtur Referrals',
+  'Know Your Market',
+  'TPJ',
+  'Not A Nurtur Product',
+];
 
 
 interface FeedbackItem {
@@ -140,6 +158,8 @@ export function AdminView() {
 
   // Team form
   const [newTeamName, setNewTeamName] = useState('');
+  const [productPickerTeam, setProductPickerTeam] = useState<Team | null>(null);
+  const [productPickerSelection, setProductPickerSelection] = useState<Set<string>>(new Set());
 
   // Add User form
   const [showAddUser, setShowAddUser] = useState(false);
@@ -588,6 +608,30 @@ export function AdminView() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Create failed');
+    }
+  };
+
+  const openProductPicker = (team: Team) => {
+    setProductPickerTeam(team);
+    setProductPickerSelection(new Set(team.jira_products || []));
+  };
+  const saveProductPicker = async () => {
+    if (!productPickerTeam) return;
+    clearMessages();
+    try {
+      const res = await fetch(`/api/admin/teams/${productPickerTeam.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jira_products: Array.from(productPickerSelection) }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setSuccess(`Dev Review products updated for "${productPickerTeam.name}"`);
+        setProductPickerTeam(null);
+        fetchData();
+      } else setError(json.error || 'Save failed');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
     }
   };
 
@@ -1124,16 +1168,32 @@ export function AdminView() {
                 <tr className="border-b border-[#3a424d] text-xs text-neutral-500 uppercase tracking-wider">
                   <th className="text-left px-4 py-3">Team</th>
                   <th className="text-left px-4 py-3">Members</th>
+                  <th className="text-left px-4 py-3">Dev Review products</th>
                   <th className="text-right px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {teams.map((team) => {
                   const memberCount = users.filter((u) => u.team_id === team.id).length;
+                  const products = team.jira_products || [];
+                  const productLabel = products.length === 0
+                    ? 'Sees all'
+                    : products.length === 1
+                      ? products[0]
+                      : `${products.length} products`;
                   return (
                     <tr key={team.id} className="border-b border-[#3a424d]/50 hover:bg-[#363d47] transition-colors">
                       <td className="px-4 py-3 text-neutral-200">{team.name}</td>
                       <td className="px-4 py-3 text-neutral-400">{memberCount} member{memberCount !== 1 ? 's' : ''}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => openProductPicker(team)}
+                          className="px-2 py-1 text-[11px] rounded bg-[#272C33] hover:bg-[#3a424d] text-[#5ec1ca] border border-[#3a424d] transition-colors"
+                          title={products.length > 0 ? products.join(', ') : 'Team sees every Dev Review ticket'}
+                        >
+                          {productLabel} <span className="text-neutral-500">· edit</span>
+                        </button>
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <button
                           onClick={() => deleteTeam(team.id, team.name)}
@@ -1152,6 +1212,98 @@ export function AdminView() {
             )}
           </div>
         </div>
+
+        {/* Dev Review product picker modal */}
+        {productPickerTeam && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-6"
+            style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(6px)' }}
+            onClick={() => setProductPickerTeam(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg rounded-2xl p-6"
+              style={{
+                background: 'rgba(30,36,48,0.97)',
+                backdropFilter: 'blur(24px)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                boxShadow: '0 24px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.12)',
+              }}
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <span
+                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                  style={{ background: 'rgba(94,193,202,0.15)', color: '#5ec1ca', border: '1px solid rgba(94,193,202,0.3)' }}
+                >
+                  DEV REVIEW OWNERSHIP
+                </span>
+              </div>
+              <h3 className="text-lg font-bold text-neutral-50 mb-1">
+                {productPickerTeam.name}
+              </h3>
+              <p className="text-[12px] text-neutral-400 mb-5">
+                Pick the Nurtur Products this team owns. Members of this team will only see Dev Review tickets whose
+                product matches one of these. <span className="text-[#5ec1ca] font-semibold">Leave empty = team sees every ticket</span> (the
+                Support-team default). Admins always see everything regardless.
+              </p>
+
+              <div className="grid grid-cols-2 gap-2 mb-5 max-h-[50vh] overflow-y-auto">
+                {NURTUR_PRODUCTS.map((p) => {
+                  const checked = productPickerSelection.has(p);
+                  return (
+                    <label
+                      key={p}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-all text-[12px] ${
+                        checked ? 'text-[#5ec1ca] font-semibold' : 'text-neutral-300'
+                      }`}
+                      style={{
+                        background: checked ? 'rgba(94,193,202,0.1)' : 'rgba(255,255,255,0.03)',
+                        borderColor: checked ? 'rgba(94,193,202,0.4)' : 'rgba(255,255,255,0.08)',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const next = new Set(productPickerSelection);
+                          if (e.target.checked) next.add(p);
+                          else next.delete(p);
+                          setProductPickerSelection(next);
+                        }}
+                        className="accent-[#5ec1ca]"
+                      />
+                      {p}
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-white/5">
+                <button
+                  onClick={() => setProductPickerSelection(new Set())}
+                  className="text-[11px] text-neutral-500 hover:text-neutral-300"
+                >
+                  Clear all (see everything)
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setProductPickerTeam(null)}
+                    className="px-4 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveProductPicker}
+                    className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]"
+                    style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 16px rgba(94,193,202,0.35)' }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </CollapsibleSection>
 
       <CollapsibleSection title="AI Keys">
