@@ -187,14 +187,16 @@ function BriefField({ label, value, mono }: { label: string; value: string | und
   if (!value) return null;
   return (
     <div className="mb-4">
-      <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold mb-1.5">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5">{label}</div>
       <div
-        className={`text-[12px] leading-relaxed text-neutral-200 whitespace-pre-wrap ${mono ? 'font-mono text-[11px]' : ''}`}
+        className={`leading-relaxed whitespace-pre-wrap break-words ${mono ? 'font-mono text-[12px] text-emerald-200' : 'text-[13px] text-neutral-50'}`}
         style={{
-          background: 'rgba(255,255,255,0.02)',
-          border: '1px solid rgba(255,255,255,0.05)',
+          background: 'rgba(255,255,255,0.06)',
+          border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '8px',
-          padding: '10px 12px',
+          padding: '12px 14px',
+          maxHeight: mono ? '320px' : 'none',
+          overflowY: mono ? 'auto' : 'visible',
         }}
       >
         {value}
@@ -653,17 +655,17 @@ function QueueRow({
         </div>
         <StatusPill status={item.state?.status} />
       </div>
-      <div className="text-[12px] text-neutral-200 font-semibold truncate mb-1">{summary}</div>
+      <div className="text-[12px] text-neutral-50 font-semibold truncate mb-1">{summary}</div>
       {tldr && (
-        <div className="text-[11px] text-neutral-500 line-clamp-2 mb-2">{tldr}</div>
+        <div className="text-[11px] text-neutral-300 line-clamp-2 mb-2 leading-snug">{tldr}</div>
       )}
-      <div className="flex items-center justify-between text-[10px] text-neutral-600">
+      <div className="flex items-center justify-between text-[10px] text-neutral-400">
         <div className="flex items-center gap-2">
-          {product && <span className="px-1.5 py-0.5 rounded bg-white/5">{product}</span>}
+          {product && <span className="px-1.5 py-0.5 rounded bg-white/10 text-neutral-200">{product}</span>}
           {claimed ? (
-            <span className="text-neutral-400">◉ claimed</span>
+            <span className="text-[#c4b5fd]">◉ claimed</span>
           ) : (
-            <span className="text-amber-500/80">○ unclaimed</span>
+            <span className="text-amber-400">○ unclaimed</span>
           )}
         </div>
         <span>{timeAgo(updated)}</span>
@@ -724,16 +726,16 @@ function TicketDetailPane({
             <h2 className="text-xl font-bold text-neutral-100 leading-tight" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
               {fields.summary}
             </h2>
-            <div className="flex items-center gap-3 mt-1.5 text-[10px] text-neutral-500">
-              <span>Reporter: <span className="text-neutral-300">{fields.reporter?.displayName || '—'}</span></span>
-              <span>·</span>
-              <span>Assignee: <span className="text-neutral-300">{fields.assignee?.displayName || 'Unassigned'}</span></span>
-              <span>·</span>
-              <span>Updated {timeAgo(fields.updated)} ago</span>
+            <div className="flex items-center gap-3 mt-1.5 text-[11px] text-neutral-300">
+              <span>Reporter: <span className="text-neutral-100 font-semibold">{fields.reporter?.displayName || '—'}</span></span>
+              <span className="text-neutral-600">·</span>
+              <span>Assignee: <span className="text-neutral-100 font-semibold">{fields.assignee?.displayName || 'Unassigned'}</span></span>
+              <span className="text-neutral-600">·</span>
+              <span>Updated <span className="text-neutral-100">{timeAgo(fields.updated)}</span> ago</span>
               {state?.claimed_by_user_id && (
                 <>
-                  <span>·</span>
-                  <span className="text-[#9b6aed]">Claimed {timeAgo(state.claimed_at)} ago</span>
+                  <span className="text-neutral-600">·</span>
+                  <span className="text-[#c4b5fd] font-semibold">Claimed {timeAgo(state.claimed_at)} ago</span>
                 </>
               )}
             </div>
@@ -803,7 +805,7 @@ function TicketDetailPane({
       <div className="grid gap-4 flex-1" style={{ gridTemplateColumns: '1.3fr 1fr' }}>
         {/* Brief */}
         <GlassCard className="p-5 overflow-y-auto dr-scroll" >
-          <div className="text-[10px] uppercase tracking-wider text-[#9b6aed] font-bold mb-4">
+          <div className="text-[11px] uppercase tracking-wider text-[#c4b5fd] font-bold mb-4">
             ⌘ The Brief
           </div>
           <BriefField label="TL;DR" value={tldr} />
@@ -822,7 +824,7 @@ function TicketDetailPane({
 
         {/* Thread + comment composer */}
         <GlassCard className="p-5 flex flex-col" >
-          <div className="text-[10px] uppercase tracking-wider text-[#5ec1ca] font-bold mb-3">
+          <div className="text-[11px] uppercase tracking-wider text-[#5ec1ca] font-bold mb-3">
             ◈ Activity
           </div>
           <div className="flex-1 overflow-y-auto dr-scroll space-y-2 mb-3 pr-1" style={{ maxHeight: '360px' }}>
@@ -878,28 +880,28 @@ function ThreadEntryRow({ entry }: { entry: ThreadEntry }) {
   }[entry.kind];
 
   return (
-    <div className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+    <div className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2 text-[10px] font-bold" style={{ color: kindColour }}>
           <span>{icon}</span>
           <span className="uppercase tracking-wider">{entry.kind}</span>
-          <span className="text-neutral-500 font-normal">· {entry.user_display}</span>
+          <span className="text-neutral-300 font-normal">· {entry.user_display}</span>
         </div>
         <div className="flex items-center gap-2">
           {entry.jira_sync_state === 'pending' && (
-            <span className="text-[9px] text-amber-500">syncing…</span>
+            <span className="text-[9px] text-amber-400">syncing…</span>
           )}
           {entry.jira_sync_state === 'failed' && (
-            <span className="text-[9px] text-red-500" title={entry.jira_sync_error || ''}>sync failed</span>
+            <span className="text-[9px] text-red-400" title={entry.jira_sync_error || ''}>sync failed</span>
           )}
           {entry.jira_sync_state === 'synced' && (
-            <span className="text-[9px] text-emerald-500/70">✓ jira</span>
+            <span className="text-[9px] text-emerald-400">✓ jira</span>
           )}
-          <span className="text-[10px] text-neutral-600">{timeAgo(entry.created_at)}</span>
+          <span className="text-[10px] text-neutral-400">{timeAgo(entry.created_at)}</span>
         </div>
       </div>
       {entry.body && (
-        <div className="text-[12px] text-neutral-300 whitespace-pre-wrap leading-relaxed">{entry.body}</div>
+        <div className="text-[12px] text-neutral-100 whitespace-pre-wrap leading-relaxed">{entry.body}</div>
       )}
     </div>
   );
