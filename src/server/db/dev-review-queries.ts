@@ -47,6 +47,60 @@ function rowToObj<T>(row: Record<string, unknown>): T {
   return row as unknown as T;
 }
 
+// ── Working-hours math ────────────────────────────────────────────────────
+// Simple Monday–Friday 09:00–17:00 model (8 hours/day). No bank-holiday
+// handling yet — can bolt on later if the count gets too noisy after Easter
+// / Christmas etc. Used for the "not picked up in 8 working hours" KPI.
+
+const WORK_START_HOUR = 9;
+const WORK_END_HOUR = 17;
+const WORK_DAY_HOURS = WORK_END_HOUR - WORK_START_HOUR;
+
+/** Given a start timestamp and a number of business hours, compute the
+ *  deadline — i.e. the wall-clock time at which that many business hours
+ *  will have elapsed. Walks forward day by day, skipping weekends. */
+function deadlineFromWorkingHours(startIso: string, hours: number): Date {
+  let remaining = hours;
+  const cursor = new Date(startIso);
+  // Guard against infinite loops from bad input
+  let safety = 200;
+  while (remaining > 0 && safety-- > 0) {
+    const day = cursor.getDay(); // 0 Sun, 6 Sat
+    if (day === 0) {
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+    if (day === 6) {
+      cursor.setDate(cursor.getDate() + 2);
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+    if (cursor.getHours() < WORK_START_HOUR) {
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+    if (cursor.getHours() >= WORK_END_HOUR) {
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+    // Inside the working window — consume as much as we can today
+    const endOfDay = new Date(cursor);
+    endOfDay.setHours(WORK_END_HOUR, 0, 0, 0);
+    const hoursUntilEod = (endOfDay.getTime() - cursor.getTime()) / 3_600_000;
+    if (remaining <= hoursUntilEod) {
+      cursor.setTime(cursor.getTime() + remaining * 3_600_000);
+      remaining = 0;
+    } else {
+      remaining -= hoursUntilEod;
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(WORK_START_HOUR, 0, 0, 0);
+    }
+  }
+  return cursor;
+}
+
 export class DevReviewQueries {
   constructor(private db: Database) {}
 
@@ -485,6 +539,18 @@ export class DevReviewQueries {
       accepted_all: number;
       returned_all: number;
     }>;
+    unpickedKpi: {
+      today: number;
+      currentlyBreached: number;
+      history14d: Array<{ date: string; count: number }>;
+      liveBreaches: Array<{
+        jira_key: string;
+        first_seen_at: string;
+        team: string | null;
+        deadline: string;
+        hours_overdue: number;
+      }>;
+    };
   } {
     // ── Queue snapshot ──────────────────────────────────────────────────
     const queue = {
@@ -715,6 +781,88 @@ export class DevReviewQueries {
       (a, b) => (b.in_queue + b.waiting + b.accepted_week + b.returned_week) - (a.in_queue + a.waiting + a.accepted_week + a.returned_week),
     );
 
+    // ── Unpicked KPI: tickets that went 8 working hours without being ──
+    // picked up (no dev accept/return/comment action within the deadline).
+    // "Breach date" is the calendar date the 8-working-hour window expired.
+    //
+    // Two outputs:
+    //   - 14-day history bucketed by breach date
+    //   - Live list of currently-breached tickets (still active, still no
+    //     dev action recorded)
+    //
+    // We pull every non-archived state row with first_seen_at set, load the
+    // first pickup action per jira_key in one query, then bucket in JS.
+    const stateRows = this.rows<{
+      jira_key: string;
+      first_seen_at: string;
+      team: string | null;
+      status: string;
+    }>(
+      `SELECT jira_key, first_seen_at, team, status
+       FROM dev_review_state
+       WHERE status != 'archived' AND first_seen_at IS NOT NULL`,
+    );
+    const firstPickupRows = this.rows<{ jira_key: string; first_action_at: string }>(
+      `SELECT jira_key, MIN(created_at) AS first_action_at
+       FROM dev_review_thread
+       WHERE kind IN ('comment','accept','return')
+       GROUP BY jira_key`,
+    );
+    const firstPickupMap = new Map<string, number>();
+    for (const r of firstPickupRows) {
+      firstPickupMap.set(r.jira_key, new Date(r.first_action_at).getTime());
+    }
+
+    const now = Date.now();
+    const byBreachDate = new Map<string, number>();
+    const liveBreaches: Array<{ jira_key: string; first_seen_at: string; team: string | null; deadline: string; hours_overdue: number }> = [];
+
+    for (const state of stateRows) {
+      const deadline = deadlineFromWorkingHours(state.first_seen_at, 8);
+      const deadlineMs = deadline.getTime();
+      if (deadlineMs > now) continue; // still within window
+
+      // If first pickup happened before the deadline, no breach
+      const pickupMs = firstPickupMap.get(state.jira_key);
+      if (pickupMs !== undefined && pickupMs <= deadlineMs) continue;
+
+      // Bucket by the calendar date the deadline fell on
+      const breachDate = new Date(deadlineMs).toISOString().slice(0, 10);
+      byBreachDate.set(breachDate, (byBreachDate.get(breachDate) || 0) + 1);
+
+      // Live breach = no pickup yet AND status is still active/pending
+      const stillActive = state.status !== 'accepted' && state.status !== 'returned' && pickupMs === undefined;
+      if (stillActive) {
+        liveBreaches.push({
+          jira_key: state.jira_key,
+          first_seen_at: state.first_seen_at,
+          team: state.team,
+          deadline: deadline.toISOString(),
+          hours_overdue: Math.round((now - deadlineMs) / 3_600_000 * 10) / 10,
+        });
+      }
+    }
+
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const unpickedToday = byBreachDate.get(todayDate) || 0;
+
+    const history14d: Array<{ date: string; count: number }> = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const iso = d.toISOString().slice(0, 10);
+      history14d.push({ date: iso, count: byBreachDate.get(iso) || 0 });
+    }
+
+    liveBreaches.sort((a, b) => b.hours_overdue - a.hours_overdue);
+
+    const unpickedKpi = {
+      today: unpickedToday,
+      currentlyBreached: liveBreaches.length,
+      history14d,
+      liveBreaches: liveBreaches.slice(0, 25),
+    };
+
     return {
       queue,
       today,
@@ -730,6 +878,7 @@ export class DevReviewQueries {
       arrivals14d,
       decisions14d,
       perTeam,
+      unpickedKpi,
     };
   }
 }

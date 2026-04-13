@@ -35,6 +35,18 @@ interface Dashboard {
     accepted_all: number;
     returned_all: number;
   }>;
+  unpickedKpi: {
+    today: number;
+    currentlyBreached: number;
+    history14d: Array<{ date: string; count: number }>;
+    liveBreaches: Array<{
+      jira_key: string;
+      first_seen_at: string;
+      team: string | null;
+      deadline: string;
+      hours_overdue: number;
+    }>;
+  };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -346,6 +358,82 @@ export function DevReviewDashboard() {
               <HeroTile label="Avg time to decision" value={fmtMinutes(data.averages.avgTimeToDecisionMinutes)} accent="#94a3b8" />
               <HeroTile label="This week" value={data.week.new} accent="#9b6aed" sublabel={`${data.week.accepted} accepted · ${data.week.returned} returned`} />
             </div>
+
+            {/* Unpicked KPI — tickets that went 8 working hours without pickup */}
+            <div className="dr-fade grid grid-cols-1 lg:grid-cols-3 gap-4" style={{ animationDelay: '0.08s' }}>
+              <HeroTile
+                label="Unpicked today"
+                value={data.unpickedKpi.today}
+                accent={data.unpickedKpi.today === 0 ? '#10b981' : data.unpickedKpi.today < 3 ? '#f59e0b' : '#ef4444'}
+                icon="⏱"
+                big
+                sublabel={`Passed 8 working hours with no dev action today`}
+              />
+              <HeroTile
+                label="Currently breached"
+                value={data.unpickedKpi.currentlyBreached}
+                accent={data.unpickedKpi.currentlyBreached === 0 ? '#10b981' : '#ef4444'}
+                icon="⚠"
+                big
+                sublabel="Still waiting on a first dev touch"
+              />
+              <GlassCard accent className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-[10px] uppercase tracking-wider text-red-400 font-bold">Unpicked · last 14 days</div>
+                  <div className="text-[10px] text-neutral-500">peak: {Math.max(...data.unpickedKpi.history14d.map((a) => a.count), 0)}</div>
+                </div>
+                <Sparkline
+                  data={data.unpickedKpi.history14d.map((h) => ({ date: h.date, value: h.count }))}
+                  colour="#ef4444"
+                  height={50}
+                />
+                <div className="flex justify-between mt-1 text-[9px] text-neutral-600">
+                  <span>{data.unpickedKpi.history14d[0]?.date.slice(5)}</span>
+                  <span>{data.unpickedKpi.history14d[data.unpickedKpi.history14d.length - 1]?.date.slice(5)}</span>
+                </div>
+              </GlassCard>
+            </div>
+
+            {/* Live breach list — currently still unpicked */}
+            {data.unpickedKpi.liveBreaches.length > 0 && (
+              <GlassCard accent className="dr-fade p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-[10px] uppercase tracking-wider text-red-400 font-bold">
+                    Currently unpicked — no dev action yet
+                  </div>
+                  <div className="text-[10px] text-neutral-500">{data.unpickedKpi.liveBreaches.length} shown</div>
+                </div>
+                <div className="space-y-2">
+                  {data.unpickedKpi.liveBreaches.map((b) => (
+                    <div
+                      key={b.jira_key}
+                      className="flex items-center gap-3 px-3 py-2 rounded-lg border border-white/5"
+                      style={{ background: 'rgba(239,68,68,0.04)' }}
+                    >
+                      <span className="text-[11px] font-mono font-bold text-[#5ec1ca]">{b.jira_key}</span>
+                      {b.team && (
+                        <span
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded"
+                          style={{
+                            background: 'linear-gradient(135deg, rgba(94,193,202,0.15), rgba(155,106,237,0.15))',
+                            color: '#c4b5fd',
+                            border: '1px solid rgba(155,106,237,0.25)',
+                          }}
+                        >
+                          {b.team}
+                        </span>
+                      )}
+                      <span className="flex-1 text-[11px] text-neutral-400">
+                        Escalated {new Date(b.first_seen_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <span className="text-[11px] font-bold text-red-400">
+                        {b.hours_overdue.toFixed(1)}h overdue
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </GlassCard>
+            )}
 
             {/* Charts row */}
             <div className="dr-fade grid grid-cols-1 lg:grid-cols-2 gap-4" style={{ animationDelay: '0.1s' }}>
