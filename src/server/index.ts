@@ -1278,8 +1278,15 @@ ${panelHtml}
           if (entry.op === 'accept') {
             const transitionId = String(payload.transitionId || '141');
             const text = String(payload.commentText || '');
+            const tldr = String(payload.tldr || '');
+            const developmentDetails = String(payload.developmentDetails || '');
+            const adf = (t: string) => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }] });
+            const fields: Record<string, unknown> = {};
+            if (tldr) fields.customfield_13184 = adf(tldr);
+            if (developmentDetails) fields.customfield_13215 = adf(developmentDetails);
             await client.transitionIssue(entry.jira_key, transitionId, {
-              comment: { body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] } },
+              fields: Object.keys(fields).length > 0 ? fields : undefined,
+              comment: { body: adf(text) },
             });
             devReviewQueries.markAccepted(entry.jira_key);
           } else if (entry.op === 'return') {

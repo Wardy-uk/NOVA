@@ -28,10 +28,26 @@ const CF_ESCALATION_REASON = 'customfield_13186';
 const CF_EXPECTED_OUTCOME = 'customfield_13214';
 const CF_ISSUE_ENVIRONMENT = 'customfield_13213';
 const CF_NURTUR_PRODUCT = 'customfield_13183';
+const CF_DEVELOPMENT_DETAILS = 'customfield_13215';
 
 // Tier 3 option id for CurrentTier
 const TIER_ID_T3 = '13063';
 const TIER_ID_T2 = '13062';
+
+/** Build an ADF doc from plain text — Jira Cloud rich text fields require this. */
+function adfDoc(text: string): object {
+  const paragraphs = text.split(/\n\n+/).map((para) => ({
+    type: 'paragraph',
+    content: para
+      ? para.split('\n').flatMap((line, i, arr) => {
+          const out: object[] = [{ type: 'text', text: line }];
+          if (i < arr.length - 1) out.push({ type: 'hardBreak' });
+          return out;
+        })
+      : [],
+  }));
+  return { type: 'doc', version: 1, content: paragraphs };
+}
 
 export function createDevReviewRoutes(
   devQueries: DevReviewQueries,
@@ -73,6 +89,7 @@ export function createDevReviewRoutes(
         'duedate', 'issuetype',
         CF_CURRENT_TIER, CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
         CF_ESCALATION_REASON, CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT, CF_NURTUR_PRODUCT,
+        CF_DEVELOPMENT_DETAILS,
       ];
 
       let issues: Array<{ key: string; fields: Record<string, unknown> }> = [];
@@ -136,6 +153,7 @@ export function createDevReviewRoutes(
         'created', 'updated', 'duedate', 'issuetype',
         CF_CURRENT_TIER, CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
         CF_ESCALATION_REASON, CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT, CF_NURTUR_PRODUCT,
+        CF_DEVELOPMENT_DETAILS,
       ]);
 
       if (!issue) { res.status(404).json({ ok: false, error: 'Not found' }); return; }
@@ -243,47 +261,62 @@ export function createDevReviewRoutes(
   });
 
   // ── Accept (Jira transition → Development) ────────────────────────────
+  // Sets CurrentTier=Development AND populates the Escalate-to-Development
+  // screen fields (TL;DR + Development Details). Both fields are passed as
+  // ADF docs since they're configured as rich text in the NT workflow.
 
   router.post('/ticket/:key/accept', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
     const client = getJiraClient();
     if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
 
+    const key = String(req.params.key);
     const s = settingsQueries.getAll();
     const transitionId = String(s.dev_review_accept_transition_id || '141');
     const note = String(req.body?.note || '').trim();
+    const tldr = String(req.body?.tldr || '').trim();
+    const developmentDetails = String(req.body?.developmentDetails || '').trim();
     const display = userDisplay(req);
 
+    if (!tldr) {
+      res.status(400).json({ ok: false, error: 'TL;DR is required by the Escalate to Development screen' });
+      return;
+    }
+
     const threadId = devQueries.addThreadEntry({
-      jira_key: String(req.params.key),
+      jira_key: key,
       user_id: req.user.id,
       user_display: display,
       kind: 'accept',
       body: note || 'Accepted to development backlog',
+      meta: { tldr, developmentDetails },
       syncState: 'pending',
     });
 
     const commentText = `✅ Accepted to development by ${display}${note ? `\n\n${note}` : ''}`;
 
+    const fields: Record<string, unknown> = {
+      [CF_TLDR]: adfDoc(tldr),
+    };
+    if (developmentDetails) {
+      fields[CF_DEVELOPMENT_DETAILS] = adfDoc(developmentDetails);
+    }
+
     try {
-      await client.transitionIssue(String(req.params.key), transitionId, {
-        comment: {
-          body: {
-            type: 'doc', version: 1,
-            content: [{ type: 'paragraph', content: [{ type: 'text', text: commentText }] }],
-          },
-        },
+      await client.transitionIssue(key, transitionId, {
+        fields,
+        comment: { body: adfDoc(commentText) },
       });
       devQueries.markThreadSynced(threadId, null);
-      devQueries.markAccepted(String(req.params.key));
+      devQueries.markAccepted(key);
       res.json({ ok: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Transition failed';
       devQueries.markThreadSyncFailed(threadId, msg);
       devQueries.addOutbox({
-        jira_key: String(req.params.key),
+        jira_key: key,
         op: 'accept',
-        payload: { transitionId, commentText },
+        payload: { transitionId, commentText, tldr, developmentDetails },
       });
       res.status(502).json({ ok: false, error: msg });
     }

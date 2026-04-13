@@ -25,6 +25,7 @@ interface JiraFields {
   customfield_13214?: string;                             // Expected Outcome
   customfield_13213?: string;                             // Environment
   customfield_13183?: { value?: string };                 // Nurtur Product
+  customfield_13215?: unknown;                            // Development Details (ADF)
   [k: string]: unknown;
 }
 
@@ -220,6 +221,8 @@ export function DevReviewView() {
   const [returnDraft, setReturnDraft] = useState('');
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [acceptNote, setAcceptNote] = useState('');
+  const [acceptTldr, setAcceptTldr] = useState('');
+  const [acceptDevDetails, setAcceptDevDetails] = useState('');
   const [showAcceptModal, setShowAcceptModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
@@ -327,11 +330,31 @@ export function DevReviewView() {
     }, 'Comment posted to Jira');
     setCommentDraft('');
   };
+  const openAcceptModal = () => {
+    if (!detail) return;
+    // Prefill TL;DR from the existing Jira value if captured during T3 escalation
+    setAcceptTldr(adfToText(detail.fields.customfield_13184));
+    // Prefill Development Details from existing value (usually empty at T3 stage)
+    setAcceptDevDetails(adfToText(detail.fields.customfield_13215));
+    setAcceptNote('');
+    setShowAcceptModal(true);
+  };
   const onAccept = async () => {
+    if (!acceptTldr.trim()) {
+      fireToast('err', 'TL;DR is required by the Escalate to Development screen');
+      return;
+    }
     await doAction(`/ticket/${selectedKey}/accept`, {
-      method: 'POST', body: JSON.stringify({ note: acceptNote }),
+      method: 'POST',
+      body: JSON.stringify({
+        note: acceptNote,
+        tldr: acceptTldr,
+        developmentDetails: acceptDevDetails,
+      }),
     }, 'Accepted to development');
     setAcceptNote('');
+    setAcceptTldr('');
+    setAcceptDevDetails('');
     setShowAcceptModal(false);
   };
   const onReturn = async () => {
@@ -511,7 +534,7 @@ export function DevReviewView() {
                 onUnclaim={onUnclaim}
                 onFastTrack={onFastTrack}
                 onComment={onComment}
-                onAcceptClick={() => setShowAcceptModal(true)}
+                onAcceptClick={openAcceptModal}
                 onReturnClick={() => setShowReturnModal(true)}
               />
             ) : null}
@@ -521,35 +544,94 @@ export function DevReviewView() {
 
       {/* ── Modals ───────────────────────────────────────────────── */}
       {showAcceptModal && (
-        <Modal onClose={() => setShowAcceptModal(false)}>
-          <h3 className="text-lg font-bold text-neutral-100 mb-3">Accept to Development</h3>
-          <p className="text-[12px] text-neutral-400 mb-4">
-            This will transition <span className="text-neutral-200 font-mono">{selectedKey}</span> to the Development tier in Jira
-            and post an internal comment. Optionally add a note for context.
+        <Modal onClose={() => setShowAcceptModal(false)} wide>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}>
+              ESCALATE TO DEVELOPMENT
+            </span>
+            <span className="text-[11px] font-mono text-[#5ec1ca]">{selectedKey}</span>
+          </div>
+          <h3 className="text-lg font-bold text-neutral-50 mb-1" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+            Accept to Development backlog
+          </h3>
+          <p className="text-[12px] text-neutral-300 mb-5">
+            Sets <span className="text-neutral-100 font-semibold">CurrentTier = Development</span>, populates the
+            Escalate-to-Development screen fields below, and posts an internal Jira comment.
           </p>
-          <textarea
-            value={acceptNote}
-            onChange={(e) => setAcceptNote(e.target.value)}
-            placeholder="Optional context for the dev team…"
-            rows={4}
-            className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-4"
-            style={{ background: 'rgba(255,255,255,0.03)' }}
-          />
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={() => setShowAcceptModal(false)}
-              className="px-4 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={onAccept}
-              disabled={busy}
-              className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
-              style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}
-            >
-              {busy ? 'Accepting…' : 'Confirm Accept'}
-            </button>
+
+          <div className="mb-4">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2">
+              <span>TL;DR</span>
+              <span className="text-red-400">*</span>
+              <span className="text-neutral-500 normal-case font-normal text-[10px]">High level short phrase to describe the issue / request</span>
+            </label>
+            <textarea
+              value={acceptTldr}
+              onChange={(e) => setAcceptTldr(e.target.value)}
+              placeholder="e.g. Email sends are queueing more than once for some campaigns…"
+              rows={2}
+              className="w-full px-3 py-2 text-[13px] rounded-lg border text-neutral-50 placeholder-neutral-600"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                borderColor: acceptTldr.trim() ? 'rgba(255,255,255,0.12)' : 'rgba(239,68,68,0.4)',
+              }}
+              autoFocus
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2">
+              <span>Development Details</span>
+              <span className="text-neutral-500 normal-case font-normal text-[10px]">Anything Engineering needs — repro, suspected cause, links, queries</span>
+            </label>
+            <textarea
+              value={acceptDevDetails}
+              onChange={(e) => setAcceptDevDetails(e.target.value)}
+              placeholder="Any technical context, suspected cause, queries to run, related tickets…"
+              rows={6}
+              className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600 font-mono"
+              style={{ background: 'rgba(255,255,255,0.06)' }}
+            />
+          </div>
+
+          <div className="mb-5">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 block">
+              Internal note (optional)
+            </label>
+            <textarea
+              value={acceptNote}
+              onChange={(e) => setAcceptNote(e.target.value)}
+              placeholder="Optional context for the dev team…"
+              rows={2}
+              className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600"
+              style={{ background: 'rgba(255,255,255,0.06)' }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/5">
+            <div className="text-[10px] text-neutral-500">
+              {acceptTldr.trim() ? (
+                <span className="text-emerald-400">✓ TL;DR captured</span>
+              ) : (
+                <span className="text-red-400">TL;DR required</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowAcceptModal(false)}
+                className="px-4 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onAccept}
+                disabled={busy || !acceptTldr.trim()}
+                className="px-5 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
+                style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}
+              >
+                {busy ? 'Accepting…' : '✓ Move to Development'}
+              </button>
+            </div>
           </div>
         </Modal>
       )}
@@ -907,7 +989,7 @@ function ThreadEntryRow({ entry }: { entry: ThreadEntry }) {
   );
 }
 
-function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+function Modal({ children, onClose, wide }: { children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-6"
@@ -916,12 +998,12 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl p-6"
+        className={`w-full ${wide ? 'max-w-2xl' : 'max-w-md'} rounded-2xl p-6 max-h-[90vh] overflow-y-auto`}
         style={{
-          background: 'rgba(30,36,48,0.95)',
+          background: 'rgba(30,36,48,0.97)',
           backdropFilter: 'blur(24px)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.12)',
         }}
       >
         {children}
