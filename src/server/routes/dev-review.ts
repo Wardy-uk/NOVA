@@ -514,6 +514,10 @@ export function createDevReviewRoutes(
       } catch { /* non-fatal */ }
 
       devQueries.markThreadSynced(threadId, newCommentId);
+      // Purge any stale failed entries from earlier attempts so the
+      // Activity panel shows a clean history.
+      const purged = devQueries.purgeFailedThreadEntries(key, threadId);
+      if (purged > 0) console.log(`[DevReview/comment] Purged ${purged} stale failed entries for ${key}`);
       res.json({ ok: true, waitingSet: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Transition failed';

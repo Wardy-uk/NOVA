@@ -355,6 +355,29 @@ export class DevReviewQueries {
     saveDb();
   }
 
+  /** Delete stale failed thread entries for a ticket — used after a
+   *  successful retry so the activity panel doesn't show ghost duplicates
+   *  from earlier failed attempts. */
+  purgeFailedThreadEntries(jiraKey: string, excludeId?: number): number {
+    const stmt = this.db.prepare(
+      `SELECT COUNT(*) AS n FROM dev_review_thread
+       WHERE jira_key = ? AND jira_sync_state = 'failed'${excludeId ? ' AND id != ?' : ''}`,
+    );
+    stmt.bind(excludeId ? [jiraKey, excludeId] : [jiraKey]);
+    let count = 0;
+    if (stmt.step()) count = (stmt.getAsObject() as { n: number }).n;
+    stmt.free();
+    if (count > 0) {
+      this.db.run(
+        `DELETE FROM dev_review_thread
+         WHERE jira_key = ? AND jira_sync_state = 'failed'${excludeId ? ' AND id != ?' : ''}`,
+        excludeId ? [jiraKey, excludeId] : [jiraKey],
+      );
+      saveDb();
+    }
+    return count;
+  }
+
   // ── Outbox ───────────────────────────────────────────────────────────────
 
   addOutbox(entry: { jira_key: string; op: DevReviewOutboxEntry['op']; payload: Record<string, unknown> }): number {

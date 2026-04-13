@@ -309,6 +309,15 @@ export function DevReviewView() {
     return () => clearInterval(i);
   }, [loadQueue]);
 
+  // Auto-refresh the currently-selected ticket detail every 30s — pulls in
+  // new agent comments and status changes caught by the server's comment
+  // watcher without the dev having to click anything.
+  useEffect(() => {
+    if (!selectedKey) return;
+    const i = setInterval(() => loadDetail(selectedKey), 30_000);
+    return () => clearInterval(i);
+  }, [selectedKey, loadDetail]);
+
   const filtered = useMemo(() => {
     return items.filter((i) => {
       if (filter === 'mine' && i.state?.claimed_by_user_id !== currentUserId) return false;
