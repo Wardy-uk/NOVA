@@ -256,7 +256,7 @@ export function DevReviewView() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const loadQueue = useCallback(async () => {
+  const loadQueue = useCallback(async (opts?: { silent?: boolean }) => {
     setLoading(true);
     setError(null);
     try {
@@ -266,8 +266,10 @@ export function DevReviewView() {
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Failed to load queue');
-      setItems(json.data as QueueItem[]);
+      const data = json.data as QueueItem[];
+      setItems(data);
       setQueueMeta(json.meta || null);
+      if (!opts?.silent) fireToast('ok', `Queue refreshed · ${data.length} ticket${data.length === 1 ? '' : 's'}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load queue');
     } finally {
@@ -295,7 +297,7 @@ export function DevReviewView() {
     });
   };
 
-  useEffect(() => { loadQueue(); }, [loadQueue]);
+  useEffect(() => { loadQueue({ silent: true }); }, [loadQueue]);
   useEffect(() => {
     if (selectedKey) loadDetail(selectedKey);
     else setDetail(null);
@@ -303,7 +305,7 @@ export function DevReviewView() {
 
   // Auto-refresh queue every 60s
   useEffect(() => {
-    const i = setInterval(() => loadQueue(), 60_000);
+    const i = setInterval(() => loadQueue({ silent: true }), 60_000);
     return () => clearInterval(i);
   }, [loadQueue]);
 
@@ -349,7 +351,7 @@ export function DevReviewView() {
     try {
       await api(path, init);
       if (successMsg) fireToast('ok', successMsg);
-      await Promise.all([loadQueue(), loadDetail(selectedKey)]);
+      await Promise.all([loadQueue({ silent: true }), loadDetail(selectedKey)]);
     } catch (e) {
       fireToast('err', e instanceof Error ? e.message : 'Action failed');
     } finally {
@@ -440,6 +442,7 @@ export function DevReviewView() {
           50% { box-shadow: 0 0 0 6px rgba(249,115,22,0); }
         }
         @keyframes drFadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes drSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .dr-fade { animation: drFadeIn 0.45s cubic-bezier(0.16,1,0.3,1) both; }
         .dr-scroll::-webkit-scrollbar { width: 6px; }
         .dr-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 6px; }
@@ -482,11 +485,20 @@ export function DevReviewView() {
             <HeaderStat label="Fast-track" value={counts.fastTrack} accent="#f97316" />
             <HeaderStat label="Mine" value={counts.mine} accent="#9b6aed" />
             <button
-              onClick={loadQueue}
-              className="px-3 py-2 text-xs rounded-lg font-semibold text-neutral-200 border border-white/10 hover:bg-white/5 transition-all"
+              onClick={() => loadQueue()}
+              disabled={loading}
+              className="px-3 py-2 text-xs rounded-lg font-semibold text-neutral-200 border border-white/10 hover:bg-white/5 transition-all disabled:opacity-60 flex items-center gap-1.5"
               style={{ background: 'rgba(255,255,255,0.03)' }}
             >
-              ↻ Refresh
+              <span
+                style={{
+                  display: 'inline-block',
+                  animation: loading ? 'drSpin 0.9s linear infinite' : undefined,
+                }}
+              >
+                ↻
+              </span>
+              {loading ? 'Refreshing…' : 'Refresh'}
             </button>
           </div>
         </div>
