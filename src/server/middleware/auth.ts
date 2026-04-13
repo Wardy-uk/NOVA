@@ -8,6 +8,7 @@ import { ssoLogger } from '../services/sso-logger.js';
 const AREA_DEFAULTS: Record<string, string> = {
   training: 'edit',
   wallboards: 'view',
+  mi: 'hidden',
 };
 
 export interface AuthPayload {

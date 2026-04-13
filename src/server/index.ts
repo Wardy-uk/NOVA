@@ -523,11 +523,7 @@ async function main() {
   });
 
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
-  app.use('/api/board-mi', (req, res, next) => {
-    const u = (req as any).user;
-    if (!u || u.username !== 'nickw') { res.status(403).json({ ok: false, error: 'Restricted' }); return; }
-    next();
-  }, createBoardMiRoutes(settingsQueries));
+  app.use('/api/board-mi', requireAreaAccess('mi', 'view'), createBoardMiRoutes(settingsQueries));
   app.use('/api/dev-review', createDevReviewRoutes(
     devReviewQueries,
     settingsQueries,

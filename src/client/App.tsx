@@ -91,7 +91,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden',
 };
 
 // Map certain command sub-tabs to their own permission area
@@ -357,7 +357,7 @@ export function App() {
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
     userRole.split(',').map(r => r.trim()).includes('admin')
-      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit', training: 'edit' }
+      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit', training: 'edit', mi: 'edit' }
       : DEFAULT_AREA_ACCESS,
   );
   useEffect(() => {
@@ -633,8 +633,8 @@ export function App() {
   // My NOVA (command) is always visible — it's the core area
   const canSeeArea = (area: Area): boolean => {
     if (area === 'command' || area === 'wallboards') return true;
-    // Board MI is locked to nickw only for now
-    if (area === 'board') return auth.user?.username === 'nickw';
+    // Board MI gated by the 'mi' permission area
+    if (area === 'board') return (areaAccess['mi'] || 'hidden') !== 'hidden';
     // Dev Review is gated to anyone with the 'developer' role (admins always)
     if (area === 'devreview') {
       const roles = (auth.user?.role || '').split(',').map((r) => r.trim());
@@ -1094,8 +1094,8 @@ export function App() {
             <TrainingSummaryView />
           )}
 
-          {/* Board MI — admin (nickw) only */}
-          {view === 'board-mi' && auth.user?.username === 'nickw' && (
+          {/* Board MI — gated by 'mi' permission area */}
+          {view === 'board-mi' && canSeeArea('board') && (
             <BoardMiView />
           )}
 
