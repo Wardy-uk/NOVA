@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import type { DevReviewQueries } from '../db/dev-review-queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { FileUserQueries } from '../db/user-store.js';
+import type { NotificationQueries } from '../db/notifications.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
@@ -36,6 +37,7 @@ export function createDevReviewRoutes(
   devQueries: DevReviewQueries,
   settingsQueries: SettingsQueries,
   userQueries: FileUserQueries,
+  notificationQueries: NotificationQueries,
   getJiraClient: () => JiraRestClient | null,
 ): Router {
   const router = Router();
@@ -345,6 +347,27 @@ export function createDevReviewRoutes(
 
       devQueries.markThreadSynced(threadId, null);
       devQueries.markReturned(String(req.params.key));
+
+      // Notify the original submitter in NOVA (best-effort; never blocks response)
+      try {
+        if (submitter) {
+          const allUsers = userQueries.getAll();
+          // Match by email (since Jira emailAddress is what we stored), then username
+          const match = allUsers.find((u) => (u.email && u.email.toLowerCase() === submitter.toLowerCase()))
+            || allUsers.find((u) => u.username.toLowerCase() === submitter.toLowerCase());
+          if (match) {
+            notificationQueries.create({
+              user_id: match.id,
+              type: 'dev_review_returned',
+              title: `Dev returned ${String(req.params.key)} with next steps`,
+              message: nextSteps.slice(0, 200),
+              entity_type: 'jira_ticket',
+              entity_id: String(req.params.key),
+            });
+          }
+        }
+      } catch { /* non-fatal */ }
+
       res.json({ ok: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Return failed';

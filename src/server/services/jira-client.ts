@@ -269,9 +269,10 @@ export class JiraRestClient {
     return { issues: allIssues, total: allIssues.length, maxResults, isLast: true };
   }
 
-  async getIssue(issueKey: string, fields?: string[]): Promise<JiraIssue | null> {
+  async getIssue(issueKey: string, fields?: string[], options?: { expand?: string[] }): Promise<JiraIssue | null> {
     const fieldStr = (fields ?? ['summary', 'status', 'issuetype', 'issuelinks', 'priority', 'duedate']).join(',');
-    return this.request<JiraIssue | null>('GET', `issue/${issueKey}?fields=${fieldStr}`);
+    const expand = options?.expand?.length ? `&expand=${options.expand.join(',')}` : '';
+    return this.request<JiraIssue | null>('GET', `issue/${issueKey}?fields=${fieldStr}${expand}`);
   }
 
   async createIssue(payload: { fields: Record<string, unknown> }): Promise<JiraCreatedIssue> {

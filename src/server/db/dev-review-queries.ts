@@ -85,6 +85,28 @@ export class DevReviewQueries {
     saveDb();
   }
 
+  /** Backfill the submitter username (called by the background watcher after
+   *  it resolves the actual escalator from the Jira changelog). */
+  setSubmitter(jiraKey: string, username: string): void {
+    this.db.run(
+      `UPDATE dev_review_state SET submitted_by_username=? WHERE jira_key=?`,
+      [username, jiraKey],
+    );
+    saveDb();
+  }
+
+  /** Get all keys missing a submitter — for background backfill. */
+  getKeysMissingSubmitter(limit = 25): string[] {
+    const stmt = this.db.prepare(
+      `SELECT jira_key FROM dev_review_state WHERE submitted_by_username IS NULL AND status != 'archived' LIMIT ?`,
+    );
+    stmt.bind([limit]);
+    const out: string[] = [];
+    while (stmt.step()) out.push((stmt.getAsObject() as { jira_key: string }).jira_key);
+    stmt.free();
+    return out;
+  }
+
   /** Mark as archived when the ticket is no longer at Tier 3. */
   archive(jiraKey: string): void {
     this.db.run(

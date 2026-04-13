@@ -532,6 +532,7 @@ async function main() {
     devReviewQueries,
     settingsQueries,
     userQueries,
+    notificationQueries,
     buildServiceDeskJiraClient,
   ));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries, db));
@@ -1263,6 +1264,142 @@ ${panelHtml}
       console.error('[Adobe Sign] Auto-sync failed:', err instanceof Error ? err.message : err);
     }
   }, 5 * 60 * 1000);
+
+  // ── Dev Review outbox worker — drain failed Jira writes every 2 min ──
+  // When an accept/return/comment fails to write through to Jira, the route
+  // queues an entry in dev_review_outbox. This worker picks them up, retries,
+  // marks done on success, increments attempts on failure, and gives up after 5.
+  setInterval(async () => {
+    try {
+      const client = buildServiceDeskJiraClient();
+      if (!client) return;
+      const pending = devReviewQueries.pendingOutbox(20);
+      if (pending.length === 0) return;
+      console.log(`[DevReviewOutbox] Draining ${pending.length} pending`);
+      for (const entry of pending) {
+        try {
+          const payload = JSON.parse(entry.payload_json) as Record<string, unknown>;
+          if (entry.op === 'accept') {
+            const transitionId = String(payload.transitionId || '141');
+            const text = String(payload.commentText || '');
+            await client.transitionIssue(entry.jira_key, transitionId, {
+              comment: { body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] } },
+            });
+            devReviewQueries.markAccepted(entry.jira_key);
+          } else if (entry.op === 'return') {
+            const transitionId = String(payload.returnTransitionId || '');
+            const text = String(payload.commentText || '');
+            if (transitionId) {
+              await client.transitionIssue(entry.jira_key, transitionId, {
+                comment: { body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] } },
+              });
+            } else {
+              await client.updateFields(entry.jira_key, { customfield_12981: { id: '13062' } });
+              await client.addComment(entry.jira_key, text);
+            }
+            devReviewQueries.markReturned(entry.jira_key);
+          } else if (entry.op === 'comment') {
+            const text = String(payload.commentText || payload.body || '');
+            await client.addComment(entry.jira_key, text);
+          }
+          devReviewQueries.markOutboxDone(entry.id);
+        } catch (e) {
+          devReviewQueries.bumpOutboxFailure(entry.id, e instanceof Error ? e.message : 'unknown');
+        }
+      }
+    } catch (err) {
+      console.error('[DevReviewOutbox] Worker failed:', err instanceof Error ? err.message : err);
+    }
+  }, 2 * 60 * 1000);
+
+  // ── Dev Review T3 watcher — fire NOVA notifications on new arrivals ──
+  // Polls NT every 5 min for tickets at Tier 3 we haven't seen before, and
+  // notifies any user with the 'developer' role. Also archives tickets that
+  // have left T3 since last poll.
+  let devReviewLastSeen = new Set<string>();
+  const devWatch = async () => {
+    try {
+      const client = buildServiceDeskJiraClient();
+      if (!client) return;
+      const result = await client.searchJqlAll(
+        `project = NT AND cf[12981] = "Tier 3"`,
+        ['summary', 'updated', 'reporter'],
+        200,
+      );
+      const liveKeys = new Set<string>();
+      const newKeys: Array<{ key: string; summary: string }> = [];
+      for (const issue of result.issues) {
+        liveKeys.add(issue.key);
+        if (!devReviewLastSeen.has(issue.key)) {
+          const existing = devReviewQueries.getState(issue.key);
+          if (!existing) {
+            newKeys.push({ key: issue.key, summary: String((issue.fields as { summary?: string }).summary || '') });
+          }
+          devReviewQueries.upsertFromPoll(issue.key, null);
+        }
+      }
+      // Archive stale rows (left T3)
+      for (const row of devReviewQueries.listQueue()) {
+        if (!liveKeys.has(row.jira_key)) devReviewQueries.archive(row.jira_key);
+      }
+      devReviewLastSeen = liveKeys;
+
+      // Backfill submitter username via Jira changelog for any state row missing it.
+      // Looks for the most recent change to customfield_12981 (CurrentTier) where the
+      // new value is "Tier 3" and uses that change's author as the submitter.
+      const missing = devReviewQueries.getKeysMissingSubmitter(15);
+      for (const key of missing) {
+        try {
+          const issue = await client.getIssue(key, ['summary'], { expand: ['changelog'] });
+          const changelog = (issue as { changelog?: { histories?: Array<{ author?: { emailAddress?: string; displayName?: string }; items?: Array<{ field?: string; fieldId?: string; toString?: string }> }> } } | null)?.changelog;
+          const histories = changelog?.histories || [];
+          let submitter: string | null = null;
+          for (let i = histories.length - 1; i >= 0; i--) {
+            const h = histories[i];
+            const tierChange = h.items?.find((it) =>
+              (it.fieldId === 'customfield_12981' || it.field === 'CurrentTier') &&
+              (it.toString === 'Tier 3' || it.toString === '13063'),
+            );
+            if (tierChange) {
+              submitter = h.author?.emailAddress || h.author?.displayName || null;
+              break;
+            }
+          }
+          if (submitter) {
+            devReviewQueries.setSubmitter(key, submitter);
+          }
+        } catch (e) {
+          console.warn(`[DevReviewWatcher] Failed to resolve submitter for ${key}: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+
+      // Notify all developers about new arrivals
+      if (newKeys.length > 0) {
+        const allUsers = userQueries.getAll();
+        const devs = allUsers.filter((u) => {
+          const roles = (u.role || '').split(',').map((r) => r.trim());
+          return roles.includes('developer') || roles.includes('admin');
+        });
+        for (const u of devs) {
+          for (const nk of newKeys) {
+            notificationQueries.create({
+              user_id: u.id,
+              type: 'dev_review_new',
+              title: `New T3 escalation: ${nk.key}`,
+              message: nk.summary.slice(0, 200),
+              entity_type: 'jira_ticket',
+              entity_id: nk.key,
+            });
+          }
+        }
+        console.log(`[DevReviewWatcher] ${newKeys.length} new T3 ticket(s), notified ${devs.length} dev(s)`);
+      }
+    } catch (err) {
+      console.error('[DevReviewWatcher] Poll failed:', err instanceof Error ? err.message : err);
+    }
+  };
+  setInterval(devWatch, 5 * 60 * 1000);
+  setTimeout(devWatch, 45_000);
 
   // Expose last sync time + per-source intervals
   app.get('/api/sync/status', (_req, res) => {
