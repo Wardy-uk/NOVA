@@ -372,16 +372,25 @@ export function createDevReviewRoutes(
         return;
       }
 
-      // Include EVERY field on the transition screen, not just the ones
-      // flagged `required: true`. Jira's workflow validators can run on any
-      // field on the screen, and `required` in the API response doesn't
-      // always match what the validator actually checks (we've seen
-      // "Nurtur Product Must Be Set" fail even with required=false in the
-      // transitions response). Passing all current values is the safe bet.
-      const screenFieldIds = Object.keys(waitTransition.fields || {})
-        // "comment" is a special pseudo-field on the transition screen — we
-        // handle it via the update.comment block, not the fields block.
-        .filter((id) => id !== 'comment');
+      // Include EVERY writeable field on the transition screen. Jira's
+      // workflow validators can run on any field on the screen, so we
+      // round-trip current values rather than trusting the `required` flag.
+      //
+      // Excluded:
+      //  - "comment" pseudo-field (we handle that via update.comment)
+      //  - sd-* schema types: these are Service Desk display-only pseudo-
+      //    fields (Request Type, SLAs etc.) that live on many JSM workflow
+      //    screens for display but are not writeable via REST. Writing them
+      //    back returns "Operation value must be a string" and blows up the
+      //    transition. Strip them before we even try.
+      const fieldMetas = waitTransition.fields || {};
+      const isSdPseudoField = (fieldId: string): boolean => {
+        const t = fieldMetas[fieldId]?.schema?.type || '';
+        return t.startsWith('sd-');
+      };
+      const screenFieldIds = Object.keys(fieldMetas)
+        .filter((id) => id !== 'comment')
+        .filter((id) => !isSdPseudoField(id));
 
       // Step 2: fetch current values of those screen fields and normalise
       // for write-back using the schema from the transitions response.
@@ -466,60 +475,21 @@ export function createDevReviewRoutes(
         }
       }
 
-      // Respect an admin-configured exclude list so we can sidestep fields
-      // with awkward schemas without a code change.
+      // Admin-configurable escape hatch — comma-separated field IDs to drop
+      // before the call. Useful if a future NT workflow adds another awkward
+      // field and we need to skip it without a code change.
       const excludeRaw = String(settingsQueries.getAll().dev_review_wait_field_exclude || '');
       const excludeSet = new Set(excludeRaw.split(',').map((s) => s.trim()).filter(Boolean));
       for (const id of excludeSet) delete passFields[id];
 
-      // Log the payload we're about to send so we can diagnose 400s.
-      const fieldSummary = Object.entries(passFields).map(([id, v]) => {
-        const t = typeof v;
-        const shape = v === null ? 'null'
-          : Array.isArray(v) ? `array[${(v as unknown[]).length}]`
-          : t === 'object' ? `{${Object.keys(v as object).join(',')}}`
-          : t;
-        const sample = t === 'string'
-          ? `"${String(v).slice(0, 30)}${String(v).length > 30 ? '…' : ''}"`
-          : t === 'number' || t === 'boolean'
-            ? String(v)
-            : '';
-        return `${id}=${shape}${sample ? ` ${sample}` : ''}`;
-      }).join('  |  ');
       console.log(`[DevReview/comment] ${key} → transition ${waitTransition.id} (${waitTransition.name})`);
-      console.log(`[DevReview/comment] fields: ${fieldSummary || '(none)'}`);
+      console.log(`[DevReview/comment] fields: ${Object.keys(passFields).join(', ') || '(none)'}`);
 
-      // Step 3: single-shot transition + internal comment.
-      // If Jira returns a 400 with per-field errors, drop the offending
-      // field(s) and retry up to 3 times. Most workflow validators will
-      // accept a transition with the field omitted if the current ticket
-      // value is valid — and if they don't, we'll surface the error.
-      const attemptTransition = async (fields: Record<string, unknown>, attempt = 0): Promise<void> => {
-        try {
-          await client.transitionIssue(key, waitTransition!.id, {
-            fields,
-            comment: { body: adfDoc(prefixed), internal: true },
-          });
-        } catch (err) {
-          const jiraErr = err as { body?: { errors?: Record<string, string> } };
-          const errs = jiraErr.body?.errors;
-          if (errs && attempt < 3) {
-            const badFields = Object.keys(errs);
-            console.warn(`[DevReview/comment] ${key} attempt ${attempt + 1} failed on [${badFields.join(', ')}], dropping and retrying`);
-            const next = { ...fields };
-            for (const bad of badFields) delete next[bad];
-            if (Object.keys(next).length !== Object.keys(fields).length) {
-              await attemptTransition(next, attempt + 1);
-              return;
-            }
-          }
-          console.error(`[DevReview/comment] Transition failed for ${key}:`);
-          console.error(`[DevReview/comment] Full fields payload:`, JSON.stringify(fields, null, 2));
-          console.error(`[DevReview/comment] Error:`, err instanceof Error ? err.message : err);
-          throw err;
-        }
-      };
-      await attemptTransition(passFields);
+      // Step 3: single-shot transition + internal comment
+      await client.transitionIssue(key, waitTransition.id, {
+        fields: passFields,
+        comment: { body: adfDoc(prefixed), internal: true },
+      });
 
       devQueries.setStatus(key, 'waiting_on_assignee');
 
@@ -547,8 +517,28 @@ export function createDevReviewRoutes(
       res.json({ ok: true, waitingSet: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Transition failed';
-      devQueries.markThreadSyncFailed(threadId, msg);
-      res.status(502).json({ ok: false, error: `Failed to transition to Waiting On Assignee: ${msg}` });
+      console.error(`[DevReview/comment] Transition failed for ${String(req.params.key)}: ${msg}`);
+
+      // Fallback: post the internal comment standalone so the dev's note
+      // isn't lost. The status won't flip, but the comment will be visible
+      // in Jira (and on the next Jira→NOVA comment sync). We ignore errors
+      // from this fallback because we still want to surface the original
+      // transition error to the UI.
+      let fallbackId: string | null = null;
+      try {
+        const r = await client.addComment(String(req.params.key), prefixed, { internal: true });
+        fallbackId = (r as { id?: string } | null)?.id ?? null;
+        devQueries.markThreadSynced(threadId, fallbackId);
+      } catch (fallbackErr) {
+        devQueries.markThreadSyncFailed(threadId, msg);
+        console.error(`[DevReview/comment] Fallback comment also failed: ${fallbackErr instanceof Error ? fallbackErr.message : fallbackErr}`);
+      }
+
+      res.status(502).json({
+        ok: false,
+        error: `Transition to Waiting On Assignee failed: ${msg}`,
+        commentPosted: fallbackId !== null,
+      });
     }
   });
 

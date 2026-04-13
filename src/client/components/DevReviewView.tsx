@@ -365,11 +365,36 @@ export function DevReviewView() {
     method: 'POST', body: JSON.stringify({ on }),
   }, on ? 'Fast-tracked' : 'Fast-track cleared');
   const onComment = async () => {
-    if (!commentDraft.trim()) return;
-    await doAction(`/ticket/${selectedKey}/comment`, {
-      method: 'POST', body: JSON.stringify({ body: commentDraft }),
-    }, 'Comment posted to Jira');
-    setCommentDraft('');
+    if (!commentDraft.trim() || !selectedKey) return;
+    setBusy(true);
+    try {
+      // Direct fetch rather than doAction so we can read the `commentPosted`
+      // fallback flag on a transition failure.
+      const res = await fetch(`/api/dev-review/ticket/${selectedKey}/comment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}`,
+        },
+        body: JSON.stringify({ body: commentDraft }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        fireToast('ok', 'Comment posted · ticket set to Waiting on Agent');
+        setCommentDraft('');
+      } else if (json.commentPosted) {
+        // Status didn't flip but the comment DID land — warn the user
+        fireToast('err', `Comment posted, but status change failed: ${json.error || 'unknown'}`);
+        setCommentDraft('');
+      } else {
+        fireToast('err', json.error || 'Comment failed');
+      }
+      await Promise.all([loadQueue({ silent: true }), loadDetail(selectedKey)]);
+    } catch (e) {
+      fireToast('err', e instanceof Error ? e.message : 'Comment failed');
+    } finally {
+      setBusy(false);
+    }
   };
   const openAcceptModal = () => {
     if (!detail) return;
