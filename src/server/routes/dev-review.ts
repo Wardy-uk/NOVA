@@ -466,11 +466,60 @@ export function createDevReviewRoutes(
         }
       }
 
-      // Step 3: single-shot transition + internal comment
-      await client.transitionIssue(key, waitTransition.id, {
-        fields: passFields,
-        comment: { body: adfDoc(prefixed), internal: true },
-      });
+      // Respect an admin-configured exclude list so we can sidestep fields
+      // with awkward schemas without a code change.
+      const excludeRaw = String(settingsQueries.getAll().dev_review_wait_field_exclude || '');
+      const excludeSet = new Set(excludeRaw.split(',').map((s) => s.trim()).filter(Boolean));
+      for (const id of excludeSet) delete passFields[id];
+
+      // Log the payload we're about to send so we can diagnose 400s.
+      const fieldSummary = Object.entries(passFields).map(([id, v]) => {
+        const t = typeof v;
+        const shape = v === null ? 'null'
+          : Array.isArray(v) ? `array[${(v as unknown[]).length}]`
+          : t === 'object' ? `{${Object.keys(v as object).join(',')}}`
+          : t;
+        const sample = t === 'string'
+          ? `"${String(v).slice(0, 30)}${String(v).length > 30 ? '…' : ''}"`
+          : t === 'number' || t === 'boolean'
+            ? String(v)
+            : '';
+        return `${id}=${shape}${sample ? ` ${sample}` : ''}`;
+      }).join('  |  ');
+      console.log(`[DevReview/comment] ${key} → transition ${waitTransition.id} (${waitTransition.name})`);
+      console.log(`[DevReview/comment] fields: ${fieldSummary || '(none)'}`);
+
+      // Step 3: single-shot transition + internal comment.
+      // If Jira returns a 400 with per-field errors, drop the offending
+      // field(s) and retry up to 3 times. Most workflow validators will
+      // accept a transition with the field omitted if the current ticket
+      // value is valid — and if they don't, we'll surface the error.
+      const attemptTransition = async (fields: Record<string, unknown>, attempt = 0): Promise<void> => {
+        try {
+          await client.transitionIssue(key, waitTransition!.id, {
+            fields,
+            comment: { body: adfDoc(prefixed), internal: true },
+          });
+        } catch (err) {
+          const jiraErr = err as { body?: { errors?: Record<string, string> } };
+          const errs = jiraErr.body?.errors;
+          if (errs && attempt < 3) {
+            const badFields = Object.keys(errs);
+            console.warn(`[DevReview/comment] ${key} attempt ${attempt + 1} failed on [${badFields.join(', ')}], dropping and retrying`);
+            const next = { ...fields };
+            for (const bad of badFields) delete next[bad];
+            if (Object.keys(next).length !== Object.keys(fields).length) {
+              await attemptTransition(next, attempt + 1);
+              return;
+            }
+          }
+          console.error(`[DevReview/comment] Transition failed for ${key}:`);
+          console.error(`[DevReview/comment] Full fields payload:`, JSON.stringify(fields, null, 2));
+          console.error(`[DevReview/comment] Error:`, err instanceof Error ? err.message : err);
+          throw err;
+        }
+      };
+      await attemptTransition(passFields);
 
       devQueries.setStatus(key, 'waiting_on_assignee');
 
