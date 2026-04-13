@@ -26,8 +26,11 @@ interface Team {
   jira_products?: string[] | null;
 }
 
-// Hardcoded Nurtur Product list for Dev Review team owner-picker
-const NURTUR_PRODUCTS: string[] = [
+// Fallback list — used only if /api/admin/nurtur-products fails.
+// The live list is pulled dynamically from Jira's customfield_13183 options
+// on modal open (cached server-side for 1 hour) so new products appear
+// automatically as admins add them in Jira.
+const NURTUR_PRODUCTS_FALLBACK: string[] = [
   'Nurtur Direct Communications',
   'Nurtur Build',
   'Nurtur Lead Management',
@@ -160,6 +163,10 @@ export function AdminView() {
   const [newTeamName, setNewTeamName] = useState('');
   const [productPickerTeam, setProductPickerTeam] = useState<Team | null>(null);
   const [productPickerSelection, setProductPickerSelection] = useState<Set<string>>(new Set());
+  const [productPickerOptions, setProductPickerOptions] = useState<string[]>(NURTUR_PRODUCTS_FALLBACK);
+  const [productPickerLoading, setProductPickerLoading] = useState(false);
+  const [productPickerStale, setProductPickerStale] = useState<boolean>(false);
+  const [productPickerCachedAt, setProductPickerCachedAt] = useState<number | null>(null);
 
   // Add User form
   const [showAddUser, setShowAddUser] = useState(false);
@@ -611,9 +618,31 @@ export function AdminView() {
     }
   };
 
+  const loadProductOptions = async (refresh = false) => {
+    setProductPickerLoading(true);
+    try {
+      const res = await fetch(`/api/admin/nurtur-products${refresh ? '?refresh=1' : ''}`);
+      const json = await res.json();
+      if (json.ok && Array.isArray(json.data) && json.data.length > 0) {
+        setProductPickerOptions(json.data);
+        setProductPickerStale(false);
+        setProductPickerCachedAt(json.fetchedAt ?? Date.now());
+      } else {
+        setProductPickerOptions(NURTUR_PRODUCTS_FALLBACK);
+        setProductPickerStale(true);
+      }
+    } catch {
+      setProductPickerOptions(NURTUR_PRODUCTS_FALLBACK);
+      setProductPickerStale(true);
+    } finally {
+      setProductPickerLoading(false);
+    }
+  };
+
   const openProductPicker = (team: Team) => {
     setProductPickerTeam(team);
     setProductPickerSelection(new Set(team.jira_products || []));
+    loadProductOptions();
   };
   const saveProductPicker = async () => {
     if (!productPickerTeam) return;
@@ -1241,14 +1270,33 @@ export function AdminView() {
               <h3 className="text-lg font-bold text-neutral-50 mb-1">
                 {productPickerTeam.name}
               </h3>
-              <p className="text-[12px] text-neutral-400 mb-5">
+              <p className="text-[12px] text-neutral-400 mb-3">
                 Pick the Nurtur Products this team owns. Members of this team will only see Dev Review tickets whose
                 product matches one of these. <span className="text-[#5ec1ca] font-semibold">Leave empty = team sees every ticket</span> (the
                 Support-team default). Admins always see everything regardless.
               </p>
+              <div className="flex items-center justify-between mb-3 text-[10px]">
+                {productPickerLoading ? (
+                  <span className="text-amber-400">Loading latest list from Jira…</span>
+                ) : productPickerStale ? (
+                  <span className="text-red-400">Jira unavailable — showing bundled fallback list</span>
+                ) : (
+                  <span className="text-neutral-500">
+                    {productPickerOptions.length} products from Jira
+                    {productPickerCachedAt && ` · refreshed ${new Date(productPickerCachedAt).toLocaleTimeString('en-GB')}`}
+                  </span>
+                )}
+                <button
+                  onClick={() => loadProductOptions(true)}
+                  disabled={productPickerLoading}
+                  className="text-[10px] text-[#5ec1ca] hover:text-[#9b6aed] disabled:opacity-40"
+                >
+                  ↻ Refresh from Jira
+                </button>
+              </div>
 
               <div className="grid grid-cols-2 gap-2 mb-5 max-h-[50vh] overflow-y-auto">
-                {NURTUR_PRODUCTS.map((p) => {
+                {productPickerOptions.map((p) => {
                   const checked = productPickerSelection.has(p);
                   return (
                     <label

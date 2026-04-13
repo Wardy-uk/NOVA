@@ -9,6 +9,7 @@ import { requireRole } from '../middleware/auth.js';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 import { EmailService } from '../services/email.js';
 import { inviteHtml } from '../services/email-templates.js';
+import type { JiraRestClient } from '../services/jira-client.js';
 
 function generateTempPassword(): string {
   return crypto.randomBytes(9).toString('base64url').slice(0, 12);
@@ -19,6 +20,7 @@ export function createAdminRoutes(
   teamQueries: TeamQueries,
   userSettingsQueries: UserSettingsQueries,
   settingsQueries: SettingsQueries,
+  getJiraClient: () => JiraRestClient | null,
 ): Router {
   const router = Router();
   router.use(requireRole('admin'));
@@ -317,6 +319,42 @@ export function createAdminRoutes(
     const id = parseInt(req.params.id, 10);
     teamQueries.delete(id);
     res.json({ ok: true });
+  });
+
+  // ── Nurtur Product field options (cached, for the Dev Review team picker) ──
+  // Fetches allowed values for customfield_13183 from Jira at most once per
+  // hour. Collapses all 'The Property Jungle' variants into a single 'TPJ'
+  // entry to match productToTeam(). Clients should gracefully fall back to
+  // a bundled default list if this endpoint fails.
+  const PRODUCT_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+  let productCache: { products: string[]; fetchedAt: number } | null = null;
+
+  router.get('/nurtur-products', async (req, res) => {
+    try {
+      const force = req.query.refresh === '1';
+      const fresh = productCache && !force && (Date.now() - productCache.fetchedAt) < PRODUCT_CACHE_TTL_MS;
+      if (fresh && productCache) {
+        res.json({ ok: true, data: productCache.products, cached: true, fetchedAt: productCache.fetchedAt });
+        return;
+      }
+      const client = getJiraClient();
+      if (!client) {
+        res.status(503).json({ ok: false, error: 'Jira not configured' });
+        return;
+      }
+      const raw = await client.getFieldOptions('customfield_13183');
+      const values = raw.map((o) => o.value).filter((v): v is string => !!v);
+      // Collapse TPJ variants
+      const hasTpj = values.some((v) => v.startsWith('The Property Jungle'));
+      const collapsed = values.filter((v) => !v.startsWith('The Property Jungle'));
+      if (hasTpj) collapsed.push('TPJ');
+      // Deduplicate + sort
+      const deduped = Array.from(new Set(collapsed)).sort((a, b) => a.localeCompare(b));
+      productCache = { products: deduped, fetchedAt: Date.now() };
+      res.json({ ok: true, data: deduped, cached: false, fetchedAt: productCache.fetchedAt });
+    } catch (err) {
+      res.status(502).json({ ok: false, error: err instanceof Error ? err.message : 'Product fetch failed' });
+    }
   });
 
   // ---- AI Keys ----
