@@ -1315,6 +1315,16 @@ export function initializeSchema(database: Database): void {
   database.run(`CREATE INDEX IF NOT EXISTS idx_dev_thread_key ON dev_review_thread(jira_key, created_at DESC)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_dev_thread_sync ON dev_review_thread(jira_sync_state) WHERE jira_sync_state = 'pending'`);
 
+  // Service Desk MI commentary — one editable text block per month
+  database.run(`
+    CREATE TABLE IF NOT EXISTS mi_commentary (
+      month TEXT PRIMARY KEY,
+      content TEXT,
+      updated_at TEXT DEFAULT (datetime('now')),
+      updated_by_user_id INTEGER
+    )
+  `);
+
   database.run(`
     CREATE TABLE IF NOT EXISTS dev_review_outbox (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

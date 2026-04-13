@@ -523,7 +523,12 @@ async function main() {
   });
 
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
-  app.use('/api/board-mi', requireAreaAccess('mi', 'view'), createBoardMiRoutes(settingsQueries));
+  app.use('/api/board-mi', requireAreaAccess('mi', 'view'), createBoardMiRoutes(
+    settingsQueries,
+    devReviewQueries,
+    db,
+    buildServiceDeskJiraClient,
+  ));
   app.use('/api/dev-review', createDevReviewRoutes(
     devReviewQueries,
     settingsQueries,
