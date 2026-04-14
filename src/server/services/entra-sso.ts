@@ -1,17 +1,66 @@
 import { ConfidentialClientApplication } from '@azure/msal-node';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const SSO_SCOPES = ['openid', 'profile', 'email', 'User.Read', 'GroupMember.Read.All'];
 
-// In-memory PKCE + state store (expires after 10 min)
-const pendingLogins = new Map<string, { verifier: string; createdAt: number }>();
+// File-backed PKCE + state store — survives process restarts, unlike an in-memory Map.
+// Previously lost state on every NSSM restart, causing "Invalid or expired SSO state".
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../../../');
+const PENDING_FILE = path.join(DATA_DIR, 'sso-pending.json');
 const EXPIRY_MS = 10 * 60 * 1000;
 
-function cleanExpired(): void {
-  const now = Date.now();
-  for (const [key, val] of pendingLogins) {
-    if (now - val.createdAt > EXPIRY_MS) pendingLogins.delete(key);
+type PendingEntry = { verifier: string; createdAt: number };
+type PendingStore = Record<string, PendingEntry>;
+
+function loadPending(): PendingStore {
+  try {
+    if (fs.existsSync(PENDING_FILE)) {
+      return JSON.parse(fs.readFileSync(PENDING_FILE, 'utf-8')) as PendingStore;
+    }
+  } catch {
+    console.warn('[SSO] Failed to read sso-pending.json, starting fresh');
   }
+  return {};
+}
+
+function savePending(store: PendingStore): void {
+  try {
+    fs.writeFileSync(PENDING_FILE, JSON.stringify(store), 'utf-8');
+  } catch (err) {
+    console.error('[SSO] Failed to persist sso-pending.json:', err instanceof Error ? err.message : err);
+  }
+}
+
+function cleanExpired(store: PendingStore): PendingStore {
+  const now = Date.now();
+  let changed = false;
+  for (const key of Object.keys(store)) {
+    if (now - store[key].createdAt > EXPIRY_MS) {
+      delete store[key];
+      changed = true;
+    }
+  }
+  if (changed) savePending(store);
+  return store;
+}
+
+function putPending(state: string, verifier: string): void {
+  const store = cleanExpired(loadPending());
+  store[state] = { verifier, createdAt: Date.now() };
+  savePending(store);
+}
+
+function takePending(state: string): PendingEntry | null {
+  const store = cleanExpired(loadPending());
+  const entry = store[state];
+  if (!entry) return null;
+  delete store[state];
+  savePending(store);
+  return entry;
 }
 
 function generatePkce(): { verifier: string; challenge: string } {
@@ -60,10 +109,9 @@ export class EntraSsoService {
     const app = this.getApp();
     if (!app) throw new Error('SSO not configured');
 
-    cleanExpired();
     const { verifier, challenge } = generatePkce();
     const state = crypto.randomBytes(16).toString('hex');
-    pendingLogins.set(state, { verifier, createdAt: Date.now() });
+    putPending(state, verifier);
 
     const url = await app.getAuthCodeUrl({
       scopes: SSO_SCOPES,
@@ -80,10 +128,8 @@ export class EntraSsoService {
     const app = this.getApp();
     if (!app) throw new Error('SSO not configured');
 
-    cleanExpired();
-    const pending = pendingLogins.get(state);
+    const pending = takePending(state);
     if (!pending) throw new Error('Invalid or expired SSO state. Please try logging in again.');
-    pendingLogins.delete(state);
 
     const result = await app.acquireTokenByCode({
       code,
