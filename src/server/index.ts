@@ -357,6 +357,49 @@ async function main() {
     res.json({ ok: true, data: { today, daily } });
   });
 
+  // Training export — token-gated, no JWT, for n8n automation (Training Matrix Sync).
+  // Returns a flat dump of categories, items, scores, members, and the display-name
+  // map needed to render the matrix into Obsidian. Requires TRAINING_EXPORT_TOKEN env
+  // var set and caller to provide header X-Training-Export-Token matching it.
+  app.get('/api/public/training-export', (req, res) => {
+    const expected = process.env.TRAINING_EXPORT_TOKEN;
+    if (!expected) {
+      res.status(503).json({ ok: false, error: 'TRAINING_EXPORT_TOKEN not configured on server' });
+      return;
+    }
+    const provided = (req.headers['x-training-export-token'] || req.query.token) as string | undefined;
+    if (!provided || provided !== expected) {
+      res.status(401).json({ ok: false, error: 'Invalid or missing X-Training-Export-Token' });
+      return;
+    }
+
+    try {
+      const categories = trainingQueries.getCategories();
+      const items = trainingQueries.getItems();
+      const scores = trainingQueries.getScores();
+      const memberIds = trainingQueries.getMembers();
+      const users = userQueries.getAll().map((u) => ({
+        id: u.id,
+        username: u.username,
+        display_name: u.display_name || u.username,
+        email: u.email,
+        role: u.role,
+      }));
+      res.json({
+        ok: true,
+        exportedAt: new Date().toISOString(),
+        categories,
+        items,
+        scores,
+        memberIds,
+        users,
+      });
+    } catch (e) {
+      console.error('[training-export]', e);
+      res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   // Debug endpoints are registered after auth middleware below (admin-only)
 
   // Dynamics 365 — direct Web API with delegated auth (device code flow)
