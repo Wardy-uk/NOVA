@@ -184,7 +184,10 @@ export function createBoardMiRoutes(
       let aging = null as {
         under4h: number; h4to24: number; d1to3: number; d3to7: number; over7d: number;
       } | null;
-      let backlogSplit = null as { cc: number; incidents: number; serviceReq: number; t2: number; t3: number; dev: number } | null;
+      let backlogSplit = null as {
+        cc: number; incidents: number; serviceReq: number; tpj: number;
+        t2: number; t3: number; production: number; dev: number;
+      } | null;
       let topProducts: Array<{ product: string; count: number }> = [];
       let agedDev = null as { total: number; over30d: number; over90d: number; over180d: number; oldestDays: number | null } | null;
       let openedResolved = null as { opened: number; resolved: number; prevOpened: number; prevResolved: number } | null;
@@ -202,21 +205,23 @@ export function createBoardMiRoutes(
           aging = { under4h: u4, h4to24: h4, d1to3: d1, d3to7: d3, over7d: o7 };
         } catch { /* leave null */ }
 
-        // Backlog split by current tier
+        // Backlog split by current tier — CC further sub-divided into
+        // Incidents (JSM Request Type = Incident), Service Requests, and
+        // TPJ (Nurtur Product in the TPJ variants).
         try {
-          const [cc, t2, t3, dev] = await Promise.all([
+          const tpjProducts =
+            '"The Property Jungle - IOMart Website", "The Property Jungle - Wordpress Website", "The Property Jungle - M365"';
+          const [cc, t2, t3, production, dev, inc, sr, tpj] = await Promise.all([
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Customer Care"`),
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Tier 2"`),
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Tier 3"`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Production"`),
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Development"`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND "Request Type" = "Incident"`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND "Request Type" = "Service Request"`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND cf[13183] in (${tpjProducts})`),
           ]);
-          // Request type split — Incidents vs Service Requests — run on Customer Care tier only
-          // (Board pack style: split by CC tier first, then by type)
-          const [inc, sr] = await Promise.all([
-            jqlCount(client, `project = NT AND statusCategory != Done AND "Request Type" = "Report a Bug"`).catch(() => 0),
-            jqlCount(client, `project = NT AND statusCategory != Done AND "Request Type" = "Service Request"`).catch(() => 0),
-          ]);
-          backlogSplit = { cc, incidents: inc, serviceReq: sr, t2, t3, dev };
+          backlogSplit = { cc, incidents: inc, serviceReq: sr, tpj, t2, t3, production, dev };
         } catch { /* leave null */ }
 
         // Top 5 products — facet in memory from top 200 unresolved
@@ -262,13 +267,17 @@ export function createBoardMiRoutes(
           agedDev = { total, over30d: o30, over90d: o90, over180d: o180, oldestDays };
         } catch { /* leave null */ }
 
-        // Opened vs Resolved for the month + previous month
+        // Opened vs Resolved for the month + previous month.
+        // "Resolved" = statusCategory flipped to Done during the period.
+        // We use statusCategoryChangedDate rather than the `resolved` field
+        // because many NT tickets get closed without a resolution being set,
+        // which would silently drop them from a `resolved >= X` query.
         try {
           const [opened, resolved, prevOpened, prevResolved] = await Promise.all([
             jqlCount(client, `project = NT AND created >= "${start}" AND created <= "${end}"`),
-            jqlCount(client, `project = NT AND resolved >= "${start}" AND resolved <= "${end}"`),
+            jqlCount(client, `project = NT AND statusCategory = Done AND statusCategoryChangedDate >= "${start}" AND statusCategoryChangedDate <= "${end}"`),
             jqlCount(client, `project = NT AND created >= "${prevStart}" AND created <= "${prevEnd}"`),
-            jqlCount(client, `project = NT AND resolved >= "${prevStart}" AND resolved <= "${prevEnd}"`),
+            jqlCount(client, `project = NT AND statusCategory = Done AND statusCategoryChangedDate >= "${prevStart}" AND statusCategoryChangedDate <= "${prevEnd}"`),
           ]);
           openedResolved = { opened, resolved, prevOpened, prevResolved };
         } catch { /* leave null */ }

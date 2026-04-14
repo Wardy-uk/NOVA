@@ -10,7 +10,7 @@ interface TierCompliance {
 }
 
 interface Aging { under4h: number; h4to24: number; d1to3: number; d3to7: number; over7d: number }
-interface BacklogSplit { cc: number; incidents: number; serviceReq: number; t2: number; t3: number; dev: number }
+interface BacklogSplit { cc: number; incidents: number; serviceReq: number; tpj: number; t2: number; t3: number; production: number; dev: number }
 interface AgedDev { total: number; over30d: number; over90d: number; over180d: number; oldestDays: number | null }
 interface OpenedResolved { opened: number; resolved: number; prevOpened: number; prevResolved: number }
 interface DevReviewMonth {
@@ -591,8 +591,10 @@ export function BoardMiView() {
                       <BigStat
                         label="Net backlog change"
                         value={netBacklog !== null ? (netBacklog >= 0 ? `+${netBacklog}` : `${netBacklog}`) : '—'}
+                        valueColour={netBacklog === null ? undefined : netBacklog > 0 ? '#ef4444' : '#10b981'}
                         delta={deltaPct(netBacklog, prevNetBacklog)}
                         inverseDelta
+                        tooltip="Opened minus Resolved. Positive = backlog growing (bad). Zero or negative = keeping up or catching up (good)."
                       />
                     </div>
                   </div>
@@ -605,9 +607,11 @@ export function BoardMiView() {
                       <SplitRow label="Customer Care" value={data.backlogSplit.cc} colour="#5ec1ca" />
                       <SplitRow label="— Incidents" value={data.backlogSplit.incidents} colour="#ef4444" muted />
                       <SplitRow label="— Service Req" value={data.backlogSplit.serviceReq} colour="#f59e0b" muted />
+                      <SplitRow label="— TPJ" value={data.backlogSplit.tpj} colour="#9b6aed" muted />
                       <div className="pt-2 border-t border-white/5">
                         <SplitRow label="Tier 2" value={data.backlogSplit.t2} colour="#9b6aed" />
                         <SplitRow label="Tier 3" value={data.backlogSplit.t3} colour="#f59e0b" />
+                        <SplitRow label="Production" value={data.backlogSplit.production} colour="#10b981" />
                         <SplitRow label="Development" value={data.backlogSplit.dev} colour="#ef4444" />
                       </div>
                     </div>
@@ -780,7 +784,7 @@ export function BoardMiView() {
   );
 }
 
-function BigStat({ label, value, delta, inverseDelta, tooltip }: { label: string; value: string; delta?: number | null; inverseDelta?: boolean; tooltip?: string }) {
+function BigStat({ label, value, delta, inverseDelta, tooltip, valueColour }: { label: string; value: string; delta?: number | null; inverseDelta?: boolean; tooltip?: string; valueColour?: string }) {
   return (
     <div className="flex items-center justify-between">
       <div className="text-[11px] text-neutral-400 flex items-center gap-1.5">
@@ -788,7 +792,13 @@ function BigStat({ label, value, delta, inverseDelta, tooltip }: { label: string
         {tooltip && <InfoTip text={tooltip} />}
       </div>
       <div className="flex items-center gap-2">
-        <div className="text-lg font-bold text-neutral-50" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+        <div
+          className="text-lg font-bold"
+          style={{
+            fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+            color: valueColour || '#f8fafc',
+          }}
+        >
           {value}
         </div>
         {delta !== undefined && <SentimentArrow delta={delta ?? null} inverse={inverseDelta} />}
