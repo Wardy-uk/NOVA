@@ -96,14 +96,14 @@ function saveCommentary(db: Database, month: string, content: string, userId: nu
 }
 
 // ── JQL helper: count-only search ──────────────────────────────────────────
+// Delegates to JiraRestClient.jqlCount which uses the dedicated
+// /search/approximate-count endpoint. The legacy search endpoint returned a
+// `total` field; the new POST /search/jql endpoint does not, which is why
+// every count was silently coming back as 0 before this change.
 
 async function jqlCount(client: JiraRestClient, jql: string): Promise<number> {
-  try {
-    const r = await client.searchJql(jql, ['summary'], 1);
-    return r.total ?? 0;
-  } catch {
-    return 0;
-  }
+  const n = await client.jqlCount(jql);
+  return n < 0 ? 0 : n; // collapse "error" into 0 for the UI
 }
 
 // ── Main route ─────────────────────────────────────────────────────────────

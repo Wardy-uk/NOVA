@@ -250,6 +250,19 @@ export class JiraRestClient {
     return this.request<JiraSearchResult>('POST', 'search/jql', body);
   }
 
+  /** Approximate count of tickets matching a JQL query.
+   *  The new Jira Cloud search/jql endpoint dropped the `total` field, so for
+   *  count-only queries we use the dedicated /search/approximate-count endpoint.
+   *  Returns -1 on error so callers can distinguish "no data" from "failed". */
+  async jqlCount(jql: string): Promise<number> {
+    try {
+      const result = await this.request<{ count?: number }>('POST', 'search/approximate-count', { jql });
+      return typeof result?.count === 'number' ? result.count : 0;
+    } catch {
+      return -1;
+    }
+  }
+
   /** Search with automatic pagination — fetches all pages up to maxResults total. */
   async searchJqlAll(
     jql: string,

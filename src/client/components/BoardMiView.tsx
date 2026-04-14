@@ -212,16 +212,19 @@ function SectionHeader({ num, title, subtitle }: { num: string; title: string; s
 }
 
 function KpiTile({
-  label, value, rag, delta, inverseDelta, target,
+  label, value, rag, delta, inverseDelta, target, tooltip,
 }: {
-  label: string; value: string; rag: Rag; delta: number | null; inverseDelta?: boolean; target?: string;
+  label: string; value: string; rag: Rag; delta: number | null; inverseDelta?: boolean; target?: string; tooltip?: string;
 }) {
   const ragColour = rag === 'green' ? '#10b981' : rag === 'amber' ? '#f59e0b' : rag === 'red' ? '#ef4444' : '#64748b';
   return (
     <div>
       <div className="flex items-center gap-1.5 mb-1">
         <RagDot rag={rag} />
-        <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">{label}</div>
+        <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold flex items-center gap-1.5">
+          <span>{label}</span>
+          {tooltip && <InfoTip text={tooltip} />}
+        </div>
       </div>
       <div className="flex items-baseline gap-2 mb-1">
         <div
@@ -421,7 +424,11 @@ export function BoardMiView() {
             <div className="text-[12px] text-neutral-400 ml-[52px]">
               {data?.label ?? 'Loading…'}
               {data?.isMtd && (
-                <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: 'rgba(94,193,202,0.15)', color: '#5ec1ca', border: '1px solid rgba(94,193,202,0.3)' }}>
+                <span
+                  className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-help"
+                  style={{ background: 'rgba(94,193,202,0.15)', color: '#5ec1ca', border: '1px solid rgba(94,193,202,0.3)' }}
+                  title="Month-to-date — the current month through today. Prior-month deltas compare the same day-count window for fairness."
+                >
                   MTD · {data.daysElapsed} days
                 </span>
               )}
@@ -481,9 +488,17 @@ export function BoardMiView() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <GlassCard accent className="p-6 lg:col-span-2">
                   <div className="grid grid-cols-3 gap-4 mb-6">
-                    <KpiTile label="Avg FRT compliance" value={fmtPct(avgFrt)} rag={ragForPct(avgFrt)} delta={null} target="≥95%" />
+                    <KpiTile
+                      label="Avg FRT compliance"
+                      tooltip="First Response Time — % of tickets where the first agent reply was sent within SLA. Averaged across all tiers."
+                      value={fmtPct(avgFrt)}
+                      rag={ragForPct(avgFrt)}
+                      delta={null}
+                      target="≥95%"
+                    />
                     <KpiTile
                       label="FCR Rate"
+                      tooltip="First Contact Resolution — % of tickets resolved on the first interaction with no further back-and-forth."
                       value={fmtPct(data.service.fcrRate)}
                       rag={ragForPct(data.service.fcrRate, 70, 50)}
                       delta={deltaPct(data.service.fcrRate, data.service.prevFcrRate)}
@@ -491,13 +506,17 @@ export function BoardMiView() {
                     />
                     <KpiTile
                       label="CSAT"
+                      tooltip="Customer Satisfaction — % of customers rating their support experience positively on the post-ticket survey."
                       value={fmtPct(data.service.csat)}
                       rag={ragForPct(data.service.csat, 85, 70)}
                       delta={deltaPct(data.service.csat, data.service.prevCsat)}
                       target="≥90%"
                     />
                   </div>
-                  <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold mb-3">FRT Compliance by Tier</div>
+                  <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold mb-3 flex items-center gap-1.5">
+                    <span>FRT Compliance by Tier</span>
+                    <InfoTip text="First Response Time SLA compliance broken down by support tier (CC, Tier 2, Tier 3, Production, Development)." />
+                  </div>
                   <div className="space-y-2">
                     {data.service.frtCompliance.map((t) => <TierRow key={t.tier} tier={t} />)}
                   </div>
@@ -506,15 +525,27 @@ export function BoardMiView() {
                 <GlassCard accent className="p-6">
                   <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold mb-3">Month at a Glance</div>
                   <div className="space-y-3.5">
-                    <BigStat label="Tickets opened" value={fmtNum(data.service.ticketsOpened)} />
+                    <BigStat
+                      label="Tickets opened"
+                      tooltip="Total NT tickets created in this period (live JQL count)"
+                      value={fmtNum(data.openedResolved?.opened ?? data.service.ticketsOpened)}
+                      delta={deltaPct(data.openedResolved?.opened ?? null, data.openedResolved?.prevOpened ?? null)}
+                      inverseDelta
+                    />
                     <BigStat
                       label="1st Line Resolution"
+                      tooltip="Percentage of tickets resolved by Customer Care without escalation"
                       value={fmtPct(data.service.firstLineResolution)}
                       delta={deltaPct(data.service.firstLineResolution, data.service.prevFirstLineResolution)}
                     />
-                    <BigStat label="Avg Resolution Compliance" value={fmtPct(avgRes)} />
+                    <BigStat
+                      label="Avg Resolution Compliance"
+                      tooltip="Average of resolution-time SLA compliance % across all tiers"
+                      value={fmtPct(avgRes)}
+                    />
                     <BigStat
                       label="FRT Breaches"
+                      tooltip="First Response Time breaches — total count across all tiers"
                       value={fmtNum(data.escalation.frtBreachedAll)}
                       delta={deltaPct(data.escalation.frtBreachedAll, data.escalation.prevFrtBreachedAll)}
                       inverseDelta
@@ -749,10 +780,13 @@ export function BoardMiView() {
   );
 }
 
-function BigStat({ label, value, delta, inverseDelta }: { label: string; value: string; delta?: number | null; inverseDelta?: boolean }) {
+function BigStat({ label, value, delta, inverseDelta, tooltip }: { label: string; value: string; delta?: number | null; inverseDelta?: boolean; tooltip?: string }) {
   return (
     <div className="flex items-center justify-between">
-      <div className="text-[11px] text-neutral-400">{label}</div>
+      <div className="text-[11px] text-neutral-400 flex items-center gap-1.5">
+        <span>{label}</span>
+        {tooltip && <InfoTip text={tooltip} />}
+      </div>
       <div className="flex items-center gap-2">
         <div className="text-lg font-bold text-neutral-50" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
           {value}
@@ -760,6 +794,38 @@ function BigStat({ label, value, delta, inverseDelta }: { label: string; value: 
         {delta !== undefined && <SentimentArrow delta={delta ?? null} inverse={inverseDelta} />}
       </div>
     </div>
+  );
+}
+
+/** Small ⓘ icon that shows a glass-styled tooltip on hover. Uses native
+ *  `title` as an accessibility fallback + a custom styled popover for the
+ *  hover presentation. Pure CSS — no JS state. */
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="relative inline-flex items-center group" tabIndex={0}>
+      <span
+        className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full text-[9px] font-bold cursor-help"
+        style={{
+          background: 'rgba(148,163,184,0.15)',
+          color: '#94a3b8',
+          border: '1px solid rgba(148,163,184,0.3)',
+        }}
+        title={text}
+      >
+        i
+      </span>
+      <span
+        className="pointer-events-none opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 rounded-lg text-[10px] font-medium text-neutral-100 whitespace-nowrap transition-opacity duration-150 z-50"
+        style={{
+          background: 'rgba(15,23,42,0.97)',
+          backdropFilter: 'blur(12px)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        }}
+      >
+        {text}
+      </span>
+    </span>
   );
 }
 
