@@ -47,7 +47,7 @@ function clearToken() {
 
 // Install fetch interceptor that injects Authorization header for /api/ calls
 // and triggers logout on 401 responses
-let currentToken: string | null = null;
+let currentToken: string | null = getStoredToken();
 let onUnauthorized: (() => void) | null = null;
 
 const originalFetch = window.fetch.bind(window);
