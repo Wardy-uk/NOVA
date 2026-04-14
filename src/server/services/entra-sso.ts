@@ -157,22 +157,33 @@ export class EntraSsoService {
 
   /** Fetch the user's Azure AD group IDs via Microsoft Graph /me/memberOf */
   private async fetchUserGroups(accessToken: string): Promise<string[]> {
+    // Graph paginates /me/memberOf at 100 entries by default. Users in more
+    // than 100 directory objects silently lost later pages and could fail to
+    // match their configured NOVA group. Follow @odata.nextLink to exhaustion.
+    const ids: string[] = [];
+    let url: string | null = 'https://graph.microsoft.com/v1.0/me/memberOf?$select=id&$top=999';
     try {
-      const res = await fetch('https://graph.microsoft.com/v1.0/me/memberOf?$select=id,displayName', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (!res.ok) {
-        console.warn(`[SSO] Failed to fetch groups: ${res.status} ${res.statusText}`);
-        return [];
+      while (url) {
+        const res: Response = await fetch(url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!res.ok) {
+          console.warn(`[SSO] Failed to fetch groups: ${res.status} ${res.statusText}`);
+          return ids;
+        }
+        const data = await res.json() as {
+          value?: Array<{ id?: string; '@odata.type'?: string }>;
+          '@odata.nextLink'?: string;
+        };
+        for (const m of data.value ?? []) {
+          if (m['@odata.type'] === '#microsoft.graph.group' && m.id) ids.push(m.id);
+        }
+        url = data['@odata.nextLink'] ?? null;
       }
-      const data = await res.json() as { value?: Array<{ id?: string; '@odata.type'?: string }> };
-      return (data.value ?? [])
-        .filter(m => m['@odata.type'] === '#microsoft.graph.group')
-        .map(m => m.id!)
-        .filter(Boolean);
+      return ids;
     } catch (err) {
       console.warn('[SSO] Error fetching group memberships:', err instanceof Error ? err.message : err);
-      return [];
+      return ids;
     }
   }
 }
