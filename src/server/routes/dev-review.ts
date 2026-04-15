@@ -641,6 +641,18 @@ export function createDevReviewRoutes(
 
     const commentText = `✅ Accepted to development by ${display}${note ? `\n\n${note}` : ''}`;
 
+    // Capture the current assignee BEFORE the transition. The Escalate to
+    // Development post-function clears the assignee (it's a workflow rule
+    // intended for teams who reassign at each tier), but we want the
+    // original agent to stay on the ticket so they can update the customer.
+    // Restored via updateFields after the transition completes.
+    let originalAssigneeAccountId: string | null = null;
+    try {
+      const currentIssue = await client.getIssue(key, ['assignee']);
+      const assignee = (currentIssue?.fields as { assignee?: { accountId?: string } | null } | undefined)?.assignee;
+      originalAssigneeAccountId = assignee?.accountId ?? null;
+    } catch { /* non-fatal — skip restore step if we can't read */ }
+
     // Set TL;DR + Development Details on the issue BEFORE the transition.
     // The Escalate to Development transition screen doesn't include these
     // fields — Jira rejects them with "Field cannot be set. It is not on
@@ -715,6 +727,19 @@ export function createDevReviewRoutes(
       });
       devQueries.markThreadSynced(threadId, null);
       devQueries.markAccepted(key);
+
+      // Restore the original assignee — the Escalate to Development
+      // post-function clears it, but we want the original agent to stay
+      // on the ticket so they can update the customer after it lands in
+      // development. Awaited (not fire-and-forget) so the UI reflects
+      // the restored assignee on its next refresh.
+      if (originalAssigneeAccountId) {
+        try {
+          await client.updateFields(key, { assignee: { accountId: originalAssigneeAccountId } });
+        } catch (reassignErr) {
+          console.warn(`[DevReview/accept] Failed to restore assignee for ${key}: ${reassignErr instanceof Error ? reassignErr.message : reassignErr}`);
+        }
+      }
 
       // Best-effort second internal comment aimed at the T2 agent who owns
       // the ticket — tells them the ticket is with development and prompts
