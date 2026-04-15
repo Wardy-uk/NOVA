@@ -1,21 +1,7 @@
 import { z } from 'zod';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { apiGet, apiPut } from '../auth.js';
 import { toolResult, toolError } from './helpers.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-
-// Path to NOVA's settings.json — same file the daypilot server reads and
-// writes via FileSettingsQueries. We read it directly here because that's
-// cheaper and simpler than going through HTTP for a read-only inspection,
-// and NOVA reloads settings on every get() call so an external write is
-// picked up on the next request without a restart.
-//
-// Resolved relative to THIS file's location. The compiled output lives
-// at daypilot/nova-mcp/dist/tools/admin-config.js, so we walk up three
-// levels (tools → dist → nova-mcp → daypilot) to reach settings.json.
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const NOVA_SETTINGS_PATH = resolve(__dirname, '..', '..', '..', 'settings.json');
 
 // ── Masking helpers ─────────────────────────────────────────────────────
 
@@ -46,12 +32,7 @@ function maskValue(key: string, val: unknown): unknown {
 }
 
 // ── Write denylist ──────────────────────────────────────────────────────
-// These keys cannot be written via MCP. Writing any of them would either:
-//  - leak / corrupt credentials
-//  - break authentication (custom_roles, role_permissions)
-//  - change the auth provider wiring
-//
-// Reading them is allowed (masked) so we can inspect; writing is not.
+
 const WRITE_DENY_PATTERNS: RegExp[] = [
   /token/i,
   /password/i,
@@ -71,30 +52,6 @@ function isWriteDenied(key: string): boolean {
   return WRITE_DENY_PATTERNS.some((rx) => rx.test(key));
 }
 
-// ── Settings loader ─────────────────────────────────────────────────────
-
-interface NovaSettingsFile {
-  settings: Record<string, string>;
-  updatedAt?: string;
-}
-
-function loadSettings(): NovaSettingsFile {
-  const raw = readFileSync(NOVA_SETTINGS_PATH, 'utf-8');
-  const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== 'object' || !parsed.settings) {
-    throw new Error('settings.json missing `settings` object');
-  }
-  return parsed as NovaSettingsFile;
-}
-
-function writeSettings(file: NovaSettingsFile): void {
-  const next: NovaSettingsFile = {
-    settings: file.settings,
-    updatedAt: new Date().toISOString(),
-  };
-  writeFileSync(NOVA_SETTINGS_PATH, JSON.stringify(next, null, 2));
-}
-
 // ── Tool 1: read config ────────────────────────────────────────────────
 
 export const getConfigSchema = {
@@ -105,18 +62,18 @@ export const getConfigSchema = {
   unmask: z
     .boolean()
     .default(false)
-    .describe('Set true to return raw (unmasked) values. USE SPARINGLY — exposes tokens and passwords. Default false.'),
+    .describe('Set true to return raw (unmasked) values. USE SPARINGLY — exposes tokens and passwords. Note: admin login already redacts nothing, but non-admin accounts receive a pre-redacted view from the NOVA API. Default false.'),
 };
 
 export async function getConfig(args: {
   key_pattern?: string;
   unmask: boolean;
 }): Promise<CallToolResult> {
-  let file: NovaSettingsFile;
+  let settings: Record<string, string>;
   try {
-    file = loadSettings();
+    settings = await apiGet<Record<string, string>>('/api/settings');
   } catch (err) {
-    return toolError(`Failed to read settings.json: ${err instanceof Error ? err.message : err}`);
+    return toolError(`Failed to GET /api/settings: ${err instanceof Error ? err.message : err}`);
   }
 
   let filter: RegExp | null = null;
@@ -131,7 +88,7 @@ export async function getConfig(args: {
   const out: Record<string, unknown> = {};
   let total = 0;
   let matched = 0;
-  for (const [k, v] of Object.entries(file.settings || {})) {
+  for (const [k, v] of Object.entries(settings ?? {})) {
     total++;
     if (filter && !filter.test(k)) continue;
     matched++;
@@ -142,10 +99,9 @@ export async function getConfig(args: {
   for (const k of Object.keys(out).sort()) sorted[k] = out[k];
 
   return toolResult(
-    `Read ${matched}/${total} keys from settings.json${args.unmask ? ' (UNMASKED)' : ' (masked)'}`,
+    `Read ${matched}/${total} keys from NOVA /api/settings${args.unmask ? ' (UNMASKED)' : ' (masked)'}`,
     {
-      path: NOVA_SETTINGS_PATH,
-      updatedAt: file.updatedAt,
+      source: 'GET /api/settings',
       keyCount: matched,
       totalKeys: total,
       filter: args.key_pattern || '(none)',
@@ -161,14 +117,14 @@ export const setSettingSchema = {
   key: z
     .string()
     .min(1)
-    .describe('The settings.json key to write (e.g. "dev_review_accept_transition_id"). Must not match the write denylist.'),
+    .describe('The settings key to write (e.g. "dev_review_accept_transition_id"). Must not match the write denylist.'),
   value: z
     .string()
-    .describe('The new value as a plain string. Pass empty string to clear. Values are always stored as strings in settings.json.'),
+    .describe('The new value as a plain string. Pass empty string to clear. Values are always stored as strings in NOVA settings.'),
   confirm: z
     .boolean()
     .default(false)
-    .describe('Must be true to actually write. When false (default) the tool performs a dry-run and returns what would change without touching the file.'),
+    .describe('Must be true to actually write. When false (default) the tool performs a dry-run and returns what would change without hitting the API.'),
 };
 
 export async function setSetting(args: {
@@ -185,14 +141,15 @@ export async function setSetting(args: {
     );
   }
 
-  let file: NovaSettingsFile;
+  // Fetch current value for the diff.
+  let current: Record<string, string>;
   try {
-    file = loadSettings();
+    current = await apiGet<Record<string, string>>('/api/settings');
   } catch (err) {
-    return toolError(`Failed to read settings.json: ${err instanceof Error ? err.message : err}`);
+    return toolError(`Failed to read current settings: ${err instanceof Error ? err.message : err}`);
   }
 
-  const before = file.settings[key];
+  const before = current[key];
   const after = args.value;
   const changed = before !== after;
 
@@ -220,21 +177,20 @@ export async function setSetting(args: {
     );
   }
 
-  file.settings[key] = after;
   try {
-    writeSettings(file);
+    await apiPut(`/api/settings/${encodeURIComponent(key)}`, { value: after });
   } catch (err) {
-    return toolError(`Failed to write settings.json: ${err instanceof Error ? err.message : err}`);
+    return toolError(`Failed to PUT /api/settings/${key}: ${err instanceof Error ? err.message : err}`);
   }
 
   return toolResult(
-    `Wrote ${key} to settings.json. The running NOVA server will pick up the change on its next read — no restart required.`,
+    `Wrote ${key} via PUT /api/settings/${key}. NOVA reloads settings on every read — no restart required.`,
     {
       key,
       before: maskValue(key, before),
       after: maskValue(key, after),
       changed: true,
-      path: NOVA_SETTINGS_PATH,
+      endpoint: `PUT /api/settings/${key}`,
     },
   );
 }

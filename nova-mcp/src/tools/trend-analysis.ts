@@ -1,21 +1,22 @@
 import { z } from 'zod';
-import { query } from '../db.js';
+import { apiGet, getEnv } from '../auth.js';
 import { toolResult, toolError, mean, pctChange } from './helpers.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 export const trendAnalysisSchema = {
-  metric: z.string().describe('KPI name or partial name to match (LIKE syntax)'),
-  days: z.number().default(90).describe('Number of days to look back (default 90)'),
+  metric: z.string().describe('KPI name or partial name to match (case-insensitive substring of `kpi` column)'),
+  days: z.number().default(90).describe('Number of days to look back (default 90, max 90)'),
   granularity: z.enum(['daily', 'weekly']).default('weekly').describe('Time series granularity'),
 };
 
-interface KpiRow {
+interface DailyRow {
   kpi: string;
+  kpiGroup?: string;
   count: number;
   target: number | null;
   direction: string | null;
   rag: string | null;
-  CreatedAt: Date;
+  CreatedAt: string;
 }
 
 export async function trendAnalysis(args: {
@@ -23,23 +24,27 @@ export async function trendAnalysis(args: {
   days: number;
   granularity: 'daily' | 'weekly';
 }): Promise<CallToolResult> {
-  const { metric, days, granularity } = args;
+  const { metric, granularity } = args;
+  const days = Math.min(Math.max(args.days, 1), 90);
 
-  const rows = await query<KpiRow[]>(
-    `SELECT kpi, [count], target, direction, rag, CreatedAt
-     FROM dbo.jira_kpi_daily
-     WHERE kpi LIKE @metric
-       AND CreatedAt >= DATEADD(day, -@days, GETDATE())
-     ORDER BY CreatedAt ASC`,
-    { metric: `%${metric}%`, days },
-  );
+  let all: DailyRow[];
+  try {
+    all = await apiGet<DailyRow[]>('/api/kpi-data/daily-history', { env: getEnv(), days });
+  } catch (err) {
+    return toolError(`Failed to fetch daily-history: ${err instanceof Error ? err.message : err}`);
+  }
+
+  const needle = metric.toLowerCase();
+  const rows = all
+    .filter((r) => (r.kpi ?? '').toLowerCase().includes(needle))
+    .sort((a, b) => new Date(a.CreatedAt).getTime() - new Date(b.CreatedAt).getTime());
 
   if (rows.length === 0) {
     return toolError(`No data found for KPI matching "${metric}" in the last ${days} days.`);
   }
 
   const kpiName = rows[0].kpi;
-  const target = rows.find(r => r.target != null)?.target ?? null;
+  const target = rows.find((r) => r.target != null)?.target ?? null;
   const direction = rows[0].direction ?? 'higher is better';
   const lowerIsBetter = direction.toLowerCase().includes('lower');
 
@@ -59,7 +64,7 @@ export async function trendAnalysis(args: {
       key = monday.toISOString().slice(0, 10);
     }
     if (!buckets.has(key)) buckets.set(key, []);
-    buckets.get(key)!.push(row.count);
+    buckets.get(key)!.push(Number(row.count));
   }
 
   const timeSeries = Array.from(buckets.entries())
@@ -69,30 +74,24 @@ export async function trendAnalysis(args: {
       value: Math.round(mean(values) * 100) / 100,
     }));
 
-  // Week-over-week change
   const latest = timeSeries[timeSeries.length - 1];
   const previous = timeSeries.length >= 2 ? timeSeries[timeSeries.length - 2] : null;
   const wowChange = previous ? pctChange(latest.value, previous.value) : null;
 
-  // 4-period rolling average
-  const last4 = timeSeries.slice(-4).map(t => t.value);
+  const last4 = timeSeries.slice(-4).map((t) => t.value);
   const rollingAvg = Math.round(mean(last4) * 100) / 100;
 
-  // Is trend improving?
   let improving: boolean | null = null;
   if (previous) {
     const delta = latest.value - previous.value;
     improving = lowerIsBetter ? delta < 0 : delta > 0;
   }
 
-  // Breach periods
   const breachPeriods: { start: string; end: string }[] = [];
   if (target !== null) {
     let breachStart: string | null = null;
     for (const point of timeSeries) {
-      const breached = lowerIsBetter
-        ? point.value > target
-        : point.value < target;
+      const breached = lowerIsBetter ? point.value > target : point.value < target;
       if (breached && !breachStart) {
         breachStart = point.period;
       } else if (!breached && breachStart) {
@@ -106,13 +105,13 @@ export async function trendAnalysis(args: {
   }
 
   const trendDir = improving === true ? 'improving' : improving === false ? 'degrading' : 'stable';
-  const summary = `"${kpiName}" over the last ${days} days: latest value ${latest.value}${
-    target !== null ? ` (target: ${target})` : ''
-  }. ${granularity === 'weekly' ? 'Week' : 'Day'}-over-${granularity === 'weekly' ? 'week' : 'day'} change: ${
-    wowChange !== null ? `${wowChange > 0 ? '+' : ''}${wowChange.toFixed(1)}%` : 'N/A'
-  }. 4-period rolling avg: ${rollingAvg}. Trend is ${trendDir} vs target.${
-    breachPeriods.length > 0 ? ` ${breachPeriods.length} breach period(s) detected.` : ' No breaches detected.'
-  }`;
+  const summary =
+    `"${kpiName}" over the last ${days} days: latest value ${latest.value}${target !== null ? ` (target: ${target})` : ''}. ` +
+    `${granularity === 'weekly' ? 'Week' : 'Day'}-over-${granularity === 'weekly' ? 'week' : 'day'} change: ${
+      wowChange !== null ? `${wowChange > 0 ? '+' : ''}${wowChange.toFixed(1)}%` : 'N/A'
+    }. 4-period rolling avg: ${rollingAvg}. Trend is ${trendDir} vs target.${
+      breachPeriods.length > 0 ? ` ${breachPeriods.length} breach period(s) detected.` : ' No breaches detected.'
+    }`;
 
   return toolResult(summary, {
     kpiName,

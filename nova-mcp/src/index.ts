@@ -1,7 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { z } from 'zod';
-import { closePool } from './db.js';
 
 import { trendAnalysisSchema, trendAnalysis } from './tools/trend-analysis.js';
 import { agentComparisonSchema, agentComparison } from './tools/agent-comparison.js';
@@ -19,7 +17,7 @@ import {
 
 const server = new McpServer({
   name: 'nova',
-  version: '1.0.0',
+  version: '1.1.0',
 });
 
 // 1. Trend Analysis
@@ -101,13 +99,11 @@ async function main() {
 
   // Graceful shutdown
   process.on('SIGINT', async () => {
-    await closePool();
     await server.close();
     process.exit(0);
   });
 
   process.on('SIGTERM', async () => {
-    await closePool();
     await server.close();
     process.exit(0);
   });

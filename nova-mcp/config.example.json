@@ -1,8 +1,8 @@
 {
-  "sql": {
-    "server": "",
-    "database": "",
-    "user": "",
-    "password": ""
+  "api": {
+    "baseUrl": "https://nova.nurtur.tech",
+    "username": "your.email@nurtur.tech",
+    "password": "",
+    "env": "live"
   }
 }

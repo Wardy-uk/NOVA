@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { query } from '../db.js';
+import { apiGet, getEnv } from '../auth.js';
 import { TEAM_AGENTS, CHECKPOINT_DATES } from '../constants.js';
-import { toolResult, ragStatus } from './helpers.js';
+import { toolResult, toolError, ragStatus, mean } from './helpers.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 export const checkpointSummarySchema = {
@@ -22,6 +22,27 @@ interface MetricRow {
   periods: Record<PeriodKey, MetricCell>;
 }
 
+interface DailyRow {
+  kpi: string;
+  count: number;
+  CreatedAt: string;
+}
+
+interface QaResultRow {
+  assigneeName: string;
+  overallScore: number | string;
+  processedAt: string;
+}
+
+interface GoldenRow {
+  Updater?: string;
+  assigneeName?: string;
+  rule1Pass?: number;
+  rule2Pass?: number;
+  rule3Pass?: number;
+  processedAt: string;
+}
+
 function getMonday(): string {
   const d = new Date();
   const day = d.getDay();
@@ -38,8 +59,31 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function n(v: unknown): number {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+}
+
+function inRange(dateStr: string, start: string, end: string): boolean {
+  const d = dateStr.slice(0, 10);
+  return d >= start && d <= end;
+}
+
+const TEAM_SET = new Set<string>(TEAM_AGENTS);
+
+async function fetchAllPaged<T>(path: string, base: Record<string, string | number>): Promise<T[]> {
+  const out: T[] = [];
+  for (let page = 1; page <= 5; page++) {
+    const batch = await apiGet<T[]>(path, { ...base, page, limit: 100 });
+    if (!batch || batch.length === 0) break;
+    out.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return out;
+}
+
 export async function checkpointSummary(args: { env: string }): Promise<CallToolResult> {
-  const agentList = TEAM_AGENTS.join("','");
+  const env = args.env || getEnv();
 
   const periodRanges: Record<PeriodKey, { start: string; end: string }> = {
     day0: { start: CHECKPOINT_DATES.day0, end: CHECKPOINT_DATES.day0 },
@@ -50,6 +94,32 @@ export async function checkpointSummary(args: { env: string }): Promise<CallTool
     mtd: { start: getFirstOfMonth(), end: today() },
   };
 
+  // Compute overall fetch window: earliest start across all periods → today
+  const starts = Object.values(periodRanges).map((r) => r.start).sort();
+  const earliest = starts[0];
+  const latest = today();
+
+  // Number of days back from today (for qa-results/golden which don't support from/to)
+  const daysBack = Math.max(
+    1,
+    Math.ceil((new Date(latest).getTime() - new Date(earliest).getTime()) / 86400_000) + 1,
+  );
+  const qaDays = Math.min(daysBack + 2, 365);
+
+  // Fetch all data up-front
+  let history: DailyRow[];
+  let qaRows: QaResultRow[];
+  let grRows: GoldenRow[];
+  try {
+    [history, qaRows, grRows] = await Promise.all([
+      apiGet<DailyRow[]>('/api/kpi-data/daily-history', { env, from: earliest, to: latest }),
+      fetchAllPaged<QaResultRow>('/api/kpi-data/qa-results', { env, days: qaDays }),
+      fetchAllPaged<GoldenRow>('/api/kpi-data/qa-golden-results', { env, days: qaDays }),
+    ]);
+  } catch (err) {
+    return toolError(`Failed to fetch checkpoint data: ${err instanceof Error ? err.message : err}`);
+  }
+
   const metrics: MetricRow[] = [
     { metric: 'FRT Compliance %', target: 90, lowerIsBetter: false, periods: {} as any },
     { metric: 'Resolution Compliance %', target: 85, lowerIsBetter: false, periods: {} as any },
@@ -59,7 +129,6 @@ export async function checkpointSummary(args: { env: string }): Promise<CallTool
     { metric: 'Oldest Support Ticket', target: null, lowerIsBetter: true, periods: {} as any },
   ];
 
-  // Initialize periods
   for (const m of metrics) {
     m.periods = {} as Record<PeriodKey, MetricCell>;
     for (const pk of Object.keys(periodRanges) as PeriodKey[]) {
@@ -68,20 +137,14 @@ export async function checkpointSummary(args: { env: string }): Promise<CallTool
   }
 
   for (const [pk, range] of Object.entries(periodRanges) as [PeriodKey, { start: string; end: string }][]) {
-    // FRT Compliance
-    const frtRows = await query<Array<{ kpi: string; totalCount: number }>>(
-      `SELECT kpi, SUM([count]) AS totalCount
-       FROM dbo.jira_kpi_daily
-       WHERE (kpi LIKE 'FRT Met%' OR kpi LIKE 'FRT Breached%')
-         AND CAST(CreatedAt AS DATE) BETWEEN @start AND @end
-       GROUP BY kpi`,
-      { start: range.start, end: range.end },
-    );
+    const hRows = history.filter((r) => inRange(r.CreatedAt, range.start, range.end));
 
-    let frtMet = 0, frtBreached = 0;
-    for (const r of frtRows) {
-      if (r.kpi.toLowerCase().includes('met')) frtMet += r.totalCount;
-      else frtBreached += r.totalCount;
+    // FRT Compliance
+    let frtMet = 0;
+    let frtBreached = 0;
+    for (const r of hRows) {
+      if (/^FRT Met/i.test(r.kpi)) frtMet += n(r.count);
+      else if (/^FRT Breached/i.test(r.kpi)) frtBreached += n(r.count);
     }
     const frtTotal = frtMet + frtBreached;
     if (frtTotal > 0) {
@@ -90,19 +153,11 @@ export async function checkpointSummary(args: { env: string }): Promise<CallTool
     }
 
     // Resolution Compliance
-    const resRows = await query<Array<{ kpi: string; totalCount: number }>>(
-      `SELECT kpi, SUM([count]) AS totalCount
-       FROM dbo.jira_kpi_daily
-       WHERE (kpi LIKE 'Resolution Met%' OR kpi LIKE 'Resolution Breached%')
-         AND CAST(CreatedAt AS DATE) BETWEEN @start AND @end
-       GROUP BY kpi`,
-      { start: range.start, end: range.end },
-    );
-
-    let resMet = 0, resBreached = 0;
-    for (const r of resRows) {
-      if (r.kpi.toLowerCase().includes('met')) resMet += r.totalCount;
-      else resBreached += r.totalCount;
+    let resMet = 0;
+    let resBreached = 0;
+    for (const r of hRows) {
+      if (/^Resolution Met/i.test(r.kpi)) resMet += n(r.count);
+      else if (/^Resolution Breached/i.test(r.kpi)) resBreached += n(r.count);
     }
     const resTotal = resMet + resBreached;
     if (resTotal > 0) {
@@ -111,87 +166,70 @@ export async function checkpointSummary(args: { env: string }): Promise<CallTool
     }
 
     // Team QA Average
-    const qaRows = await query<Array<{ avg: number }>>(
-      `SELECT AVG(overallScore) AS avg
-       FROM dbo.jira_qa_results
-       WHERE assigneeName IN ('${agentList}')
-         AND (qaType IS NULL OR qaType != 'excluded')
-         AND CAST(CreatedAt AS DATE) BETWEEN @start AND @end`,
-      { start: range.start, end: range.end },
+    const qaInRange = qaRows.filter(
+      (r) => TEAM_SET.has(r.assigneeName) && inRange(r.processedAt, range.start, range.end),
     );
-    if (qaRows[0]?.avg != null) {
-      const val = Math.round(qaRows[0].avg * 100) / 100;
+    if (qaInRange.length > 0) {
+      const val = Math.round(mean(qaInRange.map((r) => n(r.overallScore))) * 100) / 100;
       metrics[2].periods[pk] = { value: val, rag: ragStatus(val, 7.0, false) };
     }
 
     // Golden Rules Avg %
-    const grRows = await query<Array<{ avg: number }>>(
-      `SELECT AVG((CAST(rule1Pass AS FLOAT) + CAST(rule2Pass AS FLOAT) + CAST(rule3Pass AS FLOAT)) / 3.0) * 100 AS avg
-       FROM dbo.Jira_QA_GoldenRules
-       WHERE Updater IN ('${agentList}')
-         AND CAST(CreatedAt AS DATE) BETWEEN @start AND @end`,
-      { start: range.start, end: range.end },
-    );
-    if (grRows[0]?.avg != null) {
-      const val = Math.round(grRows[0].avg * 10) / 10;
+    const grInRange = grRows.filter((r) => {
+      const updater = r.Updater ?? r.assigneeName ?? '';
+      return TEAM_SET.has(updater) && inRange(r.processedAt, range.start, range.end);
+    });
+    if (grInRange.length > 0) {
+      const avgPct = mean(
+        grInRange.map((r) => ((n(r.rule1Pass) + n(r.rule2Pass) + n(r.rule3Pass)) / 3) * 100),
+      );
+      const val = Math.round(avgPct * 10) / 10;
       metrics[3].periods[pk] = { value: val, rag: ragStatus(val, 70, false) };
     }
 
-    // Total Queue Size
-    const queueRows = await query<Array<{ total: number }>>(
-      `SELECT SUM([count]) AS total
-       FROM dbo.jira_kpi_daily
-       WHERE kpi LIKE 'Number of Tickets in%'
-         AND CAST(CreatedAt AS DATE) = (
-           SELECT MAX(CAST(CreatedAt AS DATE))
-           FROM dbo.jira_kpi_daily
-           WHERE kpi LIKE 'Number of Tickets in%'
-             AND CAST(CreatedAt AS DATE) BETWEEN @start AND @end
-         )`,
-      { start: range.start, end: range.end },
-    );
-    if (queueRows[0]?.total != null) {
-      metrics[4].periods[pk] = { value: queueRows[0].total, rag: null };
+    // Total Queue Size — use latest date in range where there are "Number of Tickets in%" rows
+    const queueRows = hRows.filter((r) => /^Number of Tickets in/i.test(r.kpi));
+    if (queueRows.length > 0) {
+      queueRows.sort((a, b) => b.CreatedAt.localeCompare(a.CreatedAt));
+      const latestDate = queueRows[0].CreatedAt.slice(0, 10);
+      const total = queueRows
+        .filter((r) => r.CreatedAt.slice(0, 10) === latestDate)
+        .reduce((s, r) => s + n(r.count), 0);
+      metrics[4].periods[pk] = { value: total, rag: null };
     }
 
     // Oldest Support Ticket
-    const oldestRows = await query<Array<{ maxAge: number }>>(
-      `SELECT MAX([count]) AS maxAge
-       FROM dbo.jira_kpi_daily
-       WHERE kpi LIKE 'Oldest actionable ticket%'
-         AND CAST(CreatedAt AS DATE) = (
-           SELECT MAX(CAST(CreatedAt AS DATE))
-           FROM dbo.jira_kpi_daily
-           WHERE kpi LIKE 'Oldest actionable ticket%'
-             AND CAST(CreatedAt AS DATE) BETWEEN @start AND @end
-         )`,
-      { start: range.start, end: range.end },
-    );
-    if (oldestRows[0]?.maxAge != null) {
-      metrics[5].periods[pk] = { value: oldestRows[0].maxAge, rag: null };
+    const oldestRows = hRows.filter((r) => /^Oldest actionable ticket/i.test(r.kpi));
+    if (oldestRows.length > 0) {
+      oldestRows.sort((a, b) => b.CreatedAt.localeCompare(a.CreatedAt));
+      const latestDate = oldestRows[0].CreatedAt.slice(0, 10);
+      const maxAge = Math.max(
+        ...oldestRows.filter((r) => r.CreatedAt.slice(0, 10) === latestDate).map((r) => n(r.count)),
+      );
+      metrics[5].periods[pk] = { value: maxAge, rag: null };
     }
   }
 
-  // Build summary
   const changes: string[] = [];
   for (const m of metrics) {
     const d1 = m.periods.day1.value;
-    const latest = m.periods.wtd.value ?? m.periods.mtd.value;
-    if (d1 !== null && latest !== null) {
-      const diff = latest - d1;
+    const latestVal = m.periods.wtd.value ?? m.periods.mtd.value;
+    if (d1 !== null && latestVal !== null) {
+      const diff = latestVal - d1;
       if (Math.abs(diff) > 0.1) {
         const dir = (m.lowerIsBetter ? diff < 0 : diff > 0) ? 'improved' : 'worsened';
-        changes.push(`${m.metric} ${dir} from ${d1} to ${latest}`);
+        changes.push(`${m.metric} ${dir} from ${d1} to ${latestVal}`);
       }
     }
   }
 
-  const summary = `Checkpoint summary across the 90-day framework. ` +
+  const summary =
+    `Checkpoint summary across the 90-day framework. ` +
     `${changes.length > 0 ? `Since Day 1: ${changes.join('; ')}.` : 'No significant movement since Day 1.'}`;
 
   return toolResult(summary, {
     periodDates: periodRanges,
-    matrix: metrics.map(m => ({
+    matrix: metrics.map((m) => ({
       metric: m.metric,
       target: m.target,
       ...m.periods,

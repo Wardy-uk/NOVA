@@ -1,11 +1,11 @@
 import { z } from 'zod';
-import { query } from '../db.js';
+import { apiGet, getEnv } from '../auth.js';
 import { TEAM_AGENTS } from '../constants.js';
 import { toolResult, mean } from './helpers.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 export const focusAreasSchema = {
-  days: z.number().default(14).describe('Number of days to look back (default 14)'),
+  days: z.number().default(14).describe('Number of days to look back (default 14, max 90)'),
 };
 
 interface FocusItem {
@@ -17,28 +17,69 @@ interface FocusItem {
   action: string;
 }
 
+interface DailyRow {
+  kpi: string;
+  kpiGroup?: string;
+  count: number;
+  target: number | null;
+  direction: string | null;
+  CreatedAt: string;
+}
+
+interface QaAgentRow {
+  assigneeName: string;
+  avgScore: number | string;
+}
+
+interface GoldenSummary {
+  total: number;
+  rule1Pass: number;
+  rule2Pass: number;
+  rule3Pass: number;
+}
+
+const TEAM_SET = new Set<string>(TEAM_AGENTS);
+
+function groupByKpi(rows: DailyRow[]): Map<string, DailyRow[]> {
+  const out = new Map<string, DailyRow[]>();
+  for (const r of rows) {
+    if (!out.has(r.kpi)) out.set(r.kpi, []);
+    out.get(r.kpi)!.push(r);
+  }
+  return out;
+}
+
 export async function focusAreas(args: { days: number }): Promise<CallToolResult> {
-  const { days } = args;
-  const agentList = TEAM_AGENTS.join("','");
+  const days = Math.min(Math.max(args.days, 1), 90);
+  const env = getEnv();
   const items: FocusItem[] = [];
 
-  // 1. KPIs below target
-  const kpiRows = await query<Array<{
-    kpi: string; avgCount: number; target: number; direction: string;
-  }>>(
-    `SELECT kpi, AVG([count]) AS avgCount, AVG(target) AS target, MAX(direction) AS direction
-     FROM dbo.jira_kpi_daily
-     WHERE CreatedAt >= DATEADD(day, -@days, GETDATE())
-       AND target IS NOT NULL AND target > 0
-     GROUP BY kpi
-     HAVING (MAX(direction) LIKE '%lower%' AND AVG([count]) > AVG(target) * 1.1)
-        OR  (MAX(direction) NOT LIKE '%lower%' AND AVG([count]) < AVG(target) * 0.9)
-     ORDER BY ABS(AVG([count]) - AVG(target)) / AVG(target) DESC`,
-    { days },
-  );
+  // Fetch data
+  const [history, qaAgents, golden] = await Promise.all([
+    apiGet<DailyRow[]>('/api/kpi-data/daily-history', { env, days }),
+    apiGet<QaAgentRow[]>('/api/kpi-data/qa-agents', { env, days }),
+    apiGet<GoldenSummary>('/api/kpi-data/qa-golden-summary', { env, days }),
+  ]);
 
-  for (const row of kpiRows.slice(0, 5)) {
-    const lowerIsBetter = (row.direction ?? '').toLowerCase().includes('lower');
+  const byKpi = groupByKpi(history);
+
+  // 1. KPIs below target — averages vs target
+  type KpiAgg = { kpi: string; avgCount: number; target: number; direction: string };
+  const kpiAggs: KpiAgg[] = [];
+  for (const [kpi, rs] of byKpi.entries()) {
+    const targets = rs.map((r) => r.target).filter((t): t is number => t != null && t > 0);
+    if (targets.length === 0) continue;
+    const target = mean(targets);
+    const avgCount = mean(rs.map((r) => Number(r.count) || 0));
+    const direction = rs.find((r) => r.direction)?.direction ?? 'higher is better';
+    const lowerIsBetter = direction.toLowerCase().includes('lower');
+    const breaching = lowerIsBetter ? avgCount > target * 1.1 : avgCount < target * 0.9;
+    if (breaching) kpiAggs.push({ kpi, avgCount, target, direction });
+  }
+  kpiAggs.sort((a, b) => Math.abs(b.avgCount - b.target) / b.target - Math.abs(a.avgCount - a.target) / a.target);
+
+  for (const row of kpiAggs.slice(0, 5)) {
+    const lowerIsBetter = row.direction.toLowerCase().includes('lower');
     const gap = lowerIsBetter
       ? ((row.avgCount - row.target) / row.target) * 100
       : ((row.target - row.avgCount) / row.target) * 100;
@@ -46,7 +87,7 @@ export async function focusAreas(args: { days: number }): Promise<CallToolResult
       severity: gap > 20 ? 'red' : 'amber',
       area: row.kpi,
       metric: Math.round(row.avgCount * 100) / 100,
-      target: row.target,
+      target: Math.round(row.target * 100) / 100,
       gap: Math.round(gap * 10) / 10,
       action: lowerIsBetter
         ? `Reduce ${row.kpi} — currently ${Math.round(gap)}% above target.`
@@ -55,19 +96,13 @@ export async function focusAreas(args: { days: number }): Promise<CallToolResult
   }
 
   // 2. QA averages below 7.0 by agent
-  const qaRows = await query<Array<{ assigneeName: string; avgScore: number }>>(
-    `SELECT assigneeName, AVG(overallScore) AS avgScore
-     FROM dbo.jira_qa_results
-     WHERE assigneeName IN ('${agentList}')
-       AND CreatedAt >= DATEADD(day, -@days, GETDATE())
-       AND (qaType IS NULL OR qaType != 'excluded')
-     GROUP BY assigneeName
-     HAVING AVG(overallScore) < 7.0
-     ORDER BY AVG(overallScore) ASC`,
-    { days },
-  );
+  const qaLow = qaAgents
+    .filter((r) => TEAM_SET.has(r.assigneeName))
+    .map((r) => ({ assigneeName: r.assigneeName, avgScore: Number(r.avgScore) || 0 }))
+    .filter((r) => r.avgScore > 0 && r.avgScore < 7.0)
+    .sort((a, b) => a.avgScore - b.avgScore);
 
-  for (const row of qaRows.slice(0, 3)) {
+  for (const row of qaLow.slice(0, 3)) {
     items.push({
       severity: row.avgScore < 5.0 ? 'red' : 'amber',
       area: `QA: ${row.assigneeName}`,
@@ -79,70 +114,56 @@ export async function focusAreas(args: { days: number }): Promise<CallToolResult
   }
 
   // 3. Golden Rules pass rates below 70%
-  const grRows = await query<Array<{ rule: string; passRate: number }>>(
-    `SELECT 'Rule 1 (Ownership)' AS rule,
-            AVG(CAST(rule1Pass AS FLOAT)) * 100 AS passRate
-     FROM dbo.Jira_QA_GoldenRules
-     WHERE Updater IN ('${agentList}')
-       AND CreatedAt >= DATEADD(day, -@days, GETDATE())
-     UNION ALL
-     SELECT 'Rule 2 (Next Action)',
-            AVG(CAST(rule2Pass AS FLOAT)) * 100
-     FROM dbo.Jira_QA_GoldenRules
-     WHERE Updater IN ('${agentList}')
-       AND CreatedAt >= DATEADD(day, -@days, GETDATE())
-     UNION ALL
-     SELECT 'Rule 3 (Timeframe)',
-            AVG(CAST(rule3Pass AS FLOAT)) * 100
-     FROM dbo.Jira_QA_GoldenRules
-     WHERE Updater IN ('${agentList}')
-       AND CreatedAt >= DATEADD(day, -@days, GETDATE())`,
-    { days },
-  );
-
-  for (const row of grRows) {
-    if (row.passRate < 70) {
-      items.push({
-        severity: row.passRate < 50 ? 'red' : 'amber',
-        area: `Golden Rules: ${row.rule}`,
-        metric: Math.round(row.passRate * 10) / 10,
-        target: 70,
-        gap: Math.round((70 - row.passRate) * 10) / 10,
-        action: `Focus team on ${row.rule} — pass rate ${row.passRate.toFixed(0)}% is below 70% threshold.`,
-      });
+  const grTotal = Number(golden?.total ?? 0);
+  if (grTotal > 0) {
+    const rules: Array<{ label: string; pass: number }> = [
+      { label: 'Rule 1 (Ownership)', pass: Number(golden.rule1Pass ?? 0) },
+      { label: 'Rule 2 (Next Action)', pass: Number(golden.rule2Pass ?? 0) },
+      { label: 'Rule 3 (Timeframe)', pass: Number(golden.rule3Pass ?? 0) },
+    ];
+    for (const r of rules) {
+      const passRate = (r.pass / grTotal) * 100;
+      if (passRate < 70) {
+        items.push({
+          severity: passRate < 50 ? 'red' : 'amber',
+          area: `Golden Rules: ${r.label}`,
+          metric: Math.round(passRate * 10) / 10,
+          target: 70,
+          gap: Math.round((70 - passRate) * 10) / 10,
+          action: `Focus team on ${r.label} — pass rate ${passRate.toFixed(0)}% is below 70% threshold.`,
+        });
+      }
     }
   }
 
-  // 4. Week-on-week deterioration
-  const wowRows = await query<Array<{
-    kpi: string; thisWeek: number; lastWeek: number; direction: string;
-  }>>(
-    `WITH ThisWeek AS (
-       SELECT kpi, AVG([count]) AS avg_count, MAX(direction) AS direction
-       FROM dbo.jira_kpi_daily
-       WHERE CreatedAt >= DATEADD(day, -7, GETDATE())
-       GROUP BY kpi
-     ),
-     LastWeek AS (
-       SELECT kpi, AVG([count]) AS avg_count
-       FROM dbo.jira_kpi_daily
-       WHERE CreatedAt >= DATEADD(day, -14, GETDATE())
-         AND CreatedAt < DATEADD(day, -7, GETDATE())
-       GROUP BY kpi
-     )
-     SELECT t.kpi, t.avg_count AS thisWeek, l.avg_count AS lastWeek, t.direction
-     FROM ThisWeek t
-     JOIN LastWeek l ON t.kpi = l.kpi
-     WHERE l.avg_count > 0
-       AND (
-         (t.direction LIKE '%lower%' AND t.avg_count > l.avg_count * 1.15)
-         OR (t.direction NOT LIKE '%lower%' AND t.avg_count < l.avg_count * 0.85)
-       )`,
-    { days },
-  );
+  // 4. Week-on-week deterioration (needs ≥ 14 days of data)
+  const now = Date.now();
+  const oneWeekMs = 7 * 86400_000;
+  const thisWeekRows: DailyRow[] = [];
+  const lastWeekRows: DailyRow[] = [];
+  for (const r of history) {
+    const t = new Date(r.CreatedAt).getTime();
+    if (t >= now - oneWeekMs) thisWeekRows.push(r);
+    else if (t >= now - 2 * oneWeekMs) lastWeekRows.push(r);
+  }
 
-  for (const row of wowRows.slice(0, 3)) {
-    const lowerIsBetter = (row.direction ?? '').toLowerCase().includes('lower');
+  const thisByKpi = groupByKpi(thisWeekRows);
+  const lastByKpi = groupByKpi(lastWeekRows);
+  const wowCandidates: Array<{ kpi: string; thisWeek: number; lastWeek: number; direction: string }> = [];
+  for (const [kpi, rs] of thisByKpi.entries()) {
+    const last = lastByKpi.get(kpi);
+    if (!last || last.length === 0) continue;
+    const thisAvg = mean(rs.map((r) => Number(r.count) || 0));
+    const lastAvg = mean(last.map((r) => Number(r.count) || 0));
+    if (lastAvg <= 0) continue;
+    const direction = rs.find((r) => r.direction)?.direction ?? 'higher is better';
+    const lowerIsBetter = direction.toLowerCase().includes('lower');
+    const deteriorated = lowerIsBetter ? thisAvg > lastAvg * 1.15 : thisAvg < lastAvg * 0.85;
+    if (deteriorated) wowCandidates.push({ kpi, thisWeek: thisAvg, lastWeek: lastAvg, direction });
+  }
+
+  for (const row of wowCandidates.slice(0, 3)) {
+    const lowerIsBetter = row.direction.toLowerCase().includes('lower');
     const change = ((row.thisWeek - row.lastWeek) / Math.abs(row.lastWeek)) * 100;
     items.push({
       severity: Math.abs(change) > 30 ? 'red' : 'amber',
@@ -155,18 +176,17 @@ export async function focusAreas(args: { days: number }): Promise<CallToolResult
   }
 
   // 5. Over-SLA counts
-  const slaRows = await query<Array<{ kpi: string; avgCount: number }>>(
-    `SELECT kpi, AVG([count]) AS avgCount
-     FROM dbo.jira_kpi_daily
-     WHERE (kpiGroup = 'SLA' OR kpi LIKE '%over sla%')
-       AND CreatedAt >= DATEADD(day, -@days, GETDATE())
-       AND [count] > 0
-     GROUP BY kpi
-     ORDER BY AVG([count]) DESC`,
-    { days },
-  );
+  const slaAggs: Array<{ kpi: string; avgCount: number }> = [];
+  for (const [kpi, rs] of byKpi.entries()) {
+    const isSla = rs.some((r) => (r.kpiGroup ?? '') === 'SLA') || /over sla/i.test(kpi);
+    if (!isSla) continue;
+    const counts = rs.map((r) => Number(r.count) || 0).filter((v) => v > 0);
+    if (counts.length === 0) continue;
+    slaAggs.push({ kpi, avgCount: mean(counts) });
+  }
+  slaAggs.sort((a, b) => b.avgCount - a.avgCount);
 
-  for (const row of slaRows.slice(0, 2)) {
+  for (const row of slaAggs.slice(0, 2)) {
     items.push({
       severity: row.avgCount > 5 ? 'red' : 'amber',
       area: `SLA: ${row.kpi}`,
@@ -177,7 +197,7 @@ export async function focusAreas(args: { days: number }): Promise<CallToolResult
     });
   }
 
-  // Sort by severity (red first), then by gap descending
+  // Sort: red first, then by gap descending
   items.sort((a, b) => {
     if (a.severity !== b.severity) return a.severity === 'red' ? -1 : 1;
     return (b.gap ?? 0) - (a.gap ?? 0);
@@ -185,11 +205,17 @@ export async function focusAreas(args: { days: number }): Promise<CallToolResult
 
   const top5 = items.slice(0, 5);
 
-  const summary = top5.length === 0
-    ? 'No significant focus areas identified — all KPIs appear healthy.'
-    : `Top ${top5.length} focus areas: ${top5.map((f, i) =>
-        `${i + 1}. ${f.area} (${f.severity.toUpperCase()}: ${f.metric}${f.target !== null ? ` vs target ${f.target}` : ''})`
-      ).join('; ')}. ${top5.filter(f => f.severity === 'red').length} red, ${top5.filter(f => f.severity === 'amber').length} amber.`;
+  const summary =
+    top5.length === 0
+      ? 'No significant focus areas identified — all KPIs appear healthy.'
+      : `Top ${top5.length} focus areas: ${top5
+          .map(
+            (f, i) =>
+              `${i + 1}. ${f.area} (${f.severity.toUpperCase()}: ${f.metric}${f.target !== null ? ` vs target ${f.target}` : ''})`,
+          )
+          .join('; ')}. ${top5.filter((f) => f.severity === 'red').length} red, ${
+          top5.filter((f) => f.severity === 'amber').length
+        } amber.`;
 
   return toolResult(summary, { focusAreas: top5, totalCandidates: items.length });
 }
