@@ -45,6 +45,24 @@ export function productToTeam(product: string | null | undefined): string {
   return product;
 }
 
+/** Walk an ADF doc and extract plain text — used when importing Jira
+ *  comments into the local thread. Mirrors the helper in the background
+ *  watcher in index.ts. */
+function adfToPlainText(adf: unknown): string {
+  const walk = (n: unknown): string => {
+    if (!n) return '';
+    if (typeof n === 'string') return n;
+    const node = n as { text?: string; type?: string; content?: unknown[] };
+    if (node.text) return node.text;
+    if (Array.isArray(node.content)) {
+      const inner = node.content.map(walk).join('');
+      return node.type === 'paragraph' || node.type === 'heading' ? inner + '\n' : inner;
+    }
+    return '';
+  };
+  return walk(adf).trim();
+}
+
 /** Build an ADF doc from plain text — Jira Cloud rich text fields require this. */
 function adfDoc(text: string): object {
   const paragraphs = text.split(/\n\n+/).map((para) => ({
@@ -258,9 +276,37 @@ export function createDevReviewRoutes(
 
       if (!issue) { res.status(404).json({ ok: false, error: 'Not found' }); return; }
 
+      // Pull the latest 20 Jira comments and import any not yet in the
+      // local thread. Same logic as the global comment watcher but scoped
+      // to this single ticket — gives the detail pane near-real-time
+      // freshness without waiting for the 2-min sweep.
+      const jiraComments = await client.getComments(key, 20).catch(() => []);
+      let importedExternal = 0;
+      for (const c of jiraComments) {
+        if (devQueries.hasJiraComment(key, c.id)) continue;
+        const body = adfToPlainText(c.body);
+        const authorName = c.author?.displayName || 'Unknown';
+        devQueries.addExternalJiraComment({
+          jira_key: key,
+          author_display: authorName,
+          body,
+          jira_comment_id: c.id,
+          author_account_id: c.author?.accountId,
+          internal: c.jsdPublic === false,
+        });
+        importedExternal++;
+      }
+      // Any new external reply flips waiting_on_assignee → in_review so
+      // the queue immediately reflects "ball back in dev court".
+      if (importedExternal > 0) {
+        const cur = devQueries.getState(key);
+        if (cur?.status === 'waiting_on_assignee') {
+          devQueries.setStatus(key, 'in_review');
+        }
+      }
+
       const state = devQueries.getState(key);
       const thread = devQueries.getThread(key);
-      const jiraComments = await client.getComments(key, 20).catch(() => []);
 
       res.json({ ok: true, data: { key, fields: issue.fields, state, thread, jiraComments } });
     } catch (err) {

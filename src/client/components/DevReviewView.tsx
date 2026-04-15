@@ -314,7 +314,7 @@ export function DevReviewView() {
   // watcher without the dev having to click anything.
   useEffect(() => {
     if (!selectedKey) return;
-    const i = setInterval(() => loadDetail(selectedKey), 30_000);
+    const i = setInterval(() => loadDetail(selectedKey), 15_000);
     return () => clearInterval(i);
   }, [selectedKey, loadDetail]);
 
