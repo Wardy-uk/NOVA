@@ -639,40 +639,17 @@ export function createDevReviewRoutes(
       syncState: 'pending',
     });
 
-    const commentText = `✅ Accepted to development by ${display}${note ? `\n\n${note}` : ''}`;
-
     // Capture the current assignee BEFORE the transition. The Escalate to
-    // Development post-function clears the assignee (it's a workflow rule
-    // intended for teams who reassign at each tier), but we want the
-    // original agent to stay on the ticket so they can update the customer.
-    // Restored via updateFields after the transition completes.
+    // Development post-function clears the assignee AND any TL;DR /
+    // Development Details we'd set. We restore everything in a single
+    // updateFields call AFTER the transition so post-functions can't
+    // clobber our writes.
     let originalAssigneeAccountId: string | null = null;
     try {
       const currentIssue = await client.getIssue(key, ['assignee']);
       const assignee = (currentIssue?.fields as { assignee?: { accountId?: string } | null } | undefined)?.assignee;
       originalAssigneeAccountId = assignee?.accountId ?? null;
     } catch { /* non-fatal — skip restore step if we can't read */ }
-
-    // Set TL;DR + Development Details on the issue BEFORE the transition.
-    // The Escalate to Development transition screen doesn't include these
-    // fields — Jira rejects them with "Field cannot be set. It is not on
-    // the appropriate screen" if passed in the transition payload. Using
-    // updateFields first writes them directly to the ticket, then the
-    // transition runs with just the comment.
-    try {
-      const updatePayload: Record<string, unknown> = {
-        [CF_TLDR]: adfDoc(tldr),
-      };
-      if (developmentDetails) {
-        updatePayload[CF_DEVELOPMENT_DETAILS] = adfDoc(developmentDetails);
-      }
-      await client.updateFields(key, updatePayload);
-    } catch (updateErr) {
-      const msg = updateErr instanceof Error ? updateErr.message : 'Field update failed';
-      devQueries.markThreadSyncFailed(threadId, msg);
-      res.status(502).json({ ok: false, error: `Failed to set TL;DR / Development Details: ${msg}` });
-      return;
-    }
 
     // Discover the actual Escalate to Development transition id for THIS
     // ticket's current status. Accept is called from anywhere in the
@@ -721,51 +698,61 @@ export function createDevReviewRoutes(
       return;
     }
 
+    // Step 1 — bare transition (no fields, no comment). The transition
+    // screen doesn't include TL;DR / Dev Details / comment, and its
+    // post-function clears the assignee. We do all writes in step 2
+    // to avoid fighting those post-functions.
     try {
-      await client.transitionIssue(key, transitionId, {
-        comment: { body: adfDoc(commentText) },
-      });
-      devQueries.markThreadSynced(threadId, null);
-      devQueries.markAccepted(key);
-
-      // Restore the original assignee — the Escalate to Development
-      // post-function clears it, but we want the original agent to stay
-      // on the ticket so they can update the customer after it lands in
-      // development. Awaited (not fire-and-forget) so the UI reflects
-      // the restored assignee on its next refresh.
-      if (originalAssigneeAccountId) {
-        try {
-          await client.updateFields(key, { assignee: { accountId: originalAssigneeAccountId } });
-        } catch (reassignErr) {
-          console.warn(`[DevReview/accept] Failed to restore assignee for ${key}: ${reassignErr instanceof Error ? reassignErr.message : reassignErr}`);
-        }
-      }
-
-      // Best-effort second internal comment aimed at the T2 agent who owns
-      // the ticket — tells them the ticket is with development and prompts
-      // them to update the customer. FIRE-AND-FORGET — we don't await it.
-      // Awaiting blocked the response on a second Jira call which could
-      // hang past the reverse-proxy timeout, returning HTML instead of JSON.
-      const agentNoticeText =
-        `📋 Action required — ${display} has accepted this ticket into the development backlog.\n\n` +
-        `Please update the customer to let them know their ticket is now with the development team. ` +
-        `You can expect updates from development every 5 working days. ` +
-        `If there is no update after 5 working days, chase via the Jira comment thread.`;
-      client.addComment(key, agentNoticeText, { internal: true }).catch((noticeErr) => {
-        console.warn(`[DevReview/accept] Failed to post agent-notice comment for ${key}: ${noticeErr instanceof Error ? noticeErr.message : noticeErr}`);
-      });
-
-      res.json({ ok: true });
+      await client.transitionIssue(key, transitionId);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Transition failed';
       devQueries.markThreadSyncFailed(threadId, msg);
       devQueries.addOutbox({
         jira_key: key,
         op: 'accept',
-        payload: { transitionId, commentText, tldr, developmentDetails },
+        payload: { transitionId, tldr, developmentDetails },
       });
       res.status(502).json({ ok: false, error: msg });
+      return;
     }
+
+    devQueries.markThreadSynced(threadId, null);
+    devQueries.markAccepted(key);
+
+    // Step 2 — single updateFields call writing TL;DR, Development Details
+    // and restoring the original assignee. Runs AFTER the transition so
+    // any post-functions that clear these fields have already fired.
+    // Logged loudly on failure — the accept is already committed in
+    // NOVA and the ticket has moved in Jira, so we return ok: true with
+    // a warnings list rather than failing the whole request.
+    const postUpdatePayload: Record<string, unknown> = {
+      [CF_TLDR]: adfDoc(tldr),
+    };
+    if (developmentDetails) postUpdatePayload[CF_DEVELOPMENT_DETAILS] = adfDoc(developmentDetails);
+    if (originalAssigneeAccountId) {
+      postUpdatePayload.assignee = { accountId: originalAssigneeAccountId };
+    }
+    const warnings: string[] = [];
+    try {
+      await client.updateFields(key, postUpdatePayload);
+    } catch (postErr) {
+      const msg = postErr instanceof Error ? postErr.message : 'post-transition update failed';
+      console.warn(`[DevReview/accept] Post-transition field update failed for ${key}: ${msg}`);
+      warnings.push(`Field update after transition failed: ${msg}`);
+    }
+
+    // Step 3 — internal comment aimed at the T2 agent. Fire-and-forget
+    // so a slow/hung Jira call can't time out the accept response.
+    const agentNoticeText =
+      `📋 Action required — ${display} has accepted this ticket into the development backlog.\n\n` +
+      `Please update the customer to let them know their ticket is now with the development team. ` +
+      `You can expect updates from development every 5 working days. ` +
+      `If there is no update after 5 working days, chase via the Jira comment thread.`;
+    client.addComment(key, agentNoticeText, { internal: true }).catch((noticeErr) => {
+      console.warn(`[DevReview/accept] Failed to post agent-notice comment for ${key}: ${noticeErr instanceof Error ? noticeErr.message : noticeErr}`);
+    });
+
+    res.json({ ok: true, warnings: warnings.length > 0 ? warnings : undefined });
   });
 
   // ── Return (back to T2 with mandatory next steps) ─────────────────────
