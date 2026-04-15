@@ -595,6 +595,22 @@ export function createDevReviewRoutes(
       });
       devQueries.markThreadSynced(threadId, null);
       devQueries.markAccepted(key);
+
+      // Best-effort second internal comment aimed at the T2 agent who owns
+      // the ticket — tells them the ticket is with development and prompts
+      // them to update the customer. Wrapped in its own try/catch so a
+      // failure here never breaks the accept response.
+      try {
+        const agentNoticeText =
+          `📋 Action required — ${display} has accepted this ticket into the development backlog.\n\n` +
+          `Please update the customer to let them know their ticket is now with the development team. ` +
+          `You can expect updates from development every 5 working days. ` +
+          `If there is no update after 5 working days, chase via the Jira comment thread.`;
+        await client.addComment(key, agentNoticeText, { internal: true });
+      } catch (noticeErr) {
+        console.warn(`[DevReview/accept] Failed to post agent-notice comment for ${key}: ${noticeErr instanceof Error ? noticeErr.message : noticeErr}`);
+      }
+
       res.json({ ok: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Transition failed';
