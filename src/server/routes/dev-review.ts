@@ -619,8 +619,6 @@ export function createDevReviewRoutes(
     if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
 
     const key = String(req.params.key);
-    const s = settingsQueries.getAll();
-    const transitionId = String(s.dev_review_accept_transition_id || '141');
     const note = String(req.body?.note || '').trim();
     const tldr = String(req.body?.tldr || '').trim();
     const developmentDetails = String(req.body?.developmentDetails || '').trim();
@@ -648,6 +646,53 @@ export function createDevReviewRoutes(
     };
     if (developmentDetails) {
       fields[CF_DEVELOPMENT_DETAILS] = adfDoc(developmentDetails);
+    }
+
+    // Discover the actual Escalate to Development transition id for THIS
+    // ticket's current status. Accept is called from anywhere in the
+    // workflow (Open, Work In Progress, Waiting On Partner, Waiting on
+    // Assignee, etc.) and the transition we want isn't always directly
+    // reachable. If it's not available from the current status, chain
+    // through 'Work In Progress' first, which sits between the various
+    // waiting states and the escalate-to-development transition.
+    const findTransitionByName = async (rx: RegExp): Promise<string | null> => {
+      try {
+        const meta = await client.getTransitionsWithFields(key) as {
+          transitions?: Array<{ id: string; name?: string }>;
+        };
+        const t = (meta.transitions || []).find((x) => rx.test(x.name || ''));
+        return t?.id || null;
+      } catch { return null; }
+    };
+
+    let transitionId = String(
+      settingsQueries.getAll().dev_review_accept_transition_id || '',
+    );
+    // If admin has pinned an ID but it's not in the available set, fall back to name discovery
+    if (transitionId) {
+      const available = await findTransitionByName(new RegExp(`^${transitionId}$`));
+      if (!available) transitionId = '';
+    }
+    if (!transitionId) {
+      transitionId = (await findTransitionByName(/escalate.*development/i)) || '';
+    }
+    if (!transitionId) {
+      // Not directly reachable — chain through Work In Progress
+      const wipId = await findTransitionByName(/work\s*in\s*progress|^wip$/i);
+      if (wipId) {
+        try {
+          await client.transitionIssue(key, wipId);
+          transitionId = (await findTransitionByName(/escalate.*development/i)) || '';
+        } catch (wipErr) {
+          console.warn(`[DevReview/accept] WIP pre-transition failed for ${key}: ${wipErr instanceof Error ? wipErr.message : wipErr}`);
+        }
+      }
+    }
+    if (!transitionId) {
+      const msg = 'Escalate to Development transition not reachable from current status';
+      devQueries.markThreadSyncFailed(threadId, msg);
+      res.status(409).json({ ok: false, error: msg });
+      return;
     }
 
     try {
