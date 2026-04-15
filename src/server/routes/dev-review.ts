@@ -641,11 +641,25 @@ export function createDevReviewRoutes(
 
     const commentText = `✅ Accepted to development by ${display}${note ? `\n\n${note}` : ''}`;
 
-    const fields: Record<string, unknown> = {
-      [CF_TLDR]: adfDoc(tldr),
-    };
-    if (developmentDetails) {
-      fields[CF_DEVELOPMENT_DETAILS] = adfDoc(developmentDetails);
+    // Set TL;DR + Development Details on the issue BEFORE the transition.
+    // The Escalate to Development transition screen doesn't include these
+    // fields — Jira rejects them with "Field cannot be set. It is not on
+    // the appropriate screen" if passed in the transition payload. Using
+    // updateFields first writes them directly to the ticket, then the
+    // transition runs with just the comment.
+    try {
+      const updatePayload: Record<string, unknown> = {
+        [CF_TLDR]: adfDoc(tldr),
+      };
+      if (developmentDetails) {
+        updatePayload[CF_DEVELOPMENT_DETAILS] = adfDoc(developmentDetails);
+      }
+      await client.updateFields(key, updatePayload);
+    } catch (updateErr) {
+      const msg = updateErr instanceof Error ? updateErr.message : 'Field update failed';
+      devQueries.markThreadSyncFailed(threadId, msg);
+      res.status(502).json({ ok: false, error: `Failed to set TL;DR / Development Details: ${msg}` });
+      return;
     }
 
     // Discover the actual Escalate to Development transition id for THIS
@@ -697,7 +711,6 @@ export function createDevReviewRoutes(
 
     try {
       await client.transitionIssue(key, transitionId, {
-        fields,
         comment: { body: adfDoc(commentText) },
       });
       devQueries.markThreadSynced(threadId, null);
