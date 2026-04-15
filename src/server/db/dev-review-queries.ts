@@ -116,8 +116,9 @@ export class DevReviewQueries {
     return result;
   }
 
-  /** Upsert state — used by the Jira poller when it first sees a T3 ticket. */
-  upsertFromPoll(jiraKey: string, submittedBy: string | null): void {
+  /** Upsert state — used by the Jira poller when it first sees a T3 ticket.
+   *  Pass `defer: true` from a hot path that flushes saveDb() once at the end. */
+  upsertFromPoll(jiraKey: string, submittedBy: string | null, opts?: { defer?: boolean }): void {
     const existing = this.getState(jiraKey);
     if (existing) {
       // If ticket is archived but back in T3 → reopen
@@ -128,7 +129,7 @@ export class DevReviewQueries {
            WHERE jira_key=?`,
           [jiraKey],
         );
-        saveDb();
+        if (!opts?.defer) saveDb();
       }
       return;
     }
@@ -137,7 +138,7 @@ export class DevReviewQueries {
        VALUES (?, 'pending', ?)`,
       [jiraKey, submittedBy],
     );
-    saveDb();
+    if (!opts?.defer) saveDb();
   }
 
   /** Backfill the submitter username (called by the background watcher after
@@ -187,15 +188,16 @@ export class DevReviewQueries {
     return out;
   }
 
-  /** Mark as archived when the ticket is no longer at Tier 3. */
-  archive(jiraKey: string): void {
+  /** Mark as archived when the ticket is no longer at Tier 3.
+   *  Pass `defer: true` from a hot path that flushes saveDb() once at the end. */
+  archive(jiraKey: string, opts?: { defer?: boolean }): void {
     this.db.run(
       `UPDATE dev_review_state
        SET status='archived', archived_at=datetime('now'), last_action_at=datetime('now')
        WHERE jira_key=? AND status != 'archived'`,
       [jiraKey],
     );
-    saveDb();
+    if (!opts?.defer) saveDb();
   }
 
   /** List the active queue (optionally filtered by claim / status / fast-track). */
@@ -271,13 +273,14 @@ export class DevReviewQueries {
     saveDb();
   }
 
-  /** Backfill team from the Nurtur Product field on each queue sync. */
-  setTeam(jiraKey: string, team: string): void {
+  /** Backfill team from the Nurtur Product field on each queue sync.
+   *  Pass `defer: true` from a hot path that flushes saveDb() once at the end. */
+  setTeam(jiraKey: string, team: string, opts?: { defer?: boolean }): void {
     this.db.run(
       `UPDATE dev_review_state SET team=? WHERE jira_key=? AND (team IS NULL OR team != ?)`,
       [team, jiraKey, team],
     );
-    saveDb();
+    if (!opts?.defer) saveDb();
   }
 
   /** Generic status update — used for the waiting_on_assignee round-trip. */

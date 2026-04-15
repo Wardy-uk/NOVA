@@ -5,6 +5,7 @@ import type { FileUserQueries } from '../db/user-store.js';
 import type { NotificationQueries } from '../db/notifications.js';
 import type { TeamQueries } from '../db/queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
+import { saveDb } from '../db/schema.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
 /**
@@ -127,12 +128,14 @@ export function createDevReviewRoutes(
       if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
 
       const jql = `project = NT AND cf[12981] = "Tier 3" AND statusCategory != Done ORDER BY updated DESC`;
+      // Only fetch fields actually rendered in the queue card (summary,
+      // TL;DR preview, product chip, age, claimed indicator). Heavy
+      // escalation textareas (Agent Summary, Troubleshooting, Expected
+      // Outcome, Environment, Development Details) are big ADF docs and
+      // are loaded only when the user clicks into a ticket via /ticket/:key.
       const fields = [
-        'summary', 'status', 'assignee', 'reporter', 'priority', 'created', 'updated',
-        'duedate', 'issuetype',
-        CF_CURRENT_TIER, CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
-        CF_ESCALATION_REASON, CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT, CF_NURTUR_PRODUCT,
-        CF_DEVELOPMENT_DETAILS,
+        'summary', 'status', 'assignee', 'reporter', 'updated',
+        CF_CURRENT_TIER, CF_TLDR, CF_NURTUR_PRODUCT,
       ];
 
       let issues: Array<{ key: string; fields: Record<string, unknown> }> = [];
@@ -144,18 +147,31 @@ export function createDevReviewRoutes(
         return;
       }
 
-      // Sync NOVA state: upsert anything newly seen, archive anything no longer in T3
+      // Sync NOVA state: upsert anything newly seen, archive anything no longer in T3.
+      //
+      // Performance note: every per-row write previously called saveDb() which
+      // flushes the entire sql.js DB to disk. With ~20 active tickets that was
+      // 40+ disk writes per queue load. We now defer all writes and call
+      // saveDb() ONCE at the end of the sync block. Crash-window data loss is
+      // bounded by the 15s periodic flush — and these rows are all derivable
+      // from Jira state on the next poll anyway.
+      let dirty = false;
       const liveKeys = new Set(issues.map((i) => i.key));
       for (const issue of issues) {
         const submitter = (issue.fields.assignee as { emailAddress?: string } | null)?.emailAddress || null;
-        devQueries.upsertFromPoll(issue.key, submitter);
+        devQueries.upsertFromPoll(issue.key, submitter, { defer: true });
         const product = (issue.fields as { customfield_13183?: { value?: string } }).customfield_13183?.value || null;
-        devQueries.setTeam(issue.key, productToTeam(product));
+        devQueries.setTeam(issue.key, productToTeam(product), { defer: true });
+        dirty = true;
       }
       // Archive stale rows
       for (const row of devQueries.listQueue()) {
-        if (!liveKeys.has(row.jira_key)) devQueries.archive(row.jira_key);
+        if (!liveKeys.has(row.jira_key)) {
+          devQueries.archive(row.jira_key, { defer: true });
+          dirty = true;
+        }
       }
+      if (dirty) saveDb();
 
       // Merge: for each live issue, attach NOVA state + resolved team
       let enriched = issues.map((issue) => {
