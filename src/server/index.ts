@@ -105,6 +105,17 @@ async function main() {
   const crmQueries = new CrmQueries(db);
   const salesQueries = new SalesQueries(db);
   const userQueries = new FileUserQueries();
+  // Bootstrap service accounts — created on first run, left alone afterwards
+  // so an admin can rotate the password via the Admin UI without redeploying.
+  // The password is hard-coded as a bcrypt hash (never plaintext) and the
+  // matching plaintext lives in nova-mcp/config.json (gitignored).
+  const novaMcpCreated = userQueries.ensureServiceAccount({
+    username: 'nova-mcp',
+    password_hash: '$2b$10$14kBcPzWdHR/G2UBK8YMWuQozUp4iQNIbM1jAw9lhvP1zFixAxVMe',
+    role: 'admin',
+    display_name: 'NOVA MCP Service Account',
+  });
+  if (novaMcpCreated) console.log('[Startup] Bootstrapped service account: nova-mcp');
   const teamQueries = new TeamQueries(db);
   const userSettingsQueries = new UserSettingsQueries(db);
   const feedbackQueries = new FeedbackQueries(db);

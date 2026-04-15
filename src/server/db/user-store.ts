@@ -126,4 +126,39 @@ export class FileUserQueries {
     save(data);
     return true;
   }
+
+  /**
+   * Ensure a service account exists with the given username + bcrypt hash.
+   * Creates the user on first startup if missing; leaves it alone on subsequent
+   * starts so an admin can rotate the password without redeploying.
+   *
+   * Returns true if a new user was created, false if it already existed.
+   */
+  ensureServiceAccount(spec: {
+    username: string;
+    password_hash: string;
+    role: string;
+    display_name?: string;
+  }): boolean {
+    const data = load();
+    const existing = data.users.find((u) => u.username === spec.username);
+    if (existing) return false;
+    const now = new Date().toISOString();
+    data.users.push({
+      id: data.nextId,
+      username: spec.username,
+      display_name: spec.display_name ?? spec.username,
+      email: null,
+      password_hash: spec.password_hash,
+      role: spec.role,
+      auth_provider: 'local',
+      provider_id: null,
+      team_id: null,
+      created_at: now,
+      updated_at: now,
+    });
+    data.nextId++;
+    save(data);
+    return true;
+  }
 }
