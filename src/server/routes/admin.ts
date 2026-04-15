@@ -287,6 +287,158 @@ export function createAdminRoutes(
     res.json({ ok: true, data: { created, skipped, invited } });
   });
 
+  /*
+  // ---- Debug / config inspection (admin only) ----
+  //
+  // COMMENTED OUT 2026-04-15 — replaced by nova-mcp tools
+  // (nova_admin_get_config / nova_admin_set_setting) which read the
+  // settings.json file directly. Leaving this block as reference in
+  // case we later want an HTTP-facing equivalent for the browser UI.
+  //
+  // Full masked dump of settings.json plus live Jira identity, teams,
+  // users (counts only), and custom roles. Used to diagnose config
+  // issues without exposing secrets. Every key whose name contains
+  // 'token', 'password', 'secret', 'apikey', etc. is masked. Every
+  // email-looking value is partially masked. Everything else is passed
+  // through verbatim.
+  router.get('/debug/config', async (req, res) => {
+    try {
+      const s = settingsQueries.getAll();
+
+      // ── Mask helpers ─────────────────────────────────────────────────
+      const maskEmail = (email: string | undefined | null): string => {
+        if (!email) return '(unset)';
+        const [local, domain] = email.split('@');
+        if (!domain || !local) return email;
+        const masked = local.length <= 3
+          ? `${local[0]}***`
+          : `${local.slice(0, 2)}***${local.slice(-1)}`;
+        return `${masked}@${domain}`;
+      };
+      const maskToken = (tok: string | undefined | null): string => {
+        if (tok == null || tok === '') return '(unset)';
+        if (typeof tok !== 'string') return `(non-string: ${typeof tok})`;
+        if (tok.length < 12) return '(too short)';
+        return `${tok.slice(0, 4)}…${tok.slice(-4)} (len ${tok.length})`;
+      };
+      const SECRET_KEY_PATTERN = /token|password|secret|apikey|api_key|client_secret|pass$|pass_|_pass/i;
+      const EMAIL_KEY_PATTERN = /email|username|user$|_user/i;
+      const maskValue = (key: string, val: unknown): unknown => {
+        if (val == null || val === '') return '(unset)';
+        if (typeof val !== 'string') return val;
+        if (SECRET_KEY_PATTERN.test(key)) return maskToken(val);
+        if (EMAIL_KEY_PATTERN.test(key) && val.includes('@')) return maskEmail(val);
+        return val;
+      };
+
+      // ── Full masked dump of settings.json ────────────────────────────
+      const maskedSettings: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(s)) {
+        maskedSettings[k] = maskValue(k, v);
+      }
+
+      // ── Live Jira identity — calls GET /myself on the service desk
+      //    client so we see exactly which account is used for writes.
+      //    The answer to "is a service account configured?" lives here.
+      let liveJiraIdentity: Record<string, unknown> | { error: string } = { error: 'client not built' };
+      try {
+        const client = getJiraClient();
+        if (client) {
+          const myself = await (client as unknown as { request: (m: string, p: string) => Promise<unknown> })
+            .request('GET', 'myself');
+          const me = myself as {
+            accountId?: string; emailAddress?: string; displayName?: string;
+            accountType?: string; active?: boolean; timeZone?: string;
+          };
+          liveJiraIdentity = {
+            accountId: me.accountId,
+            emailAddress: me.emailAddress,
+            displayName: me.displayName,
+            accountType: me.accountType,
+            active: me.active,
+            timeZone: me.timeZone,
+          };
+        } else {
+          liveJiraIdentity = { error: 'buildServiceDeskJiraClient returned null' };
+        }
+      } catch (err) {
+        liveJiraIdentity = { error: err instanceof Error ? err.message : 'myself call failed' };
+      }
+
+      // ── Teams, users, custom roles ───────────────────────────────────
+      const teams = teamQueries.getAll().map((t) => ({
+        id: t.id,
+        name: t.name,
+        description: t.description,
+        member_count: userQueries.getAll().filter((u) => u.team_id === t.id).length,
+        jira_products: t.jira_products || [],
+      }));
+
+      const users = userQueries.getAll();
+      const usersByRole: Record<string, number> = {};
+      for (const u of users) {
+        const r = u.role || '(none)';
+        usersByRole[r] = (usersByRole[r] || 0) + 1;
+      }
+      const usersSummary = {
+        total: users.length,
+        byRole: usersByRole,
+        list: users.map((u) => ({
+          id: u.id,
+          username: u.username,
+          display_name: u.display_name,
+          email: maskEmail(u.email),
+          role: u.role,
+          team_id: u.team_id,
+          auth_provider: (u as unknown as { auth_provider?: string }).auth_provider,
+        })),
+      };
+
+      let customRoles: unknown = null;
+      try {
+        const raw = s.custom_roles;
+        customRoles = raw ? JSON.parse(raw) : [];
+      } catch {
+        customRoles = '(parse failed)';
+      }
+
+      let rolePermissions: unknown = null;
+      try {
+        const raw = s.role_permissions;
+        rolePermissions = raw ? JSON.parse(raw) : {};
+      } catch {
+        rolePermissions = '(parse failed)';
+      }
+
+      // ── Caller info ─────────────────────────────────────────────────
+      const caller = {
+        id: req.user?.id,
+        username: req.user?.username,
+        role: req.user?.role,
+      };
+
+      res.json({
+        ok: true,
+        data: {
+          caller,
+          liveJiraIdentity,
+          teams,
+          users: usersSummary,
+          customRoles,
+          rolePermissions,
+          settings: maskedSettings,
+          meta: {
+            settingKeyCount: Object.keys(maskedSettings).length,
+            note: 'liveJiraIdentity is the Jira account actually used by buildServiceDeskJiraClient for all Dev Review writes. If it shows a real human, NOVA is writing as that human — not a service account.',
+          },
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'debug failed' });
+    }
+  });
+  */
+
   // ---- Teams ----
 
   router.get('/teams', (_req, res) => {
