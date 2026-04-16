@@ -671,11 +671,11 @@ function SingleAgentDashboard({ summary }: { summary: AgentSummary }) {
         <SectionTitle title="Performance" subtitle={`${s.daysInRange} days in range`} />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
           <MetricCard label="Tickets Resolved" value={fmtInt(s.solvedTotal)} subtitle={`${fmt(s.solvedAvgPerDay)} avg/day`} trend={s.trendSolved} />
-          <MetricCard label="Tickets Per Hour" value={fmt(s.ticketsPerHourAvg, 2)} subtitle="30-day rolling avg" color={C.teal} />
-          <MetricCard label="Avg Open Tickets" value={fmt(s.openTicketsAvg)} />
-          <MetricCard label="Avg >2h Overdue" value={fmt(s.openOver2hAvg)} color={s.openOver2hAvg > 0 ? C.red : C.green} invertTrend />
-          <MetricCard label="Avg No Update Today" value={fmt(s.openNoUpdateAvg)} color={s.openNoUpdateAvg > 1 ? C.amber : C.text3} invertTrend />
-          <MetricCard label="Oldest Ticket (days)" value={fmtInt(s.oldestTicketMax)} color={s.oldestTicketMax > 5 ? C.red : C.text3} />
+          <MetricCard label="Tickets Per Hour" value={fmt(s.ticketsPerHourAvg, 2)} subtitle="Target: ≥1.5 TPH" color={s.ticketsPerHourAvg !== null && s.ticketsPerHourAvg >= 1.5 ? C.green : s.ticketsPerHourAvg !== null && s.ticketsPerHourAvg >= 1.0 ? C.amber : C.teal} />
+          <MetricCard label="Avg Open Tickets" value={fmt(s.openTicketsAvg)} subtitle="Lower is better" />
+          <MetricCard label="Avg >2h Overdue" value={fmt(s.openOver2hAvg)} subtitle="Target: 0" color={s.openOver2hAvg > 0 ? C.red : C.green} invertTrend />
+          <MetricCard label="Avg No Update Today" value={fmt(s.openNoUpdateAvg)} subtitle="Target: 0" color={s.openNoUpdateAvg > 1 ? C.amber : s.openNoUpdateAvg === 0 ? C.green : C.text3} invertTrend />
+          <MetricCard label="Oldest Ticket (days)" value={fmtInt(s.oldestTicketMax)} subtitle="Target: ≤3 days" color={s.oldestTicketMax <= 3 ? C.green : s.oldestTicketMax <= 7 ? C.amber : C.red} />
         </div>
       </div>
 
@@ -684,9 +684,9 @@ function SingleAgentDashboard({ summary }: { summary: AgentSummary }) {
         <SectionTitle title="Quality" subtitle={`${s.qaScored} tickets scored`} />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
           <MetricCard label="QA Score Overall" value={fmt(s.qaOverallAvg)} subtitle="Target: ≥8.0 by Day 90" color={qaColor(s.qaOverallAvg)} trend={s.trendQA} />
-          <MetricCard label="Accuracy" value={fmt(s.qaAccuracyAvg)} color={qaColor(s.qaAccuracyAvg)} />
-          <MetricCard label="Clarity" value={fmt(s.qaClarityAvg)} color={qaColor(s.qaClarityAvg)} />
-          <MetricCard label="Tone" value={fmt(s.qaToneAvg)} color={qaColor(s.qaToneAvg)} />
+          <MetricCard label="Accuracy" value={fmt(s.qaAccuracyAvg)} subtitle="Target: ≥8.0" color={qaColor(s.qaAccuracyAvg)} />
+          <MetricCard label="Clarity" value={fmt(s.qaClarityAvg)} subtitle="Target: ≥8.0" color={qaColor(s.qaClarityAvg)} />
+          <MetricCard label="Tone" value={fmt(s.qaToneAvg)} subtitle="Target: ≥8.0" color={qaColor(s.qaToneAvg)} />
           <div style={{
             background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12,
             padding: '16px 20px', borderLeft: `3px solid ${C.purple}`,
@@ -708,7 +708,7 @@ function SingleAgentDashboard({ summary }: { summary: AgentSummary }) {
               </>
             ) : <span style={{ fontSize: 13, color: C.text3 }}>No scored tickets</span>}
           </div>
-          <MetricCard label="Concerning Tickets" value={fmtInt(s.qaConcerning)} color={s.qaConcerning > 0 ? C.red : C.green} />
+          <MetricCard label="Concerning Tickets" value={fmtInt(s.qaConcerning)} subtitle="Target: 0" color={s.qaConcerning > 0 ? C.red : C.green} />
         </div>
       </div>
 
@@ -716,10 +716,10 @@ function SingleAgentDashboard({ summary }: { summary: AgentSummary }) {
       <div>
         <SectionTitle title="Golden Rules" subtitle={`${s.goldenRulesScored} tickets scored`} />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-          <MetricCard label="Overall Score" value={fmt(s.goldenRulesAvg)} color={qaColor(s.goldenRulesAvg)} />
-          <MetricCard label="Ownership" value={fmt(s.ownershipAvg)} color={qaColor(s.ownershipAvg)} />
-          <MetricCard label="Next Action" value={fmt(s.nextActionAvg)} color={qaColor(s.nextActionAvg)} />
-          <MetricCard label="Timeframe" value={fmt(s.timeframeAvg)} color={qaColor(s.timeframeAvg)} />
+          <MetricCard label="Overall Score" value={fmt(s.goldenRulesAvg)} subtitle="Target: ≥8.0" color={qaColor(s.goldenRulesAvg)} />
+          <MetricCard label="Ownership" value={fmt(s.ownershipAvg)} subtitle="Target: ≥8.0" color={qaColor(s.ownershipAvg)} />
+          <MetricCard label="Next Action" value={fmt(s.nextActionAvg)} subtitle="Target: ≥8.0" color={qaColor(s.nextActionAvg)} />
+          <MetricCard label="Timeframe" value={fmt(s.timeframeAvg)} subtitle="Target: ≥8.0" color={qaColor(s.timeframeAvg)} />
         </div>
       </div>
 
@@ -727,9 +727,9 @@ function SingleAgentDashboard({ summary }: { summary: AgentSummary }) {
       <div>
         <SectionTitle title="SLA Compliance" subtitle="Target: ≥95%" />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-          <MetricCard label="SLA Compliance" value={fmtPct(s.slaCompliancePct)} color={slaColor(s.slaCompliancePct)} trend={s.trendSLA} />
-          <MetricCard label="Resolved" value={fmtInt(s.slaResolved)} color={C.green} />
-          <MetricCard label="Breached" value={fmtInt(s.slaBreached)} color={s.slaBreached > 0 ? C.red : C.green} />
+          <MetricCard label="SLA Compliance" value={fmtPct(s.slaCompliancePct)} subtitle="Target: ≥95%" color={slaColor(s.slaCompliancePct)} trend={s.trendSLA} />
+          <MetricCard label="Resolved" value={fmtInt(s.slaResolved)} subtitle="Within SLA" color={C.green} />
+          <MetricCard label="Breached" value={fmtInt(s.slaBreached)} subtitle="Target: 0" color={s.slaBreached > 0 ? C.red : C.green} />
         </div>
       </div>
 
@@ -740,8 +740,8 @@ function SingleAgentDashboard({ summary }: { summary: AgentSummary }) {
           <MetricCard
             label="CSAT Average"
             value={s.csatAvg !== null ? fmt(s.csatAvg) : '—'}
-            subtitle={s.csatCount > 0 && s.csatCount < 5 ? 'Low sample size — treat with caution' : `${s.csatCount} responses`}
-            color={s.csatAvg !== null ? C.teal : C.text3}
+            subtitle={s.csatCount > 0 && s.csatCount < 5 ? 'Target: ≥4.0 / Low sample — treat with caution' : `Target: ≥4.0 / ${s.csatCount} responses`}
+            color={s.csatAvg !== null ? (s.csatAvg >= 4.0 ? C.green : s.csatAvg >= 3.0 ? C.amber : C.red) : C.text3}
             trend={s.trendCSAT}
           />
         </div>
