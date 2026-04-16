@@ -390,6 +390,83 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         `);
       }
 
+      // Enrich with QA + Golden Rules from source tables (jira_qa_results, Jira_QA_GoldenRules)
+      // The agent daily table only captures today's QA at write time, so historical rows have 0.
+      // Querying the source tables directly gives accurate per-agent per-day aggregates.
+      const dateFilter = from && to
+        ? `CAST(CreatedAt AS DATE) >= '${from}' AND CAST(CreatedAt AS DATE) <= '${to}'`
+        : `CAST(CreatedAt AS DATE) >= DATEADD(day, -${days}, CAST(GETDATE() AS DATE))`;
+      const agentNameFilter = scopedAgent ? `AND assigneeName = '${scopedAgent.replace(/'/g, "''")}'` : '';
+
+      const [qaResult, grResult] = await Promise.all([
+        p.request().query(`
+          SELECT CAST(CreatedAt AS DATE) AS ReportDate, assigneeName AS AgentName,
+            COUNT(*) AS QATicketsScored,
+            AVG(CAST(overallScore AS FLOAT)) AS QAOverallAvg,
+            AVG(CAST(accuracyScore AS FLOAT)) AS QAAccuracyAvg,
+            AVG(CAST(clarityScore AS FLOAT)) AS QAClarityAvg,
+            AVG(CAST(toneScore AS FLOAT)) AS QAToneAvg,
+            SUM(CASE WHEN grade = 'RED' THEN 1 ELSE 0 END) AS QARedCount,
+            SUM(CASE WHEN grade = 'AMBER' THEN 1 ELSE 0 END) AS QAAmberCount,
+            SUM(CASE WHEN grade = 'GREEN' THEN 1 ELSE 0 END) AS QAGreenCount,
+            SUM(CAST(isConcerning AS INT)) AS QAConcerningCount
+          FROM dbo.jira_qa_results${s}
+          WHERE ${dateFilter} AND ISNULL(qaType, '') <> 'excluded'
+            AND assigneeName IS NOT NULL AND assigneeName <> '' ${agentNameFilter}
+          GROUP BY CAST(CreatedAt AS DATE), assigneeName
+        `).catch(() => ({ recordset: [] })),
+        p.request().query(`
+          SELECT CAST(CreatedAt AS DATE) AS ReportDate, Assignee AS AgentName,
+            COUNT(*) AS GoldenRulesScored,
+            AVG(CAST(OverallScore AS FLOAT)) AS GoldenRulesAvg,
+            AVG(CAST(Rule1Score AS FLOAT)) AS OwnershipAvg,
+            AVG(CAST(Rule2Score AS FLOAT)) AS NextActionAvg,
+            AVG(CAST(Rule3Score AS FLOAT)) AS TimeframeAvg
+          FROM dbo.Jira_QA_GoldenRules${s}
+          WHERE ${dateFilter}
+            AND Assignee IS NOT NULL AND Assignee <> '' ${agentNameFilter.replace('assigneeName', 'Assignee')}
+          GROUP BY CAST(CreatedAt AS DATE), Assignee
+        `).catch(() => ({ recordset: [] })),
+      ]);
+
+      // Build lookup maps: "AgentName|YYYY-MM-DD" → QA/GR data
+      const qaMap: Record<string, any> = {};
+      for (const r of qaResult.recordset) {
+        const dateStr = r.ReportDate instanceof Date ? r.ReportDate.toISOString().slice(0, 10) : String(r.ReportDate).slice(0, 10);
+        qaMap[`${r.AgentName}|${dateStr}`] = r;
+      }
+      const grMap: Record<string, any> = {};
+      for (const r of grResult.recordset) {
+        const dateStr = r.ReportDate instanceof Date ? r.ReportDate.toISOString().slice(0, 10) : String(r.ReportDate).slice(0, 10);
+        grMap[`${r.AgentName}|${dateStr}`] = r;
+      }
+
+      // Merge into agent daily rows
+      for (const row of result.recordset) {
+        const dateStr = row.ReportDate instanceof Date ? row.ReportDate.toISOString().slice(0, 10) : String(row.ReportDate).slice(0, 10);
+        const key = `${row.AgentName}|${dateStr}`;
+        const qa = qaMap[key];
+        const gr = grMap[key];
+        if (qa) {
+          row.QATicketsScored = qa.QATicketsScored;
+          row.QAOverallAvg = qa.QAOverallAvg != null ? Math.round(qa.QAOverallAvg * 10) / 10 : null;
+          row.QAAccuracyAvg = qa.QAAccuracyAvg != null ? Math.round(qa.QAAccuracyAvg * 10) / 10 : null;
+          row.QAClarityAvg = qa.QAClarityAvg != null ? Math.round(qa.QAClarityAvg * 10) / 10 : null;
+          row.QAToneAvg = qa.QAToneAvg != null ? Math.round(qa.QAToneAvg * 10) / 10 : null;
+          row.QARedCount = qa.QARedCount;
+          row.QAAmberCount = qa.QAAmberCount;
+          row.QAGreenCount = qa.QAGreenCount;
+          row.QAConcerningCount = qa.QAConcerningCount;
+        }
+        if (gr) {
+          row.GoldenRulesScored = gr.GoldenRulesScored;
+          row.GoldenRulesAvg = gr.GoldenRulesAvg != null ? Math.round(gr.GoldenRulesAvg * 10) / 10 : null;
+          row.OwnershipAvg = gr.OwnershipAvg != null ? Math.round(gr.OwnershipAvg * 10) / 10 : null;
+          row.NextActionAvg = gr.NextActionAvg != null ? Math.round(gr.NextActionAvg * 10) / 10 : null;
+          row.TimeframeAvg = gr.TimeframeAvg != null ? Math.round(gr.TimeframeAvg * 10) / 10 : null;
+        }
+      }
+
       res.json({
         ok: true,
         data: result.recordset,
