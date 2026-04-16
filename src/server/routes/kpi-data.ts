@@ -312,16 +312,36 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
     }
   });
 
-  // GET /api/kpi-data/agent-kpis?env=live|uat&days=30&from=YYYY-MM-DD&to=YYYY-MM-DD
-  // Scoped: non-admin sees only their own agent data
+  // GET /api/kpi-data/agent-kpis?env=live|uat&days=30&from=YYYY-MM-DD&to=YYYY-MM-DD&scope=self
+  // Scoped: non-admin sees only their own agent data; admin with scope=self sees their own
   router.get('/agent-kpis', async (req, res) => {
     try {
       const env = parseEnv(req);
       const s = suffix(env);
       const p = await getPool();
 
-      // Resolve agent scope for non-admin users
-      const scopedAgent = await resolveAgentScope(req);
+      // Resolve agent scope — scope=self forces scoping even for admins
+      const forceSelf = req.query.scope === 'self';
+      let scopedAgent: string | null;
+      if (forceSelf && req.user && isAdmin(req.user.role)) {
+        // Admin requesting their own data — resolve like a non-admin
+        const user = userQueries.getById(req.user.id);
+        if (user?.email) {
+          const r = p.request();
+          r.input('email', sql.NVarChar, user.email.toLowerCase());
+          const result = await r.query(`
+            SELECT TOP 1
+              LTRIM(RTRIM(AgentName)) + ' ' + LTRIM(RTRIM(AgentSurname)) AS FullName
+            FROM dbo.Agent
+            WHERE LOWER(LTRIM(RTRIM(AgentKey))) = @email
+          `);
+          scopedAgent = result.recordset[0]?.FullName?.trim() || null;
+        } else {
+          scopedAgent = null;
+        }
+      } else {
+        scopedAgent = await resolveAgentScope(req);
+      }
 
       // Date range
       const from = req.query.from as string | undefined;

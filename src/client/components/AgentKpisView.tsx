@@ -762,6 +762,7 @@ export function AgentKpisView() {
   const [dateRange, setDateRange] = useState<DateRange>('30');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+  const [viewMode, setViewMode] = useState<'team' | 'my'>('team');
   const env = 'live' as const;
 
   const fetchData = useCallback(async () => {
@@ -774,6 +775,7 @@ export function AgentKpisView() {
       } else {
         url += `&days=${dateRange}`;
       }
+      if (viewMode === 'my') url += '&scope=self';
       const res = await fetch(url);
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Failed to load data');
@@ -784,7 +786,7 @@ export function AgentKpisView() {
     } finally {
       setLoading(false);
     }
-  }, [dateRange, customFrom, customTo, env]);
+  }, [dateRange, customFrom, customTo, viewMode, env]);
 
   useEffect(() => {
     fetchData();
@@ -813,7 +815,7 @@ export function AgentKpisView() {
 
   const summaries = useMemo(() => aggregateAgents(rawData), [rawData]);
   const teamAvg = useMemo(() => computeTeamAverage(summaries), [summaries]);
-  const isAdmin = scopedAgent === null;
+  const isAdmin = scopedAgent === null && viewMode === 'team';
 
   if (loading) {
     return (
@@ -882,6 +884,30 @@ export function AgentKpisView() {
               {isAdmin ? 'All agents • admin view' : 'Personal performance metrics'}
             </p>
           </div>
+
+          {/* My KPIs / Team KPIs toggle — only shown when user has admin access */}
+          {(viewMode === 'team' && scopedAgent === null) || viewMode === 'my' ? (
+            <div style={{
+              display: 'flex', borderRadius: 20, overflow: 'hidden',
+              border: `1px solid ${C.border}`, marginLeft: 16,
+            }}>
+              {([
+                { id: 'my' as const, label: 'My KPIs' },
+                { id: 'team' as const, label: 'Team KPIs' },
+              ]).map(m => (
+                <button
+                  key={m.id}
+                  onClick={() => setViewMode(m.id)}
+                  style={{
+                    padding: '6px 16px', border: 'none', cursor: 'pointer',
+                    fontSize: 11, fontWeight: 600, transition: 'all 0.2s',
+                    background: viewMode === m.id ? `${C.teal}20` : 'transparent',
+                    color: viewMode === m.id ? C.teal : C.text3,
+                  }}
+                >{m.label}</button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {/* Date range selector */}
