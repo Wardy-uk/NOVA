@@ -161,6 +161,13 @@ function qaColor(score: number | null): string {
   return C.red;
 }
 
+function grColor(score: number | null): string {
+  if (score === null) return C.text3;
+  if (score >= 2.5) return C.green;
+  if (score >= 2.0) return C.amber;
+  return C.red;
+}
+
 /** Compute standard deviation */
 function stddev(values: number[]): number {
   if (values.length < 2) return 0;
@@ -509,7 +516,7 @@ function AdminTableView({ summaries, teamAvg }: { summaries: AgentSummary[]; tea
         </td>
 
         {/* Golden Rules */}
-        <td style={{ ...tdStyle, fontWeight: 600, color: qaColor(agent.goldenRulesAvg) }}>
+        <td style={{ ...tdStyle, fontWeight: 600, color: grColor(agent.goldenRulesAvg) }}>
           {fmt(agent.goldenRulesAvg)}
         </td>
 
@@ -716,10 +723,10 @@ function SingleAgentDashboard({ summary }: { summary: AgentSummary }) {
       <div>
         <SectionTitle title="Golden Rules" subtitle={`${s.goldenRulesScored} tickets scored`} />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-          <MetricCard label="Overall Score" value={fmt(s.goldenRulesAvg)} subtitle="Target: ≥8.0" color={qaColor(s.goldenRulesAvg)} />
-          <MetricCard label="Ownership" value={fmt(s.ownershipAvg)} subtitle="Target: ≥8.0" color={qaColor(s.ownershipAvg)} />
-          <MetricCard label="Next Action" value={fmt(s.nextActionAvg)} subtitle="Target: ≥8.0" color={qaColor(s.nextActionAvg)} />
-          <MetricCard label="Timeframe" value={fmt(s.timeframeAvg)} subtitle="Target: ≥8.0" color={qaColor(s.timeframeAvg)} />
+          <MetricCard label="Overall Score" value={fmt(s.goldenRulesAvg)} subtitle="Target: ≥2.5 / 3" color={grColor(s.goldenRulesAvg)} />
+          <MetricCard label="Ownership" value={fmt(s.ownershipAvg)} subtitle="Target: ≥2.5 / 3" color={grColor(s.ownershipAvg)} />
+          <MetricCard label="Next Action" value={fmt(s.nextActionAvg)} subtitle="Target: ≥2.5 / 3" color={grColor(s.nextActionAvg)} />
+          <MetricCard label="Timeframe" value={fmt(s.timeframeAvg)} subtitle="Target: ≥2.5 / 3" color={grColor(s.timeframeAvg)} />
         </div>
       </div>
 
