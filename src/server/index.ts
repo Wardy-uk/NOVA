@@ -589,6 +589,7 @@ async function main() {
     userQueries,
     notificationQueries,
     teamQueries,
+    requireAreaAccess,
     buildServiceDeskJiraClient,
   ));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries, db));

@@ -9,6 +9,7 @@ const AREA_DEFAULTS: Record<string, string> = {
   training: 'edit',
   wallboards: 'view',
   mi: 'hidden',
+  devreview: 'hidden',
 };
 
 export interface AuthPayload {

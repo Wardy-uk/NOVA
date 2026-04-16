@@ -55,12 +55,13 @@ const AREA_DEFAULTS: Record<string, string> = {
   training: 'edit',   // everyone can edit their own training scores
   wallboards: 'view', // everyone can see wallboards
   mi: 'hidden',       // Board MI hidden by default
+  devreview: 'hidden', // Dev Review hidden by default
 };
 
 function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string, string> {
   const userRoles = parseRoles(roleStr);
   if (userRoles.includes('admin')) {
-    return { command: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', azdo_push: 'edit', ai_approvals: 'edit', training: 'edit', admin: 'edit', mi: 'edit' };
+    return { command: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', azdo_push: 'edit', ai_approvals: 'edit', training: 'edit', admin: 'edit', mi: 'edit', devreview: 'edit' };
   }
   const matched = roles.filter(r => userRoles.includes(r.id));
   if (matched.length === 0) {

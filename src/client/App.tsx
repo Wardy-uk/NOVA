@@ -92,7 +92,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden',
 };
 
 // Map certain command sub-tabs to their own permission area
@@ -359,7 +359,7 @@ export function App() {
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
     userRole.split(',').map(r => r.trim()).includes('admin')
-      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit', training: 'edit', mi: 'edit' }
+      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit', training: 'edit', mi: 'edit', devreview: 'edit' }
       : DEFAULT_AREA_ACCESS,
   );
   useEffect(() => {
@@ -637,11 +637,8 @@ export function App() {
     if (area === 'command' || area === 'wallboards') return true;
     // Board MI gated by the 'mi' permission area
     if (area === 'board') return (areaAccess['mi'] || 'hidden') !== 'hidden';
-    // Dev Review is gated to anyone with the 'developer' role (admins always)
-    if (area === 'devreview') {
-      const roles = (auth.user?.role || '').split(',').map((r) => r.trim());
-      return roles.includes('admin') || roles.includes('developer');
-    }
+    // Dev Review — standard area permission (configured in Admin > Permissions)
+    if (area === 'devreview') return (areaAccess['devreview'] || 'hidden') !== 'hidden';
     // Trends piggybacks on KPIs access (no separate role needed)
     if (area === 'trends') return (areaAccess['kpis'] || 'hidden') !== 'hidden';
     return (areaAccess[area] || 'hidden') !== 'hidden';

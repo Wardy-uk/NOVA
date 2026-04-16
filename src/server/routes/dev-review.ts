@@ -5,6 +5,7 @@ import type { FileUserQueries } from '../db/user-store.js';
 import type { NotificationQueries } from '../db/notifications.js';
 import type { TeamQueries } from '../db/queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
+import type { AreaAccessGuard } from '../middleware/auth.js';
 import { saveDb } from '../db/schema.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
@@ -84,6 +85,7 @@ export function createDevReviewRoutes(
   userQueries: FileUserQueries,
   notificationQueries: NotificationQueries,
   teamQueries: TeamQueries,
+  requireAreaAccess: AreaAccessGuard,
   getJiraClient: () => JiraRestClient | null,
 ): Router {
   const router = Router();
@@ -120,17 +122,8 @@ export function createDevReviewRoutes(
     return null;
   }
 
-  // Gate: developer role or admin
-  router.use((req: Request, res: Response, next) => {
-    const u = req.user;
-    if (!u) { res.status(401).json({ ok: false, error: 'Unauthorized' }); return; }
-    const roles = u.role?.split(',').map((r) => r.trim()) ?? [];
-    if (!roles.includes('admin') && !roles.includes('developer')) {
-      res.status(403).json({ ok: false, error: 'Developer role required' });
-      return;
-    }
-    next();
-  });
+  // Gate: devreview area access (configured in Admin > Permissions)
+  router.use(requireAreaAccess('devreview', 'view'));
 
   const userDisplay = (req: Request): string => {
     if (!req.user) return 'Unknown';
