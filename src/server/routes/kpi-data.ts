@@ -312,6 +312,75 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
     }
   });
 
+  // GET /api/kpi-data/agent-kpis?env=live|uat&days=30&from=YYYY-MM-DD&to=YYYY-MM-DD
+  // Scoped: non-admin sees only their own agent data
+  router.get('/agent-kpis', async (req, res) => {
+    try {
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const p = await getPool();
+
+      // Resolve agent scope for non-admin users
+      const scopedAgent = await resolveAgentScope(req);
+
+      // Date range
+      const from = req.query.from as string | undefined;
+      const to = req.query.to as string | undefined;
+      const days = Math.min(parseInt(req.query.days as string) || 30, 90);
+
+      // Department filter
+      const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
+      const hasDeptLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDept;
+      let deptJoin: string;
+      let deptWhere: string;
+      if (hasDept.recordset.length > 0) {
+        deptJoin = `INNER JOIN dbo.Agent${s} a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
+        deptWhere = "AND a.Department = 'NT'";
+      } else if (hasDeptLive.recordset.length > 0) {
+        deptJoin = `INNER JOIN dbo.Agent a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
+        deptWhere = "AND a.Department = 'NT'";
+      } else {
+        deptJoin = '';
+        deptWhere = '';
+      }
+
+      const agentFilter = scopedAgent ? `AND d.AgentName = '${scopedAgent.replace(/'/g, "''")}'` : '';
+
+      let result;
+      if (from && to) {
+        const request = p.request();
+        request.input('from', sql.Date, from);
+        request.input('to', sql.Date, to);
+        result = await request.query(`
+          SELECT d.*
+          FROM dbo.jira_agent_kpi_daily${s} d
+          ${deptJoin}
+          WHERE d.ReportDate >= @from AND d.ReportDate <= @to
+            ${deptWhere} ${agentFilter}
+          ORDER BY d.ReportDate DESC, d.AgentName
+        `);
+      } else {
+        result = await p.request().query(`
+          SELECT d.*
+          FROM dbo.jira_agent_kpi_daily${s} d
+          ${deptJoin}
+          WHERE d.ReportDate >= DATEADD(day, -${days}, CAST(GETDATE() AS DATE))
+            ${deptWhere} ${agentFilter}
+          ORDER BY d.ReportDate DESC, d.AgentName
+        `);
+      }
+
+      res.json({
+        ok: true,
+        data: result.recordset,
+        scopedAgent: scopedAgent ?? null,
+        env,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
   // GET /api/admin/kpi-data/agent-daily?env=live|uat&days=7&from=YYYY-MM-DD&to=YYYY-MM-DD
   router.get('/agent-daily', async (req, res) => {
     try {
