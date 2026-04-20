@@ -31,7 +31,9 @@ try {
 
     # ── Stop service (so native .node binaries aren't locked) ─────────────────
     Write-Host "[0/4] Stopping $ServiceName service..." -ForegroundColor Yellow
+    $ErrorActionPreference = "Continue"
     nssm stop $ServiceName 2>$null
+    $ErrorActionPreference = "Stop"
     Start-Sleep -Seconds 2
     # Kill any lingering node processes holding the .node binary
     Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object {
