@@ -29,6 +29,11 @@ try {
     Write-Host "=== N.O.V.A Deployment ===" -ForegroundColor Cyan
     Write-Host ""
 
+    # ── Stop service (so native .node binaries aren't locked) ─────────────────
+    Write-Host "[0/4] Stopping $ServiceName service..." -ForegroundColor Yellow
+    nssm stop $ServiceName 2>$null
+    Start-Sleep -Seconds 2
+
     # ── Pull latest code ─────────────────────────────────────────────────────
     Write-Host "[1/4] Pulling latest from azdo/$Branch..." -ForegroundColor Yellow
     git checkout -- package-lock.json 2>$null
