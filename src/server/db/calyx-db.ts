@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { addBusinessMinutes, toSqliteDatetime } from '../utils/business-hours.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -168,23 +169,57 @@ export function seedCalyxData(database: Database.Database): void {
     insertSla.run('P3 - Medium', null, 'P3', 240, 2880, 1, 1, 3);      // id=3
     insertSla.run('P4 - Low', null, 'P4', 1440, 7200, 1, 1, 4);        // id=4
 
-    // Sample tickets
-    insertTicket.run('CAL-001', 'Portal login failing for Acme Corp', 'Users at Acme Corp are unable to log in since this morning. Getting 500 errors.', 2, 5, 'P1', 'in_progress', 3, 'John Smith', 'john@acmecorp.com', 1, null, null);
+    // Sample tickets with realistic SLA deadlines
+    // P1: 15min FRT, 2hr resolution | P2: 1hr FRT, 8hr resolution | P3: 4hr FRT, 48hr resolution | P4: 1 day FRT, 5 day resolution
+    const now = new Date();
+    const nowStr = toSqliteDatetime(now);
+
+    // CAL-001: P1 in_progress, created 10 min ago — FRT about to breach
+    const t1Created = new Date(now.getTime() - 10 * 60000);
+    const t1Str = toSqliteDatetime(t1Created);
+    const t1Frt = toSqliteDatetime(addBusinessMinutes(t1Created, 15));
+    const t1Res = toSqliteDatetime(addBusinessMinutes(t1Created, 120));
+    insertTicket.run('CAL-001', 'Portal login failing for Acme Corp', 'Users at Acme Corp are unable to log in since this morning. Getting 500 errors.', 2, 5, 'P1', 'in_progress', 3, 'John Smith', 'john@acmecorp.com', 1, t1Frt, t1Res);
     insertEvent.run(1, 'created', 'open', 'Ticket created');
     insertEvent.run(1, 'status_change', 'in_progress', 'Assigned to Nick Ward');
 
-    insertTicket.run('CAL-002', 'Invoice query for Q4 2025', 'Client requesting breakdown of Q4 2025 invoices for their accounting team.', 1, 1, 'P3', 'waiting_customer', 1, 'Emma Davis', 'emma@clientco.com', 3, null, null);
+    // CAL-002: P3 waiting_customer, created 2 hours ago, SLA paused
+    const t2Created = new Date(now.getTime() - 2 * 3600000);
+    const t2Frt = toSqliteDatetime(addBusinessMinutes(t2Created, 240));
+    const t2Res = toSqliteDatetime(addBusinessMinutes(t2Created, 2880));
+    const t2PausedAt = toSqliteDatetime(new Date(now.getTime() - 30 * 60000));
+    database.prepare(`
+      INSERT INTO tickets (reference, title, description, team_id, category_id, priority, status, assigned_agent_id, requester_name, requester_email, sla_policy_id, frt_due_at, resolution_due_at, sla_paused_at, sla_pause_reason, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('CAL-002', 'Invoice query for Q4 2025', 'Client requesting breakdown of Q4 2025 invoices for their accounting team.', 1, 1, 'P3', 'waiting_customer', 1, 'Emma Davis', 'emma@clientco.com', 3, t2Frt, t2Res, t2PausedAt, 'waiting_customer', toSqliteDatetime(t2Created), nowStr);
     insertEvent.run(2, 'created', 'open', 'Ticket created');
     insertEvent.run(2, 'status_change', 'waiting_customer', 'Awaiting invoice copies from finance');
 
-    insertTicket.run('CAL-003', 'New email template for spring campaign', 'Need a responsive email template for the spring 2026 marketing campaign.', 3, 9, 'P3', 'open', 5, 'Marketing Team', 'marketing@nurtur.tech', 3, null, null);
+    // CAL-003: P3 open, created 5 hours ago — FRT breached (4hr SLA)
+    const t3Created = new Date(now.getTime() - 5 * 3600000);
+    const t3Frt = toSqliteDatetime(addBusinessMinutes(t3Created, 240));
+    const t3Res = toSqliteDatetime(addBusinessMinutes(t3Created, 2880));
+    insertTicket.run('CAL-003', 'New email template for spring campaign', 'Need a responsive email template for the spring 2026 marketing campaign.', 3, 9, 'P3', 'open', 5, 'Marketing Team', 'marketing@nurtur.tech', 3, t3Frt, t3Res);
     insertEvent.run(3, 'created', 'open', 'Ticket created');
 
-    insertTicket.run('CAL-004', 'Zapier integration not syncing contacts', 'Contacts added via Zapier webhook are not appearing in the CRM. Started 2 days ago.', 2, 6, 'P2', 'in_progress', 4, 'Lisa Park', 'lisa@techstart.io', 2, null, null);
+    // CAL-004: P2 in_progress, created 30 min ago — healthy SLA
+    const t4Created = new Date(now.getTime() - 30 * 60000);
+    const t4Frt = toSqliteDatetime(addBusinessMinutes(t4Created, 60));
+    const t4Res = toSqliteDatetime(addBusinessMinutes(t4Created, 480));
+    insertTicket.run('CAL-004', 'Zapier integration not syncing contacts', 'Contacts added via Zapier webhook are not appearing in the CRM. Started 2 days ago.', 2, 6, 'P2', 'in_progress', 4, 'Lisa Park', 'lisa@techstart.io', 2, t4Frt, t4Res);
     insertEvent.run(4, 'created', 'open', 'Ticket created');
     insertEvent.run(4, 'status_change', 'in_progress', 'Investigating webhook logs');
 
-    insertTicket.run('CAL-005', 'New starter onboarding - Rachel Green', 'New CC agent starting Monday. Needs system access, training materials, and team introduction.', 1, 2, 'P4', 'resolved', 2, 'HR Department', 'hr@nurtur.tech', 4, null, null);
+    // CAL-005: P4 resolved, FRT met, resolved
+    const t5Created = new Date(now.getTime() - 48 * 3600000);
+    const t5Frt = toSqliteDatetime(addBusinessMinutes(t5Created, 1440));
+    const t5Res = toSqliteDatetime(addBusinessMinutes(t5Created, 7200));
+    const t5FrtMet = toSqliteDatetime(new Date(t5Created.getTime() + 2 * 3600000));
+    const t5Resolved = toSqliteDatetime(new Date(t5Created.getTime() + 24 * 3600000));
+    database.prepare(`
+      INSERT INTO tickets (reference, title, description, team_id, category_id, priority, status, assigned_agent_id, requester_name, requester_email, sla_policy_id, frt_due_at, resolution_due_at, frt_met_at, first_replied_at, resolved_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('CAL-005', 'New starter onboarding - Rachel Green', 'New CC agent starting Monday. Needs system access, training materials, and team introduction.', 1, 2, 'P4', 'resolved', 2, 'HR Department', 'hr@nurtur.tech', 4, t5Frt, t5Res, t5FrtMet, t5FrtMet, t5Resolved, toSqliteDatetime(t5Created), nowStr);
     insertEvent.run(5, 'created', 'open', 'Ticket created');
     insertEvent.run(5, 'status_change', 'in_progress', 'Setting up accounts');
     insertEvent.run(5, 'status_change', 'resolved', 'All access granted and training scheduled');
