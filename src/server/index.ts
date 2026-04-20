@@ -114,8 +114,8 @@ async function main() {
   const calyxQueries = new CalyxQueries(calyxDb);
   setInterval(() => checkSloBreaches(calyxDb, settingsQueries.getAll()), 5 * 60 * 1000);
   setInterval(() => processEmailQueue(calyxDb, settingsQueries.getAll()), 60_000);
-  setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries), 30 * 60 * 1000);
-  syncCalyxKpisToNova(calyxDb, settingsQueries);
+  setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 30 * 60 * 1000);
+  setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 10_000);
 
   const taskQueries = new TaskQueries(db);
   const settingsQueries = new FileSettingsQueries();
