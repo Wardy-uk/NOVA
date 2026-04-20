@@ -216,6 +216,18 @@ export function createCalyxRoutes(queries: CalyxQueries, db: Database.Database, 
     }
   });
 
+  // ── Ticket Tags (read) ──
+
+  router.get('/tickets/:id/tags', (req, res) => {
+    const tags = db.prepare(`
+      SELECT tg.* FROM calyx_tags tg
+      JOIN calyx_ticket_tags tt ON tt.tag_id = tg.id
+      WHERE tt.ticket_id = ?
+      ORDER BY tg.name
+    `).all(Number(req.params.id));
+    res.json({ ok: true, data: tags });
+  });
+
   // ── Ticket SLO Tracking ──
 
   router.get('/tickets/:id/slos', (req, res) => {

@@ -93,9 +93,14 @@ export type TicketEventType =
   | 'comment_added'
   | 'sla_paused'
   | 'sla_resumed'
+  | 'sla_breached'
+  | 'slo_breached'
   | 'frt_met'
   | 'resolved'
-  | 'reopened';
+  | 'reopened'
+  | 'escalated'
+  | 'major_incident_declared'
+  | 'merged';
 
 export interface CalyxTicketEvent {
   id: number;

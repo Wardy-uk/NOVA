@@ -209,21 +209,94 @@ function NewTicketForm({ teams, agents, categories, onCreated, onCancel }: {
 
 // ── Ticket Detail Panel ──
 
-function TicketDetailPanel({ ticketId, agents, onClose, onUpdated }: {
-  ticketId: number; agents: CalyxAgent[]; onClose: () => void; onUpdated: () => void;
+function timeAgo(dateStr: string): string {
+  const ms = Date.now() - new Date(dateStr.replace(' ', 'T') + (dateStr.includes('Z') || dateStr.includes('+') ? '' : 'Z')).getTime();
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+function InitialsAvatar({ name, size = 28, color = C.teal }: { name: string; size?: number; color?: string }) {
+  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%', background: `${color}25`, border: `1px solid ${color}40`,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.38, fontWeight: 700, color, flexShrink: 0,
+    }}>{initials}</div>
+  );
+}
+
+function TicketDetailPanel({ ticketId, agents, teams, onClose, onUpdated }: {
+  ticketId: number; agents: CalyxAgent[]; teams: CalyxTeam[]; onClose: () => void; onUpdated: () => void;
 }) {
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [activeTab, setActiveTab] = useState<'comments' | 'events'>('comments');
   const [commentBody, setCommentBody] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const [showCanned, setShowCanned] = useState(false);
+  const [cannedSearch, setCannedSearch] = useState('');
+  const [slideIn, setSlideIn] = useState(false);
+
+  // Extra data
+  const [slos, setSlos] = useState<any[]>([]);
+  const [links, setLinks] = useState<any[]>([]);
+  const [watchers, setWatchers] = useState<any[]>([]);
+  const [kbSuggestions, setKbSuggestions] = useState<any[]>([]);
+  const [requesterTickets, setRequesterTickets] = useState<any[]>([]);
+  const [requesterInfo, setRequesterInfo] = useState<any>(null);
+  const [ticketTags, setTicketTags] = useState<any[]>([]);
+  const [allTags, setAllTags] = useState<any[]>([]);
+  const [cannedResponses, setCannedResponses] = useState<any[]>([]);
+
+  const commentRef = useRef<HTMLTextAreaElement>(null);
 
   const loadTicket = useCallback(async () => {
     const res = await fetch(`/api/calyx/tickets/${ticketId}`);
-    if (res.ok) setTicket(await res.json());
+    if (res.ok) {
+      const data = await res.json();
+      setTicket(data);
+      // Parallel extra fetches
+      const [sloRes, linkRes, watchRes, tagRes] = await Promise.all([
+        fetch(`/api/calyx/tickets/${ticketId}/slos`),
+        fetch(`/api/calyx/tickets/${ticketId}/links`),
+        fetch(`/api/calyx/tickets/${ticketId}/watchers`),
+        fetch(`/api/calyx/tickets/${ticketId}/tags`),
+      ]);
+      if (sloRes.ok) { const j = await sloRes.json(); setSlos(j.data ?? j); }
+      if (linkRes.ok) { const j = await linkRes.json(); setLinks(j.data ?? j); }
+      if (watchRes.ok) { const j = await watchRes.json(); setWatchers(j.data ?? j); }
+      if (tagRes.ok) { const j = await tagRes.json(); setTicketTags(j.data ?? j); }
+
+      // KB suggestions
+      if (data.title) {
+        const kbRes = await fetch(`/api/calyx/kb/suggest?q=${encodeURIComponent(data.title.split(' ').slice(0, 4).join(' '))}`);
+        if (kbRes.ok) { const j = await kbRes.json(); setKbSuggestions(j.data ?? []); }
+      }
+      // Requester info
+      if (data.requester_id) {
+        const reqRes = await fetch(`/api/calyx/requesters/${data.requester_id}`);
+        if (reqRes.ok) { const j = await reqRes.json(); setRequesterInfo(j.data ?? j); }
+        const rtRes = await fetch(`/api/calyx/requesters/${data.requester_id}/tickets?limit=3`);
+        if (rtRes.ok) { const j = await rtRes.json(); setRequesterTickets(j.data ?? j); }
+      }
+    }
   }, [ticketId]);
 
   useEffect(() => { loadTicket(); }, [loadTicket]);
+  useEffect(() => { requestAnimationFrame(() => setSlideIn(true)); return () => setSlideIn(false); }, []);
+
+  // Load canned responses + all tags once
+  useEffect(() => {
+    fetch('/api/calyx/canned-responses').then(r => r.ok ? r.json() : { data: [] }).then(j => setCannedResponses(j.data ?? j));
+    fetch('/api/calyx/tags').then(r => r.ok ? r.json() : { data: [] }).then(j => setAllTags(j.data ?? j));
+  }, []);
 
   async function handleStatusChange(status: TicketStatus) {
     await fetch(`/api/calyx/tickets/${ticketId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
@@ -244,181 +317,491 @@ function TicketDetailPanel({ ticketId, agents, onClose, onUpdated }: {
     setCommentBody(''); setPosting(false);
     await loadTicket(); onUpdated();
   }
+  async function handleEscalate(teamId: number) {
+    await fetch(`/api/calyx/tickets/${ticketId}/escalate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ team_id: teamId }) });
+    await loadTicket(); onUpdated();
+  }
+  async function handleDeclareMajor() {
+    if (!ticket) return;
+    await fetch(`/api/calyx/tickets/${ticketId}/declare-major`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ impact_statement: ticket.title }) });
+    await loadTicket(); onUpdated();
+  }
+  async function handleSendCsat() {
+    await fetch(`/api/calyx/tickets/${ticketId}/send-csat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    await loadTicket(); onUpdated();
+  }
+  async function addWatcher(agentId: number) {
+    await fetch(`/api/calyx/tickets/${ticketId}/watchers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent_id: agentId }) });
+    await loadTicket();
+  }
+  async function removeWatcher(agentId: number) {
+    await fetch(`/api/calyx/tickets/${ticketId}/watchers/${agentId}`, { method: 'DELETE' });
+    await loadTicket();
+  }
+  async function addTag(tagId: number) {
+    await fetch(`/api/calyx/tickets/${ticketId}/tags`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag_id: tagId }) });
+    await loadTicket();
+  }
+  async function removeTag(tagId: number) {
+    await fetch(`/api/calyx/tickets/${ticketId}/tags/${tagId}`, { method: 'DELETE' });
+    await loadTicket();
+  }
 
   if (!ticket) {
     return (
-      <div style={{ position: 'fixed', top: 0, bottom: 0, right: 0, width: '100%', maxWidth: 660, background: C.bg2, borderLeft: `1px solid ${C.border}`, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ width: 40, height: 40, border: `3px solid ${C.border}`, borderTopColor: C.teal, borderRadius: '50%', animation: 'calyxSpin 0.8s linear infinite' }} />
-      </div>
+      <>
+        <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 39 }} />
+        <div style={{ position: 'fixed', top: 0, bottom: 0, right: 0, width: '100%', maxWidth: 760, background: C.bg0, borderLeft: `1px solid ${C.border}`, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 40, height: 40, border: `3px solid ${C.border}`, borderTopColor: C.teal, borderRadius: '50%', animation: 'calyxSpin 0.8s linear infinite' }} />
+        </div>
+      </>
     );
   }
 
   const frt = formatTimeRemaining(ticket.frt_due_at, !!ticket.sla_paused_at, null, ticket.frt_met_at, true);
   const resolution = formatTimeRemaining(ticket.resolution_due_at, !!ticket.sla_paused_at, ticket.resolved_at, null, false);
 
-  const slaColor = (sla: { breached: boolean; paused: boolean; text: string }) => {
+  const slaCardColor = (sla: { breached: boolean; paused: boolean; text: string }) => {
     if (sla.breached) return C.red;
     if (sla.paused) return C.purple;
     if (sla.text === 'Met') return C.green;
     return C.teal;
   };
 
+  const topSlos = slos.filter(s => !s.completed_at).sort((a: any, b: any) => {
+    const aRemain = new Date(a.target_at).getTime() - Date.now();
+    const bRemain = new Date(b.target_at).getTime() - Date.now();
+    return aRemain - bRemain;
+  }).slice(0, 2);
+
+  const sloCardColor = (s: any) => {
+    if (s.breached) return C.red;
+    const remain = new Date(s.target_at).getTime() - Date.now();
+    if (remain < 0) return C.red;
+    const warnAt = s.warning_at ? new Date(s.warning_at).getTime() : 0;
+    if (warnAt && Date.now() >= warnAt) return C.amber;
+    return C.teal;
+  };
+
+  const sloTimeRemaining = (s: any) => {
+    if (s.breached) { return `-${Math.abs(s.breach_minutes || 0)}m`; }
+    const diff = new Date(s.target_at).getTime() - Date.now();
+    if (diff <= 0) { const m = Math.floor(Math.abs(diff) / 60000); return m < 60 ? `-${m}m` : `-${Math.floor(m / 60)}h ${m % 60}m`; }
+    const m = Math.floor(diff / 60000);
+    return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+  };
+
   const eventLabel = (e: CalyxTicketEvent) => {
+    const pretty = (v: string | null) => v ? v.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '';
     switch (e.event_type) {
-      case 'status_change': return `Status \u2192 ${e.to_value}`;
+      case 'status_change': return `Status changed from ${pretty(e.from_value)} to ${pretty(e.to_value)}`;
       case 'created': return 'Ticket created';
-      case 'priority_change': return `Priority ${e.from_value} \u2192 ${e.to_value}`;
-      case 'assignment_change': return `Assigned ${e.from_value} \u2192 ${e.to_value}`;
-      case 'comment_added': return e.to_value === 'internal' ? 'Internal note added' : 'Comment added';
-      case 'sla_paused': return `SLA paused \u2014 ${e.to_value}`;
+      case 'priority_change': return `Priority changed from ${e.from_value} to ${e.to_value}`;
+      case 'assignment_change': return `Assigned to ${pretty(e.to_value)}${e.from_value ? ` (was ${pretty(e.from_value)})` : ''}`;
+      case 'comment_added': return e.to_value === 'internal' ? 'Internal note added' : 'Public comment added';
+      case 'sla_paused': return `SLA paused \u2014 ${pretty(e.to_value)}`;
       case 'sla_resumed': return 'SLA resumed';
       case 'frt_met': return 'First response SLA met';
       case 'resolved': return 'Ticket resolved';
       case 'reopened': return 'Ticket reopened';
-      default: return e.event_type;
+      case 'escalated': return `Escalated to ${pretty(e.to_value)}`;
+      case 'slo_breached': return `SLO breached: ${e.to_value}`;
+      case 'major_incident_declared': return 'Declared as major incident';
+      case 'merged': return `Merged into ${e.to_value}`;
+      default: return e.event_type.replace(/_/g, ' ');
     }
   };
 
-  const eventColor = (type: string) => {
-    if (type === 'resolved' || type === 'frt_met') return C.green;
-    if (type === 'sla_paused') return C.purple;
-    if (type === 'sla_resumed') return C.teal;
-    if (type === 'reopened') return C.amber;
-    return C.text3;
+  const EVENT_STYLES: Record<string, { color: string; icon: string }> = {
+    created: { color: C.teal, icon: '\u25CF' },
+    status_change: { color: '#3b82f6', icon: '\u2192' },
+    escalated: { color: C.amber, icon: '\u2191' },
+    slo_breached: { color: C.red, icon: '\u2715' },
+    major_incident_declared: { color: C.red, icon: '\u26A0' },
+    comment_added: { color: C.text3, icon: '\u25CB' },
+    assignment_change: { color: C.purple, icon: '\u2299' },
+    merged: { color: C.text3, icon: '\u2295' },
+    frt_met: { color: C.green, icon: '\u2713' },
+    resolved: { color: C.green, icon: '\u2713\u2713' },
+    sla_paused: { color: C.purple, icon: '\u23F8' },
+    sla_resumed: { color: C.teal, icon: '\u25B6' },
+    reopened: { color: C.amber, icon: '\u21BA' },
+    priority_change: { color: C.amber, icon: '\u25B2' },
+    sla_breached: { color: C.red, icon: '\u2715\u2715' },
   };
 
+  const getEventStyle = (type: string) => {
+    if (type === 'comment_added') return EVENT_STYLES.comment_added;
+    return EVENT_STYLES[type] || { color: C.text3, icon: '\u25CB' };
+  };
+
+  const isResolved = ticket.status === 'resolved' || ticket.status === 'closed';
+  const sourcePill = (ticket as any).source || 'manual';
+  const sourceColors: Record<string, { color: string; bg: string }> = {
+    portal: { color: C.teal, bg: `${C.teal}18` },
+    email: { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+    api: { color: C.purple, bg: `${C.purple}18` },
+    manual: { color: C.text3, bg: `${C.text3}15` },
+  };
+  const sc = sourceColors[sourcePill] || sourceColors.manual;
+
+  const filteredCanned = cannedResponses.filter((cr: any) =>
+    !cannedSearch || cr.title.toLowerCase().includes(cannedSearch.toLowerCase()) || cr.body.toLowerCase().includes(cannedSearch.toLowerCase())
+  );
+
+  const untagged = allTags.filter((t: any) => !ticketTags.find((tt: any) => tt.id === t.id));
+  const unwatched = agents.filter(a => !watchers.find((w: any) => w.agent_id === a.id));
+
   return (
-    <div style={{
-      position: 'fixed', top: 0, bottom: 0, right: 0, width: '100%', maxWidth: 660,
-      background: C.bg2, borderLeft: `1px solid ${C.border}`, zIndex: 40,
-      display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      animation: 'calyxSlideIn 0.3s cubic-bezier(0.16,1,0.3,1)',
-      boxShadow: '-20px 0 60px rgba(0,0,0,0.5)',
-    }}>
-      {/* Backdrop click area */}
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: -1 }} />
-
-      {/* Header */}
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 39 }} />
       <div style={{
-        padding: '20px 24px', borderBottom: `1px solid ${C.border}`,
-        background: `linear-gradient(135deg, ${C.teal}08 0%, transparent 60%)`,
+        position: 'fixed', top: 0, bottom: 0, right: 0, width: '100%', maxWidth: 760,
+        background: C.bg0, borderLeft: `1px solid ${C.border}`, zIndex: 40,
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        transform: slideIn ? 'translateX(0)' : 'translateX(100%)',
+        transition: 'transform 200ms ease',
+        boxShadow: '-20px 0 60px rgba(0,0,0,0.5)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: C.text3, fontFamily: 'monospace', fontWeight: 700 }}>{ticket.reference}</span>
-            <PriorityBadge priority={ticket.priority} />
-            <StatusBadge status={ticket.status as TicketStatus} />
+        {/* ── HEADER ── */}
+        <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.border}`, background: C.bg1, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13, color: C.teal, fontFamily: 'monospace', fontWeight: 700 }}>{ticket.reference}</span>
+              <PriorityBadge priority={ticket.priority} />
+              <StatusBadge status={ticket.status as TicketStatus} />
+            </div>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.text3, fontSize: 20, cursor: 'pointer', padding: '4px 8px' }}>&times;</button>
           </div>
-          <button onClick={onClose} style={{ background: C.glass, border: `1px solid ${C.border}`, borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.text3, fontSize: 18, cursor: 'pointer' }}>&times;</button>
-        </div>
-        <h2 style={{ fontSize: 17, fontWeight: 700, color: C.text1, margin: 0, lineHeight: 1.4 }}>{ticket.title}</h2>
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
-        {/* Meta */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div><span style={{ fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Status</span><select style={{ ...selectStyle, width: '100%', marginTop: 4 }} value={ticket.status} onChange={e => handleStatusChange(e.target.value as TicketStatus)}>{Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
-          <div><span style={{ fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Priority</span><select style={{ ...selectStyle, width: '100%', marginTop: 4 }} value={ticket.priority} onChange={e => handlePriorityChange(e.target.value as TicketPriority)}><option value="P1">P1 - Critical</option><option value="P2">P2 - High</option><option value="P3">P3 - Medium</option><option value="P4">P4 - Low</option></select></div>
-          <div><span style={{ fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Assigned To</span><select style={{ ...selectStyle, width: '100%', marginTop: 4 }} value={ticket.assigned_agent_id ?? ''} onChange={e => handleAssign(e.target.value ? Number(e.target.value) : null)}><option value="">Unassigned</option>{agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
-          <div><span style={{ fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Team</span><div style={{ marginTop: 4, fontSize: 13, color: C.text1, padding: '6px 0' }}>{ticket.team_name}</div></div>
-          <div><span style={{ fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Requester</span><div style={{ marginTop: 4, fontSize: 13, color: C.text1 }}>{ticket.requester_name}</div><div style={{ fontSize: 11, color: C.text3 }}>{ticket.requester_email}</div></div>
-          <div><span style={{ fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Category</span><div style={{ marginTop: 4, fontSize: 13, color: C.text1, padding: '6px 0' }}>{ticket.category_name ?? '-'}</div></div>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: C.text1, margin: 0, lineHeight: 1.3 }}>{ticket.title}</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, color: sc.color, background: sc.bg, border: `1px solid ${sc.color}40`, textTransform: 'capitalize' }}>{sourcePill}</span>
+            <span style={{ fontSize: 11, color: C.text3 }}>{ticket.team_name}</span>
+            {ticket.category_name && <><span style={{ fontSize: 11, color: C.text3 }}>&middot;</span><span style={{ fontSize: 11, color: C.text3 }}>{ticket.category_name}</span></>}
+            <span style={{ fontSize: 11, color: C.text3 }}>&middot;</span>
+            <span style={{ fontSize: 11, color: C.text3 }}>{timeAgo(ticket.created_at)}</span>
+            <span style={{ fontSize: 11, color: C.text3 }}>&middot;</span>
+            <span style={{ fontSize: 11, color: C.text3 }}>{STATUS_LABELS[ticket.status as TicketStatus]} for {timeAgo(ticket.updated_at).replace(' ago', '')}</span>
+          </div>
         </div>
 
-        {/* SLA cards */}
-        <div style={{ display: 'flex', gap: 12 }}>
-          {[{ label: 'First Response', sla: frt }, { label: 'Resolution', sla: resolution }].map(({ label, sla }) => {
-            const col = slaColor(sla);
-            return (
-              <div key={label} style={{
-                flex: 1, background: C.glass, border: `1px solid ${C.border}`,
-                borderLeft: `3px solid ${col}`, borderRadius: 12, padding: '14px 16px',
-                position: 'relative', overflow: 'hidden',
-              }}>
-                <div style={{ position: 'absolute', top: 0, right: 0, width: 70, height: 70, background: `radial-gradient(circle at 100% 0%, ${col}15, transparent 70%)`, pointerEvents: 'none' }} />
-                <div style={{ fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginBottom: 6 }}>{label}</div>
-                <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'monospace', color: col, display: 'flex', alignItems: 'center', gap: 6, ...(sla.breached ? { animation: 'calyxPulse 2s ease-in-out infinite' } : {}), ...(sla.paused ? { fontStyle: 'italic' } : {}) }}>
-                  {sla.breached && <Pulse color={C.red} />}
-                  {sla.text === 'Met' ? <><span style={{ fontSize: 20 }}>{'\u2713'}</span> Met</> : sla.paused ? <><span style={{ fontSize: 16 }}>{'\u23F8'}</span> Paused</> : sla.text}
+        {/* ── TWO COLUMN BODY ── */}
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          {/* LEFT COLUMN */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+
+            {/* SLA + SLO 2x2 grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {[{ label: 'First Response', sla: frt }, { label: 'Resolution', sla: resolution }].map(({ label, sla }) => {
+                const col = slaCardColor(sla);
+                return (
+                  <div key={label} style={{ background: C.bg1, borderLeft: `3px solid ${col}`, borderRadius: 8, padding: '12px 16px' }}>
+                    <div style={{ fontSize: 9, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'monospace', color: col, display: 'flex', alignItems: 'center', gap: 4, ...(sla.breached ? { animation: 'calyxPulse 2s ease-in-out infinite' } : {}) }}>
+                      {sla.breached && <Pulse color={C.red} />}
+                      {sla.text === 'Met' ? '\u2713 Met' : sla.paused ? '\u23F8 Paused' : sla.text}
+                    </div>
+                  </div>
+                );
+              })}
+              {topSlos.map((s: any) => {
+                const col = sloCardColor(s);
+                const pct = s.target_at ? Math.max(0, Math.min(100, ((new Date(s.target_at).getTime() - Date.now()) / (new Date(s.target_at).getTime() - new Date(s.started_at).getTime())) * 100)) : 0;
+                return (
+                  <div key={s.id} style={{ background: C.bg1, borderLeft: `3px solid ${col}`, borderRadius: 8, padding: '12px 16px' }}>
+                    <div style={{ fontSize: 9, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.slo_name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ flex: 1, height: 4, borderRadius: 2, background: `${C.text3}20`, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${Math.min(100 - pct, 100)}%`, borderRadius: 2, background: col, transition: 'width 0.3s' }} />
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'monospace', color: col, flexShrink: 0 }}>{sloTimeRemaining(s)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Quick actions */}
+            {!isResolved && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {teams.filter(t => t.id !== ticket.team_id).slice(0, 2).map(t => (
+                  <button key={t.id} onClick={() => handleEscalate(t.id)} style={{ padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 20, cursor: 'pointer', color: C.amber, background: `${C.amber}12`, border: `1px solid ${C.amber}30` }}>Escalate to {t.name}</button>
+                ))}
+                <button onClick={handleDeclareMajor} style={{ padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 20, cursor: 'pointer', color: C.red, background: `${C.red}12`, border: `1px solid ${C.red}30` }}>Declare Major</button>
+                <button onClick={handleSendCsat} style={{ padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 20, cursor: 'pointer', color: C.teal, background: `${C.teal}12`, border: `1px solid ${C.teal}30` }}>Send CSAT</button>
+              </div>
+            )}
+
+            {/* Description */}
+            {ticket.description && (
+              <div style={{ background: C.glass, borderRadius: 8, padding: '12px 16px', border: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 13, color: C.text2, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                  {ticket.description.length > 200 && !descExpanded ? ticket.description.slice(0, 200) + '...' : ticket.description}
+                </div>
+                {ticket.description.length > 200 && (
+                  <button onClick={() => setDescExpanded(!descExpanded)} style={{ background: 'none', border: 'none', color: C.teal, fontSize: 11, cursor: 'pointer', marginTop: 4, padding: 0 }}>{descExpanded ? 'Show less' : 'Show more'}</button>
+                )}
+              </div>
+            )}
+
+            {/* Linked context strip */}
+            {links.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {links.map((l: any) => (
+                  <span key={l.id || l.reference} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, background: C.glass, border: `1px solid ${C.border}`, color: C.text2 }}>
+                    {'\u2192'} {l.reference}: {(l.title || '').slice(0, 40)}{(l.title || '').length > 40 ? '...' : ''} <StatusBadge status={l.status as TicketStatus} />
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* KB suggestions strip */}
+            {kbSuggestions.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {kbSuggestions.slice(0, 3).map((kb: any) => (
+                  <button key={kb.id} onClick={() => { setCommentBody(prev => prev + (prev ? '\n\n' : '') + `KB: ${kb.title}`); setActiveTab('comments'); }} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, background: `${C.teal}08`, border: `1px solid ${C.teal}20`, color: C.teal, cursor: 'pointer', fontWeight: 500 }}>
+                    {'\uD83D\uDCC4'} {kb.title}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Tabs */}
+            <div style={{ display: 'flex', gap: 0, borderBottom: `1px solid ${C.border}` }}>
+              {(['comments', 'events'] as const).map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab)} style={{
+                  padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  background: 'none', border: 'none',
+                  color: activeTab === tab ? C.teal : C.text3,
+                  borderBottom: activeTab === tab ? `2px solid ${C.teal}` : '2px solid transparent',
+                }}>{tab === 'comments' ? `Comments (${ticket.comments.length})` : `Activity (${ticket.events.length})`}</button>
+              ))}
+            </div>
+
+            {/* Comments */}
+            {activeTab === 'comments' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {ticket.comments.map(c => {
+                  const isAgent = !!c.agent_id;
+                  const isRequester = !c.agent_id && !c.is_internal;
+                  const borderCol = c.is_internal ? C.amber : isAgent ? C.teal : C.text3;
+                  return (
+                    <div key={c.id} style={{
+                      display: 'flex', gap: 10,
+                      ...(isRequester ? { flexDirection: 'row-reverse' } : {}),
+                    }}>
+                      <InitialsAvatar name={c.agent_name || ticket.requester_name || 'User'} size={26} color={isAgent ? C.teal : C.text3} />
+                      <div style={{
+                        flex: 1, maxWidth: '85%', borderRadius: 8, padding: '10px 14px',
+                        borderLeft: isRequester ? 'none' : `3px solid ${borderCol}`,
+                        borderRight: isRequester ? `3px solid ${C.bg3}` : 'none',
+                        background: c.is_internal ? `rgba(217,119,6,0.08)` : isAgent ? C.glass : C.bg3,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: isAgent ? C.teal : C.text2 }}>{c.agent_name ?? ticket.requester_name ?? 'Requester'}</span>
+                          {c.is_internal && <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 10, fontWeight: 600, color: C.amber, background: `${C.amber}18`, border: `1px solid ${C.amber}30` }}>Internal</span>}
+                          <span style={{ fontSize: 9, color: C.text3, marginLeft: 'auto' }}>{timeAgo(c.created_at)}</span>
+                        </div>
+                        <div style={{ fontSize: 13, color: C.text2, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{c.body}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Reply box */}
+                <div style={{ position: 'relative', marginTop: 4 }}>
+                  <textarea ref={commentRef} style={{ ...inputStyle, height: 72, resize: 'none' as const, borderColor: C.border, paddingRight: 40 }} placeholder="Write a reply..." value={commentBody} onChange={e => setCommentBody(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) postComment(); }} />
+                  <button onClick={() => setShowCanned(!showCanned)} title="Canned responses" style={{ position: 'absolute', right: 10, top: 10, background: 'none', border: 'none', color: C.text3, cursor: 'pointer', fontSize: 16 }}>{'\uD83D\uDCCB'}</button>
+                  {showCanned && (
+                    <div style={{ position: 'absolute', bottom: '100%', right: 0, width: 300, maxHeight: 250, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.4)', zIndex: 10, marginBottom: 4 }}>
+                      <input style={{ ...inputStyle, borderRadius: 0, border: 'none', borderBottom: `1px solid ${C.border}` }} placeholder="Search canned..." value={cannedSearch} onChange={e => setCannedSearch(e.target.value)} autoFocus />
+                      <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                        {filteredCanned.map((cr: any) => (
+                          <button key={cr.id} onClick={() => { setCommentBody(prev => prev + (prev ? '\n' : '') + cr.body); setShowCanned(false); setCannedSearch(''); fetch(`/api/calyx/canned-responses/${cr.id}/use`, { method: 'POST' }); }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: 'pointer', color: C.text1 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600 }}>{cr.title}</div>
+                            <div style={{ fontSize: 10, color: C.text3, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cr.body.slice(0, 80)}</div>
+                          </button>
+                        ))}
+                        {filteredCanned.length === 0 && <div style={{ padding: 12, fontSize: 11, color: C.text3, textAlign: 'center' }}>No canned responses found</div>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <button onClick={() => setIsInternal(!isInternal)} style={{
+                    padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 20, cursor: 'pointer',
+                    color: isInternal ? C.amber : C.text3,
+                    background: isInternal ? `${C.amber}15` : 'transparent',
+                    border: `1px solid ${isInternal ? `${C.amber}40` : C.border}`,
+                  }}>{isInternal ? '\uD83D\uDD12 Internal' : '\uD83C\uDF10 Public'}</button>
+                  <button onClick={postComment} disabled={posting || !commentBody.trim()} style={{
+                    padding: '6px 16px', fontSize: 12, fontWeight: 700, color: '#fff', background: C.teal, border: 'none', borderRadius: 8,
+                    cursor: commentBody.trim() && !posting ? 'pointer' : 'default', opacity: commentBody.trim() && !posting ? 1 : 0.5,
+                  }}>{posting ? 'Posting...' : 'Post'}</button>
                 </div>
               </div>
-            );
-          })}
-        </div>
+            )}
 
-        {/* Description */}
-        {ticket.description && (
-          <div style={{ background: C.glass, borderRadius: 12, padding: '14px 18px', border: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginBottom: 8 }}>Description</div>
-            <div style={{ fontSize: 13, color: C.text2, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{ticket.description}</div>
-          </div>
-        )}
-
-        {/* Tabs */}
-        <div style={{ display: 'flex', gap: 0, borderBottom: `1px solid ${C.border}` }}>
-          {(['comments', 'events'] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} style={{
-              padding: '10px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              background: 'none', border: 'none',
-              color: activeTab === tab ? C.teal : C.text3,
-              borderBottom: activeTab === tab ? `2px solid ${C.teal}` : '2px solid transparent',
-            }}>{tab === 'comments' ? `Comments (${ticket.comments.length})` : `Activity (${ticket.events.length})`}</button>
-          ))}
-        </div>
-
-        {/* Comments — chat thread style */}
-        {activeTab === 'comments' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {ticket.comments.map(c => {
-              const isAgent = !!c.agent_id;
-              return (
-                <div key={c.id} style={{ display: 'flex', justifyContent: isAgent ? 'flex-end' : 'flex-start' }}>
-                  <div style={{
-                    maxWidth: '80%', borderRadius: 12, padding: '10px 14px',
-                    background: c.is_internal ? `${C.amber}0a` : isAgent ? `${C.teal}0c` : C.glass,
-                    border: `1px solid ${c.is_internal ? `${C.amber}20` : isAgent ? `${C.teal}15` : C.border}`,
-                    borderTopRightRadius: isAgent ? 4 : 12,
-                    borderTopLeftRadius: isAgent ? 12 : 4,
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: isAgent ? C.teal : C.text2 }}>{c.agent_name ?? 'System'}</span>
-                      {c.is_internal && <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 10, fontWeight: 600, color: C.amber, background: `${C.amber}18`, border: `1px solid ${C.amber}30` }}>Internal</span>}
-                      <span style={{ fontSize: 9, color: C.text3, marginLeft: 'auto' }}>{formatDate(c.created_at)}</span>
+            {/* Events — timeline */}
+            {activeTab === 'events' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0, paddingLeft: 8 }}>
+                {ticket.events.map((e, i) => {
+                  const es = getEventStyle(e.event_type);
+                  const isInternalComment = e.event_type === 'comment_added' && e.to_value === 'internal';
+                  const borderCol = isInternalComment ? C.amber : es.color;
+                  const icon = isInternalComment ? '\u25D0' : es.icon;
+                  return (
+                    <div key={e.id} style={{ display: 'flex', gap: 12, position: 'relative', paddingBottom: i < ticket.events.length - 1 ? 14 : 0 }}>
+                      {i < ticket.events.length - 1 && <div style={{ position: 'absolute', left: 7, top: 16, bottom: 0, width: 1, background: C.border }} />}
+                      <div style={{
+                        width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 9, color: borderCol, background: `${borderCol}18`, border: `1px solid ${borderCol}30`,
+                      }}>{icon}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 12, color: C.text2 }}>{eventLabel(e)}</span>
+                        {e.agent_name && <span style={{ fontSize: 11, color: C.text3 }}> \u2014 {e.agent_name}</span>}
+                        {e.note && <div style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>{e.note}</div>}
+                      </div>
+                      <span style={{ fontSize: 10, color: C.text3, flexShrink: 0, whiteSpace: 'nowrap' }}>{timeAgo(e.created_at)}</span>
                     </div>
-                    <div style={{ fontSize: 13, color: C.text2, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{c.body}</div>
-                  </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT SIDEBAR */}
+          <div style={{ width: 240, flexShrink: 0, borderLeft: `1px solid ${C.border}`, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 16, background: C.bg1 }}>
+
+            {/* Requester card */}
+            <div style={{ paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <InitialsAvatar name={ticket.requester_name} size={32} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ticket.requester_name}</div>
+                  <div style={{ fontSize: 10, color: C.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ticket.requester_email}</div>
                 </div>
-              );
-            })}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-              <textarea style={{ ...inputStyle, height: 72, resize: 'none' as const }} placeholder="Write a comment..." value={commentBody} onChange={e => setCommentBody(e.target.value)} />
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.text3, cursor: 'pointer' }}><input type="checkbox" checked={isInternal} onChange={e => setIsInternal(e.target.checked)} />Internal note</label>
-                <button onClick={postComment} disabled={posting || !commentBody.trim()} style={{ padding: '6px 14px', fontSize: 12, fontWeight: 700, color: C.bg1, background: C.teal, border: 'none', borderRadius: 8, cursor: commentBody.trim() && !posting ? 'pointer' : 'default', opacity: commentBody.trim() && !posting ? 1 : 0.5 }}>{posting ? 'Posting...' : 'Add Comment'}</button>
+              </div>
+              {requesterInfo?.organisation_name && (
+                <div style={{ fontSize: 11, color: C.text2, marginBottom: 4 }}>{requesterInfo.organisation_name}</div>
+              )}
+              {requesterInfo?.avg_csat != null && (
+                <div style={{ fontSize: 10, color: C.text3 }}>Avg {requesterInfo.avg_csat.toFixed(1)} {'\u2605'} across {requesterInfo.recent_tickets?.length ?? 0} tickets</div>
+              )}
+              {/* Recent tickets */}
+              {requesterTickets.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  {requesterTickets.filter((rt: any) => rt.id !== ticketId).slice(0, 3).map((rt: any) => (
+                    <div key={rt.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
+                      <span style={{ fontSize: 10, fontFamily: 'monospace', color: C.teal, fontWeight: 600 }}>{rt.reference}</span>
+                      <span style={{ fontSize: 10, color: C.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{rt.title}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Metadata grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 4px', paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
+              <div><div style={{ fontSize: 9, color: C.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Priority</div>
+                <select style={{ ...selectStyle, width: '100%', padding: '3px 6px', fontSize: 11 }} value={ticket.priority} onChange={e => handlePriorityChange(e.target.value as TicketPriority)}>
+                  <option value="P1">P1</option><option value="P2">P2</option><option value="P3">P3</option><option value="P4">P4</option>
+                </select>
+              </div>
+              <div><div style={{ fontSize: 9, color: C.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Status</div>
+                <select style={{ ...selectStyle, width: '100%', padding: '3px 6px', fontSize: 11 }} value={ticket.status} onChange={e => handleStatusChange(e.target.value as TicketStatus)}>
+                  {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}><div style={{ fontSize: 9, color: C.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Assignee</div>
+                <select style={{ ...selectStyle, width: '100%', padding: '3px 6px', fontSize: 11 }} value={ticket.assigned_agent_id ?? ''} onChange={e => handleAssign(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">Unassigned</option>{agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+              {[
+                ['Team', ticket.team_name],
+                ['Category', ticket.category_name ?? '-'],
+                ['Source', sourcePill],
+                ['Created', formatDate(ticket.created_at)],
+                ['Age', timeAgo(ticket.created_at).replace(' ago', '')],
+                ['Updated', formatDate(ticket.updated_at)],
+              ].map(([label, value]) => (
+                <div key={label as string}><div style={{ fontSize: 9, color: C.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>{label}</div><div style={{ fontSize: 11, color: C.text2 }}>{value}</div></div>
+              ))}
+            </div>
+
+            {/* Watchers */}
+            <div style={{ paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 10, color: C.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Watchers</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                {watchers.map((w: any) => (
+                  <div key={w.agent_id} style={{ position: 'relative', display: 'inline-flex' }} title={w.agent_name}>
+                    <InitialsAvatar name={w.agent_name} size={24} />
+                    <button onClick={() => removeWatcher(w.agent_id)} style={{ position: 'absolute', top: -4, right: -4, width: 14, height: 14, borderRadius: '50%', background: C.bg3, border: `1px solid ${C.border}`, color: C.text3, fontSize: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 }}>&times;</button>
+                  </div>
+                ))}
+                {unwatched.length > 0 && (
+                  <select style={{ ...selectStyle, width: 'auto', padding: '2px 6px', fontSize: 10 }} value="" onChange={e => { if (e.target.value) addWatcher(Number(e.target.value)); }}>
+                    <option value="">+ Add</option>
+                    {unwatched.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                )}
               </div>
             </div>
-          </div>
-        )}
 
-        {/* Events — timeline */}
-        {activeTab === 'events' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0, paddingLeft: 12 }}>
-            {ticket.events.map((e, i) => (
-              <div key={e.id} style={{ display: 'flex', gap: 14, position: 'relative', paddingBottom: i < ticket.events.length - 1 ? 16 : 0 }}>
-                {i < ticket.events.length - 1 && <div style={{ position: 'absolute', left: 3, top: 12, bottom: 0, width: 1, background: C.border }} />}
-                <div style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 4, flexShrink: 0, background: eventColor(e.event_type), boxShadow: `0 0 6px ${eventColor(e.event_type)}40` }} />
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: 12, color: C.text2 }}>{eventLabel(e)}</span>
-                  {e.agent_name && <span style={{ fontSize: 11, color: C.text3 }}> \u2014 {e.agent_name}</span>}
-                  {e.note && <div style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>{e.note}</div>}
-                </div>
-                <span style={{ fontSize: 10, color: C.text3, flexShrink: 0, whiteSpace: 'nowrap' }}>{formatDate(e.created_at)}</span>
+            {/* Tags */}
+            <div style={{ paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 10, color: C.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Tags</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                {ticketTags.map((t: any) => (
+                  <span key={t.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, padding: '2px 8px', borderRadius: 10, background: `${t.colour || C.teal}20`, color: t.colour || C.teal, border: `1px solid ${t.colour || C.teal}30` }}>
+                    {t.name}
+                    <button onClick={() => removeTag(t.id)} style={{ background: 'none', border: 'none', color: 'inherit', fontSize: 10, cursor: 'pointer', padding: 0, lineHeight: 1 }}>&times;</button>
+                  </span>
+                ))}
+                {untagged.length > 0 && (
+                  <select style={{ ...selectStyle, width: 'auto', padding: '2px 6px', fontSize: 10 }} value="" onChange={e => { if (e.target.value) addTag(Number(e.target.value)); }}>
+                    <option value="">+</option>
+                    {untagged.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                )}
               </div>
-            ))}
+            </div>
+
+            {/* SLO detail (collapsible) */}
+            {slos.length > 0 && (
+              <div style={{ paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 10, color: C.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>SLO Tracking</div>
+                {slos.map((s: any) => {
+                  const col = s.completed_at ? C.green : sloCardColor(s);
+                  return (
+                    <div key={s.id} style={{ marginBottom: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                        <span style={{ fontSize: 10, color: C.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{s.slo_name}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'monospace', color: col, flexShrink: 0, marginLeft: 4 }}>
+                          {s.completed_at ? '\u2713' : sloTimeRemaining(s)}
+                        </span>
+                      </div>
+                      <div style={{ height: 3, borderRadius: 2, background: `${C.text3}20` }}>
+                        <div style={{ height: '100%', borderRadius: 2, background: col, width: s.completed_at ? '100%' : `${Math.min(100, Math.max(0, ((Date.now() - new Date(s.started_at).getTime()) / (new Date(s.target_at).getTime() - new Date(s.started_at).getTime())) * 100))}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Supplier / third party */}
+            {(ticket.status === 'waiting_third_party' || (ticket as any).supplier_id) && (
+              <div style={{ padding: '8px 12px', borderRadius: 6, background: `${C.amber}12`, border: `1px solid ${C.amber}30` }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: C.amber }}>Waiting on third party</div>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -512,7 +895,7 @@ export function CalyxQueueView() {
   const [showNewForm, setShowNewForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TicketStatus | ''>('');
   const [priorityFilter, setPriorityFilter] = useState<TicketPriority | ''>('');
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const [, setTick] = useState(0);
 
   const loadTickets = useCallback(async () => {
@@ -684,7 +1067,7 @@ export function CalyxQueueView() {
       </div>
 
       {selectedTicketId !== null && (
-        <TicketDetailPanel ticketId={selectedTicketId} agents={agents} onClose={() => setSelectedTicketId(null)} onUpdated={() => { loadTickets(); loadAllTickets(); }} />
+        <TicketDetailPanel ticketId={selectedTicketId} agents={agents} teams={teams} onClose={() => setSelectedTicketId(null)} onUpdated={() => { loadTickets(); loadAllTickets(); }} />
       )}
 
       {showNewForm && (
