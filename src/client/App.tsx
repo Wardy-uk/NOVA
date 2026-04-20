@@ -53,6 +53,17 @@ import { DevReviewView } from './components/DevReviewView.js';
 import { DevReviewDashboard } from './components/DevReviewDashboard.js';
 import { AgentKpisView } from './components/AgentKpisView.js';
 import { CalyxQueueView } from './components/CalyxQueueView.js';
+import { CalyxDashboardView } from './components/CalyxDashboardView.js';
+import { CalyxPlaylistView } from './components/CalyxPlaylistView.js';
+import { CalyxProblemsView } from './components/CalyxProblemsView.js';
+import { CalyxChangesView } from './components/CalyxChangesView.js';
+import { CalyxKnowledgeBaseView } from './components/CalyxKnowledgeBaseView.js';
+import { CalyxMajorIncidentsView } from './components/CalyxMajorIncidentsView.js';
+import { CalyxImprovementsView } from './components/CalyxImprovementsView.js';
+import { CalyxSloSettingsView } from './components/CalyxSloSettingsView.js';
+import { CalyxBusinessHoursView } from './components/CalyxBusinessHoursView.js';
+import { CalyxOrganisationsView } from './components/CalyxOrganisationsView.js';
+import { CalyxPortal } from './components/CalyxPortal.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -75,7 +86,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'training-matrix' | 'training-summary'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
-  | 'calyx-queue'
+  | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-problems' | 'calyx-changes' | 'calyx-kb' | 'calyx-major-incidents' | 'calyx-improvements' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -231,6 +242,16 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'calyx-queue',
     tabs: [
       { view: 'calyx-queue', label: 'Queue' },
+      { view: 'calyx-playlist', label: 'My Queue' },
+      { view: 'calyx-dashboard', label: 'Dashboard' },
+      { view: 'calyx-problems', label: 'Problems' },
+      { view: 'calyx-changes', label: 'Changes' },
+      { view: 'calyx-kb', label: 'Knowledge Base' },
+      { view: 'calyx-major-incidents', label: 'Major Incidents' },
+      { view: 'calyx-improvements', label: 'Improvements' },
+      { view: 'calyx-slo-settings', label: 'SLO Settings' },
+      { view: 'calyx-business-hours', label: 'Business Hours' },
+      { view: 'calyx-organisations', label: 'Organisations' },
     ],
   },
 };
@@ -247,7 +268,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue', 'calyx-dashboard', 'calyx-playlist', 'calyx-problems', 'calyx-changes', 'calyx-kb', 'calyx-major-incidents', 'calyx-improvements', 'calyx-slo-settings', 'calyx-business-hours', 'calyx-organisations']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -293,6 +314,9 @@ function getViewFromHash(): View | null {
 }
 
 export function App() {
+  // Calyx requester portal — standalone (no NOVA chrome or auth)
+  if (window.location.pathname.startsWith('/portal')) return <CalyxPortal />;
+
   // Customer setup portal — standalone public page (no NOVA auth)
   const setupMatch = window.location.pathname.match(/^\/setup\/([a-f0-9]{64})$/);
   if (setupMatch) return <SetupPortal token={setupMatch[1]} />;
@@ -1121,6 +1145,36 @@ export function App() {
           {/* Calyx — internal service desk */}
           {view === 'calyx-queue' && (
             <CalyxQueueView />
+          )}
+          {view === 'calyx-dashboard' && (
+            <CalyxDashboardView />
+          )}
+          {view === 'calyx-playlist' && (
+            <CalyxPlaylistView />
+          )}
+          {view === 'calyx-problems' && (
+            <CalyxProblemsView />
+          )}
+          {view === 'calyx-changes' && (
+            <CalyxChangesView />
+          )}
+          {view === 'calyx-kb' && (
+            <CalyxKnowledgeBaseView />
+          )}
+          {view === 'calyx-major-incidents' && (
+            <CalyxMajorIncidentsView />
+          )}
+          {view === 'calyx-improvements' && (
+            <CalyxImprovementsView />
+          )}
+          {view === 'calyx-slo-settings' && (
+            <CalyxSloSettingsView />
+          )}
+          {view === 'calyx-business-hours' && (
+            <CalyxBusinessHoursView />
+          )}
+          {view === 'calyx-organisations' && (
+            <CalyxOrganisationsView />
           )}
 
           {/* Administration */}

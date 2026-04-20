@@ -85,6 +85,14 @@ import { addBusinessHours, toSqliteDatetime } from './utils/business-hours.js';
 import { getCalyxDb, initializeCalyxSchema, seedCalyxData } from './db/calyx-db.js';
 import { CalyxQueries } from './db/calyx-queries.js';
 import { createCalyxRoutes } from './routes/calyx.js';
+import { createCalyxPhase4Routes } from './routes/calyx-phase4.js';
+import { createCalyxPhase5Routes } from './routes/calyx-phase5.js';
+import { createCalyxReportRoutes } from './routes/calyx-reports.js';
+import { createCalyxPortalRoutes } from './routes/calyx-portal.js';
+import { checkSloBreaches } from './services/calyx-slo-engine.js';
+import { processEmailQueue } from './services/calyx-email.js';
+import { syncCalyxKpisToNova } from './services/calyx-kpi-sync.js';
+import cookieParser from 'cookie-parser';
 
 dotenv.config();
 
@@ -104,6 +112,10 @@ async function main() {
   initializeCalyxSchema(calyxDb);
   seedCalyxData(calyxDb);
   const calyxQueries = new CalyxQueries(calyxDb);
+  setInterval(() => checkSloBreaches(calyxDb, settingsQueries.getAll()), 5 * 60 * 1000);
+  setInterval(() => processEmailQueue(calyxDb, settingsQueries.getAll()), 60_000);
+  setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries), 30 * 60 * 1000);
+  syncCalyxKpisToNova(calyxDb, settingsQueries);
 
   const taskQueries = new TaskQueries(db);
   const settingsQueries = new FileSettingsQueries();
@@ -308,6 +320,7 @@ async function main() {
   app.use(helmet({ contentSecurityPolicy: false })); // CSP off for SPA
   app.use(cors());
   app.use(express.json({ limit: '20mb' }));
+  app.use(cookieParser());
 
   // Rate limit login attempts (15 per 15 min window)
   const loginLimiter = rateLimit({
@@ -525,6 +538,9 @@ async function main() {
     }
   });
 
+  // Calyx portal — public + portal-JWT auth (no NOVA auth)
+  app.use('/api/calyx/portal', createCalyxPortalRoutes(calyxDb, settingsQueries));
+
   // Protected API routes — look up fresh role from DB so stale JWTs always reflect current role
   app.use('/api', authMiddleware(jwtSecret, (id) => userQueries.getById(id)?.role));
 
@@ -540,7 +556,11 @@ async function main() {
     res.json({ ok: true, data: list });
   });
 
-  app.use('/api/calyx', createCalyxRoutes(calyxQueries));
+  const getCalyxSettings = () => settingsQueries.getAll();
+  app.use('/api/calyx', createCalyxRoutes(calyxQueries, calyxDb, getCalyxSettings));
+  app.use('/api/calyx', createCalyxPhase4Routes(calyxDb, getCalyxSettings));
+  app.use('/api/calyx', createCalyxPhase5Routes(calyxDb, settingsQueries));
+  app.use('/api/calyx', createCalyxReportRoutes(calyxDb));
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries, settingsQueries, onboardingRunQueries, problemTicketQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries, userSettingsQueries, (key) => {

@@ -13,18 +13,18 @@ export class CalyxQueries {
   // ── Teams ──
 
   listTeams(): CalyxTeam[] {
-    return this.db.prepare('SELECT * FROM teams ORDER BY id').all() as CalyxTeam[];
+    return this.db.prepare('SELECT * FROM calyx_teams ORDER BY id').all() as CalyxTeam[];
   }
 
   // ── Categories ──
 
   listCategories(): CalyxCategory[] {
-    const rows = this.db.prepare('SELECT * FROM categories ORDER BY team_id, level, name').all() as CalyxCategory[];
+    const rows = this.db.prepare('SELECT * FROM calyx_categories ORDER BY team_id, level, name').all() as CalyxCategory[];
     return this.buildCategoryTree(rows);
   }
 
   listCategoriesFlat(): CalyxCategory[] {
-    return this.db.prepare('SELECT * FROM categories ORDER BY team_id, level, name').all() as CalyxCategory[];
+    return this.db.prepare('SELECT * FROM calyx_categories ORDER BY team_id, level, name').all() as CalyxCategory[];
   }
 
   private buildCategoryTree(rows: CalyxCategory[]): CalyxCategory[] {
@@ -52,8 +52,8 @@ export class CalyxQueries {
   listAgents(): CalyxAgent[] {
     return this.db.prepare(`
       SELECT a.*, t.name as team_name
-      FROM agents a
-      JOIN teams t ON t.id = a.team_id
+      FROM calyx_agents a
+      JOIN calyx_teams t ON t.id = a.team_id
       WHERE a.is_active = 1
       ORDER BY a.name
     `).all() as CalyxAgent[];
@@ -62,33 +62,32 @@ export class CalyxQueries {
   // ── SLA Policies ──
 
   listSlaPolicies(): CalyxSlaPolicy[] {
-    return this.db.prepare('SELECT * FROM sla_policies ORDER BY position, priority').all() as CalyxSlaPolicy[];
+    return this.db.prepare('SELECT * FROM calyx_sla_policies ORDER BY position, priority').all() as CalyxSlaPolicy[];
   }
 
   findSlaPolicy(priority: string, teamId?: number, categoryId?: number | null): CalyxSlaPolicy | undefined {
-    // Try specific match first (team + category), then team-only, then global
     if (categoryId && teamId) {
       const specific = this.db.prepare(
-        'SELECT * FROM sla_policies WHERE priority = ? AND team_id = ? AND category_id = ? LIMIT 1'
+        'SELECT * FROM calyx_sla_policies WHERE priority = ? AND team_id = ? AND category_id = ? LIMIT 1'
       ).get(priority, teamId, categoryId) as CalyxSlaPolicy | undefined;
       if (specific) return specific;
     }
 
     if (teamId) {
       const teamMatch = this.db.prepare(
-        'SELECT * FROM sla_policies WHERE priority = ? AND team_id = ? AND category_id IS NULL LIMIT 1'
+        'SELECT * FROM calyx_sla_policies WHERE priority = ? AND team_id = ? AND category_id IS NULL LIMIT 1'
       ).get(priority, teamId) as CalyxSlaPolicy | undefined;
       if (teamMatch) return teamMatch;
     }
 
     return this.db.prepare(
-      'SELECT * FROM sla_policies WHERE priority = ? AND team_id IS NULL AND category_id IS NULL LIMIT 1'
+      'SELECT * FROM calyx_sla_policies WHERE priority = ? AND team_id IS NULL AND category_id IS NULL LIMIT 1'
     ).get(priority) as CalyxSlaPolicy | undefined;
   }
 
   createSlaPolicy(payload: CreateSlaPolicyPayload): CalyxSlaPolicy {
     const result = this.db.prepare(`
-      INSERT INTO sla_policies (name, team_id, category_id, priority, frt_minutes, resolution_minutes, business_hours_only, pause_on_waiting, position)
+      INSERT INTO calyx_sla_policies (name, team_id, category_id, priority, frt_minutes, resolution_minutes, business_hours_only, pause_on_waiting, position)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       payload.name,
@@ -102,13 +101,13 @@ export class CalyxQueries {
       payload.position ?? 0,
     );
 
-    return this.db.prepare('SELECT * FROM sla_policies WHERE id = ?').get(result.lastInsertRowid) as CalyxSlaPolicy;
+    return this.db.prepare('SELECT * FROM calyx_sla_policies WHERE id = ?').get(result.lastInsertRowid) as CalyxSlaPolicy;
   }
 
   // ── Tickets ──
 
   private nextReference(): string {
-    const row = this.db.prepare("SELECT MAX(CAST(SUBSTR(reference, 5) AS INTEGER)) as num FROM tickets").get() as { num: number | null };
+    const row = this.db.prepare("SELECT MAX(CAST(SUBSTR(reference, 5) AS INTEGER)) as num FROM calyx_tickets").get() as { num: number | null };
     const next = (row.num ?? 0) + 1;
     return `CAL-${String(next).padStart(3, '0')}`;
   }
@@ -122,13 +121,13 @@ export class CalyxQueries {
         c2.name as subcategory_name,
         c3.name as item_name,
         sp.name as sla_policy_name
-      FROM tickets t
-      JOIN teams tm ON tm.id = t.team_id
-      LEFT JOIN agents a ON a.id = t.assigned_agent_id
-      LEFT JOIN categories c1 ON c1.id = t.category_id
-      LEFT JOIN categories c2 ON c2.id = t.subcategory_id
-      LEFT JOIN categories c3 ON c3.id = t.item_id
-      LEFT JOIN sla_policies sp ON sp.id = t.sla_policy_id
+      FROM calyx_tickets t
+      JOIN calyx_teams tm ON tm.id = t.team_id
+      LEFT JOIN calyx_agents a ON a.id = t.assigned_agent_id
+      LEFT JOIN calyx_categories c1 ON c1.id = t.category_id
+      LEFT JOIN calyx_categories c2 ON c2.id = t.subcategory_id
+      LEFT JOIN calyx_categories c3 ON c3.id = t.item_id
+      LEFT JOIN calyx_sla_policies sp ON sp.id = t.sla_policy_id
     `;
 
     const conditions: string[] = [];
@@ -176,13 +175,13 @@ export class CalyxQueries {
         c2.name as subcategory_name,
         c3.name as item_name,
         sp.name as sla_policy_name
-      FROM tickets t
-      JOIN teams tm ON tm.id = t.team_id
-      LEFT JOIN agents a ON a.id = t.assigned_agent_id
-      LEFT JOIN categories c1 ON c1.id = t.category_id
-      LEFT JOIN categories c2 ON c2.id = t.subcategory_id
-      LEFT JOIN categories c3 ON c3.id = t.item_id
-      LEFT JOIN sla_policies sp ON sp.id = t.sla_policy_id
+      FROM calyx_tickets t
+      JOIN calyx_teams tm ON tm.id = t.team_id
+      LEFT JOIN calyx_agents a ON a.id = t.assigned_agent_id
+      LEFT JOIN calyx_categories c1 ON c1.id = t.category_id
+      LEFT JOIN calyx_categories c2 ON c2.id = t.subcategory_id
+      LEFT JOIN calyx_categories c3 ON c3.id = t.item_id
+      LEFT JOIN calyx_sla_policies sp ON sp.id = t.sla_policy_id
       WHERE t.id = ?
     `).get(id) as CalyxTicket | undefined;
   }
@@ -192,7 +191,6 @@ export class CalyxQueries {
     const now = new Date();
     const nowStr = toSqliteDatetime(now);
 
-    // Find matching SLA policy
     const slaPolicy = this.findSlaPolicy(payload.priority, payload.team_id, payload.category_id);
 
     let frtDueAt: string | null = null;
@@ -209,7 +207,7 @@ export class CalyxQueries {
     }
 
     const result = this.db.prepare(`
-      INSERT INTO tickets (reference, title, description, team_id, category_id, subcategory_id, item_id, priority, status, assigned_agent_id, requester_name, requester_email, sla_policy_id, frt_due_at, resolution_due_at, created_at, updated_at)
+      INSERT INTO calyx_tickets (reference, title, description, team_id, category_id, subcategory_id, item_id, priority, status, assigned_agent_id, requester_name, requester_email, sla_policy_id, frt_due_at, resolution_due_at, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       reference, payload.title, payload.description,
@@ -222,9 +220,8 @@ export class CalyxQueries {
 
     const ticketId = result.lastInsertRowid as number;
 
-    // Record creation event
     this.db.prepare(
-      'INSERT INTO ticket_events (ticket_id, event_type, to_value, note, created_at) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO calyx_ticket_events (ticket_id, event_type, to_value, note, created_at) VALUES (?, ?, ?, ?, ?)'
     ).run(ticketId, 'created', 'open', 'Ticket created', nowStr);
 
     return this.getTicket(ticketId)!;
@@ -244,7 +241,7 @@ export class CalyxQueries {
 
       if (payload.priority && payload.priority !== ticket.priority) {
         this.db.prepare(
-          'INSERT INTO ticket_events (ticket_id, event_type, from_value, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+          'INSERT INTO calyx_ticket_events (ticket_id, event_type, from_value, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
         ).run(id, 'priority_change', ticket.priority, payload.priority, agentId ?? null, nowStr);
       }
 
@@ -252,11 +249,11 @@ export class CalyxQueries {
         const fromName = ticket.assigned_agent_name ?? 'unassigned';
         let toName = 'unassigned';
         if (payload.assigned_agent_id) {
-          const agent = this.db.prepare('SELECT name FROM agents WHERE id = ?').get(payload.assigned_agent_id) as { name: string } | undefined;
+          const agent = this.db.prepare('SELECT name FROM calyx_agents WHERE id = ?').get(payload.assigned_agent_id) as { name: string } | undefined;
           toName = agent?.name ?? 'unknown';
         }
         this.db.prepare(
-          'INSERT INTO ticket_events (ticket_id, event_type, from_value, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+          'INSERT INTO calyx_ticket_events (ticket_id, event_type, from_value, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
         ).run(id, 'assignment_change', fromName, toName, agentId ?? null, nowStr);
       }
 
@@ -271,7 +268,7 @@ export class CalyxQueries {
       if (payload.item_id !== undefined) { sets.push('item_id = ?'); params.push(payload.item_id); }
 
       params.push(id);
-      this.db.prepare(`UPDATE tickets SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+      this.db.prepare(`UPDATE calyx_tickets SET ${sets.join(', ')} WHERE id = ?`).run(...params);
     })();
 
     return this.getTicket(id);
@@ -282,63 +279,57 @@ export class CalyxQueries {
     const wasWaiting = waitingStatuses.includes(ticket.status as TicketStatus);
     const goingWaiting = waitingStatuses.includes(newStatus);
 
-    // SLA pause: entering a waiting state
     if (goingWaiting && !wasWaiting && ticket.sla_paused_at === null) {
       this.db.prepare(
-        'UPDATE tickets SET sla_paused_at = ?, sla_pause_reason = ? WHERE id = ?'
+        'UPDATE calyx_tickets SET sla_paused_at = ?, sla_pause_reason = ? WHERE id = ?'
       ).run(nowStr, newStatus, ticket.id);
 
       this.db.prepare(
-        'INSERT INTO ticket_events (ticket_id, event_type, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO calyx_ticket_events (ticket_id, event_type, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?)'
       ).run(ticket.id, 'sla_paused', newStatus, agentId, nowStr);
     }
 
-    // SLA resume: leaving a waiting state
     if (wasWaiting && !goingWaiting && ticket.sla_paused_at) {
       const pausedAt = new Date(ticket.sla_paused_at.replace(' ', 'T') + 'Z');
       const pausedMs = new Date(nowStr.replace(' ', 'T') + 'Z').getTime() - pausedAt.getTime();
       const pausedMinutes = Math.floor(pausedMs / 60000);
 
-      // Extend deadlines by the paused duration
       if (ticket.frt_due_at && !ticket.frt_met_at && !ticket.first_replied_at) {
         const oldFrt = new Date(ticket.frt_due_at.replace(' ', 'T') + 'Z');
         const newFrt = new Date(oldFrt.getTime() + pausedMs);
-        this.db.prepare('UPDATE tickets SET frt_due_at = ? WHERE id = ?').run(toSqliteDatetime(newFrt), ticket.id);
+        this.db.prepare('UPDATE calyx_tickets SET frt_due_at = ? WHERE id = ?').run(toSqliteDatetime(newFrt), ticket.id);
       }
       if (ticket.resolution_due_at && !ticket.resolved_at) {
         const oldRes = new Date(ticket.resolution_due_at.replace(' ', 'T') + 'Z');
         const newRes = new Date(oldRes.getTime() + pausedMs);
-        this.db.prepare('UPDATE tickets SET resolution_due_at = ? WHERE id = ?').run(toSqliteDatetime(newRes), ticket.id);
+        this.db.prepare('UPDATE calyx_tickets SET resolution_due_at = ? WHERE id = ?').run(toSqliteDatetime(newRes), ticket.id);
       }
 
       this.db.prepare(
-        'UPDATE tickets SET sla_paused_at = NULL, sla_pause_reason = NULL WHERE id = ?'
+        'UPDATE calyx_tickets SET sla_paused_at = NULL, sla_pause_reason = NULL WHERE id = ?'
       ).run(ticket.id);
 
       this.db.prepare(
-        'INSERT INTO ticket_events (ticket_id, event_type, to_value, note, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+        'INSERT INTO calyx_ticket_events (ticket_id, event_type, to_value, note, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
       ).run(ticket.id, 'sla_resumed', newStatus, `Paused for ${pausedMinutes} minutes`, agentId, nowStr);
     }
 
-    // Resolved
     if (newStatus === 'resolved' && ticket.status !== 'resolved') {
-      this.db.prepare('UPDATE tickets SET resolved_at = ? WHERE id = ?').run(nowStr, ticket.id);
+      this.db.prepare('UPDATE calyx_tickets SET resolved_at = ? WHERE id = ?').run(nowStr, ticket.id);
       this.db.prepare(
-        'INSERT INTO ticket_events (ticket_id, event_type, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO calyx_ticket_events (ticket_id, event_type, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?)'
       ).run(ticket.id, 'resolved', 'resolved', agentId, nowStr);
     }
 
-    // Reopened (from resolved/closed back to open)
     if ((ticket.status === 'resolved' || ticket.status === 'closed') && newStatus !== 'resolved' && newStatus !== 'closed') {
-      this.db.prepare('UPDATE tickets SET resolved_at = NULL WHERE id = ?').run(ticket.id);
+      this.db.prepare('UPDATE calyx_tickets SET resolved_at = NULL WHERE id = ?').run(ticket.id);
       this.db.prepare(
-        'INSERT INTO ticket_events (ticket_id, event_type, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO calyx_ticket_events (ticket_id, event_type, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?)'
       ).run(ticket.id, 'reopened', newStatus, agentId, nowStr);
     }
 
-    // Status change event
     this.db.prepare(
-      'INSERT INTO ticket_events (ticket_id, event_type, from_value, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO calyx_ticket_events (ticket_id, event_type, from_value, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(ticket.id, 'status_change', ticket.status, newStatus, agentId, nowStr);
   }
 
@@ -347,8 +338,8 @@ export class CalyxQueries {
   getTicketComments(ticketId: number): CalyxComment[] {
     return this.db.prepare(`
       SELECT c.*, a.name as agent_name
-      FROM ticket_comments c
-      LEFT JOIN agents a ON a.id = c.agent_id
+      FROM calyx_ticket_comments c
+      LEFT JOIN calyx_agents a ON a.id = c.agent_id
       WHERE c.ticket_id = ?
       ORDER BY c.created_at ASC
     `).all(ticketId) as CalyxComment[];
@@ -358,29 +349,27 @@ export class CalyxQueries {
     const now = toSqliteDatetime(new Date());
 
     const result = this.db.prepare(
-      'INSERT INTO ticket_comments (ticket_id, agent_id, body, is_internal, created_at) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO calyx_ticket_comments (ticket_id, agent_id, body, is_internal, created_at) VALUES (?, ?, ?, ?, ?)'
     ).run(ticketId, payload.agent_id ?? null, payload.body, payload.is_internal ? 1 : 0, now);
 
-    // Record event
     this.db.prepare(
-      'INSERT INTO ticket_events (ticket_id, event_type, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO calyx_ticket_events (ticket_id, event_type, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?)'
     ).run(ticketId, 'comment_added', payload.is_internal ? 'internal' : 'public', payload.agent_id ?? null, now);
 
-    // FRT: first public comment marks first reply
     if (!payload.is_internal) {
-      const ticket = this.db.prepare('SELECT first_replied_at, frt_due_at FROM tickets WHERE id = ?').get(ticketId) as { first_replied_at: string | null; frt_due_at: string | null } | undefined;
+      const ticket = this.db.prepare('SELECT first_replied_at, frt_due_at FROM calyx_tickets WHERE id = ?').get(ticketId) as { first_replied_at: string | null; frt_due_at: string | null } | undefined;
       if (ticket && !ticket.first_replied_at) {
-        this.db.prepare('UPDATE tickets SET first_replied_at = ?, frt_met_at = ? WHERE id = ?').run(now, now, ticketId);
+        this.db.prepare('UPDATE calyx_tickets SET first_replied_at = ?, frt_met_at = ? WHERE id = ?').run(now, now, ticketId);
         this.db.prepare(
-          'INSERT INTO ticket_events (ticket_id, event_type, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?)'
+          'INSERT INTO calyx_ticket_events (ticket_id, event_type, to_value, agent_id, created_at) VALUES (?, ?, ?, ?, ?)'
         ).run(ticketId, 'frt_met', now, payload.agent_id ?? null, now);
       }
     }
 
     return this.db.prepare(`
       SELECT c.*, a.name as agent_name
-      FROM ticket_comments c
-      LEFT JOIN agents a ON a.id = c.agent_id
+      FROM calyx_ticket_comments c
+      LEFT JOIN calyx_agents a ON a.id = c.agent_id
       WHERE c.id = ?
     `).get(result.lastInsertRowid) as CalyxComment;
   }
@@ -390,8 +379,8 @@ export class CalyxQueries {
   getTicketEvents(ticketId: number): CalyxTicketEvent[] {
     return this.db.prepare(`
       SELECT e.*, a.name as agent_name
-      FROM ticket_events e
-      LEFT JOIN agents a ON a.id = e.agent_id
+      FROM calyx_ticket_events e
+      LEFT JOIN calyx_agents a ON a.id = e.agent_id
       WHERE e.ticket_id = ?
       ORDER BY e.created_at ASC
     `).all(ticketId) as CalyxTicketEvent[];
