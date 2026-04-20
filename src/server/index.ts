@@ -82,6 +82,9 @@ import { createApprovalRoutes } from './routes/approvals.js';
 import { createTrainingRoutes } from './routes/training.js';
 import { sendTrainingReminders } from './services/training-reminder.js';
 import { addBusinessHours, toSqliteDatetime } from './utils/business-hours.js';
+import { getCalyxDb, initializeCalyxSchema, seedCalyxData } from './db/calyx-db.js';
+import { CalyxQueries } from './db/calyx-queries.js';
+import { createCalyxRoutes } from './routes/calyx.js';
 
 dotenv.config();
 
@@ -94,6 +97,13 @@ async function main() {
   console.log('[N.O.V.A] Initializing database...');
   const db = await getDb();
   initializeSchema(db);
+
+  // Calyx database (separate SQLite via better-sqlite3)
+  console.log('[N.O.V.A] Initializing Calyx database...');
+  const calyxDb = getCalyxDb();
+  initializeCalyxSchema(calyxDb);
+  seedCalyxData(calyxDb);
+  const calyxQueries = new CalyxQueries(calyxDb);
 
   const taskQueries = new TaskQueries(db);
   const settingsQueries = new FileSettingsQueries();
@@ -530,6 +540,7 @@ async function main() {
     res.json({ ok: true, data: list });
   });
 
+  app.use('/api/calyx', createCalyxRoutes(calyxQueries));
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries, settingsQueries, onboardingRunQueries, problemTicketQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries, userSettingsQueries, (key) => {

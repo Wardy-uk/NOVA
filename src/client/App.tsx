@@ -52,6 +52,7 @@ import { BoardMiView } from './components/BoardMiView.js';
 import { DevReviewView } from './components/DevReviewView.js';
 import { DevReviewDashboard } from './components/DevReviewDashboard.js';
 import { AgentKpisView } from './components/AgentKpisView.js';
+import { CalyxQueueView } from './components/CalyxQueueView.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -61,7 +62,7 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview';
+type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'calyx';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
@@ -74,6 +75,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'training-matrix' | 'training-summary'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
+  | 'calyx-queue'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -92,7 +94,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', calyx: 'hidden',
 };
 
 // Map certain command sub-tabs to their own permission area
@@ -224,9 +226,16 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'dev-review-dashboard', label: 'Dashboard' },
     ],
   },
+  calyx: {
+    label: 'Calyx',
+    defaultView: 'calyx-queue',
+    tabs: [
+      { view: 'calyx-queue', label: 'Queue' },
+    ],
+  },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'calyx', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
@@ -238,7 +247,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1107,6 +1116,11 @@ export function App() {
           )}
           {view === 'dev-review-dashboard' && canSeeArea('devreview') && (
             <DevReviewDashboard />
+          )}
+
+          {/* Calyx — internal service desk */}
+          {view === 'calyx-queue' && (
+            <CalyxQueueView />
           )}
 
           {/* Administration */}
