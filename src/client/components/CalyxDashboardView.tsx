@@ -47,7 +47,7 @@ export function CalyxDashboardView() {
     ? Math.round(slos.reduce((s, slo) => s + (slo.compliance_30d?.compliance_pct ?? 0), 0) / slos.length)
     : null;
 
-  const isWatermelon = overallCompliance !== null && csat
+  const isWatermelon = overallCompliance !== null && csat?.avg_csat != null
     ? overallCompliance >= 90 && csat.avg_csat < 3.5
     : false;
 
@@ -86,13 +86,13 @@ export function CalyxDashboardView() {
             </div>
             <div style={{
               fontSize: 48, fontWeight: 700, lineHeight: 1,
-              color: csat ? ragColor(csat.avg_csat, 4, true) : C.text3,
+              color: csat?.avg_csat != null ? ragColor(csat.avg_csat, 4, true) : C.text3,
             }}>
-              {csat ? csat.avg_csat.toFixed(1) : '—'}
+              {csat?.avg_csat != null ? csat.avg_csat.toFixed(1) : '—'}
               <span style={{ fontSize: 20, fontWeight: 400, color: C.text3 }}> / 5</span>
             </div>
             <div style={{ fontSize: 12, color: C.text3, marginTop: 8 }}>
-              XLA: {csat ? csat.avg_xla.toFixed(1) : '—'}
+              XLA: {csat?.avg_xla != null ? csat.avg_xla.toFixed(1) : '—'}
             </div>
           </div>
         </div>
@@ -232,10 +232,10 @@ export function CalyxDashboardView() {
                     textAlign: 'right',
                     fontSize: 14,
                     fontWeight: 600,
-                    color: ragColor(agent.avg_csat, 4, true),
+                    color: agent.avg_csat != null ? ragColor(agent.avg_csat, 4, true) : C.text3,
                     borderBottom: `1px solid ${C.border}`,
                   }}>
-                    {agent.avg_csat.toFixed(1)}
+                    {agent.avg_csat != null ? agent.avg_csat.toFixed(1) : '—'}
                   </td>
                   <td style={{
                     padding: '10px 12px',
