@@ -8,45 +8,45 @@ import { evaluateAttention, isOverdueUpdate, isResolutionSlaBreached, getSlaRema
 import { getAllowedSources } from '../utils/source-filter.js';
 
 /** Check if Jira is enabled for this user (per-user first, admin falls back to global). */
-function isJiraEnabled(
+async function isJiraEnabled(
   userId: number | undefined,
   userRole: string | undefined,
   userSettingsQueries?: UserSettingsQueries,
   settingsQueries?: SettingsQueries,
-): boolean {
+): Promise<boolean> {
   if (!userId) return false;
-  const userVal = userSettingsQueries?.get(userId, 'jira_enabled');
+  const userVal = await userSettingsQueries?.get(userId, 'jira_enabled');
   if (userVal !== undefined && userVal !== null) return userVal === 'true';
   if (userRole === 'admin') return settingsQueries?.get('jira_enabled') === 'true';
   return false;
 }
 
 /** Get the Jira username for this user (per-user first, admin falls back to global). */
-function getJiraUsername(
+async function getJiraUsername(
   userId: number | undefined,
   userRole: string | undefined,
   userSettingsQueries?: UserSettingsQueries,
   settingsQueries?: SettingsQueries,
-): string | undefined {
+): Promise<string | undefined> {
   if (!userId) return undefined;
-  const userVal = userSettingsQueries?.get(userId, 'jira_username');
+  const userVal = await userSettingsQueries?.get(userId, 'jira_username');
   if (userVal) return userVal;
   if (userRole === 'admin') return settingsQueries?.get('jira_username') ?? undefined;
   return undefined;
 }
 
 /** Build a JiraRestClient from the user's personal Jira credentials (My Settings). */
-function buildUserJiraClient(
+async function buildUserJiraClient(
   userId: number | undefined,
   userRole: string | undefined,
   userSettingsQueries?: UserSettingsQueries,
   settingsQueries?: SettingsQueries,
-): JiraRestClient | null {
+): Promise<JiraRestClient | null> {
   if (!userId) return null;
   // Per-user credentials
-  const url = userSettingsQueries?.get(userId, 'jira_url');
-  const email = userSettingsQueries?.get(userId, 'jira_username');
-  const token = userSettingsQueries?.get(userId, 'jira_token');
+  const url = await userSettingsQueries?.get(userId, 'jira_url');
+  const email = await userSettingsQueries?.get(userId, 'jira_username');
+  const token = await userSettingsQueries?.get(userId, 'jira_token');
   if (url && email && token) {
     return new JiraRestClient({ baseUrl: url, email, apiToken: token });
   }
@@ -74,18 +74,18 @@ export function createTaskRoutes(
   const router = Router();
 
   // GET /api/tasks — List tasks (per-user, scoped to integrations the user has enabled)
-  router.get('/', (req, res) => {
+  router.get('/', async (req, res) => {
     const { status, source } = req.query;
     const userId = (req as any).user?.id as number | undefined;
     const userRole = (req as any).user?.role as string | undefined;
-    const tasks = taskQueries.getAll({
+    const tasks = await taskQueries.getAll({
       status: status as string | undefined,
       source: source as string | undefined,
       userId,
     });
 
     // Scope to sources the user has enabled (per-user; admin falls back to global)
-    const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
+    const allowedSources = await getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
     const filtered = tasks.filter((t) => allowedSources.has(t.source));
 
     res.json({ ok: true, data: filtered });
@@ -103,7 +103,7 @@ export function createTaskRoutes(
       const userRole = (req as any).user?.role as string | undefined;
       // "mine" requires personal Jira config
       if (filter === 'mine') {
-        if (!isJiraEnabled(userId, userRole, userSettingsQueries, settingsQueries)) {
+        if (!(await isJiraEnabled(userId, userRole, userSettingsQueries, settingsQueries))) {
           res.json({ ok: true, data: [] });
           return;
         }
@@ -115,7 +115,7 @@ export function createTaskRoutes(
           return;
         }
       }
-      const jiraUsername = getJiraUsername(userId, userRole, userSettingsQueries, settingsQueries);
+      const jiraUsername = await getJiraUsername(userId, userRole, userSettingsQueries, settingsQueries);
       const tickets = await aggregator.fetchServiceDeskTickets(filter as SdFilter, jiraUsername);
       // Map to task-like objects for the frontend
       const mapped = tickets.map((t) => ({
@@ -154,11 +154,11 @@ export function createTaskRoutes(
 
       let tickets;
       if (scope === 'mine') {
-        if (!isJiraEnabled(userId, userRole, userSettingsQueries, settingsQueries)) {
+        if (!(await isJiraEnabled(userId, userRole, userSettingsQueries, settingsQueries))) {
           res.json({ ok: true, data: [] });
           return;
         }
-        const jiraUsername = getJiraUsername(userId, userRole, userSettingsQueries, settingsQueries);
+        const jiraUsername = await getJiraUsername(userId, userRole, userSettingsQueries, settingsQueries);
         tickets = await aggregator.fetchServiceDeskTickets('mine', jiraUsername);
       } else {
         // scope=all requires global Jira (Admin) to be configured
@@ -280,7 +280,7 @@ export function createTaskRoutes(
       }
 
       // Problem ticket stats
-      const ptStats = problemTicketQueries?.getStats();
+      const ptStats = await problemTicketQueries?.getStats();
       const problemTickets = ptStats
         ? { p1: ptStats.p1, p2: ptStats.p2, p3: ptStats.p3, total: ptStats.total }
         : { p1: 0, p2: 0, p3: 0, total: 0 };
@@ -525,11 +525,11 @@ export function createTaskRoutes(
   });
 
   // GET /api/tasks/stats — must be before /:id
-  router.get('/stats', (req, res) => {
+  router.get('/stats', async (req, res) => {
     const userId = (req as any).user?.id as number | undefined;
     const userRole = (req as any).user?.role as string | undefined;
-    const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
-    const allTasks = taskQueries.getAllIncludingDone(userId).filter((t) => allowedSources.has(t.source));
+    const allowedSources = await getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
+    const allTasks = (await taskQueries.getAllIncludingDone(userId)).filter((t) => allowedSources.has(t.source));
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -586,8 +586,8 @@ export function createTaskRoutes(
     const avgAgeDays = activeCount > 0 ? Math.round(totalAgeMs / activeCount / 86400000) : 0;
 
     // Onboarding metrics — milestone summary + recent runs
-    const milestoneSummary = milestoneQueries?.getSummary() ?? null;
-    const recentRuns = onboardingRunQueries?.getRecent(5) ?? [];
+    const milestoneSummary = (await milestoneQueries?.getSummary()) ?? null;
+    const recentRuns = (await onboardingRunQueries?.getRecent(5)) ?? [];
 
     res.json({
       ok: true,
@@ -613,8 +613,8 @@ export function createTaskRoutes(
   });
 
   // GET /api/tasks/:id — Get single task
-  router.get('/:id', (req, res) => {
-    const task = taskQueries.getById(req.params.id);
+  router.get('/:id', async (req, res) => {
+    const task = await taskQueries.getById(req.params.id);
     if (!task) {
       res.status(404).json({ ok: false, error: 'Task not found' });
       return;
@@ -623,14 +623,14 @@ export function createTaskRoutes(
   });
 
   // PATCH /api/tasks/:id — Update task (pin/snooze/dismiss)
-  router.patch('/:id', (req, res) => {
+  router.patch('/:id', async (req, res) => {
     const parsed = TaskUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ ok: false, error: parsed.error.message });
       return;
     }
     const userId = (req as any).user?.id as number | undefined;
-    const updated = taskQueries.update(req.params.id, parsed.data, userId);
+    const updated = await taskQueries.update(req.params.id, parsed.data, userId);
     if (!updated) {
       res.status(404).json({ ok: false, error: 'Task not found' });
       return;
@@ -638,14 +638,14 @@ export function createTaskRoutes(
 
     // Bidirectional milestone sync: when a milestone task status changes, update the milestone
     if (parsed.data.status && milestoneQueries) {
-      const task = taskQueries.getById(req.params.id);
+      const task = await taskQueries.getById(req.params.id);
       if (task?.source === 'milestone' && task.source_id?.startsWith('milestone:')) {
         const parts = task.source_id.split(':');
         // source_id format: milestone:{deliveryId}:{templateId}
         const deliveryId = parseInt(parts[1], 10);
         const templateId = parseInt(parts[2], 10);
         if (!isNaN(deliveryId) && !isNaN(templateId)) {
-          const milestones = milestoneQueries.getByDelivery(deliveryId);
+          const milestones = await milestoneQueries.getByDelivery(deliveryId);
           const milestone = milestones.find(m => m.template_id === templateId);
           if (milestone) {
             const statusMap: Record<string, string> = { open: 'pending', in_progress: 'in_progress', done: 'complete' };
@@ -656,13 +656,13 @@ export function createTaskRoutes(
             } else {
               milestoneUpdates.actual_date = null;
             }
-            milestoneQueries.updateMilestone(milestone.id, milestoneUpdates as any);
+            await milestoneQueries.updateMilestone(milestone.id, milestoneUpdates as any);
           }
         }
       }
     }
 
-    res.json({ ok: true, data: taskQueries.getById(req.params.id) });
+    res.json({ ok: true, data: await taskQueries.getById(req.params.id) });
   });
 
   // POST /api/tasks/sync — Trigger manual sync (only sources this user has enabled)
@@ -670,9 +670,9 @@ export function createTaskRoutes(
     try {
       const userId = (req as any).user?.id as number | undefined;
       const userRole = (req as any).user?.role as string | undefined;
-      const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
-      const jiraClient = buildUserJiraClient(userId, userRole, userSettingsQueries, settingsQueries);
-      const jiraBaseUrl = userSettingsQueries?.get(userId!, 'jira_url') ?? settingsQueries?.get('jira_url') ?? undefined;
+      const allowedSources = await getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
+      const jiraClient = await buildUserJiraClient(userId, userRole, userSettingsQueries, settingsQueries);
+      const jiraBaseUrl = (await userSettingsQueries?.get(userId!, 'jira_url')) ?? settingsQueries?.get('jira_url') ?? undefined;
       const ctx: SyncContext = { jiraClient, jiraBaseUrl };
       const results = await aggregator.syncAllForUser(userId, allowedSources, ctx);
       res.json({ ok: true, data: results });
@@ -693,14 +693,14 @@ export function createTaskRoutes(
     }
     const userId = (req as any).user?.id as number | undefined;
     const userRole = (req as any).user?.role as string | undefined;
-    const allowedSources = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
+    const allowedSources = await getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
     if (!allowedSources.has(source)) {
       res.json({ ok: true, data: { source, count: 0 } });
       return;
     }
     try {
-      const jiraClient = buildUserJiraClient(userId, userRole, userSettingsQueries, settingsQueries);
-      const jiraBaseUrl = userSettingsQueries?.get(userId!, 'jira_url') ?? settingsQueries?.get('jira_url') ?? undefined;
+      const jiraClient = await buildUserJiraClient(userId, userRole, userSettingsQueries, settingsQueries);
+      const jiraBaseUrl = (await userSettingsQueries?.get(userId!, 'jira_url')) ?? settingsQueries?.get('jira_url') ?? undefined;
       const result = await aggregator.syncSource(source, userId, { jiraClient, jiraBaseUrl });
       res.json({ ok: true, data: result });
     } catch (err) {

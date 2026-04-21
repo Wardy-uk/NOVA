@@ -51,8 +51,8 @@ function extractSubdomain(raw: string): string {
 export class SetupOrchestrator {
   constructor(private deps: OrchestratorDeps) {}
 
-  private log(runId: number, stepKey: string, level: string, message: string): void {
-    this.deps.execQueries.addLog(runId, stepKey, level, message);
+  private async log(runId: number, stepKey: string, level: string, message: string): Promise<void> {
+    await this.deps.execQueries.addLog(runId, stepKey, level, message);
     const prefix = `[Setup:${stepKey}]`;
     if (level === 'error') console.error(prefix, message);
     else console.log(prefix, message);
@@ -61,40 +61,40 @@ export class SetupOrchestrator {
   async execute(deliveryId: number, userId: number, options?: { dryRun?: boolean }): Promise<ExecutionResult> {
     const dryRun = options?.dryRun ?? false;
 
-    const runId = this.deps.execQueries.createRun(deliveryId, userId);
-    this.log(runId, 'init', 'info', `Starting setup execution for delivery ${deliveryId}${dryRun ? ' (DRY RUN)' : ''}`);
+    const runId = await this.deps.execQueries.createRun(deliveryId, userId);
+    await this.log(runId, 'init', 'info', `Starting setup execution for delivery ${deliveryId}${dryRun ? ' (DRY RUN)' : ''}`);
 
     let stepsRun = 0;
     let stepsFailed = 0;
 
     try {
       // ── Load delivery data ──
-      const entries = this.deps.deliveryQueries.getAll();
+      const entries = await this.deps.deliveryQueries.getAll();
       const delivery = entries.find(e => e.id === deliveryId);
       if (!delivery) throw new Error(`Delivery ${deliveryId} not found`);
 
-      const brandSettings = this.deps.brandQueries.getByDelivery(deliveryId);
-      const branches = this.deps.branchQueries.getByDelivery(deliveryId);
-      const logos = this.deps.logoQueries.getMetadataByDelivery(deliveryId);
-      const portalAccounts = this.deps.portalAccountQueries.getByDelivery(deliveryId);
-      const districts = this.deps.districtQueries.getByDelivery(deliveryId);
+      const brandSettings = await this.deps.brandQueries.getByDelivery(deliveryId);
+      const branches = await this.deps.branchQueries.getByDelivery(deliveryId);
+      const logos = await this.deps.logoQueries.getMetadataByDelivery(deliveryId);
+      const portalAccounts = await this.deps.portalAccountQueries.getByDelivery(deliveryId);
+      const districts = await this.deps.districtQueries.getByDelivery(deliveryId);
       const rawSubdomain = brandSettings['subdomain'];
       const subdomain = rawSubdomain ? extractSubdomain(rawSubdomain) : undefined;
 
-      this.log(runId, 'init', 'info', `Delivery: ${delivery.onboarding_id || delivery.account} | Subdomain: ${subdomain || '(not set)'}`);
-      this.log(runId, 'init', 'info', `Data: ${Object.keys(brandSettings).length} brand settings, ${branches.length} branches, ${logos.length} logos, ${portalAccounts.length} portal accounts, ${districts.length} districts`);
+      await this.log(runId, 'init', 'info', `Delivery: ${delivery.onboarding_id || delivery.account} | Subdomain: ${subdomain || '(not set)'}`);
+      await this.log(runId, 'init', 'info', `Data: ${Object.keys(brandSettings).length} brand settings, ${branches.length} branches, ${logos.length} logos, ${portalAccounts.length} portal accounts, ${districts.length} districts`);
 
       if (!subdomain) {
-        this.log(runId, 'init', 'error', 'Subdomain is required but not set in brand settings. Aborting.');
-        this.deps.execQueries.updateRunStatus(runId, 'failed', 'Missing subdomain');
+        await this.log(runId, 'init', 'error', 'Subdomain is required but not set in brand settings. Aborting.');
+        await this.deps.execQueries.updateRunStatus(runId, 'failed', 'Missing subdomain');
         return { runId, status: 'failed', stepsRun: 0, stepsFailed: 1, summary: 'Missing subdomain', dryRun };
       }
 
       const bym = this.deps.getBym();
 
       if (!bym) {
-        this.log(runId, 'init', 'error', 'BriefYourMarket integration not configured. Set up in Admin > Integrations.');
-        this.deps.execQueries.updateRunStatus(runId, 'failed', 'BYM not configured');
+        await this.log(runId, 'init', 'error', 'BriefYourMarket integration not configured. Set up in Admin > Integrations.');
+        await this.deps.execQueries.updateRunStatus(runId, 'failed', 'BYM not configured');
         return { runId, status: 'failed', stepsRun: 0, stepsFailed: 1, summary: 'BYM not configured', dryRun };
       }
 
@@ -108,8 +108,8 @@ export class SetupOrchestrator {
           ? 'Ready to execute. All data present.'
           : `Issues found: ${issues.join('; ')}`;
 
-        this.log(runId, 'dry-run', issues.length === 0 ? 'success' : 'warn', summary);
-        this.deps.execQueries.updateRunStatus(runId, 'complete', `Dry run: ${summary}`);
+        await this.log(runId, 'dry-run', issues.length === 0 ? 'success' : 'warn', summary);
+        await this.deps.execQueries.updateRunStatus(runId, 'complete', `Dry run: ${summary}`);
         return { runId, status: 'complete', stepsRun: 0, stepsFailed: 0, summary, dryRun: true };
       }
 
@@ -118,26 +118,26 @@ export class SetupOrchestrator {
       stepsRun++;
       try {
         const authUrl = `${bym.getUrlTemplate().replace('{0}', subdomain)}/api/authorize`;
-        this.log(runId, 'authorize', 'info', `URL: ${authUrl}`);
-        this.deps.setupQueries.updateStepStatus(deliveryId, 'authorize', 'in_progress', undefined, userId);
+        await this.log(runId, 'authorize', 'info', `URL: ${authUrl}`);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'authorize', 'in_progress', undefined, userId);
         bearerToken = await bym.authorize(subdomain);
-        this.deps.setupQueries.updateStepStatus(deliveryId, 'authorize', 'complete', 'Token obtained', userId);
-        this.log(runId, 'authorize', 'success', 'Bearer token obtained');
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'authorize', 'complete', 'Token obtained', userId);
+        await this.log(runId, 'authorize', 'success', 'Bearer token obtained');
       } catch (err) {
         stepsFailed++;
         const msg = err instanceof Error ? err.message : String(err);
-        this.log(runId, 'authorize', 'error', `Auth failed: ${msg}`);
-        this.deps.setupQueries.updateStepStatus(deliveryId, 'authorize', 'failed', msg, userId);
+        await this.log(runId, 'authorize', 'error', `Auth failed: ${msg}`);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'authorize', 'failed', msg, userId);
         // Can't continue without token
-        this.deps.execQueries.updateRunStatus(runId, 'failed', `Auth failed: ${msg}`);
+        await this.deps.execQueries.updateRunStatus(runId, 'failed', `Auth failed: ${msg}`);
         return { runId, status: 'failed', stepsRun, stepsFailed, summary: `Auth failed: ${msg}`, dryRun: false };
       }
 
       // ── Step 2: Push Brands ──
       stepsRun++;
       try {
-        this.log(runId, 'push_brands', 'info', 'Pushing brand lookup values...');
-        this.deps.setupQueries.updateStepStatus(deliveryId, 'push_brands', 'in_progress', undefined, userId);
+        await this.log(runId, 'push_brands', 'info', 'Pushing brand lookup values...');
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_brands', 'in_progress', undefined, userId);
 
         // Get existing to deduplicate
         const existing = await bym.getBrands(subdomain);
@@ -152,23 +152,23 @@ export class SetupOrchestrator {
 
         if (newBrands.length > 0) {
           await bym.createBrands(subdomain, newBrands);
-          this.log(runId, 'push_brands', 'success', `Created ${newBrands.length} brand(s)`);
+          await this.log(runId, 'push_brands', 'success', `Created ${newBrands.length} brand(s)`);
         } else {
-          this.log(runId, 'push_brands', 'success', 'All brands already exist — skipped');
+          await this.log(runId, 'push_brands', 'success', 'All brands already exist — skipped');
         }
-        this.deps.setupQueries.updateStepStatus(deliveryId, 'push_brands', 'complete', `${newBrands.length} created`, userId);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_brands', 'complete', `${newBrands.length} created`, userId);
       } catch (err) {
         stepsFailed++;
         const msg = err instanceof Error ? err.message : String(err);
-        this.log(runId, 'push_brands', 'error', `Failed: ${msg}`);
-        this.deps.setupQueries.updateStepStatus(deliveryId, 'push_brands', 'failed', msg, userId);
+        await this.log(runId, 'push_brands', 'error', `Failed: ${msg}`);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_brands', 'failed', msg, userId);
       }
 
       // ── Step 3: Push Branches ──
       stepsRun++;
       try {
-        this.log(runId, 'push_branches', 'info', `Pushing ${branches.length} branch(es)...`);
-        this.deps.setupQueries.updateStepStatus(deliveryId, 'push_branches', 'in_progress', undefined, userId);
+        await this.log(runId, 'push_branches', 'info', `Pushing ${branches.length} branch(es)...`);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_branches', 'in_progress', undefined, userId);
 
         const existing = await bym.getBranches(subdomain);
         const existingNames = new Set(existing.filter(b => b.value).map(b => b.value.toLowerCase()));
@@ -184,16 +184,16 @@ export class SetupOrchestrator {
 
         if (newBranches.length > 0) {
           await bym.createBranches(subdomain, newBranches);
-          this.log(runId, 'push_branches', 'success', `Created ${newBranches.length} branch(es)`);
+          await this.log(runId, 'push_branches', 'success', `Created ${newBranches.length} branch(es)`);
         } else {
-          this.log(runId, 'push_branches', 'success', 'All branches already exist — skipped');
+          await this.log(runId, 'push_branches', 'success', 'All branches already exist — skipped');
         }
-        this.deps.setupQueries.updateStepStatus(deliveryId, 'push_branches', 'complete', `${newBranches.length} created`, userId);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_branches', 'complete', `${newBranches.length} created`, userId);
       } catch (err) {
         stepsFailed++;
         const msg = err instanceof Error ? err.message : String(err);
-        this.log(runId, 'push_branches', 'error', `Failed: ${msg}`);
-        this.deps.setupQueries.updateStepStatus(deliveryId, 'push_branches', 'failed', msg, userId);
+        await this.log(runId, 'push_branches', 'error', `Failed: ${msg}`);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_branches', 'failed', msg, userId);
       }
 
       // ── Step 4: Upload Logos ──
@@ -202,8 +202,8 @@ export class SetupOrchestrator {
       // Config API (api/files/folders/{id}) during a later stage. Re-enable when
       // the correct upload target is confirmed.
       if (logos.length > 0) {
-        this.log(runId, 'upload_logos', 'info', `${logos.length} logo(s) available — upload skipped (not yet implemented for this stage)`);
-        this.deps.setupQueries.updateStepStatus(deliveryId, 'upload_logos', 'complete', 'Skipped — pending Config API integration', userId);
+        await this.log(runId, 'upload_logos', 'info', `${logos.length} logo(s) available — upload skipped (not yet implemented for this stage)`);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'upload_logos', 'complete', 'Skipped — pending Config API integration', userId);
         // stepsRun++;
         // try {
         //   this.log(runId, 'upload_logos', 'info', `Uploading ${logos.length} logo(s)...`);
@@ -220,10 +220,10 @@ export class SetupOrchestrator {
         //     const fileName = typeDef ? `${typeDef.key}.${ext}` : `logo-${logoMeta.logo_type}.${ext}`;
         //
         //     const imageBuffer = Buffer.from(logoFull.image_data, 'base64');
-        //     this.log(runId, 'upload_logos', 'info', `Uploading ${fileName} (${imageBuffer.length} bytes) to ${subdomain}...`);
+        //     await this.log(runId, 'upload_logos', 'info', `Uploading ${fileName} (${imageBuffer.length} bytes) to ${subdomain}...`);
         //     await bym.uploadImage(subdomain, fileName, imageBuffer, logoMeta.mime_type);
         //     uploaded++;
-        //     this.log(runId, 'upload_logos', 'info', `Uploaded: ${fileName}`);
+        //     await this.log(runId, 'upload_logos', 'info', `Uploaded: ${fileName}`);
         //   }
         //
         //   this.deps.setupQueries.updateStepStatus(deliveryId, 'upload_logos', 'complete', `${uploaded} uploaded`, userId);
@@ -237,12 +237,12 @@ export class SetupOrchestrator {
       }
 
       // ── Step 5: Push Portal Accounts ──
-      this.log(runId, 'push_portals', 'info', `Portal accounts: ${portalAccounts.length}, bearerToken: ${bearerToken ? 'yes' : 'no'}`);
+      await this.log(runId, 'push_portals', 'info', `Portal accounts: ${portalAccounts.length}, bearerToken: ${bearerToken ? 'yes' : 'no'}`);
       if (portalAccounts.length > 0 && bearerToken) {
         stepsRun++;
         try {
-          this.log(runId, 'push_portals', 'info', `Creating ${portalAccounts.length} portal account(s)...`);
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'push_portals', 'in_progress', undefined, userId);
+          await this.log(runId, 'push_portals', 'info', `Creating ${portalAccounts.length} portal account(s)...`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_portals', 'in_progress', undefined, userId);
 
           let created = 0;
           for (const pa of portalAccounts) {
@@ -250,23 +250,23 @@ export class SetupOrchestrator {
             created++;
           }
 
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'push_portals', 'complete', `${created} created`, userId);
-          this.log(runId, 'push_portals', 'success', `${created} portal account(s) created`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_portals', 'complete', `${created} created`, userId);
+          await this.log(runId, 'push_portals', 'success', `${created} portal account(s) created`);
         } catch (err) {
           stepsFailed++;
           const msg = err instanceof Error ? err.message : String(err);
-          this.log(runId, 'push_portals', 'error', `Failed: ${msg}`);
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'push_portals', 'failed', msg, userId);
+          await this.log(runId, 'push_portals', 'error', `Failed: ${msg}`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_portals', 'failed', msg, userId);
         }
       }
 
       // ── Step 6: Push Branch Districts ──
-      this.log(runId, 'push_districts', 'info', `Districts: ${districts.length}, bearerToken: ${bearerToken ? 'yes' : 'no'}`);
+      await this.log(runId, 'push_districts', 'info', `Districts: ${districts.length}, bearerToken: ${bearerToken ? 'yes' : 'no'}`);
       if (districts.length > 0 && bearerToken) {
         stepsRun++;
         try {
-          this.log(runId, 'push_districts', 'info', `Configuring districts for branches...`);
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'push_districts', 'in_progress', undefined, userId);
+          await this.log(runId, 'push_districts', 'info', `Configuring districts for branches...`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_districts', 'in_progress', undefined, userId);
 
           // Get BYM branch IDs by name lookup
           const bymBranches = await bym.getBranches(subdomain);
@@ -288,7 +288,7 @@ export class SetupOrchestrator {
             // Look up BYM's internal branch ID by name
             const bymBranch = bymBranchByName.get(branch.name.toLowerCase());
             if (!bymBranch || !bymBranch.id) {
-              this.log(runId, 'push_districts', 'warn', `Branch "${branch.name}" not found in BYM — skipping`);
+              await this.log(runId, 'push_districts', 'warn', `Branch "${branch.name}" not found in BYM — skipping`);
               continue;
             }
 
@@ -314,16 +314,16 @@ export class SetupOrchestrator {
 
             await bym.setupBranch(bearerToken, payload);
             branchesConfigured++;
-            this.log(runId, 'push_districts', 'info', `Configured ${branch.name} with ${postCodeDistricts.length} district(s)`);
+            await this.log(runId, 'push_districts', 'info', `Configured ${branch.name} with ${postCodeDistricts.length} district(s)`);
           }
 
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'push_districts', 'complete', `${branchesConfigured} branches configured`, userId);
-          this.log(runId, 'push_districts', 'success', `${branchesConfigured} branch(es) configured with districts`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_districts', 'complete', `${branchesConfigured} branches configured`, userId);
+          await this.log(runId, 'push_districts', 'success', `${branchesConfigured} branch(es) configured with districts`);
         } catch (err) {
           stepsFailed++;
           const msg = err instanceof Error ? err.message : String(err);
-          this.log(runId, 'push_districts', 'error', `Failed: ${msg}`);
-          this.deps.setupQueries.updateStepStatus(deliveryId, 'push_districts', 'failed', msg, userId);
+          await this.log(runId, 'push_districts', 'error', `Failed: ${msg}`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_districts', 'failed', msg, userId);
         }
       }
 
@@ -332,8 +332,8 @@ export class SetupOrchestrator {
       // gated by the azdo_push permission area (Design role). Not part of the automated execution flow.
       const finalStatus = stepsFailed === 0 ? 'complete' : (stepsRun > stepsFailed ? 'complete' : 'failed');
       const summary = `${stepsRun} steps run, ${stepsFailed} failed`;
-      this.log(runId, 'done', finalStatus === 'complete' ? 'success' : 'warn', summary);
-      this.deps.execQueries.updateRunStatus(runId, finalStatus, summary);
+      await this.log(runId, 'done', finalStatus === 'complete' ? 'success' : 'warn', summary);
+      await this.deps.execQueries.updateRunStatus(runId, finalStatus, summary);
 
       return {
         runId,
@@ -346,8 +346,8 @@ export class SetupOrchestrator {
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.log(runId, 'fatal', 'error', `Fatal error: ${msg}`);
-      this.deps.execQueries.updateRunStatus(runId, 'failed', msg);
+      await this.log(runId, 'fatal', 'error', `Fatal error: ${msg}`);
+      await this.deps.execQueries.updateRunStatus(runId, 'failed', msg);
       return { runId, status: 'failed', stepsRun, stepsFailed: stepsFailed + 1, summary: msg, dryRun: false };
     }
   }

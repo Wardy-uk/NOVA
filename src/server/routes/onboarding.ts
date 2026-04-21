@@ -50,9 +50,9 @@ export function createOnboardingRoutes(
   });
 
   // GET /api/onboarding/status/:ref — check run status
-  router.get('/status/:ref', (req, res) => {
+  router.get('/status/:ref', async (req, res) => {
     const ref = req.params.ref;
-    const runs = runQueries.getAllByRef(ref);
+    const runs = await runQueries.getAllByRef(ref);
     if (runs.length === 0) {
       res.status(404).json({ ok: false, error: 'No runs found for this reference' });
       return;
@@ -67,18 +67,18 @@ export function createOnboardingRoutes(
   });
 
   // GET /api/onboarding/next-ref — suggest next onboarding reference
-  router.get('/next-ref', (req, res) => {
+  router.get('/next-ref', async (req, res) => {
     const prefix = ((req.query.prefix as string) || 'BYM').toUpperCase();
-    const maxNum = runQueries.getMaxRefNumber(prefix);
+    const maxNum = await runQueries.getMaxRefNumber(prefix);
     const next = maxNum + 1;
     const suggestedRef = `${prefix}${String(next).padStart(4, '0')}`;
     res.json({ ok: true, data: { prefix, nextNumber: next, suggestedRef } });
   });
 
   // GET /api/onboarding/runs — list recent runs
-  router.get('/runs', (req, res) => {
+  router.get('/runs', async (req, res) => {
     const limit = parseInt(req.query.limit as string, 10) || 20;
-    res.json({ ok: true, data: runQueries.getRecent(limit) });
+    res.json({ ok: true, data: await runQueries.getRecent(limit) });
   });
 
   // GET /api/onboarding/jira-meta — discover field IDs and request types

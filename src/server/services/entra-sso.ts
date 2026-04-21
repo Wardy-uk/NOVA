@@ -155,13 +155,13 @@ export class EntraSsoService {
     return { oid, email, name, preferredUsername, groups };
   }
 
-  /** Fetch the user's Azure AD group IDs via Microsoft Graph /me/transitiveMemberOf */
+  /** Fetch the user's Azure AD group IDs via Microsoft Graph /me/memberOf */
   private async fetchUserGroups(accessToken: string): Promise<string[]> {
-    // Use transitiveMemberOf to resolve nested group memberships (e.g. user is
-    // in "Dept - Development" which nests into "N.O.V.A-Developers").
-    // Graph paginates at 100 entries by default — follow @odata.nextLink to exhaustion.
+    // Graph paginates /me/memberOf at 100 entries by default. Users in more
+    // than 100 directory objects silently lost later pages and could fail to
+    // match their configured NOVA group. Follow @odata.nextLink to exhaustion.
     const ids: string[] = [];
-    let url: string | null = 'https://graph.microsoft.com/v1.0/me/transitiveMemberOf?$select=id&$top=999';
+    let url: string | null = 'https://graph.microsoft.com/v1.0/me/memberOf?$select=id&$top=999';
     try {
       while (url) {
         const res: Response = await fetch(url, {

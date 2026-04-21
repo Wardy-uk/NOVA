@@ -424,9 +424,12 @@ export function DevReviewView() {
     if (!selectedKey) return;
     setBusy(true);
     try {
-      const raw = await fetch(`/api/dev-review/ticket/${selectedKey}/accept`, {
+      const res = await fetch(`/api/dev-review/ticket/${selectedKey}/accept`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}`,
+        },
         body: JSON.stringify({
           note: acceptNote,
           tldr: acceptTldr,
@@ -434,12 +437,16 @@ export function DevReviewView() {
           workItemComment: acceptWorkItemComment,
         }),
       });
-      const resp = await raw.json();
-      if (!resp.ok) throw new Error(resp.error || 'Accept failed');
-      const msg = resp.workItemKey
-        ? `Accepted — Bug ${resp.workItemKey} created`
-        : 'Accepted to development';
-      fireToast('ok', msg);
+      const json = await res.json();
+      if (json.ok) {
+        const workItemMsg = json.workItemKey ? ` · ${json.workItemKey} created` : '';
+        fireToast('ok', `Accepted to development${workItemMsg}`);
+        if (json.warnings?.length) {
+          setTimeout(() => fireToast('err', json.warnings.join('; ')), 500);
+        }
+      } else {
+        fireToast('err', json.error || 'Accept failed');
+      }
       await Promise.all([loadQueue({ silent: true }), loadDetail(selectedKey)]);
     } catch (e) {
       fireToast('err', e instanceof Error ? e.message : 'Accept failed');
@@ -739,13 +746,13 @@ export function DevReviewView() {
 
           <div className="mb-4">
             <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2">
-              <span>Work Item Comment</span>
-              <span className="text-neutral-500 normal-case font-normal text-[10px]">Included in the Bug description if team has a Jira project configured</span>
+              <span>Work item comment (optional)</span>
+              <span className="text-neutral-500 normal-case font-normal text-[10px]">Added to the dev Bug work item description</span>
             </label>
             <textarea
               value={acceptWorkItemComment}
               onChange={(e) => setAcceptWorkItemComment(e.target.value)}
-              placeholder="Optional developer notes for the Bug work item…"
+              placeholder="Anything you'd like to add to the dev work item?"
               rows={3}
               className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600"
               style={{ background: 'rgba(255,255,255,0.06)' }}

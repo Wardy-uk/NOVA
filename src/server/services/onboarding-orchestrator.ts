@@ -109,7 +109,7 @@ export class OnboardingOrchestrator {
     // Skip cache when filterGroupIds provided — milestone-specific creation may add children
     // to an existing parent, and different milestones create different groups.
     if (!dryRun && !options?.filterGroupIds?.length) {
-      const existing = this.runQueries.getByRef(onboardingRef);
+      const existing = await this.runQueries.getByRef(onboardingRef);
       if (existing && existing.parent_key) {
         this.log(`${prefix} Already completed (run #${existing.id}), returning cached result`);
         return {
@@ -124,7 +124,7 @@ export class OnboardingOrchestrator {
     }
 
     // 3. Resolve matrix — returns ticket groups, each with their X'd capabilities
-    let ticketGroups = this.configQueries.resolveForSaleType(payload.saleType);
+    let ticketGroups = await this.configQueries.resolveForSaleType(payload.saleType);
     if (ticketGroups.length === 0) {
       throw new Error(`No capabilities found for sale type "${payload.saleType}". Check the onboarding configuration.`);
     }
@@ -167,7 +167,7 @@ export class OnboardingOrchestrator {
     }
 
     // 6. Create run record
-    const runId = this.runQueries.create({
+    const runId = await this.runQueries.create({
       onboarding_ref: onboardingRef,
       payload: JSON.stringify(payload),
       user_id: options?.userId,
@@ -320,7 +320,7 @@ export class OnboardingOrchestrator {
       }
 
       // 10. Update run record — success
-      this.runQueries.update(runId, {
+      await this.runQueries.update(runId, {
         status: childKeys.length === ticketGroups.length ? 'success' : 'partial',
         parent_key: parentKey,
         child_keys: JSON.stringify(childKeys),
@@ -340,7 +340,7 @@ export class OnboardingOrchestrator {
       };
     } catch (err) {
       // Record error
-      this.runQueries.update(runId, {
+      await this.runQueries.update(runId, {
         status: 'error',
         parent_key: parentKey || null,
         child_keys: childKeys.length > 0 ? JSON.stringify(childKeys) : null,

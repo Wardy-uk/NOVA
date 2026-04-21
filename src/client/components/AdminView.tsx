@@ -1200,7 +1200,7 @@ export function AdminView() {
                   <th className="text-left px-4 py-3">Team</th>
                   <th className="text-left px-4 py-3">Members</th>
                   <th className="text-left px-4 py-3">Dev Review products</th>
-                  <th className="text-left px-4 py-3">Bug project</th>
+                  <th className="text-left px-4 py-3">Jira Project Key</th>
                   <th className="text-right px-4 py-3">Actions</th>
                 </tr>
               </thead>
@@ -1230,18 +1230,23 @@ export function AdminView() {
                         <input
                           type="text"
                           defaultValue={team.jira_project_key || ''}
-                          placeholder="e.g. DEV"
-                          onBlur={(e) => {
-                            const val = e.target.value.trim() || null;
-                            if (val !== (team.jira_project_key || null)) {
-                              fetch('/api/admin/teams/' + team.id, {
+                          placeholder="e.g. DEV, PLATFORM"
+                          className="bg-[#272C33] text-neutral-300 text-[11px] rounded px-2 py-1 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-28 placeholder:text-neutral-600"
+                          onBlur={async (e) => {
+                            const val = e.target.value.trim();
+                            if (val === (team.jira_project_key || '')) return;
+                            try {
+                              const res = await fetch(`/api/admin/teams/${team.id}`, {
                                 method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ jira_project_key: val }),
-                              }).then(() => fetchData());
-                            }
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` },
+                                body: JSON.stringify({ jira_project_key: val || null }),
+                              });
+                              const json = await res.json();
+                              if (json.ok) { setSuccess(`Jira project key updated for "${team.name}"`); fetchData(); }
+                              else setError(json.error || 'Failed to update');
+                            } catch (err) { setError(err instanceof Error ? err.message : 'Failed to update'); }
                           }}
-                          className="w-20 px-2 py-1 text-[11px] rounded bg-[#272C33] text-neutral-300 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors"
+                          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                         />
                       </td>
                       <td className="px-4 py-3 text-right">

@@ -10,10 +10,10 @@ export function createTeamRoutes(
 ): Router {
   const router = Router();
 
-  router.get('/workload', (_req, res) => {
+  router.get('/workload', async (_req, res) => {
     const users = userQueries.getAll();
-    const deliveries = deliveryQueries.getAll();
-    const allMilestones = milestoneQueries.getAllWithDelivery();
+    const deliveries = await deliveryQueries.getAll();
+    const allMilestones = await milestoneQueries.getAllWithDelivery();
     const today = new Date().toISOString().split('T')[0];
 
     // Build per-user workload

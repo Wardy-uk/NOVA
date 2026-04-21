@@ -11,20 +11,20 @@ export function createInstanceSetupRoutes(
 
   // ── Step templates (admin config) ──
 
-  router.get('/templates', (_req, res) => {
-    res.json({ ok: true, data: setupQueries.getAllTemplates() });
+  router.get('/templates', async (_req, res) => {
+    res.json({ ok: true, data: await setupQueries.getAllTemplates() });
   });
 
-  router.get('/templates/products', (_req, res) => {
-    res.json({ ok: true, data: setupQueries.getDistinctProducts() });
+  router.get('/templates/products', async (_req, res) => {
+    res.json({ ok: true, data: await setupQueries.getDistinctProducts() });
   });
 
-  router.get('/templates/:product', (req, res) => {
+  router.get('/templates/:product', async (req, res) => {
     const product = req.params.product;
-    res.json({ ok: true, data: setupQueries.getTemplatesByProduct(product) });
+    res.json({ ok: true, data: await setupQueries.getTemplatesByProduct(product) });
   });
 
-  router.post('/templates', (req, res) => {
+  router.post('/templates', async (req, res) => {
     const parsed = z.object({
       product: z.string().min(1),
       step_key: z.string().min(1),
@@ -35,7 +35,7 @@ export function createInstanceSetupRoutes(
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
     try {
       const d = parsed.data;
-      const id = setupQueries.createTemplate({
+      const id = await setupQueries.createTemplate({
         product: d.product,
         step_key: d.step_key,
         step_label: d.step_label,
@@ -48,7 +48,7 @@ export function createInstanceSetupRoutes(
     }
   });
 
-  router.put('/templates/:id', (req, res) => {
+  router.put('/templates/:id', async (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       step_label: z.string().min(1).optional(),
@@ -56,43 +56,43 @@ export function createInstanceSetupRoutes(
       required: z.number().min(0).max(1).optional(),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    setupQueries.updateTemplate(id, parsed.data);
+    await setupQueries.updateTemplate(id, parsed.data);
     res.json({ ok: true });
   });
 
-  router.delete('/templates/:id', (req, res) => {
+  router.delete('/templates/:id', async (req, res) => {
     const id = parseInt(String(req.params.id), 10);
-    setupQueries.deleteTemplate(id);
+    await setupQueries.deleteTemplate(id);
     res.json({ ok: true });
   });
 
   // ── Per-delivery setup steps ──
 
-  router.get('/delivery/:id/steps', (req, res) => {
+  router.get('/delivery/:id/steps', async (req, res) => {
     const deliveryId = parseInt(String(req.params.id), 10);
-    const steps = setupQueries.getByDelivery(deliveryId);
+    const steps = await setupQueries.getByDelivery(deliveryId);
     res.json({ ok: true, data: steps });
   });
 
   /** Initialize steps for a delivery (copies from templates based on product) */
-  router.post('/delivery/:id/initialize', (req, res) => {
+  router.post('/delivery/:id/initialize', async (req, res) => {
     const deliveryId = parseInt(String(req.params.id), 10);
 
     // Look up the delivery to get its product
-    const entries = deliveryQueries.getAll();
+    const entries = await deliveryQueries.getAll();
     const entry = entries.find(e => e.id === deliveryId);
     if (!entry) { res.status(404).json({ ok: false, error: 'Delivery not found' }); return; }
 
     // Allow overriding product via body
     const product = (req.body?.product as string) || entry.product;
 
-    const count = setupQueries.initializeSteps(deliveryId, product);
-    const steps = setupQueries.getByDelivery(deliveryId);
+    const count = await setupQueries.initializeSteps(deliveryId, product);
+    const steps = await setupQueries.getByDelivery(deliveryId);
     res.json({ ok: true, data: steps, initialized: count });
   });
 
   /** Update a step's status */
-  router.patch('/delivery/:id/steps/:stepKey', (req, res) => {
+  router.patch('/delivery/:id/steps/:stepKey', async (req, res) => {
     const deliveryId = parseInt(String(req.params.id), 10);
     const stepKey = req.params.stepKey;
     const parsed = z.object({
@@ -102,7 +102,7 @@ export function createInstanceSetupRoutes(
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
 
     const userId = (req as any).user?.id;
-    const updated = setupQueries.updateStepStatus(
+    const updated = await setupQueries.updateStepStatus(
       deliveryId,
       stepKey,
       parsed.data.status,
@@ -112,24 +112,24 @@ export function createInstanceSetupRoutes(
     if (!updated) { res.status(404).json({ ok: false, error: 'Step not found' }); return; }
 
     // Return updated step list
-    const steps = setupQueries.getByDelivery(deliveryId);
+    const steps = await setupQueries.getByDelivery(deliveryId);
     res.json({ ok: true, data: steps });
   });
 
   /** Reset (delete) all steps for a delivery */
-  router.delete('/delivery/:id/steps', (req, res) => {
+  router.delete('/delivery/:id/steps', async (req, res) => {
     const deliveryId = parseInt(String(req.params.id), 10);
-    setupQueries.deleteStepsForDelivery(deliveryId);
+    await setupQueries.deleteStepsForDelivery(deliveryId);
     res.json({ ok: true });
   });
 
   /** Bulk progress for all deliveries (for list view indicators) */
-  router.post('/bulk-progress', (req, res) => {
+  router.post('/bulk-progress', async (req, res) => {
     const parsed = z.object({
       deliveryIds: z.array(z.number()),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    const progress = setupQueries.getBulkProgress(parsed.data.deliveryIds);
+    const progress = await setupQueries.getBulkProgress(parsed.data.deliveryIds);
     res.json({ ok: true, data: progress });
   });
 

@@ -15,39 +15,39 @@ export function createStandupRoutes(
   const today = () => new Date().toISOString().split('T')[0];
 
   // Re-enrich task references from stored response, optionally filtered by allowed sources
-  const enrichTask = (allowedSources?: Set<string>) => (item: { task_id: string }) => {
-    const task = taskQueries.getById(item.task_id);
+  const enrichTask = (allowedSources?: Set<string>) => async (item: { task_id: string }) => {
+    const task = await taskQueries.getById(item.task_id);
     if (!task || (allowedSources && !allowedSources.has(task.source))) return { ...item, task: null };
     return { ...item, task };
   };
 
-  const enrichMorning = (raw: Record<string, unknown>, ritualId: number, allowed?: Set<string>) => ({
+  const enrichMorning = async (raw: Record<string, unknown>, ritualId: number, allowed?: Set<string>) => ({
     summary: raw.summary as string,
-    overdue: ((raw.overdue as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
-    due_today: ((raw.due_today as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
-    top_priorities: ((raw.top_priorities as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
-    rolled_over: ((raw.rolled_over as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
+    overdue: (await Promise.all(((raw.overdue as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)))).filter((i) => i.task),
+    due_today: (await Promise.all(((raw.due_today as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)))).filter((i) => i.task),
+    top_priorities: (await Promise.all(((raw.top_priorities as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)))).filter((i) => i.task),
+    rolled_over: (await Promise.all(((raw.rolled_over as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)))).filter((i) => i.task),
     ritual_id: ritualId,
   });
 
-  const enrichReplan = (raw: Record<string, unknown>, ritualId: number, allowed?: Set<string>) => ({
+  const enrichReplan = async (raw: Record<string, unknown>, ritualId: number, allowed?: Set<string>) => ({
     summary: raw.summary as string,
-    adjusted_priorities: ((raw.adjusted_priorities as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
+    adjusted_priorities: (await Promise.all(((raw.adjusted_priorities as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)))).filter((i) => i.task),
     ritual_id: ritualId,
   });
 
-  const enrichEod = (raw: Record<string, unknown>, ritualId: number, allowed?: Set<string>) => ({
+  const enrichEod = async (raw: Record<string, unknown>, ritualId: number, allowed?: Set<string>) => ({
     summary: raw.summary as string,
     accomplished: (raw.accomplished as string[]) ?? [],
-    rolling_over: ((raw.rolling_over as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)).filter((i) => i.task),
+    rolling_over: (await Promise.all(((raw.rolling_over as Array<{ task_id: string }>) ?? []).map(enrichTask(allowed)))).filter((i) => i.task),
     insights: (raw.insights as string) ?? '',
     ritual_id: ritualId,
   });
 
   // Check what exists today (per-user)
-  router.get('/today', (req, res) => {
+  router.get('/today', async (req, res) => {
     const userId = (req as any).user?.id as number | undefined;
-    const rituals = ritualQueries.getByDate(today(), undefined, userId);
+    const rituals = await ritualQueries.getByDate(today(), undefined, userId);
     const hasMorning = rituals.some((r) => r.type === 'morning');
     const hasReplan = rituals.some((r) => r.type === 'replan');
     const hasEod = rituals.some((r) => r.type === 'eod');
@@ -55,11 +55,11 @@ export function createStandupRoutes(
   });
 
   // Load cached rituals for today, re-enriched with current task data (per-user, source-filtered)
-  router.get('/cached', (req, res) => {
+  router.get('/cached', async (req, res) => {
     const userId = (req as any).user?.id as number | undefined;
     const userRole = (req as any).user?.role as string | undefined;
-    const allowed = getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
-    const rituals = ritualQueries.getByDate(today(), undefined, userId);
+    const allowed = await getAllowedSources(userId, userRole, userSettingsQueries, settingsQueries);
+    const rituals = await ritualQueries.getByDate(today(), undefined, userId);
     const result: Record<string, unknown> = {};
 
     for (const ritual of rituals) {
@@ -67,11 +67,11 @@ export function createStandupRoutes(
       try {
         const raw = JSON.parse(ritual.conversation) as Record<string, unknown>;
         if (ritual.type === 'morning' && !result.morning) {
-          result.morning = enrichMorning(raw, ritual.id, allowed);
+          result.morning = await enrichMorning(raw, ritual.id, allowed);
         } else if (ritual.type === 'replan' && !result.replan) {
-          result.replan = enrichReplan(raw, ritual.id, allowed);
+          result.replan = await enrichReplan(raw, ritual.id, allowed);
         } else if (ritual.type === 'eod' && !result.eod) {
-          result.eod = enrichEod(raw, ritual.id, allowed);
+          result.eod = await enrichEod(raw, ritual.id, allowed);
         }
       } catch { /* skip corrupt data */ }
     }
@@ -84,17 +84,17 @@ export function createStandupRoutes(
     try {
       const userId = (req as any).user?.id as number | undefined;
       const userRole = (req as any).user?.role as string | undefined;
-      const tasks = filterTasksByAllowedSources(
-        taskQueries.getAll({ userId }), userId, userRole, userSettingsQueries, settingsQueries
+      const tasks = await filterTasksByAllowedSources(
+        await taskQueries.getAll({ userId }), userId, userRole, userSettingsQueries, settingsQueries
       );
 
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayRituals = ritualQueries.getByDate(yesterday.toISOString().split('T')[0], 'morning', userId);
+      const yesterdayRituals = await ritualQueries.getByDate(yesterday.toISOString().split('T')[0], 'morning', userId);
 
       const briefing = generateMorningBriefing(tasks, yesterdayRituals[0] ?? null);
 
-      const ritualId = ritualQueries.create({
+      const ritualId = await ritualQueries.create({
         type: 'morning',
         date: today(),
         summary_md: briefing.summary,
@@ -103,7 +103,7 @@ export function createStandupRoutes(
         user_id: userId,
       });
 
-      const enriched = enrichMorning(briefing as unknown as Record<string, unknown>, ritualId);
+      const enriched = await enrichMorning(briefing as unknown as Record<string, unknown>, ritualId);
       res.json({ ok: true, data: enriched });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -116,14 +116,14 @@ export function createStandupRoutes(
     try {
       const userId = (req as any).user?.id as number | undefined;
       const userRole = (req as any).user?.role as string | undefined;
-      const tasks = filterTasksByAllowedSources(
-        taskQueries.getAll({ userId }), userId, userRole, userSettingsQueries, settingsQueries
+      const tasks = await filterTasksByAllowedSources(
+        await taskQueries.getAll({ userId }), userId, userRole, userSettingsQueries, settingsQueries
       );
-      const todayRituals = ritualQueries.getByDate(today(), 'morning', userId);
+      const todayRituals = await ritualQueries.getByDate(today(), 'morning', userId);
 
       const replan = generateReplan(tasks, todayRituals[0] ?? null);
 
-      const ritualId = ritualQueries.create({
+      const ritualId = await ritualQueries.create({
         type: 'replan',
         date: today(),
         summary_md: replan.summary,
@@ -131,7 +131,7 @@ export function createStandupRoutes(
         user_id: userId,
       });
 
-      const enriched = enrichReplan(replan as unknown as Record<string, unknown>, ritualId);
+      const enriched = await enrichReplan(replan as unknown as Record<string, unknown>, ritualId);
       res.json({ ok: true, data: enriched });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -144,14 +144,14 @@ export function createStandupRoutes(
     try {
       const userId = (req as any).user?.id as number | undefined;
       const userRole = (req as any).user?.role as string | undefined;
-      const tasks = filterTasksByAllowedSources(
-        taskQueries.getAll({ userId }), userId, userRole, userSettingsQueries, settingsQueries
+      const tasks = await filterTasksByAllowedSources(
+        await taskQueries.getAll({ userId }), userId, userRole, userSettingsQueries, settingsQueries
       );
-      const todayRituals = ritualQueries.getByDate(today(), 'morning', userId);
+      const todayRituals = await ritualQueries.getByDate(today(), 'morning', userId);
 
       const review = generateEndOfDay(tasks, todayRituals[0] ?? null);
 
-      const ritualId = ritualQueries.create({
+      const ritualId = await ritualQueries.create({
         type: 'eod',
         date: today(),
         summary_md: review.summary,
@@ -160,7 +160,7 @@ export function createStandupRoutes(
         user_id: userId,
       });
 
-      const enriched = enrichEod(review as unknown as Record<string, unknown>, ritualId);
+      const enriched = await enrichEod(review as unknown as Record<string, unknown>, ritualId);
       res.json({ ok: true, data: enriched });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -169,7 +169,7 @@ export function createStandupRoutes(
   });
 
   // Update ritual (add notes, blockers, completed items)
-  router.patch('/:id', (req, res) => {
+  router.patch('/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
       res.status(400).json({ ok: false, error: 'Invalid ritual ID' });
@@ -177,7 +177,7 @@ export function createStandupRoutes(
     }
 
     const { summary_md, planned_items, completed_items, blockers } = req.body;
-    const updated = ritualQueries.update(id, { summary_md, planned_items, completed_items, blockers });
+    const updated = await ritualQueries.update(id, { summary_md, planned_items, completed_items, blockers });
 
     if (!updated) {
       res.status(404).json({ ok: false, error: 'Ritual not found' });
@@ -187,9 +187,9 @@ export function createStandupRoutes(
   });
 
   // History
-  router.get('/history', (req, res) => {
+  router.get('/history', async (req, res) => {
     const limit = parseInt(req.query.limit as string, 10) || 20;
-    const rituals = ritualQueries.getRecent(limit);
+    const rituals = await ritualQueries.getRecent(limit);
     res.json({ ok: true, data: rituals });
   });
 

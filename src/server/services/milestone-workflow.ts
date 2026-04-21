@@ -14,7 +14,7 @@ export class MilestoneWorkflowEngine {
 
   /** Main evaluation loop — called by scheduler and after completion triggers */
   async evaluateAll(): Promise<{ tasksCreated: number; ticketsCreated: number }> {
-    const ready = this.milestoneQueries.getMilestonesReadyForWorkflow();
+    const ready = await this.milestoneQueries.getMilestonesReadyForWorkflow();
     if (ready.length === 0) return { tasksCreated: 0, ticketsCreated: 0 };
 
     let tasksCreated = 0;
@@ -40,7 +40,7 @@ export class MilestoneWorkflowEngine {
   /** Process a single milestone that's ready for workflow */
   private async processMilestone(milestone: WorkflowReadyMilestone): Promise<{ taskCreated: boolean; ticketCount: number }> {
     // 1. Create the task in the tasks table
-    syncMilestoneToTask(
+    await syncMilestoneToTask(
       {
         id: milestone.id,
         delivery_id: milestone.delivery_id,
@@ -52,13 +52,13 @@ export class MilestoneWorkflowEngine {
       milestone.account,
       this.taskQueries,
     );
-    this.milestoneQueries.markWorkflowTaskCreated(milestone.id);
+    await this.milestoneQueries.markWorkflowTaskCreated(milestone.id);
     this.log(`[Workflow] Task created: ${milestone.account} — ${milestone.template_name} (due ${milestone.target_date})`);
 
     // 2. Check for linked ticket groups and create Jira tickets if applicable
     let ticketCount = 0;
     if (milestone.workflow_tickets_created === 0) {
-      const linkedGroups = this.milestoneQueries.getTemplateTicketGroups(milestone.template_id);
+      const linkedGroups = await this.milestoneQueries.getTemplateTicketGroups(milestone.template_id);
       if (linkedGroups.length > 0 && milestone.sale_type && milestone.onboarding_id) {
         ticketCount = await this.createTicketsForMilestone(milestone, linkedGroups);
       }
@@ -89,7 +89,7 @@ export class MilestoneWorkflowEngine {
       );
 
       const jiraKeys = [result.parentKey, ...result.childKeys].filter(Boolean);
-      this.milestoneQueries.markWorkflowTicketsCreated(milestone.id, jiraKeys);
+      await this.milestoneQueries.markWorkflowTicketsCreated(milestone.id, jiraKeys);
       this.log(`[Workflow] Tickets created for ${milestone.account} — ${milestone.template_name}: ${jiraKeys.join(', ')}`);
       return result.createdCount;
     } catch (err) {
@@ -100,10 +100,10 @@ export class MilestoneWorkflowEngine {
 
   /** Called when a milestone is marked complete — immediately evaluate the next one */
   async onMilestoneCompleted(milestoneId: number): Promise<void> {
-    const milestone = this.milestoneQueries.getMilestoneById(milestoneId);
+    const milestone = await this.milestoneQueries.getMilestoneById(milestoneId);
     if (!milestone) return;
 
-    const nextMilestone = this.milestoneQueries.getNextMilestoneForDelivery(
+    const nextMilestone = await this.milestoneQueries.getNextMilestoneForDelivery(
       milestone.delivery_id,
       milestone.template_id,
     );
@@ -125,7 +125,7 @@ export class MilestoneWorkflowEngine {
 
       if (today >= triggerDate) {
         // Within lead time — create the task now
-        const entry = this.deliveryQueries.getById(milestone.delivery_id);
+        const entry = await this.deliveryQueries.getById(milestone.delivery_id);
         if (entry) {
           const ready: WorkflowReadyMilestone = {
             ...nextMilestone,
