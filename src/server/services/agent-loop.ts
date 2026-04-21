@@ -15,6 +15,8 @@ import { Guardrails, type GuardrailResult } from './guardrails.js';
 import { QueueMonitor } from './queue-monitor.js';
 import { AutonomyEngine } from './autonomy-engine.js';
 import { AlertService } from './alert-service.js';
+import { TicketClassifier } from './ticket-classifier.js';
+import { CoachingEngine } from './coach.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 
 const DEFAULT_INTERVAL_MS = 60_000;
@@ -41,6 +43,8 @@ export class AgentLoop {
   private queueMonitor: QueueMonitor;
   private autonomyEngine: AutonomyEngine;
   private alertService: AlertService;
+  private ticketClassifier: TicketClassifier;
+  private coachingEngine: CoachingEngine;
   private jiraClient: JiraRestClient;
   private llmService: LlmService;
   private settings: SettingsQueries;
@@ -65,6 +69,8 @@ export class AgentLoop {
     this.guardrails = new Guardrails(settings);
     this.queueMonitor = new QueueMonitor(jiraClient, settings);
     this.alertService = new AlertService(settings);
+    this.ticketClassifier = new TicketClassifier(llmService, jiraClient, 'NT');
+    this.coachingEngine = new CoachingEngine(llmService, jiraClient, 'NT');
     this.jiraClient = jiraClient;
     this.llmService = llmService;
     this.settings = settings;
@@ -219,11 +225,13 @@ export class AgentLoop {
       // 5. QUEUE MONITOR + ALERTS
       await this.runQueueMonitor();
 
-      // 6. SWEEP + RESOLUTION REVIEW (every Nth tick)
+      // 6. SWEEP + RESOLUTION REVIEW + CLASSIFICATION + COACHING (every Nth tick)
       const sweepInterval = this.getNumber('agent_sweep_interval_ticks', DEFAULT_SWEEP_INTERVAL_TICKS);
       if (this.tickCount % sweepInterval === 0) {
         await this.runSweep(shadow);
         await this.runResolutionReview(shadow);
+        await this.runTicketClassification();
+        await this.runCoachingHealthChecks();
       }
 
       this.lastTickAt = new Date();
@@ -298,6 +306,38 @@ export class AgentLoop {
     } catch (err) {
       this.errorCount++;
       console.error(`[agent] Resolution review failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  private async runTicketClassification(): Promise<void> {
+    try {
+      console.log(`[agent] Running ticket classification...`);
+      const results = await this.ticketClassifier.classifyResolved(24);
+      console.log(`[agent] Classification complete — ${results.length} tickets classified`);
+    } catch (err) {
+      console.warn(`[agent] Ticket classification failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  private async runCoachingHealthChecks(): Promise<void> {
+    try {
+      const openIssues = this.perceiver.getLastOpenIssues();
+      if (openIssues.length === 0) return;
+
+      let checked = 0;
+      for (const issue of openIssues.slice(0, 20)) {
+        const assignee = (issue.fields as any)?.assignee?.accountId;
+        if (!assignee) continue;
+
+        const nudges = await this.coachingEngine.checkTicketHealth(issue.key, assignee);
+        if (nudges.length > 0) {
+          console.log(`[agent] Coaching health check: ${issue.key} — ${nudges.join(', ')}`);
+        }
+        checked++;
+      }
+      if (checked > 0) console.log(`[agent] Coaching health checks complete — ${checked} tickets checked`);
+    } catch (err) {
+      console.warn(`[agent] Coaching health checks failed:`, err instanceof Error ? err.message : err);
     }
   }
 

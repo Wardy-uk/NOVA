@@ -5,8 +5,22 @@ import { query, execute } from '../services/database.js';
 import { RespondResultSchema, type RespondResult } from '../services/respond-schema.js';
 import { ResolveSummarySchema, type ResolveSummaryResult } from '../services/resolve-schema.js';
 import { loadPrompt } from '../services/prompt-loader.js';
+import type { AssignmentEngine, Pool } from '../services/assignment-engine.js';
+import type { AgentAvailabilityService, AvailabilityStatus } from '../services/agent-availability.js';
+import type { TicketClassifier } from '../services/ticket-classifier.js';
+import type { BriefEngine } from '../services/brief-engine.js';
+import type { CoachingEngine } from '../services/coach.js';
 
-export function createAgentRoutes(agentLoop: AgentLoop): Router {
+interface AgentRouteDeps {
+  agentLoop: AgentLoop;
+  assignmentEngine: AssignmentEngine;
+  availabilityService: AgentAvailabilityService;
+  ticketClassifier: TicketClassifier;
+  briefEngine: BriefEngine;
+  coachingEngine: CoachingEngine;
+}
+
+export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
   const router = Router();
 
   router.use(requireRole('admin'));
@@ -858,6 +872,482 @@ export function createAgentRoutes(agentLoop: AgentLoop): Router {
         ...agentLoop.status,
       },
     });
+  });
+
+  // ── Escalation (WP-13) ──
+
+  router.get('/escalation/reasons', async (_req, res) => {
+    try {
+      const rows = await query<any>(
+        `SELECT id, reason_code, label, requires_troubleshooting, troubleshooting_checklist, sort_order
+         FROM escalation_reasons WHERE active = 1 ORDER BY sort_order`,
+      );
+      const data = rows.map((r: any) => ({
+        ...r,
+        troubleshooting_checklist: r.troubleshooting_checklist ? JSON.parse(r.troubleshooting_checklist) : [],
+      }));
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get escalation reasons' });
+    }
+  });
+
+  router.get('/escalation/t2-agents', async (_req, res) => {
+    try {
+      const assignment = deps?.assignmentEngine;
+      if (!assignment) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
+      const agents = await assignment.getAvailableAgents('t2');
+      res.json({ ok: true, data: agents });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get T2 agents' });
+    }
+  });
+
+  router.post('/escalation/execute', async (req, res) => {
+    const { ticketKey, reasonCode, reasonLabel, troubleshootingDone, assignToAgentId, additionalNotes, briefText } = req.body;
+    if (!ticketKey || !reasonCode) {
+      res.status(400).json({ ok: false, error: 'ticketKey and reasonCode are required' });
+      return;
+    }
+    try {
+      const jira = agentLoop.getJiraClient();
+      const username = (req as any).user?.username ?? 'unknown';
+
+      const escalationNote = [
+        `🔺 Escalation via SOP-002 Gate`,
+        ``,
+        `Escalated by: ${username}`,
+        `Reason: ${reasonLabel ?? reasonCode}`,
+        troubleshootingDone?.length > 0 ? `\nTroubleshooting completed:\n${troubleshootingDone.map((s: string) => `  ✓ ${s}`).join('\n')}` : '',
+        additionalNotes ? `\nNotes: ${additionalNotes}` : '',
+      ].filter(Boolean).join('\n');
+
+      await jira.addComment(ticketKey, escalationNote, { internal: true });
+
+      if (assignToAgentId && deps?.assignmentEngine) {
+        const agent = await deps.assignmentEngine.getAgent(assignToAgentId);
+        if (agent) {
+          await jira.updateFields(ticketKey, {
+            assignee: { accountId: agent.jira_account_id },
+          });
+        }
+      }
+
+      res.json({ ok: true, data: { ticketKey, escalated: true } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Escalation failed' });
+    }
+  });
+
+  // ── Briefs (WP-13) ──
+
+  router.post('/brief/generate', async (req, res) => {
+    const { ticketKey } = req.body;
+    if (!ticketKey) {
+      res.status(400).json({ ok: false, error: 'ticketKey is required' });
+      return;
+    }
+    try {
+      const briefEngine = deps?.briefEngine;
+      if (!briefEngine) {
+        res.status(503).json({ ok: false, error: 'Brief engine not available' });
+        return;
+      }
+      const brief = await briefEngine.generateBrief(ticketKey);
+      if (!brief) {
+        res.status(404).json({ ok: false, error: 'Ticket not found' });
+        return;
+      }
+      res.json({ ok: true, data: brief });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to generate brief' });
+    }
+  });
+
+  router.post('/brief/post-to-jira', async (req, res) => {
+    const { ticketKey, brief } = req.body;
+    if (!ticketKey || !brief) {
+      res.status(400).json({ ok: false, error: 'ticketKey and brief are required' });
+      return;
+    }
+    try {
+      const briefEngine = deps?.briefEngine;
+      if (!briefEngine) {
+        res.status(503).json({ ok: false, error: 'Brief engine not available' });
+        return;
+      }
+      await briefEngine.postBriefToJira(ticketKey, brief);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to post brief' });
+    }
+  });
+
+  // ── Classification (WP-18) ──
+
+  router.get('/classifications', async (req, res) => {
+    const ticketKey = req.query.ticketKey as string | undefined;
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+    try {
+      const classifier = deps?.ticketClassifier;
+      if (!classifier) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
+      const data = await classifier.getClassifications(ticketKey, limit);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get classifications' });
+    }
+  });
+
+  router.get('/classifications/breakdown', async (req, res) => {
+    const days = Math.min(parseInt(req.query.days as string, 10) || 30, 180);
+    try {
+      const classifier = deps?.ticketClassifier;
+      if (!classifier) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
+      const data = await classifier.getCategoryBreakdown(days);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get classification breakdown' });
+    }
+  });
+
+  router.post('/classifications/run', async (_req, res) => {
+    try {
+      const classifier = deps?.ticketClassifier;
+      if (!classifier) {
+        res.status(503).json({ ok: false, error: 'Classifier not available' });
+        return;
+      }
+      const results = await classifier.classifyResolved();
+      res.json({ ok: true, data: { classified: results.length } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Classification run failed' });
+    }
+  });
+
+  router.get('/trends', async (req, res) => {
+    const days = Math.min(parseInt(req.query.days as string, 10) || 30, 180);
+    try {
+      const classifier = deps?.ticketClassifier;
+      if (!classifier) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
+      const data = await classifier.getTrendSnapshots(days);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get trends' });
+    }
+  });
+
+  router.post('/trends/run', async (req, res) => {
+    const days = Math.min(parseInt(req.query.days as string, 10) || 7, 30);
+    try {
+      const classifier = deps?.ticketClassifier;
+      if (!classifier) {
+        res.status(503).json({ ok: false, error: 'Classifier not available' });
+        return;
+      }
+      const result = await classifier.runTrendAnalysis(days);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Trend analysis failed' });
+    }
+  });
+
+  // ── Coaching (WP-14) ──
+
+  router.get('/coaching/team', async (req, res) => {
+    const days = Math.min(parseInt(req.query.days as string, 10) || 30, 90);
+    try {
+      const coach = deps?.coachingEngine;
+      if (!coach) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
+      const data = await coach.getTeamScores(days);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get team scores' });
+    }
+  });
+
+  router.get('/coaching/agent/:agentUserId', async (req, res) => {
+    const agentUserId = parseInt(req.params.agentUserId, 10);
+    const days = Math.min(parseInt(req.query.days as string, 10) || 30, 90);
+    if (isNaN(agentUserId)) {
+      res.status(400).json({ ok: false, error: 'Invalid agent user ID' });
+      return;
+    }
+    try {
+      const coach = deps?.coachingEngine;
+      if (!coach) {
+        res.json({ ok: true, data: null });
+        return;
+      }
+      const data = await coach.getAgentScores(agentUserId, days);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get agent scores' });
+    }
+  });
+
+  router.get('/coaching/nudges', async (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+    const agentUserId = req.query.agentUserId ? parseInt(req.query.agentUserId as string, 10) : undefined;
+    try {
+      const coach = deps?.coachingEngine;
+      if (!coach) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
+      const data = await coach.getNudgeHistory(limit, agentUserId);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get nudge history' });
+    }
+  });
+
+  router.post('/coaching/assess', async (req, res) => {
+    const { ticketKey, agentAccountId, responseText } = req.body;
+    if (!ticketKey || !agentAccountId || !responseText) {
+      res.status(400).json({ ok: false, error: 'ticketKey, agentAccountId, and responseText are required' });
+      return;
+    }
+    try {
+      const coach = deps?.coachingEngine;
+      if (!coach) {
+        res.status(503).json({ ok: false, error: 'Coaching engine not available' });
+        return;
+      }
+      const result = await coach.assessResponse(ticketKey, agentAccountId, responseText);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Assessment failed' });
+    }
+  });
+
+  router.put('/coaching/visibility', (req, res) => {
+    const { visibility } = req.body;
+    const valid = ['off', 'agent', 'manager'];
+    if (!valid.includes(visibility)) {
+      res.status(400).json({ ok: false, error: `visibility must be one of: ${valid.join(', ')}` });
+      return;
+    }
+    const coach = deps?.coachingEngine;
+    if (!coach) {
+      res.status(503).json({ ok: false, error: 'Coaching engine not available' });
+      return;
+    }
+    coach.setVisibility(visibility);
+    res.json({ ok: true, data: { visibility } });
+  });
+
+  // ── Roster & Assignment (WP-19) ──
+
+  router.get('/roster', async (req, res) => {
+    const pool = req.query.pool as Pool | undefined;
+    try {
+      const engine = deps?.assignmentEngine;
+      if (!engine) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
+      const data = await engine.getAllAgents(pool);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get roster' });
+    }
+  });
+
+  router.post('/roster', async (req, res) => {
+    const { jira_account_id, display_name, email, pool, skills, max_capacity, active, is_current_agent } = req.body;
+    if (!jira_account_id || !display_name || !pool) {
+      res.status(400).json({ ok: false, error: 'jira_account_id, display_name, and pool are required' });
+      return;
+    }
+    try {
+      const engine = deps?.assignmentEngine;
+      if (!engine) {
+        res.status(503).json({ ok: false, error: 'Assignment engine not available' });
+        return;
+      }
+      const id = await engine.createAgent({
+        jira_account_id, display_name, email: email ?? null,
+        pool, skills: skills ?? null, max_capacity: max_capacity ?? 10,
+        active: active ?? true, is_current_agent: is_current_agent ?? false,
+      });
+      const agent = await engine.getAgent(id);
+      res.json({ ok: true, data: agent });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create agent' });
+    }
+  });
+
+  router.put('/roster/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ ok: false, error: 'Invalid agent ID' });
+      return;
+    }
+    try {
+      const engine = deps?.assignmentEngine;
+      if (!engine) {
+        res.status(503).json({ ok: false, error: 'Assignment engine not available' });
+        return;
+      }
+      await engine.updateAgent(id, req.body);
+      const agent = await engine.getAgent(id);
+      res.json({ ok: true, data: agent });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to update agent' });
+    }
+  });
+
+  router.delete('/roster/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ ok: false, error: 'Invalid agent ID' });
+      return;
+    }
+    try {
+      const engine = deps?.assignmentEngine;
+      if (!engine) {
+        res.status(503).json({ ok: false, error: 'Assignment engine not available' });
+        return;
+      }
+      await engine.deleteAgent(id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to delete agent' });
+    }
+  });
+
+  router.get('/roster/stats', async (_req, res) => {
+    try {
+      const engine = deps?.assignmentEngine;
+      if (!engine) {
+        res.json({ ok: true, data: {} });
+        return;
+      }
+      const data = await engine.getPoolStats();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get pool stats' });
+    }
+  });
+
+  router.post('/roster/assign', async (req, res) => {
+    const { ticketKey, pool, preferredSkills } = req.body;
+    if (!ticketKey) {
+      res.status(400).json({ ok: false, error: 'ticketKey is required' });
+      return;
+    }
+    try {
+      const engine = deps?.assignmentEngine;
+      if (!engine) {
+        res.status(503).json({ ok: false, error: 'Assignment engine not available' });
+        return;
+      }
+      const result = await engine.assignToJira(ticketKey, pool ?? 'cc', preferredSkills);
+      if (!result) {
+        res.status(404).json({ ok: false, error: 'No available agents in pool' });
+        return;
+      }
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Assignment failed' });
+    }
+  });
+
+  router.get('/roster/assignment-log', async (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+    try {
+      const engine = deps?.assignmentEngine;
+      if (!engine) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
+      const data = await engine.getAssignmentLog(limit);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get assignment log' });
+    }
+  });
+
+  // ── Availability (WP-19) ──
+
+  router.get('/availability/snapshot', async (req, res) => {
+    const date = (req.query.date as string) ?? new Date().toISOString().slice(0, 10);
+    const pool = req.query.pool as string | undefined;
+    try {
+      const svc = deps?.availabilityService;
+      if (!svc) {
+        res.json({ ok: true, data: { date, available: [], unavailable: [], totalRoster: 0, availableCount: 0 } });
+        return;
+      }
+      const data = await svc.getDaySnapshot(date, pool);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get availability' });
+    }
+  });
+
+  router.post('/availability', async (req, res) => {
+    const { rosterId, date, status, reason } = req.body;
+    if (!rosterId || !date || !status) {
+      res.status(400).json({ ok: false, error: 'rosterId, date, and status are required' });
+      return;
+    }
+    try {
+      const svc = deps?.availabilityService;
+      if (!svc) {
+        res.status(503).json({ ok: false, error: 'Availability service not available' });
+        return;
+      }
+      await svc.setAvailability(rosterId, date, status as AvailabilityStatus, reason);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to set availability' });
+    }
+  });
+
+  router.get('/availability/upcoming', async (req, res) => {
+    const days = Math.min(parseInt(req.query.days as string, 10) || 14, 60);
+    try {
+      const svc = deps?.availabilityService;
+      if (!svc) {
+        res.json({ ok: true, data: [] });
+        return;
+      }
+      const data = await svc.getUpcomingAbsences(days);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get upcoming absences' });
+    }
+  });
+
+  router.get('/availability/capacity', async (req, res) => {
+    const pool = req.query.pool as string | undefined;
+    try {
+      const svc = deps?.availabilityService;
+      if (!svc) {
+        res.json({ ok: true, data: {} });
+        return;
+      }
+      const data = await svc.getCapacitySummary(pool);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get capacity' });
+    }
   });
 
   return router;

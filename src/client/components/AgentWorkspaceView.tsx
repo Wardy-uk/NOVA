@@ -59,11 +59,11 @@ function api(path: string) {
   return fetch(`/api/agent${path}`).then(r => r.json());
 }
 
-function apiJson(path: string, method: string, body: unknown) {
+function apiJson(path: string, method: string, body?: unknown) {
   return fetch(`/api/agent${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   }).then(r => r.json());
 }
 
@@ -1058,47 +1058,236 @@ function NoteComposer({ ticketKey, onComplete }: {
 }
 
 // ═══════════════════════════════════════════
-// ESCALATE PANEL
+// ESCALATION WIZARD (SOP-002)
 // ═══════════════════════════════════════════
+
+interface EscalationReason {
+  id: number;
+  reason_code: string;
+  label: string;
+  requires_troubleshooting: boolean;
+  troubleshooting_checklist: string[] | null;
+}
+
+interface T2Agent {
+  id: number;
+  display_name: string;
+  pool: string;
+  skills: string[] | null;
+  open_tickets?: number;
+  available?: boolean;
+}
 
 function EscalatePanel({ ticketKey, onComplete }: {
   ticketKey: string;
   onComplete: (msg: string, ok?: boolean) => void;
 }) {
-  const [reason, setReason] = useState('');
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [reasons, setReasons] = useState<EscalationReason[]>([]);
+  const [selectedReason, setSelectedReason] = useState<EscalationReason | null>(null);
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
+  const [t2Agents, setT2Agents] = useState<T2Agent[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<T2Agent | null>(null);
+  const [additionalNotes, setAdditionalNotes] = useState('');
+  const [briefPreview, setBriefPreview] = useState('');
   const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const escalate = async () => {
+  useEffect(() => {
+    Promise.all([
+      apiJson('/escalation/reasons', 'GET'),
+      apiJson('/escalation/t2-agents', 'GET'),
+    ]).then(([reasonsRes, agentsRes]) => {
+      if (reasonsRes.ok) setReasons(reasonsRes.data ?? []);
+      if (agentsRes.ok) setT2Agents(agentsRes.data ?? []);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const allChecklistComplete = selectedReason?.troubleshooting_checklist
+    ? selectedReason.troubleshooting_checklist.every((_: string, i: number) => checklist[i])
+    : true;
+
+  const canProceedStep2 = !selectedReason?.requires_troubleshooting || allChecklistComplete;
+
+  const generateBriefPreview = useCallback(async () => {
+    const items = selectedReason?.troubleshooting_checklist?.filter((_: string, i: number) => checklist[i]) ?? [];
+    const brief = [
+      `Escalation Reason: ${selectedReason?.label}`,
+      '',
+      items.length > 0 ? `Troubleshooting Completed:\n${items.map((s: string) => `  [x] ${s}`).join('\n')}` : '',
+      additionalNotes ? `\nAdditional Notes:\n${additionalNotes}` : '',
+      selectedAgent ? `\nAssigned To: ${selectedAgent.display_name}` : '',
+    ].filter(Boolean).join('\n');
+    setBriefPreview(brief);
+  }, [selectedReason, checklist, additionalNotes, selectedAgent]);
+
+  useEffect(() => { if (step === 4) generateBriefPreview(); }, [step, generateBriefPreview]);
+
+  const submit = async () => {
     setSending(true);
     try {
-      const res = await apiJson('/quick-actions/escalate', 'POST', { ticketKey, reason: reason.trim() || undefined });
-      if (res.ok) onComplete(`${ticketKey} escalated`);
+      const payload = {
+        ticketKey,
+        reasonCode: selectedReason?.reason_code,
+        reasonLabel: selectedReason?.label,
+        troubleshootingDone: selectedReason?.troubleshooting_checklist?.filter((_: string, i: number) => checklist[i]) ?? [],
+        assignToAccountId: selectedAgent?.id ? undefined : undefined,
+        assignToAgentId: selectedAgent?.id,
+        additionalNotes: additionalNotes.trim() || undefined,
+        briefText: briefPreview,
+      };
+      const res = await apiJson('/escalation/execute', 'POST', payload);
+      if (res.ok) onComplete(`${ticketKey} escalated to ${selectedAgent?.display_name ?? 'T2'}`, true);
       else onComplete(res.error ?? 'Escalation failed', false);
     } catch (err: any) { onComplete(err.message ?? 'Escalation failed', false); }
     finally { setSending(false); }
   };
 
   const shortcuts = useMemo(() => ({
-    'Ctrl+Enter': () => { if (!sending) escalate(); },
-  }), [sending]);
+    'Ctrl+Enter': () => { if (step === 4 && !sending) submit(); },
+  }), [step, sending]);
 
   useKeyboardShortcuts(shortcuts);
 
+  if (loading) return <div className="p-4 text-xs text-neutral-500">Loading escalation config...</div>;
+
+  const stepIndicator = (
+    <div className="flex items-center gap-1 mb-4">
+      {[1, 2, 3, 4].map(s => (
+        <div key={s} className="flex items-center gap-1">
+          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold
+            ${step === s ? 'bg-amber-600 text-white' : step > s ? 'bg-green-900/50 text-green-400 border border-green-800/40' : 'bg-[#2f353d] text-neutral-500 border border-[#3a424d]'}`}>
+            {step > s ? '✓' : s}
+          </div>
+          {s < 4 && <div className={`w-6 h-0.5 ${step > s ? 'bg-green-800/60' : 'bg-[#3a424d]'}`} />}
+        </div>
+      ))}
+      <span className="ml-2 text-[10px] text-neutral-500">
+        {step === 1 ? 'Reason' : step === 2 ? 'Troubleshooting' : step === 3 ? 'Assign' : 'Review'}
+      </span>
+    </div>
+  );
+
   return (
     <div className="border border-amber-800/30 rounded-lg bg-[#272C33] p-4 space-y-3">
-      <h4 className="text-xs font-semibold text-neutral-200">Escalate Ticket</h4>
-      <p className="text-[10px] text-neutral-500">Posts an internal escalation note. Phase 3 will add guided routing with SOP-002 enforcement.</p>
-      <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
-        placeholder="Describe why this needs escalation — what troubleshooting was done, why it can't be resolved at this tier..."
-        className="w-full bg-[#2f353d] border border-[#3a424d] text-neutral-200 text-xs rounded-lg p-3 focus:outline-none focus:border-amber-600 resize-y leading-relaxed"
-        autoFocus />
-      <div className="flex items-center gap-2">
-        <button onClick={escalate} disabled={sending}
-          className="px-4 py-1.5 text-[11px] font-medium rounded bg-amber-900/30 text-amber-400 border border-amber-800/40 hover:bg-amber-900/50 disabled:opacity-40 disabled:cursor-not-allowed">
-          {sending ? 'Escalating...' : 'Escalate'}
-        </button>
-        <span className="text-[9px] text-neutral-600">Ctrl+Enter to submit</span>
-      </div>
+      <h4 className="text-xs font-semibold text-neutral-200">Escalate Ticket (SOP-002)</h4>
+      {stepIndicator}
+
+      {step === 1 && (
+        <div className="space-y-2">
+          <p className="text-[10px] text-neutral-400">Select the reason for escalation:</p>
+          {reasons.map(r => (
+            <label key={r.id} className={`flex items-start gap-2 p-2 rounded cursor-pointer border text-xs
+              ${selectedReason?.id === r.id ? 'border-amber-600 bg-amber-900/20 text-amber-300' : 'border-[#3a424d] hover:border-[#4a525d] text-neutral-300'}`}
+              onClick={() => {
+                setSelectedReason(r);
+                setChecklist({});
+              }}>
+              <input type="radio" name="reason" checked={selectedReason?.id === r.id} onChange={() => {}} className="mt-0.5" />
+              <div>
+                <div className="font-medium">{r.label}</div>
+                {r.requires_troubleshooting && <div className="text-[9px] text-neutral-500 mt-0.5">Requires troubleshooting documentation</div>}
+              </div>
+            </label>
+          ))}
+          <div className="flex justify-end pt-2">
+            <button onClick={() => setStep(2)} disabled={!selectedReason}
+              className="px-3 py-1.5 text-[11px] font-medium rounded bg-blue-900/30 text-blue-400 border border-blue-800/40 hover:bg-blue-900/50 disabled:opacity-40">
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="space-y-3">
+          {selectedReason?.requires_troubleshooting && selectedReason.troubleshooting_checklist ? (
+            <>
+              <p className="text-[10px] text-neutral-400">Confirm troubleshooting steps taken:</p>
+              {selectedReason.troubleshooting_checklist.map((item: string, i: number) => (
+                <label key={i} className={`flex items-start gap-2 p-2 rounded border text-xs cursor-pointer
+                  ${checklist[i] ? 'border-green-800/40 bg-green-900/10 text-green-300' : 'border-[#3a424d] text-neutral-300'}`}>
+                  <input type="checkbox" checked={!!checklist[i]}
+                    onChange={e => setChecklist(prev => ({ ...prev, [i]: e.target.checked }))} className="mt-0.5" />
+                  {item}
+                </label>
+              ))}
+              {!allChecklistComplete && (
+                <p className="text-[9px] text-amber-500">All steps must be confirmed before escalation</p>
+              )}
+            </>
+          ) : (
+            <p className="text-[10px] text-neutral-400">No troubleshooting checklist required for this reason.</p>
+          )}
+          <textarea value={additionalNotes} onChange={e => setAdditionalNotes(e.target.value)} rows={3}
+            placeholder="Additional context for the T2 agent (optional)..."
+            className="w-full bg-[#2f353d] border border-[#3a424d] text-neutral-200 text-xs rounded-lg p-3 focus:outline-none focus:border-amber-600 resize-y leading-relaxed" />
+          <div className="flex justify-between pt-1">
+            <button onClick={() => setStep(1)} className="px-3 py-1.5 text-[11px] font-medium rounded text-neutral-400 hover:text-neutral-200">Back</button>
+            <button onClick={() => setStep(3)} disabled={!canProceedStep2}
+              className="px-3 py-1.5 text-[11px] font-medium rounded bg-blue-900/30 text-blue-400 border border-blue-800/40 hover:bg-blue-900/50 disabled:opacity-40">
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="space-y-2">
+          <p className="text-[10px] text-neutral-400">Select T2 agent (or leave blank for auto-assignment):</p>
+          <div className="max-h-40 overflow-y-auto space-y-1">
+            <label className={`flex items-center gap-2 p-2 rounded border text-xs cursor-pointer
+              ${!selectedAgent ? 'border-amber-600 bg-amber-900/20 text-amber-300' : 'border-[#3a424d] text-neutral-300'}`}
+              onClick={() => setSelectedAgent(null)}>
+              <input type="radio" name="t2agent" checked={!selectedAgent} onChange={() => {}} />
+              <div>
+                <div className="font-medium">Auto-assign (Round Robin)</div>
+                <div className="text-[9px] text-neutral-500">Assigns to available T2 agent with lowest workload</div>
+              </div>
+            </label>
+            {t2Agents.map(a => (
+              <label key={a.id} className={`flex items-center gap-2 p-2 rounded border text-xs cursor-pointer
+                ${selectedAgent?.id === a.id ? 'border-amber-600 bg-amber-900/20 text-amber-300' : 'border-[#3a424d] text-neutral-300'}
+                ${a.available === false ? 'opacity-50' : ''}`}
+                onClick={() => { if (a.available !== false) setSelectedAgent(a); }}>
+                <input type="radio" name="t2agent" checked={selectedAgent?.id === a.id} onChange={() => {}} />
+                <div className="flex-1">
+                  <div className="font-medium">{a.display_name}</div>
+                  <div className="text-[9px] text-neutral-500 flex gap-2">
+                    {a.skills?.slice(0, 3).map(s => <span key={s} className="bg-[#2f353d] px-1 rounded">{s}</span>)}
+                    {a.open_tickets !== undefined && <span>{a.open_tickets} open</span>}
+                    {a.available === false && <span className="text-red-400">Unavailable</span>}
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+          <div className="flex justify-between pt-1">
+            <button onClick={() => setStep(2)} className="px-3 py-1.5 text-[11px] font-medium rounded text-neutral-400 hover:text-neutral-200">Back</button>
+            <button onClick={() => setStep(4)}
+              className="px-3 py-1.5 text-[11px] font-medium rounded bg-blue-900/30 text-blue-400 border border-blue-800/40 hover:bg-blue-900/50">
+              Review
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 4 && (
+        <div className="space-y-3">
+          <p className="text-[10px] text-neutral-400">Review escalation brief before submitting:</p>
+          <pre className="text-[10px] text-neutral-300 bg-[#1a1e24] border border-[#3a424d] rounded p-3 whitespace-pre-wrap max-h-48 overflow-y-auto">{briefPreview}</pre>
+          <div className="flex justify-between pt-1">
+            <button onClick={() => setStep(3)} className="px-3 py-1.5 text-[11px] font-medium rounded text-neutral-400 hover:text-neutral-200">Back</button>
+            <div className="flex items-center gap-2">
+              <button onClick={submit} disabled={sending}
+                className="px-4 py-1.5 text-[11px] font-medium rounded bg-amber-900/30 text-amber-400 border border-amber-800/40 hover:bg-amber-900/50 disabled:opacity-40">
+                {sending ? 'Escalating...' : 'Escalate'}
+              </button>
+              <span className="text-[9px] text-neutral-600">Ctrl+Enter to submit</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -81,6 +81,12 @@ import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from
 import { createAgentRoutes } from './routes/agent.js';
 import { AgentLoop } from './services/agent-loop.js';
 import { LlmService } from './services/llm-service.js';
+import { AssignmentEngine } from './services/assignment-engine.js';
+import { AgentAvailabilityService } from './services/agent-availability.js';
+import { TicketClassifier } from './services/ticket-classifier.js';
+import { BriefEngine } from './services/brief-engine.js';
+import { CoachingEngine } from './services/coach.js';
+import { KbSearchService } from './services/kb-search.js';
 import { createApprovalRoutes } from './routes/approvals.js';
 import { createTrainingRoutes } from './routes/training.js';
 import { sendTrainingReminders } from './services/training-reminder.js';
@@ -666,7 +672,22 @@ async function main() {
   const llmService = new LlmService(settingsQueries);
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries);
-    app.use('/api/agent', createAgentRoutes(agentLoop));
+
+    const assignmentEngine = new AssignmentEngine(agentJiraClient, 'NT');
+    const availabilityService = new AgentAvailabilityService();
+    const ticketClassifier = new TicketClassifier(llmService, agentJiraClient, 'NT');
+    const agentKbSearch = new KbSearchService(settingsQueries);
+    const briefEngine = new BriefEngine(llmService, agentJiraClient, agentKbSearch, 'NT');
+    const coachingEngine = new CoachingEngine(llmService, agentJiraClient, 'NT');
+
+    app.use('/api/agent', createAgentRoutes(agentLoop, {
+      assignmentEngine,
+      availabilityService,
+      ticketClassifier,
+      briefEngine,
+      coachingEngine,
+    }));
+
     if (settingsQueries.get('agent_enabled') === 'true') {
       agentLoop.start();
       console.log('[N.O.V.A] Agent loop auto-started (agent_enabled=true)');

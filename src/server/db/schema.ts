@@ -147,6 +147,148 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_kb_gap_log_status')
      CREATE INDEX IX_kb_gap_log_status ON kb_gap_log (status, created_at DESC);`,
+
+    // WP-14: Coaching engine — per-ticket QA scoring and nudges
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_coaching') AND type = 'U')
+     CREATE TABLE agent_coaching (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_id NVARCHAR(20) NOT NULL,
+       agent_user_id INT NOT NULL,
+       nudge_type NVARCHAR(50) NULL,
+       golden_rule_scores NVARCHAR(MAX) NULL,
+       message NVARCHAR(MAX) NULL,
+       delivered BIT NOT NULL DEFAULT 0,
+       delivery_method NVARCHAR(20) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_coaching_agent')
+     CREATE INDEX IX_agent_coaching_agent ON agent_coaching (agent_user_id, created_at DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_coaching_ticket')
+     CREATE INDEX IX_agent_coaching_ticket ON agent_coaching (ticket_id, created_at DESC);`,
+
+    // WP-14: Decision scoring — per-decision quality signals
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_decision_scores') AND type = 'U')
+     CREATE TABLE agent_decision_scores (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       decision_id INT NOT NULL,
+       signal_type NVARCHAR(50) NOT NULL,
+       signal_value NVARCHAR(200) NULL,
+       scored_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decision_scores_decision')
+     CREATE INDEX IX_agent_decision_scores_decision ON agent_decision_scores (decision_id);`,
+
+    // WP-19: Agent roster — who's in each assignment pool
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_roster') AND type = 'U')
+     CREATE TABLE agent_roster (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       jira_account_id NVARCHAR(200) NOT NULL,
+       display_name NVARCHAR(200) NOT NULL,
+       email NVARCHAR(200) NULL,
+       pool NVARCHAR(50) NOT NULL DEFAULT 'cc',
+       skills NVARCHAR(MAX) NULL,
+       max_capacity INT NOT NULL DEFAULT 15,
+       active BIT NOT NULL DEFAULT 1,
+       is_current_agent BIT NOT NULL DEFAULT 0,
+       last_assigned_at DATETIME2 NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_roster_pool_active')
+     CREATE INDEX IX_agent_roster_pool_active ON agent_roster (pool, active) INCLUDE (jira_account_id, display_name, max_capacity, last_assigned_at);`,
+
+    // WP-19: Assignment log — every assignment decision
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_assignment_log') AND type = 'U')
+     CREATE TABLE agent_assignment_log (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key NVARCHAR(20) NOT NULL,
+       pool NVARCHAR(50) NOT NULL,
+       assigned_to NVARCHAR(200) NOT NULL,
+       reason NVARCHAR(500) NULL,
+       open_ticket_count INT NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    // WP-19: Agent availability — daily availability snapshots
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_availability') AND type = 'U')
+     CREATE TABLE agent_availability (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       roster_id INT NOT NULL,
+       available_date DATE NOT NULL,
+       status NVARCHAR(30) NOT NULL DEFAULT 'available',
+       reason NVARCHAR(200) NULL,
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_agent_availability_roster_date UNIQUE (roster_id, available_date)
+     );`,
+
+    // WP-18: Ticket classification results
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ticket_classifications') AND type = 'U')
+     CREATE TABLE ticket_classifications (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key NVARCHAR(20) NOT NULL,
+       classification_type NVARCHAR(30) NOT NULL DEFAULT 'resolved',
+       category NVARCHAR(200) NULL,
+       sub_category NVARCHAR(200) NULL,
+       software_area NVARCHAR(200) NULL,
+       problem_type NVARCHAR(200) NULL,
+       root_cause NVARCHAR(500) NULL,
+       confidence FLOAT NULL,
+       provider NVARCHAR(20) NULL,
+       model NVARCHAR(60) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ticket_classifications_key')
+     CREATE INDEX IX_ticket_classifications_key ON ticket_classifications (ticket_key, classification_type);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ticket_classifications_category')
+     CREATE INDEX IX_ticket_classifications_category ON ticket_classifications (category, created_at DESC);`,
+
+    // WP-18: Trend analysis snapshots
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ticket_trend_snapshots') AND type = 'U')
+     CREATE TABLE ticket_trend_snapshots (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       snapshot_date DATE NOT NULL,
+       category NVARCHAR(200) NOT NULL,
+       ticket_count INT NOT NULL DEFAULT 0,
+       avg_resolution_hours FLOAT NULL,
+       escalation_rate FLOAT NULL,
+       reopen_rate FLOAT NULL,
+       trend_direction NVARCHAR(20) NULL,
+       narrative NVARCHAR(MAX) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ticket_trend_snapshots_date')
+     CREATE INDEX IX_ticket_trend_snapshots_date ON ticket_trend_snapshots (snapshot_date DESC, category);`,
+
+    // WP-13: Escalation reasons config
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'escalation_reasons') AND type = 'U')
+     CREATE TABLE escalation_reasons (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       reason_code NVARCHAR(50) NOT NULL,
+       label NVARCHAR(200) NOT NULL,
+       requires_troubleshooting BIT NOT NULL DEFAULT 1,
+       troubleshooting_checklist NVARCHAR(MAX) NULL,
+       sort_order INT NOT NULL DEFAULT 0,
+       active BIT NOT NULL DEFAULT 1
+     );`,
+
+    // WP-13: Seed escalation reasons (SOP-002 aligned)
+    `IF NOT EXISTS (SELECT 1 FROM escalation_reasons WHERE reason_code = 'complexity')
+     INSERT INTO escalation_reasons (reason_code, label, requires_troubleshooting, troubleshooting_checklist, sort_order) VALUES
+       ('complexity', 'Technical complexity beyond T1 scope', 1, '["Reproduced the issue","Checked KB for known solutions","Gathered logs/screenshots","Identified affected component"]', 1),
+       ('access', 'Requires elevated access or permissions', 1, '["Confirmed the access requirement","Verified current permission level","Documented what access is needed"]', 2),
+       ('third_party', 'Third-party integration issue', 1, '["Identified the third-party system","Checked integration status page","Gathered error logs from both sides"]', 3),
+       ('data_issue', 'Data correction or database change required', 1, '["Identified the data discrepancy","Documented expected vs actual values","Confirmed scope of affected records"]', 4),
+       ('recurring', 'Recurring issue requiring root cause analysis', 1, '["Linked previous related tickets","Documented pattern/frequency","Noted any recent changes"]', 5),
+       ('customer_request', 'Customer specifically requested escalation', 0, NULL, 6),
+       ('sla_risk', 'SLA at risk — needs specialist attention', 0, NULL, 7),
+       ('security', 'Security or compliance concern', 0, '["Documented the security concern","Assessed data exposure risk"]', 8);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
