@@ -56,14 +56,20 @@ const inputStyle: CSSProperties = {
 };
 const labelStyle: CSSProperties = { display: 'block', fontSize: 11, color: C.text3, marginBottom: 4, fontWeight: 600 };
 
-function formatTimeRemaining(dueAt: string | null, isPaused: boolean, resolvedAt: string | null, frtMetAt: string | null, isFrt: boolean): { text: string; breached: boolean; paused: boolean; pct: number } {
+function parseDateUtc(s: string): number {
+  if (s.includes('T') || s.includes('Z') || s.includes('+')) return new Date(s).getTime();
+  return new Date(s.replace(' ', 'T') + 'Z').getTime();
+}
+
+function formatTimeRemaining(dueAt: string | null | undefined, isPaused: boolean, resolvedAt: string | null | undefined, frtMetAt: string | null | undefined, isFrt: boolean): { text: string; breached: boolean; paused: boolean; pct: number } {
   if (isFrt && frtMetAt) return { text: 'Met', breached: false, paused: false, pct: 100 };
   if (!isFrt && resolvedAt) return { text: 'Met', breached: false, paused: false, pct: 100 };
   if (!dueAt) return { text: '-', breached: false, paused: false, pct: 100 };
   if (isPaused) return { text: 'Paused', breached: false, paused: true, pct: 50 };
 
   const now = Date.now();
-  const due = new Date(dueAt.replace(' ', 'T') + 'Z').getTime();
+  const due = parseDateUtc(dueAt);
+  if (isNaN(due)) return { text: '-', breached: false, paused: false, pct: 100 };
   const diff = due - now;
 
   if (diff <= 0) {
@@ -84,7 +90,7 @@ function formatTimeRemaining(dueAt: string | null, isPaused: boolean, resolvedAt
 }
 
 function formatDate(dateStr: string): string {
-  const d = new Date(dateStr.replace(' ', 'T') + 'Z');
+  const d = new Date(parseDateUtc(dateStr));
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
@@ -349,12 +355,9 @@ function TicketDetailPanel({ ticketId, agents, teams, onClose, onUpdated }: {
 
   if (!ticket) {
     return (
-      <>
-        <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 39 }} />
-        <div style={{ position: 'fixed', top: 0, bottom: 0, right: 0, width: '100%', maxWidth: 760, background: C.bg0, borderLeft: `1px solid ${C.border}`, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: 40, height: 40, border: `3px solid ${C.border}`, borderTopColor: C.teal, borderRadius: '50%', animation: 'calyxSpin 0.8s linear infinite' }} />
-        </div>
-      </>
+      <div style={{ position: 'fixed', inset: 0, background: C.bg0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 40, height: 40, border: `3px solid ${C.border}`, borderTopColor: C.teal, borderRadius: '50%', animation: 'calyxSpin 0.8s linear infinite' }} />
+      </div>
     );
   }
 
@@ -453,25 +456,22 @@ function TicketDetailPanel({ ticketId, agents, teams, onClose, onUpdated }: {
   const unwatched = agents.filter(a => !watchers.find((w: any) => w.agent_id === a.id));
 
   return (
-    <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 39 }} />
-      <div style={{
-        position: 'fixed', top: 0, bottom: 0, right: 0, width: '100%', maxWidth: 760,
-        background: C.bg0, borderLeft: `1px solid ${C.border}`, zIndex: 40,
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        transform: slideIn ? 'translateX(0)' : 'translateX(100%)',
-        transition: 'transform 200ms ease',
-        boxShadow: '-20px 0 60px rgba(0,0,0,0.5)',
-      }}>
+    <div style={{
+      position: 'fixed', inset: 0, background: C.bg0, zIndex: 50,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      opacity: slideIn ? 1 : 0,
+      transition: 'opacity 200ms ease',
+    }}>
+      <div style={{ width: '100%', maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
         {/* ── HEADER ── */}
-        <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.border}`, background: C.bg1, flexShrink: 0 }}>
+        <div style={{ padding: '16px 24px', borderBottom: `1px solid ${C.border}`, background: C.bg1, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 13, color: C.teal, fontFamily: 'monospace', fontWeight: 700 }}>{ticket.reference}</span>
               <PriorityBadge priority={ticket.priority} />
               <StatusBadge status={ticket.status as TicketStatus} />
             </div>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.text3, fontSize: 20, cursor: 'pointer', padding: '4px 8px' }}>&times;</button>
+            <button onClick={onClose} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text2, fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 4 }}>{'\u2190'} Back</button>
           </div>
           <h2 style={{ fontSize: 20, fontWeight: 700, color: C.text1, margin: 0, lineHeight: 1.3 }}>{ticket.title}</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
@@ -801,7 +801,7 @@ function TicketDetailPanel({ ticketId, agents, teams, onClose, onUpdated }: {
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

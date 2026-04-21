@@ -395,11 +395,26 @@ export function createCalyxRoutes(queries: CalyxQueries, db: Database.Database, 
 
   router.get('/business-hours', (_req, res) => {
     const profiles = db.prepare('SELECT * FROM calyx_business_hours ORDER BY id').all() as any[];
+    const dayMap = [
+      { dow: 0, prefix: 'sun' },
+      { dow: 1, prefix: 'mon' },
+      { dow: 2, prefix: 'tue' },
+      { dow: 3, prefix: 'wed' },
+      { dow: 4, prefix: 'thu' },
+      { dow: 5, prefix: 'fri' },
+      { dow: 6, prefix: 'sat' },
+    ];
     const result = profiles.map(p => {
       const holidays = db.prepare(
         'SELECT * FROM calyx_business_hours_holidays WHERE business_hours_id = ? ORDER BY date'
       ).all(p.id);
-      return { ...p, holidays };
+      const schedules = dayMap.map(({ dow, prefix }) => ({
+        day_of_week: dow,
+        start_time: p[`${prefix}_start`] ?? '09:00',
+        end_time: p[`${prefix}_end`] ?? '17:00',
+        enabled: p[`${prefix}_enabled`] ?? 0,
+      }));
+      return { id: p.id, name: p.name, timezone: p.timezone, schedules, holidays };
     });
     res.json({ ok: true, data: result });
   });
@@ -454,6 +469,17 @@ export function createCalyxRoutes(queries: CalyxQueries, db: Database.Database, 
     const params: unknown[] = [];
     const allowed = ['name', 'timezone', 'mon_start', 'mon_end', 'mon_enabled', 'tue_start', 'tue_end', 'tue_enabled', 'wed_start', 'wed_end', 'wed_enabled', 'thu_start', 'thu_end', 'thu_enabled', 'fri_start', 'fri_end', 'fri_enabled', 'sat_start', 'sat_end', 'sat_enabled', 'sun_start', 'sun_end', 'sun_enabled'];
 
+    // Convert schedules array to flat columns
+    if (Array.isArray(req.body.schedules)) {
+      const prefixes = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+      for (const s of req.body.schedules) {
+        const prefix = prefixes[s.day_of_week];
+        if (!prefix) continue;
+        fields.push(`${prefix}_start = ?`, `${prefix}_end = ?`, `${prefix}_enabled = ?`);
+        params.push(s.start_time, s.end_time, s.enabled);
+      }
+    }
+
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
         fields.push(`${key} = ?`);
@@ -461,13 +487,19 @@ export function createCalyxRoutes(queries: CalyxQueries, db: Database.Database, 
       }
     }
 
-    if (fields.length === 0) {
-      res.json({ ok: true, data: existing });
-      return;
+    if (fields.length > 0) {
+      params.push(id);
+      db.prepare(`UPDATE calyx_business_hours SET ${fields.join(', ')} WHERE id = ?`).run(...params);
     }
 
-    params.push(id);
-    db.prepare(`UPDATE calyx_business_hours SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    // Handle holidays sync
+    if (Array.isArray(req.body.holidays)) {
+      db.prepare('DELETE FROM calyx_business_hours_holidays WHERE business_hours_id = ?').run(id);
+      const insertHoliday = db.prepare('INSERT INTO calyx_business_hours_holidays (business_hours_id, date, name) VALUES (?, ?, ?)');
+      for (const h of req.body.holidays) {
+        if (h.date && h.name) insertHoliday.run(id, h.date, h.name);
+      }
+    }
 
     const updated = db.prepare('SELECT * FROM calyx_business_hours WHERE id = ?').get(id);
     res.json({ ok: true, data: updated });
