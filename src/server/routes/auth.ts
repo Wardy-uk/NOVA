@@ -266,7 +266,7 @@ export function createAuthRoutes(
   });
 
   // GET /api/auth/me — requires valid token
-  router.get('/me', authMiddleware(jwtSecret), (req, res) => {
+  router.get('/me', authMiddleware(jwtSecret), async (req, res) => {
     const user = userQueries.getById(req.user!.id);
     if (!user) {
       res.status(401).json({ ok: false, error: 'User not found' });
@@ -274,33 +274,33 @@ export function createAuthRoutes(
     }
     const preferences: Record<string, string | null> = {};
     if (userSettingsQueries) {
-      preferences.homepage = userSettingsQueries.get(req.user!.id, 'homepage');
+      preferences.homepage = await userSettingsQueries.get(req.user!.id, 'homepage');
     }
     res.json({ ok: true, data: { user: safeUser(user), preferences } });
   });
 
   // GET /api/auth/preferences — user preferences
-  router.get('/preferences', authMiddleware(jwtSecret), (req, res) => {
+  router.get('/preferences', authMiddleware(jwtSecret), async (req, res) => {
     if (!userSettingsQueries) {
       res.json({ ok: true, data: { homepage: null } });
       return;
     }
-    res.json({ ok: true, data: { homepage: userSettingsQueries.get(req.user!.id, 'homepage') } });
+    res.json({ ok: true, data: { homepage: await userSettingsQueries.get(req.user!.id, 'homepage') } });
   });
 
   // PUT /api/auth/preferences — update user preferences
-  router.put('/preferences', authMiddleware(jwtSecret), (req, res) => {
+  router.put('/preferences', authMiddleware(jwtSecret), async (req, res) => {
     if (!userSettingsQueries) {
       res.status(500).json({ ok: false, error: 'User settings not available' });
       return;
     }
     const { homepage } = req.body;
     if (homepage === null || homepage === '') {
-      userSettingsQueries.delete(req.user!.id, 'homepage');
+      await userSettingsQueries.delete(req.user!.id, 'homepage');
     } else if (typeof homepage === 'string') {
-      userSettingsQueries.set(req.user!.id, 'homepage', homepage);
+      await userSettingsQueries.set(req.user!.id, 'homepage', homepage);
     }
-    res.json({ ok: true, data: { homepage: userSettingsQueries.get(req.user!.id, 'homepage') } });
+    res.json({ ok: true, data: { homepage: await userSettingsQueries.get(req.user!.id, 'homepage') } });
   });
 
   // ── SSO Routes ──
@@ -560,12 +560,12 @@ export function createAuthRoutes(
   // ── Jira OAuth 3LO ──
 
   // GET /api/auth/jira/status — check if OAuth is configured and user is connected
-  router.get('/jira/status', authMiddleware(jwtSecret), (req, res) => {
+  router.get('/jira/status', authMiddleware(jwtSecret), async (req, res) => {
     const userId = (req as any).user?.id as number;
     const configured = jiraOAuthService?.isConfigured() ?? false;
     let connected = false;
     if (configured && userId && userSettingsQueries) {
-      connected = !!userSettingsQueries.get(userId, 'jira_access_token');
+      connected = !!(await userSettingsQueries.get(userId, 'jira_access_token'));
     }
     res.json({ ok: true, configured, connected });
   });
@@ -607,10 +607,10 @@ export function createAuthRoutes(
       const userId = result.userId;
 
       // Store tokens in user_settings
-      userSettingsQueries.set(userId, 'jira_access_token', result.accessToken);
-      userSettingsQueries.set(userId, 'jira_refresh_token', result.refreshToken);
-      userSettingsQueries.set(userId, 'jira_cloud_id', result.cloudId);
-      userSettingsQueries.set(userId, 'jira_site_url', result.siteUrl);
+      await userSettingsQueries.set(userId, 'jira_access_token', result.accessToken);
+      await userSettingsQueries.set(userId, 'jira_refresh_token', result.refreshToken);
+      await userSettingsQueries.set(userId, 'jira_cloud_id', result.cloudId);
+      await userSettingsQueries.set(userId, 'jira_site_url', result.siteUrl);
 
       res.redirect(`${frontendUrl}/#jira_connected=true`);
     } catch (err) {
@@ -620,13 +620,13 @@ export function createAuthRoutes(
   });
 
   // DELETE /api/auth/jira/disconnect — remove stored tokens
-  router.delete('/jira/disconnect', authMiddleware(jwtSecret), (req, res) => {
+  router.delete('/jira/disconnect', authMiddleware(jwtSecret), async (req, res) => {
     const userId = (req as any).user?.id as number;
     if (userId && userSettingsQueries) {
-      userSettingsQueries.delete(userId, 'jira_access_token');
-      userSettingsQueries.delete(userId, 'jira_refresh_token');
-      userSettingsQueries.delete(userId, 'jira_cloud_id');
-      userSettingsQueries.delete(userId, 'jira_site_url');
+      await userSettingsQueries.delete(userId, 'jira_access_token');
+      await userSettingsQueries.delete(userId, 'jira_refresh_token');
+      await userSettingsQueries.delete(userId, 'jira_cloud_id');
+      await userSettingsQueries.delete(userId, 'jira_site_url');
     }
     res.json({ ok: true });
   });

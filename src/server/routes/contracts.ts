@@ -82,7 +82,7 @@ export function createContractsRoutes(
     try {
       const customers = await client.getCustomers();
       for (const c of customers) {
-        bcCustomerQueries.upsert({
+        await bcCustomerQueries.upsert({
           bc_id: c.id,
           number: c.number ?? null,
           display_name: c.displayName,
@@ -108,9 +108,9 @@ export function createContractsRoutes(
   });
 
   // GET /api/contracts/customers — list cached BC customers
-  router.get('/customers', (req, res) => {
+  router.get('/customers', async (req, res) => {
     const search = req.query.search as string | undefined;
-    const customers = bcCustomerQueries.getAll(search);
+    const customers = await bcCustomerQueries.getAll(search);
     res.json({ ok: true, data: customers, total: customers.length });
   });
 
@@ -119,7 +119,7 @@ export function createContractsRoutes(
     const settings = settingsQueries.getAll();
     const client = buildBcClient(settings);
 
-    const customer = bcCustomerQueries.getByBcId(req.params.bcId);
+    const customer = await bcCustomerQueries.getByBcId(req.params.bcId);
     if (!customer) {
       res.status(404).json({ ok: false, error: 'Customer not found' });
       return;
@@ -143,8 +143,8 @@ export function createContractsRoutes(
   // ── Local contracts CRUD ──
 
   // GET /api/contracts — list all contracts (optionally filter by bc_customer_id)
-  router.get('/', (req, res) => {
-    const contracts = contractsQueries.getAll({
+  router.get('/', async (req, res) => {
+    const contracts = await contractsQueries.getAll({
       bc_customer_id: req.query.bc_customer_id as string | undefined,
       status: req.query.status as string | undefined,
       search: req.query.search as string | undefined,
@@ -153,28 +153,28 @@ export function createContractsRoutes(
   });
 
   // POST /api/contracts — create a contract
-  router.post('/', (req, res) => {
+  router.post('/', async (req, res) => {
     const { title, customer_name } = req.body;
     if (!title?.trim()) { res.status(400).json({ ok: false, error: 'title is required' }); return; }
     if (!customer_name?.trim()) { res.status(400).json({ ok: false, error: 'customer_name is required' }); return; }
-    const id = contractsQueries.create(req.body);
-    res.json({ ok: true, data: contractsQueries.getById(id) });
+    const id = await contractsQueries.create(req.body);
+    res.json({ ok: true, data: await contractsQueries.getById(id) });
   });
 
   // PUT /api/contracts/:id — update a contract
-  router.put('/:id', (req, res) => {
+  router.put('/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    const updated = contractsQueries.update(id, req.body);
+    const updated = await contractsQueries.update(id, req.body);
     if (!updated) { res.status(404).json({ ok: false, error: 'Contract not found' }); return; }
-    res.json({ ok: true, data: contractsQueries.getById(id) });
+    res.json({ ok: true, data: await contractsQueries.getById(id) });
   });
 
   // DELETE /api/contracts/:id — delete a contract
-  router.delete('/:id', (req, res) => {
+  router.delete('/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    const deleted = contractsQueries.delete(id);
+    const deleted = await contractsQueries.delete(id);
     if (!deleted) { res.status(404).json({ ok: false, error: 'Contract not found' }); return; }
     res.json({ ok: true });
   });

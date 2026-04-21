@@ -11,11 +11,11 @@ export function createProblemTicketRoutes(
   const router = Router();
 
   // GET / — list active alerts
-  router.get('/', (req, res) => {
+  router.get('/', async (req, res) => {
     try {
       const severity = req.query.severity as string | undefined;
       const projectKey = req.query.project as string | undefined;
-      const alerts = queries.getActiveAlerts({
+      const alerts = await queries.getActiveAlerts({
         severity: severity || undefined,
         projectKey: projectKey || undefined,
       });
@@ -26,9 +26,9 @@ export function createProblemTicketRoutes(
   });
 
   // GET /stats — aggregate stats
-  router.get('/stats', (_req, res) => {
+  router.get('/stats', async (_req, res) => {
     try {
-      const stats = queries.getStats();
+      const stats = await queries.getStats();
       const jiraBaseUrl = getSettings?.()?.get('jira_url') ?? null;
       res.json({ ok: true, data: { ...stats, jiraBaseUrl } });
     } catch (err: any) {
@@ -37,9 +37,9 @@ export function createProblemTicketRoutes(
   });
 
   // GET /config — rule config
-  router.get('/config', (_req, res) => {
+  router.get('/config', async (_req, res) => {
     try {
-      const config = queries.getConfig();
+      const config = await queries.getConfig();
       res.json({ ok: true, data: config });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
@@ -47,11 +47,11 @@ export function createProblemTicketRoutes(
   });
 
   // PUT /config/:rule — update rule config (admin only)
-  router.put('/config/:rule', requireRole('admin'), (req, res) => {
+  router.put('/config/:rule', requireRole('admin'), async (req, res) => {
     try {
       const rule = req.params.rule as string;
       const { enabled, weight, threshold_json } = req.body;
-      queries.updateConfig(rule, { enabled, weight, threshold_json });
+      await queries.updateConfig(rule, { enabled, weight, threshold_json });
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
@@ -92,9 +92,9 @@ export function createProblemTicketRoutes(
   });
 
   // GET /:issueKey — single alert with reasons
-  router.get('/:issueKey', (req, res) => {
+  router.get('/:issueKey', async (req, res) => {
     try {
-      const alert = queries.getAlertByIssueKey(req.params.issueKey);
+      const alert = await queries.getAlertByIssueKey(req.params.issueKey);
       if (!alert) {
         return res.status(404).json({ ok: false, error: 'Alert not found' });
       }
@@ -105,15 +105,15 @@ export function createProblemTicketRoutes(
   });
 
   // POST /:issueKey/ignore — ignore an alert
-  router.post('/:issueKey/ignore', (req, res) => {
+  router.post('/:issueKey/ignore', async (req, res) => {
     try {
-      const alert = queries.getAlertByIssueKey(req.params.issueKey);
+      const alert = await queries.getAlertByIssueKey(req.params.issueKey);
       if (!alert) {
         return res.status(404).json({ ok: false, error: 'Alert not found' });
       }
       const username = (req as any).user?.username ?? 'unknown';
       const reason = req.body?.reason ?? null;
-      queries.insertIgnore(req.params.issueKey, username, reason, alert.fingerprint);
+      await queries.insertIgnore(req.params.issueKey, username, reason, alert.fingerprint);
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
@@ -121,9 +121,9 @@ export function createProblemTicketRoutes(
   });
 
   // GET /:issueKey/ignores — ignore history
-  router.get('/:issueKey/ignores', (req, res) => {
+  router.get('/:issueKey/ignores', async (req, res) => {
     try {
-      const ignores = queries.getIgnoresForIssue(req.params.issueKey);
+      const ignores = await queries.getIgnoresForIssue(req.params.issueKey);
       res.json({ ok: true, data: ignores });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });

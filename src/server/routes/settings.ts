@@ -46,10 +46,10 @@ export function createSettingsRoutes(
   });
 
   // GET /api/settings/my/ai-key — User's personal AI key override
-  router.get('/my/ai-key', (req, res) => {
+  router.get('/my/ai-key', async (req, res) => {
     const userId = req.user?.id as number | undefined;
     if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
-    const key = userSettingsQueries.get(userId, 'openai_api_key');
+    const key = await userSettingsQueries.get(userId, 'openai_api_key');
     const hasKey = !!key?.trim();
     res.json({
       ok: true,
@@ -61,7 +61,7 @@ export function createSettingsRoutes(
   });
 
   // PUT /api/settings/my/ai-key — Set user's personal AI key override
-  router.put('/my/ai-key', (req, res) => {
+  router.put('/my/ai-key', async (req, res) => {
     const userId = req.user?.id as number | undefined;
     if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
     const parsed = SettingUpdateSchema.safeParse(req.body);
@@ -71,15 +71,15 @@ export function createSettingsRoutes(
       res.status(400).json({ ok: false, error: 'API key cannot be empty. Use DELETE to remove your override.' });
       return;
     }
-    userSettingsQueries.set(userId, 'openai_api_key', value);
+    await userSettingsQueries.set(userId, 'openai_api_key', value);
     res.json({ ok: true });
   });
 
   // DELETE /api/settings/my/ai-key — Remove user's personal AI key override (fall back to global)
-  router.delete('/my/ai-key', (req, res) => {
+  router.delete('/my/ai-key', async (req, res) => {
     const userId = req.user?.id as number | undefined;
     if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
-    userSettingsQueries.delete(userId, 'openai_api_key');
+    await userSettingsQueries.delete(userId, 'openai_api_key');
     res.json({ ok: true });
   });
 

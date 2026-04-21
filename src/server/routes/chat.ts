@@ -12,9 +12,9 @@ export function createChatRoutes(
 ): Router {
   const router = Router();
 
-  const resolveApiKey = (userId?: number): string | null => {
+  const resolveApiKey = async (userId?: number): Promise<string | null> => {
     if (userId) {
-      const userKey = userSettingsQueries.get(userId, 'openai_api_key');
+      const userKey = await userSettingsQueries.get(userId, 'openai_api_key');
       if (userKey?.trim()) return userKey.trim();
     }
     const fromDb = settingsQueries.get('openai_api_key');
@@ -24,12 +24,12 @@ export function createChatRoutes(
     return null;
   };
 
-  const buildContext = (userId: number): string => {
+  const buildContext = async (userId: number): Promise<string> => {
     const lines: string[] = [];
 
     // Active deliveries summary
     try {
-      const entries = deliveryQueries.getAll();
+      const entries = await deliveryQueries.getAll();
       const active = entries.filter(e => e.status !== 'complete');
       lines.push(`Active deliveries: ${active.length}`);
       if (active.length > 0) {
@@ -43,13 +43,13 @@ export function createChatRoutes(
 
     // Milestone summary
     try {
-      const summary = milestoneQueries.getSummary();
+      const summary = await milestoneQueries.getSummary();
       lines.push(`Milestones: ${summary.total} total, ${summary.pending} pending, ${summary.in_progress} in-progress, ${summary.complete} complete, ${summary.overdue} overdue`);
     } catch { /* ignore */ }
 
     // Tasks summary
     try {
-      const tasks = taskQueries.getAll({ userId });
+      const tasks = await taskQueries.getAll({ userId });
       const bySource: Record<string, number> = {};
       for (const t of tasks) bySource[t.source] = (bySource[t.source] ?? 0) + 1;
       lines.push(`Open tasks: ${tasks.length} (${Object.entries(bySource).map(([s, c]) => `${s}: ${c}`).join(', ')})`);
@@ -63,7 +63,7 @@ export function createChatRoutes(
     const userId = (req as any).user?.id as number;
     if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
 
-    const apiKey = resolveApiKey(userId);
+    const apiKey = await resolveApiKey(userId);
     if (!apiKey) {
       res.status(400).json({ ok: false, error: 'No OpenAI API key configured. Add one in Settings.' });
       return;
@@ -76,7 +76,7 @@ export function createChatRoutes(
     }
 
     try {
-      const context = buildContext(userId);
+      const context = await buildContext(userId);
       const reply = await chat(apiKey, userId, conversationId, message.trim(), context);
       const history = getConversation(userId, conversationId)
         .filter(m => m.role !== 'system')

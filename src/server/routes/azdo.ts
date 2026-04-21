@@ -33,16 +33,16 @@ export function createAzDoRoutes(
     const userId = (req as any).user?.id;
 
     try {
-      const entries = deliveryQueries.getAll();
+      const entries = await deliveryQueries.getAll();
       const delivery = entries.find(e => e.id === deliveryId);
       if (!delivery) { res.status(404).json({ ok: false, error: 'Delivery not found' }); return; }
 
-      const brandSettings = brandQueries.getByDelivery(deliveryId);
+      const brandSettings = await brandQueries.getByDelivery(deliveryId);
       const subdomain = brandSettings['subdomain'];
       if (!subdomain) { res.status(400).json({ ok: false, error: 'Subdomain not set in brand settings' }); return; }
 
       const branches = (deliveryQueries as any).getAll ? [] : []; // branches from separate query
-      const logos = logoQueries.getMetadataByDelivery(deliveryId);
+      const logos = await logoQueries.getMetadataByDelivery(deliveryId);
       const deliveryRef = delivery.onboarding_id || delivery.account || `delivery-${deliveryId}`;
 
       // Build files
@@ -50,7 +50,7 @@ export function createAzDoRoutes(
       files.push({ path: `/${subdomain}/brand.json`, content: JSON.stringify(brandSettings, null, 2) });
 
       for (const logoMeta of logos) {
-        const full = logoQueries.getById(logoMeta.id);
+        const full = await logoQueries.getById(logoMeta.id);
         if (full) {
           const typeDef = LOGO_TYPE_DEFS.find(t => t.type === logoMeta.logo_type);
           const ext = logoMeta.mime_type === 'image/svg+xml' ? 'svg' : logoMeta.mime_type === 'image/png' ? 'png' : 'jpg';
@@ -64,10 +64,10 @@ export function createAzDoRoutes(
       }
 
       const result = await client.pushBrandSettingsAndCreatePR(deliveryRef, files);
-      deliveryQueries.updateAzDoFields(deliveryId, result.branchName, result.prUrl);
+      await deliveryQueries.updateAzDoFields(deliveryId, result.branchName, result.prUrl);
 
       // Update setup step if exists
-      setupQueries.updateStepStatus(deliveryId, 'azdo_push', 'complete', `PR: ${result.prUrl}`, userId);
+      await setupQueries.updateStepStatus(deliveryId, 'azdo_push', 'complete', `PR: ${result.prUrl}`, userId);
 
       res.json({ ok: true, data: result });
     } catch (err) {
@@ -76,9 +76,9 @@ export function createAzDoRoutes(
   });
 
   /** Get AzDO push status for a delivery */
-  router.get('/delivery/:id/status', (req, res) => {
+  router.get('/delivery/:id/status', async (req, res) => {
     const deliveryId = parseInt(String(req.params.id), 10);
-    const entries = deliveryQueries.getAll();
+    const entries = await deliveryQueries.getAll();
     const delivery = entries.find(e => e.id === deliveryId);
     if (!delivery) { res.status(404).json({ ok: false, error: 'Delivery not found' }); return; }
 

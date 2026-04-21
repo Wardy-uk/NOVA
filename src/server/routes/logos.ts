@@ -11,28 +11,28 @@ export function createLogoRoutes(logoQueries: LogoQueries): Router {
   router.use(express.json({ limit: '2mb' }));
 
   // GET /delivery/:id — get logo metadata (no image_data) for a delivery
-  router.get('/delivery/:id', (req, res) => {
+  router.get('/delivery/:id', async (req, res) => {
     const deliveryId = Number(req.params.id);
     if (!deliveryId) { res.status(400).json({ ok: false, error: 'Invalid delivery ID' }); return; }
-    const logos = logoQueries.getMetadataByDelivery(deliveryId);
+    const logos = await logoQueries.getMetadataByDelivery(deliveryId);
     res.json({ ok: true, data: logos });
   });
 
   // GET /delivery/:id/type/:type — get a single logo with full base64 data
-  router.get('/delivery/:id/type/:type', (req, res) => {
+  router.get('/delivery/:id/type/:type', async (req, res) => {
     const deliveryId = Number(req.params.id);
     const logoType = Number(req.params.type);
     if (!deliveryId || isNaN(logoType)) { res.status(400).json({ ok: false, error: 'Invalid parameters' }); return; }
-    const logo = logoQueries.getByDeliveryAndType(deliveryId, logoType);
+    const logo = await logoQueries.getByDeliveryAndType(deliveryId, logoType);
     if (!logo) { res.status(404).json({ ok: false, error: 'Logo not found' }); return; }
     res.json({ ok: true, data: logo });
   });
 
   // GET /:logoId/image — serve as binary image for <img src>
-  router.get('/:logoId/image', (req, res) => {
+  router.get('/:logoId/image', async (req, res) => {
     const logoId = Number(req.params.logoId);
     if (!logoId) { res.status(400).json({ ok: false, error: 'Invalid logo ID' }); return; }
-    const logo = logoQueries.getById(logoId);
+    const logo = await logoQueries.getById(logoId);
     if (!logo) { res.status(404).json({ ok: false, error: 'Logo not found' }); return; }
     const buffer = Buffer.from(logo.image_data, 'base64');
     res.set('Content-Type', logo.mime_type);
@@ -42,7 +42,7 @@ export function createLogoRoutes(logoQueries: LogoQueries): Router {
   });
 
   // PUT /delivery/:id/type/:type — upload/replace a logo
-  router.put('/delivery/:id/type/:type', (req, res) => {
+  router.put('/delivery/:id/type/:type', async (req, res) => {
     const deliveryId = Number(req.params.id);
     const logoType = Number(req.params.type);
     if (!deliveryId || isNaN(logoType)) { res.status(400).json({ ok: false, error: 'Invalid parameters' }); return; }
@@ -65,7 +65,7 @@ export function createLogoRoutes(logoQueries: LogoQueries): Router {
       return;
     }
 
-    const id = logoQueries.upsert({
+    const id = await logoQueries.upsert({
       delivery_id: deliveryId,
       logo_type: logoType,
       logo_label: typeDef.label,
@@ -75,18 +75,18 @@ export function createLogoRoutes(logoQueries: LogoQueries): Router {
       file_size: parsed.data.file_size,
     });
 
-    const logos = logoQueries.getMetadataByDelivery(deliveryId);
+    const logos = await logoQueries.getMetadataByDelivery(deliveryId);
     res.json({ ok: true, data: logos, id });
   });
 
   // DELETE /delivery/:id/type/:type — delete a logo
-  router.delete('/delivery/:id/type/:type', (req, res) => {
+  router.delete('/delivery/:id/type/:type', async (req, res) => {
     const deliveryId = Number(req.params.id);
     const logoType = Number(req.params.type);
     if (!deliveryId || isNaN(logoType)) { res.status(400).json({ ok: false, error: 'Invalid parameters' }); return; }
-    const deleted = logoQueries.deleteByDeliveryAndType(deliveryId, logoType);
+    const deleted = await logoQueries.deleteByDeliveryAndType(deliveryId, logoType);
     if (!deleted) { res.status(404).json({ ok: false, error: 'Logo not found' }); return; }
-    const logos = logoQueries.getMetadataByDelivery(deliveryId);
+    const logos = await logoQueries.getMetadataByDelivery(deliveryId);
     res.json({ ok: true, data: logos });
   });
 

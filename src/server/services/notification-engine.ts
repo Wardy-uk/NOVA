@@ -9,18 +9,18 @@ export class NotificationEngine {
     private taskQueries?: TaskQueries,
   ) {}
 
-  checkAndCreate(userId: number): number {
+  async checkAndCreate(userId: number): Promise<number> {
     let created = 0;
     const today = new Date().toISOString().split('T')[0];
 
     // 1. Overdue milestones
     try {
-      const allMilestones = this.milestoneQueries.getAllWithDelivery();
+      const allMilestones = await this.milestoneQueries.getAllWithDelivery();
       const overdue = allMilestones.filter(m =>
         m.status !== 'complete' && m.target_date && m.target_date < today
       );
       for (const m of overdue) {
-        const ok = this.notificationQueries.create({
+        const ok = await this.notificationQueries.create({
           user_id: userId,
           type: 'milestone_overdue',
           title: `Milestone overdue: ${m.template_name}`,
@@ -34,7 +34,7 @@ export class NotificationEngine {
 
     // 2. Deliveries due within 7 days
     try {
-      const entries = this.deliveryQueries.getAll();
+      const entries = await this.deliveryQueries.getAll();
       const sevenDays = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       const upcoming = entries.filter(e =>
         e.status !== 'complete' &&
@@ -43,7 +43,7 @@ export class NotificationEngine {
         e.go_live_date <= sevenDays
       );
       for (const e of upcoming) {
-        const ok = this.notificationQueries.create({
+        const ok = await this.notificationQueries.create({
           user_id: userId,
           type: 'delivery_due_soon',
           title: `Delivery due soon: ${e.account}`,
@@ -58,7 +58,7 @@ export class NotificationEngine {
     // 3. SLA breach warnings (within 30 minutes)
     try {
       if (this.taskQueries) {
-        const slaTasksAll = this.taskQueries.getTasksWithUpcomingSla(30);
+        const slaTasksAll = await this.taskQueries.getTasksWithUpcomingSla(30);
         // Only notify for tasks owned by this user
         const slaTasks = slaTasksAll.filter(t => {
           const taskId = t.id;
@@ -67,7 +67,7 @@ export class NotificationEngine {
         });
         for (const t of slaTasks) {
           const mins = Math.round((new Date(t.sla_breach_at!).getTime() - Date.now()) / 60000);
-          const ok = this.notificationQueries.create({
+          const ok = await this.notificationQueries.create({
             user_id: userId,
             type: 'sla_breach_warning',
             title: `SLA breach in ~${mins}m: ${t.title}`,

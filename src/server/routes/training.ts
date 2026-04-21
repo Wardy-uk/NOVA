@@ -19,91 +19,91 @@ export function createTrainingRoutes(
 
   // ── Categories ──
 
-  router.get('/categories', (_req: Request, res: Response) => {
-    const categories = trainingQueries.getCategories();
+  router.get('/categories', async (_req: Request, res: Response) => {
+    const categories = await trainingQueries.getCategories();
     res.json({ ok: true, data: categories });
   });
 
-  router.post('/categories', (req: Request, res: Response) => {
+  router.post('/categories', async (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) {
       res.status(403).json({ ok: false, error: 'Admin only' });
       return;
     }
     const { name, sort_order } = req.body;
     if (!name) { res.status(400).json({ ok: false, error: 'Name required' }); return; }
-    const id = trainingQueries.createCategory(name, sort_order ?? 0);
+    const id = await trainingQueries.createCategory(name, sort_order ?? 0);
     res.json({ ok: true, data: { id } });
   });
 
-  router.put('/categories/:id', (req: Request, res: Response) => {
+  router.put('/categories/:id', async (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) {
       res.status(403).json({ ok: false, error: 'Admin only' });
       return;
     }
     const { name, sort_order } = req.body;
-    trainingQueries.updateCategory(Number(req.params.id), name, sort_order ?? 0);
+    await trainingQueries.updateCategory(Number(req.params.id), name, sort_order ?? 0);
     res.json({ ok: true });
   });
 
-  router.delete('/categories/:id', (req: Request, res: Response) => {
+  router.delete('/categories/:id', async (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) {
       res.status(403).json({ ok: false, error: 'Admin only' });
       return;
     }
-    trainingQueries.deleteCategory(Number(req.params.id));
+    await trainingQueries.deleteCategory(Number(req.params.id));
     res.json({ ok: true });
   });
 
   // ── Items ──
 
-  router.get('/items', (req: Request, res: Response) => {
+  router.get('/items', async (req: Request, res: Response) => {
     const categoryId = req.query.category ? Number(req.query.category) : undefined;
-    const items = trainingQueries.getItems(categoryId);
+    const items = await trainingQueries.getItems(categoryId);
     res.json({ ok: true, data: items });
   });
 
-  router.post('/items', (req: Request, res: Response) => {
+  router.post('/items', async (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) {
       res.status(403).json({ ok: false, error: 'Admin only' });
       return;
     }
     const { category_id, section, name, tech_lead, max_score, sort_order } = req.body;
     if (!category_id || !name) { res.status(400).json({ ok: false, error: 'category_id and name required' }); return; }
-    const id = trainingQueries.createItem({
+    const id = await trainingQueries.createItem({
       category_id, section: section ?? '', name,
       tech_lead: tech_lead ?? null, max_score: max_score ?? 5, sort_order: sort_order ?? 0,
     });
     res.json({ ok: true, data: { id } });
   });
 
-  router.put('/items/:id', (req: Request, res: Response) => {
+  router.put('/items/:id', async (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) {
       res.status(403).json({ ok: false, error: 'Admin only' });
       return;
     }
-    trainingQueries.updateItem(Number(req.params.id), req.body);
+    await trainingQueries.updateItem(Number(req.params.id), req.body);
     res.json({ ok: true });
   });
 
-  router.delete('/items/:id', (req: Request, res: Response) => {
+  router.delete('/items/:id', async (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) {
       res.status(403).json({ ok: false, error: 'Admin only' });
       return;
     }
-    trainingQueries.deleteItem(Number(req.params.id));
+    await trainingQueries.deleteItem(Number(req.params.id));
     res.json({ ok: true });
   });
 
   // ── Scores ──
 
-  router.get('/scores', (req: Request, res: Response) => {
+  router.get('/scores', async (req: Request, res: Response) => {
     const categoryId = req.query.category ? Number(req.query.category) : undefined;
     const userId = req.query.user ? Number(req.query.user) : undefined;
-    const scores = trainingQueries.getScores(categoryId, userId);
+    const scores = await trainingQueries.getScores(categoryId, userId);
     res.json({ ok: true, data: scores });
   });
 
-  router.put('/scores', (req: Request, res: Response) => {
+  router.put('/scores', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
     const { scores } = req.body as { scores: Array<{ item_id: number; user_id: number; score: number }> };
     if (!scores?.length) { res.status(400).json({ ok: false, error: 'scores array required' }); return; }
@@ -118,15 +118,15 @@ export function createTrainingRoutes(
       }
     }
 
-    trainingQueries.bulkUpsertScores(scores);
+    await trainingQueries.bulkUpsertScores(scores);
     res.json({ ok: true });
   });
 
   // ── Users (people in the matrix) ──
 
-  router.get('/users', (_req: Request, res: Response) => {
+  router.get('/users', async (_req: Request, res: Response) => {
     // Only return users who are training members (imported from spreadsheet)
-    const memberIds = trainingQueries.getMembers();
+    const memberIds = await trainingQueries.getMembers();
     if (memberIds.length === 0) {
       // No members table yet — fall back to all users
       const allUsers = userQueries.getAll();
@@ -195,7 +195,7 @@ export function createTrainingRoutes(
     return null;
   }
 
-  router.post('/import-xlsx', (req: Request, res: Response) => {
+  router.post('/import-xlsx', async (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) {
       res.status(403).json({ ok: false, error: 'Admin only' });
       return;
@@ -211,7 +211,7 @@ export function createTrainingRoutes(
     const skipCols = new Set(['Knowledge Item', 'Total', 'Team Total Score', 'Tech Lead', 'Udemy', '']);
 
     // Clear existing data
-    trainingQueries.deleteAllData();
+    await trainingQueries.deleteAllData();
 
     let totalCategories = 0, totalItems = 0, totalScores = 0;
     const unmatchedColumns: string[] = [];
@@ -222,7 +222,7 @@ export function createTrainingRoutes(
       if (!sheet.rows || sheet.rows.length < 2) continue;
 
       // Create category
-      const catId = trainingQueries.createCategory(sheet.name, catIdx);
+      const catId = await trainingQueries.createCategory(sheet.name, catIdx);
       totalCategories++;
 
       // Parse headers — find person columns
@@ -272,7 +272,7 @@ export function createTrainingRoutes(
 
         const techLead = techLeadCol >= 0 ? String(row[techLeadCol] ?? '').trim() || null : null;
 
-        const itemId = trainingQueries.createItem({
+        const itemId = await trainingQueries.createItem({
           category_id: catId, section: currentSection, name: cleanName,
           tech_lead: techLead, max_score: 5, sort_order: sortOrder++,
         });
@@ -288,7 +288,7 @@ export function createTrainingRoutes(
           scoreBatch.push({ item_id: itemId, user_id: pc.userId, score: Math.min(score, 5) });
         }
         if (scoreBatch.length > 0) {
-          trainingQueries.bulkUpsertScores(scoreBatch);
+          await trainingQueries.bulkUpsertScores(scoreBatch);
           totalScores += scoreBatch.length;
         }
       }
@@ -297,7 +297,7 @@ export function createTrainingRoutes(
     // Save matched users as training members (preserving spreadsheet column order)
     let memberOrder = 0;
     for (const uid of matchedUserIds) {
-      trainingQueries.addMember(uid, memberOrder++);
+      await trainingQueries.addMember(uid, memberOrder++);
     }
 
     res.json({
@@ -308,14 +308,14 @@ export function createTrainingRoutes(
 
   // ── Summary stats ──
 
-  router.get('/summary', (_req: Request, res: Response) => {
-    const categories = trainingQueries.getCategories();
-    const items = trainingQueries.getItems();
-    const scores = trainingQueries.getScores();
+  router.get('/summary', async (_req: Request, res: Response) => {
+    const categories = await trainingQueries.getCategories();
+    const items = await trainingQueries.getItems();
+    const scores = await trainingQueries.getScores();
     const allUsers = userQueries.getAll();
 
     // Only include training members (from spreadsheet import)
-    const memberIds = trainingQueries.getMembers();
+    const memberIds = await trainingQueries.getMembers();
     const memberSet = memberIds.length > 0 ? new Set(memberIds) : null;
     const activeUsers = memberSet ? allUsers.filter(u => memberSet.has(u.id)) : allUsers;
 

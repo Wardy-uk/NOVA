@@ -47,93 +47,93 @@ export function createSalesHotboxRoutes(
 
   // ── Pipeline deals ──────────────────────────────────────────────────────
 
-  router.get('/pipeline', (req, res) => {
+  router.get('/pipeline', async (req, res) => {
     const salesperson = req.query.salesperson as string | undefined;
-    res.json({ ok: true, data: salesQueries.getAllDeals(salesperson) });
+    res.json({ ok: true, data: await salesQueries.getAllDeals(salesperson) });
   });
 
-  router.get('/pipeline/:id', (req, res) => {
+  router.get('/pipeline/:id', async (req, res) => {
     const id = parseInt(req.params.id as string, 10);
-    const deal = salesQueries.getDealById(id);
+    const deal = await salesQueries.getDealById(id);
     if (!deal) return res.status(404).json({ ok: false, error: 'Deal not found' });
     res.json({ ok: true, data: deal });
   });
 
-  router.post('/pipeline', writeGuard, (req, res) => {
+  router.post('/pipeline', writeGuard, async (req, res) => {
     const { salesperson, company, mrr, stage } = req.body;
     if (!salesperson || !company || mrr == null || !stage) {
       return res.status(400).json({ ok: false, error: 'salesperson, company, mrr, and stage are required' });
     }
-    const id = salesQueries.createDeal(req.body);
-    res.json({ ok: true, data: salesQueries.getDealById(id) });
+    const id = await salesQueries.createDeal(req.body);
+    res.json({ ok: true, data: await salesQueries.getDealById(id) });
   });
 
-  router.put('/pipeline/:id', writeGuard, (req, res) => {
+  router.put('/pipeline/:id', writeGuard, async (req, res) => {
     const id = parseInt(req.params.id as string, 10);
-    const ok = salesQueries.updateDeal(id, req.body);
+    const ok = await salesQueries.updateDeal(id, req.body);
     if (!ok) return res.status(404).json({ ok: false, error: 'Deal not found' });
-    res.json({ ok: true, data: salesQueries.getDealById(id) });
+    res.json({ ok: true, data: await salesQueries.getDealById(id) });
   });
 
-  router.delete('/pipeline/:id', writeGuard, (req, res) => {
-    const ok = salesQueries.deleteDeal(parseInt(req.params.id as string, 10));
+  router.delete('/pipeline/:id', writeGuard, async (req, res) => {
+    const ok = await salesQueries.deleteDeal(parseInt(req.params.id as string, 10));
     res.json({ ok: true, deleted: ok });
   });
 
   // ── Monthly sales ─────────────────────────────────────────────────────
 
-  router.get('/monthly', (req, res) => {
+  router.get('/monthly', async (req, res) => {
     const month = req.query.month as string | undefined;
-    res.json({ ok: true, data: salesQueries.getMonthlySales(month) });
+    res.json({ ok: true, data: await salesQueries.getMonthlySales(month) });
   });
 
-  router.post('/monthly', writeGuard, (req, res) => {
+  router.post('/monthly', writeGuard, async (req, res) => {
     const { sale_date, salesperson } = req.body;
     if (!sale_date || !salesperson) {
       return res.status(400).json({ ok: false, error: 'sale_date and salesperson are required' });
     }
-    const id = salesQueries.createSale(req.body);
+    const id = await salesQueries.createSale(req.body);
     res.json({ ok: true, data: { id } });
   });
 
-  router.put('/monthly/:id', writeGuard, (req, res) => {
-    const ok = salesQueries.updateSale(parseInt(req.params.id as string, 10), req.body);
+  router.put('/monthly/:id', writeGuard, async (req, res) => {
+    const ok = await salesQueries.updateSale(parseInt(req.params.id as string, 10), req.body);
     res.json({ ok: true, updated: ok });
   });
 
-  router.delete('/monthly/:id', writeGuard, (req, res) => {
-    const ok = salesQueries.deleteSale(parseInt(req.params.id as string, 10));
+  router.delete('/monthly/:id', writeGuard, async (req, res) => {
+    const ok = await salesQueries.deleteSale(parseInt(req.params.id as string, 10));
     res.json({ ok: true, deleted: ok });
   });
 
   // ── Targets ───────────────────────────────────────────────────────────
 
-  router.get('/targets', (req, res) => {
+  router.get('/targets', async (req, res) => {
     const month = req.query.month as string | undefined;
-    res.json({ ok: true, data: salesQueries.getTargets(month) });
+    res.json({ ok: true, data: await salesQueries.getTargets(month) });
   });
 
-  router.post('/targets', writeGuard, (req, res) => {
+  router.post('/targets', writeGuard, async (req, res) => {
     const { salesperson, month, target_mrr } = req.body;
     if (!salesperson || !month || target_mrr == null) {
       return res.status(400).json({ ok: false, error: 'salesperson, month, target_mrr required' });
     }
-    salesQueries.setTarget(salesperson, month, target_mrr);
+    await salesQueries.setTarget(salesperson, month, target_mrr);
     res.json({ ok: true });
   });
 
-  router.delete('/targets/:id', writeGuard, (req, res) => {
-    const ok = salesQueries.deleteTarget(parseInt(req.params.id as string, 10));
+  router.delete('/targets/:id', writeGuard, async (req, res) => {
+    const ok = await salesQueries.deleteTarget(parseInt(req.params.id as string, 10));
     res.json({ ok: true, deleted: ok });
   });
 
   // ── Summary (computed) ────────────────────────────────────────────────
 
-  router.get('/summary', (req, res) => {
+  router.get('/summary', async (req, res) => {
     const month = req.query.month as string | undefined;
-    const deals = salesQueries.getAllDeals();
-    const sales = salesQueries.getMonthlySales(month);
-    const targets = salesQueries.getTargets(month);
+    const deals = await salesQueries.getAllDeals();
+    const sales = await salesQueries.getMonthlySales(month);
+    const targets = await salesQueries.getTargets(month);
 
     const totalPipeline = deals.reduce((s, d) => s + d.mrr, 0);
     const contractsOut = deals.filter(d => d.stage === 'Contract Sent').reduce((s, d) => s + d.mrr, 0);
@@ -170,9 +170,9 @@ export function createSalesHotboxRoutes(
       // ── Import pipeline deals from individual hotbox sheets ──
       const { clear } = req.body;
       if (clear) {
-        salesQueries.clearAllDeals();
-        salesQueries.clearAllSales();
-        salesQueries.clearAllTargets();
+        await salesQueries.clearAllDeals();
+        await salesQueries.clearAllSales();
+        await salesQueries.clearAllTargets();
       }
 
       for (const [sheetName, salesperson] of Object.entries(HOTBOX_SHEETS)) {
@@ -225,7 +225,7 @@ export function createSalesHotboxRoutes(
             notes: row[10] ? String(row[10]).trim().slice(0, 2000) : null,
           });
         }
-        stats.deals += salesQueries.bulkCreateDeals(deals);
+        stats.deals += await salesQueries.bulkCreateDeals(deals);
       }
 
       // ── Import current month sales ──
@@ -266,7 +266,7 @@ export function createSalesHotboxRoutes(
             hotbox_ref: row[28] ? parseInt(String(row[28])) || null : null,
           });
         }
-        stats.sales += salesQueries.bulkCreateSales(sales);
+        stats.sales += await salesQueries.bulkCreateSales(sales);
       }
 
       // ── Import targets from right-side columns of March 26 ──
@@ -302,7 +302,7 @@ export function createSalesHotboxRoutes(
         const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
         for (const [shortName, fullName] of Object.entries(nameMap)) {
           if (targetMap[shortName]) {
-            salesQueries.setTarget(fullName, currentMonth, targetMap[shortName]);
+            await salesQueries.setTarget(fullName, currentMonth, targetMap[shortName]);
             stats.targets++;
           }
         }
@@ -317,88 +317,88 @@ export function createSalesHotboxRoutes(
 
   // ── Bookings ──────────────────────────────────────────────────────────
 
-  router.get('/bookings', (req, res) => {
+  router.get('/bookings', async (req, res) => {
     const month = req.query.month as string | undefined;
-    res.json({ ok: true, data: salesQueries.getBookings(month) });
+    res.json({ ok: true, data: await salesQueries.getBookings(month) });
   });
 
-  router.post('/bookings', writeGuard, (req, res) => {
+  router.post('/bookings', writeGuard, async (req, res) => {
     const { booked_date, salesperson, company } = req.body;
     if (!booked_date || !salesperson || !company) {
       return res.status(400).json({ ok: false, error: 'booked_date, salesperson, and company are required' });
     }
-    const id = salesQueries.createBooking(req.body);
-    res.json({ ok: true, data: salesQueries.getBookingById(id) });
+    const id = await salesQueries.createBooking(req.body);
+    res.json({ ok: true, data: await salesQueries.getBookingById(id) });
   });
 
-  router.put('/bookings/:id', writeGuard, (req, res) => {
-    const ok = salesQueries.updateBooking(parseInt(req.params.id as string, 10), req.body);
+  router.put('/bookings/:id', writeGuard, async (req, res) => {
+    const ok = await salesQueries.updateBooking(parseInt(req.params.id as string, 10), req.body);
     if (!ok) return res.status(404).json({ ok: false, error: 'Booking not found' });
-    res.json({ ok: true, data: salesQueries.getBookingById(parseInt(req.params.id as string, 10)) });
+    res.json({ ok: true, data: await salesQueries.getBookingById(parseInt(req.params.id as string, 10)) });
   });
 
-  router.delete('/bookings/:id', writeGuard, (req, res) => {
-    const ok = salesQueries.deleteBooking(parseInt(req.params.id as string, 10));
+  router.delete('/bookings/:id', writeGuard, async (req, res) => {
+    const ok = await salesQueries.deleteBooking(parseInt(req.params.id as string, 10));
     res.json({ ok: true, deleted: ok });
   });
 
   // ── Taken Place ─────────────────────────────────────────────────────────
 
-  router.get('/taken-place', (req, res) => {
+  router.get('/taken-place', async (req, res) => {
     const month = req.query.month as string | undefined;
-    res.json({ ok: true, data: salesQueries.getTakenPlace(month) });
+    res.json({ ok: true, data: await salesQueries.getTakenPlace(month) });
   });
 
-  router.post('/taken-place', writeGuard, (req, res) => {
+  router.post('/taken-place', writeGuard, async (req, res) => {
     const { demo_date, salesperson, company } = req.body;
     if (!demo_date || !salesperson || !company) {
       return res.status(400).json({ ok: false, error: 'demo_date, salesperson, and company are required' });
     }
-    const id = salesQueries.createTakenPlace(req.body);
-    res.json({ ok: true, data: salesQueries.getTakenPlaceById(id) });
+    const id = await salesQueries.createTakenPlace(req.body);
+    res.json({ ok: true, data: await salesQueries.getTakenPlaceById(id) });
   });
 
-  router.put('/taken-place/:id', writeGuard, (req, res) => {
-    const ok = salesQueries.updateTakenPlace(parseInt(req.params.id as string, 10), req.body);
+  router.put('/taken-place/:id', writeGuard, async (req, res) => {
+    const ok = await salesQueries.updateTakenPlace(parseInt(req.params.id as string, 10), req.body);
     if (!ok) return res.status(404).json({ ok: false, error: 'Record not found' });
-    res.json({ ok: true, data: salesQueries.getTakenPlaceById(parseInt(req.params.id as string, 10)) });
+    res.json({ ok: true, data: await salesQueries.getTakenPlaceById(parseInt(req.params.id as string, 10)) });
   });
 
-  router.delete('/taken-place/:id', writeGuard, (req, res) => {
-    const ok = salesQueries.deleteTakenPlace(parseInt(req.params.id as string, 10));
+  router.delete('/taken-place/:id', writeGuard, async (req, res) => {
+    const ok = await salesQueries.deleteTakenPlace(parseInt(req.params.id as string, 10));
     res.json({ ok: true, deleted: ok });
   });
 
   // ── KPIs ────────────────────────────────────────────────────────────────
 
-  router.get('/lg-kpis', (req, res) => {
+  router.get('/lg-kpis', async (req, res) => {
     const month = req.query.month as string | undefined;
-    res.json({ ok: true, data: salesQueries.getLgKpis(month) });
+    res.json({ ok: true, data: await salesQueries.getLgKpis(month) });
   });
 
-  router.post('/lg-kpis', writeGuard, (req, res) => {
+  router.post('/lg-kpis', writeGuard, async (req, res) => {
     const { person, month } = req.body;
     if (!person || !month) return res.status(400).json({ ok: false, error: 'person and month required' });
-    salesQueries.setLgKpi(person, month, req.body);
+    await salesQueries.setLgKpi(person, month, req.body);
     res.json({ ok: true });
   });
 
-  router.get('/bdm-kpis', (req, res) => {
+  router.get('/bdm-kpis', async (req, res) => {
     const month = req.query.month as string | undefined;
-    res.json({ ok: true, data: salesQueries.getBdmKpis(month) });
+    res.json({ ok: true, data: await salesQueries.getBdmKpis(month) });
   });
 
-  router.post('/bdm-kpis', writeGuard, (req, res) => {
+  router.post('/bdm-kpis', writeGuard, async (req, res) => {
     const { person, month } = req.body;
     if (!person || !month) return res.status(400).json({ ok: false, error: 'person and month required' });
-    salesQueries.setBdmKpi(person, month, req.body);
+    await salesQueries.setBdmKpi(person, month, req.body);
     res.json({ ok: true });
   });
 
   // ── LG History (team-wide monthly totals) ─────────────────────────────
 
-  router.get('/lg-history', (_req, res) => {
-    res.json({ ok: true, data: salesQueries.getLgHistory() });
+  router.get('/lg-history', async (_req, res) => {
+    res.json({ ok: true, data: await salesQueries.getLgHistory() });
   });
 
   // ── Data Pack Import (Dream Team Tracker spreadsheet) ────────────────
@@ -443,7 +443,7 @@ export function createSalesHotboxRoutes(
         const TP_KPI_PER_DAY = 16.4 / 9;     // ~1.82 per day
 
         // Clear existing data before import
-        salesQueries.clearAllLgKpis();
+        await salesQueries.clearAllLgKpis();
 
         for (const person of LG_PEOPLE) {
           // Aggregate weekly values into monthly buckets
@@ -466,7 +466,7 @@ export function createSalesHotboxRoutes(
           // Write each month to DB
           for (const [month, bucket] of Object.entries(monthBuckets)) {
             if (bucket.days === 0 && bucket.calls === 0 && bucket.booked === 0) continue;
-            salesQueries.setLgKpi(person.name, month, {
+            await salesQueries.setLgKpi(person.name, month, {
               days_worked: Math.round(bucket.days * 10) / 10,
               calls_kpi: Math.round(bucket.days * person.callsPerDay),
               calls_actual: Math.round(bucket.calls),
@@ -485,7 +485,7 @@ export function createSalesHotboxRoutes(
       if (lcSheetName) {
         const lcData = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[lcSheetName], { header: 1, defval: '', range: 0 });
 
-        salesQueries.clearAllLgHistory();
+        await salesQueries.clearAllLgHistory();
 
         // Row layout: row 2-6 = Calls YYYY, row 10-13 = Bookings YYYY, row 17-20 = TP YYYY
         // Cols 1-12 = Jan-Dec
@@ -538,7 +538,7 @@ export function createSalesHotboxRoutes(
             const bookings = bookingsRows[year]?.[m] ?? 0;
             const tp = tpRows[year]?.[m] ?? 0;
             if (calls === 0 && bookings === 0 && tp === 0) continue;
-            salesQueries.setLgHistory(year, m + 1, { calls, bookings, taken_place: tp });
+            await salesQueries.setLgHistory(year, m + 1, { calls, bookings, taken_place: tp });
             stats.lgHistory++;
           }
         }

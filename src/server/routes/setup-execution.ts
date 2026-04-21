@@ -74,17 +74,17 @@ export function createSetupExecutionRoutes(
       }
 
       // Load delivery data
-      const entries = deps.deliveryQueries.getAll();
+      const entries = await deps.deliveryQueries.getAll();
       const delivery = entries.find(e => e.id === deliveryId);
       if (!delivery) {
         res.status(404).json({ ok: false, error: 'Delivery not found' });
         return;
       }
 
-      const brandSettings = deps.brandQueries.getByDelivery(deliveryId);
-      const branches = deps.branchQueries.getByDelivery(deliveryId);
-      const logoMeta = deps.logoQueries.getMetadataByDelivery(deliveryId);
-      const fullLogos = logoMeta.map(l => deps.logoQueries.getById(l.id)).filter(Boolean) as import('../db/queries.js').DeliveryLogo[];
+      const brandSettings = await deps.brandQueries.getByDelivery(deliveryId);
+      const branches = await deps.branchQueries.getByDelivery(deliveryId);
+      const logoMeta = await deps.logoQueries.getMetadataByDelivery(deliveryId);
+      const fullLogos = (await Promise.all(logoMeta.map(l => deps.logoQueries.getById(l.id)))).filter(Boolean) as import('../db/queries.js').DeliveryLogo[];
 
       const rawSubdomain = brandSettings['subdomain'];
       const subdomain = rawSubdomain ? extractSubdomain(rawSubdomain) : undefined;
@@ -141,23 +141,23 @@ export function createSetupExecutionRoutes(
   });
 
   /** List execution runs for a delivery */
-  router.get('/delivery/:id/runs', (req, res) => {
+  router.get('/delivery/:id/runs', async (req, res) => {
     const deliveryId = parseInt(String(req.params.id), 10);
-    const runs = execQueries.getRunsByDelivery(deliveryId);
+    const runs = await execQueries.getRunsByDelivery(deliveryId);
     res.json({ ok: true, data: runs });
   });
 
   /** Get logs for a specific run */
-  router.get('/runs/:runId/logs', (req, res) => {
+  router.get('/runs/:runId/logs', async (req, res) => {
     const runId = parseInt(String(req.params.runId), 10);
-    const logs = execQueries.getLogsByRun(runId);
+    const logs = await execQueries.getLogsByRun(runId);
     res.json({ ok: true, data: logs });
   });
 
   /** Get latest run status for a delivery */
-  router.get('/delivery/:id/latest-run', (req, res) => {
+  router.get('/delivery/:id/latest-run', async (req, res) => {
     const deliveryId = parseInt(String(req.params.id), 10);
-    const run = execQueries.getLatestRun(deliveryId);
+    const run = await execQueries.getLatestRun(deliveryId);
     res.json({ ok: true, data: run });
   });
 
@@ -167,18 +167,18 @@ export function createSetupExecutionRoutes(
     const userName = (req as any).user?.username ?? 'system';
 
     try {
-      const entries = deps.deliveryQueries.getAll();
+      const entries = await deps.deliveryQueries.getAll();
       const delivery = entries.find(e => e.id === deliveryId);
       if (!delivery) {
         res.status(404).json({ ok: false, error: 'Delivery not found' });
         return;
       }
 
-      const brandSettings = deps.brandQueries.getByDelivery(deliveryId);
-      const branches = deps.branchQueries.getByDelivery(deliveryId);
-      const logoMeta = deps.logoQueries.getMetadataByDelivery(deliveryId);
-      const portalAccounts = deps.portalAccountQueries.getByDelivery(deliveryId);
-      const districts = deps.districtQueries.getByDelivery(deliveryId);
+      const brandSettings = await deps.brandQueries.getByDelivery(deliveryId);
+      const branches = await deps.branchQueries.getByDelivery(deliveryId);
+      const logoMeta = await deps.logoQueries.getMetadataByDelivery(deliveryId);
+      const portalAccounts = await deps.portalAccountQueries.getByDelivery(deliveryId);
+      const districts = await deps.districtQueries.getByDelivery(deliveryId);
 
       const snapshot = {
         account: delivery.account,
@@ -216,7 +216,7 @@ export function createSetupExecutionRoutes(
       };
 
       const name = `${delivery.account} - Welcome Pack`;
-      const pack = deps.welcomePackQueries.create(deliveryId, name, JSON.stringify(snapshot), userName);
+      const pack = await deps.welcomePackQueries.create(deliveryId, name, JSON.stringify(snapshot), userName);
 
       res.json({ ok: true, data: { id: pack.id, name: pack.name, createdAt: pack.created_at } });
     } catch (err) {
@@ -225,9 +225,9 @@ export function createSetupExecutionRoutes(
   });
 
   /** Get welcome packs for a delivery */
-  router.get('/delivery/:id/welcome-pack', (req, res) => {
+  router.get('/delivery/:id/welcome-pack', async (req, res) => {
     const deliveryId = parseInt(String(req.params.id), 10);
-    const packs = deps.welcomePackQueries.getByDelivery(deliveryId);
+    const packs = await deps.welcomePackQueries.getByDelivery(deliveryId);
     res.json({
       ok: true,
       data: packs.map(p => ({
