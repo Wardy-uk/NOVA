@@ -48,9 +48,9 @@ export function createAdminRoutes(
 
   // ---- Users ----
 
-  router.get('/users', async (_req, res) => {
+  router.get('/users', (_req, res) => {
     const users = userQueries.getAll();
-    const teams = await teamQueries.getAll();
+    const teams = teamQueries.getAll();
     res.json({ ok: true, data: { users, teams } });
   });
 
@@ -441,21 +441,21 @@ export function createAdminRoutes(
 
   // ---- Teams ----
 
-  router.get('/teams', async (_req, res) => {
-    res.json({ ok: true, data: await teamQueries.getAll() });
+  router.get('/teams', (_req, res) => {
+    res.json({ ok: true, data: teamQueries.getAll() });
   });
 
-  router.post('/teams', async (req, res) => {
+  router.post('/teams', (req, res) => {
     const { name, description } = req.body;
     if (!name?.trim()) { res.status(400).json({ ok: false, error: 'Team name is required' }); return; }
-    const id = await teamQueries.create(name.trim(), description?.trim());
+    const id = teamQueries.create(name.trim(), description?.trim());
     res.json({ ok: true, data: { id } });
   });
 
-  router.put('/teams/:id', async (req, res) => {
+  router.put('/teams/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
-    const { name, description, jira_products, jira_project_key } = req.body;
-    const updates: { name?: string; description?: string; jira_products?: string[] | null; jira_project_key?: string | null } = {};
+    const { name, description, jira_products } = req.body;
+    const updates: { name?: string; description?: string; jira_products?: string[] | null } = {};
     if (name !== undefined) updates.name = name?.trim();
     if (description !== undefined) updates.description = description?.trim();
     if (jira_products !== undefined) {
@@ -463,14 +463,13 @@ export function createAdminRoutes(
         ? jira_products.filter((p) => typeof p === 'string')
         : null;
     }
-    if (jira_project_key !== undefined) updates.jira_project_key = jira_project_key?.trim() || null;
-    await teamQueries.update(id, updates);
+    teamQueries.update(id, updates);
     res.json({ ok: true });
   });
 
-  router.delete('/teams/:id', async (req, res) => {
+  router.delete('/teams/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
-    await teamQueries.delete(id);
+    teamQueries.delete(id);
     res.json({ ok: true });
   });
 
@@ -527,20 +526,20 @@ export function createAdminRoutes(
   });
 
   // Per-user AI key override
-  router.get('/ai-keys/user/:userId', async (req, res) => {
+  router.get('/ai-keys/user/:userId', (req, res) => {
     const userId = parseInt(req.params.userId, 10);
-    const userKey = (await userSettingsQueries.get(userId, 'openai_api_key')) ?? '';
+    const userKey = userSettingsQueries.get(userId, 'openai_api_key') ?? '';
     const masked = userKey.length > 4 ? '•'.repeat(userKey.length - 4) + userKey.slice(-4) : userKey;
     res.json({ ok: true, data: { key: masked, hasKey: userKey.length > 0 } });
   });
 
-  router.put('/ai-keys/user/:userId', async (req, res) => {
+  router.put('/ai-keys/user/:userId', (req, res) => {
     const userId = parseInt(req.params.userId, 10);
     const { key } = req.body;
     if (key?.trim()) {
-      await userSettingsQueries.set(userId, 'openai_api_key', key.trim());
+      userSettingsQueries.set(userId, 'openai_api_key', key.trim());
     } else {
-      await userSettingsQueries.delete(userId, 'openai_api_key');
+      userSettingsQueries.delete(userId, 'openai_api_key');
     }
     res.json({ ok: true });
   });

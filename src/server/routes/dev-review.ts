@@ -6,6 +6,7 @@ import type { NotificationQueries } from '../db/notifications.js';
 import type { TeamQueries } from '../db/queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { AreaAccessGuard } from '../middleware/auth.js';
+import { saveDb } from '../db/schema.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
 /**
@@ -165,22 +166,27 @@ export function createDevReviewRoutes(
       // saveDb() ONCE at the end of the sync block. Crash-window data loss is
       // bounded by the 15s periodic flush — and these rows are all derivable
       // from Jira state on the next poll anyway.
+      let dirty = false;
       const liveKeys = new Set(issues.map((i) => i.key));
       for (const issue of issues) {
         const submitter = (issue.fields.assignee as { emailAddress?: string } | null)?.emailAddress || null;
-        await devQueries.upsertFromPoll(issue.key, submitter);
+        devQueries.upsertFromPoll(issue.key, submitter, { defer: true });
         const product = (issue.fields as { customfield_13183?: { value?: string } }).customfield_13183?.value || null;
-        await devQueries.setTeam(issue.key, productToTeam(product));
+        devQueries.setTeam(issue.key, productToTeam(product), { defer: true });
+        dirty = true;
       }
       // Archive stale rows
-      for (const row of await devQueries.listQueue()) {
+      for (const row of devQueries.listQueue()) {
         if (!liveKeys.has(row.jira_key)) {
-          await devQueries.archive(row.jira_key);
+          devQueries.archive(row.jira_key, { defer: true });
+          dirty = true;
         }
       }
+      if (dirty) saveDb();
+
       // Merge: for each live issue, attach NOVA state + resolved team
-      let enriched = await Promise.all(issues.map(async (issue) => {
-        const state = await devQueries.getState(issue.key);
+      let enriched = issues.map((issue) => {
+        const state = devQueries.getState(issue.key);
         const product = (issue.fields as { customfield_13183?: { value?: string } }).customfield_13183?.value || null;
         return {
           key: issue.key,
@@ -188,7 +194,7 @@ export function createDevReviewRoutes(
           state: state || null,
           team: productToTeam(product),
         };
-      }));
+      });
 
       // Filter by user's NOVA team jira_products. Admins always see all.
       // If the user's team has no products set (NULL or empty), they see all
@@ -206,7 +212,7 @@ export function createDevReviewRoutes(
       if (req.user && !isAdmin(req.user.role)) {
         const user = userQueries.getById(req.user.id);
         if (user?.team_id) {
-          const team = await teamQueries.getById(user.team_id);
+          const team = teamQueries.getById(user.team_id);
           const allowed = team?.jira_products;
           if (allowed && allowed.length > 0) {
             userTeamFilterActive = true;
@@ -270,10 +276,10 @@ export function createDevReviewRoutes(
       const jiraComments = await client.getComments(key, 20).catch(() => []);
       let importedExternal = 0;
       for (const c of jiraComments) {
-        if (await devQueries.hasJiraComment(key, c.id)) continue;
+        if (devQueries.hasJiraComment(key, c.id)) continue;
         const body = adfToPlainText(c.body);
         const authorName = c.author?.displayName || 'Unknown';
-        await devQueries.addExternalJiraComment({
+        devQueries.addExternalJiraComment({
           jira_key: key,
           author_display: authorName,
           body,
@@ -286,14 +292,14 @@ export function createDevReviewRoutes(
       // Any new external reply flips waiting_on_assignee → in_review so
       // the queue immediately reflects "ball back in dev court".
       if (importedExternal > 0) {
-        const cur = await devQueries.getState(key);
+        const cur = devQueries.getState(key);
         if (cur?.status === 'waiting_on_assignee') {
-          await devQueries.setStatus(key, 'in_review');
+          devQueries.setStatus(key, 'in_review');
         }
       }
 
-      const state = await devQueries.getState(key);
-      const thread = await devQueries.getThread(key);
+      const state = devQueries.getState(key);
+      const thread = devQueries.getThread(key);
 
       res.json({ ok: true, data: { key, fields: issue.fields, state, thread, jiraComments } });
     } catch (err) {
@@ -303,10 +309,10 @@ export function createDevReviewRoutes(
 
   // ── Claim / unclaim / fast-track / priority ────────────────────────────
 
-  router.post('/ticket/:key/claim', async (req: Request, res: Response) => {
+  router.post('/ticket/:key/claim', (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
-    await devQueries.claim(String(req.params.key), req.user.id);
-    await devQueries.addThreadEntry({
+    devQueries.claim(String(req.params.key), req.user.id);
+    devQueries.addThreadEntry({
       jira_key: String(req.params.key),
       user_id: req.user.id,
       user_display: userDisplay(req),
@@ -317,17 +323,17 @@ export function createDevReviewRoutes(
     res.json({ ok: true });
   });
 
-  router.post('/ticket/:key/unclaim', async (req: Request, res: Response) => {
+  router.post('/ticket/:key/unclaim', (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
-    await devQueries.unclaim(String(req.params.key));
+    devQueries.unclaim(String(req.params.key));
     res.json({ ok: true });
   });
 
-  router.post('/ticket/:key/fast-track', async (req: Request, res: Response) => {
+  router.post('/ticket/:key/fast-track', (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
     const on = !!req.body?.on;
-    await devQueries.setFastTrack(String(req.params.key), on);
-    await devQueries.addThreadEntry({
+    devQueries.setFastTrack(String(req.params.key), on);
+    devQueries.addThreadEntry({
       jira_key: String(req.params.key),
       user_id: req.user.id,
       user_display: userDisplay(req),
@@ -338,13 +344,13 @@ export function createDevReviewRoutes(
     res.json({ ok: true });
   });
 
-  router.post('/ticket/:key/priority', async (req: Request, res: Response) => {
+  router.post('/ticket/:key/priority', (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
     const priority = req.body?.priority as 'low' | 'normal' | 'high';
     if (!['low', 'normal', 'high'].includes(priority)) {
       res.status(400).json({ ok: false, error: 'Invalid priority' }); return;
     }
-    await devQueries.setPriority(String(req.params.key), priority);
+    devQueries.setPriority(String(req.params.key), priority);
     res.json({ ok: true });
   });
 
@@ -371,7 +377,7 @@ export function createDevReviewRoutes(
 
     const key = String(req.params.key);
     const display = userDisplay(req);
-    const threadId = await devQueries.addThreadEntry({
+    const threadId = devQueries.addThreadEntry({
       jira_key: key,
       user_id: req.user.id,
       user_display: display,
@@ -382,7 +388,7 @@ export function createDevReviewRoutes(
 
     const client = getJiraClient();
     if (!client) {
-      await devQueries.markThreadSyncFailed(threadId, 'Jira not configured');
+      devQueries.markThreadSyncFailed(threadId, 'Jira not configured');
       res.status(503).json({ ok: false, error: 'Jira not configured' });
       return;
     }
@@ -413,9 +419,9 @@ export function createDevReviewRoutes(
         // dev's note isn't lost, and warn the caller.
         try {
           const r = await client.addComment(key, prefixed, { internal: true });
-          await devQueries.markThreadSynced(threadId, (r as { id?: string } | null)?.id ?? null);
+          devQueries.markThreadSynced(threadId, (r as { id?: string } | null)?.id ?? null);
         } catch (e) {
-          await devQueries.markThreadSyncFailed(threadId, e instanceof Error ? e.message : 'comment failed');
+          devQueries.markThreadSyncFailed(threadId, e instanceof Error ? e.message : 'comment failed');
         }
         res.json({ ok: true, waitingSet: false, warning: 'Waiting On Assignee transition not found — comment posted but status not changed' });
         return;
@@ -540,7 +546,7 @@ export function createDevReviewRoutes(
         comment: { body: adfDoc(prefixed), internal: true },
       });
 
-      await devQueries.setStatus(key, 'waiting_on_assignee');
+      devQueries.setStatus(key, 'waiting_on_assignee');
 
       // Step 4: find the comment we just added so the watcher doesn't
       // re-import it as an external reply (matches by body prefix).
@@ -562,10 +568,10 @@ export function createDevReviewRoutes(
         if (mine) newCommentId = mine.id;
       } catch { /* non-fatal */ }
 
-      await devQueries.markThreadSynced(threadId, newCommentId);
+      devQueries.markThreadSynced(threadId, newCommentId);
       // Purge any stale failed entries from earlier attempts so the
       // Activity panel shows a clean history.
-      const purged = await devQueries.purgeFailedThreadEntries(key, threadId);
+      const purged = devQueries.purgeFailedThreadEntries(key, threadId);
       if (purged > 0) console.log(`[DevReview/comment] Purged ${purged} stale failed entries for ${key}`);
       res.json({ ok: true, waitingSet: true });
     } catch (e) {
@@ -581,9 +587,9 @@ export function createDevReviewRoutes(
       try {
         const r = await client.addComment(String(req.params.key), prefixed, { internal: true });
         fallbackId = (r as { id?: string } | null)?.id ?? null;
-        await devQueries.markThreadSynced(threadId, fallbackId);
+        devQueries.markThreadSynced(threadId, fallbackId);
       } catch (fallbackErr) {
-        await devQueries.markThreadSyncFailed(threadId, msg);
+        devQueries.markThreadSyncFailed(threadId, msg);
         console.error(`[DevReview/comment] Fallback comment also failed: ${fallbackErr instanceof Error ? fallbackErr.message : fallbackErr}`);
       }
 
@@ -609,7 +615,6 @@ export function createDevReviewRoutes(
     const note = String(req.body?.note || '').trim();
     const tldr = String(req.body?.tldr || '').trim();
     const developmentDetails = String(req.body?.developmentDetails || '').trim();
-    const workItemComment = String(req.body?.workItemComment || '').trim();
     const display = userDisplay(req);
 
     if (!tldr) {
@@ -617,7 +622,7 @@ export function createDevReviewRoutes(
       return;
     }
 
-    const threadId = await devQueries.addThreadEntry({
+    const threadId = devQueries.addThreadEntry({
       jira_key: key,
       user_id: req.user.id,
       user_display: display,
@@ -681,7 +686,7 @@ export function createDevReviewRoutes(
     }
     if (!transitionId) {
       const msg = 'Escalate to Development transition not reachable from current status';
-      await devQueries.markThreadSyncFailed(threadId, msg);
+      devQueries.markThreadSyncFailed(threadId, msg);
       res.status(409).json({ ok: false, error: msg });
       return;
     }
@@ -694,8 +699,8 @@ export function createDevReviewRoutes(
       await client.transitionIssue(key, transitionId);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Transition failed';
-      await devQueries.markThreadSyncFailed(threadId, msg);
-      await devQueries.addOutbox({
+      devQueries.markThreadSyncFailed(threadId, msg);
+      devQueries.addOutbox({
         jira_key: key,
         op: 'accept',
         payload: { transitionId, tldr, developmentDetails },
@@ -704,8 +709,8 @@ export function createDevReviewRoutes(
       return;
     }
 
-    await devQueries.markThreadSynced(threadId, null);
-    await devQueries.markAccepted(key);
+    devQueries.markThreadSynced(threadId, null);
+    devQueries.markAccepted(key);
 
     // Step 2 — single updateFields call writing TL;DR, Development Details
     // and restoring the original assignee. Runs AFTER the transition so
@@ -740,94 +745,7 @@ export function createDevReviewRoutes(
       console.warn(`[DevReview/accept] Failed to post agent-notice comment for ${key}: ${noticeErr instanceof Error ? noticeErr.message : noticeErr}`);
     });
 
-    // Step 4 — Create linked Bug work item in the dev team's Jira project
-    let workItemKey: string | null = null;
-    let targetProjectKey: string | null = null;
-    if (req.user) {
-      const user = userQueries.getById(req.user.id);
-      if (user?.team_id) {
-        const team = await teamQueries.getById(user.team_id);
-        targetProjectKey = team?.jira_project_key?.trim() || null;
-      }
-    }
-
-    if (!targetProjectKey) {
-      console.warn(`[DevReview/accept] No jira_project_key for accepting user's team — skipping Bug creation for ${key}`);
-      warnings.push('No Jira project key configured for your team — work item not created');
-    } else {
-      try {
-        // Fetch the full issue fields for the Bug description
-        const issueForBug = await client.getIssue(key, [
-          'summary', 'reporter', 'priority',
-          CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
-          CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT,
-        ]);
-        const issueFields = (issueForBug?.fields || {}) as Record<string, unknown>;
-        const reporterName = (issueFields.reporter as { displayName?: string } | null)?.displayName || 'Unknown';
-        const priorityName = (issueFields.priority as { name?: string } | null)?.name || 'Unknown';
-        const issueSummary = (issueFields.summary as string) || '(no summary)';
-
-        const briefTldr = adfToPlainText(issueFields[CF_TLDR]) || tldr || '(none)';
-        const briefAgentSummary = adfToPlainText(issueFields[CF_AGENT_SUMMARY]) || 'None';
-        const briefTroubleshooting = adfToPlainText(issueFields[CF_TROUBLESHOOTING]) || 'None';
-        const briefExpectedOutcome = adfToPlainText(issueFields[CF_EXPECTED_OUTCOME]) || 'None';
-        const briefEnvironment = adfToPlainText(issueFields[CF_ISSUE_ENVIRONMENT]) || 'None';
-
-        const descriptionText =
-          `Support Ticket: ${key}\n` +
-          `Customer: ${reporterName}\n` +
-          `Priority: ${priorityName}\n\n` +
-          `── TL;DR ──\n${briefTldr}\n\n` +
-          `── Agent Summary ──\n${briefAgentSummary}\n\n` +
-          `── Troubleshooting Performed ──\n${briefTroubleshooting}\n\n` +
-          `── Expected Outcome ──\n${briefExpectedOutcome}\n\n` +
-          `── Environment ──\n${briefEnvironment}\n\n` +
-          `── Developer Comment ──\n${workItemComment || 'None'}`;
-
-        const createdBug = await client.createIssue({
-          fields: {
-            project: { key: targetProjectKey },
-            issuetype: { name: 'Bug' },
-            summary: `[Support] ${issueSummary}`,
-            description: adfDoc(descriptionText),
-          },
-        });
-        workItemKey = createdBug.key;
-        console.log(`[DevReview/accept] Created Bug ${workItemKey} in ${targetProjectKey} for ${key}`);
-
-        // Link the Bug to the NT support ticket
-        try {
-          await client.createIssueLink({
-            type: { name: 'Relates' },
-            inwardIssue: { key: createdBug.key },
-            outwardIssue: { key },
-          });
-        } catch (linkErr) {
-          const msg = linkErr instanceof Error ? linkErr.message : 'Link creation failed';
-          console.error(`[DevReview/accept] Issue link failed for ${key} → ${createdBug.key}: ${msg}`);
-          warnings.push(`Bug created (${createdBug.key}) but link failed: ${msg}`);
-        }
-
-        // Post customer-facing comment on the NT ticket
-        try {
-          const customerComment =
-            'This issue requires work by our development team. ' +
-            'Development work operates under a 60 working day SLA. ' +
-            'If you have any concerns or wish to escalate, please contact your Account Manager.';
-          await client.addComment(key, customerComment);
-        } catch (commentErr) {
-          const msg = commentErr instanceof Error ? commentErr.message : 'Customer comment failed';
-          console.error(`[DevReview/accept] Customer comment failed for ${key}: ${msg}`);
-          warnings.push(`Customer comment failed: ${msg}`);
-        }
-      } catch (bugErr) {
-        const msg = bugErr instanceof Error ? bugErr.message : 'Bug creation failed';
-        console.error(`[DevReview/accept] Bug creation failed for ${key}: ${msg}`);
-        warnings.push(`Work item creation failed: ${msg}`);
-      }
-    }
-
-    res.json({ ok: true, workItemKey, warnings: warnings.length > 0 ? warnings : undefined });
+    res.json({ ok: true, warnings: warnings.length > 0 ? warnings : undefined });
   });
 
   // ── Return (back to T2 with mandatory next steps) ─────────────────────
@@ -845,7 +763,7 @@ export function createDevReviewRoutes(
     const returnTransitionId = s.dev_review_return_transition_id ? String(s.dev_review_return_transition_id) : '';
     const display = userDisplay(req);
 
-    const threadId = await devQueries.addThreadEntry({
+    const threadId = devQueries.addThreadEntry({
       jira_key: String(req.params.key),
       user_id: req.user.id,
       user_display: display,
@@ -864,7 +782,7 @@ export function createDevReviewRoutes(
     };
 
     // Look up original assignee to reassign
-    const state = await devQueries.getState(String(req.params.key));
+    const state = devQueries.getState(String(req.params.key));
     const submitter = state?.submitted_by_username || null;
 
     try {
@@ -886,8 +804,8 @@ export function createDevReviewRoutes(
         } catch { /* non-fatal */ }
       }
 
-      await devQueries.markThreadSynced(threadId, null);
-      await devQueries.markReturned(String(req.params.key));
+      devQueries.markThreadSynced(threadId, null);
+      devQueries.markReturned(String(req.params.key));
 
       // Notify the original submitter in NOVA (best-effort; never blocks response)
       try {
@@ -897,7 +815,7 @@ export function createDevReviewRoutes(
           const match = allUsers.find((u) => (u.email && u.email.toLowerCase() === submitter.toLowerCase()))
             || allUsers.find((u) => u.username.toLowerCase() === submitter.toLowerCase());
           if (match) {
-            await notificationQueries.create({
+            notificationQueries.create({
               user_id: match.id,
               type: 'dev_review_returned',
               title: `Dev returned ${String(req.params.key)} with next steps`,
@@ -912,8 +830,8 @@ export function createDevReviewRoutes(
       res.json({ ok: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Return failed';
-      await devQueries.markThreadSyncFailed(threadId, msg);
-      await devQueries.addOutbox({
+      devQueries.markThreadSyncFailed(threadId, msg);
+      devQueries.addOutbox({
         jira_key: String(req.params.key),
         op: 'return',
         payload: { returnTransitionId, commentText, nextSteps },
@@ -924,9 +842,9 @@ export function createDevReviewRoutes(
 
   // ── Dashboard aggregations ────────────────────────────────────────────
 
-  router.get('/dashboard', async (_req: Request, res: Response) => {
+  router.get('/dashboard', (_req: Request, res: Response) => {
     try {
-      const data = await devQueries.getDashboard();
+      const data = devQueries.getDashboard();
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'dashboard failed' });
@@ -935,9 +853,9 @@ export function createDevReviewRoutes(
 
   // ── Outbox visibility (admin diagnostic) ──────────────────────────────
 
-  router.get('/outbox', async (req: Request, res: Response) => {
+  router.get('/outbox', (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false }); return; }
-    res.json({ ok: true, data: await devQueries.pendingOutbox(100) });
+    res.json({ ok: true, data: devQueries.pendingOutbox(100) });
   });
 
   return router;

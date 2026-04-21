@@ -238,7 +238,6 @@ export function DevReviewView() {
   const [acceptNote, setAcceptNote] = useState('');
   const [acceptTldr, setAcceptTldr] = useState('');
   const [acceptDevDetails, setAcceptDevDetails] = useState('');
-  const [acceptWorkItemComment, setAcceptWorkItemComment] = useState('');
   const [showAcceptModal, setShowAcceptModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
@@ -413,7 +412,6 @@ export function DevReviewView() {
     // Prefill Development Details from existing value (usually empty at T3 stage)
     setAcceptDevDetails(adfToText(detail.fields.customfield_13215));
     setAcceptNote('');
-    setAcceptWorkItemComment('');
     setShowAcceptModal(true);
   };
   const onAccept = async () => {
@@ -421,42 +419,17 @@ export function DevReviewView() {
       fireToast('err', 'TL;DR is required by the Escalate to Development screen');
       return;
     }
-    if (!selectedKey) return;
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/dev-review/ticket/${selectedKey}/accept`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}`,
-        },
-        body: JSON.stringify({
-          note: acceptNote,
-          tldr: acceptTldr,
-          developmentDetails: acceptDevDetails,
-          workItemComment: acceptWorkItemComment,
-        }),
-      });
-      const json = await res.json();
-      if (json.ok) {
-        const workItemMsg = json.workItemKey ? ` · ${json.workItemKey} created` : '';
-        fireToast('ok', `Accepted to development${workItemMsg}`);
-        if (json.warnings?.length) {
-          setTimeout(() => fireToast('err', json.warnings.join('; ')), 500);
-        }
-      } else {
-        fireToast('err', json.error || 'Accept failed');
-      }
-      await Promise.all([loadQueue({ silent: true }), loadDetail(selectedKey)]);
-    } catch (e) {
-      fireToast('err', e instanceof Error ? e.message : 'Accept failed');
-    } finally {
-      setBusy(false);
-    }
+    await doAction(`/ticket/${selectedKey}/accept`, {
+      method: 'POST',
+      body: JSON.stringify({
+        note: acceptNote,
+        tldr: acceptTldr,
+        developmentDetails: acceptDevDetails,
+      }),
+    }, 'Accepted to development');
     setAcceptNote('');
     setAcceptTldr('');
     setAcceptDevDetails('');
-    setAcceptWorkItemComment('');
     setShowAcceptModal(false);
   };
   const onReturn = async () => {
@@ -740,21 +713,6 @@ export function DevReviewView() {
               placeholder="Any technical context, suspected cause, queries to run, related tickets…"
               rows={6}
               className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600 font-mono"
-              style={{ background: 'rgba(255,255,255,0.06)' }}
-            />
-          </div>
-
-          <div className="mb-4">
-            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2">
-              <span>Work item comment (optional)</span>
-              <span className="text-neutral-500 normal-case font-normal text-[10px]">Added to the dev Bug work item description</span>
-            </label>
-            <textarea
-              value={acceptWorkItemComment}
-              onChange={(e) => setAcceptWorkItemComment(e.target.value)}
-              placeholder="Anything you'd like to add to the dev work item?"
-              rows={3}
-              className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600"
               style={{ background: 'rgba(255,255,255,0.06)' }}
             />
           </div>
