@@ -1,11 +1,10 @@
-import type { Database } from 'sql.js';
 import type { Task, TaskUpdate } from '../../shared/types.js';
-import { saveDb } from './schema.js';
+import { query, queryOne, execute, executeAndGetId, transaction, txExecute, txExecuteAndGetId, txQuery } from '../services/database.js';
+
+// ─── Tasks ────────────────────────────────────────────────────────────────────
 
 export class TaskQueries {
-  constructor(private db: Database) {}
-
-  getAll(filters?: { status?: string; source?: string; userId?: number }): Task[] {
+  async getAll(filters?: { status?: string; source?: string; userId?: number }): Promise<Task[]> {
     const useUserPins = filters?.userId != null;
     let sql: string;
     if (useUserPins) {
@@ -15,7 +14,7 @@ export class TaskQueries {
     } else {
       sql = `SELECT * FROM tasks WHERE 1=1`;
     }
-    const params: (string | number)[] = [];
+    const params: unknown[] = [];
     if (useUserPins) { params.push(filters!.userId!); params.push(filters!.userId!); }
 
     if (filters?.status) {
@@ -28,69 +27,44 @@ export class TaskQueries {
     }
 
     if (useUserPins) {
-      sql += ` AND (t.snoozed_until IS NULL OR t.snoozed_until <= datetime('now'))`;
+      sql += ` AND (t.snoozed_until IS NULL OR t.snoozed_until <= GETUTCDATE())`;
       sql += ` AND t.status NOT IN ('dismissed', 'done')`;
     } else {
-      sql += ` AND (snoozed_until IS NULL OR snoozed_until <= datetime('now'))`;
+      sql += ` AND (snoozed_until IS NULL OR snoozed_until <= GETUTCDATE())`;
       sql += ` AND status NOT IN ('dismissed', 'done')`;
     }
     sql += useUserPins
       ? ` ORDER BY (CASE WHEN p.task_id IS NOT NULL THEN 1 ELSE 0 END) DESC, t.priority DESC, t.due_date ASC`
       : ` ORDER BY is_pinned DESC, priority DESC, due_date ASC`;
 
-    const stmt = this.db.prepare(sql);
-    if (params.length > 0) stmt.bind(params);
-
-    const tasks: Task[] = [];
-    while (stmt.step()) {
-      tasks.push(this.rowToTask(stmt.getAsObject() as Record<string, unknown>));
-    }
-    stmt.free();
-    return tasks;
+    const rows = await query<Record<string, unknown>>(sql, params);
+    return rows.map(r => this.rowToTask(r));
   }
 
-  searchByTitle(query: string, source?: string, limit: number = 20): Task[] {
-    let sql = `SELECT * FROM tasks WHERE title LIKE ?`;
-    const params: (string | number)[] = [`%${query}%`];
+  async searchByTitle(searchQuery: string, source?: string, limit: number = 20): Promise<Task[]> {
+    let sql = `SELECT TOP(?) * FROM tasks WHERE title LIKE ?`;
+    const params: unknown[] = [limit, `%${searchQuery}%`];
     if (source) { sql += ` AND source = ?`; params.push(source); }
-    sql += ` ORDER BY updated_at DESC LIMIT ?`;
-    params.push(limit);
-    const stmt = this.db.prepare(sql);
-    stmt.bind(params);
-    const tasks: Task[] = [];
-    while (stmt.step()) tasks.push(this.rowToTask(stmt.getAsObject() as Record<string, unknown>));
-    stmt.free();
-    return tasks;
+    sql += ` ORDER BY updated_at DESC`;
+    const rows = await query<Record<string, unknown>>(sql, params);
+    return rows.map(r => this.rowToTask(r));
   }
 
-  getAllIncludingDone(userId?: number): Task[] {
+  async getAllIncludingDone(userId?: number): Promise<Task[]> {
     const sql = userId != null
       ? `SELECT * FROM tasks WHERE user_id = ? ORDER BY updated_at DESC`
       : `SELECT * FROM tasks ORDER BY updated_at DESC`;
-    const stmt = this.db.prepare(sql);
-    if (userId != null) stmt.bind([userId]);
-    const tasks: Task[] = [];
-    while (stmt.step()) {
-      tasks.push(this.rowToTask(stmt.getAsObject() as Record<string, unknown>));
-    }
-    stmt.free();
-    return tasks;
+    const params = userId != null ? [userId] : [];
+    const rows = await query<Record<string, unknown>>(sql, params);
+    return rows.map(r => this.rowToTask(r));
   }
 
-  getById(id: string): Task | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`);
-    stmt.bind([id]);
-
-    if (stmt.step()) {
-      const task = this.rowToTask(stmt.getAsObject() as Record<string, unknown>);
-      stmt.free();
-      return task;
-    }
-    stmt.free();
-    return undefined;
+  async getById(id: string): Promise<Task | undefined> {
+    const row = await queryOne<Record<string, unknown>>(`SELECT * FROM tasks WHERE id = ?`, [id]);
+    return row ? this.rowToTask(row) : undefined;
   }
 
-  upsertFromSource(task: {
+  async upsertFromSource(task: {
     source: string;
     source_id: string;
     source_url?: string;
@@ -104,230 +78,156 @@ export class TaskQueries {
     raw_data?: unknown;
     transient?: boolean;
     user_id?: number;
-  }, options?: { deferSave?: boolean }): void {
+  }): Promise<void> {
     const id = `${task.source}:${task.source_id}`;
-    this.db.run(
-      `INSERT INTO tasks (id, source, source_id, source_url, title, description,
-        status, priority, due_date, sla_breach_at, category, raw_data, transient, user_id, last_synced, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-      ON CONFLICT(id) DO UPDATE SET
-        source_url = excluded.source_url,
-        title = excluded.title,
-        description = excluded.description,
-        status = excluded.status,
-        priority = excluded.priority,
-        due_date = excluded.due_date,
-        sla_breach_at = excluded.sla_breach_at,
-        category = excluded.category,
-        raw_data = excluded.raw_data,
-        transient = excluded.transient,
-        user_id = COALESCE(tasks.user_id, excluded.user_id),
-        last_synced = datetime('now'),
-        updated_at = datetime('now')`,
-      [
-        id,
-        task.source,
-        task.source_id,
-        task.source_url ?? null,
-        task.title,
-        task.description ?? null,
-        task.status ?? 'open',
-        task.priority ?? 50,
-        task.due_date ?? null,
-        task.sla_breach_at ?? null,
-        task.category ?? null,
-        task.raw_data ? JSON.stringify(task.raw_data) : null,
-        task.transient ? 1 : 0,
-        task.user_id ?? null,
-      ]
-    );
-    if (!options?.deferSave) {
-      saveDb();
-    }
+    const params = [
+      id, task.source, task.source_id, task.source_url ?? null,
+      task.title, task.description ?? null, task.status ?? 'open',
+      task.priority ?? 50, task.due_date ?? null, task.sla_breach_at ?? null,
+      task.category ?? null, task.raw_data ? JSON.stringify(task.raw_data) : null,
+      task.transient ? 1 : 0, task.user_id ?? null,
+    ];
+    await execute(`
+      MERGE INTO tasks WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
+        AS source(id, source, source_id, source_url, title, description, status, priority, due_date, sla_breach_at, category, raw_data, [transient], user_id)
+      ON target.id = source.id
+      WHEN MATCHED THEN UPDATE SET
+        source_url = source.source_url, title = source.title, description = source.description,
+        status = source.status, priority = source.priority, due_date = source.due_date,
+        sla_breach_at = source.sla_breach_at, category = source.category, raw_data = source.raw_data,
+        [transient] = source.[transient], user_id = COALESCE(target.user_id, source.user_id),
+        last_synced = GETUTCDATE(), updated_at = GETUTCDATE()
+      WHEN NOT MATCHED THEN INSERT (id, source, source_id, source_url, title, description, status, priority, due_date, sla_breach_at, category, raw_data, [transient], user_id, last_synced, updated_at)
+        VALUES (source.id, source.source, source.source_id, source.source_url, source.title, source.description, source.status, source.priority, source.due_date, source.sla_breach_at, source.category, source.raw_data, source.[transient], source.user_id, GETUTCDATE(), GETUTCDATE());
+    `, params);
   }
 
-  setTaskUserId(taskId: string, userId: number | null): void {
-    this.db.run(`UPDATE tasks SET user_id = ?, updated_at = datetime('now') WHERE id = ?`, [userId, taskId]);
-    saveDb();
+  async setTaskUserId(taskId: string, userId: number | null): Promise<void> {
+    await execute(`UPDATE tasks SET user_id = ?, updated_at = GETUTCDATE() WHERE id = ?`, [userId, taskId]);
   }
 
-  deleteTransientTasks(): number {
-    const countResult = this.db.exec('SELECT COUNT(*) FROM tasks WHERE transient = 1');
-    const count = (countResult[0]?.values[0]?.[0] as number) ?? 0;
+  async deleteTransientTasks(): Promise<number> {
+    const row = await queryOne<{ c: number }>('SELECT COUNT(*) as c FROM tasks WHERE [transient] = 1');
+    const count = row?.c ?? 0;
     if (count > 0) {
-      this.db.run('DELETE FROM tasks WHERE transient = 1');
-      saveDb();
+      await execute('DELETE FROM tasks WHERE [transient] = 1');
     }
     return count;
   }
 
-  deleteStaleBySource(
+  async deleteStaleBySource(
     source: string,
     freshIds: string[],
-    options?: { allowEmpty?: boolean; deferSave?: boolean; userId?: number }
-  ): number {
-    // Milestone tasks are managed by the milestone system, not external sync
+    options?: { allowEmpty?: boolean; userId?: number }
+  ): Promise<number> {
     if (source === 'milestone') return 0;
 
-    // Build user scope clause: only delete tasks belonging to this user (or unowned)
     const userClause = options?.userId != null ? ` AND user_id = ?` : '';
     const userParams: number[] = options?.userId != null ? [options.userId] : [];
 
     if (freshIds.length === 0) {
-      if (!options?.allowEmpty) {
-        return 0;
-      }
-
-      // No fresh tasks — delete all for this source (scoped to user)
-      const countStmt = this.db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE source = ?${userClause}`);
-      countStmt.bind([source, ...userParams]);
-      let count = 0;
-      if (countStmt.step()) {
-        const row = countStmt.getAsObject() as Record<string, unknown>;
-        count = (row.c as number) ?? 0;
-      }
-      countStmt.free();
-
-      this.db.run(`DELETE FROM tasks WHERE source = ?${userClause}`, [source, ...userParams]);
-      if (!options?.deferSave) {
-        saveDb();
-      }
+      if (!options?.allowEmpty) return 0;
+      const row = await queryOne<{ c: number }>(`SELECT COUNT(*) as c FROM tasks WHERE source = ?${userClause}`, [source, ...userParams]);
+      const count = row?.c ?? 0;
+      await execute(`DELETE FROM tasks WHERE source = ?${userClause}`, [source, ...userParams]);
       return count;
     }
     const placeholders = freshIds.map(() => '?').join(',');
-    const countStmt = this.db.prepare(
-      `SELECT COUNT(*) as c FROM tasks WHERE source = ? AND id NOT IN (${placeholders})${userClause}`
+    const row = await queryOne<{ c: number }>(
+      `SELECT COUNT(*) as c FROM tasks WHERE source = ? AND id NOT IN (${placeholders})${userClause}`,
+      [source, ...freshIds, ...userParams]
     );
-    countStmt.bind([source, ...freshIds, ...userParams]);
-    let count = 0;
-    if (countStmt.step()) {
-      const row = countStmt.getAsObject() as Record<string, unknown>;
-      count = (row.c as number) ?? 0;
-    }
-    countStmt.free();
-
+    const count = row?.c ?? 0;
     if (count > 0) {
-      this.db.run(
+      await execute(
         `DELETE FROM tasks WHERE source = ? AND id NOT IN (${placeholders})${userClause}`,
         [source, ...freshIds, ...userParams]
       );
-      if (!options?.deferSave) {
-        saveDb();
-      }
     }
     return count;
   }
 
-  /** Purge tasks not refreshed by a recent sync (stale accumulation cleanup). */
-  purgeUnsyncedTasks(maxAgeDays: number = 2): number {
+  async purgeUnsyncedTasks(maxAgeDays: number = 2): Promise<number> {
     const cutoff = new Date(Date.now() - maxAgeDays * 86400000).toISOString();
-    const countResult = this.db.exec(
-      `SELECT COUNT(*) FROM tasks WHERE source != 'milestone' AND transient = 0 AND (last_synced IS NULL OR last_synced < '${cutoff}')`
+    const row = await queryOne<{ c: number }>(
+      `SELECT COUNT(*) as c FROM tasks WHERE source != 'milestone' AND [transient] = 0 AND (last_synced IS NULL OR last_synced < ?)`,
+      [cutoff]
     );
-    const count = (countResult[0]?.values[0]?.[0] as number) ?? 0;
+    const count = row?.c ?? 0;
     if (count > 0) {
-      this.db.run(
-        `DELETE FROM tasks WHERE source != 'milestone' AND transient = 0 AND (last_synced IS NULL OR last_synced < ?)`,
+      await execute(
+        `DELETE FROM tasks WHERE source != 'milestone' AND [transient] = 0 AND (last_synced IS NULL OR last_synced < ?)`,
         [cutoff]
       );
-      saveDb();
     }
     return count;
   }
 
-  update(id: string, updates: TaskUpdate, userId?: number): boolean {
+  async update(id: string, updates: TaskUpdate, userId?: number): Promise<boolean> {
+    if (updates.is_pinned !== undefined && userId != null) {
+      if (updates.is_pinned) {
+        await execute(
+          `IF NOT EXISTS (SELECT 1 FROM user_task_pins WHERE user_id = ? AND task_id = ?)
+           INSERT INTO user_task_pins (user_id, task_id) VALUES (?, ?)`,
+          [userId, id, userId, id]
+        );
+      } else {
+        await execute(`DELETE FROM user_task_pins WHERE user_id = ? AND task_id = ?`, [userId, id]);
+      }
+    }
+
     const fields: string[] = [];
     const params: unknown[] = [];
 
-    // Handle per-user pin via user_task_pins table
-    if (updates.is_pinned !== undefined && userId != null) {
-      if (updates.is_pinned) {
-        this.db.run(
-          `INSERT OR IGNORE INTO user_task_pins (user_id, task_id) VALUES (?, ?)`,
-          [userId, id]
-        );
-      } else {
-        this.db.run(
-          `DELETE FROM user_task_pins WHERE user_id = ? AND task_id = ?`,
-          [userId, id]
-        );
-      }
-    } else if (updates.is_pinned !== undefined) {
-      // Fallback: legacy global pin
+    if (updates.is_pinned !== undefined && userId == null) {
       fields.push('is_pinned = ?');
       params.push(updates.is_pinned ? 1 : 0);
     }
-
-    if (updates.snoozed_until !== undefined) {
-      fields.push('snoozed_until = ?');
-      params.push(updates.snoozed_until);
-    }
-    if (updates.status !== undefined) {
-      fields.push('status = ?');
-      params.push(updates.status);
-    }
+    if (updates.snoozed_until !== undefined) { fields.push('snoozed_until = ?'); params.push(updates.snoozed_until); }
+    if (updates.status !== undefined) { fields.push('status = ?'); params.push(updates.status); }
 
     if (fields.length > 0) {
-      fields.push(`updated_at = datetime('now')`);
+      fields.push(`updated_at = GETUTCDATE()`);
       params.push(id);
-      this.db.run(
-        `UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`,
-        params as (string | number | null)[]
-      );
+      await execute(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`, params);
     }
 
-    saveDb();
-    const check = this.getById(id);
+    const check = await this.getById(id);
     return check !== undefined;
   }
 
-  deleteBySourcePrefix(source: string, sourceIdPrefix: string): number {
-    const countStmt = this.db.prepare(
-      `SELECT COUNT(*) as c FROM tasks WHERE source = ? AND source_id LIKE ?`
+  async deleteBySourcePrefix(source: string, sourceIdPrefix: string): Promise<number> {
+    const row = await queryOne<{ c: number }>(
+      `SELECT COUNT(*) as c FROM tasks WHERE source = ? AND source_id LIKE ?`,
+      [source, sourceIdPrefix + '%']
     );
-    countStmt.bind([source, sourceIdPrefix + '%']);
-    let count = 0;
-    if (countStmt.step()) {
-      count = (countStmt.getAsObject() as Record<string, unknown>).c as number;
-    }
-    countStmt.free();
+    const count = row?.c ?? 0;
     if (count > 0) {
-      this.db.run(`DELETE FROM tasks WHERE source = ? AND source_id LIKE ?`, [source, sourceIdPrefix + '%']);
-      saveDb();
+      await execute(`DELETE FROM tasks WHERE source = ? AND source_id LIKE ?`, [source, sourceIdPrefix + '%']);
     }
     return count;
   }
 
-  deleteAllBySource(source: string): number {
-    const countStmt = this.db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE source = ?`);
-    countStmt.bind([source]);
-    let count = 0;
-    if (countStmt.step()) {
-      count = (countStmt.getAsObject() as Record<string, unknown>).c as number;
-    }
-    countStmt.free();
+  async deleteAllBySource(source: string): Promise<number> {
+    const row = await queryOne<{ c: number }>(`SELECT COUNT(*) as c FROM tasks WHERE source = ?`, [source]);
+    const count = row?.c ?? 0;
     if (count > 0) {
-      this.db.run(`DELETE FROM tasks WHERE source = ?`, [source]);
-      saveDb();
+      await execute(`DELETE FROM tasks WHERE source = ?`, [source]);
     }
     return count;
   }
 
-  /** Get tasks with SLA breach within the next N minutes (for proactive warnings). */
-  getTasksWithUpcomingSla(withinMinutes = 30): Task[] {
-    const stmt = this.db.prepare(
+  async getTasksWithUpcomingSla(withinMinutes = 30): Promise<Task[]> {
+    const rows = await query<Record<string, unknown>>(
       `SELECT * FROM tasks
        WHERE status NOT IN ('done', 'dismissed')
          AND sla_breach_at IS NOT NULL
-         AND sla_breach_at > datetime('now')
-         AND sla_breach_at <= datetime('now', '+${withinMinutes} minutes')`
+         AND sla_breach_at > GETUTCDATE()
+         AND sla_breach_at <= DATEADD(minute, ?, GETUTCDATE())`,
+      [withinMinutes]
     );
-    const tasks: Task[] = [];
-    while (stmt.step()) {
-      tasks.push(this.rowToTask(stmt.getAsObject() as Record<string, unknown>));
-    }
-    stmt.free();
-    return tasks;
+    return rows.map(r => this.rowToTask(r));
   }
 
   private rowToTask(row: Record<string, unknown>): Task {
@@ -343,7 +243,7 @@ export class TaskQueries {
       due_date: (row.due_date as string) ?? null,
       sla_breach_at: (row.sla_breach_at as string) ?? null,
       category: (row.category as string) ?? null,
-      is_pinned: row.is_pinned === 1,
+      is_pinned: row.is_pinned === 1 || row.is_pinned === true,
       snoozed_until: (row.snoozed_until as string) ?? null,
       last_synced: (row.last_synced as string) ?? null,
       raw_data: row.raw_data ? JSON.parse(row.raw_data as string) : null,
@@ -353,7 +253,7 @@ export class TaskQueries {
   }
 }
 
-// ---------- Rituals ----------
+// ─── Rituals ──────────────────────────────────────────────────────────────────
 
 export interface Ritual {
   id: number;
@@ -369,128 +269,52 @@ export interface Ritual {
 }
 
 export class RitualQueries {
-  constructor(private db: Database) {}
-
-  create(ritual: {
-    type: string;
-    date: string;
-    summary_md?: string;
-    planned_items?: string;
-    completed_items?: string;
-    blockers?: string;
-    openai_response_id?: string;
-    conversation?: string;
-    user_id?: number;
-  }): number {
-    this.db.run(
+  async create(ritual: {
+    type: string; date: string; summary_md?: string; planned_items?: string;
+    completed_items?: string; blockers?: string; openai_response_id?: string;
+    conversation?: string; user_id?: number;
+  }): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO rituals (type, date, summary_md, planned_items, completed_items, blockers, openai_response_id, conversation, user_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        ritual.type,
-        ritual.date,
-        ritual.summary_md ?? null,
-        ritual.planned_items ?? null,
-        ritual.completed_items ?? null,
-        ritual.blockers ?? null,
-        ritual.openai_response_id ?? null,
-        ritual.conversation ?? null,
-        ritual.user_id ?? null,
-      ]
+      [ritual.type, ritual.date, ritual.summary_md ?? null, ritual.planned_items ?? null,
+       ritual.completed_items ?? null, ritual.blockers ?? null, ritual.openai_response_id ?? null,
+       ritual.conversation ?? null, ritual.user_id ?? null]
     );
-    saveDb();
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    return (result[0]?.values[0]?.[0] as number) ?? 0;
   }
 
-  getByDate(date: string, type?: string, userId?: number): Ritual[] {
+  async getByDate(date: string, type?: string, userId?: number): Promise<Ritual[]> {
     let sql = `SELECT * FROM rituals WHERE date = ?`;
-    const params: (string | number)[] = [date];
-    if (type) {
-      sql += ` AND type = ?`;
-      params.push(type);
-    }
-    if (userId != null) {
-      sql += ` AND user_id = ?`;
-      params.push(userId);
-    }
+    const params: unknown[] = [date];
+    if (type) { sql += ` AND type = ?`; params.push(type); }
+    if (userId != null) { sql += ` AND user_id = ?`; params.push(userId); }
     sql += ` ORDER BY created_at DESC`;
-
-    const stmt = this.db.prepare(sql);
-    if (params.length > 0) stmt.bind(params);
-
-    const rituals: Ritual[] = [];
-    while (stmt.step()) {
-      rituals.push(this.rowToRitual(stmt.getAsObject() as Record<string, unknown>));
-    }
-    stmt.free();
-    return rituals;
+    return query<Ritual>(sql, params);
   }
 
-  getRecent(limit: number = 10): Ritual[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM rituals ORDER BY date DESC, created_at DESC LIMIT ?`
-    );
-    stmt.bind([limit]);
-
-    const rituals: Ritual[] = [];
-    while (stmt.step()) {
-      rituals.push(this.rowToRitual(stmt.getAsObject() as Record<string, unknown>));
-    }
-    stmt.free();
-    return rituals;
+  async getRecent(limit: number = 10): Promise<Ritual[]> {
+    return query<Ritual>(`SELECT TOP(?) * FROM rituals ORDER BY date DESC, created_at DESC`, [limit]);
   }
 
-  getById(id: number): Ritual | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM rituals WHERE id = ?`);
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const ritual = this.rowToRitual(stmt.getAsObject() as Record<string, unknown>);
-      stmt.free();
-      return ritual;
-    }
-    stmt.free();
-    return undefined;
+  async getById(id: number): Promise<Ritual | undefined> {
+    return queryOne<Ritual>(`SELECT * FROM rituals WHERE id = ?`, [id]);
   }
 
-  update(id: number, updates: {
-    summary_md?: string;
-    planned_items?: string;
-    completed_items?: string;
-    blockers?: string;
-  }): boolean {
+  async update(id: number, updates: { summary_md?: string; planned_items?: string; completed_items?: string; blockers?: string }): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
-
     if (updates.summary_md !== undefined) { fields.push('summary_md = ?'); params.push(updates.summary_md); }
     if (updates.planned_items !== undefined) { fields.push('planned_items = ?'); params.push(updates.planned_items); }
     if (updates.completed_items !== undefined) { fields.push('completed_items = ?'); params.push(updates.completed_items); }
     if (updates.blockers !== undefined) { fields.push('blockers = ?'); params.push(updates.blockers); }
-
     if (fields.length === 0) return false;
-
     params.push(id);
-    this.db.run(`UPDATE rituals SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
+    await execute(`UPDATE rituals SET ${fields.join(', ')} WHERE id = ?`, params);
     return true;
-  }
-
-  private rowToRitual(row: Record<string, unknown>): Ritual {
-    return {
-      id: row.id as number,
-      type: row.type as string,
-      date: row.date as string,
-      conversation: (row.conversation as string) ?? null,
-      summary_md: (row.summary_md as string) ?? null,
-      planned_items: (row.planned_items as string) ?? null,
-      completed_items: (row.completed_items as string) ?? null,
-      blockers: (row.blockers as string) ?? null,
-      openai_response_id: (row.openai_response_id as string) ?? null,
-      created_at: row.created_at as string,
-    };
   }
 }
 
-// ---------- Delivery Entries ----------
+// ─── Delivery Entries ─────────────────────────────────────────────────────────
 
 export interface DeliveryEntry {
   id: number;
@@ -517,150 +341,87 @@ export interface DeliveryEntry {
   updated_at: string;
 }
 
-// Brand prefix mapping — product name → short code for onboarding IDs
 const BRAND_PREFIXES: Record<string, string> = {
-  'BYM': 'BYM',
-  'KYM': 'KYM',
-  'Yomdel': 'YMD',
-  'Leadpro': 'LDP',
-  'TPJ': 'TPJ',
-  'Voice AI': 'VAI',
-  'GRS': 'GRS',
-  'Undeliverable': 'UND',
-  'SB - Web': 'SBW',
-  'SB - DM': 'SBD',
-  'Google Ad Spend': 'GAS',
-  'Google SEO': 'GSO',
-  'Guild Package': 'GLD',
+  'BYM': 'BYM', 'KYM': 'KYM', 'Yomdel': 'YMD', 'Leadpro': 'LDP', 'TPJ': 'TPJ',
+  'Voice AI': 'VAI', 'GRS': 'GRS', 'Undeliverable': 'UND', 'SB - Web': 'SBW',
+  'SB - DM': 'SBD', 'Google Ad Spend': 'GAS', 'Google SEO': 'GSO', 'Guild Package': 'GLD',
 };
 
 function getBrandPrefix(product: string): string {
   if (BRAND_PREFIXES[product]) return BRAND_PREFIXES[product];
-  // Fallback: first 3 uppercase chars
   return product.replace(/[^a-zA-Z]/g, '').substring(0, 3).toUpperCase() || 'UNK';
 }
 
 export class DeliveryQueries {
-  constructor(private db: Database) {}
-
-  /** Get the next available onboarding ID for a product, e.g. BYM0001 */
-  getNextOnboardingId(product: string): string {
+  async getNextOnboardingId(product: string): Promise<string> {
     const prefix = getBrandPrefix(product);
-    const stmt = this.db.prepare(
-      `SELECT onboarding_id FROM delivery_entries WHERE onboarding_id LIKE ? ORDER BY onboarding_id DESC LIMIT 1`
+    const row = await queryOne<{ onboarding_id: string }>(
+      `SELECT TOP 1 onboarding_id FROM delivery_entries WHERE onboarding_id LIKE ? ORDER BY onboarding_id DESC`,
+      [`${prefix}%`]
     );
-    stmt.bind([`${prefix}%`]);
     let nextNum = 1;
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      const lastId = row.onboarding_id as string;
-      const numPart = parseInt(lastId.substring(prefix.length), 10);
+    if (row) {
+      const numPart = parseInt(row.onboarding_id.substring(prefix.length), 10);
       if (!isNaN(numPart)) nextNum = numPart + 1;
     }
-    stmt.free();
     return `${prefix}${String(nextNum).padStart(4, '0')}`;
   }
 
-  /** Backfill onboarding IDs for all entries that don't have one */
-  backfillOnboardingIds(): number {
-    const stmt = this.db.prepare(`SELECT id, product FROM delivery_entries WHERE onboarding_id IS NULL ORDER BY id`);
-    const entries: Array<{ id: number; product: string }> = [];
-    while (stmt.step()) {
-      entries.push(stmt.getAsObject() as { id: number; product: string });
-    }
-    stmt.free();
+  async backfillOnboardingIds(): Promise<number> {
+    const entries = await query<{ id: number; product: string }>(
+      `SELECT id, product FROM delivery_entries WHERE onboarding_id IS NULL ORDER BY id`
+    );
     let count = 0;
     for (const entry of entries) {
-      const newId = this.getNextOnboardingId(entry.product);
-      this.db.run(`UPDATE delivery_entries SET onboarding_id = ? WHERE id = ?`, [newId, entry.id]);
+      const newId = await this.getNextOnboardingId(entry.product);
+      await execute(`UPDATE delivery_entries SET onboarding_id = ? WHERE id = ?`, [newId, entry.id]);
       count++;
     }
-    if (count > 0) saveDb();
     return count;
   }
 
-  getAll(product?: string): DeliveryEntry[] {
+  async getAll(product?: string): Promise<DeliveryEntry[]> {
     let sql = `SELECT * FROM delivery_entries`;
     const params: string[] = [];
-    if (product) {
-      sql += ` WHERE product = ?`;
-      params.push(product);
-    }
+    if (product) { sql += ` WHERE product = ?`; params.push(product); }
     sql += ` ORDER BY is_starred DESC, created_at DESC`;
-
-    const stmt = this.db.prepare(sql);
-    if (params.length > 0) stmt.bind(params);
-
-    const entries: DeliveryEntry[] = [];
-    while (stmt.step()) {
-      entries.push(stmt.getAsObject() as unknown as DeliveryEntry);
-    }
-    stmt.free();
-    return entries;
+    return query<DeliveryEntry>(sql, params);
   }
 
-  getById(id: number): DeliveryEntry | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_entries WHERE id = ?`);
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const entry = stmt.getAsObject() as unknown as DeliveryEntry;
-      stmt.free();
-      return entry;
-    }
-    stmt.free();
-    return undefined;
+  async getById(id: number): Promise<DeliveryEntry | undefined> {
+    return queryOne<DeliveryEntry>(`SELECT * FROM delivery_entries WHERE id = ?`, [id]);
   }
 
-  findByProductAccount(product: string, account: string): DeliveryEntry | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_entries WHERE product = ? AND account = ? LIMIT 1`);
-    stmt.bind([product, account]);
-    if (stmt.step()) {
-      const entry = stmt.getAsObject() as unknown as DeliveryEntry;
-      stmt.free();
-      return entry;
-    }
-    stmt.free();
-    return undefined;
+  async findByProductAccount(product: string, account: string): Promise<DeliveryEntry | undefined> {
+    return queryOne<DeliveryEntry>(`SELECT TOP 1 * FROM delivery_entries WHERE product = ? AND account = ?`, [product, account]);
   }
 
-  deleteDuplicates(): number {
-    // Keep the lowest id per product+account, delete the rest
-    const result = this.db.exec(
+  async deleteDuplicates(): Promise<number> {
+    const dupes = await query<{ id: number }>(
       `SELECT id FROM delivery_entries WHERE id NOT IN (SELECT MIN(id) FROM delivery_entries GROUP BY product, account)`
     );
-    if (!result[0] || result[0].values.length === 0) return 0;
-    const dupeIds = result[0].values.map((row: unknown[]) => row[0] as number);
-    this.db.run(`DELETE FROM delivery_entries WHERE id IN (${dupeIds.join(',')})`);
-    saveDb();
+    if (dupes.length === 0) return 0;
+    const dupeIds = dupes.map(r => r.id);
+    await execute(`DELETE FROM delivery_entries WHERE id IN (${dupeIds.join(',')})`);
     return dupeIds.length;
   }
 
-  create(entry: Omit<DeliveryEntry, 'id' | 'onboarding_id' | 'created_at' | 'updated_at'> & { onboarding_id?: string | null }): number {
-    const onboardingId = entry.onboarding_id || this.getNextOnboardingId(entry.product);
-    this.db.run(
+  async create(entry: Omit<DeliveryEntry, 'id' | 'onboarding_id' | 'created_at' | 'updated_at'> & { onboarding_id?: string | null }): Promise<number> {
+    const onboardingId = entry.onboarding_id || await this.getNextOnboardingId(entry.product);
+    return executeAndGetId(
       `INSERT INTO delivery_entries (onboarding_id, product, account, status, onboarder, order_date, go_live_date,
         predicted_delivery, training_date, branches, mrr, incremental, licence_fee, sale_type, crm_customer_id, is_starred, star_scope, starred_by, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        onboardingId,
-        entry.product, entry.account, entry.status ?? '',
-        entry.onboarder ?? null, entry.order_date ?? null, entry.go_live_date ?? null,
-        entry.predicted_delivery ?? null, entry.training_date ?? null,
-        entry.branches ?? null,
-        entry.mrr ?? null, entry.incremental ?? null, entry.licence_fee ?? null,
-        entry.sale_type ?? null,
-        entry.crm_customer_id ?? null,
-        entry.is_starred ?? 0, entry.star_scope ?? 'all', entry.starred_by ?? null,
-        entry.notes ?? null,
-      ]
+      [onboardingId, entry.product, entry.account, entry.status ?? '',
+       entry.onboarder ?? null, entry.order_date ?? null, entry.go_live_date ?? null,
+       entry.predicted_delivery ?? null, entry.training_date ?? null,
+       entry.branches ?? null, entry.mrr ?? null, entry.incremental ?? null, entry.licence_fee ?? null,
+       entry.sale_type ?? null, entry.crm_customer_id ?? null,
+       entry.is_starred ?? 0, entry.star_scope ?? 'all', entry.starred_by ?? null, entry.notes ?? null]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  update(id: number, updates: Partial<Omit<DeliveryEntry, 'id' | 'created_at' | 'updated_at'>>): boolean {
+  async update(id: number, updates: Partial<Omit<DeliveryEntry, 'id' | 'created_at' | 'updated_at'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     for (const [key, val] of Object.entries(updates)) {
@@ -668,45 +429,34 @@ export class DeliveryQueries {
       params.push(val ?? null);
     }
     if (fields.length === 0) return false;
-    fields.push(`updated_at = datetime('now')`);
+    fields.push(`updated_at = GETUTCDATE()`);
     params.push(id);
-    this.db.run(`UPDATE delivery_entries SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
-    return this.getById(id) !== undefined;
+    await execute(`UPDATE delivery_entries SET ${fields.join(', ')} WHERE id = ?`, params);
+    return (await this.getById(id)) !== undefined;
   }
 
-  delete(id: number): boolean {
-    const exists = this.getById(id);
+  async delete(id: number): Promise<boolean> {
+    const exists = await this.getById(id);
     if (!exists) return false;
-    this.db.run(`DELETE FROM delivery_entries WHERE id = ?`, [id]);
-    saveDb();
+    await execute(`DELETE FROM delivery_entries WHERE id = ?`, [id]);
     return true;
   }
 
-  toggleStar(id: number, userId?: number): boolean {
-    const entry = this.getById(id);
+  async toggleStar(id: number, userId?: number): Promise<boolean> {
+    const entry = await this.getById(id);
     if (!entry) return false;
     const newVal = entry.is_starred ? 0 : 1;
     const params: unknown[] = [newVal];
     let sql = `UPDATE delivery_entries SET is_starred = ?`;
-    if (newVal && userId) {
-      sql += `, starred_by = ?`;
-      params.push(userId);
-    }
-    if (!newVal) {
-      sql += `, starred_by = NULL, star_scope = 'me'`;
-    }
-    sql += `, updated_at = datetime('now') WHERE id = ?`;
+    if (newVal && userId) { sql += `, starred_by = ?`; params.push(userId); }
+    if (!newVal) { sql += `, starred_by = NULL, star_scope = 'me'`; }
+    sql += `, updated_at = GETUTCDATE() WHERE id = ?`;
     params.push(id);
-    this.db.run(sql, params as (string | number | null)[]);
-    saveDb();
+    await execute(sql, params);
     return true;
   }
 
-  /** Entries relevant to the current user's focus:
-   *  - starred by me (star_scope='me') or starred for all (star_scope='all')
-   *  - onboarder matches me AND has at least one overdue milestone */
-  getMyFocus(userId: number, userNames: string[]): DeliveryEntry[] {
+  async getMyFocus(userId: number, userNames: string[]): Promise<DeliveryEntry[]> {
     const conditions: string[] = [
       `(de.is_starred = 1 AND (de.starred_by = ? OR de.star_scope = 'all'))`,
     ];
@@ -718,88 +468,51 @@ export class DeliveryQueries {
         (${nameClauses.join(' OR ')})
         AND EXISTS (
           SELECT 1 FROM delivery_milestones dm
-          WHERE dm.delivery_id = de.id AND dm.status != 'complete' AND dm.target_date < date('now')
+          WHERE dm.delivery_id = de.id AND dm.status != 'complete' AND dm.target_date < CAST(GETUTCDATE() AS DATE)
         )
       )`);
-      for (const name of userNames) {
-        params.push(`%${name.toLowerCase()}%`);
-      }
+      for (const name of userNames) params.push(`%${name.toLowerCase()}%`);
     }
 
     const sql = `SELECT de.* FROM delivery_entries de WHERE ${conditions.join(' OR ')} ORDER BY de.is_starred DESC, de.updated_at DESC`;
-    const stmt = this.db.prepare(sql);
-    stmt.bind(params as (string | number | null)[]);
-
-    const entries: DeliveryEntry[] = [];
-    while (stmt.step()) {
-      entries.push(stmt.getAsObject() as unknown as DeliveryEntry);
-    }
-    stmt.free();
-    return entries;
+    return query<DeliveryEntry>(sql, params);
   }
 
-  getProducts(): string[] {
-    const stmt = this.db.prepare(`SELECT DISTINCT product FROM delivery_entries ORDER BY product`);
-    const products: string[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      products.push(row.product as string);
-    }
-    stmt.free();
-    return products;
+  async getProducts(): Promise<string[]> {
+    const rows = await query<{ product: string }>(`SELECT DISTINCT product FROM delivery_entries ORDER BY product`);
+    return rows.map(r => r.product);
   }
 
-  updateAzDoFields(deliveryId: number, branchName: string | null, prUrl: string | null): boolean {
-    this.db.run(
+  async updateAzDoFields(deliveryId: number, branchName: string | null, prUrl: string | null): Promise<boolean> {
+    const result = await execute(
       `UPDATE delivery_entries SET azdo_branch_name = ?, azdo_pr_url = ? WHERE id = ?`,
       [branchName, prUrl, deliveryId]
     );
-    saveDb();
-    return this.db.getRowsModified() > 0;
+    return result.rowsAffected > 0;
   }
 }
 
-// ---------- CRM ----------
+// ─── CRM ──────────────────────────────────────────────────────────────────────
 
 export type RagStatus = 'red' | 'amber' | 'green';
 
 export interface CrmCustomer {
-  id: number;
-  name: string;
-  company: string | null;
-  sector: string | null;
-  mrr: number | null;
-  owner: string | null;
-  rag_status: RagStatus;
-  next_review_date: string | null;
-  contract_start: string | null;
-  contract_end: string | null;
-  dynamics_id: string | null;
-  account_number: string | null;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
+  id: number; name: string; company: string | null; sector: string | null;
+  mrr: number | null; owner: string | null; rag_status: RagStatus;
+  next_review_date: string | null; contract_start: string | null;
+  contract_end: string | null; dynamics_id: string | null;
+  account_number: string | null; notes: string | null;
+  created_at: string; updated_at: string;
 }
 
 export interface CrmReview {
-  id: number;
-  customer_id: number;
-  review_date: string;
-  rag_status: RagStatus;
-  outcome: string | null;
-  actions: string | null;
-  reviewer: string | null;
-  next_review_date: string | null;
-  notes: string | null;
-  created_at: string;
+  id: number; customer_id: number; review_date: string; rag_status: RagStatus;
+  outcome: string | null; actions: string | null; reviewer: string | null;
+  next_review_date: string | null; notes: string | null; created_at: string;
 }
 
 export class CrmQueries {
-  constructor(private db: Database) {}
-
-  // --- Customers ---
-
-  getAllCustomers(filters?: { rag_status?: string; owner?: string; search?: string }): CrmCustomer[] {
+  async getAllCustomers(filters?: { rag_status?: string; owner?: string; search?: string }): Promise<CrmCustomer[]> {
     let sql = `SELECT * FROM crm_customers WHERE 1=1`;
     const params: string[] = [];
     if (filters?.rag_status) { sql += ` AND rag_status = ?`; params.push(filters.rag_status); }
@@ -809,38 +522,24 @@ export class CrmQueries {
       params.push(`%${filters.search}%`, `%${filters.search}%`);
     }
     sql += ` ORDER BY CASE rag_status WHEN 'red' THEN 0 WHEN 'amber' THEN 1 WHEN 'green' THEN 2 END, next_review_date ASC`;
-
-    const stmt = this.db.prepare(sql);
-    if (params.length > 0) stmt.bind(params);
-    const results: CrmCustomer[] = [];
-    while (stmt.step()) { results.push(stmt.getAsObject() as unknown as CrmCustomer); }
-    stmt.free();
-    return results;
+    return query<CrmCustomer>(sql, params);
   }
 
-  getCustomerById(id: number): CrmCustomer | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM crm_customers WHERE id = ?`);
-    stmt.bind([id]);
-    if (stmt.step()) { const c = stmt.getAsObject() as unknown as CrmCustomer; stmt.free(); return c; }
-    stmt.free();
-    return undefined;
+  async getCustomerById(id: number): Promise<CrmCustomer | undefined> {
+    return queryOne<CrmCustomer>(`SELECT * FROM crm_customers WHERE id = ?`, [id]);
   }
 
-  createCustomer(c: Omit<CrmCustomer, 'id' | 'created_at' | 'updated_at'>): number {
-    this.db.run(
+  async createCustomer(c: Omit<CrmCustomer, 'id' | 'created_at' | 'updated_at'>): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO crm_customers (name, company, sector, mrr, owner, rag_status, next_review_date, contract_start, contract_end, dynamics_id, account_number, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [c.name, c.company ?? null, c.sector ?? null, c.mrr ?? null, c.owner ?? null,
        c.rag_status ?? 'green', c.next_review_date ?? null, c.contract_start ?? null,
        c.contract_end ?? null, c.dynamics_id ?? null, c.account_number ?? null, c.notes ?? null]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  updateCustomer(id: number, updates: Partial<Omit<CrmCustomer, 'id' | 'created_at' | 'updated_at'>>): boolean {
+  async updateCustomer(id: number, updates: Partial<Omit<CrmCustomer, 'id' | 'created_at' | 'updated_at'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     for (const [key, val] of Object.entries(updates)) {
@@ -848,79 +547,56 @@ export class CrmQueries {
       params.push(val ?? null);
     }
     if (fields.length === 0) return false;
-    fields.push(`updated_at = datetime('now')`);
+    fields.push(`updated_at = GETUTCDATE()`);
     params.push(id);
-    this.db.run(`UPDATE crm_customers SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
-    return this.getCustomerById(id) !== undefined;
+    await execute(`UPDATE crm_customers SET ${fields.join(', ')} WHERE id = ?`, params);
+    return (await this.getCustomerById(id)) !== undefined;
   }
 
-  deleteCustomer(id: number): boolean {
-    const exists = this.getCustomerById(id);
+  async deleteCustomer(id: number): Promise<boolean> {
+    const exists = await this.getCustomerById(id);
     if (!exists) return false;
-    this.db.run(`DELETE FROM crm_reviews WHERE customer_id = ?`, [id]);
-    this.db.run(`DELETE FROM crm_customers WHERE id = ?`, [id]);
-    saveDb();
+    await execute(`DELETE FROM crm_reviews WHERE customer_id = ?`, [id]);
+    await execute(`DELETE FROM crm_customers WHERE id = ?`, [id]);
     return true;
   }
 
-  deleteAllCustomers(): number {
-    const count = this.getAllCustomers({}).length;
-    this.db.run(`DELETE FROM crm_reviews`);
-    this.db.run(`DELETE FROM crm_customers`);
-    saveDb();
+  async deleteAllCustomers(): Promise<number> {
+    const all = await this.getAllCustomers({});
+    const count = all.length;
+    await execute(`DELETE FROM crm_reviews`);
+    await execute(`DELETE FROM crm_customers`);
     return count;
   }
 
-  getOwners(): string[] {
-    const stmt = this.db.prepare(`SELECT DISTINCT owner FROM crm_customers WHERE owner IS NOT NULL AND owner != '' ORDER BY owner`);
-    const owners: string[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      if (row.owner) owners.push(row.owner as string);
-    }
-    stmt.free();
-    return owners;
+  async getOwners(): Promise<string[]> {
+    const rows = await query<{ owner: string }>(`SELECT DISTINCT owner FROM crm_customers WHERE owner IS NOT NULL AND owner != '' ORDER BY owner`);
+    return rows.map(r => r.owner);
   }
 
-  // --- Reviews ---
-
-  getReviewsForCustomer(customerId: number): CrmReview[] {
-    const stmt = this.db.prepare(`SELECT * FROM crm_reviews WHERE customer_id = ? ORDER BY review_date DESC`);
-    stmt.bind([customerId]);
-    const results: CrmReview[] = [];
-    while (stmt.step()) { results.push(stmt.getAsObject() as unknown as CrmReview); }
-    stmt.free();
-    return results;
+  async getReviewsForCustomer(customerId: number): Promise<CrmReview[]> {
+    return query<CrmReview>(`SELECT * FROM crm_reviews WHERE customer_id = ? ORDER BY review_date DESC`, [customerId]);
   }
 
-  getReviewById(id: number): CrmReview | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM crm_reviews WHERE id = ?`);
-    stmt.bind([id]);
-    if (stmt.step()) { const r = stmt.getAsObject() as unknown as CrmReview; stmt.free(); return r; }
-    stmt.free();
-    return undefined;
+  async getReviewById(id: number): Promise<CrmReview | undefined> {
+    return queryOne<CrmReview>(`SELECT * FROM crm_reviews WHERE id = ?`, [id]);
   }
 
-  createReview(r: Omit<CrmReview, 'id' | 'created_at'>): number {
-    this.db.run(
+  async createReview(r: Omit<CrmReview, 'id' | 'created_at'>): Promise<number> {
+    const id = await executeAndGetId(
       `INSERT INTO crm_reviews (customer_id, review_date, rag_status, outcome, actions, reviewer, next_review_date, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [r.customer_id, r.review_date, r.rag_status, r.outcome ?? null, r.actions ?? null,
        r.reviewer ?? null, r.next_review_date ?? null, r.notes ?? null]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    // Propagate RAG + next review to parent customer
-    this.db.run(
-      `UPDATE crm_customers SET rag_status = ?, next_review_date = COALESCE(?, next_review_date), updated_at = datetime('now') WHERE id = ?`,
+    await execute(
+      `UPDATE crm_customers SET rag_status = ?, next_review_date = COALESCE(?, next_review_date), updated_at = GETUTCDATE() WHERE id = ?`,
       [r.rag_status, r.next_review_date ?? null, r.customer_id]
     );
-    saveDb();
     return id;
   }
 
-  updateReview(id: number, updates: Partial<Omit<CrmReview, 'id' | 'created_at'>>): boolean {
+  async updateReview(id: number, updates: Partial<Omit<CrmReview, 'id' | 'created_at'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     for (const [key, val] of Object.entries(updates)) {
@@ -929,103 +605,68 @@ export class CrmQueries {
     }
     if (fields.length === 0) return false;
     params.push(id);
-    this.db.run(`UPDATE crm_reviews SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
-    return this.getReviewById(id) !== undefined;
+    await execute(`UPDATE crm_reviews SET ${fields.join(', ')} WHERE id = ?`, params);
+    return (await this.getReviewById(id)) !== undefined;
   }
 
-  deleteReview(id: number): boolean {
-    const exists = this.getReviewById(id);
+  async deleteReview(id: number): Promise<boolean> {
+    const exists = await this.getReviewById(id);
     if (!exists) return false;
-    this.db.run(`DELETE FROM crm_reviews WHERE id = ?`, [id]);
-    saveDb();
+    await execute(`DELETE FROM crm_reviews WHERE id = ?`, [id]);
     return true;
   }
 
-  getSummary(): { total: number; red: number; amber: number; green: number; overdueReviews: number; totalMrr: number } {
-    const stmt = this.db.prepare(`
+  async getSummary(): Promise<{ total: number; red: number; amber: number; green: number; overdueReviews: number; totalMrr: number }> {
+    const row = await queryOne<Record<string, unknown>>(`
       SELECT
         COUNT(*) as total,
         SUM(CASE WHEN rag_status = 'red' THEN 1 ELSE 0 END) as red,
         SUM(CASE WHEN rag_status = 'amber' THEN 1 ELSE 0 END) as amber,
         SUM(CASE WHEN rag_status = 'green' THEN 1 ELSE 0 END) as green,
-        SUM(CASE WHEN next_review_date < date('now') THEN 1 ELSE 0 END) as overdueReviews,
+        SUM(CASE WHEN next_review_date < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as overdueReviews,
         COALESCE(SUM(mrr), 0) as totalMrr
       FROM crm_customers
     `);
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      stmt.free();
-      return {
-        total: (row.total as number) ?? 0,
-        red: (row.red as number) ?? 0,
-        amber: (row.amber as number) ?? 0,
-        green: (row.green as number) ?? 0,
-        overdueReviews: (row.overdueReviews as number) ?? 0,
-        totalMrr: (row.totalMrr as number) ?? 0,
-      };
-    }
-    stmt.free();
-    return { total: 0, red: 0, amber: 0, green: 0, overdueReviews: 0, totalMrr: 0 };
+    if (!row) return { total: 0, red: 0, amber: 0, green: 0, overdueReviews: 0, totalMrr: 0 };
+    return {
+      total: (row.total as number) ?? 0, red: (row.red as number) ?? 0,
+      amber: (row.amber as number) ?? 0, green: (row.green as number) ?? 0,
+      overdueReviews: (row.overdueReviews as number) ?? 0, totalMrr: (row.totalMrr as number) ?? 0,
+    };
   }
 }
 
-// ---------- Users ----------
+// ─── Users ────────────────────────────────────────────────────────────────────
 
 export interface User {
-  id: number;
-  username: string;
-  display_name: string | null;
-  email: string | null;
-  password_hash: string;
-  role: string;
-  auth_provider: string;
-  provider_id: string | null;
-  created_at: string;
-  updated_at: string;
+  id: number; username: string; display_name: string | null; email: string | null;
+  password_hash: string; role: string; auth_provider: string;
+  provider_id: string | null; created_at: string; updated_at: string;
 }
 
 export class UserQueries {
-  constructor(private db: Database) {}
-
-  getByUsername(username: string): User | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM users WHERE username = ?`);
-    stmt.bind([username]);
-    if (stmt.step()) { const u = stmt.getAsObject() as unknown as User; stmt.free(); return u; }
-    stmt.free();
-    return undefined;
+  async getByUsername(username: string): Promise<User | undefined> {
+    return queryOne<User>(`SELECT * FROM users WHERE username = ?`, [username]);
   }
 
-  getById(id: number): User | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM users WHERE id = ?`);
-    stmt.bind([id]);
-    if (stmt.step()) { const u = stmt.getAsObject() as unknown as User; stmt.free(); return u; }
-    stmt.free();
-    return undefined;
+  async getById(id: number): Promise<User | undefined> {
+    return queryOne<User>(`SELECT * FROM users WHERE id = ?`, [id]);
   }
 
-  getByProviderId(provider: string, providerId: string): User | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM users WHERE auth_provider = ? AND provider_id = ?`);
-    stmt.bind([provider, providerId]);
-    if (stmt.step()) { const u = stmt.getAsObject() as unknown as User; stmt.free(); return u; }
-    stmt.free();
-    return undefined;
+  async getByProviderId(provider: string, providerId: string): Promise<User | undefined> {
+    return queryOne<User>(`SELECT * FROM users WHERE auth_provider = ? AND provider_id = ?`, [provider, providerId]);
   }
 
-  create(user: { username: string; display_name?: string; email?: string; password_hash: string; role?: string; auth_provider?: string; provider_id?: string }): number {
-    this.db.run(
+  async create(user: { username: string; display_name?: string; email?: string; password_hash: string; role?: string; auth_provider?: string; provider_id?: string }): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO users (username, display_name, email, password_hash, role, auth_provider, provider_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [user.username, user.display_name ?? null, user.email ?? null, user.password_hash,
        user.role ?? 'viewer', user.auth_provider ?? 'local', user.provider_id ?? null]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  update(id: number, updates: Partial<Omit<User, 'id' | 'created_at'>>): boolean {
+  async update(id: number, updates: Partial<Omit<User, 'id' | 'created_at'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     for (const [key, val] of Object.entries(updates)) {
@@ -1033,90 +674,63 @@ export class UserQueries {
       params.push(val ?? null);
     }
     if (fields.length === 0) return false;
-    fields.push(`updated_at = datetime('now')`);
+    fields.push(`updated_at = GETUTCDATE()`);
     params.push(id);
-    this.db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
-    return this.getById(id) !== undefined;
+    await execute(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, params);
+    return (await this.getById(id)) !== undefined;
   }
 
-  count(): number {
-    const stmt = this.db.prepare(`SELECT COUNT(*) as c FROM users`);
-    let count = 0;
-    if (stmt.step()) { count = (stmt.getAsObject() as Record<string, unknown>).c as number; }
-    stmt.free();
-    return count;
+  async count(): Promise<number> {
+    const row = await queryOne<{ c: number }>(`SELECT COUNT(*) as c FROM users`);
+    return row?.c ?? 0;
   }
 
-  getAll(): Omit<User, 'password_hash'>[] {
-    const stmt = this.db.prepare(`SELECT id, username, display_name, email, role, auth_provider, provider_id, team_id, created_at, updated_at FROM users ORDER BY LOWER(display_name), LOWER(username)`);
-    const users: Omit<User, 'password_hash'>[] = [];
-    while (stmt.step()) { users.push(stmt.getAsObject() as unknown as Omit<User, 'password_hash'>); }
-    stmt.free();
-    return users;
+  async getAll(): Promise<Omit<User, 'password_hash'>[]> {
+    return query<Omit<User, 'password_hash'>>(
+      `SELECT id, username, display_name, email, role, auth_provider, provider_id, team_id, created_at, updated_at FROM users ORDER BY LOWER(display_name), LOWER(username)`
+    );
   }
 
-  delete(id: number): boolean {
-    this.db.run(`DELETE FROM users WHERE id = ?`, [id]);
-    this.db.run(`DELETE FROM user_settings WHERE user_id = ?`, [id]);
-    saveDb();
+  async delete(id: number): Promise<boolean> {
+    await execute(`DELETE FROM users WHERE id = ?`, [id]);
+    await execute(`DELETE FROM user_settings WHERE user_id = ?`, [id]);
     return true;
   }
 }
 
-// ---------- Teams ----------
+// ─── Teams ────────────────────────────────────────────────────────────────────
+
 export interface Team {
-  id: number;
-  name: string;
-  description: string | null;
-  created_at: string;
-  jira_products: string[] | null; // empty/null = sees all Dev Review tickets
+  id: number; name: string; description: string | null; created_at: string;
+  jira_products: string[] | null;
+  jira_project_key: string | null;
 }
 
 export class TeamQueries {
-  constructor(private db: Database) {}
-
   private rowToTeam(row: Record<string, unknown>): Team {
     const raw = row.jira_products as string | null;
     let products: string[] | null = null;
-    if (raw) {
-      try { products = JSON.parse(raw); } catch { products = null; }
-    }
-    return {
-      id: row.id as number,
-      name: row.name as string,
-      description: (row.description as string | null) ?? null,
-      created_at: row.created_at as string,
-      jira_products: products,
-    };
+    if (raw) { try { products = JSON.parse(raw); } catch { products = null; } }
+    return { id: row.id as number, name: row.name as string,
+      description: (row.description as string | null) ?? null, created_at: row.created_at as string,
+      jira_products: products, jira_project_key: (row.jira_project_key as string | null) ?? null };
   }
 
-  getAll(): Team[] {
-    const stmt = this.db.prepare(`SELECT * FROM teams ORDER BY name`);
-    const teams: Team[] = [];
-    while (stmt.step()) { teams.push(this.rowToTeam(stmt.getAsObject())); }
-    stmt.free();
-    return teams;
+  async getAll(): Promise<Team[]> {
+    const rows = await query<Record<string, unknown>>(`SELECT * FROM teams ORDER BY name`);
+    return rows.map(r => this.rowToTeam(r));
   }
 
-  getById(id: number): Team | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM teams WHERE id = ?`);
-    stmt.bind([id]);
-    let team: Team | undefined;
-    if (stmt.step()) team = this.rowToTeam(stmt.getAsObject());
-    stmt.free();
-    return team;
+  async getById(id: number): Promise<Team | undefined> {
+    const row = await queryOne<Record<string, unknown>>(`SELECT * FROM teams WHERE id = ?`, [id]);
+    return row ? this.rowToTeam(row) : undefined;
   }
 
-  create(name: string, description?: string): number {
-    this.db.run(`INSERT INTO teams (name, description) VALUES (?, ?)`, [name, description ?? null]);
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
+  async create(name: string, description?: string): Promise<number> {
+    return executeAndGetId(`INSERT INTO teams (name, description) VALUES (?, ?)`, [name, description ?? null]);
   }
 
-  update(id: number, updates: { name?: string; description?: string; jira_products?: string[] | null }): boolean {
+  async update(id: number, updates: { name?: string; description?: string; jira_products?: string[] | null; jira_project_key?: string | null }): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
@@ -1125,244 +739,149 @@ export class TeamQueries {
       fields.push('jira_products = ?');
       params.push(updates.jira_products && updates.jira_products.length > 0 ? JSON.stringify(updates.jira_products) : null);
     }
+    if (updates.jira_project_key !== undefined) {
+      fields.push('jira_project_key = ?');
+      params.push(updates.jira_project_key?.trim() || null);
+    }
     if (fields.length === 0) return false;
     params.push(id);
-    this.db.run(`UPDATE teams SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
+    await execute(`UPDATE teams SET ${fields.join(', ')} WHERE id = ?`, params);
     return true;
   }
 
-  delete(id: number): boolean {
-    this.db.run(`UPDATE users SET team_id = NULL WHERE team_id = ?`, [id]);
-    this.db.run(`DELETE FROM teams WHERE id = ?`, [id]);
-    saveDb();
+  async delete(id: number): Promise<boolean> {
+    await execute(`UPDATE users SET team_id = NULL WHERE team_id = ?`, [id]);
+    await execute(`DELETE FROM teams WHERE id = ?`, [id]);
     return true;
   }
 }
 
-// ---------- User Settings (per-user key/value) ----------
+// ─── User Settings ────────────────────────────────────────────────────────────
+
 export class UserSettingsQueries {
-  constructor(private db: Database) {}
-
-  get(userId: number, key: string): string | null {
-    const stmt = this.db.prepare(`SELECT value FROM user_settings WHERE user_id = ? AND key = ?`);
-    stmt.bind([userId, key]);
-    if (stmt.step()) { const row = stmt.getAsObject() as Record<string, unknown>; stmt.free(); return (row.value as string) ?? null; }
-    stmt.free();
-    return null;
+  async get(userId: number, key: string): Promise<string | null> {
+    const row = await queryOne<{ value: string }>(`SELECT value FROM user_settings WHERE user_id = ? AND [key] = ?`, [userId, key]);
+    return row?.value ?? null;
   }
 
-  set(userId: number, key: string, value: string): void {
-    this.db.run(
-      `INSERT INTO user_settings (user_id, key, value, updated_at) VALUES (?, ?, ?, datetime('now'))
-       ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-      [userId, key, value]
-    );
-    saveDb();
+  async set(userId: number, key: string, value: string): Promise<void> {
+    await execute(`
+      MERGE INTO user_settings WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?, ?)) AS source(user_id, [key], value)
+      ON target.user_id = source.user_id AND target.[key] = source.[key]
+      WHEN MATCHED THEN UPDATE SET value = source.value, updated_at = GETUTCDATE()
+      WHEN NOT MATCHED THEN INSERT (user_id, [key], value, updated_at) VALUES (source.user_id, source.[key], source.value, GETUTCDATE());
+    `, [userId, key, value]);
   }
 
-  delete(userId: number, key: string): void {
-    this.db.run(`DELETE FROM user_settings WHERE user_id = ? AND key = ?`, [userId, key]);
-    saveDb();
+  async delete(userId: number, key: string): Promise<void> {
+    await execute(`DELETE FROM user_settings WHERE user_id = ? AND [key] = ?`, [userId, key]);
   }
 
-  getAllForUser(userId: number): Record<string, string> {
-    const stmt = this.db.prepare(`SELECT key, value FROM user_settings WHERE user_id = ?`);
-    stmt.bind([userId]);
+  async getAllForUser(userId: number): Promise<Record<string, string>> {
+    const rows = await query<{ key: string; value: string }>(`SELECT [key], value FROM user_settings WHERE user_id = ?`, [userId]);
     const result: Record<string, string> = {};
-    while (stmt.step()) { const row = stmt.getAsObject() as Record<string, unknown>; result[row.key as string] = row.value as string; }
-    stmt.free();
+    for (const row of rows) result[row.key] = row.value;
     return result;
   }
 }
 
-// ---------- Feedback ----------
+// ─── Feedback ─────────────────────────────────────────────────────────────────
 
 export interface Feedback {
-  id: number;
-  user_id: number;
-  type: 'bug' | 'question' | 'feature';
-  title: string;
-  description: string | null;
-  status: string;
-  created_at: string;
-  admin_reply: string | null;
-  admin_reply_at: string | null;
-  admin_reply_by: number | null;
-  task_id: number | null;
+  id: number; user_id: number; type: 'bug' | 'question' | 'feature';
+  title: string; description: string | null; status: string; created_at: string;
+  admin_reply: string | null; admin_reply_at: string | null;
+  admin_reply_by: number | null; task_id: number | null;
 }
 
 export class FeedbackQueries {
-  constructor(private db: Database) {}
-
-  create(entry: { user_id: number; type: string; title: string; description?: string }): number {
-    this.db.run(
+  async create(entry: { user_id: number; type: string; title: string; description?: string }): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO feedback (user_id, type, title, description) VALUES (?, ?, ?, ?)`,
       [entry.user_id, entry.type, entry.title, entry.description ?? null]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  getByUser(userId: number, filters?: { hideResolved?: boolean }): Feedback[] {
+  async getByUser(userId: number, filters?: { hideResolved?: boolean }): Promise<Feedback[]> {
     let sql = `SELECT * FROM feedback WHERE user_id = ?`;
-    const params: (string | number)[] = [userId];
+    const params: unknown[] = [userId];
     if (filters?.hideResolved) { sql += ` AND status != 'resolved'`; }
     sql += ` ORDER BY created_at DESC`;
-    const stmt = this.db.prepare(sql);
-    stmt.bind(params);
-    const results: Feedback[] = [];
-    while (stmt.step()) { results.push(stmt.getAsObject() as unknown as Feedback); }
-    stmt.free();
-    return results;
+    return query<Feedback>(sql, params);
   }
 
-  getAll(filters?: { status?: string }): (Feedback & { username?: string })[] {
+  async getAll(filters?: { status?: string }): Promise<(Feedback & { username?: string })[]> {
     let sql = `SELECT f.*, u.username FROM feedback f LEFT JOIN users u ON f.user_id = u.id WHERE 1=1`;
     const params: string[] = [];
     if (filters?.status) { sql += ` AND f.status = ?`; params.push(filters.status); }
     sql += ` ORDER BY f.created_at DESC`;
-    const stmt = this.db.prepare(sql);
-    if (params.length > 0) stmt.bind(params);
-    const results: (Feedback & { username?: string })[] = [];
-    while (stmt.step()) { results.push(stmt.getAsObject() as unknown as Feedback & { username?: string }); }
-    stmt.free();
-    return results;
+    return query<Feedback & { username?: string }>(sql, params);
   }
 
-  updateStatus(id: number, status: string): boolean {
-    this.db.run(`UPDATE feedback SET status = ? WHERE id = ?`, [status, id]);
-    saveDb();
+  async updateStatus(id: number, status: string): Promise<boolean> {
+    await execute(`UPDATE feedback SET status = ? WHERE id = ?`, [status, id]);
     return true;
   }
 
-  reply(id: number, reply: string, adminUserId: number): boolean {
-    this.db.run(
-      `UPDATE feedback SET admin_reply = ?, admin_reply_at = datetime('now'), admin_reply_by = ?, status = 'reviewed' WHERE id = ?`,
-      [reply, adminUserId, id]
+  async reply(id: number, replyText: string, adminUserId: number): Promise<boolean> {
+    await execute(
+      `UPDATE feedback SET admin_reply = ?, admin_reply_at = GETUTCDATE(), admin_reply_by = ?, status = 'reviewed' WHERE id = ?`,
+      [replyText, adminUserId, id]
     );
-    saveDb();
     return true;
   }
 
-  linkTask(id: number, taskId: number): boolean {
-    this.db.run(`UPDATE feedback SET task_id = ? WHERE id = ?`, [taskId, id]);
-    saveDb();
+  async linkTask(id: number, taskId: number): Promise<boolean> {
+    await execute(`UPDATE feedback SET task_id = ? WHERE id = ?`, [taskId, id]);
     return true;
   }
 
-  getById(id: number): (Feedback & { username?: string }) | null {
-    const stmt = this.db.prepare(
-      `SELECT f.*, u.username FROM feedback f LEFT JOIN users u ON f.user_id = u.id WHERE f.id = ?`
-    );
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as unknown as Feedback & { username?: string };
-      stmt.free();
-      return row;
-    }
-    stmt.free();
-    return null;
+  async getById(id: number): Promise<(Feedback & { username?: string }) | null> {
+    return (await queryOne<Feedback & { username?: string }>(
+      `SELECT f.*, u.username FROM feedback f LEFT JOIN users u ON f.user_id = u.id WHERE f.id = ?`, [id]
+    )) ?? null;
   }
 
-  delete(id: number): boolean {
-    this.db.run(`DELETE FROM feedback WHERE id = ?`, [id]);
-    saveDb();
+  async delete(id: number): Promise<boolean> {
+    await execute(`DELETE FROM feedback WHERE id = ?`, [id]);
     return true;
   }
 }
 
-// ---------- Onboarding Config ----------
+// ─── Onboarding Config ───────────────────────────────────────────────────────
 
 export interface OnboardingTicketGroup {
-  id: number;
-  name: string;
-  sort_order: number;
-  active: number;
-  display_name: string | null;
-  traffic_light_group: string | null;
-  created_at: string;
+  id: number; name: string; sort_order: number; active: number;
+  display_name: string | null; traffic_light_group: string | null; created_at: string;
 }
-
 export interface OnboardingSaleType {
-  id: number;
-  name: string;
-  sort_order: number;
-  active: number;
-  jira_tickets_required: number;
-  created_at: string;
+  id: number; name: string; sort_order: number; active: number;
+  jira_tickets_required: number; created_at: string;
 }
-
 export interface OnboardingCapability {
-  id: number;
-  name: string;
-  code: string | null;
-  ticket_group_id: number | null;
-  ticket_group_name?: string;
-  sort_order: number;
-  active: number;
-  created_at: string;
-  item_count?: number;
+  id: number; name: string; code: string | null; ticket_group_id: number | null;
+  ticket_group_name?: string; sort_order: number; active: number;
+  created_at: string; item_count?: number;
 }
-
-export interface OnboardingMatrixCell {
-  id: number;
-  sale_type_id: number;
-  capability_id: number;
-  enabled: number;
-  notes: string | null;
-}
-
+export interface OnboardingMatrixCell { id: number; sale_type_id: number; capability_id: number; enabled: number; notes: string | null; }
 export interface OnboardingCapabilityItem {
-  id: number;
-  capability_id: number;
-  name: string;
-  is_bolt_on: number;
-  sort_order: number;
-  active: number;
-  created_at: string;
+  id: number; capability_id: number; name: string; is_bolt_on: number;
+  sort_order: number; active: number; created_at: string;
 }
-
-export interface ResolvedCapability {
-  capabilityId: number;
-  capabilityName: string;
-  code: string | null;
-  items: string[];
-}
-
-export interface ResolvedTicketGroup {
-  ticketGroupId: number | null;
-  ticketGroupName: string;
-  capabilities: ResolvedCapability[];
-}
+export interface ResolvedCapability { capabilityId: number; capabilityName: string; code: string | null; items: string[]; }
+export interface ResolvedTicketGroup { ticketGroupId: number | null; ticketGroupName: string; capabilities: ResolvedCapability[]; }
 
 export class OnboardingConfigQueries {
-  constructor(private db: Database) {}
-
-  // ── Ticket Groups ──
-
-  getAllTicketGroups(): OnboardingTicketGroup[] {
-    const stmt = this.db.prepare(`SELECT * FROM onboarding_ticket_groups ORDER BY sort_order, name`);
-    const results: OnboardingTicketGroup[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingTicketGroup);
-    stmt.free();
-    return results;
+  async getAllTicketGroups(): Promise<OnboardingTicketGroup[]> {
+    return query<OnboardingTicketGroup>(`SELECT * FROM onboarding_ticket_groups ORDER BY sort_order, name`);
   }
 
-  createTicketGroup(name: string, sortOrder?: number): number {
-    this.db.run(
-      `INSERT INTO onboarding_ticket_groups (name, sort_order) VALUES (?, ?)`,
-      [name, sortOrder ?? 0]
-    );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
+  async createTicketGroup(name: string, sortOrder?: number): Promise<number> {
+    return executeAndGetId(`INSERT INTO onboarding_ticket_groups (name, sort_order) VALUES (?, ?)`, [name, sortOrder ?? 0]);
   }
 
-  updateTicketGroup(id: number, updates: { name?: string; sort_order?: number; active?: number; display_name?: string | null; traffic_light_group?: string | null }): boolean {
+  async updateTicketGroup(id: number, updates: { name?: string; sort_order?: number; active?: number; display_name?: string | null; traffic_light_group?: string | null }): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
@@ -1372,59 +891,43 @@ export class OnboardingConfigQueries {
     if (updates.traffic_light_group !== undefined) { fields.push('traffic_light_group = ?'); params.push(updates.traffic_light_group); }
     if (fields.length === 0) return false;
     params.push(id);
-    this.db.run(`UPDATE onboarding_ticket_groups SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
+    await execute(`UPDATE onboarding_ticket_groups SET ${fields.join(', ')} WHERE id = ?`, params);
     return true;
   }
 
-  deleteTicketGroup(id: number): boolean {
-    // Unlink capabilities from this group
-    this.db.run(`UPDATE onboarding_capabilities SET ticket_group_id = NULL WHERE ticket_group_id = ?`, [id]);
-    this.db.run(`DELETE FROM onboarding_ticket_groups WHERE id = ?`, [id]);
-    saveDb();
+  async deleteTicketGroup(id: number): Promise<boolean> {
+    await execute(`UPDATE onboarding_capabilities SET ticket_group_id = NULL WHERE ticket_group_id = ?`, [id]);
+    await execute(`DELETE FROM onboarding_ticket_groups WHERE id = ?`, [id]);
     return true;
   }
 
-  getTrafficLightGroups(): Array<{ tag: string; displayName: string }> {
-    const stmt = this.db.prepare(
+  async getTrafficLightGroups(): Promise<Array<{ tag: string; displayName: string }>> {
+    const rows = await query<{ traffic_light_group: string; display_name: string | null }>(
       `SELECT DISTINCT traffic_light_group, display_name FROM onboarding_ticket_groups WHERE traffic_light_group IS NOT NULL AND traffic_light_group != '' ORDER BY traffic_light_group`
     );
     const results: Array<{ tag: string; displayName: string }> = [];
     const seen = new Set<string>();
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      const tag = row.traffic_light_group as string;
-      if (!seen.has(tag)) {
-        seen.add(tag);
-        results.push({ tag, displayName: (row.display_name as string) || tag });
+    for (const row of rows) {
+      if (!seen.has(row.traffic_light_group)) {
+        seen.add(row.traffic_light_group);
+        results.push({ tag: row.traffic_light_group, displayName: row.display_name || row.traffic_light_group });
       }
     }
-    stmt.free();
     return results;
   }
 
-  // ── Sale Types ──
-
-  getAllSaleTypes(): OnboardingSaleType[] {
-    const stmt = this.db.prepare(`SELECT * FROM onboarding_sale_types ORDER BY sort_order, name`);
-    const results: OnboardingSaleType[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingSaleType);
-    stmt.free();
-    return results;
+  async getAllSaleTypes(): Promise<OnboardingSaleType[]> {
+    return query<OnboardingSaleType>(`SELECT * FROM onboarding_sale_types ORDER BY sort_order, name`);
   }
 
-  createSaleType(name: string, sortOrder?: number, jiraTicketsRequired?: number): number {
-    this.db.run(
+  async createSaleType(name: string, sortOrder?: number, jiraTicketsRequired?: number): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO onboarding_sale_types (name, sort_order, jira_tickets_required) VALUES (?, ?, ?)`,
       [name, sortOrder ?? 0, jiraTicketsRequired ?? 0]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  updateSaleType(id: number, updates: { name?: string; sort_order?: number; active?: number }): boolean {
+  async updateSaleType(id: number, updates: { name?: string; sort_order?: number; active?: number }): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
@@ -1432,47 +935,35 @@ export class OnboardingConfigQueries {
     if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
     if (fields.length === 0) return false;
     params.push(id);
-    this.db.run(`UPDATE onboarding_sale_types SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
+    await execute(`UPDATE onboarding_sale_types SET ${fields.join(', ')} WHERE id = ?`, params);
     return true;
   }
 
-  deleteSaleType(id: number): boolean {
-    this.db.run(`DELETE FROM onboarding_matrix WHERE sale_type_id = ?`, [id]);
-    this.db.run(`DELETE FROM onboarding_sale_types WHERE id = ?`, [id]);
-    saveDb();
+  async deleteSaleType(id: number): Promise<boolean> {
+    await execute(`DELETE FROM onboarding_matrix WHERE sale_type_id = ?`, [id]);
+    await execute(`DELETE FROM onboarding_sale_types WHERE id = ?`, [id]);
     return true;
   }
 
-  // ── Capabilities ──
-
-  getAllCapabilities(): OnboardingCapability[] {
-    const stmt = this.db.prepare(`
+  async getAllCapabilities(): Promise<OnboardingCapability[]> {
+    return query<OnboardingCapability>(`
       SELECT c.*, tg.name as ticket_group_name, COUNT(i.id) as item_count
       FROM onboarding_capabilities c
       LEFT JOIN onboarding_ticket_groups tg ON c.ticket_group_id = tg.id
       LEFT JOIN onboarding_capability_items i ON c.id = i.capability_id
-      GROUP BY c.id
+      GROUP BY c.id, c.name, c.code, c.ticket_group_id, c.sort_order, c.active, c.created_at, tg.name
       ORDER BY c.sort_order, c.name
     `);
-    const results: OnboardingCapability[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingCapability);
-    stmt.free();
-    return results;
   }
 
-  createCapability(name: string, code?: string, sortOrder?: number, ticketGroupId?: number): number {
-    this.db.run(
+  async createCapability(name: string, code?: string, sortOrder?: number, ticketGroupId?: number): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO onboarding_capabilities (name, code, sort_order, ticket_group_id) VALUES (?, ?, ?, ?)`,
       [name, code ?? null, sortOrder ?? 0, ticketGroupId ?? null]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  updateCapability(id: number, updates: { name?: string; code?: string; sort_order?: number; active?: number; ticket_group_id?: number | null }): boolean {
+  async updateCapability(id: number, updates: { name?: string; code?: string; sort_order?: number; active?: number; ticket_group_id?: number | null }): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
@@ -1482,141 +973,89 @@ export class OnboardingConfigQueries {
     if (updates.ticket_group_id !== undefined) { fields.push('ticket_group_id = ?'); params.push(updates.ticket_group_id); }
     if (fields.length === 0) return false;
     params.push(id);
-    this.db.run(`UPDATE onboarding_capabilities SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
+    await execute(`UPDATE onboarding_capabilities SET ${fields.join(', ')} WHERE id = ?`, params);
     return true;
   }
 
-  deleteCapability(id: number): boolean {
-    this.db.run(`DELETE FROM onboarding_capability_items WHERE capability_id = ?`, [id]);
-    this.db.run(`DELETE FROM onboarding_matrix WHERE capability_id = ?`, [id]);
-    this.db.run(`DELETE FROM onboarding_capabilities WHERE id = ?`, [id]);
-    saveDb();
+  async deleteCapability(id: number): Promise<boolean> {
+    await execute(`DELETE FROM onboarding_capability_items WHERE capability_id = ?`, [id]);
+    await execute(`DELETE FROM onboarding_matrix WHERE capability_id = ?`, [id]);
+    await execute(`DELETE FROM onboarding_capabilities WHERE id = ?`, [id]);
     return true;
   }
 
-  // ── Matrix ──
-
-  getFullMatrix(): { saleTypes: OnboardingSaleType[]; capabilities: OnboardingCapability[]; cells: OnboardingMatrixCell[]; ticketGroups: OnboardingTicketGroup[] } {
-    const saleTypes = this.getAllSaleTypes();
-    const capabilities = this.getAllCapabilities();
-    const ticketGroups = this.getAllTicketGroups();
-
-    const stmt = this.db.prepare(`SELECT * FROM onboarding_matrix`);
-    const cells: OnboardingMatrixCell[] = [];
-    while (stmt.step()) cells.push(stmt.getAsObject() as unknown as OnboardingMatrixCell);
-    stmt.free();
-
+  async getFullMatrix(): Promise<{ saleTypes: OnboardingSaleType[]; capabilities: OnboardingCapability[]; cells: OnboardingMatrixCell[]; ticketGroups: OnboardingTicketGroup[] }> {
+    const [saleTypes, capabilities, ticketGroups, cells] = await Promise.all([
+      this.getAllSaleTypes(),
+      this.getAllCapabilities(),
+      this.getAllTicketGroups(),
+      query<OnboardingMatrixCell>(`SELECT * FROM onboarding_matrix`),
+    ]);
     return { saleTypes, capabilities, cells, ticketGroups };
   }
 
-  setMatrixCell(saleTypeId: number, capabilityId: number, enabled: boolean, notes?: string | null): void {
-    this.db.run(
-      `INSERT INTO onboarding_matrix (sale_type_id, capability_id, enabled, notes)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(sale_type_id, capability_id) DO UPDATE SET enabled = excluded.enabled, notes = COALESCE(excluded.notes, notes)`,
-      [saleTypeId, capabilityId, enabled ? 1 : 0, notes ?? null]
-    );
-    saveDb();
+  async setMatrixCell(saleTypeId: number, capabilityId: number, enabled: boolean, notes?: string | null): Promise<void> {
+    await execute(`
+      MERGE INTO onboarding_matrix WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?, ?, ?)) AS source(sale_type_id, capability_id, enabled, notes)
+      ON target.sale_type_id = source.sale_type_id AND target.capability_id = source.capability_id
+      WHEN MATCHED THEN UPDATE SET enabled = source.enabled, notes = COALESCE(source.notes, target.notes)
+      WHEN NOT MATCHED THEN INSERT (sale_type_id, capability_id, enabled, notes) VALUES (source.sale_type_id, source.capability_id, source.enabled, source.notes);
+    `, [saleTypeId, capabilityId, enabled ? 1 : 0, notes ?? null]);
   }
 
-  batchUpdateMatrix(updates: Array<{ sale_type_id: number; capability_id: number; enabled: boolean; notes?: string | null }>): void {
+  async batchUpdateMatrix(updates: Array<{ sale_type_id: number; capability_id: number; enabled: boolean; notes?: string | null }>): Promise<void> {
     for (const u of updates) {
-      this.db.run(
-        `INSERT INTO onboarding_matrix (sale_type_id, capability_id, enabled, notes)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(sale_type_id, capability_id) DO UPDATE SET enabled = excluded.enabled, notes = COALESCE(excluded.notes, notes)`,
-        [u.sale_type_id, u.capability_id, u.enabled ? 1 : 0, u.notes ?? null]
-      );
+      await this.setMatrixCell(u.sale_type_id, u.capability_id, u.enabled, u.notes);
     }
-    saveDb();
   }
 
-  /** Resolved ticket group — one Jira ticket per group, listing X'd capabilities within */
-  resolveForSaleType(saleTypeName: string): ResolvedTicketGroup[] {
-    const stStmt = this.db.prepare(`SELECT id FROM onboarding_sale_types WHERE name = ? AND active = 1`);
-    stStmt.bind([saleTypeName]);
-    if (!stStmt.step()) { stStmt.free(); return []; }
-    const saleTypeId = (stStmt.getAsObject() as Record<string, unknown>).id as number;
-    stStmt.free();
+  async resolveForSaleType(saleTypeName: string): Promise<ResolvedTicketGroup[]> {
+    const st = await queryOne<{ id: number }>(`SELECT id FROM onboarding_sale_types WHERE name = ? AND active = 1`, [saleTypeName]);
+    if (!st) return [];
 
-    // Get all enabled capabilities for this sale type, joined with their ticket group
-    const capStmt = this.db.prepare(`
+    const caps = await query<Record<string, unknown>>(`
       SELECT c.id, c.name, c.code, c.ticket_group_id, COALESCE(tg.name, c.name) as ticket_group_name, COALESCE(tg.sort_order, c.sort_order) as group_sort
       FROM onboarding_matrix m
       JOIN onboarding_capabilities c ON m.capability_id = c.id
       LEFT JOIN onboarding_ticket_groups tg ON c.ticket_group_id = tg.id
       WHERE m.sale_type_id = ? AND m.enabled = 1 AND c.active = 1
       ORDER BY group_sort, c.sort_order, c.name
-    `);
-    capStmt.bind([saleTypeId]);
+    `, [st.id]);
 
-    // Group capabilities by ticket_group_id (null → singleton group per capability)
     const groupMap = new Map<string, ResolvedTicketGroup>();
-    while (capStmt.step()) {
-      const row = capStmt.getAsObject() as Record<string, unknown>;
+    for (const row of caps) {
       const groupId = row.ticket_group_id as number | null;
       const groupKey = groupId != null ? `g:${groupId}` : `c:${row.id}`;
-      const groupName = row.ticket_group_name as string;
-
       if (!groupMap.has(groupKey)) {
-        groupMap.set(groupKey, {
-          ticketGroupId: groupId,
-          ticketGroupName: groupName,
-          capabilities: [],
-        });
+        groupMap.set(groupKey, { ticketGroupId: groupId, ticketGroupName: row.ticket_group_name as string, capabilities: [] });
       }
-
-      const cap: ResolvedCapability = {
-        capabilityId: row.id as number,
-        capabilityName: row.name as string,
-        code: (row.code as string) ?? null,
-        items: [],
-      };
-
-      // Fill items
-      const itemStmt = this.db.prepare(
-        `SELECT name FROM onboarding_capability_items WHERE capability_id = ? AND active = 1 ORDER BY sort_order, name`
+      const items = await query<{ name: string }>(
+        `SELECT name FROM onboarding_capability_items WHERE capability_id = ? AND active = 1 ORDER BY sort_order, name`,
+        [row.id as number]
       );
-      itemStmt.bind([cap.capabilityId]);
-      while (itemStmt.step()) {
-        const itemRow = itemStmt.getAsObject() as Record<string, unknown>;
-        cap.items.push(itemRow.name as string);
-      }
-      itemStmt.free();
-
-      groupMap.get(groupKey)!.capabilities.push(cap);
+      groupMap.get(groupKey)!.capabilities.push({
+        capabilityId: row.id as number, capabilityName: row.name as string,
+        code: (row.code as string) ?? null, items: items.map(i => i.name),
+      });
     }
-    capStmt.free();
-
     return Array.from(groupMap.values());
   }
 
-  // ── Items ──
-
-  getItemsForCapability(capabilityId: number): OnboardingCapabilityItem[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM onboarding_capability_items WHERE capability_id = ? ORDER BY sort_order, name`
+  async getItemsForCapability(capabilityId: number): Promise<OnboardingCapabilityItem[]> {
+    return query<OnboardingCapabilityItem>(
+      `SELECT * FROM onboarding_capability_items WHERE capability_id = ? ORDER BY sort_order, name`, [capabilityId]
     );
-    stmt.bind([capabilityId]);
-    const results: OnboardingCapabilityItem[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingCapabilityItem);
-    stmt.free();
-    return results;
   }
 
-  createItem(capabilityId: number, name: string, isBoltOn?: boolean, sortOrder?: number): number {
-    this.db.run(
+  async createItem(capabilityId: number, name: string, isBoltOn?: boolean, sortOrder?: number): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO onboarding_capability_items (capability_id, name, is_bolt_on, sort_order) VALUES (?, ?, ?, ?)`,
       [capabilityId, name, isBoltOn ? 1 : 0, sortOrder ?? 0]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  updateItem(id: number, updates: { name?: string; is_bolt_on?: number; sort_order?: number; active?: number }): boolean {
+  async updateItem(id: number, updates: { name?: string; is_bolt_on?: number; sort_order?: number; active?: number }): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
@@ -1625,89 +1064,56 @@ export class OnboardingConfigQueries {
     if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
     if (fields.length === 0) return false;
     params.push(id);
-    this.db.run(`UPDATE onboarding_capability_items SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
+    await execute(`UPDATE onboarding_capability_items SET ${fields.join(', ')} WHERE id = ?`, params);
     return true;
   }
 
-  deleteItem(id: number): boolean {
-    this.db.run(`DELETE FROM onboarding_capability_items WHERE id = ?`, [id]);
-    saveDb();
+  async deleteItem(id: number): Promise<boolean> {
+    await execute(`DELETE FROM onboarding_capability_items WHERE id = ?`, [id]);
     return true;
   }
 
-  /** Clear all config tables (used before import) */
-  clearAll(): void {
-    this.db.run(`DELETE FROM onboarding_capability_items`);
-    this.db.run(`DELETE FROM onboarding_matrix`);
-    this.db.run(`DELETE FROM onboarding_capabilities`);
-    this.db.run(`DELETE FROM onboarding_sale_types`);
-    this.db.run(`DELETE FROM onboarding_ticket_groups`);
-    saveDb();
+  async clearAll(): Promise<void> {
+    await execute(`DELETE FROM onboarding_capability_items`);
+    await execute(`DELETE FROM onboarding_matrix`);
+    await execute(`DELETE FROM onboarding_capabilities`);
+    await execute(`DELETE FROM onboarding_sale_types`);
+    await execute(`DELETE FROM onboarding_ticket_groups`);
   }
 }
 
-// ---------- Onboarding Runs ----------
+// ─── Onboarding Runs ───────────────────────────────────────���─────────────────
 
 export interface OnboardingRun {
-  id: number;
-  onboarding_ref: string;
-  status: 'pending' | 'success' | 'partial' | 'error';
-  parent_key: string | null;
-  child_keys: string | null;
-  created_count: number;
-  linked_count: number;
-  error_message: string | null;
-  payload: string | null;
-  dry_run: number;
-  user_id: number | null;
-  created_at: string;
-  updated_at: string;
+  id: number; onboarding_ref: string; status: 'pending' | 'success' | 'partial' | 'error';
+  parent_key: string | null; child_keys: string | null; created_count: number;
+  linked_count: number; error_message: string | null; payload: string | null;
+  dry_run: number; user_id: number | null; created_at: string; updated_at: string;
 }
 
 export class OnboardingRunQueries {
-  constructor(private db: Database) {}
-
-  getByRef(ref: string): OnboardingRun | undefined {
-    const stmt = this.db.prepare(
-      `SELECT * FROM onboarding_runs WHERE onboarding_ref = ? AND status = 'success' ORDER BY created_at DESC LIMIT 1`
+  async getByRef(ref: string): Promise<OnboardingRun | undefined> {
+    return queryOne<OnboardingRun>(
+      `SELECT TOP 1 * FROM onboarding_runs WHERE onboarding_ref = ? AND status = 'success' ORDER BY created_at DESC`, [ref]
     );
-    stmt.bind([ref]);
-    if (stmt.step()) { const r = stmt.getAsObject() as unknown as OnboardingRun; stmt.free(); return r; }
-    stmt.free();
-    return undefined;
   }
 
-  getAllByRef(ref: string): OnboardingRun[] {
-    const stmt = this.db.prepare(`SELECT * FROM onboarding_runs WHERE onboarding_ref = ? ORDER BY created_at DESC`);
-    stmt.bind([ref]);
-    const results: OnboardingRun[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingRun);
-    stmt.free();
-    return results;
+  async getAllByRef(ref: string): Promise<OnboardingRun[]> {
+    return query<OnboardingRun>(`SELECT * FROM onboarding_runs WHERE onboarding_ref = ? ORDER BY created_at DESC`, [ref]);
   }
 
-  getRecent(limit: number = 20): OnboardingRun[] {
-    const stmt = this.db.prepare(`SELECT * FROM onboarding_runs ORDER BY created_at DESC LIMIT ?`);
-    stmt.bind([limit]);
-    const results: OnboardingRun[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as OnboardingRun);
-    stmt.free();
-    return results;
+  async getRecent(limit: number = 20): Promise<OnboardingRun[]> {
+    return query<OnboardingRun>(`SELECT TOP(?) * FROM onboarding_runs ORDER BY created_at DESC`, [limit]);
   }
 
-  create(run: { onboarding_ref: string; payload?: string; user_id?: number; dry_run?: boolean }): number {
-    this.db.run(
+  async create(run: { onboarding_ref: string; payload?: string; user_id?: number; dry_run?: boolean }): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO onboarding_runs (onboarding_ref, payload, user_id, dry_run) VALUES (?, ?, ?, ?)`,
       [run.onboarding_ref, run.payload ?? null, run.user_id ?? null, run.dry_run ? 1 : 0]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  update(id: number, updates: Partial<Pick<OnboardingRun, 'status' | 'parent_key' | 'child_keys' | 'created_count' | 'linked_count' | 'error_message'>>): boolean {
+  async update(id: number, updates: Partial<Pick<OnboardingRun, 'status' | 'parent_key' | 'child_keys' | 'created_count' | 'linked_count' | 'error_message'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     for (const [key, val] of Object.entries(updates)) {
@@ -1715,107 +1121,63 @@ export class OnboardingRunQueries {
       params.push(val ?? null);
     }
     if (fields.length === 0) return false;
-    fields.push(`updated_at = datetime('now')`);
+    fields.push(`updated_at = GETUTCDATE()`);
     params.push(id);
-    this.db.run(`UPDATE onboarding_runs SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
+    await execute(`UPDATE onboarding_runs SET ${fields.join(', ')} WHERE id = ?`, params);
     return true;
   }
 
-  getMaxRefNumber(prefix: string): number {
-    const stmt = this.db.prepare(
-      `SELECT onboarding_ref FROM onboarding_runs WHERE onboarding_ref LIKE ? ORDER BY onboarding_ref DESC LIMIT 1`
+  async getMaxRefNumber(prefix: string): Promise<number> {
+    const row = await queryOne<{ onboarding_ref: string }>(
+      `SELECT TOP 1 onboarding_ref FROM onboarding_runs WHERE onboarding_ref LIKE ? ORDER BY onboarding_ref DESC`,
+      [`${prefix}%`]
     );
-    stmt.bind([`${prefix}%`]);
-    let max = 0;
-    if (stmt.step()) {
-      const ref = (stmt.getAsObject() as Record<string, unknown>).onboarding_ref as string;
-      const numPart = parseInt(ref.substring(prefix.length), 10);
-      if (!isNaN(numPart) && numPart > max) max = numPart;
-    }
-    stmt.free();
-    return max;
+    if (!row) return 0;
+    const numPart = parseInt(row.onboarding_ref.substring(prefix.length), 10);
+    return !isNaN(numPart) ? numPart : 0;
   }
 }
 
-// ---------- Milestone Templates & Delivery Milestones ----------
+// ─── Milestone Templates & Delivery Milestones ───────────────────────────────
 
 export interface MilestoneTemplate {
-  id: number;
-  name: string;
-  day_offset: number;
-  sort_order: number;
-  checklist_json: string;
-  lead_days: number;
-  active: number;
-  tickets_enabled: number;
-  created_at: string;
-  updated_at: string;
+  id: number; name: string; day_offset: number; sort_order: number;
+  checklist_json: string; lead_days: number; active: number;
+  tickets_enabled: number; created_at: string; updated_at: string;
 }
-
 export interface DeliveryMilestone {
-  id: number;
-  delivery_id: number;
-  template_id: number;
-  template_name: string;
-  target_date: string | null;
-  actual_date: string | null;
-  status: string;
-  checklist_state_json: string;
-  notes: string | null;
-  workflow_task_created: number;
-  workflow_tickets_created: number;
-  jira_keys: string | null;
-  assigned_to: number | null;
-  created_at: string;
-  updated_at: string;
+  id: number; delivery_id: number; template_id: number; template_name: string;
+  target_date: string | null; actual_date: string | null; status: string;
+  checklist_state_json: string; notes: string | null;
+  workflow_task_created: number; workflow_tickets_created: number;
+  jira_keys: string | null; assigned_to: number | null;
+  created_at: string; updated_at: string;
 }
-
 export interface WorkflowReadyMilestone extends DeliveryMilestone {
-  lead_days: number;
-  account: string;
-  product: string;
-  sale_type: string | null;
-  onboarding_id: string | null;
-  onboarder: string | null;
+  lead_days: number; account: string; product: string;
+  sale_type: string | null; onboarding_id: string | null; onboarder: string | null;
 }
 
 export class MilestoneQueries {
-  constructor(private db: Database) {}
-
-  // ── Templates ──
-
-  getAllTemplates(activeOnly = false): MilestoneTemplate[] {
+  async getAllTemplates(activeOnly = false): Promise<MilestoneTemplate[]> {
     const sql = activeOnly
       ? `SELECT * FROM milestone_templates WHERE active = 1 ORDER BY sort_order, name`
       : `SELECT * FROM milestone_templates ORDER BY sort_order, name`;
-    const stmt = this.db.prepare(sql);
-    const results: MilestoneTemplate[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as MilestoneTemplate);
-    stmt.free();
-    return results;
+    return query<MilestoneTemplate>(sql);
   }
 
-  getTemplateById(id: number): MilestoneTemplate | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM milestone_templates WHERE id = ?`);
-    stmt.bind([id]);
-    if (stmt.step()) { const t = stmt.getAsObject() as unknown as MilestoneTemplate; stmt.free(); return t; }
-    stmt.free();
-    return undefined;
+  async getTemplateById(id: number): Promise<MilestoneTemplate | undefined> {
+    return queryOne<MilestoneTemplate>(`SELECT * FROM milestone_templates WHERE id = ?`, [id]);
   }
 
-  createTemplate(data: { name: string; day_offset: number; sort_order?: number; checklist_json?: string }): number {
-    this.db.run(
+  async createTemplate(data: { name: string; day_offset: number; sort_order?: number; checklist_json?: string }): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO milestone_templates (name, day_offset, sort_order, checklist_json) VALUES (?, ?, ?, ?)`,
       [data.name, data.day_offset, data.sort_order ?? 0, data.checklist_json ?? '[]']
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  updateTemplate(id: number, updates: Partial<Pick<MilestoneTemplate, 'name' | 'day_offset' | 'sort_order' | 'checklist_json' | 'lead_days' | 'active' | 'tickets_enabled'>>): boolean {
+  async updateTemplate(id: number, updates: Partial<Pick<MilestoneTemplate, 'name' | 'day_offset' | 'sort_order' | 'checklist_json' | 'lead_days' | 'active' | 'tickets_enabled'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
@@ -1826,131 +1188,86 @@ export class MilestoneQueries {
     if (updates.active !== undefined) { fields.push('active = ?'); params.push(updates.active); }
     if (updates.tickets_enabled !== undefined) { fields.push('tickets_enabled = ?'); params.push(updates.tickets_enabled); }
     if (fields.length === 0) return false;
-    fields.push(`updated_at = datetime('now')`);
+    fields.push(`updated_at = GETUTCDATE()`);
     params.push(id);
-    this.db.run(`UPDATE milestone_templates SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
+    await execute(`UPDATE milestone_templates SET ${fields.join(', ')} WHERE id = ?`, params);
     return true;
   }
 
-  deleteTemplate(id: number): boolean {
-    this.db.run(`DELETE FROM milestone_templates WHERE id = ?`, [id]);
-    saveDb();
+  async deleteTemplate(id: number): Promise<boolean> {
+    await execute(`DELETE FROM milestone_templates WHERE id = ?`, [id]);
     return true;
   }
 
-  // ── Sale Type Matrix (day offsets per sale type per template) ──
-
-  getMatrixOffsets(): Array<{ sale_type_id: number; template_id: number; day_offset: number }> {
-    const stmt = this.db.prepare(`SELECT sale_type_id, template_id, day_offset FROM milestone_sale_type_offsets`);
-    const results: Array<{ sale_type_id: number; template_id: number; day_offset: number }> = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as { sale_type_id: number; template_id: number; day_offset: number });
-    stmt.free();
-    return results;
+  async getMatrixOffsets(): Promise<Array<{ sale_type_id: number; template_id: number; day_offset: number }>> {
+    return query<{ sale_type_id: number; template_id: number; day_offset: number }>(`SELECT sale_type_id, template_id, day_offset FROM milestone_sale_type_offsets`);
   }
 
-  setMatrixOffset(saleTypeId: number, templateId: number, dayOffset: number): void {
-    this.db.run(
-      `INSERT INTO milestone_sale_type_offsets (sale_type_id, template_id, day_offset) VALUES (?, ?, ?)
-       ON CONFLICT(sale_type_id, template_id) DO UPDATE SET day_offset = excluded.day_offset`,
-      [saleTypeId, templateId, dayOffset]
-    );
-    saveDb();
+  async setMatrixOffset(saleTypeId: number, templateId: number, dayOffset: number): Promise<void> {
+    await execute(`
+      MERGE INTO milestone_sale_type_offsets WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?, ?)) AS source(sale_type_id, template_id, day_offset)
+      ON target.sale_type_id = source.sale_type_id AND target.template_id = source.template_id
+      WHEN MATCHED THEN UPDATE SET day_offset = source.day_offset
+      WHEN NOT MATCHED THEN INSERT (sale_type_id, template_id, day_offset) VALUES (source.sale_type_id, source.template_id, source.day_offset);
+    `, [saleTypeId, templateId, dayOffset]);
   }
 
-  batchSetMatrixOffsets(updates: Array<{ sale_type_id: number; template_id: number; day_offset: number }>): void {
-    for (const u of updates) {
-      this.db.run(
-        `INSERT INTO milestone_sale_type_offsets (sale_type_id, template_id, day_offset) VALUES (?, ?, ?)
-         ON CONFLICT(sale_type_id, template_id) DO UPDATE SET day_offset = excluded.day_offset`,
-        [u.sale_type_id, u.template_id, u.day_offset]
-      );
-    }
-    saveDb();
+  async batchSetMatrixOffsets(updates: Array<{ sale_type_id: number; template_id: number; day_offset: number }>): Promise<void> {
+    for (const u of updates) await this.setMatrixOffset(u.sale_type_id, u.template_id, u.day_offset);
   }
 
-  deleteMatrixRow(saleTypeId: number): void {
-    this.db.run(`DELETE FROM milestone_sale_type_offsets WHERE sale_type_id = ?`, [saleTypeId]);
-    saveDb();
+  async deleteMatrixRow(saleTypeId: number): Promise<void> {
+    await execute(`DELETE FROM milestone_sale_type_offsets WHERE sale_type_id = ?`, [saleTypeId]);
   }
 
-  /** Get offsets for a sale type name (falls back to template defaults) */
-  getOffsetsForSaleType(saleTypeName: string): Map<number, number> {
+  async getOffsetsForSaleType(saleTypeName: string): Promise<Map<number, number>> {
     const result = new Map<number, number>();
-    // Start with template defaults
-    const templates = this.getAllTemplates(true);
+    const templates = await this.getAllTemplates(true);
     for (const t of templates) result.set(t.id, t.day_offset);
-    // Override with sale-type-specific offsets if found
-    const stmt = this.db.prepare(`
+    const rows = await query<{ template_id: number; day_offset: number }>(`
       SELECT mso.template_id, mso.day_offset
       FROM milestone_sale_type_offsets mso
       JOIN onboarding_sale_types ost ON mso.sale_type_id = ost.id
       WHERE ost.name = ? AND ost.active = 1
-    `);
-    stmt.bind([saleTypeName]);
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      result.set(row.template_id as number, row.day_offset as number);
-    }
-    stmt.free();
+    `, [saleTypeName]);
+    for (const row of rows) result.set(row.template_id, row.day_offset);
     return result;
   }
 
-  // ── Delivery Milestone Instances ──
-
-  getByDelivery(deliveryId: number): DeliveryMilestone[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM delivery_milestones WHERE delivery_id = ? ORDER BY target_date, template_name`
-    );
-    stmt.bind([deliveryId]);
-    const results: DeliveryMilestone[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as DeliveryMilestone);
-    stmt.free();
-    return results;
+  async getByDelivery(deliveryId: number): Promise<DeliveryMilestone[]> {
+    return query<DeliveryMilestone>(`SELECT * FROM delivery_milestones WHERE delivery_id = ? ORDER BY target_date, template_name`, [deliveryId]);
   }
 
-  getMilestoneById(id: number): DeliveryMilestone | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_milestones WHERE id = ?`);
-    stmt.bind([id]);
-    if (stmt.step()) { const m = stmt.getAsObject() as unknown as DeliveryMilestone; stmt.free(); return m; }
-    stmt.free();
-    return undefined;
+  async getMilestoneById(id: number): Promise<DeliveryMilestone | undefined> {
+    return queryOne<DeliveryMilestone>(`SELECT * FROM delivery_milestones WHERE id = ?`, [id]);
   }
 
-  createForDelivery(deliveryId: number, startDate: string, saleType?: string): DeliveryMilestone[] {
-    const templates = this.getAllTemplates(true);
+  async createForDelivery(deliveryId: number, startDate: string, saleType?: string): Promise<DeliveryMilestone[]> {
+    const templates = await this.getAllTemplates(true);
     const start = new Date(startDate);
     if (isNaN(start.getTime())) return [];
-
-    // Use sale-type-specific offsets if available
-    const saleTypeOffsets = saleType ? this.getOffsetsForSaleType(saleType) : null;
+    const saleTypeOffsets = saleType ? await this.getOffsetsForSaleType(saleType) : null;
 
     for (const tmpl of templates) {
       const dayOffset = saleTypeOffsets?.get(tmpl.id) ?? tmpl.day_offset;
       const target = new Date(start);
       target.setDate(target.getDate() + dayOffset);
       const targetStr = target.toISOString().split('T')[0];
-
-      // Convert template checklist items (string[]) to stateful format [{text, checked}]
       let stateJson = '[]';
       try {
         const items = JSON.parse(tmpl.checklist_json || '[]');
-        if (Array.isArray(items)) {
-          stateJson = JSON.stringify(items.map((text: string) => ({ text, checked: false })));
-        }
+        if (Array.isArray(items)) stateJson = JSON.stringify(items.map((text: string) => ({ text, checked: false })));
       } catch { /* keep empty */ }
-
-      this.db.run(
-        `INSERT INTO delivery_milestones (delivery_id, template_id, template_name, target_date, checklist_state_json)
-         VALUES (?, ?, ?, ?, ?)`,
+      await execute(
+        `INSERT INTO delivery_milestones (delivery_id, template_id, template_name, target_date, checklist_state_json) VALUES (?, ?, ?, ?, ?)`,
         [deliveryId, tmpl.id, tmpl.name, targetStr, stateJson]
       );
     }
-    saveDb();
     return this.getByDelivery(deliveryId);
   }
 
-  updateMilestone(id: number, updates: Partial<Pick<DeliveryMilestone, 'status' | 'actual_date' | 'checklist_state_json' | 'notes' | 'target_date' | 'jira_keys' | 'assigned_to'>>): boolean {
+  async updateMilestone(id: number, updates: Partial<Pick<DeliveryMilestone, 'status' | 'actual_date' | 'checklist_state_json' | 'notes' | 'target_date' | 'jira_keys' | 'assigned_to'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.status !== undefined) { fields.push('status = ?'); params.push(updates.status); }
@@ -1961,251 +1278,159 @@ export class MilestoneQueries {
     if (updates.jira_keys !== undefined) { fields.push('jira_keys = ?'); params.push(updates.jira_keys); }
     if (updates.assigned_to !== undefined) { fields.push('assigned_to = ?'); params.push(updates.assigned_to); }
     if (fields.length === 0) return false;
-    fields.push(`updated_at = datetime('now')`);
+    fields.push(`updated_at = GETUTCDATE()`);
     params.push(id);
-    this.db.run(`UPDATE delivery_milestones SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
-    return this.getMilestoneById(id) !== undefined;
+    await execute(`UPDATE delivery_milestones SET ${fields.join(', ')} WHERE id = ?`, params);
+    return (await this.getMilestoneById(id)) !== undefined;
   }
 
-  deleteByDelivery(deliveryId: number): number {
-    const countStmt = this.db.prepare(`SELECT COUNT(*) as c FROM delivery_milestones WHERE delivery_id = ?`);
-    countStmt.bind([deliveryId]);
-    let count = 0;
-    if (countStmt.step()) count = (countStmt.getAsObject() as Record<string, unknown>).c as number;
-    countStmt.free();
-    this.db.run(`DELETE FROM delivery_milestones WHERE delivery_id = ?`, [deliveryId]);
-    saveDb();
+  async deleteByDelivery(deliveryId: number): Promise<number> {
+    const row = await queryOne<{ c: number }>(`SELECT COUNT(*) as c FROM delivery_milestones WHERE delivery_id = ?`, [deliveryId]);
+    const count = row?.c ?? 0;
+    await execute(`DELETE FROM delivery_milestones WHERE delivery_id = ?`, [deliveryId]);
     return count;
   }
 
-  getOverdueSummaryByDelivery(deliveryIds: number[]): Map<number, { overdueCount: number; totalCount: number; completeCount: number; nextOverdue: string | null }> {
+  async getOverdueSummaryByDelivery(deliveryIds: number[]): Promise<Map<number, { overdueCount: number; totalCount: number; completeCount: number; nextOverdue: string | null }>> {
     const result = new Map<number, { overdueCount: number; totalCount: number; completeCount: number; nextOverdue: string | null }>();
     if (deliveryIds.length === 0) return result;
-
     const placeholders = deliveryIds.map(() => '?').join(',');
-    const stmt = this.db.prepare(`
+    const rows = await query<Record<string, unknown>>(`
       SELECT delivery_id,
         COUNT(*) as total,
         SUM(CASE WHEN status = 'complete' THEN 1 ELSE 0 END) as complete,
-        SUM(CASE WHEN status != 'complete' AND target_date < date('now') THEN 1 ELSE 0 END) as overdue,
-        MIN(CASE WHEN status != 'complete' AND target_date < date('now') THEN template_name END) as next_overdue
+        SUM(CASE WHEN status != 'complete' AND target_date < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as overdue,
+        MIN(CASE WHEN status != 'complete' AND target_date < CAST(GETUTCDATE() AS DATE) THEN template_name END) as next_overdue
       FROM delivery_milestones
       WHERE delivery_id IN (${placeholders})
       GROUP BY delivery_id
-    `);
-    stmt.bind(deliveryIds);
-
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
+    `, deliveryIds);
+    for (const row of rows) {
       result.set(row.delivery_id as number, {
-        overdueCount: (row.overdue as number) ?? 0,
-        totalCount: (row.total as number) ?? 0,
-        completeCount: (row.complete as number) ?? 0,
-        nextOverdue: (row.next_overdue as string) ?? null,
+        overdueCount: (row.overdue as number) ?? 0, totalCount: (row.total as number) ?? 0,
+        completeCount: (row.complete as number) ?? 0, nextOverdue: (row.next_overdue as string) ?? null,
       });
     }
-    stmt.free();
     return result;
   }
 
-  /** Get all milestones joined with delivery info, for calendar view */
-  getAllWithDelivery(): Array<DeliveryMilestone & { account: string; product: string; onboarding_id: string | null; onboarder: string | null }> {
-    const stmt = this.db.prepare(`
+  async getAllWithDelivery(): Promise<Array<DeliveryMilestone & { account: string; product: string; onboarding_id: string | null; onboarder: string | null }>> {
+    return query<any>(`
       SELECT dm.*, de.account, de.product, de.onboarding_id, de.onboarder
       FROM delivery_milestones dm
       JOIN delivery_entries de ON dm.delivery_id = de.id
       ORDER BY dm.target_date, de.account, dm.template_name
     `);
-    const results: Array<DeliveryMilestone & { account: string; product: string; onboarding_id: string | null; onboarder: string | null }> = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as any);
-    stmt.free();
-    return results;
   }
 
-  getSummary(): { total: number; pending: number; in_progress: number; complete: number; overdue: number } {
-    const stmt = this.db.prepare(`
-      SELECT
-        COUNT(*) as total,
+  async getSummary(): Promise<{ total: number; pending: number; in_progress: number; complete: number; overdue: number }> {
+    const row = await queryOne<Record<string, unknown>>(`
+      SELECT COUNT(*) as total,
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
         SUM(CASE WHEN status = 'complete' THEN 1 ELSE 0 END) as complete,
-        SUM(CASE WHEN status != 'complete' AND target_date < date('now') THEN 1 ELSE 0 END) as overdue
+        SUM(CASE WHEN status != 'complete' AND target_date < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as overdue
       FROM delivery_milestones
     `);
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      stmt.free();
-      return {
-        total: (row.total as number) ?? 0,
-        pending: (row.pending as number) ?? 0,
-        in_progress: (row.in_progress as number) ?? 0,
-        complete: (row.complete as number) ?? 0,
-        overdue: (row.overdue as number) ?? 0,
-      };
-    }
-    stmt.free();
-    return { total: 0, pending: 0, in_progress: 0, complete: 0, overdue: 0 };
+    if (!row) return { total: 0, pending: 0, in_progress: 0, complete: 0, overdue: 0 };
+    return {
+      total: (row.total as number) ?? 0, pending: (row.pending as number) ?? 0,
+      in_progress: (row.in_progress as number) ?? 0, complete: (row.complete as number) ?? 0,
+      overdue: (row.overdue as number) ?? 0,
+    };
   }
 
-  /** Deliveries that have at least one overdue (non-complete, past target_date) milestone.
-   *  Returns delivery info + overdue count + oldest overdue milestone name/date. */
-  getOverdueDeliveries(): Array<{
+  async getOverdueDeliveries(): Promise<Array<{
     delivery_id: number; onboarding_id: string | null; account: string; product: string;
     onboarder: string | null; status: string; go_live_date: string | null;
     overdue_count: number; total_count: number; complete_count: number;
     oldest_overdue_name: string; oldest_overdue_date: string;
-  }> {
-    const stmt = this.db.prepare(`
+  }>> {
+    return query<any>(`
       SELECT
         de.id as delivery_id, de.onboarding_id, de.account, de.product,
         de.onboarder, de.status, de.go_live_date,
         COUNT(*) as total_count,
         SUM(CASE WHEN dm.status = 'complete' THEN 1 ELSE 0 END) as complete_count,
-        SUM(CASE WHEN dm.status != 'complete' AND dm.target_date < date('now') THEN 1 ELSE 0 END) as overdue_count,
-        (SELECT dm2.template_name FROM delivery_milestones dm2
-         WHERE dm2.delivery_id = de.id AND dm2.status != 'complete' AND dm2.target_date < date('now')
-         ORDER BY dm2.target_date ASC LIMIT 1) as oldest_overdue_name,
-        (SELECT dm2.target_date FROM delivery_milestones dm2
-         WHERE dm2.delivery_id = de.id AND dm2.status != 'complete' AND dm2.target_date < date('now')
-         ORDER BY dm2.target_date ASC LIMIT 1) as oldest_overdue_date
+        SUM(CASE WHEN dm.status != 'complete' AND dm.target_date < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as overdue_count,
+        (SELECT TOP 1 dm2.template_name FROM delivery_milestones dm2
+         WHERE dm2.delivery_id = de.id AND dm2.status != 'complete' AND dm2.target_date < CAST(GETUTCDATE() AS DATE)
+         ORDER BY dm2.target_date ASC) as oldest_overdue_name,
+        (SELECT TOP 1 dm2.target_date FROM delivery_milestones dm2
+         WHERE dm2.delivery_id = de.id AND dm2.status != 'complete' AND dm2.target_date < CAST(GETUTCDATE() AS DATE)
+         ORDER BY dm2.target_date ASC) as oldest_overdue_date
       FROM delivery_milestones dm
       JOIN delivery_entries de ON dm.delivery_id = de.id
-      GROUP BY de.id
-      HAVING overdue_count > 0
-      ORDER BY overdue_count DESC, oldest_overdue_date ASC
+      GROUP BY de.id, de.onboarding_id, de.account, de.product, de.onboarder, de.status, de.go_live_date
+      HAVING SUM(CASE WHEN dm.status != 'complete' AND dm.target_date < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) > 0
+      ORDER BY SUM(CASE WHEN dm.status != 'complete' AND dm.target_date < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) DESC
     `);
-    const results: Array<any> = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      results.push({
-        delivery_id: row.delivery_id as number,
-        onboarding_id: (row.onboarding_id as string) ?? null,
-        account: (row.account as string) ?? '',
-        product: (row.product as string) ?? '',
-        onboarder: (row.onboarder as string) ?? null,
-        status: (row.status as string) ?? '',
-        go_live_date: (row.go_live_date as string) ?? null,
-        overdue_count: (row.overdue_count as number) ?? 0,
-        total_count: (row.total_count as number) ?? 0,
-        complete_count: (row.complete_count as number) ?? 0,
-        oldest_overdue_name: (row.oldest_overdue_name as string) ?? '',
-        oldest_overdue_date: (row.oldest_overdue_date as string) ?? '',
-      });
-    }
-    stmt.free();
-    return results;
   }
 
-  /** Mark all milestones as complete for deliveries whose status matches (case-insensitive).
-   *  Optionally filter by product. Returns count of milestones updated. */
-  completeMatchingDeliveries(deliveryStatus: string, product?: string): { deliveries: number; milestones: number } {
+  async completeMatchingDeliveries(deliveryStatus: string, product?: string): Promise<{ deliveries: number; milestones: number }> {
     const productClause = product ? ` AND de.product = ?` : '';
-    const params: (string)[] = [deliveryStatus];
+    const params: string[] = [deliveryStatus];
     if (product) params.push(product);
 
-    // Count affected
-    const countStmt = this.db.prepare(`
+    const row = await queryOne<{ deliveries: number; milestones: number }>(`
       SELECT COUNT(DISTINCT de.id) as deliveries, COUNT(dm.id) as milestones
-      FROM delivery_milestones dm
-      JOIN delivery_entries de ON dm.delivery_id = de.id
-      WHERE LOWER(de.status) = LOWER(?) ${productClause}
-        AND dm.status != 'complete'
-    `);
-    countStmt.bind(params);
-    let deliveries = 0, milestones = 0;
-    if (countStmt.step()) {
-      const row = countStmt.getAsObject() as Record<string, unknown>;
-      deliveries = (row.deliveries as number) ?? 0;
-      milestones = (row.milestones as number) ?? 0;
-    }
-    countStmt.free();
-
+      FROM delivery_milestones dm JOIN delivery_entries de ON dm.delivery_id = de.id
+      WHERE LOWER(de.status) = LOWER(?) ${productClause} AND dm.status != 'complete'
+    `, params);
+    const deliveries = row?.deliveries ?? 0;
+    const milestones = row?.milestones ?? 0;
     if (milestones === 0) return { deliveries: 0, milestones: 0 };
 
-    // Update
-    this.db.run(`
-      UPDATE delivery_milestones SET status = 'complete', actual_date = date('now'), updated_at = datetime('now')
+    await execute(`
+      UPDATE delivery_milestones SET status = 'complete', actual_date = CAST(GETUTCDATE() AS DATE), updated_at = GETUTCDATE()
       WHERE status != 'complete'
         AND delivery_id IN (
-          SELECT de.id FROM delivery_entries de
-          WHERE LOWER(de.status) = LOWER(?) ${productClause}
+          SELECT de.id FROM delivery_entries de WHERE LOWER(de.status) = LOWER(?) ${productClause}
         )
     `, params);
-    saveDb();
     return { deliveries, milestones };
   }
 
-  /** Get the next non-complete milestone per delivery, ordered by target_date ASC */
-  getNextPendingByDelivery(deliveryIds: number[]): Map<number, { name: string; target_date: string; status: string }> {
+  async getNextPendingByDelivery(deliveryIds: number[]): Promise<Map<number, { name: string; target_date: string; status: string }>> {
     const result = new Map<number, { name: string; target_date: string; status: string }>();
     if (deliveryIds.length === 0) return result;
-
     const placeholders = deliveryIds.map(() => '?').join(',');
-    const stmt = this.db.prepare(`
+    const rows = await query<Record<string, unknown>>(`
       SELECT delivery_id, template_name, target_date, status
       FROM delivery_milestones
-      WHERE delivery_id IN (${placeholders})
-        AND status != 'complete'
+      WHERE delivery_id IN (${placeholders}) AND status != 'complete'
       ORDER BY target_date ASC
-    `);
-    stmt.bind(deliveryIds);
-
+    `, deliveryIds);
     const seen = new Set<number>();
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
+    for (const row of rows) {
       const did = row.delivery_id as number;
       if (seen.has(did)) continue;
       seen.add(did);
-      result.set(did, {
-        name: row.template_name as string,
-        target_date: (row.target_date as string) ?? '',
-        status: row.status as string,
-      });
+      result.set(did, { name: row.template_name as string, target_date: (row.target_date as string) ?? '', status: row.status as string });
     }
-    stmt.free();
     return result;
   }
 
-  // ── Workflow: Template ↔ Ticket Group Linking ──
-
-  getTemplateTicketGroups(templateId: number): number[] {
-    const stmt = this.db.prepare(
-      `SELECT ticket_group_id FROM milestone_template_ticket_groups WHERE template_id = ? ORDER BY ticket_group_id`
+  async getTemplateTicketGroups(templateId: number): Promise<number[]> {
+    const rows = await query<{ ticket_group_id: number }>(
+      `SELECT ticket_group_id FROM milestone_template_ticket_groups WHERE template_id = ? ORDER BY ticket_group_id`, [templateId]
     );
-    stmt.bind([templateId]);
-    const ids: number[] = [];
-    while (stmt.step()) {
-      ids.push((stmt.getAsObject() as Record<string, unknown>).ticket_group_id as number);
-    }
-    stmt.free();
-    return ids;
+    return rows.map(r => r.ticket_group_id);
   }
 
-  setTemplateTicketGroups(templateId: number, ticketGroupIds: number[]): void {
-    this.db.run(`DELETE FROM milestone_template_ticket_groups WHERE template_id = ?`, [templateId]);
+  async setTemplateTicketGroups(templateId: number, ticketGroupIds: number[]): Promise<void> {
+    await execute(`DELETE FROM milestone_template_ticket_groups WHERE template_id = ?`, [templateId]);
     for (const gid of ticketGroupIds) {
-      this.db.run(
-        `INSERT INTO milestone_template_ticket_groups (template_id, ticket_group_id) VALUES (?, ?)`,
-        [templateId, gid]
-      );
+      await execute(`INSERT INTO milestone_template_ticket_groups (template_id, ticket_group_id) VALUES (?, ?)`, [templateId, gid]);
     }
-    saveDb();
   }
 
-  getAllTemplateTicketGroupMappings(): Array<{ template_id: number; ticket_group_id: number }> {
-    const stmt = this.db.prepare(`SELECT template_id, ticket_group_id FROM milestone_template_ticket_groups`);
-    const results: Array<{ template_id: number; ticket_group_id: number }> = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as { template_id: number; ticket_group_id: number });
-    stmt.free();
-    return results;
+  async getAllTemplateTicketGroupMappings(): Promise<Array<{ template_id: number; ticket_group_id: number }>> {
+    return query<{ template_id: number; ticket_group_id: number }>(`SELECT template_id, ticket_group_id FROM milestone_template_ticket_groups`);
   }
 
-  // ── Workflow: Progressive Task Creation ──
-
-  /** Find milestones within lead_days of their target_date that haven't had tasks created yet */
-  getMilestonesReadyForWorkflow(): WorkflowReadyMilestone[] {
-    const stmt = this.db.prepare(`
+  async getMilestonesReadyForWorkflow(): Promise<WorkflowReadyMilestone[]> {
+    return query<WorkflowReadyMilestone>(`
       SELECT dm.*, mt.lead_days, de.account, de.product, de.sale_type, de.onboarding_id, de.onboarder
       FROM delivery_milestones dm
       JOIN milestone_templates mt ON dm.template_id = mt.id
@@ -2213,174 +1438,102 @@ export class MilestoneQueries {
       WHERE dm.status != 'complete'
         AND dm.workflow_task_created = 0
         AND dm.target_date IS NOT NULL
-        AND date(dm.target_date, '-' || COALESCE(mt.lead_days, 3) || ' days') <= date('now')
+        AND DATEADD(day, -COALESCE(mt.lead_days, 3), dm.target_date) <= CAST(GETUTCDATE() AS DATE)
       ORDER BY dm.target_date ASC
     `);
-    const results: WorkflowReadyMilestone[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as WorkflowReadyMilestone);
-    stmt.free();
-    return results;
   }
 
-  markWorkflowTaskCreated(milestoneId: number): void {
-    this.db.run(
-      `UPDATE delivery_milestones SET workflow_task_created = 1, updated_at = datetime('now') WHERE id = ?`,
-      [milestoneId]
-    );
-    saveDb();
+  async markWorkflowTaskCreated(milestoneId: number): Promise<void> {
+    await execute(`UPDATE delivery_milestones SET workflow_task_created = 1, updated_at = GETUTCDATE() WHERE id = ?`, [milestoneId]);
   }
 
-  markWorkflowTicketsCreated(milestoneId: number, jiraKeys: string[]): void {
-    this.db.run(
-      `UPDATE delivery_milestones SET workflow_tickets_created = 1, jira_keys = ?, updated_at = datetime('now') WHERE id = ?`,
+  async markWorkflowTicketsCreated(milestoneId: number, jiraKeys: string[]): Promise<void> {
+    await execute(
+      `UPDATE delivery_milestones SET workflow_tickets_created = 1, jira_keys = ?, updated_at = GETUTCDATE() WHERE id = ?`,
       [JSON.stringify(jiraKeys), milestoneId]
     );
-    saveDb();
   }
 
-  /** Get the next milestone for a delivery after a given sort_order */
-  getNextMilestoneForDelivery(deliveryId: number, afterTemplateId: number): (DeliveryMilestone & { lead_days: number }) | undefined {
-    const stmt = this.db.prepare(`
-      SELECT dm.*, mt.lead_days
+  async getNextMilestoneForDelivery(deliveryId: number, afterTemplateId: number): Promise<(DeliveryMilestone & { lead_days: number }) | undefined> {
+    return queryOne<DeliveryMilestone & { lead_days: number }>(`
+      SELECT TOP 1 dm.*, mt.lead_days
       FROM delivery_milestones dm
       JOIN milestone_templates mt ON dm.template_id = mt.id
-      WHERE dm.delivery_id = ?
-        AND dm.status != 'complete'
-        AND dm.workflow_task_created = 0
+      WHERE dm.delivery_id = ? AND dm.status != 'complete' AND dm.workflow_task_created = 0
         AND mt.sort_order > (SELECT sort_order FROM milestone_templates WHERE id = ?)
       ORDER BY mt.sort_order ASC
-      LIMIT 1
-    `);
-    stmt.bind([deliveryId, afterTemplateId]);
-    if (stmt.step()) {
-      const m = stmt.getAsObject() as unknown as DeliveryMilestone & { lead_days: number };
-      stmt.free();
-      return m;
-    }
-    stmt.free();
-    return undefined;
+    `, [deliveryId, afterTemplateId]);
   }
 }
 
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
 export class SettingsQueries {
-  constructor(private db: Database) {}
-
-  get(key: string): string | null {
-    const stmt = this.db.prepare(`SELECT value FROM settings WHERE key = ?`);
-    stmt.bind([key]);
-
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      stmt.free();
-      return (row.value as string) ?? null;
-    }
-    stmt.free();
-    return null;
+  async get(key: string): Promise<string | null> {
+    const row = await queryOne<{ value: string }>(`SELECT value FROM settings WHERE [key] = ?`, [key]);
+    return row?.value ?? null;
   }
 
-  set(key: string, value: string): void {
-    this.db.run(
-      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-      [key, value]
-    );
-    saveDb();
+  async set(key: string, value: string): Promise<void> {
+    await execute(`
+      MERGE INTO settings WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?)) AS source([key], value)
+      ON target.[key] = source.[key]
+      WHEN MATCHED THEN UPDATE SET value = source.value, updated_at = GETUTCDATE()
+      WHEN NOT MATCHED THEN INSERT ([key], value, updated_at) VALUES (source.[key], source.value, GETUTCDATE());
+    `, [key, value]);
   }
 
-  getAll(): Record<string, string> {
-    const stmt = this.db.prepare(`SELECT key, value FROM settings`);
+  async getAll(): Promise<Record<string, string>> {
+    const rows = await query<{ key: string; value: string }>(`SELECT [key], value FROM settings`);
     const result: Record<string, string> = {};
-
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      result[row.key as string] = row.value as string;
-    }
-    stmt.free();
+    for (const row of rows) result[row.key] = row.value;
     return result;
   }
 }
 
-// ── Problem Ticket Detection Queries ──
+// ─── Problem Ticket Detection ─────────────────────────────���───────────────────
 
 export interface ProblemTicketAlert {
-  id: number;
-  issue_key: string;
-  project_key: string;
-  summary: string;
-  status: string | null;
-  priority: string | null;
-  assignee: string | null;
-  reporter: string | null;
-  created_at: string | null;
-  severity: string;
-  score: number;
-  fingerprint: string;
-  first_seen: string;
-  last_seen: string;
-  resolved_at: string | null;
-  sla_remaining_ms: number | null;
-  sentiment_score: number | null;
-  sentiment_summary: string | null;
-  scan_id: string;
-  reasons?: ProblemTicketAlertReason[];
+  id: number; issue_key: string; project_key: string; summary: string;
+  status: string | null; priority: string | null; assignee: string | null;
+  reporter: string | null; created_at: string | null; severity: string;
+  score: number; fingerprint: string; first_seen: string; last_seen: string;
+  resolved_at: string | null; sla_remaining_ms: number | null;
+  sentiment_score: number | null; sentiment_summary: string | null;
+  scan_id: string; reasons?: ProblemTicketAlertReason[];
 }
-
-export interface ProblemTicketAlertReason {
-  rule: string;
-  label: string;
-  weight: number;
-  detail: string | null;
-}
-
+export interface ProblemTicketAlertReason { rule: string; label: string; weight: number; detail: string | null; }
 export interface ProblemTicketIgnore {
-  id: number;
-  issue_key: string;
-  ignored_by: string;
-  reason: string | null;
-  fingerprint_at_ignore: string;
-  ignored_at: string;
-  lifted_at: string | null;
-  lifted_reason: string | null;
+  id: number; issue_key: string; ignored_by: string; reason: string | null;
+  fingerprint_at_ignore: string; ignored_at: string; lifted_at: string | null; lifted_reason: string | null;
 }
-
-export interface ProblemTicketConfigRow {
-  rule: string;
-  enabled: boolean;
-  weight: number;
-  threshold_json: string;
-}
+export interface ProblemTicketConfigRow { rule: string; enabled: boolean; weight: number; threshold_json: string; }
 
 export class ProblemTicketQueries {
-  constructor(private db: Database) {}
-
-  upsertAlert(
+  async upsertAlert(
     alert: Omit<ProblemTicketAlert, 'id' | 'first_seen' | 'last_seen' | 'resolved_at' | 'reasons'>,
     reasons: Omit<ProblemTicketAlertReason, 'alert_id'>[]
-  ): number {
-    // Upsert the alert
-    this.db.run(`
-      INSERT INTO problem_ticket_alerts
-        (issue_key, project_key, summary, status, priority, assignee, reporter,
-         created_at, severity, score, fingerprint, sla_remaining_ms,
-         sentiment_score, sentiment_summary, scan_id, last_seen)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(issue_key) DO UPDATE SET
-        project_key = excluded.project_key,
-        summary = excluded.summary,
-        status = excluded.status,
-        priority = excluded.priority,
-        assignee = excluded.assignee,
-        reporter = excluded.reporter,
-        created_at = excluded.created_at,
-        severity = excluded.severity,
-        score = excluded.score,
-        fingerprint = excluded.fingerprint,
-        sla_remaining_ms = excluded.sla_remaining_ms,
-        sentiment_score = excluded.sentiment_score,
-        sentiment_summary = excluded.sentiment_summary,
-        scan_id = excluded.scan_id,
-        last_seen = datetime('now'),
-        resolved_at = NULL
+  ): Promise<number> {
+    await execute(`
+      MERGE INTO problem_ticket_alerts WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
+        AS source(issue_key, project_key, summary, status, priority, assignee, reporter,
+                  created_at, severity, score, fingerprint, sla_remaining_ms,
+                  sentiment_score, sentiment_summary, scan_id)
+      ON target.issue_key = source.issue_key
+      WHEN MATCHED THEN UPDATE SET
+        project_key=source.project_key, summary=source.summary, status=source.status,
+        priority=source.priority, assignee=source.assignee, reporter=source.reporter,
+        created_at=source.created_at, severity=source.severity, score=source.score,
+        fingerprint=source.fingerprint, sla_remaining_ms=source.sla_remaining_ms,
+        sentiment_score=source.sentiment_score, sentiment_summary=source.sentiment_summary,
+        scan_id=source.scan_id, last_seen=GETUTCDATE(), resolved_at=NULL
+      WHEN NOT MATCHED THEN INSERT (issue_key, project_key, summary, status, priority, assignee, reporter,
+        created_at, severity, score, fingerprint, sla_remaining_ms, sentiment_score, sentiment_summary, scan_id, last_seen)
+        VALUES (source.issue_key, source.project_key, source.summary, source.status, source.priority, source.assignee, source.reporter,
+          source.created_at, source.severity, source.score, source.fingerprint, source.sla_remaining_ms,
+          source.sentiment_score, source.sentiment_summary, source.scan_id, GETUTCDATE());
     `, [
       alert.issue_key, alert.project_key, alert.summary, alert.status,
       alert.priority, alert.assignee, alert.reporter, alert.created_at,
@@ -2388,145 +1541,84 @@ export class ProblemTicketQueries {
       alert.sentiment_score, alert.sentiment_summary, alert.scan_id,
     ]);
 
-    // Get the alert id
-    const idResult = this.db.exec(`SELECT id FROM problem_ticket_alerts WHERE issue_key = '${alert.issue_key.replace(/'/g, "''")}'`);
-    const alertId = idResult[0]?.values[0]?.[0] as number;
+    const idRow = await queryOne<{ id: number }>(`SELECT id FROM problem_ticket_alerts WHERE issue_key = ?`, [alert.issue_key]);
+    const alertId = idRow?.id ?? 0;
 
-    // Replace reasons
-    this.db.run(`DELETE FROM problem_ticket_alert_reasons WHERE alert_id = ?`, [alertId]);
+    await execute(`DELETE FROM problem_ticket_alert_reasons WHERE alert_id = ?`, [alertId]);
     for (const r of reasons) {
-      this.db.run(
-        `INSERT INTO problem_ticket_alert_reasons (alert_id, rule, label, weight, detail) VALUES (?, ?, ?, ?, ?)`,
+      await execute(
+        `INSERT INTO problem_ticket_alert_reasons (alert_id, [rule], label, weight, detail) VALUES (?, ?, ?, ?, ?)`,
         [alertId, r.rule, r.label, r.weight, r.detail ?? null]
       );
     }
-
-    saveDb();
     return alertId;
   }
 
-  getActiveAlerts(filters?: { severity?: string; projectKey?: string }): ProblemTicketAlert[] {
+  async getActiveAlerts(filters?: { severity?: string; projectKey?: string }): Promise<ProblemTicketAlert[]> {
     let sql = `
-      SELECT a.*
-      FROM problem_ticket_alerts a
+      SELECT a.* FROM problem_ticket_alerts a
       WHERE a.resolved_at IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM problem_ticket_ignores i
-          WHERE i.issue_key = a.issue_key
-            AND i.lifted_at IS NULL
-            AND i.fingerprint_at_ignore = a.fingerprint
+          WHERE i.issue_key = a.issue_key AND i.lifted_at IS NULL AND i.fingerprint_at_ignore = a.fingerprint
         )
     `;
     const params: unknown[] = [];
-    if (filters?.severity) {
-      sql += ` AND a.severity = ?`;
-      params.push(filters.severity);
-    }
-    if (filters?.projectKey) {
-      sql += ` AND a.project_key = ?`;
-      params.push(filters.projectKey);
-    }
+    if (filters?.severity) { sql += ` AND a.severity = ?`; params.push(filters.severity); }
+    if (filters?.projectKey) { sql += ` AND a.project_key = ?`; params.push(filters.projectKey); }
     sql += ` ORDER BY a.score DESC, a.last_seen DESC`;
 
-    const stmt = this.db.prepare(sql);
-    if (params.length) stmt.bind(params as any[]);
-    const alerts: ProblemTicketAlert[] = [];
-
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      const alert = this.rowToAlert(row);
-      alert.reasons = this.getReasonsForAlert(alert.id);
-      alerts.push(alert);
+    const alerts = await query<Record<string, unknown>>(sql, params);
+    const result: ProblemTicketAlert[] = [];
+    for (const row of alerts) {
+      const a = this.rowToAlert(row);
+      a.reasons = await this.getReasonsForAlert(a.id);
+      result.push(a);
     }
-    stmt.free();
-    return alerts;
+    return result;
   }
 
-  getAlertByIssueKey(issueKey: string): ProblemTicketAlert | null {
-    const stmt = this.db.prepare(`SELECT * FROM problem_ticket_alerts WHERE issue_key = ?`);
-    stmt.bind([issueKey]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      stmt.free();
-      const alert = this.rowToAlert(row);
-      alert.reasons = this.getReasonsForAlert(alert.id);
-      return alert;
-    }
-    stmt.free();
-    return null;
+  async getAlertByIssueKey(issueKey: string): Promise<ProblemTicketAlert | null> {
+    const row = await queryOne<Record<string, unknown>>(`SELECT * FROM problem_ticket_alerts WHERE issue_key = ?`, [issueKey]);
+    if (!row) return null;
+    const alert = this.rowToAlert(row);
+    alert.reasons = await this.getReasonsForAlert(alert.id);
+    return alert;
   }
 
-  private getReasonsForAlert(alertId: number): ProblemTicketAlertReason[] {
-    const stmt = this.db.prepare(`SELECT rule, label, weight, detail FROM problem_ticket_alert_reasons WHERE alert_id = ? ORDER BY weight DESC`);
-    stmt.bind([alertId]);
-    const reasons: ProblemTicketAlertReason[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      reasons.push({
-        rule: row.rule as string,
-        label: row.label as string,
-        weight: row.weight as number,
-        detail: (row.detail as string) ?? null,
-      });
-    }
-    stmt.free();
-    return reasons;
+  private async getReasonsForAlert(alertId: number): Promise<ProblemTicketAlertReason[]> {
+    return query<ProblemTicketAlertReason>(
+      `SELECT [rule], label, weight, detail FROM problem_ticket_alert_reasons WHERE alert_id = ? ORDER BY weight DESC`, [alertId]
+    );
   }
 
-  insertIgnore(issueKey: string, ignoredBy: string, reason: string | null, fingerprint: string): void {
-    this.db.run(
+  async insertIgnore(issueKey: string, ignoredBy: string, reason: string | null, fingerprint: string): Promise<void> {
+    await execute(
       `INSERT INTO problem_ticket_ignores (issue_key, ignored_by, reason, fingerprint_at_ignore) VALUES (?, ?, ?, ?)`,
       [issueKey, ignoredBy, reason, fingerprint]
     );
-    saveDb();
   }
 
-  getIgnoresForIssue(issueKey: string): ProblemTicketIgnore[] {
-    const stmt = this.db.prepare(`SELECT * FROM problem_ticket_ignores WHERE issue_key = ? ORDER BY ignored_at DESC`);
-    stmt.bind([issueKey]);
-    const ignores: ProblemTicketIgnore[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      ignores.push({
-        id: row.id as number,
-        issue_key: row.issue_key as string,
-        ignored_by: row.ignored_by as string,
-        reason: (row.reason as string) ?? null,
-        fingerprint_at_ignore: row.fingerprint_at_ignore as string,
-        ignored_at: row.ignored_at as string,
-        lifted_at: (row.lifted_at as string) ?? null,
-        lifted_reason: (row.lifted_reason as string) ?? null,
-      });
-    }
-    stmt.free();
-    return ignores;
+  async getIgnoresForIssue(issueKey: string): Promise<ProblemTicketIgnore[]> {
+    return query<ProblemTicketIgnore>(`SELECT * FROM problem_ticket_ignores WHERE issue_key = ? ORDER BY ignored_at DESC`, [issueKey]);
   }
 
-  liftIgnore(issueKey: string, reason: string): void {
-    this.db.run(
-      `UPDATE problem_ticket_ignores SET lifted_at = datetime('now'), lifted_reason = ? WHERE issue_key = ? AND lifted_at IS NULL`,
+  async liftIgnore(issueKey: string, reason: string): Promise<void> {
+    await execute(
+      `UPDATE problem_ticket_ignores SET lifted_at = GETUTCDATE(), lifted_reason = ? WHERE issue_key = ? AND lifted_at IS NULL`,
       [reason, issueKey]
     );
-    saveDb();
   }
 
-  getConfig(): ProblemTicketConfigRow[] {
-    const stmt = this.db.prepare(`SELECT * FROM problem_ticket_config ORDER BY rule`);
-    const rows: ProblemTicketConfigRow[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      rows.push({
-        rule: row.rule as string,
-        enabled: (row.enabled as number) === 1,
-        weight: row.weight as number,
-        threshold_json: (row.threshold_json as string) ?? '{}',
-      });
-    }
-    stmt.free();
-    return rows;
+  async getConfig(): Promise<ProblemTicketConfigRow[]> {
+    const rows = await query<Record<string, unknown>>(`SELECT * FROM problem_ticket_config ORDER BY [rule]`);
+    return rows.map(row => ({
+      rule: row.rule as string, enabled: (row.enabled as number) === 1,
+      weight: row.weight as number, threshold_json: (row.threshold_json as string) ?? '{}',
+    }));
   }
 
-  updateConfig(rule: string, updates: { enabled?: boolean; weight?: number; threshold_json?: string }): void {
+  async updateConfig(rule: string, updates: { enabled?: boolean; weight?: number; threshold_json?: string }): Promise<void> {
     const sets: string[] = [];
     const params: unknown[] = [];
     if (updates.enabled !== undefined) { sets.push('enabled = ?'); params.push(updates.enabled ? 1 : 0); }
@@ -2534,168 +1626,111 @@ export class ProblemTicketQueries {
     if (updates.threshold_json !== undefined) { sets.push('threshold_json = ?'); params.push(updates.threshold_json); }
     if (sets.length === 0) return;
     params.push(rule);
-    this.db.run(`UPDATE problem_ticket_config SET ${sets.join(', ')} WHERE rule = ?`, params as any[]);
-    saveDb();
+    await execute(`UPDATE problem_ticket_config SET ${sets.join(', ')} WHERE [rule] = ?`, params);
   }
 
-  markResolved(activeIssueKeys: string[]): number {
+  async markResolved(activeIssueKeys: string[]): Promise<number> {
     if (activeIssueKeys.length === 0) {
-      // All alerts should be resolved
-      const result = this.db.exec(`SELECT COUNT(*) FROM problem_ticket_alerts WHERE resolved_at IS NULL`);
-      const count = (result[0]?.values[0]?.[0] as number) ?? 0;
-      if (count > 0) {
-        this.db.run(`UPDATE problem_ticket_alerts SET resolved_at = datetime('now') WHERE resolved_at IS NULL`);
-        saveDb();
-      }
+      const row = await queryOne<{ c: number }>(`SELECT COUNT(*) as c FROM problem_ticket_alerts WHERE resolved_at IS NULL`);
+      const count = row?.c ?? 0;
+      if (count > 0) await execute(`UPDATE problem_ticket_alerts SET resolved_at = GETUTCDATE() WHERE resolved_at IS NULL`);
       return count;
     }
     const placeholders = activeIssueKeys.map(() => '?').join(',');
-    const result = this.db.exec(`SELECT COUNT(*) FROM problem_ticket_alerts WHERE resolved_at IS NULL AND issue_key NOT IN (${placeholders})`, activeIssueKeys as any);
-    const count = (result[0]?.values[0]?.[0] as number) ?? 0;
+    const row = await queryOne<{ c: number }>(
+      `SELECT COUNT(*) as c FROM problem_ticket_alerts WHERE resolved_at IS NULL AND issue_key NOT IN (${placeholders})`,
+      activeIssueKeys
+    );
+    const count = row?.c ?? 0;
     if (count > 0) {
-      this.db.run(
-        `UPDATE problem_ticket_alerts SET resolved_at = datetime('now') WHERE resolved_at IS NULL AND issue_key NOT IN (${placeholders})`,
-        activeIssueKeys as any
+      await execute(
+        `UPDATE problem_ticket_alerts SET resolved_at = GETUTCDATE() WHERE resolved_at IS NULL AND issue_key NOT IN (${placeholders})`,
+        activeIssueKeys
       );
-      saveDb();
     }
     return count;
   }
 
-  getStats(): { p1: number; p2: number; p3: number; total: number; ignored: number; lastScan: string | null } {
-    const counts = this.db.exec(`
-      SELECT severity, COUNT(*) as cnt
-      FROM problem_ticket_alerts
-      WHERE resolved_at IS NULL
-      GROUP BY severity
+  async getStats(): Promise<{ p1: number; p2: number; p3: number; total: number; ignored: number; lastScan: string | null }> {
+    const counts = await query<{ severity: string; cnt: number }>(`
+      SELECT severity, COUNT(*) as cnt FROM problem_ticket_alerts WHERE resolved_at IS NULL GROUP BY severity
     `);
     let p1 = 0, p2 = 0, p3 = 0;
-    for (const row of counts[0]?.values ?? []) {
-      if (row[0] === 'P1') p1 = row[1] as number;
-      else if (row[0] === 'P2') p2 = row[1] as number;
-      else if (row[0] === 'P3') p3 = row[1] as number;
+    for (const row of counts) {
+      if (row.severity === 'P1') p1 = row.cnt;
+      else if (row.severity === 'P2') p2 = row.cnt;
+      else if (row.severity === 'P3') p3 = row.cnt;
     }
-
-    const ignoredResult = this.db.exec(`SELECT COUNT(*) FROM problem_ticket_ignores WHERE lifted_at IS NULL`);
-    const ignored = (ignoredResult[0]?.values[0]?.[0] as number) ?? 0;
-
-    // Read actual scan timestamp from settings (not derived from alert data)
-    const lastScanResult = this.db.exec(`SELECT value FROM settings WHERE key = 'problem_ticket_last_scan'`);
-    const lastScan = (lastScanResult[0]?.values[0]?.[0] as string) ?? null;
-
+    const ignoredRow = await queryOne<{ c: number }>(`SELECT COUNT(*) as c FROM problem_ticket_ignores WHERE lifted_at IS NULL`);
+    const ignored = ignoredRow?.c ?? 0;
+    const lastScanRow = await queryOne<{ value: string }>(`SELECT value FROM settings WHERE [key] = 'problem_ticket_last_scan'`);
+    const lastScan = lastScanRow?.value ?? null;
     return { p1, p2, p3, total: p1 + p2 + p3, ignored, lastScan };
   }
 
-  cleanupOld(daysToKeep = 30): number {
-    const result = this.db.exec(
-      `SELECT COUNT(*) FROM problem_ticket_alerts WHERE resolved_at IS NOT NULL AND resolved_at < datetime('now', '-' || ? || ' days')`,
+  async cleanupOld(daysToKeep = 30): Promise<number> {
+    const row = await queryOne<{ c: number }>(
+      `SELECT COUNT(*) as c FROM problem_ticket_alerts WHERE resolved_at IS NOT NULL AND resolved_at < DATEADD(day, -?, GETUTCDATE())`,
       [daysToKeep]
     );
-    const count = (result[0]?.values[0]?.[0] as number) ?? 0;
+    const count = row?.c ?? 0;
     if (count > 0) {
-      this.db.run(
-        `DELETE FROM problem_ticket_alerts WHERE resolved_at IS NOT NULL AND resolved_at < datetime('now', '-' || ? || ' days')`,
+      await execute(
+        `DELETE FROM problem_ticket_alerts WHERE resolved_at IS NOT NULL AND resolved_at < DATEADD(day, -?, GETUTCDATE())`,
         [daysToKeep]
       );
-      saveDb();
     }
     return count;
   }
 
   private rowToAlert(row: Record<string, unknown>): ProblemTicketAlert {
     return {
-      id: row.id as number,
-      issue_key: row.issue_key as string,
-      project_key: row.project_key as string,
-      summary: row.summary as string,
-      status: (row.status as string) ?? null,
-      priority: (row.priority as string) ?? null,
-      assignee: (row.assignee as string) ?? null,
-      reporter: (row.reporter as string) ?? null,
-      created_at: (row.created_at as string) ?? null,
-      severity: row.severity as string,
-      score: row.score as number,
-      fingerprint: row.fingerprint as string,
-      first_seen: row.first_seen as string,
-      last_seen: row.last_seen as string,
-      resolved_at: (row.resolved_at as string) ?? null,
+      id: row.id as number, issue_key: row.issue_key as string, project_key: row.project_key as string,
+      summary: row.summary as string, status: (row.status as string) ?? null,
+      priority: (row.priority as string) ?? null, assignee: (row.assignee as string) ?? null,
+      reporter: (row.reporter as string) ?? null, created_at: (row.created_at as string) ?? null,
+      severity: row.severity as string, score: row.score as number,
+      fingerprint: row.fingerprint as string, first_seen: row.first_seen as string,
+      last_seen: row.last_seen as string, resolved_at: (row.resolved_at as string) ?? null,
       sla_remaining_ms: (row.sla_remaining_ms as number) ?? null,
       sentiment_score: (row.sentiment_score as number) ?? null,
-      sentiment_summary: (row.sentiment_summary as string) ?? null,
-      scan_id: row.scan_id as string,
+      sentiment_summary: (row.sentiment_summary as string) ?? null, scan_id: row.scan_id as string,
     };
   }
 }
 
-// ── Instance Setup Queries (Onboarding.Tool integration) ──
+// ─── Instance Setup ──────────────────────────────────────────────────────────
 
 export interface SetupStepTemplate {
-  id: number;
-  product: string;
-  step_key: string;
-  step_label: string;
-  sort_order: number;
-  required: number;
+  id: number; product: string; step_key: string; step_label: string; sort_order: number; required: number;
 }
-
 export interface SetupStep {
-  id: number;
-  delivery_id: number;
-  step_key: string;
-  step_label: string;
-  status: string;
-  result_message: string | null;
-  executed_at: string | null;
-  executed_by: number | null;
+  id: number; delivery_id: number; step_key: string; step_label: string;
+  status: string; result_message: string | null; executed_at: string | null; executed_by: number | null;
 }
 
 export class InstanceSetupQueries {
-  constructor(private db: Database) {}
-
-  // ── Templates ──
-
-  getTemplatesByProduct(product: string): SetupStepTemplate[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM instance_setup_step_templates WHERE product = ? ORDER BY sort_order`
-    );
-    stmt.bind([product]);
-    const results: SetupStepTemplate[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as SetupStepTemplate);
-    stmt.free();
-    return results;
+  async getTemplatesByProduct(product: string): Promise<SetupStepTemplate[]> {
+    return query<SetupStepTemplate>(`SELECT * FROM instance_setup_step_templates WHERE product = ? ORDER BY sort_order`, [product]);
   }
 
-  getAllTemplates(): SetupStepTemplate[] {
-    const stmt = this.db.prepare(`SELECT * FROM instance_setup_step_templates ORDER BY product, sort_order`);
-    const results: SetupStepTemplate[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as SetupStepTemplate);
-    stmt.free();
-    return results;
+  async getAllTemplates(): Promise<SetupStepTemplate[]> {
+    return query<SetupStepTemplate>(`SELECT * FROM instance_setup_step_templates ORDER BY product, sort_order`);
   }
 
-  getDistinctProducts(): string[] {
-    const stmt = this.db.prepare(`SELECT DISTINCT product FROM instance_setup_step_templates ORDER BY product`);
-    const results: string[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      results.push(row.product as string);
-    }
-    stmt.free();
-    return results;
+  async getDistinctProducts(): Promise<string[]> {
+    const rows = await query<{ product: string }>(`SELECT DISTINCT product FROM instance_setup_step_templates ORDER BY product`);
+    return rows.map(r => r.product);
   }
 
-  createTemplate(data: { product: string; step_key: string; step_label: string; sort_order?: number; required?: number }): number {
-    this.db.run(
+  async createTemplate(data: { product: string; step_key: string; step_label: string; sort_order?: number; required?: number }): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO instance_setup_step_templates (product, step_key, step_label, sort_order, required) VALUES (?, ?, ?, ?, ?)`,
       [data.product, data.step_key, data.step_label, data.sort_order ?? 0, data.required ?? 1]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  updateTemplate(id: number, updates: Partial<Pick<SetupStepTemplate, 'step_label' | 'sort_order' | 'required'>>): boolean {
+  async updateTemplate(id: number, updates: Partial<Pick<SetupStepTemplate, 'step_label' | 'sort_order' | 'required'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.step_label !== undefined) { fields.push('step_label = ?'); params.push(updates.step_label); }
@@ -2703,144 +1738,100 @@ export class InstanceSetupQueries {
     if (updates.required !== undefined) { fields.push('required = ?'); params.push(updates.required); }
     if (fields.length === 0) return false;
     params.push(id);
-    this.db.run(`UPDATE instance_setup_step_templates SET ${fields.join(', ')} WHERE id = ?`, params as (string | number | null)[]);
-    saveDb();
+    await execute(`UPDATE instance_setup_step_templates SET ${fields.join(', ')} WHERE id = ?`, params);
     return true;
   }
 
-  deleteTemplate(id: number): void {
-    this.db.run(`DELETE FROM instance_setup_step_templates WHERE id = ?`, [id]);
-    saveDb();
+  async deleteTemplate(id: number): Promise<void> {
+    await execute(`DELETE FROM instance_setup_step_templates WHERE id = ?`, [id]);
   }
 
-  // ── Per-delivery steps ──
-
-  getByDelivery(deliveryId: number): SetupStep[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM instance_setup_steps WHERE delivery_id = ? ORDER BY step_key`
-    );
-    stmt.bind([deliveryId]);
-    const results: SetupStep[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as SetupStep);
-    stmt.free();
-    return results;
+  async getByDelivery(deliveryId: number): Promise<SetupStep[]> {
+    return query<SetupStep>(`SELECT * FROM instance_setup_steps WHERE delivery_id = ? ORDER BY step_key`, [deliveryId]);
   }
 
-  /** Initialize steps for a delivery from templates. Returns count of steps created. */
-  initializeSteps(deliveryId: number, product: string): number {
-    const templates = this.getTemplatesByProduct(product);
+  async initializeSteps(deliveryId: number, product: string): Promise<number> {
+    const templates = await this.getTemplatesByProduct(product);
     let created = 0;
     for (const tmpl of templates) {
       try {
-        this.db.run(
-          `INSERT OR IGNORE INTO instance_setup_steps (delivery_id, step_key, step_label) VALUES (?, ?, ?)`,
-          [deliveryId, tmpl.step_key, tmpl.step_label]
+        const existing = await queryOne<{ id: number }>(
+          `SELECT id FROM instance_setup_steps WHERE delivery_id = ? AND step_key = ?`, [deliveryId, tmpl.step_key]
         );
-        created++;
-      } catch {
-        // already exists — ignore
-      }
+        if (!existing) {
+          await execute(
+            `INSERT INTO instance_setup_steps (delivery_id, step_key, step_label) VALUES (?, ?, ?)`,
+            [deliveryId, tmpl.step_key, tmpl.step_label]
+          );
+          created++;
+        }
+      } catch { /* skip duplicates */ }
     }
-    if (created > 0) saveDb();
     return created;
   }
 
-  updateStepStatus(deliveryId: number, stepKey: string, status: string, resultMessage?: string, executedBy?: number): boolean {
+  async updateStepStatus(deliveryId: number, stepKey: string, status: string, resultMessage?: string, executedBy?: number): Promise<boolean> {
     const now = ['complete', 'failed'].includes(status) ? new Date().toISOString() : null;
-    this.db.run(
+    const result = await execute(
       `UPDATE instance_setup_steps SET status = ?, result_message = COALESCE(?, result_message), executed_at = COALESCE(?, executed_at), executed_by = COALESCE(?, executed_by) WHERE delivery_id = ? AND step_key = ?`,
       [status, resultMessage ?? null, now, executedBy ?? null, deliveryId, stepKey]
     );
-    saveDb();
-    return this.db.getRowsModified() > 0;
+    return result.rowsAffected > 0;
   }
 
-  deleteStepsForDelivery(deliveryId: number): void {
-    this.db.run(`DELETE FROM instance_setup_steps WHERE delivery_id = ?`, [deliveryId]);
-    saveDb();
+  async deleteStepsForDelivery(deliveryId: number): Promise<void> {
+    await execute(`DELETE FROM instance_setup_steps WHERE delivery_id = ?`, [deliveryId]);
   }
 
-  /** Bulk status summary for multiple deliveries */
-  getBulkProgress(deliveryIds: number[]): Record<number, { total: number; complete: number; failed: number }> {
+  async getBulkProgress(deliveryIds: number[]): Promise<Record<number, { total: number; complete: number; failed: number }>> {
     if (deliveryIds.length === 0) return {};
     const placeholders = deliveryIds.map(() => '?').join(',');
-    const stmt = this.db.prepare(
-      `SELECT delivery_id, status, COUNT(*) as cnt FROM instance_setup_steps WHERE delivery_id IN (${placeholders}) GROUP BY delivery_id, status`
+    const rows = await query<{ delivery_id: number; status: string; cnt: number }>(
+      `SELECT delivery_id, status, COUNT(*) as cnt FROM instance_setup_steps WHERE delivery_id IN (${placeholders}) GROUP BY delivery_id, status`,
+      deliveryIds
     );
-    stmt.bind(deliveryIds as any);
     const result: Record<number, { total: number; complete: number; failed: number }> = {};
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      const did = row.delivery_id as number;
-      const status = row.status as string;
-      const cnt = row.cnt as number;
-      if (!result[did]) result[did] = { total: 0, complete: 0, failed: 0 };
-      result[did].total += cnt;
-      if (status === 'complete') result[did].complete += cnt;
-      if (status === 'failed') result[did].failed += cnt;
+    for (const row of rows) {
+      if (!result[row.delivery_id]) result[row.delivery_id] = { total: 0, complete: 0, failed: 0 };
+      result[row.delivery_id].total += row.cnt;
+      if (row.status === 'complete') result[row.delivery_id].complete += row.cnt;
+      if (row.status === 'failed') result[row.delivery_id].failed += row.cnt;
     }
-    stmt.free();
     return result;
   }
 }
 
-// ─── Phase 2: Branch Queries ───────────────────────────────────────────────
+// ─── Branches ─────────────────────────────────────────────────────────────────
 
 export interface DeliveryBranch {
-  id: number;
-  delivery_id: number;
-  is_default: number;
-  name: string;
-  sales_email: string | null;
-  sales_phone: string | null;
-  lettings_email: string | null;
-  lettings_phone: string | null;
-  address1: string | null;
-  address2: string | null;
-  address3: string | null;
-  town: string | null;
-  post_code1: string | null;
-  post_code2: string | null;
-  sort_order: number;
-  created_at: string;
+  id: number; delivery_id: number; is_default: number; name: string;
+  sales_email: string | null; sales_phone: string | null;
+  lettings_email: string | null; lettings_phone: string | null;
+  address1: string | null; address2: string | null; address3: string | null;
+  town: string | null; post_code1: string | null; post_code2: string | null;
+  sort_order: number; created_at: string;
 }
 
 export class BranchQueries {
-  constructor(private db: Database) {}
-
-  getByDelivery(deliveryId: number): DeliveryBranch[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM delivery_branches WHERE delivery_id = ? ORDER BY is_default DESC, sort_order, name`
-    );
-    stmt.bind([deliveryId]);
-    const rows: DeliveryBranch[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as DeliveryBranch);
-    stmt.free();
-    return rows;
+  async getByDelivery(deliveryId: number): Promise<DeliveryBranch[]> {
+    return query<DeliveryBranch>(`SELECT * FROM delivery_branches WHERE delivery_id = ? ORDER BY is_default DESC, sort_order, name`, [deliveryId]);
   }
 
-  getById(id: number): DeliveryBranch | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_branches WHERE id = ?`);
-    stmt.bind([id]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as DeliveryBranch) : undefined;
-    stmt.free();
-    return row;
+  async getById(id: number): Promise<DeliveryBranch | undefined> {
+    return queryOne<DeliveryBranch>(`SELECT * FROM delivery_branches WHERE id = ?`, [id]);
   }
 
-  create(data: Omit<DeliveryBranch, 'id' | 'created_at'>): number {
-    this.db.run(
+  async create(data: Omit<DeliveryBranch, 'id' | 'created_at'>): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO delivery_branches (delivery_id, is_default, name, sales_email, sales_phone, lettings_email, lettings_phone, address1, address2, address3, town, post_code1, post_code2, sort_order)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [data.delivery_id, data.is_default ?? 0, data.name, data.sales_email ?? null, data.sales_phone ?? null,
        data.lettings_email ?? null, data.lettings_phone ?? null, data.address1 ?? null, data.address2 ?? null,
        data.address3 ?? null, data.town ?? null, data.post_code1 ?? null, data.post_code2 ?? null, data.sort_order ?? 0]
     );
-    const idRow = this.db.exec('SELECT last_insert_rowid() as id');
-    saveDb();
-    return (idRow[0]?.values[0]?.[0] as number) ?? 0;
   }
 
-  update(id: number, updates: Partial<Omit<DeliveryBranch, 'id' | 'delivery_id' | 'created_at'>>): boolean {
+  async update(id: number, updates: Partial<Omit<DeliveryBranch, 'id' | 'delivery_id' | 'created_at'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     for (const [key, val] of Object.entries(updates)) {
@@ -2849,612 +1840,390 @@ export class BranchQueries {
     }
     if (fields.length === 0) return false;
     params.push(id);
-    this.db.run(`UPDATE delivery_branches SET ${fields.join(', ')} WHERE id = ?`, params);
-    saveDb();
-    return this.db.getRowsModified() > 0;
+    const result = await execute(`UPDATE delivery_branches SET ${fields.join(', ')} WHERE id = ?`, params);
+    return result.rowsAffected > 0;
   }
 
-  delete(id: number): boolean {
-    this.db.run(`DELETE FROM delivery_branches WHERE id = ?`, [id]);
-    saveDb();
-    return this.db.getRowsModified() > 0;
+  async delete(id: number): Promise<boolean> {
+    const result = await execute(`DELETE FROM delivery_branches WHERE id = ?`, [id]);
+    return result.rowsAffected > 0;
   }
 
-  bulkCreate(deliveryId: number, branches: Array<Omit<DeliveryBranch, 'id' | 'delivery_id' | 'created_at'>>): number {
+  async bulkCreate(deliveryId: number, branches: Array<Omit<DeliveryBranch, 'id' | 'delivery_id' | 'created_at'>>): Promise<number> {
     let created = 0;
     for (const b of branches) {
       try {
-        this.db.run(
-          `INSERT OR IGNORE INTO delivery_branches (delivery_id, is_default, name, sales_email, sales_phone, lettings_email, lettings_phone, address1, address2, address3, town, post_code1, post_code2, sort_order)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [deliveryId, b.is_default ?? 0, b.name, b.sales_email ?? null, b.sales_phone ?? null,
-           b.lettings_email ?? null, b.lettings_phone ?? null, b.address1 ?? null, b.address2 ?? null,
-           b.address3 ?? null, b.town ?? null, b.post_code1 ?? null, b.post_code2 ?? null, b.sort_order ?? 0]
+        const existing = await queryOne<{ id: number }>(
+          `SELECT id FROM delivery_branches WHERE delivery_id = ? AND name = ?`, [deliveryId, b.name]
         );
-        created += this.db.getRowsModified();
+        if (!existing) {
+          await execute(
+            `INSERT INTO delivery_branches (delivery_id, is_default, name, sales_email, sales_phone, lettings_email, lettings_phone, address1, address2, address3, town, post_code1, post_code2, sort_order)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [deliveryId, b.is_default ?? 0, b.name, b.sales_email ?? null, b.sales_phone ?? null,
+             b.lettings_email ?? null, b.lettings_phone ?? null, b.address1 ?? null, b.address2 ?? null,
+             b.address3 ?? null, b.town ?? null, b.post_code1 ?? null, b.post_code2 ?? null, b.sort_order ?? 0]
+          );
+          created++;
+        }
       } catch { /* skip duplicates */ }
     }
-    saveDb();
     return created;
   }
 
-  setDefault(deliveryId: number, branchId: number): void {
-    this.db.run(`UPDATE delivery_branches SET is_default = 0 WHERE delivery_id = ?`, [deliveryId]);
-    this.db.run(`UPDATE delivery_branches SET is_default = 1 WHERE id = ? AND delivery_id = ?`, [branchId, deliveryId]);
-    saveDb();
+  async setDefault(deliveryId: number, branchId: number): Promise<void> {
+    await execute(`UPDATE delivery_branches SET is_default = 0 WHERE delivery_id = ?`, [deliveryId]);
+    await execute(`UPDATE delivery_branches SET is_default = 1 WHERE id = ? AND delivery_id = ?`, [branchId, deliveryId]);
   }
 }
 
-// ─── Phase 2: Brand Settings Queries ───────────────────────────────────────
+// ─── Brand Settings ───────────────────────────────────���──────────────────────
 
 export class BrandSettingsQueries {
-  constructor(private db: Database) {}
-
-  getByDelivery(deliveryId: number): Record<string, string> {
-    const stmt = this.db.prepare(
-      `SELECT setting_key, setting_value FROM delivery_brand_settings WHERE delivery_id = ?`
+  async getByDelivery(deliveryId: number): Promise<Record<string, string>> {
+    const rows = await query<{ setting_key: string; setting_value: string }>(
+      `SELECT setting_key, setting_value FROM delivery_brand_settings WHERE delivery_id = ?`, [deliveryId]
     );
-    stmt.bind([deliveryId]);
     const result: Record<string, string> = {};
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as { setting_key: string; setting_value: string };
-      result[row.setting_key] = row.setting_value;
-    }
-    stmt.free();
+    for (const row of rows) result[row.setting_key] = row.setting_value;
     return result;
   }
 
-  upsert(deliveryId: number, key: string, value: string | null): void {
-    this.db.run(
-      `INSERT INTO delivery_brand_settings (delivery_id, setting_key, setting_value, updated_at)
-       VALUES (?, ?, ?, datetime('now'))
-       ON CONFLICT(delivery_id, setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = datetime('now')`,
-      [deliveryId, key, value]
-    );
-    saveDb();
+  async upsert(deliveryId: number, key: string, value: string | null): Promise<void> {
+    await execute(`
+      MERGE INTO delivery_brand_settings WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?, ?)) AS source(delivery_id, setting_key, setting_value)
+      ON target.delivery_id = source.delivery_id AND target.setting_key = source.setting_key
+      WHEN MATCHED THEN UPDATE SET setting_value = source.setting_value, updated_at = GETUTCDATE()
+      WHEN NOT MATCHED THEN INSERT (delivery_id, setting_key, setting_value, updated_at) VALUES (source.delivery_id, source.setting_key, source.setting_value, GETUTCDATE());
+    `, [deliveryId, key, value]);
   }
 
-  bulkUpsert(deliveryId: number, settings: Record<string, string | null>): number {
+  async bulkUpsert(deliveryId: number, settings: Record<string, string | null>): Promise<number> {
     let count = 0;
     for (const [key, value] of Object.entries(settings)) {
-      this.db.run(
-        `INSERT INTO delivery_brand_settings (delivery_id, setting_key, setting_value, updated_at)
-         VALUES (?, ?, ?, datetime('now'))
-         ON CONFLICT(delivery_id, setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = datetime('now')`,
-        [deliveryId, key, value]
-      );
+      await this.upsert(deliveryId, key, value);
       count++;
     }
-    saveDb();
     return count;
   }
 
-  deleteByDelivery(deliveryId: number): void {
-    this.db.run(`DELETE FROM delivery_brand_settings WHERE delivery_id = ?`, [deliveryId]);
-    saveDb();
+  async deleteByDelivery(deliveryId: number): Promise<void> {
+    await execute(`DELETE FROM delivery_brand_settings WHERE delivery_id = ?`, [deliveryId]);
   }
 }
 
-// ─── Phase 3: Logo Queries ─────────────────────────────────────────────────
+// ─── Logos ────────────────────────────────────────────────────────────────────
 
 export interface DeliveryLogo {
-  id: number;
-  delivery_id: number;
-  logo_type: number;
-  logo_label: string;
-  mime_type: string;
-  image_data: string;
-  file_name: string | null;
-  file_size: number | null;
-  created_at: string;
+  id: number; delivery_id: number; logo_type: number; logo_label: string;
+  mime_type: string; image_data: string; file_name: string | null;
+  file_size: number | null; created_at: string;
 }
 
 export class LogoQueries {
-  constructor(private db: Database) {}
-
-  getMetadataByDelivery(deliveryId: number): Array<Omit<DeliveryLogo, 'image_data'>> {
-    const stmt = this.db.prepare(
+  async getMetadataByDelivery(deliveryId: number): Promise<Array<Omit<DeliveryLogo, 'image_data'>>> {
+    return query<Omit<DeliveryLogo, 'image_data'>>(
       `SELECT id, delivery_id, logo_type, logo_label, mime_type, file_name, file_size, created_at
-       FROM delivery_logos WHERE delivery_id = ? ORDER BY logo_type`
+       FROM delivery_logos WHERE delivery_id = ? ORDER BY logo_type`, [deliveryId]
     );
-    stmt.bind([deliveryId]);
-    const rows: Array<Omit<DeliveryLogo, 'image_data'>> = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as Omit<DeliveryLogo, 'image_data'>);
-    stmt.free();
-    return rows;
   }
 
-  getByDeliveryAndType(deliveryId: number, logoType: number): DeliveryLogo | undefined {
-    const stmt = this.db.prepare(
-      `SELECT * FROM delivery_logos WHERE delivery_id = ? AND logo_type = ?`
-    );
-    stmt.bind([deliveryId, logoType]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as DeliveryLogo) : undefined;
-    stmt.free();
-    return row;
+  async getByDeliveryAndType(deliveryId: number, logoType: number): Promise<DeliveryLogo | undefined> {
+    return queryOne<DeliveryLogo>(`SELECT * FROM delivery_logos WHERE delivery_id = ? AND logo_type = ?`, [deliveryId, logoType]);
   }
 
-  getById(id: number): DeliveryLogo | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_logos WHERE id = ?`);
-    stmt.bind([id]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as DeliveryLogo) : undefined;
-    stmt.free();
-    return row;
+  async getById(id: number): Promise<DeliveryLogo | undefined> {
+    return queryOne<DeliveryLogo>(`SELECT * FROM delivery_logos WHERE id = ?`, [id]);
   }
 
-  upsert(data: { delivery_id: number; logo_type: number; logo_label: string; mime_type: string; image_data: string; file_name?: string; file_size?: number }): number {
-    this.db.run(
-      `INSERT INTO delivery_logos (delivery_id, logo_type, logo_label, mime_type, image_data, file_name, file_size)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(delivery_id, logo_type) DO UPDATE SET
-         logo_label = excluded.logo_label, mime_type = excluded.mime_type,
-         image_data = excluded.image_data, file_name = excluded.file_name,
-         file_size = excluded.file_size, created_at = datetime('now')`,
-      [data.delivery_id, data.logo_type, data.logo_label, data.mime_type, data.image_data, data.file_name ?? null, data.file_size ?? null]
-    );
-    const idRow = this.db.exec(`SELECT id FROM delivery_logos WHERE delivery_id = ${data.delivery_id} AND logo_type = ${data.logo_type}`);
-    saveDb();
-    return (idRow[0]?.values[0]?.[0] as number) ?? 0;
+  async upsert(data: { delivery_id: number; logo_type: number; logo_label: string; mime_type: string; image_data: string; file_name?: string; file_size?: number }): Promise<number> {
+    await execute(`
+      MERGE INTO delivery_logos WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?, ?, ?, ?, ?, ?)) AS source(delivery_id, logo_type, logo_label, mime_type, image_data, file_name, file_size)
+      ON target.delivery_id = source.delivery_id AND target.logo_type = source.logo_type
+      WHEN MATCHED THEN UPDATE SET logo_label=source.logo_label, mime_type=source.mime_type,
+        image_data=source.image_data, file_name=source.file_name, file_size=source.file_size, created_at=GETUTCDATE()
+      WHEN NOT MATCHED THEN INSERT (delivery_id, logo_type, logo_label, mime_type, image_data, file_name, file_size)
+        VALUES (source.delivery_id, source.logo_type, source.logo_label, source.mime_type, source.image_data, source.file_name, source.file_size);
+    `, [data.delivery_id, data.logo_type, data.logo_label, data.mime_type, data.image_data, data.file_name ?? null, data.file_size ?? null]);
+
+    const row = await queryOne<{ id: number }>(`SELECT id FROM delivery_logos WHERE delivery_id = ? AND logo_type = ?`, [data.delivery_id, data.logo_type]);
+    return row?.id ?? 0;
   }
 
-  deleteByDeliveryAndType(deliveryId: number, logoType: number): boolean {
-    this.db.run(`DELETE FROM delivery_logos WHERE delivery_id = ? AND logo_type = ?`, [deliveryId, logoType]);
-    saveDb();
-    return this.db.getRowsModified() > 0;
+  async deleteByDeliveryAndType(deliveryId: number, logoType: number): Promise<boolean> {
+    const result = await execute(`DELETE FROM delivery_logos WHERE delivery_id = ? AND logo_type = ?`, [deliveryId, logoType]);
+    return result.rowsAffected > 0;
   }
 }
 
-// ─── Phase 5: Setup Execution Queries ─────────────────────────────────────
+// ─── Setup Execution ───────────────────────────────────���─────────────────────
 
 export interface SetupExecutionRun {
-  id: number;
-  delivery_id: number;
-  started_at: string;
-  finished_at: string | null;
-  status: string;
-  started_by: number | null;
-  summary: string | null;
+  id: number; delivery_id: number; started_at: string; finished_at: string | null;
+  status: string; started_by: number | null; summary: string | null;
 }
-
 export interface SetupExecutionLog {
-  id: number;
-  run_id: number;
-  step_key: string;
-  timestamp: string;
-  level: string;
-  message: string;
+  id: number; run_id: number; step_key: string; timestamp: string; level: string; message: string;
 }
 
 export class SetupExecutionQueries {
-  constructor(private db: Database) {}
-
-  createRun(deliveryId: number, startedBy: number | null): number {
-    this.db.run(
-      `INSERT INTO setup_execution_runs (delivery_id, started_by) VALUES (?, ?)`,
-      [deliveryId, startedBy]
-    );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const id = (result[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
+  async createRun(deliveryId: number, startedBy: number | null): Promise<number> {
+    return executeAndGetId(`INSERT INTO setup_execution_runs (delivery_id, started_by) VALUES (?, ?)`, [deliveryId, startedBy]);
   }
 
-  updateRunStatus(runId: number, status: string, summary?: string): void {
-    const finished = ['complete', 'failed', 'cancelled'].includes(status)
-      ? new Date().toISOString()
-      : null;
-    this.db.run(
+  async updateRunStatus(runId: number, status: string, summary?: string): Promise<void> {
+    const finished = ['complete', 'failed', 'cancelled'].includes(status) ? new Date().toISOString() : null;
+    await execute(
       `UPDATE setup_execution_runs SET status = ?, finished_at = COALESCE(?, finished_at), summary = COALESCE(?, summary) WHERE id = ?`,
       [status, finished, summary ?? null, runId]
     );
-    saveDb();
   }
 
-  addLog(runId: number, stepKey: string, level: string, message: string): void {
-    this.db.run(
-      `INSERT INTO setup_execution_logs (run_id, step_key, level, message) VALUES (?, ?, ?, ?)`,
-      [runId, stepKey, level, message]
-    );
-    saveDb();
+  async addLog(runId: number, stepKey: string, level: string, message: string): Promise<void> {
+    await execute(`INSERT INTO setup_execution_logs (run_id, step_key, level, message) VALUES (?, ?, ?, ?)`, [runId, stepKey, level, message]);
   }
 
-  getRunsByDelivery(deliveryId: number): SetupExecutionRun[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM setup_execution_runs WHERE delivery_id = ? ORDER BY started_at DESC LIMIT 20`
-    );
-    stmt.bind([deliveryId]);
-    const results: SetupExecutionRun[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as SetupExecutionRun);
-    stmt.free();
-    return results;
+  async getRunsByDelivery(deliveryId: number): Promise<SetupExecutionRun[]> {
+    return query<SetupExecutionRun>(`SELECT TOP 20 * FROM setup_execution_runs WHERE delivery_id = ? ORDER BY started_at DESC`, [deliveryId]);
   }
 
-  getLogsByRun(runId: number): SetupExecutionLog[] {
-    const stmt = this.db.prepare(
-      `SELECT * FROM setup_execution_logs WHERE run_id = ? ORDER BY id ASC`
-    );
-    stmt.bind([runId]);
-    const results: SetupExecutionLog[] = [];
-    while (stmt.step()) results.push(stmt.getAsObject() as unknown as SetupExecutionLog);
-    stmt.free();
-    return results;
+  async getLogsByRun(runId: number): Promise<SetupExecutionLog[]> {
+    return query<SetupExecutionLog>(`SELECT * FROM setup_execution_logs WHERE run_id = ? ORDER BY id ASC`, [runId]);
   }
 
-  getLatestRun(deliveryId: number): SetupExecutionRun | null {
-    const stmt = this.db.prepare(
-      `SELECT * FROM setup_execution_runs WHERE delivery_id = ? ORDER BY started_at DESC LIMIT 1`
-    );
-    stmt.bind([deliveryId]);
-    let run: SetupExecutionRun | null = null;
-    if (stmt.step()) run = stmt.getAsObject() as unknown as SetupExecutionRun;
-    stmt.free();
-    return run;
+  async getLatestRun(deliveryId: number): Promise<SetupExecutionRun | null> {
+    return (await queryOne<SetupExecutionRun>(`SELECT TOP 1 * FROM setup_execution_runs WHERE delivery_id = ? ORDER BY started_at DESC`, [deliveryId])) ?? null;
   }
 }
 
-// ─── Phase 6: Setup Portal Token Queries ──────────────────────────────────
+// ─── Setup Portal Tokens ────────────────────────────────────────────────────
 
 export interface SetupPortalToken {
-  id: number;
-  token: string;
-  delivery_id: number;
-  customer_email: string;
-  customer_name: string | null;
-  expires_at: string;
-  created_at: string;
-  last_accessed: string | null;
-  completed_at: string | null;
-  created_by: number | null;
-  progress_json: string;
+  id: number; token: string; delivery_id: number; customer_email: string;
+  customer_name: string | null; expires_at: string; created_at: string;
+  last_accessed: string | null; completed_at: string | null;
+  created_by: number | null; progress_json: string;
 }
 
 export class SetupPortalQueries {
-  constructor(private db: Database) {}
-
-  create(data: { token: string; delivery_id: number; customer_email: string; customer_name?: string; expires_at: string; created_by?: number }): number {
-    this.db.run(
+  async create(data: { token: string; delivery_id: number; customer_email: string; customer_name?: string; expires_at: string; created_by?: number }): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO setup_portal_tokens (token, delivery_id, customer_email, customer_name, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?)`,
       [data.token, data.delivery_id, data.customer_email, data.customer_name ?? null, data.expires_at, data.created_by ?? null]
     );
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    saveDb();
-    return (result[0]?.values[0]?.[0] as number) ?? 0;
   }
 
-  getByToken(token: string): SetupPortalToken | null {
-    const stmt = this.db.prepare(
-      `SELECT * FROM setup_portal_tokens WHERE token = ? AND expires_at > datetime('now')`
-    );
-    stmt.bind([token]);
-    let row: SetupPortalToken | null = null;
-    if (stmt.step()) row = stmt.getAsObject() as unknown as SetupPortalToken;
-    stmt.free();
-    return row;
+  async getByToken(token: string): Promise<SetupPortalToken | null> {
+    return (await queryOne<SetupPortalToken>(
+      `SELECT * FROM setup_portal_tokens WHERE token = ? AND expires_at > GETUTCDATE()`, [token]
+    )) ?? null;
   }
 
-  getByDelivery(deliveryId: number): SetupPortalToken[] {
-    const stmt = this.db.prepare(
+  async getByDelivery(deliveryId: number): Promise<SetupPortalToken[]> {
+    return query<SetupPortalToken>(
       `SELECT id, token, delivery_id, customer_email, customer_name, expires_at, created_at, last_accessed, completed_at, created_by, progress_json
-       FROM setup_portal_tokens WHERE delivery_id = ? ORDER BY created_at DESC`
+       FROM setup_portal_tokens WHERE delivery_id = ? ORDER BY created_at DESC`, [deliveryId]
     );
-    stmt.bind([deliveryId]);
-    const rows: SetupPortalToken[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as SetupPortalToken);
-    stmt.free();
-    return rows;
   }
 
-  updateLastAccessed(token: string): void {
-    this.db.run(
-      `UPDATE setup_portal_tokens SET last_accessed = datetime('now') WHERE token = ?`,
-      [token]
-    );
-    saveDb();
+  async updateLastAccessed(token: string): Promise<void> {
+    await execute(`UPDATE setup_portal_tokens SET last_accessed = GETUTCDATE() WHERE token = ?`, [token]);
   }
 
-  updateProgress(token: string, progressJson: string): void {
-    this.db.run(
-      `UPDATE setup_portal_tokens SET progress_json = ? WHERE token = ?`,
-      [progressJson, token]
-    );
-    saveDb();
+  async updateProgress(token: string, progressJson: string): Promise<void> {
+    await execute(`UPDATE setup_portal_tokens SET progress_json = ? WHERE token = ?`, [progressJson, token]);
   }
 
-  markCompleted(token: string): void {
-    this.db.run(
-      `UPDATE setup_portal_tokens SET completed_at = datetime('now') WHERE token = ?`,
-      [token]
-    );
-    saveDb();
+  async markCompleted(token: string): Promise<void> {
+    await execute(`UPDATE setup_portal_tokens SET completed_at = GETUTCDATE() WHERE token = ?`, [token]);
   }
 
-  revokeToken(id: number): boolean {
-    this.db.run(`DELETE FROM setup_portal_tokens WHERE id = ?`, [id]);
-    saveDb();
-    return this.db.getRowsModified() > 0;
+  async revokeToken(id: number): Promise<boolean> {
+    const result = await execute(`DELETE FROM setup_portal_tokens WHERE id = ?`, [id]);
+    return result.rowsAffected > 0;
   }
 
-  deleteExpired(): number {
-    this.db.run(`DELETE FROM setup_portal_tokens WHERE expires_at < datetime('now')`);
-    const deleted = this.db.getRowsModified();
-    if (deleted > 0) saveDb();
-    return deleted;
+  async deleteExpired(): Promise<number> {
+    const result = await execute(`DELETE FROM setup_portal_tokens WHERE expires_at < GETUTCDATE()`);
+    return result.rowsAffected;
   }
 }
 
-// ── Portal Account Queries ──────────────────────────────────────────────────
+// ─── Portal Accounts ─────────────────────────────────────────────────────────
 
-export interface PortalAccount {
-  id: number;
-  delivery_id: number;
-  portal_name: string;
-  created_at: string;
-}
+export interface PortalAccount { id: number; delivery_id: number; portal_name: string; created_at: string; }
 
 export class PortalAccountQueries {
-  constructor(private db: any) {}
-
-  getByDelivery(deliveryId: number): PortalAccount[] {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_portal_accounts WHERE delivery_id = ? ORDER BY portal_name`);
-    stmt.bind([deliveryId]);
-    const rows: PortalAccount[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as PortalAccount);
-    stmt.free();
-    return rows;
+  async getByDelivery(deliveryId: number): Promise<PortalAccount[]> {
+    return query<PortalAccount>(`SELECT * FROM delivery_portal_accounts WHERE delivery_id = ? ORDER BY portal_name`, [deliveryId]);
   }
 
-  create(deliveryId: number, portalName: string): PortalAccount | null {
+  async create(deliveryId: number, portalName: string): Promise<PortalAccount | null> {
     try {
-      this.db.run(
+      const id = await executeAndGetId(
         `INSERT INTO delivery_portal_accounts (delivery_id, portal_name) VALUES (?, ?)`,
         [deliveryId, portalName.trim()]
       );
-      saveDb();
-      const id = this.db.exec(`SELECT last_insert_rowid() as id`)[0].values[0][0] as number;
-      return this.getById(id);
-    } catch {
-      return null; // duplicate
-    }
+      return (await queryOne<PortalAccount>(`SELECT * FROM delivery_portal_accounts WHERE id = ?`, [id])) ?? null;
+    } catch { return null; }
   }
 
-  bulkCreate(deliveryId: number, names: string[]): PortalAccount[] {
+  async bulkCreate(deliveryId: number, names: string[]): Promise<PortalAccount[]> {
     for (const name of names) {
       const trimmed = name.trim();
       if (!trimmed) continue;
       try {
-        this.db.run(
-          `INSERT OR IGNORE INTO delivery_portal_accounts (delivery_id, portal_name) VALUES (?, ?)`,
-          [deliveryId, trimmed]
+        const existing = await queryOne<{ id: number }>(
+          `SELECT id FROM delivery_portal_accounts WHERE delivery_id = ? AND portal_name = ?`, [deliveryId, trimmed]
         );
+        if (!existing) {
+          await execute(`INSERT INTO delivery_portal_accounts (delivery_id, portal_name) VALUES (?, ?)`, [deliveryId, trimmed]);
+        }
       } catch { /* skip duplicates */ }
     }
-    saveDb();
     return this.getByDelivery(deliveryId);
   }
 
-  delete(id: number): boolean {
-    this.db.run(`DELETE FROM delivery_portal_accounts WHERE id = ?`, [id]);
-    saveDb();
-    return this.db.getRowsModified() > 0;
-  }
-
-  private getById(id: number): PortalAccount | null {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_portal_accounts WHERE id = ?`);
-    stmt.bind([id]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as PortalAccount) : null;
-    stmt.free();
-    return row;
+  async delete(id: number): Promise<boolean> {
+    const result = await execute(`DELETE FROM delivery_portal_accounts WHERE id = ?`, [id]);
+    return result.rowsAffected > 0;
   }
 }
 
-// ── Branch District Queries ─────────────────────────────────────────────────
+// ─── Branch Districts ────────────────────────────────────────────────────────
 
 export interface BranchDistrict {
-  id: number;
-  branch_id: number;
-  delivery_id: number;
-  district_name: string;
-  all_sectors: number;
-  sectors_json: string;
-  created_at: string;
+  id: number; branch_id: number; delivery_id: number; district_name: string;
+  all_sectors: number; sectors_json: string; created_at: string;
 }
 
 export class BranchDistrictQueries {
-  constructor(private db: any) {}
-
-  getByDelivery(deliveryId: number): BranchDistrict[] {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_branch_districts WHERE delivery_id = ? ORDER BY branch_id, district_name`);
-    stmt.bind([deliveryId]);
-    const rows: BranchDistrict[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as BranchDistrict);
-    stmt.free();
-    return rows;
+  async getByDelivery(deliveryId: number): Promise<BranchDistrict[]> {
+    return query<BranchDistrict>(`SELECT * FROM delivery_branch_districts WHERE delivery_id = ? ORDER BY branch_id, district_name`, [deliveryId]);
   }
 
-  getByBranch(branchId: number): BranchDistrict[] {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_branch_districts WHERE branch_id = ? ORDER BY district_name`);
-    stmt.bind([branchId]);
-    const rows: BranchDistrict[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as BranchDistrict);
-    stmt.free();
-    return rows;
+  async getByBranch(branchId: number): Promise<BranchDistrict[]> {
+    return query<BranchDistrict>(`SELECT * FROM delivery_branch_districts WHERE branch_id = ? ORDER BY district_name`, [branchId]);
   }
 
-  create(data: { branch_id: number; delivery_id: number; district_name: string; all_sectors: boolean; sectors: string[] }): BranchDistrict | null {
+  async create(data: { branch_id: number; delivery_id: number; district_name: string; all_sectors: boolean; sectors: string[] }): Promise<BranchDistrict | null> {
     try {
-      this.db.run(
+      const id = await executeAndGetId(
         `INSERT INTO delivery_branch_districts (branch_id, delivery_id, district_name, all_sectors, sectors_json) VALUES (?, ?, ?, ?, ?)`,
         [data.branch_id, data.delivery_id, data.district_name.trim(), data.all_sectors ? 1 : 0, JSON.stringify(data.sectors || [])]
       );
-      saveDb();
-      const id = this.db.exec(`SELECT last_insert_rowid() as id`)[0].values[0][0] as number;
-      return this.getById(id);
-    } catch {
-      return null;
-    }
+      return (await queryOne<BranchDistrict>(`SELECT * FROM delivery_branch_districts WHERE id = ?`, [id])) ?? null;
+    } catch { return null; }
   }
 
-  update(id: number, data: { district_name?: string; all_sectors?: boolean; sectors?: string[] }): BranchDistrict | null {
+  async update(id: number, data: { district_name?: string; all_sectors?: boolean; sectors?: string[] }): Promise<BranchDistrict | null> {
     const sets: string[] = [];
     const vals: unknown[] = [];
     if (data.district_name !== undefined) { sets.push('district_name = ?'); vals.push(data.district_name.trim()); }
     if (data.all_sectors !== undefined) { sets.push('all_sectors = ?'); vals.push(data.all_sectors ? 1 : 0); }
     if (data.sectors !== undefined) { sets.push('sectors_json = ?'); vals.push(JSON.stringify(data.sectors)); }
-    if (sets.length === 0) return this.getById(id);
+    if (sets.length === 0) return (await queryOne<BranchDistrict>(`SELECT * FROM delivery_branch_districts WHERE id = ?`, [id])) ?? null;
     vals.push(id);
-    this.db.run(`UPDATE delivery_branch_districts SET ${sets.join(', ')} WHERE id = ?`, vals);
-    saveDb();
-    return this.getById(id);
+    await execute(`UPDATE delivery_branch_districts SET ${sets.join(', ')} WHERE id = ?`, vals);
+    return (await queryOne<BranchDistrict>(`SELECT * FROM delivery_branch_districts WHERE id = ?`, [id])) ?? null;
   }
 
-  delete(id: number): boolean {
-    this.db.run(`DELETE FROM delivery_branch_districts WHERE id = ?`, [id]);
-    saveDb();
-    return this.db.getRowsModified() > 0;
-  }
-
-  private getById(id: number): BranchDistrict | null {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_branch_districts WHERE id = ?`);
-    stmt.bind([id]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as BranchDistrict) : null;
-    stmt.free();
-    return row;
+  async delete(id: number): Promise<boolean> {
+    const result = await execute(`DELETE FROM delivery_branch_districts WHERE id = ?`, [id]);
+    return result.rowsAffected > 0;
   }
 }
 
-// ─── Welcome Pack Queries ───
+// ─── Welcome Packs ──────────────────────────────────────────────────────────
 
 export interface WelcomePack {
-  id: number;
-  delivery_id: number;
-  name: string;
-  snapshot_json: string;
-  created_at: string;
-  created_by: string | null;
+  id: number; delivery_id: number; name: string; snapshot_json: string;
+  created_at: string; created_by: string | null;
 }
 
 export class WelcomePackQueries {
-  constructor(private db: any) {}
-
-  create(deliveryId: number, name: string, snapshotJson: string, createdBy?: string): WelcomePack {
-    this.db.run(
+  async create(deliveryId: number, name: string, snapshotJson: string, createdBy?: string): Promise<WelcomePack> {
+    const id = await executeAndGetId(
       `INSERT INTO delivery_welcome_packs (delivery_id, name, snapshot_json, created_by) VALUES (?, ?, ?, ?)`,
-      [deliveryId, name, snapshotJson, createdBy ?? null],
+      [deliveryId, name, snapshotJson, createdBy ?? null]
     );
-    saveDb();
-    const id = (this.db.exec('SELECT last_insert_rowid() as id')[0]?.values[0]?.[0] as number) ?? 0;
-    return this.getById(id)!;
+    return (await this.getById(id))!;
   }
 
-  getByDelivery(deliveryId: number): WelcomePack[] {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_welcome_packs WHERE delivery_id = ? ORDER BY created_at DESC`);
-    stmt.bind([deliveryId]);
-    const rows: WelcomePack[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as WelcomePack);
-    stmt.free();
-    return rows;
+  async getByDelivery(deliveryId: number): Promise<WelcomePack[]> {
+    return query<WelcomePack>(`SELECT * FROM delivery_welcome_packs WHERE delivery_id = ? ORDER BY created_at DESC`, [deliveryId]);
   }
 
-  getById(id: number): WelcomePack | null {
-    const stmt = this.db.prepare(`SELECT * FROM delivery_welcome_packs WHERE id = ?`);
-    stmt.bind([id]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as WelcomePack) : null;
-    stmt.free();
-    return row;
+  async getById(id: number): Promise<WelcomePack | null> {
+    return (await queryOne<WelcomePack>(`SELECT * FROM delivery_welcome_packs WHERE id = ?`, [id])) ?? null;
   }
 }
 
-// ── Business Central Customers ──
+// ─── Business Central Customers ─────────────────────────────────────────────
 
 export interface BcCustomer {
-  id: number;
-  bc_id: string;
-  number: string | null;
-  display_name: string;
-  email: string | null;
-  phone_number: string | null;
-  address: string | null;
-  city: string | null;
-  country: string | null;
-  currency_code: string | null;
-  balance: number | null;
-  blocked: string | null;
-  last_synced: string;
-  created_at: string;
-}
-
-export interface Contract {
-  id: number;
-  bc_customer_id: string | null;
-  customer_name: string;
-  contract_number: string | null;
-  title: string;
-  status: string;
-  start_date: string | null;
-  end_date: string | null;
-  value: number | null;
-  currency: string;
-  renewal_type: string | null;
-  notes: string | null;
-  bc_order_id: string | null;
-  created_at: string;
-  updated_at: string;
+  id: number; bc_id: string; number: string | null; display_name: string;
+  email: string | null; phone_number: string | null; address: string | null;
+  city: string | null; country: string | null; currency_code: string | null;
+  balance: number | null; blocked: string | null; last_synced: string; created_at: string;
 }
 
 export class BcCustomerQueries {
-  constructor(private db: Database) {}
-
-  getAll(search?: string): BcCustomer[] {
+  async getAll(search?: string): Promise<BcCustomer[]> {
     let sql = `SELECT * FROM bc_customers WHERE 1=1`;
     const params: string[] = [];
     if (search?.trim()) {
-      sql += ` AND (display_name LIKE ? OR number LIKE ? OR city LIKE ?)`;
+      sql += ` AND (display_name LIKE ? OR [number] LIKE ? OR city LIKE ?)`;
       const like = `%${search.trim()}%`;
       params.push(like, like, like);
     }
     sql += ` ORDER BY display_name ASC`;
-    const stmt = this.db.prepare(sql);
-    if (params.length) stmt.bind(params);
-    const rows: BcCustomer[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as BcCustomer);
-    stmt.free();
-    return rows;
+    return query<BcCustomer>(sql, params);
   }
 
-  getByBcId(bcId: string): BcCustomer | null {
-    const stmt = this.db.prepare(`SELECT * FROM bc_customers WHERE bc_id = ?`);
-    stmt.bind([bcId]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as BcCustomer) : null;
-    stmt.free();
-    return row;
+  async getByBcId(bcId: string): Promise<BcCustomer | null> {
+    return (await queryOne<BcCustomer>(`SELECT * FROM bc_customers WHERE bc_id = ?`, [bcId])) ?? null;
   }
 
-  upsert(c: Omit<BcCustomer, 'id' | 'created_at'>): void {
-    this.db.run(
-      `INSERT INTO bc_customers (bc_id, number, display_name, email, phone_number, address, city, country, currency_code, balance, blocked, last_synced)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(bc_id) DO UPDATE SET
-         number=excluded.number, display_name=excluded.display_name, email=excluded.email,
-         phone_number=excluded.phone_number, address=excluded.address, city=excluded.city,
-         country=excluded.country, currency_code=excluded.currency_code, balance=excluded.balance,
-         blocked=excluded.blocked, last_synced=datetime('now')`,
-      [c.bc_id, c.number ?? null, c.display_name, c.email ?? null, c.phone_number ?? null,
-       c.address ?? null, c.city ?? null, c.country ?? null, c.currency_code ?? null,
-       c.balance ?? null, c.blocked ?? null]
-    );
-    saveDb();
+  async upsert(c: Omit<BcCustomer, 'id' | 'created_at'>): Promise<void> {
+    await execute(`
+      MERGE INTO bc_customers WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
+        AS source(bc_id, [number], display_name, email, phone_number, address, city, country, currency_code, balance, blocked)
+      ON target.bc_id = source.bc_id
+      WHEN MATCHED THEN UPDATE SET
+        [number]=source.[number], display_name=source.display_name, email=source.email,
+        phone_number=source.phone_number, address=source.address, city=source.city,
+        country=source.country, currency_code=source.currency_code, balance=source.balance,
+        blocked=source.blocked, last_synced=GETUTCDATE()
+      WHEN NOT MATCHED THEN INSERT (bc_id, [number], display_name, email, phone_number, address, city, country, currency_code, balance, blocked, last_synced)
+        VALUES (source.bc_id, source.[number], source.display_name, source.email, source.phone_number,
+          source.address, source.city, source.country, source.currency_code, source.balance, source.blocked, GETUTCDATE());
+    `, [c.bc_id, c.number ?? null, c.display_name, c.email ?? null, c.phone_number ?? null,
+        c.address ?? null, c.city ?? null, c.country ?? null, c.currency_code ?? null,
+        c.balance ?? null, c.blocked ?? null]);
   }
 
-  count(): number {
-    const r = this.db.exec(`SELECT COUNT(*) as c FROM bc_customers`);
-    return (r[0]?.values[0]?.[0] as number) ?? 0;
+  async count(): Promise<number> {
+    const row = await queryOne<{ c: number }>(`SELECT COUNT(*) as c FROM bc_customers`);
+    return row?.c ?? 0;
   }
 }
 
-export class ContractsQueries {
-  constructor(private db: Database) {}
+// ─── Contracts ──────────────────────────────────────────────────────────────
 
-  getAll(filters?: { bc_customer_id?: string; status?: string; search?: string }): Contract[] {
+export interface Contract {
+  id: number; bc_customer_id: string | null; customer_name: string;
+  contract_number: string | null; title: string; status: string;
+  start_date: string | null; end_date: string | null; value: number | null;
+  currency: string; renewal_type: string | null; notes: string | null;
+  bc_order_id: string | null; created_at: string; updated_at: string;
+}
+
+export class ContractsQueries {
+  async getAll(filters?: { bc_customer_id?: string; status?: string; search?: string }): Promise<Contract[]> {
     let sql = `SELECT * FROM contracts WHERE 1=1`;
     const params: (string | number)[] = [];
     if (filters?.bc_customer_id) { sql += ` AND bc_customer_id = ?`; params.push(filters.bc_customer_id); }
@@ -3464,42 +2233,29 @@ export class ContractsQueries {
       const like = `%${filters.search.trim()}%`;
       params.push(like, like, like);
     }
-    sql += ` ORDER BY end_date ASC NULLS LAST, title ASC`;
-    const stmt = this.db.prepare(sql);
-    if (params.length) stmt.bind(params as string[]);
-    const rows: Contract[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as Contract);
-    stmt.free();
-    return rows;
+    sql += ` ORDER BY CASE WHEN end_date IS NULL THEN 1 ELSE 0 END, end_date ASC, title ASC`;
+    return query<Contract>(sql, params);
   }
 
-  getById(id: number): Contract | null {
-    const stmt = this.db.prepare(`SELECT * FROM contracts WHERE id = ?`);
-    stmt.bind([id]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as Contract) : null;
-    stmt.free();
-    return row;
+  async getById(id: number): Promise<Contract | null> {
+    return (await queryOne<Contract>(`SELECT * FROM contracts WHERE id = ?`, [id])) ?? null;
   }
 
-  create(c: Omit<Contract, 'id' | 'created_at' | 'updated_at'>): number {
-    this.db.run(
+  async create(c: Omit<Contract, 'id' | 'created_at' | 'updated_at'>): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO contracts (bc_customer_id, customer_name, contract_number, title, status, start_date, end_date, value, currency, renewal_type, notes, bc_order_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [c.bc_customer_id ?? null, c.customer_name, c.contract_number ?? null, c.title,
        c.status ?? 'active', c.start_date ?? null, c.end_date ?? null, c.value ?? null,
        c.currency ?? 'GBP', c.renewal_type ?? null, c.notes ?? null, c.bc_order_id ?? null]
     );
-    const r = this.db.exec(`SELECT last_insert_rowid() as id`);
-    const id = (r[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  update(id: number, c: Partial<Omit<Contract, 'id' | 'created_at' | 'updated_at'>>): boolean {
-    const existing = this.getById(id);
+  async update(id: number, c: Partial<Omit<Contract, 'id' | 'created_at' | 'updated_at'>>): Promise<boolean> {
+    const existing = await this.getById(id);
     if (!existing) return false;
-    this.db.run(
-      `UPDATE contracts SET bc_customer_id=?, customer_name=?, contract_number=?, title=?, status=?, start_date=?, end_date=?, value=?, currency=?, renewal_type=?, notes=?, bc_order_id=?, updated_at=datetime('now') WHERE id=?`,
+    await execute(
+      `UPDATE contracts SET bc_customer_id=?, customer_name=?, contract_number=?, title=?, status=?, start_date=?, end_date=?, value=?, currency=?, renewal_type=?, notes=?, bc_order_id=?, updated_at=GETUTCDATE() WHERE id=?`,
       [c.bc_customer_id ?? existing.bc_customer_id, c.customer_name ?? existing.customer_name,
        c.contract_number ?? existing.contract_number, c.title ?? existing.title,
        c.status ?? existing.status, c.start_date ?? existing.start_date,
@@ -3507,50 +2263,34 @@ export class ContractsQueries {
        c.currency ?? existing.currency, c.renewal_type ?? existing.renewal_type,
        c.notes ?? existing.notes, c.bc_order_id ?? existing.bc_order_id, id]
     );
-    saveDb();
     return true;
   }
 
-  delete(id: number): boolean {
-    const existing = this.getById(id);
+  async delete(id: number): Promise<boolean> {
+    const existing = await this.getById(id);
     if (!existing) return false;
-    this.db.run(`DELETE FROM contracts WHERE id = ?`, [id]);
-    saveDb();
+    await execute(`DELETE FROM contracts WHERE id = ?`, [id]);
     return true;
   }
 }
 
-// ── Contract Templates ──
+// ─── Contract Templates ─────────────────────────────────────────────────────
 
 export interface ContractTemplateFieldDef {
-  key: string;
-  label: string;
+  key: string; label: string;
   type: 'text' | 'number' | 'date' | 'email' | 'select' | 'textarea';
-  required?: boolean;
-  defaultValue?: string;
-  options?: string[]; // for select type
+  required?: boolean; defaultValue?: string; options?: string[];
 }
 
 export interface ContractTemplate {
-  id: number;
-  name: string;
-  description: string | null;
-  category: string | null;
-  fields_schema: string | null; // JSON string of ContractTemplateFieldDef[]
-  adobe_library_doc_id: string | null;
-  file_data: Buffer | null;
-  file_name: string | null;
-  file_mime: string | null;
-  status: string;
-  created_by: number | null;
-  created_at: string;
-  updated_at: string;
+  id: number; name: string; description: string | null; category: string | null;
+  fields_schema: string | null; adobe_library_doc_id: string | null;
+  file_data: Buffer | null; file_name: string | null; file_mime: string | null;
+  status: string; created_by: number | null; created_at: string; updated_at: string;
 }
 
 export class ContractTemplateQueries {
-  constructor(private db: Database) {}
-
-  getAll(filters?: { status?: string; category?: string; search?: string }): Omit<ContractTemplate, 'file_data'>[] {
+  async getAll(filters?: { status?: string; category?: string; search?: string }): Promise<Omit<ContractTemplate, 'file_data'>[]> {
     let sql = `SELECT id, name, description, category, fields_schema, adobe_library_doc_id, file_name, file_mime, status, created_by, created_at, updated_at FROM contract_templates WHERE 1=1`;
     const params: (string | number)[] = [];
     if (filters?.status) { sql += ` AND status = ?`; params.push(filters.status); }
@@ -3561,301 +2301,58 @@ export class ContractTemplateQueries {
       params.push(like, like);
     }
     sql += ` ORDER BY name ASC`;
-    const stmt = this.db.prepare(sql);
-    if (params.length) stmt.bind(params as string[]);
-    const rows: Omit<ContractTemplate, 'file_data'>[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as Omit<ContractTemplate, 'file_data'>);
-    stmt.free();
-    return rows;
+    return query<Omit<ContractTemplate, 'file_data'>>(sql, params);
   }
 
-  getById(id: number): ContractTemplate | null {
-    const stmt = this.db.prepare(`SELECT * FROM contract_templates WHERE id = ?`);
-    stmt.bind([id]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as ContractTemplate) : null;
-    stmt.free();
-    return row;
+  async getById(id: number): Promise<ContractTemplate | null> {
+    return (await queryOne<ContractTemplate>(`SELECT * FROM contract_templates WHERE id = ?`, [id])) ?? null;
   }
 
-  create(t: { name: string; description?: string; category?: string; fields_schema?: string; adobe_library_doc_id?: string; file_data?: Buffer; file_name?: string; file_mime?: string; created_by?: number }): number {
-    this.db.run(
+  async create(t: { name: string; description?: string; category?: string; fields_schema?: string; adobe_library_doc_id?: string; file_data?: Buffer; file_name?: string; file_mime?: string; created_by?: number }): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO contract_templates (name, description, category, fields_schema, adobe_library_doc_id, file_data, file_name, file_mime, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [t.name, t.description ?? null, t.category ?? null, t.fields_schema ?? null,
        t.adobe_library_doc_id ?? null, t.file_data ?? null, t.file_name ?? null,
-       t.file_mime ?? null, t.created_by ?? null],
+       t.file_mime ?? null, t.created_by ?? null]
     );
-    const r = this.db.exec(`SELECT last_insert_rowid() as id`);
-    const id = (r[0]?.values[0]?.[0] as number) ?? 0;
-    saveDb();
-    return id;
   }
 
-  update(id: number, t: Partial<Omit<ContractTemplate, 'id' | 'created_at' | 'updated_at'>>): boolean {
-    const existing = this.getById(id);
+  async update(id: number, t: Partial<Omit<ContractTemplate, 'id' | 'created_at' | 'updated_at'>>): Promise<boolean> {
+    const existing = await this.getById(id);
     if (!existing) return false;
-    this.db.run(
-      `UPDATE contract_templates SET name=?, description=?, category=?, fields_schema=?, adobe_library_doc_id=?, file_data=?, file_name=?, file_mime=?, status=?, updated_at=datetime('now') WHERE id=?`,
+    await execute(
+      `UPDATE contract_templates SET name=?, description=?, category=?, fields_schema=?, adobe_library_doc_id=?, file_data=?, file_name=?, file_mime=?, status=?, updated_at=GETUTCDATE() WHERE id=?`,
       [t.name ?? existing.name, t.description ?? existing.description,
        t.category ?? existing.category, t.fields_schema ?? existing.fields_schema,
        t.adobe_library_doc_id ?? existing.adobe_library_doc_id,
        t.file_data ?? existing.file_data, t.file_name ?? existing.file_name,
-       t.file_mime ?? existing.file_mime, t.status ?? existing.status, id],
+       t.file_mime ?? existing.file_mime, t.status ?? existing.status, id]
     );
-    saveDb();
     return true;
   }
 
-  delete(id: number): boolean {
-    const existing = this.getById(id);
+  async delete(id: number): Promise<boolean> {
+    const existing = await this.getById(id);
     if (!existing) return false;
-    this.db.run(`DELETE FROM contract_templates WHERE id = ?`, [id]);
-    saveDb();
+    await execute(`DELETE FROM contract_templates WHERE id = ?`, [id]);
     return true;
   }
 }
 
-// ── Adobe Sign Agreements ──
+// ─── Adobe Sign Agreements ──────────────────────────────────────────────────
 
 export interface AdobeSignAgreement {
-  id: number;
-  agreement_id: string;
-  contract_id: number | null;
-  template_id: number | null;
-  name: string;
-  status: string;
-  sender_email: string | null;
-  signer_emails: string | null; // JSON array
-  filled_fields: string | null; // JSON object
-  created_via_nova: number;
-  adobe_created_date: string | null;
-  adobe_expiration_date: string | null;
-  signed_document_url: string | null;
-  raw_data: string | null; // JSON
-  synced_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ApprovalItem {
-  id: number;
-  ticket_id: string;
-  ticket_summary: string;
-  reporter_name: string | null;
-  reporter_email: string | null;
-  ai_response_adf: string | null;
-  conversation_json: string | null;
-  kb_sources: string | null;
-  resume_url: string;
-  status: string;
-  decided_by: string | null;
-  decided_at: string | null;
-  edited_response_adf: string | null;
-  decline_reason: string | null;
-  priority: string | null;
-  created_at: string;
-  expires_at: string;
-}
-
-export class ApprovalQueries {
-  constructor(private db: Database) {}
-
-  getAll(status?: string): ApprovalItem[] {
-    // Auto-expire any pending items past their expiry
-    this.db.run(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= datetime('now')`);
-    saveDb();
-
-    let sql = `SELECT * FROM approval_queue`;
-    const params: string[] = [];
-    if (status) {
-      sql += ` WHERE status = ?`;
-      params.push(status);
-    }
-    sql += ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`;
-    const stmt = this.db.prepare(sql);
-    if (params.length > 0) stmt.bind(params);
-    const items: ApprovalItem[] = [];
-    while (stmt.step()) {
-      items.push(this.rowToItem(stmt.getAsObject() as Record<string, unknown>));
-    }
-    stmt.free();
-    return items;
-  }
-
-  getById(id: number): ApprovalItem | undefined {
-    const stmt = this.db.prepare(`SELECT * FROM approval_queue WHERE id = ?`);
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const item = this.rowToItem(stmt.getAsObject() as Record<string, unknown>);
-      stmt.free();
-      return item;
-    }
-    stmt.free();
-    return undefined;
-  }
-
-  getPending(): ApprovalItem[] {
-    return this.getAll('pending');
-  }
-
-  getPendingCount(): number {
-    this.db.run(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= datetime('now')`);
-    const stmt = this.db.prepare(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
-    stmt.step();
-    const row = stmt.getAsObject() as Record<string, unknown>;
-    stmt.free();
-    return (row.count as number) || 0;
-  }
-
-  getStats(): { pending: number; approved: number; declined: number; timed_out: number; today_decided: number } {
-    this.db.run(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= datetime('now')`);
-    const stmt = this.db.prepare(`
-      SELECT
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-        SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
-        SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END) as timed_out,
-        SUM(CASE WHEN decided_at >= date('now') AND status IN ('approved', 'declined') THEN 1 ELSE 0 END) as today_decided
-      FROM approval_queue
-    `);
-    stmt.step();
-    const row = stmt.getAsObject() as Record<string, unknown>;
-    stmt.free();
-    return {
-      pending: (row.pending as number) || 0,
-      approved: (row.approved as number) || 0,
-      declined: (row.declined as number) || 0,
-      timed_out: (row.timed_out as number) || 0,
-      today_decided: (row.today_decided as number) || 0,
-    };
-  }
-
-  create(item: {
-    ticket_id: string;
-    ticket_summary: string;
-    reporter_name?: string;
-    reporter_email?: string;
-    ai_response_adf?: string;
-    conversation_json?: string;
-    kb_sources?: string;
-    resume_url: string;
-    priority?: string;
-    expires_at: string;
-  }): number {
-    this.db.run(
-      `INSERT INTO approval_queue (ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [item.ticket_id, item.ticket_summary, item.reporter_name || null, item.reporter_email || null,
-       item.ai_response_adf || null, item.conversation_json || null, item.kb_sources || null,
-       item.resume_url, item.priority || null, item.expires_at]
-    );
-    saveDb();
-    const stmt = this.db.prepare(`SELECT last_insert_rowid() as id`);
-    stmt.step();
-    const row = stmt.getAsObject() as Record<string, unknown>;
-    stmt.free();
-    return row.id as number;
-  }
-
-  decide(id: number, action: 'approved' | 'declined' | 'timed_out' | 'cancelled', decidedBy: string, editedResponseAdf?: string, declineReason?: string): boolean {
-    const item = this.getById(id);
-    if (!item || item.status !== 'pending') return false;
-
-    this.db.run(
-      `UPDATE approval_queue SET status = ?, decided_by = ?, decided_at = datetime('now'), edited_response_adf = ?, decline_reason = ? WHERE id = ?`,
-      [action, decidedBy, editedResponseAdf || null, declineReason || null, id]
-    );
-    saveDb();
-    return true;
-  }
-
-  getDailyStats(days: number = 90): Array<{ date: string; approved: number; declined: number; timed_out: number; total_decisions: number }> {
-    const stmt = this.db.prepare(`
-      SELECT
-        DATE(decided_at) as date,
-        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-        SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
-        SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END) as timed_out,
-        COUNT(*) as total_decisions
-      FROM approval_queue
-      WHERE status IN ('approved', 'declined', 'timed_out')
-        AND decided_at >= datetime('now', '-' || ? || ' days')
-      GROUP BY DATE(decided_at)
-      ORDER BY date ASC
-    `);
-    stmt.bind([days]);
-    const results: Array<{ date: string; approved: number; declined: number; timed_out: number; total_decisions: number }> = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as Record<string, unknown>;
-      results.push({
-        date: row.date as string,
-        approved: (row.approved as number) || 0,
-        declined: (row.declined as number) || 0,
-        timed_out: (row.timed_out as number) || 0,
-        total_decisions: (row.total_decisions as number) || 0,
-      });
-    }
-    stmt.free();
-    return results;
-  }
-
-  getTodayStats(): { approved: number; declined: number; timed_out: number; pending: number; resolution_rate: number } {
-    // Auto-expire first
-    this.db.run(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= datetime('now')`);
-
-    const stmt = this.db.prepare(`
-      SELECT
-        SUM(CASE WHEN status = 'approved' AND DATE(decided_at) = DATE('now') THEN 1 ELSE 0 END) as approved,
-        SUM(CASE WHEN status = 'declined' AND DATE(decided_at) = DATE('now') THEN 1 ELSE 0 END) as declined,
-        SUM(CASE WHEN status = 'timed_out' AND DATE(decided_at) = DATE('now') THEN 1 ELSE 0 END) as timed_out,
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as total_approved,
-        SUM(CASE WHEN status IN ('approved', 'declined', 'timed_out') THEN 1 ELSE 0 END) as total_decisions
-      FROM approval_queue
-    `);
-    stmt.step();
-    const row = stmt.getAsObject() as Record<string, unknown>;
-    stmt.free();
-
-    const totalApproved = (row.total_approved as number) || 0;
-    const totalDecisions = (row.total_decisions as number) || 0;
-
-    return {
-      approved: (row.approved as number) || 0,
-      declined: (row.declined as number) || 0,
-      timed_out: (row.timed_out as number) || 0,
-      pending: (row.pending as number) || 0,
-      resolution_rate: totalDecisions > 0 ? Math.round((totalApproved / totalDecisions) * 100 * 10) / 10 : 0,
-    };
-  }
-
-  private rowToItem(row: Record<string, unknown>): ApprovalItem {
-    return {
-      id: row.id as number,
-      ticket_id: row.ticket_id as string,
-      ticket_summary: row.ticket_summary as string,
-      reporter_name: (row.reporter_name as string) || null,
-      reporter_email: (row.reporter_email as string) || null,
-      ai_response_adf: (row.ai_response_adf as string) || null,
-      conversation_json: (row.conversation_json as string) || null,
-      kb_sources: (row.kb_sources as string) || null,
-      resume_url: row.resume_url as string,
-      status: row.status as string,
-      decided_by: (row.decided_by as string) || null,
-      decided_at: (row.decided_at as string) || null,
-      edited_response_adf: (row.edited_response_adf as string) || null,
-      decline_reason: (row.decline_reason as string) || null,
-      priority: (row.priority as string) || null,
-      created_at: row.created_at as string,
-      expires_at: row.expires_at as string,
-    };
-  }
+  id: number; agreement_id: string; contract_id: number | null; template_id: number | null;
+  name: string; status: string; sender_email: string | null; signer_emails: string | null;
+  filled_fields: string | null; created_via_nova: number;
+  adobe_created_date: string | null; adobe_expiration_date: string | null;
+  signed_document_url: string | null; raw_data: string | null;
+  synced_at: string | null; created_at: string; updated_at: string;
 }
 
 export class AdobeSignAgreementQueries {
-  constructor(private db: Database) {}
-
-  getAll(filters?: { contract_id?: number; template_id?: number; status?: string; search?: string }): AdobeSignAgreement[] {
+  async getAll(filters?: { contract_id?: number; template_id?: number; status?: string; search?: string }): Promise<AdobeSignAgreement[]> {
     let sql = `SELECT * FROM adobe_sign_agreements WHERE 1=1`;
     const params: (string | number)[] = [];
     if (filters?.contract_id) { sql += ` AND contract_id = ?`; params.push(filters.contract_id); }
@@ -3867,174 +2364,228 @@ export class AdobeSignAgreementQueries {
       params.push(like, like, like);
     }
     sql += ` ORDER BY created_at DESC`;
-    const stmt = this.db.prepare(sql);
-    if (params.length) stmt.bind(params as string[]);
-    const rows: AdobeSignAgreement[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as AdobeSignAgreement);
-    stmt.free();
-    return rows;
+    return query<AdobeSignAgreement>(sql, params);
   }
 
-  getById(id: number): AdobeSignAgreement | null {
-    const stmt = this.db.prepare(`SELECT * FROM adobe_sign_agreements WHERE id = ?`);
-    stmt.bind([id]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as AdobeSignAgreement) : null;
-    stmt.free();
-    return row;
+  async getById(id: number): Promise<AdobeSignAgreement | null> {
+    return (await queryOne<AdobeSignAgreement>(`SELECT * FROM adobe_sign_agreements WHERE id = ?`, [id])) ?? null;
   }
 
-  getByAgreementId(agreementId: string): AdobeSignAgreement | null {
-    const stmt = this.db.prepare(`SELECT * FROM adobe_sign_agreements WHERE agreement_id = ?`);
-    stmt.bind([agreementId]);
-    const row = stmt.step() ? (stmt.getAsObject() as unknown as AdobeSignAgreement) : null;
-    stmt.free();
-    return row;
+  async getByAgreementId(agreementId: string): Promise<AdobeSignAgreement | null> {
+    return (await queryOne<AdobeSignAgreement>(`SELECT * FROM adobe_sign_agreements WHERE agreement_id = ?`, [agreementId])) ?? null;
   }
 
-  upsert(a: Omit<AdobeSignAgreement, 'id' | 'created_at' | 'updated_at'>): void {
-    this.db.run(
-      `INSERT INTO adobe_sign_agreements (agreement_id, contract_id, template_id, name, status, sender_email, signer_emails, filled_fields, created_via_nova, adobe_created_date, adobe_expiration_date, signed_document_url, raw_data, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(agreement_id) DO UPDATE SET
-         status=excluded.status, sender_email=excluded.sender_email, signer_emails=excluded.signer_emails,
-         adobe_expiration_date=excluded.adobe_expiration_date, signed_document_url=excluded.signed_document_url,
-         raw_data=excluded.raw_data, synced_at=excluded.synced_at, updated_at=datetime('now')`,
-      [a.agreement_id, a.contract_id ?? null, a.template_id ?? null, a.name,
-       a.status, a.sender_email ?? null, a.signer_emails ?? null,
-       a.filled_fields ?? null, a.created_via_nova ? 1 : 0,
-       a.adobe_created_date ?? null, a.adobe_expiration_date ?? null,
-       a.signed_document_url ?? null, a.raw_data ?? null,
-       a.synced_at ?? new Date().toISOString()],
-    );
-    saveDb();
+  async upsert(a: Omit<AdobeSignAgreement, 'id' | 'created_at' | 'updated_at'>): Promise<void> {
+    await execute(`
+      MERGE INTO adobe_sign_agreements WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
+        AS source(agreement_id, contract_id, template_id, name, status, sender_email, signer_emails,
+                  filled_fields, created_via_nova, adobe_created_date, adobe_expiration_date,
+                  signed_document_url, raw_data, synced_at)
+      ON target.agreement_id = source.agreement_id
+      WHEN MATCHED THEN UPDATE SET
+        status=source.status, sender_email=source.sender_email, signer_emails=source.signer_emails,
+        adobe_expiration_date=source.adobe_expiration_date, signed_document_url=source.signed_document_url,
+        raw_data=source.raw_data, synced_at=source.synced_at, updated_at=GETUTCDATE()
+      WHEN NOT MATCHED THEN INSERT (agreement_id, contract_id, template_id, name, status, sender_email, signer_emails,
+        filled_fields, created_via_nova, adobe_created_date, adobe_expiration_date, signed_document_url, raw_data, synced_at)
+        VALUES (source.agreement_id, source.contract_id, source.template_id, source.name, source.status,
+          source.sender_email, source.signer_emails, source.filled_fields, source.created_via_nova,
+          source.adobe_created_date, source.adobe_expiration_date, source.signed_document_url, source.raw_data, source.synced_at);
+    `, [a.agreement_id, a.contract_id ?? null, a.template_id ?? null, a.name,
+        a.status, a.sender_email ?? null, a.signer_emails ?? null,
+        a.filled_fields ?? null, a.created_via_nova ? 1 : 0,
+        a.adobe_created_date ?? null, a.adobe_expiration_date ?? null,
+        a.signed_document_url ?? null, a.raw_data ?? null,
+        a.synced_at ?? new Date().toISOString()]);
   }
 
-  delete(id: number): boolean {
-    const existing = this.getById(id);
+  async delete(id: number): Promise<boolean> {
+    const existing = await this.getById(id);
     if (!existing) return false;
-    this.db.run(`DELETE FROM adobe_sign_agreements WHERE id = ?`, [id]);
-    saveDb();
+    await execute(`DELETE FROM adobe_sign_agreements WHERE id = ?`, [id]);
     return true;
   }
 
-  getByContractId(contractId: number): AdobeSignAgreement[] {
-    const stmt = this.db.prepare(`SELECT * FROM adobe_sign_agreements WHERE contract_id = ? ORDER BY created_at DESC`);
-    stmt.bind([contractId]);
-    const rows: AdobeSignAgreement[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as AdobeSignAgreement);
-    stmt.free();
-    return rows;
+  async getByContractId(contractId: number): Promise<AdobeSignAgreement[]> {
+    return query<AdobeSignAgreement>(`SELECT * FROM adobe_sign_agreements WHERE contract_id = ? ORDER BY created_at DESC`, [contractId]);
   }
 }
 
-// ── Training Matrix ──────────────────────────────────────────────────
+// ─── Approvals ──────────────────────────────────────────────────────────────
 
-export interface TrainingCategory {
-  id: number;
-  name: string;
-  sort_order: number;
+export interface ApprovalItem {
+  id: number; ticket_id: string; ticket_summary: string;
+  reporter_name: string | null; reporter_email: string | null;
+  ai_response_adf: string | null; conversation_json: string | null;
+  kb_sources: string | null; resume_url: string; status: string;
+  decided_by: string | null; decided_at: string | null;
+  edited_response_adf: string | null; decline_reason: string | null;
+  priority: string | null; created_at: string; expires_at: string;
 }
 
-export interface TrainingItem {
-  id: number;
-  category_id: number;
-  section: string;
-  name: string;
-  tech_lead: string | null;
-  max_score: number;
-  sort_order: number;
+export class ApprovalQueries {
+  async getAll(status?: string): Promise<ApprovalItem[]> {
+    await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
+    let sql = `SELECT * FROM approval_queue`;
+    const params: string[] = [];
+    if (status) { sql += ` WHERE status = ?`; params.push(status); }
+    sql += ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`;
+    return query<ApprovalItem>(sql, params);
+  }
+
+  async getById(id: number): Promise<ApprovalItem | undefined> {
+    return queryOne<ApprovalItem>(`SELECT * FROM approval_queue WHERE id = ?`, [id]);
+  }
+
+  async getPending(): Promise<ApprovalItem[]> { return this.getAll('pending'); }
+
+  async getPendingCount(): Promise<number> {
+    await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
+    const row = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
+    return row?.count ?? 0;
+  }
+
+  async getStats(): Promise<{ pending: number; approved: number; declined: number; timed_out: number; today_decided: number }> {
+    await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
+    const row = await queryOne<Record<string, unknown>>(`
+      SELECT
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END) as timed_out,
+        SUM(CASE WHEN decided_at >= CAST(GETUTCDATE() AS DATE) AND status IN ('approved', 'declined') THEN 1 ELSE 0 END) as today_decided
+      FROM approval_queue
+    `);
+    if (!row) return { pending: 0, approved: 0, declined: 0, timed_out: 0, today_decided: 0 };
+    return {
+      pending: (row.pending as number) || 0, approved: (row.approved as number) || 0,
+      declined: (row.declined as number) || 0, timed_out: (row.timed_out as number) || 0,
+      today_decided: (row.today_decided as number) || 0,
+    };
+  }
+
+  async create(item: {
+    ticket_id: string; ticket_summary: string; reporter_name?: string; reporter_email?: string;
+    ai_response_adf?: string; conversation_json?: string; kb_sources?: string;
+    resume_url: string; priority?: string; expires_at: string;
+  }): Promise<number> {
+    return executeAndGetId(
+      `INSERT INTO approval_queue (ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [item.ticket_id, item.ticket_summary, item.reporter_name || null, item.reporter_email || null,
+       item.ai_response_adf || null, item.conversation_json || null, item.kb_sources || null,
+       item.resume_url, item.priority || null, item.expires_at]
+    );
+  }
+
+  async decide(id: number, action: 'approved' | 'declined' | 'timed_out' | 'cancelled', decidedBy: string, editedResponseAdf?: string, declineReason?: string): Promise<boolean> {
+    const item = await this.getById(id);
+    if (!item || item.status !== 'pending') return false;
+    await execute(
+      `UPDATE approval_queue SET status = ?, decided_by = ?, decided_at = GETUTCDATE(), edited_response_adf = ?, decline_reason = ? WHERE id = ?`,
+      [action, decidedBy, editedResponseAdf || null, declineReason || null, id]
+    );
+    return true;
+  }
+
+  async getDailyStats(days: number = 90): Promise<Array<{ date: string; approved: number; declined: number; timed_out: number; total_decisions: number }>> {
+    return query<{ date: string; approved: number; declined: number; timed_out: number; total_decisions: number }>(`
+      SELECT
+        CAST(decided_at AS DATE) as date,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END) as timed_out,
+        COUNT(*) as total_decisions
+      FROM approval_queue
+      WHERE status IN ('approved', 'declined', 'timed_out')
+        AND decided_at >= DATEADD(day, -?, GETUTCDATE())
+      GROUP BY CAST(decided_at AS DATE)
+      ORDER BY date ASC
+    `, [days]);
+  }
+
+  async getTodayStats(): Promise<{ approved: number; declined: number; timed_out: number; pending: number; resolution_rate: number }> {
+    await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
+    const row = await queryOne<Record<string, unknown>>(`
+      SELECT
+        SUM(CASE WHEN status = 'approved' AND CAST(decided_at AS DATE) = CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN status = 'declined' AND CAST(decided_at AS DATE) = CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN status = 'timed_out' AND CAST(decided_at AS DATE) = CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as timed_out,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as total_approved,
+        SUM(CASE WHEN status IN ('approved', 'declined', 'timed_out') THEN 1 ELSE 0 END) as total_decisions
+      FROM approval_queue
+    `);
+    if (!row) return { approved: 0, declined: 0, timed_out: 0, pending: 0, resolution_rate: 0 };
+    const totalApproved = (row.total_approved as number) || 0;
+    const totalDecisions = (row.total_decisions as number) || 0;
+    return {
+      approved: (row.approved as number) || 0, declined: (row.declined as number) || 0,
+      timed_out: (row.timed_out as number) || 0, pending: (row.pending as number) || 0,
+      resolution_rate: totalDecisions > 0 ? Math.round((totalApproved / totalDecisions) * 100 * 10) / 10 : 0,
+    };
+  }
 }
 
-export interface TrainingScore {
-  id: number;
-  item_id: number;
-  user_id: number;
-  score: number;
-  updated_at: string;
-}
+// ─── Training Matrix ────────────────────────────────────────────────────────
+
+export interface TrainingCategory { id: number; name: string; sort_order: number; }
+export interface TrainingItem { id: number; category_id: number; section: string; name: string; tech_lead: string | null; max_score: number; sort_order: number; }
+export interface TrainingScore { id: number; item_id: number; user_id: number; score: number; updated_at: string; }
 
 export class TrainingQueries {
-  constructor(private db: Database) {}
-
-  // ── Categories ──
-
-  getCategories(): TrainingCategory[] {
-    const stmt = this.db.prepare(`SELECT * FROM training_categories ORDER BY sort_order, id`);
-    const rows: TrainingCategory[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as TrainingCategory);
-    stmt.free();
-    return rows;
+  async getCategories(): Promise<TrainingCategory[]> {
+    return query<TrainingCategory>(`SELECT * FROM training_categories ORDER BY sort_order, id`);
   }
 
-  createCategory(name: string, sort_order: number): number {
-    this.db.run(`INSERT INTO training_categories (name, sort_order) VALUES (?, ?)`, [name, sort_order]);
-    const r = this.db.exec(`SELECT last_insert_rowid() as id`);
-    saveDb();
-    return Number(r[0].values[0][0]);
+  async createCategory(name: string, sort_order: number): Promise<number> {
+    return executeAndGetId(`INSERT INTO training_categories (name, sort_order) VALUES (?, ?)`, [name, sort_order]);
   }
 
-  updateCategory(id: number, name: string, sort_order: number): void {
-    this.db.run(`UPDATE training_categories SET name = ?, sort_order = ? WHERE id = ?`, [name, sort_order, id]);
-    saveDb();
+  async updateCategory(id: number, name: string, sort_order: number): Promise<void> {
+    await execute(`UPDATE training_categories SET name = ?, sort_order = ? WHERE id = ?`, [name, sort_order, id]);
   }
 
-  deleteCategory(id: number): void {
-    this.db.run(`DELETE FROM training_categories WHERE id = ?`, [id]);
-    saveDb();
+  async deleteCategory(id: number): Promise<void> {
+    await execute(`DELETE FROM training_categories WHERE id = ?`, [id]);
   }
 
-  deleteAllData(): void {
-    this.db.run(`DELETE FROM training_scores`);
-    this.db.run(`DELETE FROM training_items`);
-    this.db.run(`DELETE FROM training_categories`);
-    this.db.run(`DELETE FROM training_members`);
-    saveDb();
+  async deleteAllData(): Promise<void> {
+    await execute(`DELETE FROM training_scores`);
+    await execute(`DELETE FROM training_items`);
+    await execute(`DELETE FROM training_categories`);
+    await execute(`DELETE FROM training_members`);
   }
 
-  // ── Members (users included in the matrix) ──
-
-  getMembers(): number[] {
-    const stmt = this.db.prepare(`SELECT user_id FROM training_members ORDER BY sort_order, user_id`);
-    const ids: number[] = [];
-    while (stmt.step()) ids.push((stmt.getAsObject() as { user_id: number }).user_id);
-    stmt.free();
-    return ids;
+  async getMembers(): Promise<number[]> {
+    const rows = await query<{ user_id: number }>(`SELECT user_id FROM training_members ORDER BY sort_order, user_id`);
+    return rows.map(r => r.user_id);
   }
 
-  addMember(userId: number, sortOrder: number): void {
-    this.db.run(`INSERT OR IGNORE INTO training_members (user_id, sort_order) VALUES (?, ?)`, [userId, sortOrder]);
-    saveDb();
+  async addMember(userId: number, sortOrder: number): Promise<void> {
+    const existing = await queryOne<{ user_id: number }>(`SELECT user_id FROM training_members WHERE user_id = ?`, [userId]);
+    if (!existing) {
+      await execute(`INSERT INTO training_members (user_id, sort_order) VALUES (?, ?)`, [userId, sortOrder]);
+    }
   }
 
-  // ── Items ──
-
-  getItems(categoryId?: number): TrainingItem[] {
+  async getItems(categoryId?: number): Promise<TrainingItem[]> {
     let sql = `SELECT * FROM training_items`;
     const params: number[] = [];
-    if (categoryId != null) {
-      sql += ` WHERE category_id = ?`;
-      params.push(categoryId);
-    }
+    if (categoryId != null) { sql += ` WHERE category_id = ?`; params.push(categoryId); }
     sql += ` ORDER BY sort_order, id`;
-    const stmt = this.db.prepare(sql);
-    if (params.length) stmt.bind(params);
-    const rows: TrainingItem[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as TrainingItem);
-    stmt.free();
-    return rows;
+    return query<TrainingItem>(sql, params);
   }
 
-  createItem(item: Omit<TrainingItem, 'id'>): number {
-    this.db.run(
+  async createItem(item: Omit<TrainingItem, 'id'>): Promise<number> {
+    return executeAndGetId(
       `INSERT INTO training_items (category_id, section, name, tech_lead, max_score, sort_order) VALUES (?, ?, ?, ?, ?, ?)`,
       [item.category_id, item.section, item.name, item.tech_lead, item.max_score, item.sort_order]
     );
-    const r = this.db.exec(`SELECT last_insert_rowid() as id`);
-    saveDb();
-    return Number(r[0].values[0][0]);
   }
 
-  updateItem(id: number, updates: Partial<Omit<TrainingItem, 'id'>>): void {
+  async updateItem(id: number, updates: Partial<Omit<TrainingItem, 'id'>>): Promise<void> {
     const fields: string[] = [];
     const vals: (string | number | null)[] = [];
     if (updates.category_id != null) { fields.push('category_id = ?'); vals.push(updates.category_id); }
@@ -4045,18 +2596,14 @@ export class TrainingQueries {
     if (updates.sort_order != null) { fields.push('sort_order = ?'); vals.push(updates.sort_order); }
     if (fields.length === 0) return;
     vals.push(id);
-    this.db.run(`UPDATE training_items SET ${fields.join(', ')} WHERE id = ?`, vals);
-    saveDb();
+    await execute(`UPDATE training_items SET ${fields.join(', ')} WHERE id = ?`, vals);
   }
 
-  deleteItem(id: number): void {
-    this.db.run(`DELETE FROM training_items WHERE id = ?`, [id]);
-    saveDb();
+  async deleteItem(id: number): Promise<void> {
+    await execute(`DELETE FROM training_items WHERE id = ?`, [id]);
   }
 
-  // ── Scores ──
-
-  getScores(categoryId?: number, userId?: number): TrainingScore[] {
+  async getScores(categoryId?: number, userId?: number): Promise<TrainingScore[]> {
     let sql = `SELECT ts.* FROM training_scores ts`;
     const params: number[] = [];
     if (categoryId != null) {
@@ -4067,88 +2614,61 @@ export class TrainingQueries {
       sql += ` WHERE ts.user_id = ?`;
       params.push(userId);
     }
-    const stmt = this.db.prepare(sql);
-    if (params.length) stmt.bind(params);
-    const rows: TrainingScore[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as unknown as TrainingScore);
-    stmt.free();
-    return rows;
+    return query<TrainingScore>(sql, params);
   }
 
-  upsertScore(item_id: number, user_id: number, score: number): void {
-    this.db.run(
-      `INSERT INTO training_scores (item_id, user_id, score, updated_at) VALUES (?, ?, ?, datetime('now'))
-       ON CONFLICT(item_id, user_id) DO UPDATE SET score = excluded.score, updated_at = excluded.updated_at`,
-      [item_id, user_id, score]
-    );
-    saveDb();
+  async upsertScore(item_id: number, user_id: number, score: number): Promise<void> {
+    await execute(`
+      MERGE INTO training_scores WITH (HOLDLOCK) AS target
+      USING (VALUES (?, ?, ?)) AS source(item_id, user_id, score)
+      ON target.item_id = source.item_id AND target.user_id = source.user_id
+      WHEN MATCHED THEN UPDATE SET score = source.score, updated_at = GETUTCDATE()
+      WHEN NOT MATCHED THEN INSERT (item_id, user_id, score, updated_at) VALUES (source.item_id, source.user_id, source.score, GETUTCDATE());
+    `, [item_id, user_id, score]);
   }
 
-  bulkUpsertScores(scores: Array<{ item_id: number; user_id: number; score: number }>): void {
-    for (const s of scores) {
-      this.db.run(
-        `INSERT INTO training_scores (item_id, user_id, score, updated_at) VALUES (?, ?, ?, datetime('now'))
-         ON CONFLICT(item_id, user_id) DO UPDATE SET score = excluded.score, updated_at = excluded.updated_at`,
-        [s.item_id, s.user_id, s.score]
-      );
-    }
-    saveDb();
+  async bulkUpsertScores(scores: Array<{ item_id: number; user_id: number; score: number }>): Promise<void> {
+    for (const s of scores) await this.upsertScore(s.item_id, s.user_id, s.score);
   }
 
-  // ── Bulk import (for xlsx seeding) ──
-
-  bulkImport(data: {
+  async bulkImport(data: {
     categories: Array<{ name: string; sort_order: number }>;
     items: Array<{ categoryName: string; section: string; name: string; tech_lead: string | null; max_score: number; sort_order: number }>;
     scores: Array<{ itemCategoryName: string; itemSection: string; itemName: string; user_id: number; score: number }>;
-  }): { categories: number; items: number; scores: number } {
+  }): Promise<{ categories: number; items: number; scores: number }> {
     let catCount = 0, itemCount = 0, scoreCount = 0;
-
-    // Insert categories
     const catMap = new Map<string, number>();
+
     for (const cat of data.categories) {
       try {
-        this.db.run(`INSERT INTO training_categories (name, sort_order) VALUES (?, ?)`, [cat.name, cat.sort_order]);
-        const r = this.db.exec(`SELECT last_insert_rowid() as id`);
-        catMap.set(cat.name, Number(r[0].values[0][0]));
+        const id = await executeAndGetId(`INSERT INTO training_categories (name, sort_order) VALUES (?, ?)`, [cat.name, cat.sort_order]);
+        catMap.set(cat.name, id);
         catCount++;
       } catch {
-        // Already exists — find its id
-        const stmt = this.db.prepare(`SELECT id FROM training_categories WHERE name = ?`);
-        stmt.bind([cat.name]);
-        if (stmt.step()) catMap.set(cat.name, (stmt.getAsObject() as { id: number }).id);
-        stmt.free();
+        const existing = await queryOne<{ id: number }>(`SELECT id FROM training_categories WHERE name = ?`, [cat.name]);
+        if (existing) catMap.set(cat.name, existing.id);
       }
     }
 
-    // Insert items
-    const itemMap = new Map<string, number>(); // key: "catName||section||name"
+    const itemMap = new Map<string, number>();
     for (const item of data.items) {
       const catId = catMap.get(item.categoryName);
       if (catId == null) continue;
-      this.db.run(
+      const id = await executeAndGetId(
         `INSERT INTO training_items (category_id, section, name, tech_lead, max_score, sort_order) VALUES (?, ?, ?, ?, ?, ?)`,
         [catId, item.section, item.name, item.tech_lead, item.max_score, item.sort_order]
       );
-      const r = this.db.exec(`SELECT last_insert_rowid() as id`);
-      const itemId = Number(r[0].values[0][0]);
-      itemMap.set(`${item.categoryName}||${item.section}||${item.name}`, itemId);
+      itemMap.set(`${item.categoryName}||${item.section}||${item.name}`, id);
       itemCount++;
     }
 
-    // Insert scores
     for (const s of data.scores) {
       const itemId = itemMap.get(`${s.itemCategoryName}||${s.itemSection}||${s.itemName}`);
       if (itemId == null) continue;
-      this.db.run(
-        `INSERT INTO training_scores (item_id, user_id, score, updated_at) VALUES (?, ?, ?, datetime('now'))
-         ON CONFLICT(item_id, user_id) DO UPDATE SET score = excluded.score, updated_at = excluded.updated_at`,
-        [itemId, s.user_id, s.score]
-      );
+      await this.upsertScore(itemId, s.user_id, s.score);
       scoreCount++;
     }
 
-    saveDb();
     return { categories: catCount, items: itemCount, scores: scoreCount };
   }
 }
