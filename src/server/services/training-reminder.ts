@@ -66,10 +66,10 @@ export async function sendTrainingReminders(
   const settings = settingsQueries.getAll();
   const baseUrl = settings.sso_base_url || settings.nova_base_url || 'https://nova.nurtur.tech';
 
-  const categories = await trainingQueries.getCategories();
-  const items = await trainingQueries.getItems();
-  const scores = await trainingQueries.getScores();
-  const memberIds = await trainingQueries.getMembers();
+  const categories = trainingQueries.getCategories();
+  const items = trainingQueries.getItems();
+  const scores = trainingQueries.getScores();
+  const memberIds = trainingQueries.getMembers();
   const allUsers = userQueries.getAll();
 
   if (memberIds.length === 0 || items.length === 0) {

@@ -145,7 +145,7 @@ export class ProblemTicketScanner {
 
     try {
       // Load config
-      const configRows = await this.queries.getConfig();
+      const configRows = this.queries.getConfig();
       const config = new Map<string, ProblemTicketConfigRow>();
       for (const row of configRows) config.set(row.rule, row);
 
@@ -366,33 +366,33 @@ export class ProblemTicketScanner {
         const fingerprint = computeFingerprint(issue, commentCount, reopened);
 
         // Check if ignore should be lifted
-        const activeIgnores = (await this.queries.getIgnoresForIssue(issue.key))
+        const activeIgnores = this.queries.getIgnoresForIssue(issue.key)
           .filter(i => !i.lifted_at);
         for (const ig of activeIgnores) {
           if (ig.fingerprint_at_ignore !== fingerprint) {
             // Material change detected — lift ignore
             const changes: string[] = [];
-            const existingAlert = await this.queries.getAlertByIssueKey(issue.key);
+            const existingAlert = this.queries.getAlertByIssueKey(issue.key);
             if (existingAlert) {
               if (existingAlert.priority !== ((issue.fields.priority as any)?.name ?? null)) changes.push('priority changed');
               if (existingAlert.status !== (resolveStatusName(issue.fields.status) ?? null)) changes.push('status changed');
               if (existingAlert.assignee !== ((issue.fields.assignee as any)?.displayName ?? null)) changes.push('reassigned');
             }
             if (reopened) changes.push('reopened');
-            await this.queries.liftIgnore(issue.key, changes.length > 0 ? changes.join(', ') : 'material change detected');
+            this.queries.liftIgnore(issue.key, changes.length > 0 ? changes.join(', ') : 'material change detected');
             ignoresLifted++;
           }
         }
 
         // Check if currently ignored (after potential lift)
-        const stillIgnored = (await this.queries.getIgnoresForIssue(issue.key))
+        const stillIgnored = this.queries.getIgnoresForIssue(issue.key)
           .some(i => !i.lifted_at && i.fingerprint_at_ignore === fingerprint);
 
         // Determine if this is create vs update
-        const existing = await this.queries.getAlertByIssueKey(issue.key);
+        const existing = this.queries.getAlertByIssueKey(issue.key);
 
         // Upsert alert (even if ignored, so fingerprint stays current)
-        await this.queries.upsertAlert({
+        this.queries.upsertAlert({
           issue_key: issue.key,
           project_key: issue.key.split('-')[0],
           summary: (issue.fields.summary as string) ?? '',
@@ -433,10 +433,10 @@ export class ProblemTicketScanner {
         // Only include issues that scored >= 15
         return activeIssueKeys.includes(i.key);
       }).map(i => i.key);
-      const resolved = await this.queries.markResolved(allAlertedKeys);
+      const resolved = this.queries.markResolved(allAlertedKeys);
 
       // Cleanup old resolved alerts (30 days)
-      await this.queries.cleanupOld(30);
+      this.queries.cleanupOld(30);
 
       const duration = Date.now() - start;
       console.log(`[ProblemTicketScanner] Scan complete: ${allIssues.length} tickets, ${alertsCreated} new, ${alertsUpdated} updated, ${resolved} resolved, ${ignoresLifted} ignores lifted (${duration}ms)`);
@@ -557,7 +557,7 @@ Focus on the customer's tone, not the agent's. If no customer comments, score 0.
         const parsed = JSON.parse(content) as { results: Array<{ issueKey: string; score: number; summary: string }> };
 
         for (const result of parsed.results ?? []) {
-          const alert = await this.queries.getAlertByIssueKey(result.issueKey);
+          const alert = this.queries.getAlertByIssueKey(result.issueKey);
           if (!alert) continue;
 
           // Update sentiment on the alert
@@ -584,7 +584,7 @@ Focus on the customer's tone, not the agent's. If no customer comments, score 0.
               });
             }
 
-            await this.queries.upsertAlert({
+            this.queries.upsertAlert({
               ...alert,
               score: newScore,
               severity: newSeverity,
@@ -692,7 +692,7 @@ Rules:
           // Verify the commitment date is actually in the past
           if (result.commitmentDate > today) continue;
 
-          const alert = await this.queries.getAlertByIssueKey(result.issueKey);
+          const alert = this.queries.getAlertByIssueKey(result.issueKey);
           if (!alert) continue;
 
           const newScore = Math.min(100, alert.score + commitmentConfig.weight);
@@ -706,7 +706,7 @@ Rules:
             detail: `Promised update by ${result.commitmentDate}${result.quote ? `: "${result.quote}"` : ''}`,
           });
 
-          await this.queries.upsertAlert({
+          this.queries.upsertAlert({
             ...alert,
             score: newScore,
             severity: newSeverity,
@@ -811,7 +811,7 @@ Rules:
             : `${elapsedHours}h since customer replied`;
 
           // Get or create the alert for this issue
-          const existing = await this.queries.getAlertByIssueKey(issue.key);
+          const existing = this.queries.getAlertByIssueKey(issue.key);
 
           if (existing) {
             // Add no_next_reply reason to existing alert
@@ -825,7 +825,7 @@ Rules:
                 weight: noReplyConfig.weight,
                 detail,
               }];
-              await this.queries.upsertAlert({
+              this.queries.upsertAlert({
                 ...existing,
                 score: newScore,
                 severity: newSeverity,
@@ -841,7 +841,7 @@ Rules:
               const commentCount = (issue.fields.comment as any)?.total ?? comments.length;
               const fingerprint = computeFingerprint(issue, commentCount, false);
 
-              await this.queries.upsertAlert({
+              this.queries.upsertAlert({
                 issue_key: issue.key,
                 project_key: issue.key.split('-')[0],
                 summary: (issue.fields.summary as string) ?? '',

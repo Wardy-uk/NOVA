@@ -90,7 +90,7 @@ export function createIntegrationRoutes(
     const userRole = (req as any).user?.role as string | undefined;
     const userIsAdmin = userRole ? isAdmin(userRole) : false;
     const globalSettings = settingsQueries.getAll();
-    const userSettings = userId ? await userSettingsQueries.getAllForUser(userId) : {};
+    const userSettings = userId ? userSettingsQueries.getAllForUser(userId) : {};
     const mcpStatuses = mcpManager.getStatus();
 
     const results: IntegrationStatus[] = [];
@@ -202,11 +202,11 @@ export function createIntegrationRoutes(
       }
     } else if (userId) {
       // Personal: save to user_settings
-      await userSettingsQueries.set(userId, integ.enabledKey, String(enabled));
+      userSettingsQueries.set(userId, integ.enabledKey, String(enabled));
       for (const field of integ.fields) {
         const newValue = credentials[field.key];
         if (newValue !== undefined && !newValue.includes('****')) {
-          await userSettingsQueries.set(userId, field.key, newValue);
+          userSettingsQueries.set(userId, field.key, newValue);
         }
       }
 

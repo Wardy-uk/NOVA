@@ -17,22 +17,22 @@ export function createOnboardingConfigRoutes(
 
   // ── Ticket Groups ──
 
-  router.get('/ticket-groups', async (_req, res) => {
-    res.json({ ok: true, data: await configQueries.getAllTicketGroups() });
+  router.get('/ticket-groups', (_req, res) => {
+    res.json({ ok: true, data: configQueries.getAllTicketGroups() });
   });
 
-  router.post('/ticket-groups', writeGuard, async (req, res) => {
+  router.post('/ticket-groups', writeGuard, (req, res) => {
     const parsed = z.object({ name: z.string().min(1), sort_order: z.number().optional() }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
     try {
-      const id = await configQueries.createTicketGroup(parsed.data.name, parsed.data.sort_order);
+      const id = configQueries.createTicketGroup(parsed.data.name, parsed.data.sort_order);
       res.json({ ok: true, data: { id } });
     } catch (err) {
       res.status(409).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create ticket group' });
     }
   });
 
-  router.put('/ticket-groups/:id', writeGuard, async (req, res) => {
+  router.put('/ticket-groups/:id', writeGuard, (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       name: z.string().min(1).optional(),
@@ -42,37 +42,37 @@ export function createOnboardingConfigRoutes(
       traffic_light_group: z.string().nullable().optional(),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    await configQueries.updateTicketGroup(id, parsed.data);
+    configQueries.updateTicketGroup(id, parsed.data);
     res.json({ ok: true });
   });
 
-  router.get('/traffic-light-groups', async (_req, res) => {
-    res.json({ ok: true, data: await configQueries.getTrafficLightGroups() });
+  router.get('/traffic-light-groups', (_req, res) => {
+    res.json({ ok: true, data: configQueries.getTrafficLightGroups() });
   });
 
-  router.delete('/ticket-groups/:id', writeGuard, async (req, res) => {
-    await configQueries.deleteTicketGroup(parseInt(String(req.params.id), 10));
+  router.delete('/ticket-groups/:id', writeGuard, (req, res) => {
+    configQueries.deleteTicketGroup(parseInt(String(req.params.id), 10));
     res.json({ ok: true });
   });
 
   // ── Sale Types ──
 
-  router.get('/sale-types', async (_req, res) => {
-    res.json({ ok: true, data: await configQueries.getAllSaleTypes() });
+  router.get('/sale-types', (_req, res) => {
+    res.json({ ok: true, data: configQueries.getAllSaleTypes() });
   });
 
-  router.post('/sale-types', writeGuard, async (req, res) => {
+  router.post('/sale-types', writeGuard, (req, res) => {
     const parsed = z.object({ name: z.string().min(1), sort_order: z.number().optional() }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
     try {
-      const id = await configQueries.createSaleType(parsed.data.name, parsed.data.sort_order);
+      const id = configQueries.createSaleType(parsed.data.name, parsed.data.sort_order);
       res.json({ ok: true, data: { id } });
     } catch (err) {
       res.status(409).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create sale type' });
     }
   });
 
-  router.put('/sale-types/:id', writeGuard, async (req, res) => {
+  router.put('/sale-types/:id', writeGuard, (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       name: z.string().min(1).optional(),
@@ -80,22 +80,22 @@ export function createOnboardingConfigRoutes(
       active: z.number().min(0).max(1).optional(),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    await configQueries.updateSaleType(id, parsed.data);
+    configQueries.updateSaleType(id, parsed.data);
     res.json({ ok: true });
   });
 
-  router.delete('/sale-types/:id', writeGuard, async (req, res) => {
-    await configQueries.deleteSaleType(parseInt(String(req.params.id), 10));
+  router.delete('/sale-types/:id', writeGuard, (req, res) => {
+    configQueries.deleteSaleType(parseInt(String(req.params.id), 10));
     res.json({ ok: true });
   });
 
   // ── Capabilities ──
 
-  router.get('/capabilities', async (_req, res) => {
-    res.json({ ok: true, data: await configQueries.getAllCapabilities() });
+  router.get('/capabilities', (_req, res) => {
+    res.json({ ok: true, data: configQueries.getAllCapabilities() });
   });
 
-  router.post('/capabilities', writeGuard, async (req, res) => {
+  router.post('/capabilities', writeGuard, (req, res) => {
     const parsed = z.object({
       name: z.string().min(1),
       code: z.string().optional(),
@@ -104,14 +104,14 @@ export function createOnboardingConfigRoutes(
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
     try {
-      const id = await configQueries.createCapability(parsed.data.name, parsed.data.code, parsed.data.sort_order, parsed.data.ticket_group_id);
+      const id = configQueries.createCapability(parsed.data.name, parsed.data.code, parsed.data.sort_order, parsed.data.ticket_group_id);
       res.json({ ok: true, data: { id } });
     } catch (err) {
       res.status(409).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create capability' });
     }
   });
 
-  router.put('/capabilities/:id', writeGuard, async (req, res) => {
+  router.put('/capabilities/:id', writeGuard, (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       name: z.string().min(1).optional(),
@@ -121,23 +121,23 @@ export function createOnboardingConfigRoutes(
       ticket_group_id: z.number().nullable().optional(),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    await configQueries.updateCapability(id, parsed.data);
+    configQueries.updateCapability(id, parsed.data);
     res.json({ ok: true });
   });
 
-  router.delete('/capabilities/:id', writeGuard, async (req, res) => {
-    await configQueries.deleteCapability(parseInt(String(req.params.id), 10));
+  router.delete('/capabilities/:id', writeGuard, (req, res) => {
+    configQueries.deleteCapability(parseInt(String(req.params.id), 10));
     res.json({ ok: true });
   });
 
   // ── Items ──
 
-  router.get('/capabilities/:id/items', async (req, res) => {
+  router.get('/capabilities/:id/items', (req, res) => {
     const capId = parseInt(String(req.params.id), 10);
-    res.json({ ok: true, data: await configQueries.getItemsForCapability(capId) });
+    res.json({ ok: true, data: configQueries.getItemsForCapability(capId) });
   });
 
-  router.post('/capabilities/:id/items', writeGuard, async (req, res) => {
+  router.post('/capabilities/:id/items', writeGuard, (req, res) => {
     const capId = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       name: z.string().min(1),
@@ -145,11 +145,11 @@ export function createOnboardingConfigRoutes(
       sort_order: z.number().optional(),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    const id = await configQueries.createItem(capId, parsed.data.name, parsed.data.is_bolt_on, parsed.data.sort_order);
+    const id = configQueries.createItem(capId, parsed.data.name, parsed.data.is_bolt_on, parsed.data.sort_order);
     res.json({ ok: true, data: { id } });
   });
 
-  router.put('/items/:id', writeGuard, async (req, res) => {
+  router.put('/items/:id', writeGuard, (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     const parsed = z.object({
       name: z.string().min(1).optional(),
@@ -158,22 +158,22 @@ export function createOnboardingConfigRoutes(
       active: z.number().min(0).max(1).optional(),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    await configQueries.updateItem(id, parsed.data);
+    configQueries.updateItem(id, parsed.data);
     res.json({ ok: true });
   });
 
-  router.delete('/items/:id', writeGuard, async (req, res) => {
-    await configQueries.deleteItem(parseInt(String(req.params.id), 10));
+  router.delete('/items/:id', writeGuard, (req, res) => {
+    configQueries.deleteItem(parseInt(String(req.params.id), 10));
     res.json({ ok: true });
   });
 
   // ── Matrix ──
 
-  router.get('/matrix', async (_req, res) => {
-    res.json({ ok: true, data: await configQueries.getFullMatrix() });
+  router.get('/matrix', (_req, res) => {
+    res.json({ ok: true, data: configQueries.getFullMatrix() });
   });
 
-  router.put('/matrix', writeGuard, async (req, res) => {
+  router.put('/matrix', writeGuard, (req, res) => {
     const parsed = z.object({
       updates: z.array(z.object({
         sale_type_id: z.number(),
@@ -183,13 +183,13 @@ export function createOnboardingConfigRoutes(
       })),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    await configQueries.batchUpdateMatrix(parsed.data.updates as { sale_type_id: number; capability_id: number; enabled: boolean; notes?: string }[]);
+    configQueries.batchUpdateMatrix(parsed.data.updates as { sale_type_id: number; capability_id: number; enabled: boolean; notes?: string }[]);
     res.json({ ok: true });
   });
 
   // ── Import from xlsx ──
 
-  router.post('/import-xlsx', writeGuard, async (_req, res) => {
+  router.post('/import-xlsx', writeGuard, (_req, res) => {
     if (!fs.existsSync(XLSX_PATH)) {
       res.status(404).json({ ok: false, error: `File not found: ${XLSX_PATH}` });
       return;
@@ -197,7 +197,7 @@ export function createOnboardingConfigRoutes(
 
     try {
       const wb = XLSX.readFile(XLSX_PATH);
-      const stats = await importFromWorkbook(wb, configQueries);
+      const stats = importFromWorkbook(wb, configQueries);
       res.json({ ok: true, data: stats });
     } catch (err) {
       console.error('[Onboarding] Import failed:', err);
@@ -232,8 +232,8 @@ const SHEET2_TO_CAP: Record<string, string> = {
   'EcoSystem': 'EcoSystem Log in',
 };
 
-export async function importFromWorkbook(wb: XLSX.WorkBook, queries: OnboardingConfigQueries): Promise<ImportStats> {
-  await queries.clearAll();
+export function importFromWorkbook(wb: XLSX.WorkBook, queries: OnboardingConfigQueries): ImportStats {
+  queries.clearAll();
 
   const stats: ImportStats = { ticketGroups: 0, saleTypes: 0, capabilities: 0, matrixCells: 0, items: 0, skippedRows: [] };
   const saleTypeMap = new Map<string, number>();
@@ -279,7 +279,7 @@ export async function importFromWorkbook(wb: XLSX.WorkBook, queries: OnboardingC
       const gName = colToGroup[col];
       if (!gName || seenGroups.has(gName)) continue;
       seenGroups.add(gName);
-      const gId = await queries.createTicketGroup(gName, groupSortOrder++);
+      const gId = queries.createTicketGroup(gName, groupSortOrder++);
       ticketGroupMap.set(gName, gId);
       stats.ticketGroups++;
     }
@@ -291,7 +291,7 @@ export async function importFromWorkbook(wb: XLSX.WorkBook, queries: OnboardingC
       if (!capabilityMap.has(name)) {
         const groupName = colToGroup[col];
         const groupId = groupName ? ticketGroupMap.get(groupName) : undefined;
-        const id = await queries.createCapability(name, undefined, col - dataStartCol, groupId);
+        const id = queries.createCapability(name, undefined, col - dataStartCol, groupId);
         capabilityMap.set(name, id);
         stats.capabilities++;
       }
@@ -323,7 +323,7 @@ export async function importFromWorkbook(wb: XLSX.WorkBook, queries: OnboardingC
       }
 
       if (!saleTypeMap.has(saleTypeName)) {
-        const id = await queries.createSaleType(saleTypeName, row, jiraTicketsRequired);
+        const id = queries.createSaleType(saleTypeName, row, jiraTicketsRequired);
         saleTypeMap.set(saleTypeName, id);
         stats.saleTypes++;
       }
@@ -342,7 +342,7 @@ export async function importFromWorkbook(wb: XLSX.WorkBook, queries: OnboardingC
         const notes = (cellVal !== 'x' && cellVal !== '') ? String(cells[col] ?? '').trim() : null;
 
         if (isEnabled || notes) {
-          await queries.setMatrixCell(saleTypeId, capabilityMap.get(capName)!, isEnabled, notes !== 'x' ? notes : null);
+          queries.setMatrixCell(saleTypeId, capabilityMap.get(capName)!, isEnabled, notes !== 'x' ? notes : null);
           stats.matrixCells++;
         }
       }
@@ -432,7 +432,7 @@ export async function importFromWorkbook(wb: XLSX.WorkBook, queries: OnboardingC
         const cells = raw[row] as (string | undefined)[];
         const val = String(cells?.[col] ?? '').trim();
         if (!val || val === sheet2Name || shouldSkip(val)) continue;
-        await queries.createItem(capId, val, false, sortOrder++);
+        queries.createItem(capId, val, false, sortOrder++);
         stats.items++;
       }
 
@@ -441,7 +441,7 @@ export async function importFromWorkbook(wb: XLSX.WorkBook, queries: OnboardingC
         const cells = raw[row] as (string | undefined)[];
         const val = String(cells?.[col] ?? '').trim();
         if (!val || val === sheet2Name || shouldSkip(val)) continue;
-        await queries.createItem(capId, val, true, sortOrder++);
+        queries.createItem(capId, val, true, sortOrder++);
         stats.items++;
       }
     }

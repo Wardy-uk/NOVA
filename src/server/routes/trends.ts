@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import sql from 'mssql';
+import type { Database } from 'sql.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { FileUserQueries } from '../db/user-store.js';
-import { query as novaQuery } from '../services/database.js';
 
 const VALID_ENVS = ['live', 'uat'] as const;
 type Env = (typeof VALID_ENVS)[number];
@@ -228,7 +228,7 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
   },
 ];
 
-export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQueries: FileUserQueries): Router {
+export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQueries: FileUserQueries, localDb?: Database): Router {
   const router = Router();
 
   let pool: sql.ConnectionPool | null = null;
@@ -701,28 +701,30 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
             row.tiers.push(tierRow);
           }
 
-        } else if (metric.source === 'survey') {
+        } else if (metric.source === 'survey' && localDb) {
+          // Survey satisfaction score from local SQLite — show latest score for this category
           const category = metric.kpiPattern as string;
-          const surveyRow = await novaQuery<{ id: number }>(
-            `SELECT TOP(1) s.id FROM surveys s
+          const result = localDb.exec(
+            `SELECT s.id, s.closed_at, s.start_date, s.created_at FROM surveys s
              WHERE s.category = ? AND s.status IN ('active', 'closed')
-             ORDER BY COALESCE(s.closed_at, s.start_date, s.created_at) DESC`,
-            [category],
+             ORDER BY COALESCE(s.closed_at, s.start_date, s.created_at) DESC LIMIT 1`,
+            [category]
           );
-          if (surveyRow.length > 0) {
-            const surveyId = surveyRow[0].id;
-            const responses = await novaQuery<{ answers: string }>('SELECT answers FROM survey_responses WHERE survey_id = ?', [surveyId]);
-            const scaleQs = await novaQuery<{ id: number }>(`SELECT id FROM survey_questions WHERE survey_id = ? AND question_type = 'scale_5'`, [surveyId]);
-            const qIds = new Set(scaleQs.map(q => q.id));
+          if (result.length > 0 && result[0].values.length > 0) {
+            const surveyId = result[0].values[0][0] as number;
+            const responses = localDb.exec('SELECT answers FROM survey_responses WHERE survey_id = ?', [surveyId]);
+            const scaleQs = localDb.exec(`SELECT id FROM survey_questions WHERE survey_id = ? AND question_type = 'scale_5'`, [surveyId]);
+            const qIds = new Set((scaleQs[0]?.values ?? []).map(v => v[0] as number));
 
             let total = 0, count = 0;
-            for (const r of responses) {
-              const answers = JSON.parse(r.answers) as Array<{ question_id: number; value: number }>;
+            for (const row2 of (responses[0]?.values ?? [])) {
+              const answers = JSON.parse(row2[0] as string) as Array<{ question_id: number; value: number }>;
               for (const a of answers) {
                 if (qIds.has(a.question_id)) { const v = Number(a.value); if (!isNaN(v) && v >= 1 && v <= 5) { total += v; count++; } }
               }
             }
             const avg = count > 0 ? Math.round((total / count) * 100) / 100 : null;
+            // Set the same score for all columns (it's a point-in-time latest score)
             for (const col of columns) { row.checkpoints[col.label] = avg; }
           } else {
             for (const col of columns) { row.checkpoints[col.label] = null; }

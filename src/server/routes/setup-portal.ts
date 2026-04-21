@@ -36,13 +36,13 @@ export function createSetupPortalPublicRoutes(
   router.use(express.json({ limit: '2mb' }));
 
   // Token validation middleware
-  router.use(async (req: PortalRequest, res, next) => {
+  router.use((req: PortalRequest, res, next) => {
     const token = req.query.token as string;
     if (!token || typeof token !== 'string' || token.length !== 64) {
       res.status(401).json({ ok: false, error: 'Invalid or missing token' });
       return;
     }
-    const record = await portalQueries.getByToken(token);
+    const record = portalQueries.getByToken(token);
     if (!record) {
       res.status(401).json({ ok: false, error: 'expired', message: 'This link has expired or is no longer valid.' });
       return;
@@ -59,13 +59,13 @@ export function createSetupPortalPublicRoutes(
   });
 
   // GET /info — delivery summary, brand defs, logo types, progress
-  router.get('/info', async (req: PortalRequest, res) => {
+  router.get('/info', (req: PortalRequest, res) => {
     const did = req.portalToken!.delivery_id;
-    const entries = await deliveryQueries.getAll();
+    const entries = deliveryQueries.getAll();
     const delivery = entries.find(e => e.id === did);
     if (!delivery) { res.status(404).json({ ok: false, error: 'Delivery not found' }); return; }
 
-    const tokenRecord = await portalQueries.getByToken(req.portalToken!.token);
+    const tokenRecord = portalQueries.getByToken(req.portalToken!.token);
     res.json({
       ok: true,
       data: {
@@ -81,38 +81,38 @@ export function createSetupPortalPublicRoutes(
   });
 
   // GET /brand-settings — current brand settings
-  router.get('/brand-settings', async (req: PortalRequest, res) => {
-    const settings = await brandQueries.getByDelivery(req.portalToken!.delivery_id);
+  router.get('/brand-settings', (req: PortalRequest, res) => {
+    const settings = brandQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: settings });
   });
 
   // PUT /brand-settings — bulk upsert
-  router.put('/brand-settings', async (req: PortalRequest, res) => {
+  router.put('/brand-settings', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const parsed = z.object({ settings: z.record(z.string(), z.string().nullable()) }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    const count = await brandQueries.bulkUpsert(req.portalToken!.delivery_id, parsed.data.settings);
+    const count = brandQueries.bulkUpsert(req.portalToken!.delivery_id, parsed.data.settings);
     res.json({ ok: true, updated: count });
   });
 
   // PATCH /brand-settings/:key — single field auto-save
-  router.patch('/brand-settings/:key', async (req: PortalRequest, res) => {
+  router.patch('/brand-settings/:key', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const key = String(req.params.key);
     const parsed = z.object({ value: z.string().nullable() }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    await brandQueries.upsert(req.portalToken!.delivery_id, key, parsed.data.value);
+    brandQueries.upsert(req.portalToken!.delivery_id, key, parsed.data.value);
     res.json({ ok: true });
   });
 
   // GET /branches — list branches
-  router.get('/branches', async (req: PortalRequest, res) => {
-    const branches = await branchQueries.getByDelivery(req.portalToken!.delivery_id);
+  router.get('/branches', (req: PortalRequest, res) => {
+    const branches = branchQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: branches });
   });
 
   // POST /branches — create branch
-  router.post('/branches', async (req: PortalRequest, res) => {
+  router.post('/branches', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const parsed = z.object({
       name: z.string().min(1),
@@ -130,7 +130,7 @@ export function createSetupPortalPublicRoutes(
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
 
-    const id = await branchQueries.create({
+    const id = branchQueries.create({
       delivery_id: req.portalToken!.delivery_id,
       is_default: parsed.data.is_default ?? 0,
       name: parsed.data.name,
@@ -146,50 +146,50 @@ export function createSetupPortalPublicRoutes(
       post_code2: parsed.data.post_code2 ?? null,
       sort_order: 0,
     });
-    const branches = await branchQueries.getByDelivery(req.portalToken!.delivery_id);
+    const branches = branchQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: branches, id });
   });
 
   // PUT /branches/:id — update branch
-  router.put('/branches/:id', async (req: PortalRequest, res) => {
+  router.put('/branches/:id', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const branchId = Number(req.params.id);
-    const branch = await branchQueries.getById(branchId);
+    const branch = branchQueries.getById(branchId);
     if (!branch || branch.delivery_id !== req.portalToken!.delivery_id) {
       res.status(404).json({ ok: false, error: 'Branch not found' });
       return;
     }
     const { delivery_id, id, created_at, ...rest } = req.body;
-    await branchQueries.update(branchId, rest);
-    const branches = await branchQueries.getByDelivery(req.portalToken!.delivery_id);
+    branchQueries.update(branchId, rest);
+    const branches = branchQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: branches });
   });
 
   // DELETE /branches/:id — delete branch
-  router.delete('/branches/:id', async (req: PortalRequest, res) => {
+  router.delete('/branches/:id', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const branchId = Number(req.params.id);
-    const branch = await branchQueries.getById(branchId);
+    const branch = branchQueries.getById(branchId);
     if (!branch || branch.delivery_id !== req.portalToken!.delivery_id) {
       res.status(404).json({ ok: false, error: 'Branch not found' });
       return;
     }
-    await branchQueries.delete(branchId);
-    const branches = await branchQueries.getByDelivery(req.portalToken!.delivery_id);
+    branchQueries.delete(branchId);
+    const branches = branchQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: branches });
   });
 
   // GET /logos — logo metadata
-  router.get('/logos', async (req: PortalRequest, res) => {
-    const logos = await logoQueries.getMetadataByDelivery(req.portalToken!.delivery_id);
+  router.get('/logos', (req: PortalRequest, res) => {
+    const logos = logoQueries.getMetadataByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: logos });
   });
 
   // GET /logos/:id/image — serve logo as binary image (public, token-validated)
-  router.get('/logos/:id/image', async (req: PortalRequest, res) => {
+  router.get('/logos/:id/image', (req: PortalRequest, res) => {
     const logoId = Number(req.params.id);
     if (!logoId) { res.status(400).json({ ok: false, error: 'Invalid logo ID' }); return; }
-    const logo = await logoQueries.getById(logoId);
+    const logo = logoQueries.getById(logoId);
     if (!logo || logo.delivery_id !== req.portalToken!.delivery_id) {
       res.status(404).json({ ok: false, error: 'Logo not found' });
       return;
@@ -202,7 +202,7 @@ export function createSetupPortalPublicRoutes(
   });
 
   // PUT /logos/:type — upload logo
-  router.put('/logos/:type', async (req: PortalRequest, res) => {
+  router.put('/logos/:type', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const logoType = Number(req.params.type);
     const typeDef = LOGO_TYPE_DEFS.find(d => d.type === logoType);
@@ -223,7 +223,7 @@ export function createSetupPortalPublicRoutes(
       return;
     }
 
-    await logoQueries.upsert({
+    logoQueries.upsert({
       delivery_id: req.portalToken!.delivery_id,
       logo_type: logoType,
       logo_label: typeDef.label,
@@ -232,66 +232,66 @@ export function createSetupPortalPublicRoutes(
       file_name: parsed.data.file_name,
       file_size: parsed.data.file_size,
     });
-    const logos = await logoQueries.getMetadataByDelivery(req.portalToken!.delivery_id);
+    const logos = logoQueries.getMetadataByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: logos });
   });
 
   // DELETE /logos/:type — delete logo
-  router.delete('/logos/:type', async (req: PortalRequest, res) => {
+  router.delete('/logos/:type', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const logoType = Number(req.params.type);
-    await logoQueries.deleteByDeliveryAndType(req.portalToken!.delivery_id, logoType);
-    const logos = await logoQueries.getMetadataByDelivery(req.portalToken!.delivery_id);
+    logoQueries.deleteByDeliveryAndType(req.portalToken!.delivery_id, logoType);
+    const logos = logoQueries.getMetadataByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: logos });
   });
 
   // ── Portal Accounts ──
 
   // GET /portal-accounts
-  router.get('/portal-accounts', async (req: PortalRequest, res) => {
-    const accounts = await portalAccountQueries.getByDelivery(req.portalToken!.delivery_id);
+  router.get('/portal-accounts', (req: PortalRequest, res) => {
+    const accounts = portalAccountQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: accounts });
   });
 
   // POST /portal-accounts — create single
-  router.post('/portal-accounts', async (req: PortalRequest, res) => {
+  router.post('/portal-accounts', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const parsed = z.object({ portal_name: z.string().min(1).max(100) }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    const account = await portalAccountQueries.create(req.portalToken!.delivery_id, parsed.data.portal_name);
+    const account = portalAccountQueries.create(req.portalToken!.delivery_id, parsed.data.portal_name);
     if (!account) { res.status(409).json({ ok: false, error: 'Portal account already exists' }); return; }
-    const all = await portalAccountQueries.getByDelivery(req.portalToken!.delivery_id);
+    const all = portalAccountQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: all });
   });
 
   // POST /portal-accounts/import — bulk create from CSV data
-  router.post('/portal-accounts/import', async (req: PortalRequest, res) => {
+  router.post('/portal-accounts/import', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const parsed = z.object({ names: z.array(z.string().min(1)) }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    const all = await portalAccountQueries.bulkCreate(req.portalToken!.delivery_id, parsed.data.names);
+    const all = portalAccountQueries.bulkCreate(req.portalToken!.delivery_id, parsed.data.names);
     res.json({ ok: true, data: all });
   });
 
   // DELETE /portal-accounts/:id
-  router.delete('/portal-accounts/:id', async (req: PortalRequest, res) => {
+  router.delete('/portal-accounts/:id', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const id = Number(req.params.id);
-    await portalAccountQueries.delete(id);
-    const all = await portalAccountQueries.getByDelivery(req.portalToken!.delivery_id);
+    portalAccountQueries.delete(id);
+    const all = portalAccountQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: all });
   });
 
   // ── Branch Districts ──
 
   // GET /districts
-  router.get('/districts', async (req: PortalRequest, res) => {
-    const districts = await districtQueries.getByDelivery(req.portalToken!.delivery_id);
+  router.get('/districts', (req: PortalRequest, res) => {
+    const districts = districtQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: districts });
   });
 
   // POST /districts — create
-  router.post('/districts', async (req: PortalRequest, res) => {
+  router.post('/districts', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const parsed = z.object({
       branch_id: z.number(),
@@ -300,7 +300,7 @@ export function createSetupPortalPublicRoutes(
       sectors: z.array(z.string()).optional(),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    const district = await districtQueries.create({
+    const district = districtQueries.create({
       branch_id: parsed.data.branch_id,
       district_name: parsed.data.district_name,
       all_sectors: parsed.data.all_sectors,
@@ -308,12 +308,12 @@ export function createSetupPortalPublicRoutes(
       sectors: parsed.data.sectors || [],
     });
     if (!district) { res.status(409).json({ ok: false, error: 'District already exists for this branch' }); return; }
-    const all = await districtQueries.getByDelivery(req.portalToken!.delivery_id);
+    const all = districtQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: all });
   });
 
   // PUT /districts/:id — update
-  router.put('/districts/:id', async (req: PortalRequest, res) => {
+  router.put('/districts/:id', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const id = Number(req.params.id);
     const parsed = z.object({
@@ -322,38 +322,38 @@ export function createSetupPortalPublicRoutes(
       sectors: z.array(z.string()).optional(),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    await districtQueries.update(id, parsed.data);
-    const all = await districtQueries.getByDelivery(req.portalToken!.delivery_id);
+    districtQueries.update(id, parsed.data);
+    const all = districtQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: all });
   });
 
   // DELETE /districts/:id
-  router.delete('/districts/:id', async (req: PortalRequest, res) => {
+  router.delete('/districts/:id', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'This form has already been submitted' }); return; }
     const id = Number(req.params.id);
-    await districtQueries.delete(id);
-    const all = await districtQueries.getByDelivery(req.portalToken!.delivery_id);
+    districtQueries.delete(id);
+    const all = districtQueries.getByDelivery(req.portalToken!.delivery_id);
     res.json({ ok: true, data: all });
   });
 
   // GET /progress — get progress JSON
-  router.get('/progress', async (req: PortalRequest, res) => {
-    const record = await portalQueries.getByToken(req.portalToken!.token);
+  router.get('/progress', (req: PortalRequest, res) => {
+    const record = portalQueries.getByToken(req.portalToken!.token);
     res.json({ ok: true, data: JSON.parse(record?.progress_json || '{}') });
   });
 
   // PUT /progress — update section completion
-  router.put('/progress', async (req: PortalRequest, res) => {
+  router.put('/progress', (req: PortalRequest, res) => {
     const parsed = z.object({ progress: z.record(z.string(), z.boolean()) }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    await portalQueries.updateProgress(req.portalToken!.token, JSON.stringify(parsed.data.progress));
+    portalQueries.updateProgress(req.portalToken!.token, JSON.stringify(parsed.data.progress));
     res.json({ ok: true });
   });
 
   // POST /complete — mark as submitted
-  router.post('/complete', async (req: PortalRequest, res) => {
+  router.post('/complete', (req: PortalRequest, res) => {
     if (req.portalToken!.completed_at) { res.status(400).json({ ok: false, error: 'Already submitted' }); return; }
-    await portalQueries.markCompleted(req.portalToken!.token);
+    portalQueries.markCompleted(req.portalToken!.token);
     res.json({ ok: true });
   });
 
@@ -381,7 +381,7 @@ export function createSetupPortalRoutes(
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
 
-    const entries = await deliveryQueries.getAll();
+    const entries = deliveryQueries.getAll();
     const delivery = entries.find(e => e.id === deliveryId);
     if (!delivery) { res.status(404).json({ ok: false, error: 'Delivery not found' }); return; }
 
@@ -390,7 +390,7 @@ export function createSetupPortalRoutes(
     const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
     const token = crypto.randomBytes(32).toString('hex');
 
-    const id = await portalQueries.create({
+    const id = portalQueries.create({
       token,
       delivery_id: deliveryId,
       customer_email: parsed.data.email,
@@ -438,9 +438,9 @@ export function createSetupPortalRoutes(
   });
 
   // GET /tokens/:deliveryId — list tokens for a delivery
-  router.get('/tokens/:deliveryId', async (req, res) => {
+  router.get('/tokens/:deliveryId', (req, res) => {
     const deliveryId = Number(req.params.deliveryId);
-    const tokens = await portalQueries.getByDelivery(deliveryId);
+    const tokens = portalQueries.getByDelivery(deliveryId);
     // Don't expose the full token in the list — just first 8 chars for identification
     const safe = tokens.map(t => ({
       ...t,
@@ -451,9 +451,9 @@ export function createSetupPortalRoutes(
   });
 
   // DELETE /tokens/:tokenId — revoke a token
-  router.delete('/tokens/:tokenId', async (req, res) => {
+  router.delete('/tokens/:tokenId', (req, res) => {
     const tokenId = Number(req.params.tokenId);
-    const deleted = await portalQueries.revokeToken(tokenId);
+    const deleted = portalQueries.revokeToken(tokenId);
     if (!deleted) { res.status(404).json({ ok: false, error: 'Token not found' }); return; }
     res.json({ ok: true });
   });

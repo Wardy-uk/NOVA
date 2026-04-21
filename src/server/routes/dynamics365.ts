@@ -72,7 +72,7 @@ export function createDynamics365Routes(
       return;
     }
     try {
-      const deleted = await crmQueries.deleteAllCustomers();
+      const deleted = crmQueries.deleteAllCustomers();
       const result = await svc.syncToLocal(crmQueries);
       res.json({ ok: true, data: { ...result, purged: deleted } });
     } catch (err) {

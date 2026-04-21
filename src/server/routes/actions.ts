@@ -19,8 +19,8 @@ export function createActionRoutes(
       const sources = sourceParam === 'all' ? null : sourceParam.split(',').filter(Boolean);
 
       // Get all tasks scoped to this user's enabled integrations
-      let allUserTasks = await filterTasksByAllowedSources(
-        await taskQueries.getAll(), userId, userRole, userSettingsQueries, settingsQueries
+      let allUserTasks = filterTasksByAllowedSources(
+        taskQueries.getAll(), userId, userRole, userSettingsQueries, settingsQueries
       );
       // Then apply the source query-param filter on top
       if (sources) allUserTasks = allUserTasks.filter((t) => sources.includes(t.source));
@@ -42,10 +42,10 @@ export function createActionRoutes(
       const suggestions = getNextActions(allUserTasks, count);
 
       // Enrich suggestions with full task data
-      const enriched = (await Promise.all(suggestions.map(async (s) => {
-        const task = await taskQueries.getById(s.task_id);
+      const enriched = suggestions.map((s) => {
+        const task = taskQueries.getById(s.task_id);
         return { ...s, task: task ?? null };
-      }))).filter((s) => s.task !== null);
+      }).filter((s) => s.task !== null);
 
       res.json({ ok: true, data: { suggestions: enriched } });
     } catch (err) {

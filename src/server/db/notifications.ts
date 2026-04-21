@@ -1,4 +1,5 @@
-import { query, queryOne, execute, executeAndGetId } from '../services/database.js';
+import type { Database } from 'sql.js';
+import { saveDb } from './schema.js';
 
 export interface Notification {
   id: number;
@@ -13,54 +14,70 @@ export interface Notification {
 }
 
 export class NotificationQueries {
-  async getForUser(userId: number, limit: number = 20): Promise<Notification[]> {
-    return query<Notification>(
-      `SELECT TOP(?) * FROM notifications WHERE user_id = ? ORDER BY created_at DESC`,
-      [limit, userId]
+  constructor(private db: Database) {}
+
+  getForUser(userId: number, limit: number = 20): Notification[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
     );
+    stmt.bind([userId, limit]);
+    const results: Notification[] = [];
+    while (stmt.step()) results.push(stmt.getAsObject() as unknown as Notification);
+    stmt.free();
+    return results;
   }
 
-  async getUnreadCount(userId: number): Promise<number> {
-    const row = await queryOne<{ c: number }>(
-      `SELECT COUNT(*) as c FROM notifications WHERE user_id = ? AND read_at IS NULL`,
-      [userId]
+  getUnreadCount(userId: number): number {
+    const stmt = this.db.prepare(
+      `SELECT COUNT(*) as c FROM notifications WHERE user_id = ? AND read_at IS NULL`
     );
-    return row?.c ?? 0;
+    stmt.bind([userId]);
+    let count = 0;
+    if (stmt.step()) count = (stmt.getAsObject() as Record<string, unknown>).c as number;
+    stmt.free();
+    return count;
   }
 
-  async markRead(id: number, userId: number): Promise<boolean> {
-    const result = await execute(
-      `UPDATE notifications SET read_at = GETUTCDATE() WHERE id = ? AND user_id = ?`,
+  markRead(id: number, userId: number): boolean {
+    this.db.run(
+      `UPDATE notifications SET read_at = datetime('now') WHERE id = ? AND user_id = ?`,
       [id, userId]
     );
-    return (result.rowsAffected ?? 0) > 0;
+    const modified = this.db.getRowsModified() > 0;
+    if (modified) saveDb();
+    return modified;
   }
 
-  async markAllRead(userId: number): Promise<number> {
-    const result = await execute(
-      `UPDATE notifications SET read_at = GETUTCDATE() WHERE user_id = ? AND read_at IS NULL`,
+  markAllRead(userId: number): number {
+    this.db.run(
+      `UPDATE notifications SET read_at = datetime('now') WHERE user_id = ? AND read_at IS NULL`,
       [userId]
     );
-    return result.rowsAffected ?? 0;
+    const count = this.db.getRowsModified();
+    if (count > 0) saveDb();
+    return count;
   }
 
-  async create(n: { user_id: number; type: string; title: string; message?: string; entity_type?: string; entity_id?: string }): Promise<boolean> {
+  create(n: { user_id: number; type: string; title: string; message?: string; entity_type?: string; entity_id?: string }): boolean {
     // Dedup: skip if same (user, type, entity_id) was created in the last 24 hours
     // (regardless of read status — prevents re-creating notifications the user just dismissed)
     if (n.entity_id) {
-      const existing = await queryOne<{ x: number }>(
-        `SELECT 1 as x FROM notifications WHERE user_id = ? AND type = ? AND entity_id = ? AND created_at > DATEADD(day, -1, GETUTCDATE())`,
-        [n.user_id, n.type, n.entity_id]
+      const stmt = this.db.prepare(
+        `SELECT 1 FROM notifications WHERE user_id = ? AND type = ? AND entity_id = ? AND created_at > datetime('now', '-1 day')`
       );
-      if (existing) return false;
+      stmt.bind([n.user_id, n.type, n.entity_id]);
+      const exists = stmt.step();
+      stmt.free();
+      if (exists) return false;
     }
 
     try {
-      await execute(
+      this.db.run(
         `INSERT INTO notifications (user_id, type, title, message, entity_type, entity_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [n.user_id, n.type, n.title, n.message ?? null, n.entity_type ?? null, n.entity_id ?? null]
       );
+      saveDb();
       return true;
     } catch {
       // Unique constraint violation — duplicate unread notification

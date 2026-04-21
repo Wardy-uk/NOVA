@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { TaskQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import { saveDb } from '../db/schema.js';
 
 const M365_SOURCES = ['planner', 'todo', 'calendar', 'email'] as const;
 
@@ -28,7 +29,7 @@ export function createIngestRoutes(taskQueries: TaskQueries, settingsQueries?: S
   const router = Router();
 
   // POST /api/ingest — Bulk ingest tasks from Power Automate Desktop
-  router.post('/', async (req, res) => {
+  router.post('/', (req, res) => {
     const parsed = IngestRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ ok: false, error: parsed.error.message });
@@ -61,15 +62,20 @@ export function createIngestRoutes(taskQueries: TaskQueries, settingsQueries?: S
 
     const freshIds: string[] = [];
     for (const task of tasks) {
-      await taskQueries.upsertFromSource(task as any);
+      taskQueries.upsertFromSource(task as any, { deferSave: true });
       freshIds.push(`${task.source}:${task.source_id}`);
     }
 
     const removed = (tasks.length > 0 || prune)
-      ? await taskQueries.deleteStaleBySource(source, freshIds, {
+      ? taskQueries.deleteStaleBySource(source, freshIds, {
           allowEmpty: prune,
+          deferSave: true,
         })
       : 0;
+
+    if (tasks.length > 0 || removed > 0) {
+      saveDb();
+    }
 
     console.log(
       `[Ingest] ${source}: Received ${tasks.length} tasks, removed ${removed} stale`

@@ -287,7 +287,7 @@ export class Dynamics365Service {
       }
 
       // Check if customer already exists by dynamics_id
-      const existing = (await crmQueries.getAllCustomers({ search: undefined })).find(
+      const existing = crmQueries.getAllCustomers({ search: undefined }).find(
         (c) => c.dynamics_id === acct.accountid
       );
 
@@ -300,10 +300,10 @@ export class Dynamics365Service {
       };
 
       if (existing) {
-        await crmQueries.updateCustomer(existing.id, data);
+        crmQueries.updateCustomer(existing.id, data);
         updated++;
       } else {
-        await crmQueries.createCustomer({
+        crmQueries.createCustomer({
           ...data,
           sector: null,
           owner: null,

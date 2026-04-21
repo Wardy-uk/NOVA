@@ -31,30 +31,30 @@ export function createApprovalRoutes(
   }
 
   // GET /api/approvals — list approvals
-  router.get('/', async (req: Request, res: Response) => {
+  router.get('/', (req: Request, res: Response) => {
     const status = req.query.status as string | undefined;
-    const items = await approvalQueries.getAll(status);
+    const items = approvalQueries.getAll(status);
     const canInteract = isApprover(req);
     res.json({ ok: true, data: { items, canInteract } });
   });
 
   // GET /api/approvals/stats — get approval stats
-  router.get('/stats', async (_req: Request, res: Response) => {
-    const stats = await approvalQueries.getStats();
+  router.get('/stats', (_req: Request, res: Response) => {
+    const stats = approvalQueries.getStats();
     res.json({ ok: true, data: stats });
   });
 
   // GET /api/approvals/count — get pending count (for badge)
-  router.get('/count', async (_req: Request, res: Response) => {
-    const count = await approvalQueries.getPendingCount();
+  router.get('/count', (_req: Request, res: Response) => {
+    const count = approvalQueries.getPendingCount();
     res.json({ ok: true, data: { count } });
   });
 
   // GET /api/approvals/:id — get single approval
-  router.get('/:id', async (req: Request, res: Response) => {
+  router.get('/:id', (req: Request, res: Response) => {
     const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid ID' }); return; }
-    const item = await approvalQueries.getById(id);
+    const item = approvalQueries.getById(id);
     if (!item) { res.status(404).json({ ok: false, error: 'Not found' }); return; }
     const canInteract = isApprover(req);
     res.json({ ok: true, data: { item, canInteract } });
@@ -85,7 +85,7 @@ export function createApprovalRoutes(
       return;
     }
 
-    const item = await approvalQueries.getById(id);
+    const item = approvalQueries.getById(id);
     if (!item) { res.status(404).json({ ok: false, error: 'Not found' }); return; }
     if (item.status !== 'pending') {
       res.status(409).json({ ok: false, error: `Already ${item.status}` });
@@ -95,7 +95,7 @@ export function createApprovalRoutes(
     // Update local status
     const statusMap: Record<string, string> = { approve: 'approved', decline: 'declined', cancel: 'cancelled' };
     const newStatus = statusMap[action] as 'approved' | 'declined' | 'cancelled';
-    const updated = await approvalQueries.decide(id, newStatus, user.username, editedResponse, action === 'decline' ? declineReason.trim() : undefined);
+    const updated = approvalQueries.decide(id, newStatus, user.username, editedResponse, action === 'decline' ? declineReason.trim() : undefined);
     if (!updated) {
       res.status(500).json({ ok: false, error: 'Failed to update' });
       return;

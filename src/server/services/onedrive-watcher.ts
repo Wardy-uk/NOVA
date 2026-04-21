@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { TaskQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import { saveDb } from '../db/schema.js';
 
 const VALID_SOURCES = ['planner', 'todo', 'calendar', 'email'];
 const POLL_INTERVAL = 30_000; // 30 seconds
@@ -84,7 +85,7 @@ export class OneDriveWatcher {
     };
   }
 
-  private async scanFolder(): Promise<void> {
+  private scanFolder(): void {
     this.lastScanAt = new Date().toISOString();
     let files: string[];
     try {
@@ -104,7 +105,7 @@ export class OneDriveWatcher {
         if (this.lastModified.get(file) === lastMod) continue;
         this.lastModified.set(file, lastMod);
 
-        await this.processFile(filePath, file);
+        this.processFile(filePath, file);
       } catch (err) {
         console.warn(`[OneDrive] Error reading ${file}:`, err);
       }
@@ -184,7 +185,7 @@ export class OneDriveWatcher {
     };
   }
 
-  private async processFile(filePath: string, fileName: string): Promise<void> {
+  private processFile(filePath: string, fileName: string): void {
     try {
       const raw = fs.readFileSync(filePath, 'utf-8');
       const data = JSON.parse(raw);
@@ -260,14 +261,18 @@ export class OneDriveWatcher {
           t.source_url = buildSourceUrl(source, t.source_id as string);
         }
 
-        await this.taskQueries.upsertFromSource(t as { source: string; source_id: string; title: string; [key: string]: unknown });
+        this.taskQueries.upsertFromSource(t as { source: string; source_id: string; title: string; [key: string]: unknown }, { deferSave: true });
         freshIds.push(`${source}:${t.source_id}`);
       }
 
       // Clean up stale tasks for this source
       const removed = normalized.length > 0
-        ? await this.taskQueries.deleteStaleBySource(source, freshIds)
+        ? this.taskQueries.deleteStaleBySource(source, freshIds, { deferSave: true })
         : 0;
+
+      if (normalized.length > 0 || removed > 0) {
+        saveDb();
+      }
 
       this.lastIngestAt = new Date().toISOString();
       this.lastIngestFile = fileName;

@@ -49,7 +49,7 @@ function calculateMilestonePriority(targetDate: string | null, status: string): 
 }
 
 /** Sync a single milestone instance to the tasks table */
-export async function syncMilestoneToTask(
+export function syncMilestoneToTask(
   milestone: { id: number; delivery_id: number; template_id: number; template_name: string; target_date: string | null; status: string },
   account: string,
   taskQueries: TaskQueries,
@@ -58,7 +58,7 @@ export async function syncMilestoneToTask(
   const statusMap: Record<string, string> = { pending: 'open', in_progress: 'in_progress', complete: 'done' };
   const sourceId = `milestone:${milestone.delivery_id}:${milestone.template_id}`;
 
-  await taskQueries.upsertFromSource({
+  taskQueries.upsertFromSource({
     source: 'milestone',
     source_id: sourceId,
     title: `${account} — ${milestone.template_name}`,
@@ -68,30 +68,30 @@ export async function syncMilestoneToTask(
     due_date: milestone.target_date ?? undefined,
     category: 'project',
     user_id: userId,
-  });
+  }, { deferSave: true });
 }
 
 /** Sync all milestones for a delivery to the tasks table */
-export async function syncDeliveryMilestonesToTasks(
+export function syncDeliveryMilestonesToTasks(
   deliveryId: number,
   account: string,
   milestoneQueries: MilestoneQueries,
   taskQueries: TaskQueries,
   userId?: number,
 ) {
-  const milestones = await milestoneQueries.getByDelivery(deliveryId);
+  const milestones = milestoneQueries.getByDelivery(deliveryId);
   for (const m of milestones) {
-    await syncMilestoneToTask(m, account, taskQueries, userId);
+    syncMilestoneToTask(m, account, taskQueries, userId);
   }
 }
 
 /** Re-sync active milestone tasks that have been workflow-created (recalculates priorities based on current date) */
-export async function resyncAllMilestoneTasks(
+export function resyncAllMilestoneTasks(
   milestoneQueries: MilestoneQueries,
   taskQueries: TaskQueries,
   _onboarderToUserId?: Map<string, number>,
 ) {
-  const all = await milestoneQueries.getAllWithDelivery();
+  const all = milestoneQueries.getAllWithDelivery();
   let synced = 0;
   for (const m of all) {
     if (m.status === 'complete') continue;
@@ -101,7 +101,7 @@ export async function resyncAllMilestoneTasks(
     // matched to users — those deliveries remain unowned (null user_id) so they
     // don't appear in anyone's "my tasks" but stay visible in the Onboarding area.
     const userId = (m as any).assigned_to ?? undefined;
-    await syncMilestoneToTask(m, m.account, taskQueries, userId);
+    syncMilestoneToTask(m, m.account, taskQueries, userId);
     synced++;
   }
   console.log(`[Milestones] Re-synced ${synced} active milestone tasks`);
@@ -120,48 +120,48 @@ export function createMilestoneRoutes(
 
   // ── Templates ──
 
-  router.get('/templates', async (_req, res) => {
+  router.get('/templates', (_req, res) => {
     const activeOnly = _req.query.active === '1';
-    res.json({ ok: true, data: await milestoneQueries.getAllTemplates(activeOnly) });
+    res.json({ ok: true, data: milestoneQueries.getAllTemplates(activeOnly) });
   });
 
-  router.get('/templates/:id', async (req, res) => {
+  router.get('/templates/:id', (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    const tmpl = await milestoneQueries.getTemplateById(id);
+    const tmpl = milestoneQueries.getTemplateById(id);
     if (!tmpl) { res.status(404).json({ ok: false, error: 'Template not found' }); return; }
     res.json({ ok: true, data: tmpl });
   });
 
-  router.post('/templates', writeGuard, async (req, res) => {
+  router.post('/templates', writeGuard, (req, res) => {
     const parsed = TemplateCreateSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    const id = await milestoneQueries.createTemplate(parsed.data as any);
-    res.json({ ok: true, data: await milestoneQueries.getTemplateById(id) });
+    const id = milestoneQueries.createTemplate(parsed.data as any);
+    res.json({ ok: true, data: milestoneQueries.getTemplateById(id) });
   });
 
-  router.put('/templates/:id', writeGuard, async (req, res) => {
+  router.put('/templates/:id', writeGuard, (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const parsed = TemplateUpdateSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.message }); return; }
-    const ok = await milestoneQueries.updateTemplate(id, parsed.data);
+    const ok = milestoneQueries.updateTemplate(id, parsed.data);
     if (!ok) { res.status(404).json({ ok: false, error: 'Template not found or no changes' }); return; }
-    res.json({ ok: true, data: await milestoneQueries.getTemplateById(id) });
+    res.json({ ok: true, data: milestoneQueries.getTemplateById(id) });
   });
 
-  router.delete('/templates/:id', writeGuard, async (req, res) => {
+  router.delete('/templates/:id', writeGuard, (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    await milestoneQueries.deleteTemplate(id);
+    milestoneQueries.deleteTemplate(id);
     res.json({ ok: true });
   });
 
   // ── Sale Type Matrix (must be before /:id catch-all) ──
 
-  router.get('/matrix', async (_req, res) => {
+  router.get('/matrix', (_req, res) => {
     try {
-      const offsets = await milestoneQueries.getMatrixOffsets();
+      const offsets = milestoneQueries.getMatrixOffsets();
       res.json({ ok: true, data: offsets });
     } catch (err) {
       console.error('[Milestones] Matrix read error:', err);
@@ -169,7 +169,7 @@ export function createMilestoneRoutes(
     }
   });
 
-  router.put('/matrix', writeGuard, async (req, res) => {
+  router.put('/matrix', writeGuard, (req, res) => {
     const { updates } = req.body;
     if (!Array.isArray(updates)) { res.status(400).json({ ok: false, error: 'updates must be an array' }); return; }
     for (const u of updates) {
@@ -179,46 +179,46 @@ export function createMilestoneRoutes(
       }
     }
     try {
-      await milestoneQueries.batchSetMatrixOffsets(updates);
-      res.json({ ok: true, data: await milestoneQueries.getMatrixOffsets() });
+      milestoneQueries.batchSetMatrixOffsets(updates);
+      res.json({ ok: true, data: milestoneQueries.getMatrixOffsets() });
     } catch (err) {
       console.error('[Milestones] Matrix update error:', err);
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to update matrix' });
     }
   });
 
-  router.delete('/matrix/:saleTypeId', writeGuard, async (req, res) => {
+  router.delete('/matrix/:saleTypeId', writeGuard, (req, res) => {
     const saleTypeId = parseInt(String(req.params.saleTypeId), 10);
     if (isNaN(saleTypeId)) { res.status(400).json({ ok: false, error: 'Invalid saleTypeId' }); return; }
-    await milestoneQueries.deleteMatrixRow(saleTypeId);
+    milestoneQueries.deleteMatrixRow(saleTypeId);
     res.json({ ok: true });
   });
 
   // ── Calendar — all milestones with delivery info ──
 
-  router.get('/calendar', async (_req, res) => {
-    const milestones = await milestoneQueries.getAllWithDelivery();
+  router.get('/calendar', (_req, res) => {
+    const milestones = milestoneQueries.getAllWithDelivery();
     res.json({ ok: true, data: milestones });
   });
 
   // ── Summary ──
 
-  router.get('/summary', async (_req, res) => {
-    res.json({ ok: true, data: await milestoneQueries.getSummary() });
+  router.get('/summary', (_req, res) => {
+    res.json({ ok: true, data: milestoneQueries.getSummary() });
   });
 
-  router.get('/overdue-deliveries', async (_req, res) => {
-    res.json({ ok: true, data: await milestoneQueries.getOverdueDeliveries() });
+  router.get('/overdue-deliveries', (_req, res) => {
+    res.json({ ok: true, data: milestoneQueries.getOverdueDeliveries() });
   });
 
-  router.post('/complete-matching', writeGuard, async (req, res) => {
+  router.post('/complete-matching', writeGuard, (req, res) => {
     const { deliveryStatus, product } = req.body as { deliveryStatus?: string; product?: string };
     if (!deliveryStatus) {
       res.status(400).json({ ok: false, error: 'deliveryStatus is required' });
       return;
     }
     try {
-      const result = await milestoneQueries.completeMatchingDeliveries(deliveryStatus, product);
+      const result = milestoneQueries.completeMatchingDeliveries(deliveryStatus, product);
       console.log(`[Milestones] complete-matching: ${result.milestones} milestones across ${result.deliveries} deliveries (status="${deliveryStatus}", product=${product ?? 'all'})`);
       res.json({ ok: true, data: result });
     } catch (err) {
@@ -228,22 +228,22 @@ export function createMilestoneRoutes(
 
   // ── Delivery Milestone Instances ──
 
-  router.get('/delivery/:deliveryId', async (req, res) => {
+  router.get('/delivery/:deliveryId', (req, res) => {
     const deliveryId = parseInt(String(req.params.deliveryId), 10);
     if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
-    res.json({ ok: true, data: await milestoneQueries.getByDelivery(deliveryId) });
+    res.json({ ok: true, data: milestoneQueries.getByDelivery(deliveryId) });
   });
 
-  router.post('/backfill', writeGuard, async (req, res) => {
+  router.post('/backfill', writeGuard, (req, res) => {
     try {
       const { product, saleType } = req.body as { product?: string; saleType?: string };
-      const allEntries = await deliveryQueries.getAll(product);
+      const allEntries = deliveryQueries.getAll(product);
       let created = 0;
       let skipped = 0;
       const results: Array<{ id: number; account: string; milestones: number }> = [];
 
       for (const entry of allEntries) {
-        const existing = await milestoneQueries.getByDelivery(entry.id);
+        const existing = milestoneQueries.getByDelivery(entry.id);
         if (existing.length > 0) { skipped++; continue; }
 
         // Parse order_date — handle DD/MM/YYYY, YYYY-MM-DD, or fallback to today
@@ -258,8 +258,8 @@ export function createMilestoneRoutes(
         }
 
         const effectiveSaleType = saleType ?? entry.sale_type ?? undefined;
-        const milestones = await milestoneQueries.createForDelivery(entry.id, startDate, effectiveSaleType);
-        await syncDeliveryMilestonesToTasks(entry.id, entry.account, milestoneQueries, taskQueries);
+        const milestones = milestoneQueries.createForDelivery(entry.id, startDate, effectiveSaleType);
+        syncDeliveryMilestonesToTasks(entry.id, entry.account, milestoneQueries, taskQueries);
         created++;
         results.push({ id: entry.id, account: entry.account, milestones: milestones.length });
       }
@@ -272,18 +272,18 @@ export function createMilestoneRoutes(
     }
   });
 
-  router.post('/delivery/:deliveryId/create', writeGuard, async (req, res) => {
+  router.post('/delivery/:deliveryId/create', writeGuard, (req, res) => {
     const deliveryId = parseInt(String(req.params.deliveryId), 10);
     if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
 
     // Check if milestones already exist
-    const existing = await milestoneQueries.getByDelivery(deliveryId);
+    const existing = milestoneQueries.getByDelivery(deliveryId);
     if (existing.length > 0) {
       res.status(409).json({ ok: false, error: 'Milestones already exist for this delivery. Delete them first to recreate.' });
       return;
     }
 
-    const entry = await deliveryQueries.getById(deliveryId);
+    const entry = deliveryQueries.getById(deliveryId);
     if (!entry) { res.status(404).json({ ok: false, error: 'Delivery entry not found' }); return; }
 
     // Use order_date as start, fallback to today — handle DD/MM/YYYY format
@@ -297,10 +297,10 @@ export function createMilestoneRoutes(
       }
     }
     const saleType = (req.body as { saleType?: string })?.saleType ?? entry.sale_type ?? entry.product ?? undefined;
-    const milestones = await milestoneQueries.createForDelivery(deliveryId, startDate, saleType);
+    const milestones = milestoneQueries.createForDelivery(deliveryId, startDate, saleType);
 
     // Sync to tasks
-    await syncDeliveryMilestonesToTasks(deliveryId, entry.account, milestoneQueries, taskQueries);
+    syncDeliveryMilestonesToTasks(deliveryId, entry.account, milestoneQueries, taskQueries);
 
     res.json({ ok: true, data: milestones });
   });
@@ -311,15 +311,15 @@ export function createMilestoneRoutes(
     const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
 
-    const milestone = await milestoneQueries.getMilestoneById(id);
+    const milestone = milestoneQueries.getMilestoneById(id);
     if (!milestone) { res.status(404).json({ ok: false, error: 'Milestone not found' }); return; }
 
-    const entry = await deliveryQueries.getById(milestone.delivery_id);
+    const entry = deliveryQueries.getById(milestone.delivery_id);
     if (!entry) { res.status(404).json({ ok: false, error: 'Delivery entry not found' }); return; }
     if (!entry.onboarding_id) { res.status(400).json({ ok: false, error: 'Delivery entry has no onboarding ID' }); return; }
     if (!entry.sale_type) { res.status(400).json({ ok: false, error: 'Delivery entry has no sale type' }); return; }
 
-    const linkedGroups = await milestoneQueries.getTemplateTicketGroups(milestone.template_id);
+    const linkedGroups = milestoneQueries.getTemplateTicketGroups(milestone.template_id);
     if (linkedGroups.length === 0) {
       res.status(400).json({ ok: false, error: 'No ticket groups linked to this milestone template' });
       return;
@@ -353,7 +353,7 @@ export function createMilestoneRoutes(
         ...result.childKeys,
       ];
       if (allKeys.length > 0) {
-        await milestoneQueries.markWorkflowTicketsCreated(id, allKeys);
+        milestoneQueries.markWorkflowTicketsCreated(id, allKeys);
       }
 
       res.json({ ok: true, data: result });
@@ -374,7 +374,7 @@ export function createMilestoneRoutes(
 
   // ── Single milestone update (catch-all /:id — must be LAST) ──
 
-  router.put('/:id', writeGuard, async (req, res) => {
+  router.put('/:id', writeGuard, (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const parsed = MilestoneUpdateSchema.safeParse(req.body);
@@ -391,21 +391,21 @@ export function createMilestoneRoutes(
       updates.actual_date = null;
     }
 
-    const ok = await milestoneQueries.updateMilestone(id, updates as any);
+    const ok = milestoneQueries.updateMilestone(id, updates as any);
     if (!ok) { res.status(404).json({ ok: false, error: 'Milestone not found' }); return; }
 
     // Sync updated milestone to task (assigned_to takes priority, then onboarder lookup)
-    const milestone = await milestoneQueries.getMilestoneById(id);
+    const milestone = milestoneQueries.getMilestoneById(id);
     if (milestone) {
-      const entry = await deliveryQueries.getById(milestone.delivery_id);
+      const entry = deliveryQueries.getById(milestone.delivery_id);
       if (entry) {
         const taskUserId = (milestone as any).assigned_to ?? undefined;
-        await syncMilestoneToTask(milestone, entry.account, taskQueries, taskUserId);
+        syncMilestoneToTask(milestone, entry.account, taskQueries, taskUserId);
 
         // Force-update task ownership when assigned_to is explicitly changed
         if (parsed.data.assigned_to !== undefined) {
           const taskId = `milestone:milestone:${milestone.delivery_id}:${milestone.template_id}`;
-          await taskQueries.setTaskUserId(taskId, parsed.data.assigned_to);
+          taskQueries.setTaskUserId(taskId, parsed.data.assigned_to);
         }
       }
 
@@ -422,53 +422,53 @@ export function createMilestoneRoutes(
 
   // ── Template ↔ Ticket Group Linking ──
 
-  router.get('/template-groups', async (_req, res) => {
-    res.json({ ok: true, data: await milestoneQueries.getAllTemplateTicketGroupMappings() });
+  router.get('/template-groups', (_req, res) => {
+    res.json({ ok: true, data: milestoneQueries.getAllTemplateTicketGroupMappings() });
   });
 
-  router.get('/templates/:id/ticket-groups', async (req, res) => {
+  router.get('/templates/:id/ticket-groups', (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    res.json({ ok: true, data: await milestoneQueries.getTemplateTicketGroups(id) });
+    res.json({ ok: true, data: milestoneQueries.getTemplateTicketGroups(id) });
   });
 
-  router.put('/templates/:id/ticket-groups', writeGuard, async (req, res) => {
+  router.put('/templates/:id/ticket-groups', writeGuard, (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
     const { ticketGroupIds } = req.body;
     if (!Array.isArray(ticketGroupIds)) { res.status(400).json({ ok: false, error: 'ticketGroupIds must be an array' }); return; }
-    await milestoneQueries.setTemplateTicketGroups(id, ticketGroupIds);
-    res.json({ ok: true, data: await milestoneQueries.getTemplateTicketGroups(id) });
+    milestoneQueries.setTemplateTicketGroups(id, ticketGroupIds);
+    res.json({ ok: true, data: milestoneQueries.getTemplateTicketGroups(id) });
   });
 
   // ── Workflow status for a delivery ──
 
-  router.get('/delivery/:deliveryId/workflow', async (req, res) => {
+  router.get('/delivery/:deliveryId/workflow', (req, res) => {
     const deliveryId = parseInt(String(req.params.deliveryId), 10);
     if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
-    const milestones = await milestoneQueries.getByDelivery(deliveryId);
+    const milestones = milestoneQueries.getByDelivery(deliveryId);
     // Enrich with linked ticket group info + template flags
-    const enriched = await Promise.all(milestones.map(async m => {
-      const template = await milestoneQueries.getTemplateById(m.template_id);
+    const enriched = milestones.map(m => {
+      const template = milestoneQueries.getTemplateById(m.template_id);
       return {
         ...m,
-        linked_ticket_groups: await milestoneQueries.getTemplateTicketGroups(m.template_id),
+        linked_ticket_groups: milestoneQueries.getTemplateTicketGroups(m.template_id),
         jira_keys: m.jira_keys ? JSON.parse(m.jira_keys) : [],
         tickets_enabled: template?.tickets_enabled ?? 0,
       };
-    }));
+    });
     res.json({ ok: true, data: enriched });
   });
 
   // ── Traffic Light Status ──
 
   // Helper: build traffic light key map for a single delivery
-  async function buildTrafficLightMap(deliveryId: number, ticketGroups: Array<{ id: number; traffic_light_group: string | null; display_name: string | null; name: string }>): Promise<Record<string, string[]>> {
-    const milestones = await milestoneQueries.getByDelivery(deliveryId);
+  function buildTrafficLightMap(deliveryId: number, ticketGroups: Array<{ id: number; traffic_light_group: string | null; display_name: string | null; name: string }>): Record<string, string[]> {
+    const milestones = milestoneQueries.getByDelivery(deliveryId);
     const map: Record<string, string[]> = {};
 
     for (const m of milestones) {
-      const linkedGroupIds = await milestoneQueries.getTemplateTicketGroups(m.template_id);
+      const linkedGroupIds = milestoneQueries.getTemplateTicketGroups(m.template_id);
       const jiraKeys: string[] = m.jira_keys ? JSON.parse(m.jira_keys) : [];
 
       for (const gid of linkedGroupIds) {
@@ -484,31 +484,31 @@ export function createMilestoneRoutes(
     return map;
   }
 
-  router.get('/traffic-lights/:deliveryId', async (req, res) => {
+  router.get('/traffic-lights/:deliveryId', (req, res) => {
     const deliveryId = parseInt(String(req.params.deliveryId), 10);
     if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
     if (!onboardingConfigQueries) { res.json({ ok: true, data: {}, groups: [] }); return; }
 
-    const ticketGroups = await onboardingConfigQueries.getAllTicketGroups();
-    const map = await buildTrafficLightMap(deliveryId, ticketGroups as Array<{ id: number; traffic_light_group: string | null; display_name: string | null; name: string }>);
-    const groups = await onboardingConfigQueries.getTrafficLightGroups();
+    const ticketGroups = onboardingConfigQueries.getAllTicketGroups();
+    const map = buildTrafficLightMap(deliveryId, ticketGroups as Array<{ id: number; traffic_light_group: string | null; display_name: string | null; name: string }>);
+    const groups = onboardingConfigQueries.getTrafficLightGroups();
 
     res.json({ ok: true, data: map, groups });
   });
 
-  router.get('/traffic-lights-bulk', async (req, res) => {
+  router.get('/traffic-lights-bulk', (req, res) => {
     if (!onboardingConfigQueries) { res.json({ ok: true, data: {}, groups: [] }); return; }
 
-    const ticketGroups = await onboardingConfigQueries.getAllTicketGroups();
-    const groups = await onboardingConfigQueries.getTrafficLightGroups();
+    const ticketGroups = onboardingConfigQueries.getAllTicketGroups();
+    const groups = onboardingConfigQueries.getTrafficLightGroups();
     if (groups.length === 0) { res.json({ ok: true, data: {}, groups: [] }); return; }
 
     // Get all delivery entries that have milestones
-    const entries = await deliveryQueries.getAll();
+    const entries = deliveryQueries.getAll();
     const bulk: Record<number, Record<string, string[]>> = {};
 
     for (const entry of entries) {
-      const map = await buildTrafficLightMap(entry.id, ticketGroups as Array<{ id: number; traffic_light_group: string | null; display_name: string | null; name: string }>);
+      const map = buildTrafficLightMap(entry.id, ticketGroups as Array<{ id: number; traffic_light_group: string | null; display_name: string | null; name: string }>);
       // Only include entries that have at least one non-empty traffic light group
       const hasKeys = Object.values(map).some(keys => keys.length > 0);
       if (hasKeys) bulk[entry.id] = map;
@@ -533,13 +533,13 @@ export function createMilestoneRoutes(
     }
   });
 
-  router.delete('/delivery/:deliveryId', writeGuard, async (req, res) => {
+  router.delete('/delivery/:deliveryId', writeGuard, (req, res) => {
     const deliveryId = parseInt(String(req.params.deliveryId), 10);
     if (isNaN(deliveryId)) { res.status(400).json({ ok: false, error: 'Invalid deliveryId' }); return; }
 
-    const count = await milestoneQueries.deleteByDelivery(deliveryId);
+    const count = milestoneQueries.deleteByDelivery(deliveryId);
     // Also remove milestone tasks for this delivery
-    await taskQueries.deleteBySourcePrefix('milestone', `milestone:${deliveryId}:`);
+    taskQueries.deleteBySourcePrefix('milestone', `milestone:${deliveryId}:`);
 
     res.json({ ok: true, data: { deleted: count } });
   });

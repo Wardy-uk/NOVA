@@ -219,14 +219,14 @@ export class SharePointSync {
         for (const row of rows) {
           if (!row.account) continue;
 
-          const existing = await this.deliveryQueries.findByProductAccount(sheetName, row.account);
+          const existing = this.deliveryQueries.findByProductAccount(sheetName, row.account);
           if (existing) {
             result.entriesSkipped++;
             continue;
           }
 
           // Create new DB entry from SharePoint data
-          await this.deliveryQueries.create({
+          this.deliveryQueries.create({
             product: sheetName,
             account: row.account,
             status: row.status || 'Not Started',
@@ -343,7 +343,7 @@ export class SharePointSync {
       ];
 
       for (const sheetName of PRODUCT_SHEETS) {
-        const entries = await this.deliveryQueries.getAll(sheetName);
+        const entries = this.deliveryQueries.getAll(sheetName);
         if (entries.length === 0) continue;
 
         const rows: unknown[][] = [headers];

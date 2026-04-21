@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { initializeDatabase, shutdownDatabase } from './db/schema.js';
+import { getDb, initializeSchema, saveDb, createBackup } from './db/schema.js';
 import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries, TrainingQueries } from './db/queries.js';
 import { FileUserQueries } from './db/user-store.js';
 import { FileSettingsQueries } from './db/settings-store.js';
@@ -103,7 +103,8 @@ const isProduction = process.env.NODE_ENV === 'production';
 async function main() {
   // 1. Database
   console.log('[N.O.V.A] Initializing database...');
-  await initializeDatabase();
+  const db = await getDb();
+  initializeSchema(db);
 
   // Calyx database (separate SQLite via better-sqlite3)
   console.log('[N.O.V.A] Initializing Calyx database...');
@@ -116,15 +117,15 @@ async function main() {
   setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 30 * 60 * 1000);
   setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 10_000);
 
-  const taskQueries = new TaskQueries();
+  const taskQueries = new TaskQueries(db);
   const settingsQueries = new FileSettingsQueries();
-  const ritualQueries = new RitualQueries();
-  const deliveryQueries = new DeliveryQueries();
+  const ritualQueries = new RitualQueries(db);
+  const deliveryQueries = new DeliveryQueries(db);
   // Auto-assign onboarding IDs to any entries missing them
-  const backfilled = await deliveryQueries.backfillOnboardingIds();
+  const backfilled = deliveryQueries.backfillOnboardingIds();
   if (backfilled > 0) console.log(`[N.O.V.A] Backfilled ${backfilled} onboarding IDs`);
-  const crmQueries = new CrmQueries();
-  const salesQueries = new SalesQueries();
+  const crmQueries = new CrmQueries(db);
+  const salesQueries = new SalesQueries(db);
   const userQueries = new FileUserQueries();
   // Bootstrap service accounts — created on first run, left alone afterwards
   // so an admin can rotate the password via the Admin UI without redeploying.
@@ -137,35 +138,35 @@ async function main() {
     display_name: 'NOVA MCP Service Account',
   });
   if (novaMcpCreated) console.log('[Startup] Bootstrapped service account: nova-mcp');
-  const teamQueries = new TeamQueries();
-  const userSettingsQueries = new UserSettingsQueries();
-  const feedbackQueries = new FeedbackQueries();
-  const onboardingConfigQueries = new OnboardingConfigQueries();
-  const onboardingRunQueries = new OnboardingRunQueries();
-  const milestoneQueries = new MilestoneQueries();
-  const auditQueries = new AuditQueries();
-  const notificationQueries = new NotificationQueries();
+  const teamQueries = new TeamQueries(db);
+  const userSettingsQueries = new UserSettingsQueries(db);
+  const feedbackQueries = new FeedbackQueries(db);
+  const onboardingConfigQueries = new OnboardingConfigQueries(db);
+  const onboardingRunQueries = new OnboardingRunQueries(db);
+  const milestoneQueries = new MilestoneQueries(db);
+  const auditQueries = new AuditQueries(db);
+  const notificationQueries = new NotificationQueries(db);
   const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries, taskQueries);
-  const problemTicketQueries = new ProblemTicketQueries();
-  const instanceSetupQueries = new InstanceSetupQueries();
-  const branchQueries = new BranchQueries();
-  const brandSettingsQueries = new BrandSettingsQueries();
-  const logoQueries = new LogoQueries();
-  const execQueries = new SetupExecutionQueries();
-  const portalQueries = new SetupPortalQueries();
-  const portalAccountQueries = new PortalAccountQueries();
-  const districtQueries = new BranchDistrictQueries();
-  const welcomePackQueries = new WelcomePackQueries();
-  const bcCustomerQueries = new BcCustomerQueries();
-  const contractsQueries = new ContractsQueries();
-  const contractTemplateQueries = new ContractTemplateQueries();
-  const adobeSignAgreementQueries = new AdobeSignAgreementQueries();
-  const approvalQueries = new ApprovalQueries();
-  const trainingQueries = new TrainingQueries();
-  const devReviewQueries = new DevReviewQueries();
+  const problemTicketQueries = new ProblemTicketQueries(db);
+  const instanceSetupQueries = new InstanceSetupQueries(db);
+  const branchQueries = new BranchQueries(db);
+  const brandSettingsQueries = new BrandSettingsQueries(db);
+  const logoQueries = new LogoQueries(db);
+  const execQueries = new SetupExecutionQueries(db);
+  const portalQueries = new SetupPortalQueries(db);
+  const portalAccountQueries = new PortalAccountQueries(db);
+  const districtQueries = new BranchDistrictQueries(db);
+  const welcomePackQueries = new WelcomePackQueries(db);
+  const bcCustomerQueries = new BcCustomerQueries(db);
+  const contractsQueries = new ContractsQueries(db);
+  const contractTemplateQueries = new ContractTemplateQueries(db);
+  const adobeSignAgreementQueries = new AdobeSignAgreementQueries(db);
+  const approvalQueries = new ApprovalQueries(db);
+  const trainingQueries = new TrainingQueries(db);
+  const devReviewQueries = new DevReviewQueries(db);
 
   // Purge transient MS365 data from previous session
-  const purgedCount = await taskQueries.deleteTransientTasks();
+  const purgedCount = taskQueries.deleteTransientTasks();
   if (purgedCount > 0) console.log(`[Startup] Purged ${purgedCount} transient tasks from previous session`);
 
   // Build onboarder name → user ID lookup for milestone ownership
@@ -176,17 +177,18 @@ async function main() {
   }
 
   // Re-sync milestone task priorities on startup (with per-onboarder ownership)
-  await resyncAllMilestoneTasks(milestoneQueries, taskQueries, onboarderToUserId);
+  resyncAllMilestoneTasks(milestoneQueries, taskQueries, onboarderToUserId);
+  saveDb();
 
   // Auto-seed onboarding matrix from xlsx if tables are empty
-  if ((await onboardingConfigQueries.getAllSaleTypes()).length === 0) {
+  if (onboardingConfigQueries.getAllSaleTypes().length === 0) {
     const xlsxPath = path.resolve('OnboardingMatix.xlsx');
     if (fs.existsSync(xlsxPath)) {
       try {
         const XLSX = (await import('xlsx')).default;
         const { importFromWorkbook } = await import('./routes/onboarding-config.js');
         const wb = XLSX.readFile(xlsxPath);
-        const stats = await importFromWorkbook(wb, onboardingConfigQueries);
+        const stats = importFromWorkbook(wb, onboardingConfigQueries);
         console.log(`[N.O.V.A] Auto-seeded onboarding matrix: ${stats.ticketGroups} ticket groups, ${stats.saleTypes} sale types, ${stats.capabilities} capabilities, ${stats.matrixCells} matrix cells, ${stats.items} items`);
       } catch (err) {
         console.error('[N.O.V.A] Onboarding auto-seed failed:', err instanceof Error ? err.message : err);
@@ -195,9 +197,9 @@ async function main() {
   }
 
   // Ensure "Delivery QA" ticket group exists (used for the parent QA ticket)
-  const existingGroups = await onboardingConfigQueries.getAllTicketGroups();
+  const existingGroups = onboardingConfigQueries.getAllTicketGroups();
   if (!existingGroups.find(g => g.name === 'Delivery QA')) {
-    await onboardingConfigQueries.createTicketGroup('Delivery QA', -1);
+    onboardingConfigQueries.createTicketGroup('Delivery QA', -1);
     console.log('[N.O.V.A] Auto-seeded "Delivery QA" ticket group');
   }
 
@@ -358,7 +360,7 @@ async function main() {
   app.use('/api/public/setup', portalLimiter, createSetupPortalPublicRoutes(portalQueries, brandSettingsQueries, branchQueries, logoQueries, deliveryQueries, portalAccountQueries, districtQueries));
 
   // Public survey routes — token-based, no auth
-  app.use('/api/survey', createSurveyPublicRoutes());
+  app.use('/api/survey', createSurveyPublicRoutes(db));
 
   // KPI Wallboard — public route for TV displays (no auth required)
   app.use('/api/public/wallboard', createKpiWallboardRoutes(settingsQueries));
@@ -588,7 +590,7 @@ async function main() {
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/contracts', createContractsRoutes(bcCustomerQueries, contractsQueries, settingsQueries));
   app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, contractTemplateQueries, settingsQueries));
-  app.use('/api/surveys', createSurveyRoutes(settingsQueries, userQueries, teamQueries));
+  app.use('/api/surveys', createSurveyRoutes(db, settingsQueries, userQueries, teamQueries));
   app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries));
   app.use('/api/training', createTrainingRoutes(trainingQueries, userQueries, requireAreaAccess, settingsQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
@@ -609,6 +611,7 @@ async function main() {
   app.use('/api/board-mi', requireAreaAccess('mi', 'view'), createBoardMiRoutes(
     settingsQueries,
     devReviewQueries,
+    db,
     buildServiceDeskJiraClient,
   ));
   app.use('/api/dev-review', createDevReviewRoutes(
@@ -620,7 +623,7 @@ async function main() {
     requireAreaAccess,
     buildServiceDeskJiraClient,
   ));
-  app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries));
+  app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries, db));
   app.use('/api/backfill', requireAreaAccess('qa', 'view'), createBackfillRoutes(settingsQueries));
   app.use('/api/sales', requireAreaAccess('sales', 'view'), createSalesHotboxRoutes(salesQueries, requireAreaAccess));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
@@ -631,7 +634,7 @@ async function main() {
   app.use('/api/chat', requireAreaAccess('nova_features', 'view'), createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
 
   // DELETE /api/data/source/:source — purge local records for a given integration source
-  app.delete('/api/data/source/:source', async (req, res) => {
+  app.delete('/api/data/source/:source', (req, res) => {
     const source = req.params.source;
     const validSources = ['jira', 'planner', 'todo', 'calendar', 'email', 'monday', 'dynamics365'];
     if (!validSources.includes(source)) {
@@ -641,9 +644,9 @@ async function main() {
     try {
       let deleted = 0;
       if (source === 'dynamics365') {
-        deleted = await crmQueries.deleteAllCustomers();
+        deleted = crmQueries.deleteAllCustomers();
       } else {
-        deleted = await taskQueries.deleteAllBySource(source);
+        deleted = taskQueries.deleteAllBySource(source);
       }
       res.json({ ok: true, deleted });
     } catch (err) {
@@ -1164,23 +1167,23 @@ ${panelHtml}
   const preloadMorningBriefing = async () => {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
-      const existing = await ritualQueries.getByDate(todayStr, 'morning');
+      const existing = ritualQueries.getByDate(todayStr, 'morning');
       if (existing.length > 0) return; // already generated
 
-      const tasks = await taskQueries.getAll();
+      const tasks = taskQueries.getAll();
       if (tasks.length === 0) return;
 
       // Get yesterday's ritual for rollover context
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayRituals = await ritualQueries.getByDate(
+      const yesterdayRituals = ritualQueries.getByDate(
         yesterday.toISOString().split('T')[0], 'morning'
       );
 
       console.log('[PreLoad] Generating morning briefing in background...');
       const briefing = generateMorningBriefing(tasks, yesterdayRituals[0] ?? null);
       const plannedIds = briefing.top_priorities.map((p) => p.task_id);
-      await ritualQueries.create({
+      ritualQueries.create({
         type: 'morning',
         date: todayStr,
         summary_md: briefing.summary,
@@ -1358,7 +1361,7 @@ ${panelHtml}
     try {
       const client = buildServiceDeskJiraClient();
       if (!client) return;
-      const pending = await devReviewQueries.pendingOutbox(20);
+      const pending = devReviewQueries.pendingOutbox(20);
       if (pending.length === 0) return;
       console.log(`[DevReviewOutbox] Draining ${pending.length} pending`);
       for (const entry of pending) {
@@ -1377,7 +1380,7 @@ ${panelHtml}
               fields: Object.keys(fields).length > 0 ? fields : undefined,
               comment: { body: adf(text) },
             });
-            await devReviewQueries.markAccepted(entry.jira_key);
+            devReviewQueries.markAccepted(entry.jira_key);
           } else if (entry.op === 'return') {
             const transitionId = String(payload.returnTransitionId || '');
             const text = String(payload.commentText || '');
@@ -1389,14 +1392,14 @@ ${panelHtml}
               await client.updateFields(entry.jira_key, { customfield_12981: { id: '13062' } });
               await client.addComment(entry.jira_key, text);
             }
-            await devReviewQueries.markReturned(entry.jira_key);
+            devReviewQueries.markReturned(entry.jira_key);
           } else if (entry.op === 'comment') {
             const text = String(payload.commentText || payload.body || '');
             await client.addComment(entry.jira_key, text);
           }
-          await devReviewQueries.markOutboxDone(entry.id);
+          devReviewQueries.markOutboxDone(entry.id);
         } catch (e) {
-          await devReviewQueries.bumpOutboxFailure(entry.id, e instanceof Error ? e.message : 'unknown');
+          devReviewQueries.bumpOutboxFailure(entry.id, e instanceof Error ? e.message : 'unknown');
         }
       }
     } catch (err) {
@@ -1423,16 +1426,16 @@ ${panelHtml}
       for (const issue of result.issues) {
         liveKeys.add(issue.key);
         if (!devReviewLastSeen.has(issue.key)) {
-          const existing = await devReviewQueries.getState(issue.key);
+          const existing = devReviewQueries.getState(issue.key);
           if (!existing) {
             newKeys.push({ key: issue.key, summary: String((issue.fields as { summary?: string }).summary || '') });
           }
-          await devReviewQueries.upsertFromPoll(issue.key, null);
+          devReviewQueries.upsertFromPoll(issue.key, null);
         }
       }
       // Archive stale rows (left T3)
-      for (const row of await devReviewQueries.listQueue()) {
-        if (!liveKeys.has(row.jira_key)) await devReviewQueries.archive(row.jira_key);
+      for (const row of devReviewQueries.listQueue()) {
+        if (!liveKeys.has(row.jira_key)) devReviewQueries.archive(row.jira_key);
       }
       devReviewLastSeen = liveKeys;
 
@@ -1442,7 +1445,7 @@ ${panelHtml}
       // change's author becomes the submitter and its timestamp becomes
       // first_seen_at — fixing the bootstrap problem where every long-standing
       // T3 ticket was inserted with first_seen_at = now.
-      const missing = await devReviewQueries.getKeysMissingSubmitter(15);
+      const missing = devReviewQueries.getKeysMissingSubmitter(15);
       for (const key of missing) {
         try {
           const issue = await client.getIssue(key, ['summary'], { expand: ['changelog'] });
@@ -1463,7 +1466,7 @@ ${panelHtml}
             }
           }
           if (submitter || escalationIso) {
-            await devReviewQueries.setEscalationMetadata(key, submitter, escalationIso);
+            devReviewQueries.setEscalationMetadata(key, submitter, escalationIso);
           }
         } catch (e) {
           console.warn(`[DevReviewWatcher] Failed to resolve metadata for ${key}: ${e instanceof Error ? e.message : e}`);
@@ -1524,17 +1527,17 @@ ${panelHtml}
     try {
       const client = buildServiceDeskJiraClient();
       if (!client) return;
-      const keys = await devReviewQueries.getActiveKeys();
+      const keys = devReviewQueries.getActiveKeys();
       if (keys.length === 0) return;
       let newCount = 0;
       for (const key of keys) {
         try {
           const comments = await client.getComments(key, 20);
           for (const c of comments) {
-            if (await devReviewQueries.hasJiraComment(key, c.id)) continue;
+            if (devReviewQueries.hasJiraComment(key, c.id)) continue;
             const body = adfToPlain(c.body);
             const authorName = c.author?.displayName || 'Unknown';
-            await devReviewQueries.addExternalJiraComment({
+            devReviewQueries.addExternalJiraComment({
               jira_key: key,
               author_display: authorName,
               body,
@@ -1544,9 +1547,9 @@ ${panelHtml}
             });
             newCount++;
             // Flip waiting → in_review if this is the first external reply
-            const state = await devReviewQueries.getState(key);
+            const state = devReviewQueries.getState(key);
             if (state?.status === 'waiting_on_assignee') {
-              await devReviewQueries.setStatus(key, 'in_review');
+              devReviewQueries.setStatus(key, 'in_review');
             }
           }
         } catch (err) {
@@ -1577,14 +1580,23 @@ ${panelHtml}
     });
   });
 
+  // Periodic auto-save: flush in-memory sql.js database to disk every 15s
+  const autoSaveTimer = setInterval(() => {
+    try { saveDb(); } catch (err) {
+      console.error('[AutoSave] Failed:', err instanceof Error ? err.message : err);
+    }
+  }, 15_000);
+
+  // Also save after the initial auto-seed completes
+  saveDb();
 
   // Survey scheduler: auto-activate, auto-close, send invites/reminders every 15 min
-  const surveyTimer = setInterval(() => runSurveyScheduler(settingsQueries), 15 * 60 * 1000);
+  const surveyTimer = setInterval(() => runSurveyScheduler(db, settingsQueries), 15 * 60 * 1000);
 
   // Expired portal token cleanup: every 6 hours
-  const portalCleanupTimer = setInterval(async () => {
+  const portalCleanupTimer = setInterval(() => {
     try {
-      const deleted = await portalQueries.deleteExpired();
+      const deleted = portalQueries.deleteExpired();
       if (deleted > 0) console.log(`[SetupPortal] Cleaned up ${deleted} expired tokens`);
     } catch (err) {
       console.error('[SetupPortal] Cleanup failed:', err instanceof Error ? err.message : err);
@@ -1594,12 +1606,12 @@ ${panelHtml}
   // Auto-expire approval queue items and check Jira status every minute
   setInterval(async () => {
     try {
-      const pending = await approvalQueries.getAll('pending');
+      const pending = approvalQueries.getAll('pending');
 
       // 1. Expire items past their business-hours deadline
       const expired = pending.filter((item) => new Date(item.expires_at) <= new Date());
       for (const item of expired) {
-        await approvalQueries.decide(item.id, 'timed_out', 'system');
+        approvalQueries.decide(item.id, 'timed_out', 'system');
         try {
           await fetch(`${item.resume_url}?action=timeout`, { method: 'GET' });
           console.log(`[Approvals] Auto-expired approval ${item.id} (${item.ticket_id}), triggered n8n resume`);
@@ -1623,7 +1635,7 @@ ${panelHtml}
             if (!resp.ok) continue;
             const data = await resp.json() as { fields?: { status?: { statusCategory?: { key?: string } } } };
             if (data.fields?.status?.statusCategory?.key === 'done') {
-              await approvalQueries.decide(item.id, 'cancelled', 'system');
+              approvalQueries.decide(item.id, 'cancelled', 'system');
               try { await fetch(`${item.resume_url}?action=decline`, { method: 'GET' }); } catch { /* ignore */ }
               console.log(`[Approvals] Auto-cancelled approval ${item.id} (${item.ticket_id}) — already resolved in Jira`);
             }
@@ -1635,6 +1647,13 @@ ${panelHtml}
     }
   }, 60_000); // Check every minute
 
+  // Daily backup: check hourly, create one backup per day (7-day rotation)
+  createBackup();
+  const backupTimer = setInterval(() => {
+    try { createBackup(); } catch (err) {
+      console.error('[Backup] Timer error:', err instanceof Error ? err.message : err);
+    }
+  }, 60 * 60 * 1000);
 
   // Weekly training matrix reminder — check hourly, send on Mondays at 9am
   let lastTrainingReminderDate = '';
@@ -1656,6 +1675,8 @@ ${panelHtml}
   // Graceful shutdown
   const shutdown = async () => {
     console.log('[N.O.V.A] Shutting down...');
+    clearInterval(autoSaveTimer);
+    clearInterval(backupTimer);
     clearInterval(workflowTimer);
     clearInterval(ptScanTimer);
     clearInterval(portalCleanupTimer);
@@ -1663,9 +1684,10 @@ ${panelHtml}
     clearInterval(trainingReminderTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     watcher.stop();
+    try { saveDb(); console.log('[N.O.V.A] Database saved to disk'); } catch (err) {
+      console.error('[N.O.V.A] Failed to save DB on shutdown:', err instanceof Error ? err.message : err);
+    }
     await mcpManager.disconnectAll();
-    await shutdownDatabase();
-    console.log('[N.O.V.A] Database pool closed');
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

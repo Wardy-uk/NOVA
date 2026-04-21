@@ -1,4 +1,5 @@
-import { query, queryOne, execute, executeAndGetId } from '../services/database.js';
+import type { Database } from 'sql.js';
+import { saveDb } from './schema.js';
 
 export interface DevReviewState {
   jira_key: string;
@@ -40,6 +41,10 @@ export interface DevReviewOutboxEntry {
   last_error: string | null;
   created_at: string;
   processed_at: string | null;
+}
+
+function rowToObj<T>(row: Record<string, unknown>): T {
+  return row as unknown as T;
 }
 
 // ── Working-hours math ────────────────────────────────────────────────────
@@ -97,114 +102,111 @@ function deadlineFromWorkingHours(startIso: string, hours: number): Date {
 }
 
 export class DevReviewQueries {
-
-  // ── Private helpers ───────────────────────────────────────────────────────
-
-  /** Run a single-row aggregate query and return the first column as a number. */
-  private async scalar(sql: string, params: (string | number)[] = []): Promise<number> {
-    const row = await queryOne<Record<string, unknown>>(sql, params);
-    if (!row) return 0;
-    const first = Object.values(row)[0];
-    return typeof first === 'number' ? first : Number(first ?? 0);
-  }
-
-  /** Run an aggregate query returning an array of rows. */
-  private async rows<T>(sql: string, params: (string | number)[] = []): Promise<T[]> {
-    return query<T>(sql, params);
-  }
+  constructor(private db: Database) {}
 
   // ── State ────────────────────────────────────────────────────────────────
 
   /** Get current state for a ticket; returns null if none. */
-  async getState(jiraKey: string): Promise<DevReviewState | null> {
-    const row = await queryOne<DevReviewState>(
-      'SELECT * FROM dev_review_state WHERE jira_key = ?',
-      [jiraKey],
-    );
-    return row ?? null;
+  getState(jiraKey: string): DevReviewState | null {
+    const stmt = this.db.prepare('SELECT * FROM dev_review_state WHERE jira_key = ?');
+    stmt.bind([jiraKey]);
+    let result: DevReviewState | null = null;
+    if (stmt.step()) result = rowToObj<DevReviewState>(stmt.getAsObject());
+    stmt.free();
+    return result;
   }
 
-  /** Upsert state — used by the Jira poller when it first sees a T3 ticket. */
-  async upsertFromPoll(jiraKey: string, submittedBy: string | null): Promise<void> {
-    const existing = await this.getState(jiraKey);
+  /** Upsert state — used by the Jira poller when it first sees a T3 ticket.
+   *  Pass `defer: true` from a hot path that flushes saveDb() once at the end. */
+  upsertFromPoll(jiraKey: string, submittedBy: string | null, opts?: { defer?: boolean }): void {
+    const existing = this.getState(jiraKey);
     if (existing) {
       // If ticket is archived but back in T3 → reopen
       if (existing.status === 'archived') {
-        await execute(
+        this.db.run(
           `UPDATE dev_review_state
-           SET status='pending', archived_at=NULL, last_action_at=GETUTCDATE()
+           SET status='pending', archived_at=NULL, last_action_at=datetime('now')
            WHERE jira_key=?`,
           [jiraKey],
         );
+        if (!opts?.defer) saveDb();
       }
       return;
     }
-    await execute(
+    this.db.run(
       `INSERT INTO dev_review_state (jira_key, status, submitted_by_username)
        VALUES (?, 'pending', ?)`,
       [jiraKey, submittedBy],
     );
+    if (!opts?.defer) saveDb();
   }
 
   /** Backfill the submitter username (called by the background watcher after
    *  it resolves the actual escalator from the Jira changelog). */
-  async setSubmitter(jiraKey: string, username: string): Promise<void> {
-    await execute(
+  setSubmitter(jiraKey: string, username: string): void {
+    this.db.run(
       `UPDATE dev_review_state SET submitted_by_username=? WHERE jira_key=?`,
       [username, jiraKey],
     );
+    saveDb();
   }
 
   /** Backfill both submitter AND escalation time from the Jira changelog.
    *  Overwrites first_seen_at so dashboards reflect the actual escalation
    *  time rather than the time NOVA first noticed the ticket on bootstrap. */
-  async setEscalationMetadata(jiraKey: string, submitter: string | null, escalationIso: string | null): Promise<void> {
+  setEscalationMetadata(jiraKey: string, submitter: string | null, escalationIso: string | null): void {
     if (submitter && escalationIso) {
-      await execute(
+      this.db.run(
         `UPDATE dev_review_state
          SET submitted_by_username=?, first_seen_at=?
          WHERE jira_key=?`,
         [submitter, escalationIso, jiraKey],
       );
     } else if (submitter) {
-      await execute(
+      this.db.run(
         `UPDATE dev_review_state SET submitted_by_username=? WHERE jira_key=?`,
         [submitter, jiraKey],
       );
     } else if (escalationIso) {
-      await execute(
+      this.db.run(
         `UPDATE dev_review_state SET first_seen_at=? WHERE jira_key=?`,
         [escalationIso, jiraKey],
       );
     }
+    saveDb();
   }
 
   /** Get all keys missing a submitter — for background backfill. */
-  async getKeysMissingSubmitter(limit = 25): Promise<string[]> {
-    const rows = await query<{ jira_key: string }>(
-      `SELECT TOP(?) jira_key FROM dev_review_state WHERE submitted_by_username IS NULL AND status != 'archived'`,
-      [limit],
+  getKeysMissingSubmitter(limit = 25): string[] {
+    const stmt = this.db.prepare(
+      `SELECT jira_key FROM dev_review_state WHERE submitted_by_username IS NULL AND status != 'archived' LIMIT ?`,
     );
-    return rows.map(r => r.jira_key);
+    stmt.bind([limit]);
+    const out: string[] = [];
+    while (stmt.step()) out.push((stmt.getAsObject() as { jira_key: string }).jira_key);
+    stmt.free();
+    return out;
   }
 
-  /** Mark as archived when the ticket is no longer at Tier 3. */
-  async archive(jiraKey: string): Promise<void> {
-    await execute(
+  /** Mark as archived when the ticket is no longer at Tier 3.
+   *  Pass `defer: true` from a hot path that flushes saveDb() once at the end. */
+  archive(jiraKey: string, opts?: { defer?: boolean }): void {
+    this.db.run(
       `UPDATE dev_review_state
-       SET status='archived', archived_at=GETUTCDATE(), last_action_at=GETUTCDATE()
+       SET status='archived', archived_at=datetime('now'), last_action_at=datetime('now')
        WHERE jira_key=? AND status != 'archived'`,
       [jiraKey],
     );
+    if (!opts?.defer) saveDb();
   }
 
   /** List the active queue (optionally filtered by claim / status / fast-track). */
-  async listQueue(filters?: {
+  listQueue(filters?: {
     status?: DevReviewState['status'];
     claimedBy?: number | null;
     fastTrackOnly?: boolean;
     includeArchived?: boolean;
-  }): Promise<DevReviewState[]> {
+  }): DevReviewState[] {
     let sql = 'SELECT * FROM dev_review_state WHERE 1=1';
     const params: (string | number)[] = [];
     if (!filters?.includeArchived) sql += " AND status != 'archived'";
@@ -215,80 +217,94 @@ export class DevReviewQueries {
     }
     if (filters?.fastTrackOnly) sql += ' AND fast_track = 1';
     sql += ' ORDER BY fast_track DESC, last_action_at DESC';
-    return query<DevReviewState>(sql, params);
+    const stmt = this.db.prepare(sql);
+    if (params.length > 0) stmt.bind(params);
+    const out: DevReviewState[] = [];
+    while (stmt.step()) out.push(rowToObj<DevReviewState>(stmt.getAsObject()));
+    stmt.free();
+    return out;
   }
 
-  async claim(jiraKey: string, userId: number): Promise<void> {
-    await execute(
+  claim(jiraKey: string, userId: number): void {
+    this.db.run(
       `UPDATE dev_review_state
-       SET claimed_by_user_id=?, claimed_at=GETUTCDATE(),
+       SET claimed_by_user_id=?, claimed_at=datetime('now'),
            status = CASE WHEN status='pending' THEN 'in_review' ELSE status END,
-           last_action_at=GETUTCDATE()
+           last_action_at=datetime('now')
        WHERE jira_key=?`,
       [userId, jiraKey],
     );
+    saveDb();
   }
 
-  async unclaim(jiraKey: string): Promise<void> {
-    await execute(
+  unclaim(jiraKey: string): void {
+    this.db.run(
       `UPDATE dev_review_state
-       SET claimed_by_user_id=NULL, claimed_at=NULL, last_action_at=GETUTCDATE()
+       SET claimed_by_user_id=NULL, claimed_at=NULL, last_action_at=datetime('now')
        WHERE jira_key=?`,
       [jiraKey],
     );
+    saveDb();
   }
 
-  async setFastTrack(jiraKey: string, on: boolean): Promise<void> {
-    await execute(
-      `UPDATE dev_review_state SET fast_track=?, last_action_at=GETUTCDATE() WHERE jira_key=?`,
+  setFastTrack(jiraKey: string, on: boolean): void {
+    this.db.run(
+      `UPDATE dev_review_state SET fast_track=?, last_action_at=datetime('now') WHERE jira_key=?`,
       [on ? 1 : 0, jiraKey],
     );
+    saveDb();
   }
 
-  async setPriority(jiraKey: string, priority: 'low' | 'normal' | 'high'): Promise<void> {
-    await execute(
-      `UPDATE dev_review_state SET nova_priority=?, last_action_at=GETUTCDATE() WHERE jira_key=?`,
+  setPriority(jiraKey: string, priority: 'low' | 'normal' | 'high'): void {
+    this.db.run(
+      `UPDATE dev_review_state SET nova_priority=?, last_action_at=datetime('now') WHERE jira_key=?`,
       [priority, jiraKey],
     );
+    saveDb();
   }
 
-  async markAccepted(jiraKey: string): Promise<void> {
-    await execute(
+  markAccepted(jiraKey: string): void {
+    this.db.run(
       `UPDATE dev_review_state
-       SET status='accepted', accepted_at=GETUTCDATE(), last_action_at=GETUTCDATE()
+       SET status='accepted', accepted_at=datetime('now'), last_action_at=datetime('now')
        WHERE jira_key=?`,
       [jiraKey],
     );
+    saveDb();
   }
 
-  /** Backfill team from the Nurtur Product field on each queue sync. */
-  async setTeam(jiraKey: string, team: string): Promise<void> {
-    await execute(
+  /** Backfill team from the Nurtur Product field on each queue sync.
+   *  Pass `defer: true` from a hot path that flushes saveDb() once at the end. */
+  setTeam(jiraKey: string, team: string, opts?: { defer?: boolean }): void {
+    this.db.run(
       `UPDATE dev_review_state SET team=? WHERE jira_key=? AND (team IS NULL OR team != ?)`,
       [team, jiraKey, team],
     );
+    if (!opts?.defer) saveDb();
   }
 
   /** Generic status update — used for the waiting_on_assignee round-trip. */
-  async setStatus(jiraKey: string, status: DevReviewState['status']): Promise<void> {
-    await execute(
-      `UPDATE dev_review_state SET status=?, last_action_at=GETUTCDATE() WHERE jira_key=?`,
+  setStatus(jiraKey: string, status: DevReviewState['status']): void {
+    this.db.run(
+      `UPDATE dev_review_state SET status=?, last_action_at=datetime('now') WHERE jira_key=?`,
       [status, jiraKey],
     );
+    saveDb();
   }
 
-  async markReturned(jiraKey: string): Promise<void> {
-    await execute(
+  markReturned(jiraKey: string): void {
+    this.db.run(
       `UPDATE dev_review_state
-       SET status='returned', returned_at=GETUTCDATE(), last_action_at=GETUTCDATE()
+       SET status='returned', returned_at=datetime('now'), last_action_at=datetime('now')
        WHERE jira_key=?`,
       [jiraKey],
     );
+    saveDb();
   }
 
   // ── Thread ───────────────────────────────────────────────────────────────
 
-  async addThreadEntry(entry: {
+  addThreadEntry(entry: {
     jira_key: string;
     user_id: number;
     user_display: string;
@@ -296,8 +312,8 @@ export class DevReviewQueries {
     body?: string;
     meta?: Record<string, unknown>;
     syncState?: DevReviewThreadEntry['jira_sync_state'];
-  }): Promise<number> {
-    const id = await executeAndGetId(
+  }): number {
+    this.db.run(
       `INSERT INTO dev_review_thread
        (jira_key, user_id, user_display, kind, body, meta_json, jira_sync_state)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -311,35 +327,45 @@ export class DevReviewQueries {
         entry.syncState ?? 'pending',
       ],
     );
+    const stmt = this.db.prepare('SELECT last_insert_rowid() AS id');
+    stmt.step();
+    const id = (stmt.getAsObject() as { id: number }).id;
+    stmt.free();
+    saveDb();
     return id;
   }
 
-  async getThread(jiraKey: string): Promise<DevReviewThreadEntry[]> {
-    return query<DevReviewThreadEntry>(
+  getThread(jiraKey: string): DevReviewThreadEntry[] {
+    const stmt = this.db.prepare(
       'SELECT * FROM dev_review_thread WHERE jira_key = ? ORDER BY created_at DESC, id DESC',
-      [jiraKey],
     );
+    stmt.bind([jiraKey]);
+    const out: DevReviewThreadEntry[] = [];
+    while (stmt.step()) out.push(rowToObj<DevReviewThreadEntry>(stmt.getAsObject()));
+    stmt.free();
+    return out;
   }
 
-  async markThreadSynced(id: number, jiraCommentId: string | null): Promise<void> {
-    await execute(
+  markThreadSynced(id: number, jiraCommentId: string | null): void {
+    this.db.run(
       `UPDATE dev_review_thread SET jira_sync_state='synced', jira_comment_id=?, jira_sync_error=NULL WHERE id=?`,
       [jiraCommentId, id],
     );
+    saveDb();
   }
 
   /** Insert an externally-sourced Jira comment into the thread. Used by the
    *  watcher when an agent replies in Jira directly — the entry is created
    *  already-synced with the Jira comment ID set so we don't re-import it. */
-  async addExternalJiraComment(entry: {
+  addExternalJiraComment(entry: {
     jira_key: string;
     author_display: string;
     body: string;
     jira_comment_id: string;
     author_account_id?: string;
     internal?: boolean;
-  }): Promise<void> {
-    await execute(
+  }): void {
+    this.db.run(
       `INSERT INTO dev_review_thread
        (jira_key, user_id, user_display, kind, body, meta_json, jira_sync_state, jira_comment_id)
        VALUES (?, 0, ?, 'comment', ?, ?, 'synced', ?)`,
@@ -351,94 +377,139 @@ export class DevReviewQueries {
         entry.jira_comment_id,
       ],
     );
+    saveDb();
   }
 
   /** Check whether a given Jira comment ID has already been recorded in the
    *  thread for a ticket — used by the comment watcher to avoid duplicates. */
-  async hasJiraComment(jiraKey: string, jiraCommentId: string): Promise<boolean> {
-    const row = await queryOne<{ n: number }>(
-      `SELECT TOP(1) 1 AS n FROM dev_review_thread WHERE jira_key = ? AND jira_comment_id = ?`,
-      [jiraKey, jiraCommentId],
+  hasJiraComment(jiraKey: string, jiraCommentId: string): boolean {
+    const stmt = this.db.prepare(
+      `SELECT 1 FROM dev_review_thread WHERE jira_key = ? AND jira_comment_id = ? LIMIT 1`,
     );
-    return !!row;
+    stmt.bind([jiraKey, jiraCommentId]);
+    const exists = stmt.step();
+    stmt.free();
+    return exists;
   }
 
   /** Get all keys currently in an active review state — used by the comment
    *  watcher to know which tickets to poll for new Jira comments. */
-  async getActiveKeys(): Promise<string[]> {
-    const rows = await query<{ jira_key: string }>(
+  getActiveKeys(): string[] {
+    const stmt = this.db.prepare(
       `SELECT jira_key FROM dev_review_state WHERE status NOT IN ('archived','accepted','returned')`,
     );
-    return rows.map(r => r.jira_key);
+    const out: string[] = [];
+    while (stmt.step()) out.push((stmt.getAsObject() as { jira_key: string }).jira_key);
+    stmt.free();
+    return out;
   }
 
-  async markThreadSyncFailed(id: number, error: string): Promise<void> {
-    await execute(
+  markThreadSyncFailed(id: number, error: string): void {
+    this.db.run(
       `UPDATE dev_review_thread SET jira_sync_state='failed', jira_sync_error=? WHERE id=?`,
       [error.slice(0, 500), id],
     );
+    saveDb();
   }
 
   /** Delete stale failed thread entries for a ticket — used after a
    *  successful retry so the activity panel doesn't show ghost duplicates
    *  from earlier failed attempts. */
-  async purgeFailedThreadEntries(jiraKey: string, excludeId?: number): Promise<number> {
-    const countRow = await queryOne<{ n: number }>(
+  purgeFailedThreadEntries(jiraKey: string, excludeId?: number): number {
+    const stmt = this.db.prepare(
       `SELECT COUNT(*) AS n FROM dev_review_thread
        WHERE jira_key = ? AND jira_sync_state = 'failed'${excludeId ? ' AND id != ?' : ''}`,
-      excludeId ? [jiraKey, excludeId] : [jiraKey],
     );
-    const count = countRow?.n ?? 0;
+    stmt.bind(excludeId ? [jiraKey, excludeId] : [jiraKey]);
+    let count = 0;
+    if (stmt.step()) count = (stmt.getAsObject() as { n: number }).n;
+    stmt.free();
     if (count > 0) {
-      await execute(
+      this.db.run(
         `DELETE FROM dev_review_thread
          WHERE jira_key = ? AND jira_sync_state = 'failed'${excludeId ? ' AND id != ?' : ''}`,
         excludeId ? [jiraKey, excludeId] : [jiraKey],
       );
+      saveDb();
     }
     return count;
   }
 
   // ── Outbox ───────────────────────────────────────────────────────────────
 
-  async addOutbox(entry: { jira_key: string; op: DevReviewOutboxEntry['op']; payload: Record<string, unknown> }): Promise<number> {
-    const id = await executeAndGetId(
+  addOutbox(entry: { jira_key: string; op: DevReviewOutboxEntry['op']; payload: Record<string, unknown> }): number {
+    this.db.run(
       `INSERT INTO dev_review_outbox (jira_key, op, payload_json) VALUES (?, ?, ?)`,
       [entry.jira_key, entry.op, JSON.stringify(entry.payload)],
     );
+    const stmt = this.db.prepare('SELECT last_insert_rowid() AS id');
+    stmt.step();
+    const id = (stmt.getAsObject() as { id: number }).id;
+    stmt.free();
+    saveDb();
     return id;
   }
 
-  async pendingOutbox(limit = 20): Promise<DevReviewOutboxEntry[]> {
-    return query<DevReviewOutboxEntry>(
-      `SELECT TOP(?) * FROM dev_review_outbox WHERE status='pending' AND attempts < 5 ORDER BY created_at ASC`,
-      [limit],
+  pendingOutbox(limit = 20): DevReviewOutboxEntry[] {
+    const stmt = this.db.prepare(
+      `SELECT * FROM dev_review_outbox WHERE status='pending' AND attempts < 5 ORDER BY created_at ASC LIMIT ?`,
     );
+    stmt.bind([limit]);
+    const out: DevReviewOutboxEntry[] = [];
+    while (stmt.step()) out.push(rowToObj<DevReviewOutboxEntry>(stmt.getAsObject()));
+    stmt.free();
+    return out;
   }
 
-  async markOutboxDone(id: number): Promise<void> {
-    await execute(
-      `UPDATE dev_review_outbox SET status='done', processed_at=GETUTCDATE() WHERE id=?`,
+  markOutboxDone(id: number): void {
+    this.db.run(
+      `UPDATE dev_review_outbox SET status='done', processed_at=datetime('now') WHERE id=?`,
       [id],
     );
+    saveDb();
   }
 
-  async bumpOutboxFailure(id: number, error: string): Promise<void> {
-    await execute(
+  bumpOutboxFailure(id: number, error: string): void {
+    this.db.run(
       `UPDATE dev_review_outbox
        SET attempts = attempts + 1,
            last_error = ?,
            status = CASE WHEN attempts + 1 >= 5 THEN 'failed' ELSE 'pending' END,
-           processed_at = CASE WHEN attempts + 1 >= 5 THEN GETUTCDATE() ELSE processed_at END
+           processed_at = CASE WHEN attempts + 1 >= 5 THEN datetime('now') ELSE processed_at END
        WHERE id=?`,
       [error.slice(0, 500), id],
     );
+    saveDb();
   }
 
   // ── Dashboard aggregations ────────────────────────────────────────────────
 
+  /** Run a single-row aggregate query and return the first column as a number. */
+  private scalar(sql: string, params: (string | number)[] = []): number {
+    const stmt = this.db.prepare(sql);
+    if (params.length > 0) stmt.bind(params);
+    let n = 0;
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      const first = Object.values(row)[0];
+      n = typeof first === 'number' ? first : Number(first ?? 0);
+    }
+    stmt.free();
+    return n;
+  }
+
+  /** Run an aggregate query returning an array of rows. */
+  private rows<T>(sql: string, params: (string | number)[] = []): T[] {
+    const stmt = this.db.prepare(sql);
+    if (params.length > 0) stmt.bind(params);
+    const out: T[] = [];
+    while (stmt.step()) out.push(stmt.getAsObject() as unknown as T);
+    stmt.free();
+    return out;
+  }
+
   /** Top-level snapshot for the Dev Review dashboard. All times in server local TZ. */
-  async getDashboard(): Promise<{
+  getDashboard(): {
     queue: { total: number; pending: number; in_review: number; fast_track: number; unclaimed: number };
     today: { new: number; accepted: number; returned: number; processed: number };
     week: { new: number; accepted: number; returned: number };
@@ -483,18 +554,18 @@ export class DevReviewQueries {
         hours_overdue: number;
       }>;
     };
-  }> {
+  } {
     // ── Queue snapshot ──────────────────────────────────────────────────
-    const queueObj = {
-      total: await this.scalar(
+    const queue = {
+      total: this.scalar(
         `SELECT COUNT(*) FROM dev_review_state WHERE status NOT IN ('archived','accepted','returned')`,
       ),
-      pending: await this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE status = 'pending'`),
-      in_review: await this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE status = 'in_review'`),
-      fast_track: await this.scalar(
+      pending: this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE status = 'pending'`),
+      in_review: this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE status = 'in_review'`),
+      fast_track: this.scalar(
         `SELECT COUNT(*) FROM dev_review_state WHERE fast_track = 1 AND status NOT IN ('archived','accepted','returned')`,
       ),
-      unclaimed: await this.scalar(
+      unclaimed: this.scalar(
         `SELECT COUNT(*) FROM dev_review_state WHERE claimed_by_user_id IS NULL AND status NOT IN ('archived','accepted','returned')`,
       ),
     };
@@ -503,36 +574,36 @@ export class DevReviewQueries {
     // Exclude archived rows from "new" counts — they were either closed
     // or never actually escalated to T3 (cleaned up by the watcher).
     const today = {
-      new: await this.scalar(
+      new: this.scalar(
         `SELECT COUNT(*) FROM dev_review_state
-         WHERE CAST(first_seen_at AS DATE) = CAST(GETDATE() AS DATE) AND status != 'archived'`,
+         WHERE date(first_seen_at) = date('now', 'localtime') AND status != 'archived'`,
       ),
-      accepted: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE CAST(accepted_at AS DATE) = CAST(GETDATE() AS DATE)`,
+      accepted: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE date(accepted_at) = date('now', 'localtime')`,
       ),
-      returned: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE CAST(returned_at AS DATE) = CAST(GETDATE() AS DATE)`,
+      returned: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE date(returned_at) = date('now', 'localtime')`,
       ),
       processed: 0,
     };
     today.processed = today.accepted + today.returned;
 
     const week = {
-      new: await this.scalar(
+      new: this.scalar(
         `SELECT COUNT(*) FROM dev_review_state
-         WHERE first_seen_at >= DATEADD(day, -7, GETUTCDATE()) AND status != 'archived'`,
+         WHERE first_seen_at >= datetime('now', '-7 days') AND status != 'archived'`,
       ),
-      accepted: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE accepted_at >= DATEADD(day, -7, GETUTCDATE())`,
+      accepted: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE accepted_at >= datetime('now', '-7 days')`,
       ),
-      returned: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE returned_at >= DATEADD(day, -7, GETUTCDATE())`,
+      returned: this.scalar(
+        `SELECT COUNT(*) FROM dev_review_state WHERE returned_at >= datetime('now', '-7 days')`,
       ),
     };
 
     const allTime = {
-      accepted: await this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE accepted_at IS NOT NULL`),
-      returned: await this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE returned_at IS NOT NULL`),
+      accepted: this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE accepted_at IS NOT NULL`),
+      returned: this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE returned_at IS NOT NULL`),
     };
 
     // ── Averages ─────────────────────────────────────────────────────────
@@ -540,22 +611,22 @@ export class DevReviewQueries {
     const acceptanceRatePct =
       decisionTotal > 0 ? Math.round((allTime.accepted / decisionTotal) * 1000) / 10 : null;
 
-    const avgTimeToClaimSec = await this.scalar(
-      `SELECT AVG(DATEDIFF(second, first_seen_at, claimed_at))
+    const avgTimeToClaimSec = this.scalar(
+      `SELECT AVG((julianday(claimed_at) - julianday(first_seen_at)) * 86400)
        FROM dev_review_state
        WHERE claimed_at IS NOT NULL AND first_seen_at IS NOT NULL`,
     );
     const avgTimeToClaimMinutes = avgTimeToClaimSec > 0 ? Math.round(avgTimeToClaimSec / 60) : null;
 
-    const avgDecisionSec = await this.scalar(
-      `SELECT AVG(DATEDIFF(second, claimed_at, COALESCE(accepted_at, returned_at)))
+    const avgDecisionSec = this.scalar(
+      `SELECT AVG((julianday(COALESCE(accepted_at, returned_at)) - julianday(claimed_at)) * 86400)
        FROM dev_review_state
        WHERE claimed_at IS NOT NULL AND (accepted_at IS NOT NULL OR returned_at IS NOT NULL)`,
     );
     const avgTimeToDecisionMinutes = avgDecisionSec > 0 ? Math.round(avgDecisionSec / 60) : null;
 
-    const oldestSec = await this.scalar(
-      `SELECT MAX(DATEDIFF(second, first_seen_at, GETUTCDATE()))
+    const oldestSec = this.scalar(
+      `SELECT MAX((julianday('now') - julianday(first_seen_at)) * 86400)
        FROM dev_review_state
        WHERE status NOT IN ('archived','accepted','returned')`,
     );
@@ -563,14 +634,14 @@ export class DevReviewQueries {
 
     // ── Per developer ────────────────────────────────────────────────────
     // Currently claimed (pulled from dev_review_state)
-    const claimedRows = await this.rows<{ user_id: number; cnt: number }>(
+    const claimedRows = this.rows<{ user_id: number; cnt: number }>(
       `SELECT claimed_by_user_id AS user_id, COUNT(*) AS cnt
        FROM dev_review_state
        WHERE claimed_by_user_id IS NOT NULL AND status NOT IN ('archived','accepted','returned')
        GROUP BY claimed_by_user_id`,
     );
     // Accept/return counts come from the thread table (which records who took the action)
-    const threadCounts = await this.rows<{
+    const threadCounts = this.rows<{
       user_id: number;
       display: string;
       kind: string;
@@ -580,8 +651,8 @@ export class DevReviewQueries {
     }>(
       `SELECT user_id, user_display AS display, kind,
               COUNT(*) AS total,
-              SUM(CASE WHEN CAST(created_at AS DATE) = CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS today,
-              SUM(CASE WHEN created_at >= DATEADD(day, -7, GETUTCDATE()) THEN 1 ELSE 0 END) AS week
+              SUM(CASE WHEN date(created_at) = date('now','localtime') THEN 1 ELSE 0 END) AS today,
+              SUM(CASE WHEN created_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) AS week
        FROM dev_review_thread
        WHERE kind IN ('accept','return')
        GROUP BY user_id, user_display, kind`,
@@ -631,20 +702,20 @@ export class DevReviewQueries {
     );
 
     // ── 14-day arrival + decision sparklines ─────────────────────────────
-    const arrivals14d = await this.rows<{ date: string; count: number }>(
-      `SELECT CONVERT(varchar, CAST(first_seen_at AS DATE), 23) AS date, COUNT(*) AS count
+    const arrivals14d = this.rows<{ date: string; count: number }>(
+      `SELECT date(first_seen_at, 'localtime') AS date, COUNT(*) AS count
        FROM dev_review_state
-       WHERE first_seen_at >= DATEADD(day, -14, GETUTCDATE()) AND status != 'archived'
-       GROUP BY CAST(first_seen_at AS DATE)
-       ORDER BY CAST(first_seen_at AS DATE) ASC`,
+       WHERE first_seen_at >= datetime('now','-14 days') AND status != 'archived'
+       GROUP BY date(first_seen_at, 'localtime')
+       ORDER BY date ASC`,
     );
 
-    const decisionRowsByDay = await this.rows<{ date: string; kind: string; cnt: number }>(
-      `SELECT CONVERT(varchar, CAST(created_at AS DATE), 23) AS date, kind, COUNT(*) AS cnt
+    const decisionRowsByDay = this.rows<{ date: string; kind: string; cnt: number }>(
+      `SELECT date(created_at, 'localtime') AS date, kind, COUNT(*) AS cnt
        FROM dev_review_thread
-       WHERE kind IN ('accept','return') AND created_at >= DATEADD(day, -14, GETUTCDATE())
-       GROUP BY CAST(created_at AS DATE), kind
-       ORDER BY CAST(created_at AS DATE) ASC`,
+       WHERE kind IN ('accept','return') AND created_at >= datetime('now','-14 days')
+       GROUP BY date(created_at, 'localtime'), kind
+       ORDER BY date ASC`,
     );
     const decByDay = new Map<string, { accepted: number; returned: number }>();
     for (const r of decisionRowsByDay) {
@@ -658,7 +729,9 @@ export class DevReviewQueries {
       .sort((a, b) => a.date.localeCompare(b.date));
 
     // ── Per team breakdown ───────────────────────────────────────────────
-    const teamQueueRows = await this.rows<{ team: string; in_queue: number; waiting: number }>(
+    // In-queue + waiting now per team, and week/all-time decisions per team.
+    // Team comes from dev_review_state.team (populated during queue sync).
+    const teamQueueRows = this.rows<{ team: string; in_queue: number; waiting: number }>(
       `SELECT COALESCE(team, 'Unassigned') AS team,
               SUM(CASE WHEN status NOT IN ('archived','accepted','returned','waiting_on_assignee') THEN 1 ELSE 0 END) AS in_queue,
               SUM(CASE WHEN status = 'waiting_on_assignee' THEN 1 ELSE 0 END) AS waiting
@@ -666,10 +739,10 @@ export class DevReviewQueries {
        WHERE status NOT IN ('archived')
        GROUP BY COALESCE(team, 'Unassigned')`,
     );
-    const teamDecisionRows = await this.rows<{ team: string; kind: string; total: number; week: number }>(
+    const teamDecisionRows = this.rows<{ team: string; kind: string; total: number; week: number }>(
       `SELECT COALESCE(s.team, 'Unassigned') AS team, t.kind,
               COUNT(*) AS total,
-              SUM(CASE WHEN t.created_at >= DATEADD(day, -7, GETUTCDATE()) THEN 1 ELSE 0 END) AS week
+              SUM(CASE WHEN t.created_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) AS week
        FROM dev_review_thread t
        LEFT JOIN dev_review_state s ON s.jira_key = t.jira_key
        WHERE t.kind IN ('accept','return')
@@ -722,7 +795,7 @@ export class DevReviewQueries {
     //
     // We pull every non-archived state row with first_seen_at set, load the
     // first pickup action per jira_key in one query, then bucket in JS.
-    const stateRows = await this.rows<{
+    const stateRows = this.rows<{
       jira_key: string;
       first_seen_at: string;
       team: string | null;
@@ -732,7 +805,7 @@ export class DevReviewQueries {
        FROM dev_review_state
        WHERE status != 'archived' AND first_seen_at IS NOT NULL`,
     );
-    const firstPickupRows = await this.rows<{ jira_key: string; first_action_at: string }>(
+    const firstPickupRows = this.rows<{ jira_key: string; first_action_at: string }>(
       `SELECT jira_key, MIN(created_at) AS first_action_at
        FROM dev_review_thread
        WHERE kind IN ('comment','accept','return')
@@ -794,7 +867,7 @@ export class DevReviewQueries {
     };
 
     return {
-      queue: queueObj,
+      queue,
       today,
       week,
       allTime,

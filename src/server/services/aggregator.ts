@@ -2,6 +2,7 @@ import type { McpClientManager } from './mcp-client.js';
 import type { TaskQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { JiraRestClient, type JiraIssue } from './jira-client.js';
+import { saveDb } from '../db/schema.js';
 
 interface NormalizedTask {
   source: string;
@@ -796,7 +797,7 @@ export class TaskAggregator {
       const freshIds: string[] = [];
       const isTransient = TRANSIENT_SOURCES.has(adapter.source);
       for (const task of tasks) {
-        await this.taskQueries.upsertFromSource({ ...task, transient: isTransient, user_id: userId });
+        this.taskQueries.upsertFromSource({ ...task, transient: isTransient, user_id: userId }, { deferSave: true });
         freshIds.push(`${task.source}:${task.source_id}`);
         didChange = true;
       }
@@ -813,13 +814,18 @@ export class TaskAggregator {
             `[Aggregator] ${adapter.source}: Returned 0 tasks with ok=true — skipping stale cleanup to prevent accidental purge`
           );
         } else {
-          removed = await this.taskQueries.deleteStaleBySource(adapter.source, freshIds, {
+          removed = this.taskQueries.deleteStaleBySource(adapter.source, freshIds, {
             allowEmpty: canPurgeAll,
+            deferSave: true,
             userId,
           });
         }
       }
       if (removed > 0) didChange = true;
+
+      if (didChange) {
+        saveDb();
+      }
 
       console.log(
         `[Aggregator] ${adapter.source}: Synced ${tasks.length} tasks` +

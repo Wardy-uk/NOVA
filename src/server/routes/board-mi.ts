@@ -1,9 +1,10 @@
 import { Router, type Request, type Response } from 'express';
 import sql from 'mssql';
+import type { Database } from 'sql.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { DevReviewQueries } from '../db/dev-review-queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
-import { queryOne, execute, query } from '../services/database.js';
+import { saveDb } from '../db/schema.js';
 
 /**
  * Service Desk MI route.
@@ -72,23 +73,26 @@ function monthBounds(ym: string): {
 
 // ── Commentary queries (inline — tiny table) ───────────────────────────────
 
-async function getCommentary(month: string): Promise<{ content: string; updated_at: string | null }> {
-  const row = await queryOne<{ content: string | null; updated_at: string | null }>(
-    'SELECT content, updated_at FROM mi_commentary WHERE month = ?',
-    [month],
-  );
-  return { content: row?.content || '', updated_at: row?.updated_at ?? null };
+function getCommentary(db: Database, month: string): { content: string; updated_at: string | null } {
+  const stmt = db.prepare('SELECT content, updated_at FROM mi_commentary WHERE month = ?');
+  stmt.bind([month]);
+  let out = { content: '', updated_at: null as string | null };
+  if (stmt.step()) {
+    const row = stmt.getAsObject() as { content: string | null; updated_at: string | null };
+    out = { content: row.content || '', updated_at: row.updated_at };
+  }
+  stmt.free();
+  return out;
 }
 
-async function saveCommentary(month: string, content: string, userId: number): Promise<void> {
-  await execute(
-    `MERGE INTO mi_commentary WITH (HOLDLOCK) AS target
-     USING (VALUES (?, ?, ?)) AS source (month, content, updated_by_user_id)
-     ON target.month = source.month
-     WHEN MATCHED THEN UPDATE SET content = source.content, updated_by_user_id = source.updated_by_user_id, updated_at = GETUTCDATE()
-     WHEN NOT MATCHED THEN INSERT (month, content, updated_by_user_id, updated_at) VALUES (source.month, source.content, source.updated_by_user_id, GETUTCDATE())`,
+function saveCommentary(db: Database, month: string, content: string, userId: number): void {
+  db.run(
+    `INSERT INTO mi_commentary (month, content, updated_by_user_id, updated_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(month) DO UPDATE SET content=excluded.content, updated_by_user_id=excluded.updated_by_user_id, updated_at=datetime('now')`,
     [month, content, userId],
   );
+  saveDb();
 }
 
 // ── JQL helper: count-only search ──────────────────────────────────────────
@@ -107,6 +111,7 @@ async function jqlCount(client: JiraRestClient, jql: string): Promise<number> {
 export function createBoardMiRoutes(
   settingsQueries: SettingsQueries,
   devQueries: DevReviewQueries,
+  db: Database,
   getJiraClient: () => JiraRestClient | null,
 ): Router {
   const router = Router();
@@ -285,20 +290,23 @@ export function createBoardMiRoutes(
         inQueueNow: number; avgAgeHours: number | null;
       } | null;
       try {
-        const d = await devQueries.getDashboard();
+        const d = devQueries.getDashboard();
+        // Month-scoped: count thread entries within bounds
         const startIso = `${start}T00:00:00`;
         const endIso = `${end}T23:59:59`;
-        const monthRows = await query<{ kind: string; cnt: number }>(
+        const monthStmt = db.prepare(
           `SELECT kind, COUNT(*) AS cnt FROM dev_review_thread
            WHERE kind IN ('accept','return') AND created_at >= ? AND created_at <= ?
            GROUP BY kind`,
-          [startIso, endIso],
         );
+        monthStmt.bind([startIso, endIso]);
         let monthAccepted = 0, monthReturned = 0;
-        for (const row of monthRows) {
+        while (monthStmt.step()) {
+          const row = monthStmt.getAsObject() as { kind: string; cnt: number };
           if (row.kind === 'accept') monthAccepted = row.cnt;
           if (row.kind === 'return') monthReturned = row.cnt;
         }
+        monthStmt.free();
 
         devReviewMonth = {
           accepted: monthAccepted,
@@ -310,7 +318,7 @@ export function createBoardMiRoutes(
       } catch { /* leave null */ }
 
       // ── 4. Commentary ───────────────────────────────────────────────────
-      const commentary = await getCommentary(month);
+      const commentary = getCommentary(db, month);
 
       // ── Response ────────────────────────────────────────────────────────
       res.json({
@@ -367,7 +375,7 @@ export function createBoardMiRoutes(
   });
 
   // Save monthly commentary
-  router.post('/commentary', async (req: Request, res: Response) => {
+  router.post('/commentary', (req: Request, res: Response) => {
     try {
       if (!req.user) { res.status(401).json({ ok: false }); return; }
       const month = String(req.body?.month || '').trim();
@@ -375,7 +383,7 @@ export function createBoardMiRoutes(
         res.status(400).json({ ok: false, error: 'Invalid month' }); return;
       }
       const content = String(req.body?.content || '');
-      await saveCommentary(month, content, req.user.id);
+      saveCommentary(db, month, content, req.user.id);
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'save failed' });

@@ -71,8 +71,8 @@ export function createAdobeSignRoutes(
   // ── Agreements ──
 
   // GET /api/adobe-sign/agreements — list from local DB
-  router.get('/agreements', async (req, res) => {
-    const agreements = await agreementQueries.getAll({
+  router.get('/agreements', (req, res) => {
+    const agreements = agreementQueries.getAll({
       status: req.query.status as string | undefined,
       search: req.query.search as string | undefined,
       contract_id: req.query.contract_id ? parseInt(req.query.contract_id as string, 10) : undefined,
@@ -95,7 +95,7 @@ export function createAdobeSignRoutes(
           ?.filter(ps => ps.role === 'SIGNER')
           .flatMap(ps => ps.memberInfos.map(m => m.email)) ?? [];
 
-        await agreementQueries.upsert({
+        agreementQueries.upsert({
           agreement_id: a.id,
           contract_id: null,
           template_id: null,
@@ -121,10 +121,10 @@ export function createAdobeSignRoutes(
   });
 
   // GET /api/adobe-sign/agreements/:id — single agreement detail
-  router.get('/agreements/:id', async (req, res) => {
+  router.get('/agreements/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    const agreement = await agreementQueries.getById(id);
+    const agreement = agreementQueries.getById(id);
     if (!agreement) { res.status(404).json({ ok: false, error: 'Agreement not found' }); return; }
     res.json({ ok: true, data: agreement });
   });
@@ -147,7 +147,7 @@ export function createAdobeSignRoutes(
 
       // If a local template is selected, upload its file as a transient document
       if (template_id) {
-        const template = await templateQueries.getById(template_id);
+        const template = templateQueries.getById(template_id);
         if (template?.adobe_library_doc_id) {
           libraryDocumentId = template.adobe_library_doc_id;
         } else if (template?.file_data) {
@@ -177,7 +177,7 @@ export function createAdobeSignRoutes(
       });
 
       // Store in local DB
-      await agreementQueries.upsert({
+      agreementQueries.upsert({
         agreement_id: result.id,
         contract_id: contract_id ?? null,
         template_id: template_id ?? null,
@@ -206,7 +206,7 @@ export function createAdobeSignRoutes(
     const client = getClient();
     if (!client) { res.status(503).json({ ok: false, error: 'Adobe Sign is not connected.' }); return; }
 
-    const agreement = await agreementQueries.getById(parseInt(req.params.id, 10));
+    const agreement = agreementQueries.getById(parseInt(req.params.id, 10));
     if (!agreement) { res.status(404).json({ ok: false, error: 'Agreement not found' }); return; }
 
     try {
@@ -236,8 +236,8 @@ export function createAdobeSignRoutes(
 
   // ── Local Contract Templates ──
 
-  router.get('/templates', async (req, res) => {
-    const templates = await templateQueries.getAll({
+  router.get('/templates', (req, res) => {
+    const templates = templateQueries.getAll({
       status: req.query.status as string | undefined,
       category: req.query.category as string | undefined,
       search: req.query.search as string | undefined,
@@ -245,24 +245,24 @@ export function createAdobeSignRoutes(
     res.json({ ok: true, data: templates });
   });
 
-  router.get('/templates/:id', async (req, res) => {
+  router.get('/templates/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    const template = await templateQueries.getById(id);
+    const template = templateQueries.getById(id);
     if (!template) { res.status(404).json({ ok: false, error: 'Template not found' }); return; }
     // Don't send file_data in JSON — use separate download endpoint
     const { file_data, ...rest } = template;
     res.json({ ok: true, data: { ...rest, has_file: !!file_data } });
   });
 
-  router.post('/templates', async (req, res) => {
+  router.post('/templates', (req, res) => {
     const { name, description, category, fields_schema, adobe_library_doc_id, file_base64, file_name, file_mime } = req.body;
     if (!name?.trim()) { res.status(400).json({ ok: false, error: 'name is required' }); return; }
 
     const userId = (req as any).user?.id;
     const fileData = file_base64 ? Buffer.from(file_base64, 'base64') : undefined;
 
-    const id = await templateQueries.create({
+    const id = templateQueries.create({
       name,
       description,
       category,
@@ -276,14 +276,14 @@ export function createAdobeSignRoutes(
     res.json({ ok: true, data: { id } });
   });
 
-  router.put('/templates/:id', async (req, res) => {
+  router.put('/templates/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
 
     const { name, description, category, fields_schema, adobe_library_doc_id, file_base64, file_name, file_mime, status } = req.body;
     const fileData = file_base64 ? Buffer.from(file_base64, 'base64') : undefined;
 
-    const updated = await templateQueries.update(id, {
+    const updated = templateQueries.update(id, {
       name, description, category,
       fields_schema: fields_schema ? JSON.stringify(fields_schema) : undefined,
       adobe_library_doc_id,
@@ -294,19 +294,19 @@ export function createAdobeSignRoutes(
     res.json({ ok: true });
   });
 
-  router.delete('/templates/:id', async (req, res) => {
+  router.delete('/templates/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    const deleted = await templateQueries.delete(id);
+    const deleted = templateQueries.delete(id);
     if (!deleted) { res.status(404).json({ ok: false, error: 'Template not found' }); return; }
     res.json({ ok: true });
   });
 
   // GET /api/adobe-sign/templates/:id/download — download template file
-  router.get('/templates/:id/download', async (req, res) => {
+  router.get('/templates/:id/download', (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    const template = await templateQueries.getById(id);
+    const template = templateQueries.getById(id);
     if (!template?.file_data) { res.status(404).json({ ok: false, error: 'No file attached' }); return; }
     res.setHeader('Content-Type', template.file_mime ?? 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${template.file_name ?? 'template'}"`);

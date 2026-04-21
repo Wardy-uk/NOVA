@@ -48,20 +48,20 @@ export function createJiraRoutes(
 ): Router {
   /** Build a JiraRestClient for the requesting user (personal credentials only).
    *  Never falls back to global — personal and global Jira are separate. */
-  async function getClientForUser(userId?: number): Promise<JiraRestClient | null> {
+  function getClientForUser(userId?: number): JiraRestClient | null {
     if (userId && userSettingsQueries) {
       // 1. Per-user OAuth tokens (from Jira OAuth login)
-      const cloudId = await userSettingsQueries.get(userId, 'jira_cloud_id');
-      const accessToken = await userSettingsQueries.get(userId, 'jira_access_token');
+      const cloudId = userSettingsQueries.get(userId, 'jira_cloud_id');
+      const accessToken = userSettingsQueries.get(userId, 'jira_access_token');
       if (cloudId && accessToken) {
         return new JiraRestClient({ cloudId, accessToken });
       }
 
       // 2. Per-user Basic auth credentials (from My Settings > Jira)
-      const userEnabled = await userSettingsQueries.get(userId, 'jira_enabled');
-      const userUrl = await userSettingsQueries.get(userId, 'jira_url');
-      const userEmail = await userSettingsQueries.get(userId, 'jira_username');
-      const userToken = await userSettingsQueries.get(userId, 'jira_token');
+      const userEnabled = userSettingsQueries.get(userId, 'jira_enabled');
+      const userUrl = userSettingsQueries.get(userId, 'jira_url');
+      const userEmail = userSettingsQueries.get(userId, 'jira_username');
+      const userToken = userSettingsQueries.get(userId, 'jira_token');
       if (userEnabled === 'true' && userUrl && userEmail && userToken) {
         return new JiraRestClient({ baseUrl: userUrl, email: userEmail, apiToken: userToken });
       }
@@ -88,7 +88,7 @@ export function createJiraRoutes(
   router.get('/issues/:key', async (req, res) => {
     const key = req.params.key;
     const userId = (req as any).user?.id as number | undefined;
-    const restClient = await getClientForUser(userId) ?? getGlobalClient();
+    const restClient = getClientForUser(userId) ?? getGlobalClient();
 
     if (restClient) {
       try {
@@ -110,7 +110,7 @@ export function createJiraRoutes(
     }
 
     // No REST client — try cached task data
-    const task = await taskQueries.getById(`jira:${key}`);
+    const task = taskQueries.getById(`jira:${key}`);
     if (task?.raw_data) {
       res.json({ ok: true, data: task.raw_data });
       return;
@@ -122,7 +122,7 @@ export function createJiraRoutes(
     const key = req.params.key;
     const userId = (req as any).user?.id as number | undefined;
     console.log(`[Jira] editmeta request for ${key}, userId=${userId}`);
-    const restClient = await getClientForUser(userId);
+    const restClient = getClientForUser(userId);
     if (!restClient) {
       console.warn(`[Jira] editmeta for ${key}: No REST client available (userId=${userId})`);
       res.status(501).json({ ok: false, error: 'No Jira REST client available' });
@@ -145,7 +145,7 @@ export function createJiraRoutes(
   router.get('/issues/:key/transitions', async (req, res) => {
     const key = req.params.key;
     const userId = (req as any).user?.id as number | undefined;
-    const restClient = await getClientForUser(userId) ?? getGlobalClient();
+    const restClient = getClientForUser(userId) ?? getGlobalClient();
     if (!restClient) {
       res.status(501).json({ ok: false, error: 'No Jira client available' });
       return;
@@ -251,7 +251,7 @@ export function createJiraRoutes(
   router.patch('/issues/:key', async (req, res) => {
     const key = req.params.key;
     const userId = (req as any).user?.id as number | undefined;
-    const restClient = await getClientForUser(userId);
+    const restClient = getClientForUser(userId);
 
     if (!restClient) {
       res.status(501).json({ ok: false, error: 'No Jira client configured. Set up Jira credentials in My Settings.' });
@@ -369,7 +369,7 @@ export function createJiraRoutes(
   // Search issues with JQL
   router.post('/search', async (req, res) => {
     const userId = (req as any).user?.id as number | undefined;
-    const client = await getClientForUser(userId) ?? getGlobalClient();
+    const client = getClientForUser(userId) ?? getGlobalClient();
     if (!client) {
       res.status(501).json({ ok: false, error: 'No Jira client available' });
       return;
@@ -395,7 +395,7 @@ export function createJiraRoutes(
   // List projects
   router.get('/projects', async (req, res) => {
     const userId = (req as any).user?.id as number | undefined;
-    const client = await getClientForUser(userId) ?? getGlobalClient();
+    const client = getClientForUser(userId) ?? getGlobalClient();
     if (!client) {
       res.status(501).json({ ok: false, error: 'No Jira client available' });
       return;
@@ -415,7 +415,7 @@ export function createJiraRoutes(
   // Create issue
   router.post('/issues', async (req, res) => {
     const userId = (req as any).user?.id as number | undefined;
-    const client = await getClientForUser(userId) ?? getGlobalClient();
+    const client = getClientForUser(userId) ?? getGlobalClient();
     if (!client) {
       res.status(501).json({ ok: false, error: 'No Jira client available' });
       return;
@@ -466,7 +466,7 @@ export function createJiraRoutes(
 
     const userId = (req as any).user?.id as number | undefined;
     // Batch-status resolves specific keys — try personal first, then global
-    const client = await getClientForUser(userId) ?? getGlobalClient();
+    const client = getClientForUser(userId) ?? getGlobalClient();
     if (!client) {
       res.status(501).json({ ok: false, error: 'No Jira client available' });
       return;
@@ -521,7 +521,7 @@ export function createJiraRoutes(
     }
 
     const userId = (req as any).user?.id as number | undefined;
-    const client = await getClientForUser(userId) ?? getGlobalClient();
+    const client = getClientForUser(userId) ?? getGlobalClient();
     if (!client) {
       res.status(501).json({ ok: false, error: 'No Jira client available' });
       return;
