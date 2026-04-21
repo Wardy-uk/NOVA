@@ -398,22 +398,23 @@ export function createAuthRoutes(
           .map(m => m.novaRole);
 
         if (matchedRoles.length === 0) {
-          ssoLogger.warn('access_denied', `User not in any mapped Azure group`, {
+          // No role-granting group matched — assign default viewer role
+          // (Enterprise App assignment controls access; group mappings control elevated roles)
+          resolvedRole = 'viewer';
+          ssoLogger.log('group_default', `No role-granting group matched — defaulting to viewer`, {
             email: claims.email,
             userGroups: claims.groups,
             configuredGroups: groupMappings.map(m => m.groupId),
           });
-          res.redirect(`${frontendUrl}/?sso_error=${encodeURIComponent('Access denied. You are not in an authorised group. Contact your administrator.')}`);
-          return;
+        } else {
+          // Combine unique roles (e.g., "editor,admin")
+          resolvedRole = [...new Set(matchedRoles)].join(',');
+          ssoLogger.log('group_match', `Matched Azure groups → NOVA role(s)`, {
+            email: claims.email,
+            matchedRoles,
+            resolvedRole,
+          });
         }
-
-        // Combine unique roles (e.g., "editor,admin")
-        resolvedRole = [...new Set(matchedRoles)].join(',');
-        ssoLogger.log('group_match', `Matched Azure groups → NOVA role(s)`, {
-          email: claims.email,
-          matchedRoles,
-          resolvedRole,
-        });
       }
 
       // User resolution: OID lookup → email lookup (link existing) → auto-create
