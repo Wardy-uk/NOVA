@@ -66,6 +66,8 @@ import { CalyxOrganisationsView } from './components/CalyxOrganisationsView.js';
 import { CalyxTicketsView } from './components/CalyxTicketsView.js';
 import { CalyxSettingsView } from './components/CalyxSettingsView.js';
 import { CalyxPortal } from './components/CalyxPortal.js';
+import { AgentDashboardView } from './components/AgentDashboardView.js';
+import { AgentWorkspaceView } from './components/AgentWorkspaceView.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -75,7 +77,7 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'calyx';
+type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'calyx' | 'ai-agent';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
@@ -89,6 +91,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
   | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-tickets' | 'calyx-kb' | 'calyx-improvements' | 'calyx-settings' | 'calyx-problems' | 'calyx-changes' | 'calyx-major-incidents' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
+  | 'agent-dashboard' | 'agent-workspace'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -107,7 +110,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', calyx: 'hidden',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', calyx: 'hidden', 'ai-agent': 'hidden',
 };
 
 // Map certain command sub-tabs to their own permission area
@@ -252,9 +255,17 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'calyx-settings', label: 'Settings' },
     ],
   },
+  'ai-agent': {
+    label: 'AI Agent',
+    defaultView: 'agent-workspace',
+    tabs: [
+      { view: 'agent-workspace', label: 'Workspace' },
+      { view: 'agent-dashboard', label: 'Dashboard' },
+    ],
+  },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'calyx', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'calyx', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'ai-agent'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
@@ -266,7 +277,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue', 'calyx-dashboard', 'calyx-playlist', 'calyx-tickets', 'calyx-kb', 'calyx-improvements', 'calyx-settings', 'calyx-problems', 'calyx-changes', 'calyx-major-incidents', 'calyx-slo-settings', 'calyx-business-hours', 'calyx-organisations']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue', 'calyx-dashboard', 'calyx-playlist', 'calyx-tickets', 'calyx-kb', 'calyx-improvements', 'calyx-settings', 'calyx-problems', 'calyx-changes', 'calyx-major-incidents', 'calyx-slo-settings', 'calyx-business-hours', 'calyx-organisations', 'agent-dashboard', 'agent-workspace']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1179,6 +1190,14 @@ export function App() {
           )}
           {view === 'calyx-organisations' && (
             <CalyxOrganisationsView />
+          )}
+
+          {/* AI Agent */}
+          {view === 'agent-workspace' && canSeeArea('ai-agent') && (
+            <AgentWorkspaceView />
+          )}
+          {view === 'agent-dashboard' && canSeeArea('ai-agent') && (
+            <AgentDashboardView />
           )}
 
           {/* Administration */}

@@ -200,6 +200,32 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'adobe_sign_refresh_token', label: 'Refresh Token', type: 'password', placeholder: 'Auto-populated after OAuth connection', required: false },
     ],
   },
+  {
+    id: 'llm',
+    name: 'AI / LLM',
+    description: 'LLM providers for agent reasoning — Anthropic Claude (primary) and OpenAI (failover).',
+    enabledKey: 'llm_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'anthropic_api_key', label: 'Anthropic API Key', type: 'password', placeholder: 'sk-ant-...', required: true },
+      { key: 'openai_api_key', label: 'OpenAI API Key (failover)', type: 'password', placeholder: 'sk-...', required: false },
+      { key: 'llm_primary_provider', label: 'Primary Provider', type: 'text', placeholder: 'anthropic', required: false },
+      { key: 'llm_primary_model', label: 'Primary Model', type: 'text', placeholder: 'claude-sonnet-4-20250514', required: false },
+      { key: 'llm_failover_provider', label: 'Failover Provider', type: 'text', placeholder: 'openai', required: false },
+      { key: 'llm_failover_model', label: 'Failover Model', type: 'text', placeholder: 'gpt-4.1', required: false },
+      { key: 'llm_temperature', label: 'Temperature', type: 'text', placeholder: '0.3', required: false },
+      { key: 'llm_max_tokens', label: 'Max Tokens', type: 'text', placeholder: '4096', required: false },
+      { key: 'agent_shadow_mode', label: 'Shadow Mode (observe only)', type: 'text', placeholder: 'true', required: false },
+      { key: 'agent_sweep_interval_ticks', label: 'Sweep Interval (ticks)', type: 'text', placeholder: '30', required: false },
+      { key: 'agent_sweep_ai_request_hours', label: 'AI Request Stale (hours)', type: 'text', placeholder: '2', required: false },
+      { key: 'agent_sweep_wor_chase_days', label: 'WOR Chase After (days)', type: 'text', placeholder: '5', required: false },
+      { key: 'agent_sweep_wor_close_days', label: 'WOR Auto-Close After (days)', type: 'text', placeholder: '10', required: false },
+      { key: 'agent_teams_webhook_url', label: 'Teams Webhook URL (critical alerts)', type: 'url', placeholder: 'https://outlook.office.com/webhook/...', required: false },
+      { key: 'agent_sla_breach_threshold_min', label: 'SLA Breach Alert (minutes)', type: 'text', placeholder: '30', required: false },
+      { key: 'agent_unassigned_stale_min', label: 'Unassigned Stale (minutes)', type: 'text', placeholder: '15', required: false },
+      { key: 'agent_capacity_threshold', label: 'Capacity Alert (tickets/agent)', type: 'text', placeholder: '10', required: false },
+    ],
+  },
 ];
 
 export interface McpServerConfig {

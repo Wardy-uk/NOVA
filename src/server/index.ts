@@ -78,6 +78,9 @@ import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
 import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
+import { createAgentRoutes } from './routes/agent.js';
+import { AgentLoop } from './services/agent-loop.js';
+import { LlmService } from './services/llm-service.js';
 import { createApprovalRoutes } from './routes/approvals.js';
 import { createTrainingRoutes } from './routes/training.js';
 import { sendTrainingReminders } from './services/training-reminder.js';
@@ -105,6 +108,9 @@ async function main() {
   console.log('[N.O.V.A] Initializing database...');
   const db = await getDb();
   initializeSchema(db);
+
+  // Forward declaration — populated later when Jira creds are available
+  let agentLoop: AgentLoop | null = null;
 
   // Calyx database (separate SQLite via better-sqlite3)
   console.log('[N.O.V.A] Initializing Calyx database...');
@@ -391,6 +397,31 @@ async function main() {
     res.json({ ok: true, data: { today, daily } });
   });
 
+  // Agent approval callback (no auth — called by internal approval system)
+  // Handles both GET (from approval route's resume_url fetch) and POST (direct API)
+  const agentCallbackHandler = async (req: any, res: any) => {
+    if (!agentLoop) {
+      res.status(503).json({ ok: false, error: 'Agent loop not available' });
+      return;
+    }
+    const action = req.body?.action || req.query?.action;
+    const ticketKey = req.body?.ticketKey || req.query?.ticketKey;
+    const approvalId = req.body?.approvalId || req.query?.approvalId;
+    const editedResponse = req.body?.editedResponse;
+    if (!action || !ticketKey) {
+      res.status(400).json({ ok: false, error: 'action and ticketKey are required' });
+      return;
+    }
+    try {
+      await agentLoop.handleApprovalCallback(action, ticketKey, approvalId ? Number(approvalId) : undefined, editedResponse);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Callback failed' });
+    }
+  };
+  app.get('/api/public/agent/approval-callback', agentCallbackHandler);
+  app.post('/api/public/agent/approval-callback', agentCallbackHandler);
+
   // Training export — token-gated, no JWT, for n8n automation (Training Matrix Sync).
   // Returns a flat dump of categories, items, scores, members, and the display-name
   // map needed to render the matrix into Obsidian. Requires TRAINING_EXPORT_TOKEN env
@@ -632,6 +663,20 @@ async function main() {
   app.use('/api/team', requireAreaAccess('nova_features', 'view'), createTeamRoutes(deliveryQueries, milestoneQueries, taskQueries, userQueries));
   app.use('/api/notifications', createNotificationRoutes(notificationQueries, notificationEngine));
   app.use('/api/chat', requireAreaAccess('nova_features', 'view'), createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
+
+  // Agent loop — feature-flagged, admin-only
+  const agentJiraClient = buildServiceDeskJiraClient();
+  const llmService = new LlmService(settingsQueries);
+  if (agentJiraClient) {
+    agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries);
+    app.use('/api/agent', createAgentRoutes(agentLoop));
+    if (settingsQueries.get('agent_enabled') === 'true') {
+      agentLoop.start();
+      console.log('[N.O.V.A] Agent loop auto-started (agent_enabled=true)');
+    }
+  } else {
+    console.log('[N.O.V.A] Agent loop not available — no Jira credentials configured.');
+  }
 
   // DELETE /api/data/source/:source — purge local records for a given integration source
   app.delete('/api/data/source/:source', (req, res) => {
@@ -1683,6 +1728,7 @@ ${panelHtml}
     clearInterval(surveyTimer);
     clearInterval(trainingReminderTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
+    agentLoop?.stop();
     watcher.stop();
     try { saveDb(); console.log('[N.O.V.A] Database saved to disk'); } catch (err) {
       console.error('[N.O.V.A] Failed to save DB on shutdown:', err instanceof Error ? err.message : err);
