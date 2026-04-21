@@ -62,6 +62,16 @@ export async function syncCalyxKpisToNova(db: Database.Database, settingsQueries
   }
 
   try {
+    // Widen direction column if it's too narrow for 'Lower is better' / 'Higher is better'
+    await p.request().query(`
+      IF EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                 WHERE TABLE_NAME = 'jira_kpi_daily' AND COLUMN_NAME = 'direction'
+                   AND CHARACTER_MAXIMUM_LENGTH < 50)
+        ALTER TABLE jira_kpi_daily ALTER COLUMN direction NVARCHAR(50);
+    `);
+  } catch { /* ignore if column doesn't exist or perms issue */ }
+
+  try {
     // Open tickets
     const openTickets = (db.prepare(`SELECT COUNT(*) as n FROM calyx_tickets WHERE status NOT IN ('resolved','closed')`).get() as any).n;
     const p1Open = (db.prepare(`SELECT COUNT(*) as n FROM calyx_tickets WHERE priority='P1' AND status NOT IN ('resolved','closed')`).get() as any).n;
