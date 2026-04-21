@@ -1071,6 +1071,7 @@ export interface Team {
   description: string | null;
   created_at: string;
   jira_products: string[] | null; // empty/null = sees all Dev Review tickets
+  jira_project_key: string | null; // target Jira project for Bug creation on accept
 }
 
 export class TeamQueries {
@@ -1088,6 +1089,7 @@ export class TeamQueries {
       description: (row.description as string | null) ?? null,
       created_at: row.created_at as string,
       jira_products: products,
+      jira_project_key: (row.jira_project_key as string | null) ?? null,
     };
   }
 
@@ -1116,7 +1118,7 @@ export class TeamQueries {
     return id;
   }
 
-  update(id: number, updates: { name?: string; description?: string; jira_products?: string[] | null }): boolean {
+  update(id: number, updates: { name?: string; description?: string; jira_products?: string[] | null; jira_project_key?: string | null }): boolean {
     const fields: string[] = [];
     const params: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); params.push(updates.name); }
@@ -1124,6 +1126,10 @@ export class TeamQueries {
     if (updates.jira_products !== undefined) {
       fields.push('jira_products = ?');
       params.push(updates.jira_products && updates.jira_products.length > 0 ? JSON.stringify(updates.jira_products) : null);
+    }
+    if (updates.jira_project_key !== undefined) {
+      fields.push('jira_project_key = ?');
+      params.push(updates.jira_project_key?.trim() || null);
     }
     if (fields.length === 0) return false;
     params.push(id);

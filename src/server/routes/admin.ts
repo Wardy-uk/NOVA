@@ -454,8 +454,8 @@ export function createAdminRoutes(
 
   router.put('/teams/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
-    const { name, description, jira_products } = req.body;
-    const updates: { name?: string; description?: string; jira_products?: string[] | null } = {};
+    const { name, description, jira_products, jira_project_key } = req.body;
+    const updates: { name?: string; description?: string; jira_products?: string[] | null; jira_project_key?: string | null } = {};
     if (name !== undefined) updates.name = name?.trim();
     if (description !== undefined) updates.description = description?.trim();
     if (jira_products !== undefined) {
@@ -463,6 +463,7 @@ export function createAdminRoutes(
         ? jira_products.filter((p) => typeof p === 'string')
         : null;
     }
+    if (jira_project_key !== undefined) updates.jira_project_key = jira_project_key;
     teamQueries.update(id, updates);
     res.json({ ok: true });
   });

@@ -615,6 +615,7 @@ export function createDevReviewRoutes(
     const note = String(req.body?.note || '').trim();
     const tldr = String(req.body?.tldr || '').trim();
     const developmentDetails = String(req.body?.developmentDetails || '').trim();
+    const workItemComment = String(req.body?.workItemComment || '').trim();
     const display = userDisplay(req);
 
     if (!tldr) {
@@ -745,7 +746,66 @@ export function createDevReviewRoutes(
       console.warn(`[DevReview/accept] Failed to post agent-notice comment for ${key}: ${noticeErr instanceof Error ? noticeErr.message : noticeErr}`);
     });
 
-    res.json({ ok: true, warnings: warnings.length > 0 ? warnings : undefined });
+    // ── Bug work-item creation ──────────────────────────────────────
+    // If the accepting dev's team has a jira_project_key configured,
+    // create a Bug in that project, link it back to the NT ticket, and
+    // post a customer-facing 60-day SLA comment.
+    let workItemKey: string | undefined;
+    const user = userQueries.getById(req.user.id);
+    const teamId = user?.team_id ?? null;
+    const team = teamId ? teamQueries.getById(teamId) : undefined;
+    const projectKey = team?.jira_project_key;
+
+    if (projectKey) {
+      // Build the Bug description from the escalation brief
+      const descParts: string[] = [];
+      if (tldr) descParts.push(`TL;DR: ${tldr}`);
+      if (developmentDetails) descParts.push(`Development Details:\n${developmentDetails}`);
+      if (workItemComment) descParts.push(`Developer Comment:\n${workItemComment}`);
+      descParts.push(`Linked support ticket: ${key}`);
+      const bugDescription = descParts.join('\n\n');
+
+      try {
+        const created = await client.createIssue({
+          fields: {
+            project: { key: projectKey },
+            issuetype: { name: 'Bug' },
+            summary: `[${key}] ${tldr}`,
+            description: adfDoc(bugDescription),
+          },
+        });
+        workItemKey = created.key;
+
+        // Link Bug → NT ticket (blocks relationship)
+        await client.createIssueLink({
+          type: { name: 'Blocks' },
+          inwardIssue: { key: created.key },
+          outwardIssue: { key },
+        }).catch((linkErr) => {
+          const msg = linkErr instanceof Error ? linkErr.message : 'link failed';
+          console.warn(`[DevReview/accept] Bug→NT link failed: ${msg}`);
+          warnings.push(`Bug created (${created.key}) but link to ${key} failed: ${msg}`);
+        });
+
+        // Customer-facing 60-day SLA comment on the NT ticket
+        const slaText =
+          `This issue has been logged as a development work item (${created.key}). ` +
+          `Our development team will investigate and aim to resolve this within 60 working days. ` +
+          `You will receive updates as progress is made.`;
+        client.addComment(key, slaText).catch((slaErr) => {
+          console.warn(`[DevReview/accept] SLA comment failed for ${key}: ${slaErr instanceof Error ? slaErr.message : slaErr}`);
+          warnings.push(`Bug created but customer SLA comment failed`);
+        });
+
+        console.log(`[DevReview/accept] Created Bug ${created.key} in ${projectKey} for ${key}`);
+      } catch (bugErr) {
+        const msg = bugErr instanceof Error ? bugErr.message : 'Bug creation failed';
+        console.warn(`[DevReview/accept] Bug creation failed for ${key}: ${msg}`);
+        warnings.push(`Bug creation in ${projectKey} failed: ${msg}`);
+      }
+    }
+
+    res.json({ ok: true, workItemKey, warnings: warnings.length > 0 ? warnings : undefined });
   });
 
   // ── Return (back to T2 with mandatory next steps) ─────────────────────

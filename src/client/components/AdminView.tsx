@@ -24,6 +24,7 @@ interface Team {
   name: string;
   description: string | null;
   jira_products?: string[] | null;
+  jira_project_key?: string | null;
 }
 
 // Fallback list — used only if /api/admin/nurtur-products fails.
@@ -1199,6 +1200,7 @@ export function AdminView() {
                   <th className="text-left px-4 py-3">Team</th>
                   <th className="text-left px-4 py-3">Members</th>
                   <th className="text-left px-4 py-3">Dev Review products</th>
+                  <th className="text-left px-4 py-3">Bug project</th>
                   <th className="text-right px-4 py-3">Actions</th>
                 </tr>
               </thead>
@@ -1223,6 +1225,24 @@ export function AdminView() {
                         >
                           {productLabel} <span className="text-neutral-500">· edit</span>
                         </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <input
+                          type="text"
+                          defaultValue={team.jira_project_key || ''}
+                          placeholder="e.g. DEV"
+                          onBlur={(e) => {
+                            const val = e.target.value.trim() || null;
+                            if (val !== (team.jira_project_key || null)) {
+                              fetch('/api/admin/teams/' + team.id, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ jira_project_key: val }),
+                              }).then(() => fetchData());
+                            }
+                          }}
+                          className="w-20 px-2 py-1 text-[11px] rounded bg-[#272C33] text-neutral-300 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors"
+                        />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button

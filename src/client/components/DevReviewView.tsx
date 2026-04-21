@@ -238,6 +238,7 @@ export function DevReviewView() {
   const [acceptNote, setAcceptNote] = useState('');
   const [acceptTldr, setAcceptTldr] = useState('');
   const [acceptDevDetails, setAcceptDevDetails] = useState('');
+  const [acceptWorkItemComment, setAcceptWorkItemComment] = useState('');
   const [showAcceptModal, setShowAcceptModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
@@ -412,6 +413,7 @@ export function DevReviewView() {
     // Prefill Development Details from existing value (usually empty at T3 stage)
     setAcceptDevDetails(adfToText(detail.fields.customfield_13215));
     setAcceptNote('');
+    setAcceptWorkItemComment('');
     setShowAcceptModal(true);
   };
   const onAccept = async () => {
@@ -419,17 +421,35 @@ export function DevReviewView() {
       fireToast('err', 'TL;DR is required by the Escalate to Development screen');
       return;
     }
-    await doAction(`/ticket/${selectedKey}/accept`, {
-      method: 'POST',
-      body: JSON.stringify({
-        note: acceptNote,
-        tldr: acceptTldr,
-        developmentDetails: acceptDevDetails,
-      }),
-    }, 'Accepted to development');
+    if (!selectedKey) return;
+    setBusy(true);
+    try {
+      const raw = await fetch(`/api/dev-review/ticket/${selectedKey}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          note: acceptNote,
+          tldr: acceptTldr,
+          developmentDetails: acceptDevDetails,
+          workItemComment: acceptWorkItemComment,
+        }),
+      });
+      const resp = await raw.json();
+      if (!resp.ok) throw new Error(resp.error || 'Accept failed');
+      const msg = resp.workItemKey
+        ? `Accepted — Bug ${resp.workItemKey} created`
+        : 'Accepted to development';
+      fireToast('ok', msg);
+      await Promise.all([loadQueue({ silent: true }), loadDetail(selectedKey)]);
+    } catch (e) {
+      fireToast('err', e instanceof Error ? e.message : 'Accept failed');
+    } finally {
+      setBusy(false);
+    }
     setAcceptNote('');
     setAcceptTldr('');
     setAcceptDevDetails('');
+    setAcceptWorkItemComment('');
     setShowAcceptModal(false);
   };
   const onReturn = async () => {
@@ -713,6 +733,21 @@ export function DevReviewView() {
               placeholder="Any technical context, suspected cause, queries to run, related tickets…"
               rows={6}
               className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600 font-mono"
+              style={{ background: 'rgba(255,255,255,0.06)' }}
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2">
+              <span>Work Item Comment</span>
+              <span className="text-neutral-500 normal-case font-normal text-[10px]">Included in the Bug description if team has a Jira project configured</span>
+            </label>
+            <textarea
+              value={acceptWorkItemComment}
+              onChange={(e) => setAcceptWorkItemComment(e.target.value)}
+              placeholder="Optional developer notes for the Bug work item…"
+              rows={3}
+              className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600"
               style={{ background: 'rgba(255,255,255,0.06)' }}
             />
           </div>
