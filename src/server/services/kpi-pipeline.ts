@@ -1,0 +1,431 @@
+import sql from 'mssql';
+import type { SettingsQueries } from '../db/settings-store.js';
+import type { LlmService } from './llm-service.js';
+import type { JiraRestClient } from './jira-client.js';
+import { DailyDigestSchema, WeeklyDigestSchema, type DailyDigest, type WeeklyDigest } from './kpi-schemas.js';
+import { loadPrompt } from './prompt-loader.js';
+import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
+import { tableSuffix } from './pipeline-monitor.js';
+
+let pool: sql.ConnectionPool | null = null;
+
+async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool> {
+  if (pool?.connected) return pool;
+
+  const all = settings.getAll();
+  const server = all.kpi_sql_server;
+  const database = all.kpi_sql_database;
+  const user = all.kpi_sql_user;
+  const password = all.kpi_sql_password;
+
+  if (!server || !database || !user || !password) {
+    throw new Error('KPI SQL Server not configured');
+  }
+
+  pool = await new sql.ConnectionPool({
+    server, database, user, password,
+    options: { encrypt: true, trustServerCertificate: true },
+    requestTimeout: 30000,
+  }).connect();
+
+  return pool;
+}
+
+function computeRag(value: number, target: number, direction: string): number {
+  if (direction === 'Higher is better') {
+    if (value >= target) return 1;
+    if (value >= target * 0.8) return 2;
+    return 3;
+  }
+  if (value <= target) return 1;
+  if (value <= target * 1.5) return 2;
+  return 3;
+}
+
+export class KpiPipeline {
+  constructor(
+    private settings: SettingsQueries,
+    private llmService: LlmService,
+    private jiraClient: JiraRestClient,
+    private jiraProject: string = 'NT',
+    private monitor?: PipelineMonitor,
+  ) {}
+
+  private get target(): PipelineTarget {
+    const val = this.settings.get('kpi_pipeline_target');
+    return val === 'live' ? 'live' : 'uat';
+  }
+
+  private get s(): string {
+    return tableSuffix(this.target);
+  }
+
+  async collectJiraSnapshot(): Promise<void> {
+    const started = new Date();
+    let rowsAffected = 0;
+    try {
+      let p: sql.ConnectionPool;
+      try {
+        p = await getKpiPool(this.settings);
+      } catch (err) {
+        console.log(`[kpi-pipeline] ${err instanceof Error ? err.message : 'Pool error'}`);
+        throw err;
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+
+      const openResult = await this.jiraClient.jqlCount(
+        `project = ${this.jiraProject} AND resolution = EMPTY`,
+      );
+
+      const breachedResult = await this.jiraClient.searchJql(
+        `project = ${this.jiraProject} AND resolution = EMPTY AND "Time to resolution" = breached()`,
+        ['key'], 1,
+      );
+      const breachedCount = breachedResult?.total ?? 0;
+
+      const unassignedResult = await this.jiraClient.jqlCount(
+        `project = ${this.jiraProject} AND resolution = EMPTY AND assignee is EMPTY`,
+      );
+
+      const resolvedTodayResult = await this.jiraClient.jqlCount(
+        `project = ${this.jiraProject} AND resolved >= startOfDay()`,
+      );
+
+      const createdTodayResult = await this.jiraClient.jqlCount(
+        `project = ${this.jiraProject} AND created >= startOfDay()`,
+      );
+
+      const wor = await this.jiraClient.jqlCount(
+        `project = ${this.jiraProject} AND status = "Waiting on Requestor" AND resolution = EMPTY`,
+      );
+
+      const metrics: Array<{ kpi: string; group: string; count: number; target: number; direction: string }> = [
+        { kpi: 'Open Tickets', group: 'Queue', count: Math.max(openResult, 0), target: 30, direction: 'Lower is better' },
+        { kpi: 'SLA Breached', group: 'SLA', count: breachedCount, target: 0, direction: 'Lower is better' },
+        { kpi: 'Unassigned', group: 'Queue', count: Math.max(unassignedResult, 0), target: 0, direction: 'Lower is better' },
+        { kpi: 'Resolved Today', group: 'Throughput', count: Math.max(resolvedTodayResult, 0), target: 15, direction: 'Higher is better' },
+        { kpi: 'Created Today', group: 'Volume', count: Math.max(createdTodayResult, 0), target: 20, direction: 'Lower is better' },
+        { kpi: 'Waiting on Requestor', group: 'Queue', count: Math.max(wor, 0), target: 10, direction: 'Lower is better' },
+      ];
+
+      const s = this.s;
+      for (const m of metrics) {
+        const rag = computeRag(m.count, m.target, m.direction);
+        const request = p.request();
+        request.input('kpi', sql.NVarChar, m.kpi);
+        request.input('kpiGroup', sql.NVarChar, m.group);
+        request.input('count', sql.Float, m.count);
+        request.input('target', sql.Float, m.target);
+        request.input('direction', sql.NVarChar, m.direction);
+        request.input('rag', sql.Int, rag);
+        request.input('date', sql.Date, today);
+
+        await request.query(`
+          MERGE dbo.jira_kpi_daily${s} AS t
+          USING (SELECT @date AS CreatedAt, @kpi AS kpi) AS s
+          ON CAST(t.CreatedAt AS DATE) = s.CreatedAt AND t.kpi = s.kpi
+          WHEN MATCHED THEN UPDATE SET
+            kpiGroup = @kpiGroup, [count] = @count, target = @target,
+            direction = @direction, rag = @rag
+          WHEN NOT MATCHED THEN INSERT
+            (kpi, kpiGroup, [count], target, direction, rag, CreatedAt)
+          VALUES (@kpi, @kpiGroup, @count, @target, @direction, @rag, @date);
+        `);
+        rowsAffected++;
+      }
+
+      console.log(`[kpi-pipeline] Jira snapshot → ${s || 'live'}: ${metrics.length} metrics written`);
+
+      await this.monitor?.logRun({
+        pipeline_name: 'kpi-snapshot', started_at: started, completed_at: new Date(),
+        status: 'success', rows_affected: rowsAffected, error_message: null,
+        duration_ms: Date.now() - started.getTime(),
+      });
+    } catch (err) {
+      console.error('[kpi-pipeline] Jira snapshot failed:', err instanceof Error ? err.message : err);
+      await this.monitor?.logRun({
+        pipeline_name: 'kpi-snapshot', started_at: started, completed_at: new Date(),
+        status: 'error', rows_affected: rowsAffected, error_message: err instanceof Error ? err.message : String(err),
+        duration_ms: Date.now() - started.getTime(),
+      });
+    }
+  }
+
+  async snapshotAgentKpis(): Promise<void> {
+    const started = new Date();
+    let rowsAffected = 0;
+    try {
+      let p: sql.ConnectionPool;
+      try {
+        p = await getKpiPool(this.settings);
+      } catch { throw new Error('KPI SQL pool unavailable'); }
+
+      const today = new Date().toISOString().slice(0, 10);
+
+      // Always READ from the live Agent table
+      const agents = await p.request().query(`
+        SELECT AgentId, AgentName, AgentSurname, TierCode, Team,
+               OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
+               SolvedTickets_Today, SolvedTickets_ThisWeek
+        FROM dbo.Agent WHERE IsActive = 1
+      `);
+
+      if (agents.recordset.length === 0) return;
+
+      const s = this.s;
+      for (const a of agents.recordset) {
+        const request = p.request();
+        request.input('reportDate', sql.Date, today);
+        request.input('agentName', sql.NVarChar, a.AgentName);
+        request.input('tierCode', sql.NVarChar, a.TierCode || '');
+        request.input('team', sql.NVarChar, a.Team || '');
+        request.input('openTotal', sql.Int, a.OpenTickets_Total ?? 0);
+        request.input('over2h', sql.Int, a.OpenTickets_Over2Hours ?? 0);
+        request.input('noUpdate', sql.Int, a.OpenTickets_NoUpdateToday ?? 0);
+        request.input('solvedToday', sql.Int, a.SolvedTickets_Today ?? 0);
+        request.input('solvedWeek', sql.Int, a.SolvedTickets_ThisWeek ?? 0);
+
+        await request.query(`
+          MERGE dbo.jira_agent_kpi_daily${s} AS t
+          USING (SELECT @reportDate AS ReportDate, @agentName AS AgentName) AS s
+          ON t.ReportDate = s.ReportDate AND t.AgentName = s.AgentName
+          WHEN MATCHED THEN UPDATE SET
+            TierCode = @tierCode, Team = @team,
+            OpenTickets_Total = @openTotal, OpenTickets_Over2Hours = @over2h,
+            OpenTickets_NoUpdateToday = @noUpdate,
+            SolvedTickets_Today = @solvedToday, SolvedTickets_ThisWeek = @solvedWeek
+          WHEN NOT MATCHED THEN INSERT
+            (ReportDate, AgentName, TierCode, Team,
+             OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
+             SolvedTickets_Today, SolvedTickets_ThisWeek)
+          VALUES (@reportDate, @agentName, @tierCode, @team,
+                  @openTotal, @over2h, @noUpdate, @solvedToday, @solvedWeek);
+        `);
+        rowsAffected++;
+      }
+
+      console.log(`[kpi-pipeline] Agent snapshot → ${s || 'live'}: ${agents.recordset.length} agents`);
+
+      await this.monitor?.logRun({
+        pipeline_name: 'kpi-agent-snapshot', started_at: started, completed_at: new Date(),
+        status: 'success', rows_affected: rowsAffected, error_message: null,
+        duration_ms: Date.now() - started.getTime(),
+      });
+    } catch (err) {
+      console.error('[kpi-pipeline] Agent snapshot failed:', err instanceof Error ? err.message : err);
+      await this.monitor?.logRun({
+        pipeline_name: 'kpi-agent-snapshot', started_at: started, completed_at: new Date(),
+        status: 'error', rows_affected: rowsAffected, error_message: err instanceof Error ? err.message : String(err),
+        duration_ms: Date.now() - started.getTime(),
+      });
+    }
+  }
+
+  async generateDailyDigest(): Promise<DailyDigest | null> {
+    const started = new Date();
+    try {
+      let p: sql.ConnectionPool;
+      try {
+        p = await getKpiPool(this.settings);
+      } catch { return null; }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const s = this.s;
+
+      // Read from whichever target we're writing to
+      const kpiRows = await p.request().query(`
+        SELECT kpi, kpiGroup, [count], target, direction, rag
+        FROM dbo.jira_kpi_daily${s}
+        WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+        ORDER BY kpiGroup, kpi
+      `);
+      const kpiData = kpiRows.recordset.map((r: any) =>
+        `${r.kpi} (${r.kpiGroup}): ${r.count} (target: ${r.target}, ${r.direction}, RAG: ${r.rag === 1 ? 'Green' : r.rag === 2 ? 'Amber' : 'Red'})`
+      ).join('\n') || 'No KPI data for today';
+
+      const agentRows = await p.request().query(`
+        SELECT AgentName, TierCode, Team,
+               OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
+               SolvedTickets_Today, SolvedTickets_ThisWeek
+        FROM dbo.jira_agent_kpi_daily${s}
+        WHERE ReportDate = CAST(GETDATE() AS DATE)
+        ORDER BY AgentName
+      `);
+      const agentData = agentRows.recordset.map((a: any) =>
+        `${a.AgentName} (${a.TierCode}/${a.Team}): ${a.OpenTickets_Total} open, ${a.SolvedTickets_Today} solved today, ${a.OpenTickets_Over2Hours} >2h, ${a.OpenTickets_NoUpdateToday} no update`
+      ).join('\n') || 'No agent data for today';
+
+      const prompt = loadPrompt('kpi-daily-digest', {
+        date: today,
+        kpi_data: kpiData,
+        agent_data: agentData,
+        queue_health: kpiData,
+      });
+
+      const result = await this.llmService.call<DailyDigest>(
+        prompt,
+        'Generate the daily KPI digest for today.',
+        DailyDigestSchema,
+        { tier: 'reasoning', temperature: 0.3, callType: 'kpi_daily_digest' },
+      );
+
+      if (result.data) {
+        await this.saveDigest(p, 'daily', result.data.narrative, this.formatDigestHtml(result.data));
+      }
+
+      console.log(`[kpi-pipeline] Daily digest generated → ${s || 'live'}`);
+
+      await this.monitor?.logRun({
+        pipeline_name: 'kpi-daily-digest', started_at: started, completed_at: new Date(),
+        status: 'success', rows_affected: 1, error_message: null,
+        duration_ms: Date.now() - started.getTime(),
+      });
+      return result.data;
+    } catch (err) {
+      console.error('[kpi-pipeline] Daily digest failed:', err instanceof Error ? err.message : err);
+      await this.monitor?.logRun({
+        pipeline_name: 'kpi-daily-digest', started_at: started, completed_at: new Date(),
+        status: 'error', rows_affected: 0, error_message: err instanceof Error ? err.message : String(err),
+        duration_ms: Date.now() - started.getTime(),
+      });
+      return null;
+    }
+  }
+
+  async generateWeeklyDigest(): Promise<WeeklyDigest | null> {
+    const started = new Date();
+    try {
+      let p: sql.ConnectionPool;
+      try {
+        p = await getKpiPool(this.settings);
+      } catch { return null; }
+
+      const s = this.s;
+
+      const currentKpis = await p.request().query(`
+        SELECT kpi, kpiGroup, AVG([count]) as avg_count, MAX(target) as target, MAX(direction) as direction
+        FROM dbo.jira_kpi_daily${s}
+        WHERE CreatedAt >= DATEADD(day, -7, GETDATE())
+        GROUP BY kpi, kpiGroup ORDER BY kpiGroup, kpi
+      `);
+
+      const previousKpis = await p.request().query(`
+        SELECT kpi, kpiGroup, AVG([count]) as avg_count
+        FROM dbo.jira_kpi_daily${s}
+        WHERE CreatedAt >= DATEADD(day, -14, GETDATE()) AND CreatedAt < DATEADD(day, -7, GETDATE())
+        GROUP BY kpi, kpiGroup ORDER BY kpiGroup, kpi
+      `);
+
+      const agentSummary = await p.request().query(`
+        SELECT AgentName,
+               AVG(CAST(OpenTickets_Total AS FLOAT)) as avg_open,
+               SUM(SolvedTickets_Today) as total_solved,
+               AVG(CAST(OpenTickets_Over2Hours AS FLOAT)) as avg_over2h
+        FROM dbo.jira_agent_kpi_daily${s}
+        WHERE ReportDate >= DATEADD(day, -7, GETDATE())
+        GROUP BY AgentName ORDER BY total_solved DESC
+      `);
+
+      const endDate = new Date().toISOString().slice(0, 10);
+      const startDate = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+
+      const currentText = currentKpis.recordset.map((r: any) =>
+        `${r.kpi}: avg ${Math.round(r.avg_count * 10) / 10} (target: ${r.target}, ${r.direction})`
+      ).join('\n') || 'No data';
+
+      const previousText = previousKpis.recordset.map((r: any) =>
+        `${r.kpi}: avg ${Math.round(r.avg_count * 10) / 10}`
+      ).join('\n') || 'No data';
+
+      const agentText = agentSummary.recordset.map((a: any) =>
+        `${a.AgentName}: ${a.total_solved} solved, avg ${Math.round(a.avg_open)} open, avg ${Math.round(a.avg_over2h * 10) / 10} >2h`
+      ).join('\n') || 'No data';
+
+      const prompt = loadPrompt('kpi-weekly-digest', {
+        period: `${startDate} to ${endDate}`,
+        current_kpis: currentText,
+        previous_kpis: previousText,
+        agent_summary: agentText,
+        classification_trends: 'See ticket classification service for detailed trends',
+      });
+
+      const result = await this.llmService.call<WeeklyDigest>(
+        prompt,
+        'Generate the weekly KPI digest.',
+        WeeklyDigestSchema,
+        { tier: 'reasoning', temperature: 0.3, callType: 'kpi_weekly_digest' },
+      );
+
+      if (result.data) {
+        await this.saveDigest(p, 'weekly', result.data.narrative, this.formatWeeklyHtml(result.data));
+      }
+
+      console.log(`[kpi-pipeline] Weekly digest generated → ${s || 'live'}`);
+
+      await this.monitor?.logRun({
+        pipeline_name: 'kpi-weekly-digest', started_at: started, completed_at: new Date(),
+        status: 'success', rows_affected: 1, error_message: null,
+        duration_ms: Date.now() - started.getTime(),
+      });
+      return result.data;
+    } catch (err) {
+      console.error('[kpi-pipeline] Weekly digest failed:', err instanceof Error ? err.message : err);
+      await this.monitor?.logRun({
+        pipeline_name: 'kpi-weekly-digest', started_at: started, completed_at: new Date(),
+        status: 'error', rows_affected: 0, error_message: err instanceof Error ? err.message : String(err),
+        duration_ms: Date.now() - started.getTime(),
+      });
+      return null;
+    }
+  }
+
+  async getLatestDigest(period: 'daily' | 'weekly'): Promise<any | null> {
+    try {
+      const p = await getKpiPool(this.settings);
+      const s = this.s;
+      const request = p.request();
+      request.input('period', sql.NVarChar, period);
+      const result = await request.query(`
+        SELECT TOP 1 period, summary, html, CreatedAt
+        FROM dbo.jira_kpi_digest${s}
+        WHERE period = @period
+        ORDER BY CreatedAt DESC
+      `);
+      return result.recordset[0] ?? null;
+    } catch { return null; }
+  }
+
+  private async saveDigest(p: sql.ConnectionPool, period: string, summary: string, html: string): Promise<void> {
+    const s = this.s;
+    const request = p.request();
+    request.input('period', sql.NVarChar, period);
+    request.input('summary', sql.NVarChar, summary.slice(0, 4000));
+    request.input('html', sql.NVarChar, html.slice(0, 8000));
+    await request.query(`
+      INSERT INTO dbo.jira_kpi_digest${s} (period, summary, html, CreatedAt)
+      VALUES (@period, @summary, @html, GETUTCDATE())
+    `);
+  }
+
+  private formatDigestHtml(d: DailyDigest): string {
+    const bullets = d.kpi_summary.map(b => `<li>${b}</li>`).join('');
+    const concerns = d.concerns.length > 0
+      ? `<h3>Concerns</h3><ul>${d.concerns.map(c => `<li>${c}</li>`).join('')}</ul>`
+      : '';
+    const actions = d.actions.length > 0
+      ? `<h3>Recommended Actions</h3><ul>${d.actions.map(a => `<li>${a}</li>`).join('')}</ul>`
+      : '';
+    return `<h2>${d.headline}</h2><ul>${bullets}</ul><p><strong>Agents:</strong> ${d.agent_highlights}</p>${concerns}${actions}<p><em>${d.narrative}</em></p>`;
+  }
+
+  private formatWeeklyHtml(d: WeeklyDigest): string {
+    const wowRows = d.week_over_week.map(w =>
+      `<tr><td>${w.kpi}</td><td>${w.this_week}</td><td>${w.last_week}</td><td>${w.change_pct > 0 ? '+' : ''}${w.change_pct}%</td></tr>`
+    ).join('');
+    const wins = d.wins.map(w => `<li>${w}</li>`).join('');
+    const risks = d.risks.map(r => `<li>${r}</li>`).join('');
+    const recs = d.recommendations.map(r => `<li>${r}</li>`).join('');
+    return `<h2>${d.headline}</h2><table><tr><th>KPI</th><th>This Week</th><th>Last Week</th><th>Change</th></tr>${wowRows}</table><h3>Wins</h3><ul>${wins}</ul><h3>Risks</h3><ul>${risks}</ul><h3>Recommendations</h3><ul>${recs}</ul><p><em>${d.narrative}</em></p>`;
+  }
+}

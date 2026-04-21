@@ -69,6 +69,7 @@ import { CalyxPortal } from './components/CalyxPortal.js';
 import { AgentDashboardView } from './components/AgentDashboardView.js';
 import { AgentWorkspaceView } from './components/AgentWorkspaceView.js';
 import { AgentCoachingView } from './components/AgentCoachingView.js';
+import { AgentPipelinesView } from './components/AgentPipelinesView.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -92,7 +93,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
   | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-tickets' | 'calyx-kb' | 'calyx-improvements' | 'calyx-settings' | 'calyx-problems' | 'calyx-changes' | 'calyx-major-incidents' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
-  | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching'
+  | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-pipelines'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -263,6 +264,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'agent-workspace', label: 'Workspace' },
       { view: 'agent-dashboard', label: 'Dashboard' },
       { view: 'agent-coaching', label: 'Coaching' },
+      { view: 'agent-pipelines', label: 'Pipelines' },
     ],
   },
 };
@@ -1203,6 +1205,9 @@ export function App() {
           )}
           {view === 'agent-coaching' && canSeeArea('ai-agent') && (
             <AgentCoachingView />
+          )}
+          {view === 'agent-pipelines' && canSeeArea('ai-agent') && (
+            <AgentPipelinesView />
           )}
 
           {/* Administration */}

@@ -10,6 +10,9 @@ import type { AgentAvailabilityService, AvailabilityStatus } from '../services/a
 import type { TicketClassifier } from '../services/ticket-classifier.js';
 import type { BriefEngine } from '../services/brief-engine.js';
 import type { CoachingEngine } from '../services/coach.js';
+import type { KpiPipeline } from '../services/kpi-pipeline.js';
+import type { QaPipeline } from '../services/qa-pipeline.js';
+import type { PipelineMonitor } from '../services/pipeline-monitor.js';
 
 interface AgentRouteDeps {
   agentLoop: AgentLoop;
@@ -18,6 +21,9 @@ interface AgentRouteDeps {
   ticketClassifier: TicketClassifier;
   briefEngine: BriefEngine;
   coachingEngine: CoachingEngine;
+  kpiPipeline: KpiPipeline;
+  qaPipeline: QaPipeline;
+  pipelineMonitor: PipelineMonitor;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
@@ -1347,6 +1353,144 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get capacity' });
+    }
+  });
+
+  // ── KPI Pipeline (WP-16) ──
+
+  router.post('/kpi/snapshot', async (_req, res) => {
+    try {
+      const kpi = deps?.kpiPipeline;
+      if (!kpi) { res.status(503).json({ ok: false, error: 'KPI pipeline not available' }); return; }
+      const result = await kpi.collectJiraSnapshot();
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'KPI snapshot failed' });
+    }
+  });
+
+  router.post('/kpi/agent-snapshot', async (_req, res) => {
+    try {
+      const kpi = deps?.kpiPipeline;
+      if (!kpi) { res.status(503).json({ ok: false, error: 'KPI pipeline not available' }); return; }
+      const result = await kpi.snapshotAgentKpis();
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Agent KPI snapshot failed' });
+    }
+  });
+
+  router.post('/kpi/daily-digest', async (_req, res) => {
+    try {
+      const kpi = deps?.kpiPipeline;
+      if (!kpi) { res.status(503).json({ ok: false, error: 'KPI pipeline not available' }); return; }
+      const digest = await kpi.generateDailyDigest();
+      res.json({ ok: true, data: digest });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Daily digest failed' });
+    }
+  });
+
+  router.post('/kpi/weekly-digest', async (_req, res) => {
+    try {
+      const kpi = deps?.kpiPipeline;
+      if (!kpi) { res.status(503).json({ ok: false, error: 'KPI pipeline not available' }); return; }
+      const digest = await kpi.generateWeeklyDigest();
+      res.json({ ok: true, data: digest });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Weekly digest failed' });
+    }
+  });
+
+  router.get('/kpi/digest/:period', async (req, res) => {
+    try {
+      const kpi = deps?.kpiPipeline;
+      if (!kpi) { res.status(503).json({ ok: false, error: 'KPI pipeline not available' }); return; }
+      const period = req.params.period as 'daily' | 'weekly';
+      if (period !== 'daily' && period !== 'weekly') {
+        res.status(400).json({ ok: false, error: 'period must be daily or weekly' });
+        return;
+      }
+      const digest = await kpi.getLatestDigest(period);
+      res.json({ ok: true, data: digest });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get digest' });
+    }
+  });
+
+  // ── QA Pipeline (WP-17) ──
+
+  router.post('/qa/score-resolved', async (req, res) => {
+    try {
+      const qa = deps?.qaPipeline;
+      if (!qa) { res.status(503).json({ ok: false, error: 'QA pipeline not available' }); return; }
+      const hours = parseInt(req.query.hours as string, 10) || 24;
+      const results = await qa.scoreRecentlyResolved(hours);
+      res.json({ ok: true, data: { scored: results.length, results } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'QA scoring failed' });
+    }
+  });
+
+  router.get('/qa/results', async (req, res) => {
+    try {
+      const qa = deps?.qaPipeline;
+      if (!qa) { res.status(503).json({ ok: false, error: 'QA pipeline not available' }); return; }
+      const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+      const results = await qa.getQaResults(limit);
+      res.json({ ok: true, data: results });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get QA results' });
+    }
+  });
+
+  // ── Pipeline Monitoring ──
+
+  router.get('/pipeline/stats', async (_req, res) => {
+    try {
+      const mon = deps?.pipelineMonitor;
+      if (!mon) { res.status(503).json({ ok: false, error: 'Pipeline monitor not available' }); return; }
+      const stats = await mon.getStats();
+      res.json({ ok: true, data: stats });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get pipeline stats' });
+    }
+  });
+
+  router.get('/pipeline/runs', async (req, res) => {
+    try {
+      const mon = deps?.pipelineMonitor;
+      if (!mon) { res.status(503).json({ ok: false, error: 'Pipeline monitor not available' }); return; }
+      const pipeline = req.query.pipeline as string | undefined;
+      const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+      const runs = await mon.getRunHistory(pipeline, limit);
+      res.json({ ok: true, data: runs });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get pipeline runs' });
+    }
+  });
+
+  router.get('/pipeline/compare/:pipeline', async (req, res) => {
+    try {
+      const mon = deps?.pipelineMonitor;
+      if (!mon) { res.status(503).json({ ok: false, error: 'Pipeline monitor not available' }); return; }
+      const pipeline = req.params.pipeline;
+      const days = Math.min(parseInt(req.query.days as string, 10) || 7, 30);
+      const comparison = await mon.compare(pipeline, days);
+      res.json({ ok: true, data: comparison });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Comparison failed' });
+    }
+  });
+
+  router.post('/pipeline/truncate-uat', async (_req, res) => {
+    try {
+      const mon = deps?.pipelineMonitor;
+      if (!mon) { res.status(503).json({ ok: false, error: 'Pipeline monitor not available' }); return; }
+      const result = await mon.truncateUatTables();
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Truncate failed' });
     }
   });
 

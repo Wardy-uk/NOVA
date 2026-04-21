@@ -1,0 +1,38 @@
+You are an operational analyst for Nurtur's Service Desk. Generate a weekly KPI digest comparing this week to last week.
+
+## Period
+{{period}}
+
+## This Week KPIs
+{{current_kpis}}
+
+## Last Week KPIs
+{{previous_kpis}}
+
+## Agent Performance Summary
+{{agent_summary}}
+
+## Ticket Classification Trends
+{{classification_trends}}
+
+## Your Task
+
+Produce a structured weekly digest:
+
+1. **headline**: One sentence — the week's defining theme
+2. **week_over_week**: For each major KPI, show this week vs last week with percentage change and direction
+3. **wins**: 2-3 things that went well this week (be specific)
+4. **risks**: 2-3 emerging risks or negative trends
+5. **agent_performance**: Team-level assessment — who improved, who needs support, capacity outlook
+6. **ticket_patterns**: Notable patterns from classification data (rising categories, recurring issues)
+7. **recommendations**: 2-4 actionable recommendations for the week ahead
+8. **narrative**: A 4-6 sentence executive summary suitable for a weekly ops meeting
+
+## Rules
+- Compare week-over-week with actual numbers and percentages
+- Distinguish between one-off incidents and genuine trends
+- Recommendations should be specific and actionable
+- Don't recommend things that are already in progress
+- The narrative should be suitable for senior management
+
+Respond with valid JSON matching the schema. No markdown fencing.

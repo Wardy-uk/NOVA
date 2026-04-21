@@ -87,6 +87,9 @@ import { TicketClassifier } from './services/ticket-classifier.js';
 import { BriefEngine } from './services/brief-engine.js';
 import { CoachingEngine } from './services/coach.js';
 import { KbSearchService } from './services/kb-search.js';
+import { KpiPipeline } from './services/kpi-pipeline.js';
+import { QaPipeline } from './services/qa-pipeline.js';
+import { PipelineMonitor } from './services/pipeline-monitor.js';
 import { createApprovalRoutes } from './routes/approvals.js';
 import { createTrainingRoutes } from './routes/training.js';
 import { sendTrainingReminders } from './services/training-reminder.js';
@@ -680,13 +683,48 @@ async function main() {
     const briefEngine = new BriefEngine(llmService, agentJiraClient, agentKbSearch, 'NT');
     const coachingEngine = new CoachingEngine(llmService, agentJiraClient, 'NT');
 
+    const pipelineMonitor = new PipelineMonitor(settingsQueries);
+    pipelineMonitor.ensureRunsTable().catch(e => console.warn('[pipeline-monitor] ensureRunsTable failed:', e.message));
+    pipelineMonitor.ensureUatTables().then(() =>
+      pipelineMonitor.truncateUatTables()
+    ).catch(e => console.warn('[pipeline-monitor] UAT table setup failed:', e.message));
+
+    const kpiPipeline = new KpiPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
+    const qaPipeline = new QaPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
+
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,
       availabilityService,
       ticketClassifier,
       briefEngine,
       coachingEngine,
+      kpiPipeline,
+      qaPipeline,
+      pipelineMonitor,
     }));
+
+    // KPI pipeline timers
+    setInterval(() => kpiPipeline.collectJiraSnapshot().catch(e => console.warn('[kpi-pipeline] snapshot failed:', e.message)), 10 * 60 * 1000);
+    setInterval(() => kpiPipeline.snapshotAgentKpis().catch(e => console.warn('[kpi-pipeline] agent snapshot failed:', e.message)), 30 * 60 * 1000);
+    setTimeout(() => kpiPipeline.collectJiraSnapshot().catch(() => {}), 30_000);
+
+    // Daily digest at 17:30, weekly digest Monday 09:00
+    setInterval(() => {
+      const now = new Date();
+      if (now.getHours() === 17 && now.getMinutes() >= 30 && now.getMinutes() < 40) {
+        kpiPipeline.generateDailyDigest().catch(e => console.warn('[kpi-pipeline] daily digest failed:', e.message));
+      }
+      if (now.getDay() === 1 && now.getHours() === 9 && now.getMinutes() < 10) {
+        kpiPipeline.generateWeeklyDigest().catch(e => console.warn('[kpi-pipeline] weekly digest failed:', e.message));
+      }
+    }, 10 * 60 * 1000);
+
+    // QA pipeline — score resolved tickets every 2 hours
+    setInterval(() => qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] scoring failed:', e.message)), 2 * 60 * 60 * 1000);
+    setTimeout(() => qaPipeline.scoreRecentlyResolved(24).catch(() => {}), 60_000);
+
+    // Pipeline health check — every 15 min
+    setInterval(() => pipelineMonitor.checkStaleRuns().catch(() => {}), 15 * 60 * 1000);
 
     if (settingsQueries.get('agent_enabled') === 'true') {
       agentLoop.start();
