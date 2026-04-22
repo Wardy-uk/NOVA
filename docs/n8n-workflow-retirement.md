@@ -68,4 +68,17 @@ These 5 workflows were already replaced by WP-06 (agent comment handler) and WP-
 
 ---
 
-*Updated: 21 April 2026*
+## WP-22: Operational Workflows — Mixed
+
+| n8n Workflow | ID | Status | NOVA Replacement |
+|---|---|---|---|
+| Product Cancellation — Trigger | `g-8bd5DQq9NsNNRibD2hH` | Absorbed | `product-cancellation.ts` — polls D365 every 4h, creates Jira tickets |
+| Jira Abuse Report Processor | `YSg6n6qs3JKCFO5N` | Absorbed | `abuse-report-processor.ts` — webhook at `/api/public/webhooks/abuse-report` |
+| Call Reviews | `oaEFAZPlQ2Goanc3` | Absorbed | `call-reviews.ts` — Whisper transcription + LLM scoring + Teams notification |
+| Back Date Auto2020 | `soHFXArsi1G_bT6aJecXm` | **Keep in n8n** | Touches 11 SQL Server instances with a multi-step form. Too many external dependencies to safely absorb into NOVA. |
+
+**Action:** Disable Product Cancellation, Abuse Report, and Call Reviews workflows once NOVA services confirmed in production. Keep Back Date Auto2020 in n8n indefinitely.
+
+---
+
+*Updated: 22 April 2026*

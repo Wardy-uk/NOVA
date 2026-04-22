@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { TeamAvailabilityWidget } from './TeamAvailabilityWidget.js';
 
 // ── Types ──
 
@@ -425,6 +426,9 @@ function OverviewTab({ status, stats, decisions, onSelect }: {
           </div>
         </div>
       )}
+
+      {/* Team availability (WP-12) */}
+      <TeamAvailabilityWidget />
 
       {/* Recent decisions (mini feed) */}
       <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-hidden">
