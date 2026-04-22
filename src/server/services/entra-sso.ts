@@ -2,14 +2,11 @@ import { ConfidentialClientApplication } from '@azure/msal-node';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
 const SSO_SCOPES = ['openid', 'profile', 'email', 'User.Read', 'GroupMember.Read.All'];
 
-// File-backed PKCE + state store — survives process restarts, unlike an in-memory Map.
-// Previously lost state on every NSSM restart, causing "Invalid or expired SSO state".
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../../../');
+// File-backed PKCE + state store — survives process restarts and builds.
+const DATA_DIR = process.env.DATA_DIR || process.cwd();
 const PENDING_FILE = path.join(DATA_DIR, 'sso-pending.json');
 const EXPIRY_MS = 10 * 60 * 1000;
 

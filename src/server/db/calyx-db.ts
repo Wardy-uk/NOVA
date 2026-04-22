@@ -42,7 +42,7 @@ let db: Database.Database | null = null;
 export function getCalyxDb(): Database.Database {
   if (db) return db;
 
-  const dbPath = process.env.CALYX_DB_PATH ?? path.resolve(__dirname, '../../../calyx.db');
+  const dbPath = process.env.CALYX_DB_PATH ?? path.join(process.cwd(), 'calyx.db');
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
