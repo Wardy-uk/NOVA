@@ -228,7 +228,7 @@ export function createDevReviewRoutes(
           s === 'pending' ? 0 : s === 'in_review' ? 1 : s === 'returned' ? 2 : 3;
         const diff = rank(a.state?.status) - rank(b.state?.status);
         if (diff !== 0) return diff;
-        return (b.state?.last_action_at || '').localeCompare(a.state?.last_action_at || '');
+        return new Date(b.state?.last_action_at || 0).getTime() - new Date(a.state?.last_action_at || 0).getTime();
       });
 
       res.json({
