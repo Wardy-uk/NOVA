@@ -563,11 +563,14 @@ export class DevReviewQueries {
 
     // ── Per developer ────────────────────────────────────────────────────
     // Currently claimed (pulled from dev_review_state)
-    const claimedRows = await this.rows<{ user_id: number; cnt: number }>(
-      `SELECT claimed_by_user_id AS user_id, COUNT(*) AS cnt
-       FROM dev_review_state
-       WHERE claimed_by_user_id IS NOT NULL AND status NOT IN ('archived','accepted','returned')
-       GROUP BY claimed_by_user_id`,
+    const claimedRows = await this.rows<{ user_id: number; display: string | null; cnt: number }>(
+      `SELECT s.claimed_by_user_id AS user_id,
+              COALESCE(u.display_name, u.username) AS display,
+              COUNT(*) AS cnt
+       FROM dev_review_state s
+       LEFT JOIN users u ON u.id = s.claimed_by_user_id
+       WHERE s.claimed_by_user_id IS NOT NULL AND s.status NOT IN ('archived','accepted','returned')
+       GROUP BY s.claimed_by_user_id, u.display_name, u.username`,
     );
     // Accept/return counts come from the thread table (which records who took the action)
     const threadCounts = await this.rows<{
@@ -616,7 +619,7 @@ export class DevReviewQueries {
     }
     for (const c of claimedRows) {
       const existing = perDevMap.get(c.user_id) || {
-        user_id: c.user_id, display: `User #${c.user_id}`,
+        user_id: c.user_id, display: c.display || `User #${c.user_id}`,
         claimed_now: 0,
         accepted_today: 0, returned_today: 0,
         accepted_week: 0, returned_week: 0,
