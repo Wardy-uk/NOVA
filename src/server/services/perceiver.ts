@@ -86,8 +86,15 @@ export class Perceiver {
     return this.lastOpenIssues;
   }
 
+  private buildProjectFilter(): string {
+    const raw = this.settings.get('agent_jira_project') ?? 'NT';
+    const projects = raw.split(',').map(p => p.trim()).filter(Boolean);
+    if (projects.length === 1) return `project = ${projects[0]}`;
+    return `project IN (${projects.join(', ')})`;
+  }
+
   async perceive(): Promise<QueuePerception> {
-    const project = this.settings.get('agent_jira_project') ?? 'NT';
+    const projectFilter = this.buildProjectFilter();
     const now = new Date();
     const since = this.lastTickAt ?? new Date(now.getTime() - 5 * 60 * 1000);
 
@@ -95,17 +102,17 @@ export class Perceiver {
 
     const [openResult, newResult, updatedResult] = await Promise.all([
       this.jiraClient.searchJqlAll(
-        `project = ${project} AND resolution = EMPTY ORDER BY created DESC`,
+        `${projectFilter} AND resolution = EMPTY ORDER BY created DESC`,
         DEFAULT_FIELDS,
         200,
       ),
       this.jiraClient.searchJqlAll(
-        `project = ${project} AND created >= "${formatJqlDate(since)}" ORDER BY created DESC`,
+        `${projectFilter} AND created >= "${formatJqlDate(since)}" ORDER BY created DESC`,
         DEFAULT_FIELDS,
         50,
       ),
       this.jiraClient.searchJqlAll(
-        `project = ${project} AND resolution = EMPTY AND updated >= "${formatJqlDate(since)}" AND created < "${formatJqlDate(since)}" ORDER BY updated DESC`,
+        `${projectFilter} AND resolution = EMPTY AND updated >= "${formatJqlDate(since)}" AND created < "${formatJqlDate(since)}" ORDER BY updated DESC`,
         DEFAULT_FIELDS,
         50,
       ),

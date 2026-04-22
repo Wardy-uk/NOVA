@@ -34,6 +34,9 @@ export class Actor {
         case 'escalate':
           return await this.escalate(decision);
 
+        case 'bug_redirect':
+          return await this.bugRedirect(decision);
+
         default:
           return { success: false, action: decision.action, ticketKey: decision.ticketKey, detail: `Unhandled action: ${decision.action}` };
       }
@@ -96,5 +99,41 @@ export class Actor {
     const briefText = `[AI Agent Escalation]\n\nTicket: ${decision.ticketKey}\nConfidence: ${decision.confidence}\nReasoning: ${decision.reasoning}`;
     await this.jiraClient.addComment(decision.ticketKey, briefText, { internal: true });
     return { success: true, action: 'escalate', ticketKey: decision.ticketKey, detail: 'Escalation brief posted as internal comment.' };
+  }
+
+  private async bugRedirect(decision: AgentDecision): Promise<ActionResult> {
+    const targetProject = (decision.output.targetProject as string) ?? 'NT';
+    const summary = `[Bug from ${decision.ticketKey}] ${decision.inputs.summary ?? 'Bug report'}`;
+    const description = (decision.output.bugDescription as string) ?? decision.reasoning;
+
+    const created = await this.jiraClient.createIssue({
+      fields: {
+        project: { key: targetProject },
+        summary,
+        description,
+        issuetype: { name: 'Bug' },
+      },
+    });
+
+    if (created?.key) {
+      await this.jiraClient.addComment(decision.ticketKey,
+        `Bug ticket created: ${created.key}\n\nThis issue has been redirected to the ${targetProject} project for developer attention.`,
+        { internal: true },
+      );
+      try {
+        await this.jiraClient.createIssueLink({
+          type: { name: 'Blocks' },
+          inwardIssue: { key: decision.ticketKey },
+          outwardIssue: { key: created.key },
+        });
+      } catch { /* linking is best-effort */ }
+    }
+
+    return {
+      success: true,
+      action: 'bug_redirect',
+      ticketKey: decision.ticketKey,
+      detail: `Created ${created?.key ?? 'unknown'} in ${targetProject} and linked.`,
+    };
   }
 }

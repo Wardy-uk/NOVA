@@ -11,7 +11,8 @@ export type AgentAction =
   | 'transition'
   | 'comment'
   | 'update_fields'
-  | 'alert';
+  | 'alert'
+  | 'bug_redirect';
 
 export interface CommentSnapshot {
   author: string;

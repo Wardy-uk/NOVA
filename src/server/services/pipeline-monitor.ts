@@ -376,6 +376,147 @@ export class PipelineMonitor {
     }
   }
 
+  private static readonly TABLE_KEYS: Record<string, { keyColumns: string[]; dateColumn: string; compareColumns: string[] }> = {
+    'jira_kpi_daily': {
+      keyColumns: ['kpi', 'CreatedAt'],
+      dateColumn: 'CreatedAt',
+      compareColumns: ['kpiGroup', 'count', 'target', 'direction', 'rag'],
+    },
+    'jira_agent_kpi_daily': {
+      keyColumns: ['AgentName', 'ReportDate'],
+      dateColumn: 'ReportDate',
+      compareColumns: ['TierCode', 'Team', 'OpenTickets_Total', 'OpenTickets_Over2Hours', 'OpenTickets_NoUpdateToday', 'SolvedTickets_Today', 'SolvedTickets_ThisWeek'],
+    },
+    'KpiSnapshot': {
+      keyColumns: ['KPI', 'CreatedAt'],
+      dateColumn: 'CreatedAt',
+      compareColumns: ['KPIGroup', 'Value', 'Target', 'Direction', 'RAG'],
+    },
+    'jira_qa_results': {
+      keyColumns: ['issueKey'],
+      dateColumn: 'CreatedAt',
+      compareColumns: ['assigneeName', 'overallScore', 'accuracyScore', 'clarityScore', 'toneScore', 'grade', 'isConcerning', 'severity', 'category'],
+    },
+    'Jira_QA_GoldenRules': {
+      keyColumns: ['IssueKey'],
+      dateColumn: 'CreatedAt',
+      compareColumns: ['OverallScore', 'Rule1Score', 'Rule2Score', 'Rule3Score', 'rule1Pass', 'rule2Pass', 'rule3Pass', 'Assignee'],
+    },
+    'jira_kpi_digest': {
+      keyColumns: ['period', 'CreatedAt'],
+      dateColumn: 'CreatedAt',
+      compareColumns: ['summary'],
+    },
+  };
+
+  async compareTable(tableName: string, days: number = 7): Promise<any> {
+    const config = PipelineMonitor.TABLE_KEYS[tableName];
+    if (!config) {
+      return { error: `Unknown table: ${tableName}. Valid: ${Object.keys(PipelineMonitor.TABLE_KEYS).join(', ')}` };
+    }
+
+    try {
+      const p = await getKpiPool(this.settings);
+      const allCols = [...config.keyColumns, ...config.compareColumns];
+      const colList = allCols.map(c => c === 'count' ? '[count]' : c).join(', ');
+      const dateCol = config.dateColumn;
+
+      const liveResult = await p.request().input('days', sql.Int, days).query(
+        `SELECT ${colList} FROM dbo.${tableName} WHERE ${dateCol} >= DATEADD(day, -@days, GETDATE()) ORDER BY ${dateCol} DESC`
+      );
+      const uatResult = await p.request().input('days', sql.Int, days).query(
+        `SELECT ${colList} FROM dbo.${tableName}UAT WHERE ${dateCol} >= DATEADD(day, -@days, GETDATE()) ORDER BY ${dateCol} DESC`
+      );
+
+      const liveRows = liveResult.recordset;
+      const uatRows = uatResult.recordset;
+
+      const makeKey = (row: any) => config.keyColumns.map(k => {
+        const val = row[k];
+        if (val instanceof Date) return val.toISOString().slice(0, 10);
+        return String(val ?? '');
+      }).join('|');
+
+      const liveMap = new Map<string, any>();
+      for (const r of liveRows) liveMap.set(makeKey(r), r);
+
+      const uatMap = new Map<string, any>();
+      for (const r of uatRows) uatMap.set(makeKey(r), r);
+
+      const onlyInLive: string[] = [];
+      const onlyInUat: string[] = [];
+      const valueDiffs: any[] = [];
+      const sampleDiffs: any[] = [];
+      const columnDriftMap: Record<string, { match: number; diff: number }> = {};
+      for (const col of config.compareColumns) columnDriftMap[col] = { match: 0, diff: 0 };
+
+      let matchedRows = 0;
+
+      for (const [key, uatRow] of uatMap) {
+        const liveRow = liveMap.get(key);
+        if (!liveRow) {
+          onlyInUat.push(key);
+          continue;
+        }
+
+        let rowMatches = true;
+        for (const col of config.compareColumns) {
+          const liveVal = liveRow[col === 'count' ? 'count' : col];
+          const uatVal = uatRow[col === 'count' ? 'count' : col];
+          const liveStr = String(liveVal ?? '');
+          const uatStr = String(uatVal ?? '');
+
+          if (liveStr === uatStr) {
+            columnDriftMap[col].match++;
+          } else {
+            columnDriftMap[col].diff++;
+            rowMatches = false;
+            if (sampleDiffs.length < 100) {
+              const numLive = parseFloat(liveStr);
+              const numUat = parseFloat(uatStr);
+              const delta = (!isNaN(numLive) && !isNaN(numUat)) ? Math.round((numUat - numLive) * 100) / 100 : null;
+              sampleDiffs.push({ key, column: col, liveValue: liveVal, uatValue: uatVal, delta });
+            }
+          }
+        }
+        if (rowMatches) matchedRows++;
+        else valueDiffs.push(key);
+        liveMap.delete(key);
+      }
+
+      for (const key of liveMap.keys()) onlyInLive.push(key);
+
+      const totalComparable = matchedRows + valueDiffs.length;
+      const matchPct = totalComparable > 0 ? Math.round(matchedRows / totalComparable * 1000) / 10 : 100;
+
+      const columnDrift = config.compareColumns.map(col => ({
+        column: col,
+        matchCount: columnDriftMap[col].match,
+        diffCount: columnDriftMap[col].diff,
+        driftPct: (columnDriftMap[col].match + columnDriftMap[col].diff) > 0
+          ? Math.round(columnDriftMap[col].diff / (columnDriftMap[col].match + columnDriftMap[col].diff) * 1000) / 10
+          : 0,
+      }));
+
+      return {
+        table: tableName,
+        days,
+        liveRowCount: liveRows.length,
+        uatRowCount: uatRows.length,
+        matchedRows,
+        matchPct,
+        onlyInLive,
+        onlyInUat,
+        valueDiffs,
+        columnDrift,
+        sampleDiffs,
+        fetchedAt: new Date().toISOString(),
+      };
+    } catch (err) {
+      return { table: tableName, error: err instanceof Error ? err.message : 'Comparison failed' };
+    }
+  }
+
   private async sendTeamsAlert(pipeline: string, message: string): Promise<void> {
     const webhookUrl = this.settings.get('teams_webhook_url');
     if (!webhookUrl) {

@@ -39,7 +39,7 @@ import { SalesQueries } from './db/sales-queries.js';
 import { createSalesHotboxRoutes } from './routes/sales-hotbox.js';
 import { JiraRestClient } from './services/jira-client.js';
 import { OnboardingOrchestrator } from './services/onboarding-orchestrator.js';
-import { authMiddleware, createAreaAccessGuard } from './middleware/auth.js';
+import { authMiddleware, createAreaAccessGuard, requireRole } from './middleware/auth.js';
 import type { CustomRole } from './middleware/auth.js';
 import { isAdmin } from './utils/role-helpers.js';
 import crypto from 'crypto';
@@ -90,6 +90,11 @@ import { KbSearchService } from './services/kb-search.js';
 import { KpiPipeline } from './services/kpi-pipeline.js';
 import { QaPipeline } from './services/qa-pipeline.js';
 import { PipelineMonitor } from './services/pipeline-monitor.js';
+import { ConfigService } from './services/config-service.js';
+import { CalendarSyncService } from './services/calendar-sync.js';
+import { ProductCancellationService } from './services/product-cancellation.js';
+import { AbuseReportProcessor } from './services/abuse-report-processor.js';
+import { CallReviewService } from './services/call-reviews.js';
 import { createApprovalRoutes } from './routes/approvals.js';
 import { createTrainingRoutes } from './routes/training.js';
 import { sendTrainingReminders } from './services/training-reminder.js';
@@ -132,7 +137,12 @@ async function main() {
   setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 10_000);
 
   const taskQueries = new TaskQueries();
-  const settingsQueries = new FileSettingsQueries();
+  const fileSettings = new FileSettingsQueries();
+  const configService = new ConfigService(fileSettings);
+  await configService.initialize().catch(err =>
+    console.warn('[N.O.V.A] Config service init failed, using file fallback:', err instanceof Error ? err.message : err)
+  );
+  const settingsQueries = configService as FileSettingsQueries;
   const ritualQueries = new RitualQueries();
   const deliveryQueries = new DeliveryQueries();
   // Auto-assign onboarding IDs to any entries missing them
@@ -429,6 +439,18 @@ async function main() {
   app.get('/api/public/agent/approval-callback', agentCallbackHandler);
   app.post('/api/public/agent/approval-callback', agentCallbackHandler);
 
+  // Abuse report webhook (WP-22) — public endpoint for external systems (n8n, etc.)
+  app.post('/api/public/webhooks/abuse-report', express.json(), async (req, res) => {
+    try {
+      if (!agentJiraClient) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
+      const processor = new AbuseReportProcessor(settingsQueries, agentJiraClient);
+      const result = await processor.processReport(req.body);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Abuse report processing failed' });
+    }
+  });
+
   // Training export — token-gated, no JWT, for n8n automation (Training Matrix Sync).
   // Returns a flat dump of categories, items, scores, members, and the display-name
   // map needed to render the matrix into Obsidian. Requires TRAINING_EXPORT_TOKEN env
@@ -645,6 +667,35 @@ async function main() {
     res.json({ ok: true });
   });
 
+  // Config service management (admin-only)
+  app.post('/api/admin/config/migrate', async (req, res) => {
+    if (!isAdmin((req as any).user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    try {
+      const result = await configService.migrateFromFallback();
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Migration failed' });
+    }
+  });
+  app.post('/api/admin/config/refresh-secrets', async (req, res) => {
+    if (!isAdmin((req as any).user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    try {
+      const count = await configService.refreshSecrets();
+      res.json({ ok: true, data: { refreshed: count } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Refresh failed' });
+    }
+  });
+  app.get('/api/admin/config/settings', async (req, res) => {
+    if (!isAdmin((req as any).user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    try {
+      const settings = await configService.getSettingsWithMeta();
+      res.json({ ok: true, data: settings });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get settings' });
+    }
+  });
+
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
   app.use('/api/board-mi', requireAreaAccess('mi', 'view'), createBoardMiRoutes(
     settingsQueries,
@@ -692,6 +743,14 @@ async function main() {
     const kpiPipeline = new KpiPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
     const qaPipeline = new QaPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
 
+    // Calendar sync (WP-12)
+    const calendarSync = new CalendarSyncService(settingsQueries);
+
+    // Operational workflow services (WP-22)
+    const productCancellation = new ProductCancellationService(settingsQueries, agentJiraClient);
+    const abuseReportProcessor = new AbuseReportProcessor(settingsQueries, agentJiraClient);
+    const callReviewService = new CallReviewService(settingsQueries, llmService);
+
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,
       availabilityService,
@@ -725,6 +784,87 @@ async function main() {
 
     // Pipeline health check — every 15 min
     setInterval(() => pipelineMonitor.checkStaleRuns().catch(() => {}), 15 * 60 * 1000);
+
+    // Calendar sync (WP-12) — every 30 min during working hours
+    const runCalendarSync = () => {
+      const hour = new Date().getHours();
+      if (hour >= 7 && hour <= 19) {
+        calendarSync.sync().catch(e => console.warn('[calendar-sync] sync failed:', e instanceof Error ? e.message : e));
+      }
+    };
+    setInterval(runCalendarSync, 30 * 60 * 1000);
+    setTimeout(runCalendarSync, 45_000);
+
+    // Calendar availability routes (WP-12) — already behind global /api auth
+    app.get('/api/calendar/availability', async (req, res) => {
+      try {
+        const date = req.query.date as string | undefined;
+        const data = await calendarSync.getTeamAvailability(date);
+        res.json({ ok: true, data });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get availability' });
+      }
+    });
+    app.post('/api/calendar/sync', async (req, res) => {
+      if (!isAdmin((req as any).user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+      try {
+        const result = await calendarSync.sync();
+        res.json({ ok: true, data: result });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Calendar sync failed' });
+      }
+    });
+
+    // Operational workflow routes (WP-22)
+    app.get('/api/agent/abuse-reports', requireRole('admin'), async (req, res) => {
+      try {
+        const status = req.query.status as string | undefined;
+        const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+        const data = await abuseReportProcessor.getReports(status, limit);
+        res.json({ ok: true, data });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get abuse reports' });
+      }
+    });
+
+    app.post('/api/agent/call-reviews', requireRole('admin'), async (req, res) => {
+      try {
+        const result = await callReviewService.reviewCall(req.body);
+        res.json({ ok: true, data: result });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Call review failed' });
+      }
+    });
+
+    app.get('/api/agent/call-reviews', requireRole('admin'), async (req, res) => {
+      try {
+        const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+        const agentName = req.query.agentName as string | undefined;
+        const data = await callReviewService.getReviews(limit, agentName);
+        res.json({ ok: true, data });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get call reviews' });
+      }
+    });
+
+    app.post('/api/agent/product-cancellation/check', requireRole('admin'), async (_req, res) => {
+      try {
+        const result = await productCancellation.checkForCancellations();
+        res.json({ ok: true, data: result });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Cancellation check failed' });
+      }
+    });
+
+    // Product cancellation check — every 4 hours during working hours
+    setInterval(() => {
+      const hour = new Date().getHours();
+      if (hour >= 8 && hour <= 18) {
+        productCancellation.checkForCancellations().catch(e =>
+          console.warn('[product-cancellation] check failed:', e instanceof Error ? e.message : e)
+        );
+      }
+    }, 4 * 60 * 60 * 1000);
 
     if (settingsQueries.get('agent_enabled') === 'true') {
       agentLoop.start();

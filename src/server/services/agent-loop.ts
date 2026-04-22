@@ -69,8 +69,10 @@ export class AgentLoop {
     this.guardrails = new Guardrails(settings);
     this.queueMonitor = new QueueMonitor(jiraClient, settings);
     this.alertService = new AlertService(settings);
-    this.ticketClassifier = new TicketClassifier(llmService, jiraClient, 'NT');
-    this.coachingEngine = new CoachingEngine(llmService, jiraClient, 'NT');
+    const agentProject = settings.get('agent_jira_project') ?? 'NT';
+    const primaryProject = agentProject.split(',')[0].trim();
+    this.ticketClassifier = new TicketClassifier(llmService, jiraClient, primaryProject);
+    this.coachingEngine = new CoachingEngine(llmService, jiraClient, primaryProject);
     this.jiraClient = jiraClient;
     this.llmService = llmService;
     this.settings = settings;

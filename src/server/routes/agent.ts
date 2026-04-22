@@ -1483,6 +1483,20 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.get('/pipeline/uat-compare', async (req, res) => {
+    try {
+      const mon = deps?.pipelineMonitor;
+      if (!mon) { res.status(503).json({ ok: false, error: 'Pipeline monitor not available' }); return; }
+      const table = req.query.table as string;
+      const days = Math.min(parseInt(req.query.days as string, 10) || 7, 30);
+      if (!table) { res.status(400).json({ ok: false, error: 'table query param required' }); return; }
+      const data = await mon.compareTable(table, days);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'UAT comparison failed' });
+    }
+  });
+
   router.post('/pipeline/truncate-uat', async (_req, res) => {
     try {
       const mon = deps?.pipelineMonitor;

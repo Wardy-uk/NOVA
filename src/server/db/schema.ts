@@ -289,6 +289,67 @@ async function runMigrations(): Promise<void> {
        ('customer_request', 'Customer specifically requested escalation', 0, NULL, 6),
        ('sla_risk', 'SLA at risk — needs specialist attention', 0, NULL, 7),
        ('security', 'Security or compliance concern', 0, '["Documented the security concern","Assessed data exposure risk"]', 8);`,
+
+    // WP-12: People HR Calendar Sync
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_team_calendar') AND type = 'U')
+     CREATE TABLE agent_team_calendar (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       employee_name NVARCHAR(200) NOT NULL,
+       employee_email NVARCHAR(200) NULL,
+       team NVARCHAR(100) NULL,
+       absence_type VARCHAR(50) NOT NULL,
+       start_date DATE NOT NULL,
+       end_date DATE NOT NULL,
+       is_half_day BIT DEFAULT 0,
+       half_day_period VARCHAR(10) NULL,
+       synced_at DATETIME2 DEFAULT GETUTCDATE(),
+       source_id VARCHAR(100) NULL
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_calendar_source' AND object_id = OBJECT_ID(N'agent_team_calendar'))
+     CREATE UNIQUE INDEX idx_calendar_source ON agent_team_calendar(source_id) WHERE source_id IS NOT NULL;`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_calendar_dates' AND object_id = OBJECT_ID(N'agent_team_calendar'))
+     CREATE INDEX idx_calendar_dates ON agent_team_calendar(start_date, end_date);`,
+
+    // WP-22: Operational workflow tables
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'product_cancellation_log') AND type = 'U')
+     CREATE TABLE product_cancellation_log (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       d365_account_id NVARCHAR(100) NOT NULL,
+       account_name NVARCHAR(200) NULL,
+       product_name NVARCHAR(200) NULL,
+       jira_key NVARCHAR(20) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'abuse_reports') AND type = 'U')
+     CREATE TABLE abuse_reports (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       reporter_email NVARCHAR(200) NOT NULL,
+       reporter_name NVARCHAR(200) NOT NULL,
+       account_name NVARCHAR(200) NULL,
+       category NVARCHAR(100) NOT NULL,
+       description NVARCHAR(MAX) NOT NULL,
+       evidence_urls NVARCHAR(MAX) NULL,
+       severity VARCHAR(20) NOT NULL,
+       status VARCHAR(20) NOT NULL DEFAULT 'open',
+       jira_key NVARCHAR(20) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'call_reviews') AND type = 'U')
+     CREATE TABLE call_reviews (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       agent_name NVARCHAR(200) NOT NULL,
+       customer_name NVARCHAR(200) NULL,
+       ticket_key NVARCHAR(20) NULL,
+       transcript NVARCHAR(MAX) NULL,
+       summary NVARCHAR(MAX) NULL,
+       sentiment VARCHAR(20) NULL,
+       satisfaction_score INT NULL,
+       performance_score INT NULL,
+       concerns NVARCHAR(MAX) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
