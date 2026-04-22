@@ -188,9 +188,8 @@ async function main() {
   for (const u of SEED_USERS) {
     try {
       const teamId = u.team ? (teamByName.get(u.team.toLowerCase()) ?? null) : null;
-      // Match by email first (catches SSO-created accounts with suffixed usernames), then username
-      let existing = u.email ? await userQueries.getByEmail(u.email) : undefined;
-      if (!existing) existing = await userQueries.getByUsername(u.username);
+      // Always match by canonical username — never let email match hijack the wrong account
+      const existing = await userQueries.getByUsername(u.username);
       if (existing) {
         await userQueries.update(existing.id, {
           display_name: u.display_name || existing.display_name,
