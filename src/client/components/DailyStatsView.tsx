@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
+import { cachedFetch } from '../utils/fetchCache.js';
 
 interface OnboardingRunSummary {
   id: number;
@@ -93,8 +94,7 @@ export function DailyStatsView({ tasks, onNavigate }: { tasks: Task[]; onNavigat
   const focusCount = tasks.filter((t) => t.is_pinned).length;
 
   useEffect(() => {
-    fetch('/api/tasks/stats')
-      .then((r) => r.json())
+    cachedFetch<{ ok: boolean; data: Stats }>('/api/tasks/stats')
       .then((j) => { if (j.ok) setStats(j.data); })
       .catch(() => {})
       .finally(() => setLoading(false));

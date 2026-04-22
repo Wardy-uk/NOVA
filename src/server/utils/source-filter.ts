@@ -16,21 +16,23 @@ export async function getAllowedSources(
   const allowed = new Set(['milestone', 'manual']);
   if (!userId) return allowed;
 
-  const check = async (key: string): Promise<boolean> => {
-    const userVal = await userSettingsQueries?.get(userId, key);
+  // Batch: fetch all user settings in one query instead of 3 individual lookups
+  const userSettings = await userSettingsQueries?.getAllForUser(userId);
+  const check = (key: string): boolean => {
+    const userVal = userSettings?.[key];
     if (userVal !== undefined && userVal !== null) return userVal === 'true';
     if (isAdmin(userRole ?? '')) return settingsQueries?.get(key) === 'true';
     return false;
   };
 
-  if (await check('jira_enabled')) allowed.add('jira');
-  if (await check('msgraph_enabled')) {
+  if (check('jira_enabled')) allowed.add('jira');
+  if (check('msgraph_enabled')) {
     allowed.add('planner');
     allowed.add('todo');
     allowed.add('calendar');
     allowed.add('email');
   }
-  if (await check('monday_enabled')) allowed.add('monday');
+  if (check('monday_enabled')) allowed.add('monday');
   return allowed;
 }
 

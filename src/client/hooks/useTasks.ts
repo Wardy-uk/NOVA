@@ -69,34 +69,35 @@ export function useTasks() {
   );
 
   useEffect(() => {
-    // Initial sync (silent — no syncing spinner, just populates data)
-    // If transient sources return 0 (MCP not ready yet), retry after 10s
+    // Show cached tasks immediately, then sync in background
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const initialSync = async () => {
-      try {
-        const res = await fetch('/api/tasks/sync', { method: 'POST' });
-        const json = await res.json();
-        await fetchTasks();
+    fetchTasks().then(() => {
+      // Background sync — don't block initial render
+      const doSync = async () => {
+        try {
+          const res = await fetch('/api/tasks/sync', { method: 'POST' });
+          const json = await res.json();
+          await fetchTasks();
 
-        // Check if any transient sources returned 0 — likely MCP wasn't ready
-        if (json.ok && Array.isArray(json.data)) {
-          const transientSources = ['planner', 'todo', 'calendar', 'email'];
-          const emptyTransient = json.data.some(
-            (r: { source: string; count: number }) =>
-              transientSources.includes(r.source) && r.count === 0
-          );
-          if (emptyTransient) {
-            retryTimer = setTimeout(async () => {
-              await fetch('/api/tasks/sync', { method: 'POST' }).catch(() => {});
-              fetchTasks();
-            }, 10_000);
+          if (json.ok && Array.isArray(json.data)) {
+            const transientSources = ['planner', 'todo', 'calendar', 'email'];
+            const emptyTransient = json.data.some(
+              (r: { source: string; count: number }) =>
+                transientSources.includes(r.source) && r.count === 0
+            );
+            if (emptyTransient) {
+              retryTimer = setTimeout(async () => {
+                await fetch('/api/tasks/sync', { method: 'POST' }).catch(() => {});
+                fetchTasks();
+              }, 10_000);
+            }
           }
+        } catch {
+          // Silently fail on initial sync
         }
-      } catch {
-        // Silently fail on initial sync
-      }
-    };
-    initialSync();
+      };
+      doSync();
+    });
     // Background poll every 30s — silent, no UI disruption
     const interval = setInterval(fetchTasks, 30_000);
     return () => { clearInterval(interval); if (retryTimer) clearTimeout(retryTimer); };

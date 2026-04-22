@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Task } from '../../shared/types.js';
+import { cachedFetch } from '../utils/fetchCache.js';
 
 interface Stats {
   total: number;
@@ -35,8 +36,7 @@ export function Dashboard({ tasks }: Props) {
   const [stats, setStats] = useState<Stats | null>(null);
 
   useEffect(() => {
-    fetch('/api/tasks/stats')
-      .then((r) => r.json())
+    cachedFetch<{ ok: boolean; data: Stats }>('/api/tasks/stats')
       .then((j) => { if (j.ok) setStats(j.data); })
       .catch(() => {});
   }, [tasks.length]);
