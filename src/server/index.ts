@@ -151,30 +151,58 @@ async function main() {
   const salesQueries = new SalesQueries();
   const userQueries = new UserQueries();
 
-  // One-time migration: import users.json into MSSQL if the file exists
-  const usersJsonPath = path.resolve('users.json');
-  if (fs.existsSync(usersJsonPath) && (await userQueries.count()) === 0) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(usersJsonPath, 'utf-8')) as { users: Array<Record<string, unknown>> };
-      let migrated = 0;
-      for (const u of raw.users ?? []) {
+  // One-time seed: restore users from CSV export (2026-04-16) if the table is empty
+  const teamQueries = new TeamQueries();
+  if ((await userQueries.count()) === 0) {
+    console.log('[Startup] Users table empty — restoring from backup seed...');
+    const allTeams = await teamQueries.getAll();
+    const teamByName = new Map(allTeams.map(t => [t.name.toLowerCase(), t.id]));
+    const SEED_USERS: Array<{ username: string; display_name: string; email: string; role: string; team: string; auth_provider: string }> = [
+      { username: 'nickw', display_name: 'Nick Ward', email: 'nickw@nurtur.tech', role: 'super_admin,support,design,uat,briefing,kpi,sales,qa,ai-approver', team: 'Support', auth_provider: 'entra' },
+      { username: 'support', display_name: 'Support', email: '', role: 'support', team: 'Support', auth_provider: 'local' },
+      { username: 'seb', display_name: 'Sebastian Broome', email: 'sebastian.broome@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
+      { username: 'onboarding', display_name: 'Onboarding', email: '', role: 'onboader', team: 'Onboarding', auth_provider: 'local' },
+      { username: 'isabel.busk@nurtur.tech', display_name: 'Isabel Busk', email: 'Isabel.Busk@nurtur.tech', role: 'onboader,support,qa,kpi', team: 'Design', auth_provider: 'entra' },
+      { username: 'chris@nurtur.tech', display_name: 'Chris Middleton', email: 'chris@nurtur.tech', role: 'onboader,admin,support,uat,design,kpi,briefing,sales,qa,ai-approver', team: '', auth_provider: 'entra' },
+      { username: 'abdi.mohamed@nurtur.tech', display_name: 'Abdi Mohamed', email: 'abdi.mohamed@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
+      { username: 'stephen.mitchell@nurtur.tech', display_name: 'Stephen Mitchell', email: 'stephen.mitchell@nurtur.tech', role: 'onboader,support,ai-approver,qa', team: 'Support', auth_provider: 'entra' },
+      { username: 'naomi.wentworth@nurtur.tech', display_name: 'Naomi Wentworth', email: 'naomi.wentworth@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
+      { username: 'hope.goodall@nurtur.tech', display_name: 'Hope Goodall', email: 'hope.goodall@nurtur.tech', role: 'onboader,support,briefing,qa', team: 'Support', auth_provider: 'local' },
+      { username: 'arman.shazad@nurtur.tech', display_name: 'Arman Shazad', email: 'Arman.Shazad@nurtur.tech', role: 'onboader,support,viewer,qa', team: 'Support', auth_provider: 'entra' },
+      { username: 'joshua.mills', display_name: 'Joshua Mills', email: 'joshua.mills@nurtur.tech', role: 'admin,onboader', team: '', auth_provider: 'entra' },
+      { username: 'nathan.rutland@nurtur.tech', display_name: 'Nathan Rutland', email: 'Nathan.Rutland@nurtur.tech', role: 'viewer,onboader,support,design,kpi,qa,briefing', team: 'Support', auth_provider: 'local' },
+      { username: 'richardc@nurtur.tech', display_name: 'Richard', email: 'richardc@nurtur.tech', role: 'viewer,onboader,sales', team: 'Onboarding', auth_provider: 'local' },
+      { username: 'luke.scaife', display_name: 'Luke Scaife', email: 'luke.scaife@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
+      { username: 'heidi.power@nurtur.tech', display_name: 'Heidi Power', email: 'Heidi.Power@nurtur.tech', role: 'onboader,support,viewer,qa', team: 'Support', auth_provider: 'entra' },
+      { username: 'willem.kruger@nurtur.tech', display_name: 'Willem', email: 'Willem.Kruger@nurtur.tech', role: 'viewer,onboader,support,qa,briefing', team: 'Support', auth_provider: 'local' },
+      { username: 'zoe.rees@nurtur.tech', display_name: 'Zoe Rees', email: 'zoe.rees@nurtur.tech', role: 'onboader,support,viewer,qa,ai-approver', team: 'Support', auth_provider: 'entra' },
+      { username: 'jmtesting', display_name: 'JM Testing', email: 'JMTesting@nurtur.tech', role: 'admin,onboader,support,uat,kpi', team: '', auth_provider: 'entra' },
+      { username: 'georginag@nurtur.tech', display_name: 'Georgie', email: 'GeorginaG@nurtur.tech', role: 'viewer,onboader,design,kpi,sales,qa,mi', team: '', auth_provider: 'local' },
+      { username: 'ward.nickj@gmail.com', display_name: 'Nick Test', email: 'ward.nickj@gmail.com', role: 'viewer,onboader,support,uat,design,kpi,briefing,sales,qa', team: 'UAT', auth_provider: 'local' },
+      { username: 'kayleigh.russell', display_name: 'Kayleigh Russell', email: 'Kayleigh.Russell@nurtur.tech', role: 'onboader,support', team: '', auth_provider: 'entra' },
+      { username: 'maria.pappa@nurtur.tech', display_name: 'Maria', email: 'Maria.Pappa@nurtur.tech', role: 'viewer,support,kpi', team: 'Support', auth_provider: 'local' },
+      { username: 'adele.norman-swift@nurtur.tech', display_name: 'Adele', email: 'Adele.Norman-Swift@nurtur.tech', role: 'viewer,support,kpi', team: 'Support', auth_provider: 'local' },
+      { username: 'ricky.bostock@nurtur.tech', display_name: 'Ricky', email: 'Ricky.Bostock@nurtur.tech', role: 'viewer,admin,onboader,support,uat,design,kpi,briefing,sales,qa,ai-approver', team: '', auth_provider: 'local' },
+    ];
+    let restored = 0;
+    for (const u of SEED_USERS) {
+      try {
         const newId = await userQueries.create({
-          username: u.username as string,
-          display_name: (u.display_name as string) || undefined,
-          email: (u.email as string) || undefined,
-          password_hash: (u.password_hash as string) || '',
-          role: (u.role as string) || 'viewer',
-          auth_provider: (u.auth_provider as string) || 'local',
-          provider_id: (u.provider_id as string) || undefined,
+          username: u.username,
+          display_name: u.display_name || undefined,
+          email: u.email || undefined,
+          password_hash: '',
+          role: u.role,
+          auth_provider: u.auth_provider,
         });
-        if (u.team_id) await userQueries.update(newId, { team_id: u.team_id as number });
-        migrated++;
+        const teamId = u.team ? teamByName.get(u.team.toLowerCase()) : undefined;
+        if (teamId) await userQueries.update(newId, { team_id: teamId });
+        restored++;
+      } catch (err) {
+        console.warn(`[Startup] Failed to restore user ${u.username}:`, err instanceof Error ? err.message : err);
       }
-      fs.renameSync(usersJsonPath, usersJsonPath + '.migrated');
-      console.log(`[Startup] Migrated ${migrated} users from users.json → MSSQL`);
-    } catch (err) {
-      console.error('[Startup] users.json migration failed:', err instanceof Error ? err.message : err);
     }
+    console.log(`[Startup] Restored ${restored} users from backup seed`);
   }
 
   const novaMcpCreated = await userQueries.ensureServiceAccount({
@@ -184,13 +212,6 @@ async function main() {
     display_name: 'NOVA MCP Service Account',
   });
   if (novaMcpCreated) console.log('[Startup] Bootstrapped service account: nova-mcp');
-
-  const nickw = await userQueries.getByUsername('nickw');
-  if (nickw && nickw.role === 'admin') {
-    await userQueries.update(nickw.id, { role: 'super_admin' });
-    console.log('[Startup] Promoted nickw to super_admin');
-  }
-  const teamQueries = new TeamQueries();
   const userSettingsQueries = new UserSettingsQueries();
   const feedbackQueries = new FeedbackQueries();
   const onboardingConfigQueries = new OnboardingConfigQueries();

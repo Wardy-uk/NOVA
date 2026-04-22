@@ -5,7 +5,7 @@ import type { TeamQueries, UserSettingsQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { UserQueries } from '../db/queries.js';
 import { requireRole } from '../middleware/auth.js';
-import { parseRoles, isAdmin } from '../utils/role-helpers.js';
+import { parseRoles, isAdmin, isSuperAdmin } from '../utils/role-helpers.js';
 import { EmailService } from '../services/email.js';
 import { inviteHtml } from '../services/email-templates.js';
 import type { JiraRestClient } from '../services/jira-client.js';
@@ -601,13 +601,17 @@ export function createAdminRoutes(
   });
 
   // Update user role validation to accept custom role IDs
-  router.get('/valid-roles', (_req, res) => {
+  router.get('/valid-roles', (req, res) => {
     const raw = settingsQueries.get('custom_roles');
     let customRoles: Array<{ id: string; name: string }> = [];
     try {
       if (raw) customRoles = JSON.parse(raw);
     } catch { /* ignore */ }
-    const validRoles = ['admin', ...customRoles.map(r => r.id)];
+    const validRoles = [
+      ...(isSuperAdmin(req.user?.role ?? '') ? ['super_admin'] : []),
+      'admin',
+      ...customRoles.map(r => r.id),
+    ];
     res.json({ ok: true, data: { roles: validRoles, customRoles } });
   });
 
