@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import sql from 'mssql';
 import type { SettingsQueries } from '../db/settings-store.js';
-import type { FileUserQueries } from '../db/user-store.js';
+import type { UserQueries } from '../db/queries.js';
 import { query as novaQuery } from '../services/database.js';
 
 const VALID_ENVS = ['live', 'uat'] as const;
@@ -228,7 +228,7 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
   },
 ];
 
-export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQueries: FileUserQueries): Router {
+export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQueries: UserQueries): Router {
   const router = Router();
 
   let pool: sql.ConnectionPool | null = null;

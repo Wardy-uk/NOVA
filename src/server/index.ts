@@ -7,8 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { initializeDatabase, shutdownDatabase } from './db/schema.js';
-import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries, TrainingQueries } from './db/queries.js';
-import { FileUserQueries } from './db/user-store.js';
+import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries, TrainingQueries } from './db/queries.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
@@ -150,12 +149,8 @@ async function main() {
   if (backfilled > 0) console.log(`[N.O.V.A] Backfilled ${backfilled} onboarding IDs`);
   const crmQueries = new CrmQueries();
   const salesQueries = new SalesQueries();
-  const userQueries = new FileUserQueries();
-  // Bootstrap service accounts — created on first run, left alone afterwards
-  // so an admin can rotate the password via the Admin UI without redeploying.
-  // The password is hard-coded as a bcrypt hash (never plaintext) and the
-  // matching plaintext lives in nova-mcp/config.json (gitignored).
-  const novaMcpCreated = userQueries.ensureServiceAccount({
+  const userQueries = new UserQueries();
+  const novaMcpCreated = await userQueries.ensureServiceAccount({
     username: 'nova-mcp',
     password_hash: '$2b$10$14kBcPzWdHR/G2UBK8YMWuQozUp4iQNIbM1jAw9lhvP1zFixAxVMe',
     role: 'admin',
@@ -163,10 +158,9 @@ async function main() {
   });
   if (novaMcpCreated) console.log('[Startup] Bootstrapped service account: nova-mcp');
 
-  // Seed super_admin role for nickw (one-time promotion)
-  const nickw = userQueries.getByUsername('nickw');
+  const nickw = await userQueries.getByUsername('nickw');
   if (nickw && nickw.role === 'admin') {
-    userQueries.update(nickw.id, { role: 'super_admin' });
+    await userQueries.update(nickw.id, { role: 'super_admin' });
     console.log('[Startup] Promoted nickw to super_admin');
   }
   const teamQueries = new TeamQueries();
@@ -202,7 +196,7 @@ async function main() {
 
   // Build onboarder name → user ID lookup for milestone ownership
   const onboarderToUserId = new Map<string, number>();
-  for (const u of userQueries.getAll()) {
+  for (const u of await userQueries.getAll()) {
     onboarderToUserId.set(u.username.toLowerCase(), u.id);
     if (u.display_name) onboarderToUserId.set(u.display_name.toLowerCase(), u.id);
   }
@@ -462,7 +456,7 @@ async function main() {
   // Returns a flat dump of categories, items, scores, members, and the display-name
   // map needed to render the matrix into Obsidian. Requires TRAINING_EXPORT_TOKEN env
   // var set and caller to provide header X-Training-Export-Token matching it.
-  app.get('/api/public/training-export', (req, res) => {
+  app.get('/api/public/training-export', async (req, res) => {
     const expected = process.env.TRAINING_EXPORT_TOKEN;
     if (!expected) {
       res.status(503).json({ ok: false, error: 'TRAINING_EXPORT_TOKEN not configured on server' });
@@ -479,7 +473,7 @@ async function main() {
       const items = trainingQueries.getItems();
       const scores = trainingQueries.getScores();
       const memberIds = trainingQueries.getMembers();
-      const users = userQueries.getAll().map((u) => ({
+      const users = (await userQueries.getAll()).map((u) => ({
         id: u.id,
         username: u.username,
         display_name: u.display_name || u.username,
@@ -609,16 +603,16 @@ async function main() {
   app.use('/api/calyx/portal', createCalyxPortalRoutes(calyxDb, settingsQueries));
 
   // Protected API routes — look up fresh role from DB so stale JWTs always reflect current role
-  app.use('/api', authMiddleware(jwtSecret, (id) => userQueries.getById(id)?.role));
+  app.use('/api', authMiddleware(jwtSecret, async (id) => (await userQueries.getById(id))?.role));
 
   // Lightweight user list — any authenticated user
-  app.get('/api/users/list', (_req, res) => {
-    const users = userQueries.getAll();
+  app.get('/api/users/list', async (_req, res) => {
+    const users = await userQueries.getAll();
     const list = users.map((u) => ({
       id: u.id,
       username: u.username,
       display_name: u.display_name,
-      team_id: (u as any).team_id ?? null,
+      team_id: u.team_id ?? null,
     }));
     res.json({ ok: true, data: list });
   });
@@ -1445,8 +1439,8 @@ ${panelHtml}
   };
 
   // Resolve primary admin user for background sync ownership
-  const primaryAdmin = (() => {
-    const users = userQueries.getAll();
+  const primaryAdmin = await (async () => {
+    const users = await userQueries.getAll();
     return users.find(u => u.role.split(',').map(r => r.trim()).includes('admin'));
   })();
   const primaryAdminId = primaryAdmin?.id ?? 1;
@@ -1723,7 +1717,7 @@ ${panelHtml}
 
       // Notify all developers about new arrivals
       if (newKeys.length > 0) {
-        const allUsers = userQueries.getAll();
+        const allUsers = await userQueries.getAll();
         const devs = allUsers.filter((u) => {
           const roles = (u.role || '').split(',').map((r) => r.trim());
           return roles.includes('developer') || roles.includes('admin');

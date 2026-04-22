@@ -7,6 +7,33 @@ export async function initializeDatabase(): Promise<void> {
 
 async function runMigrations(): Promise<void> {
   const migrations = [
+    // ── Users table (migrated from file-based users.json) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'users') AND type = 'U')
+     CREATE TABLE users (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       username NVARCHAR(100) NOT NULL,
+       display_name NVARCHAR(200) NULL,
+       email NVARCHAR(200) NULL,
+       password_hash NVARCHAR(200) NOT NULL DEFAULT '',
+       role NVARCHAR(100) NOT NULL DEFAULT 'viewer',
+       auth_provider NVARCHAR(50) NOT NULL DEFAULT 'local',
+       provider_id NVARCHAR(200) NULL,
+       team_id INT NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_users_username UNIQUE (username)
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'user_settings') AND type = 'U')
+     CREATE TABLE user_settings (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       user_id INT NOT NULL,
+       [key] NVARCHAR(100) NOT NULL,
+       value NVARCHAR(MAX) NULL,
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_user_settings_user_key UNIQUE (user_id, [key])
+     );`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'teams') AND name = 'jira_project_key')
      ALTER TABLE teams ADD jira_project_key NVARCHAR(20) NULL;`,
 

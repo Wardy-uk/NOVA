@@ -244,8 +244,8 @@ async function aggregateResults(surveyId: number, questions: QuestionRow[]) {
 // ── Route factory ──────────────────────────────────────────────────────
 
 interface UserLookup {
-  getById(id: number): { id: number; username: string; email: string | null; team_id: number | null; role: string } | undefined;
-  getAll(): Array<{ id: number; username: string; display_name: string | null; email: string | null; team_id: number | null; role: string }>;
+  getById(id: number): Promise<{ id: number; username: string; email: string | null; team_id: number | null; role: string } | undefined>;
+  getAll(): Promise<Array<{ id: number; username: string; display_name: string | null; email: string | null; team_id: number | null; role: string }>>;
 }
 
 interface TeamLookup {
@@ -258,7 +258,7 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
 
   /** Resolve the team name(s) the current user belongs to */
   async function getUserTeamName(userId: number): Promise<string | null> {
-    const user = userQueries.getById(userId);
+    const user = await userQueries.getById(userId);
     if (!user?.team_id) return null;
     const team = await teamQueries.getById(user.team_id);
     return team?.name ?? null;
@@ -285,7 +285,7 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
       surveys = await query<SurveyRow>('SELECT * FROM surveys ORDER BY created_at DESC');
     } else {
       // Non-admin: only surveys they've been invited to (match by email)
-      const user = userQueries.getById(req.user.id);
+      const user = await userQueries.getById(req.user.id);
       if (!user?.email) {
         res.json({ ok: true, data: [] }); return;
       }
@@ -312,7 +312,7 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
     const teams = await query<{ id: number; name: string }>('SELECT id, name FROM teams ORDER BY name');
 
     // Get all users and attach to their teams
-    const allUsers = userQueries.getAll();
+    const allUsers = await userQueries.getAll();
     const teamsWithMembers = teams.map(t => ({
       ...t,
       members: allUsers
@@ -381,7 +381,7 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
 
     // Non-admins can only view surveys they're invited to
     if (!admin) {
-      const user = userQueries.getById(req.user.id);
+      const user = await userQueries.getById(req.user.id);
       if (!user?.email) { res.status(403).json({ ok: false, error: 'Access denied' }); return; }
       const invited = await queryOne<RecipientRow>(
         'SELECT * FROM survey_recipients WHERE survey_id = ? AND email = ?', [survey.id, user.email]
@@ -408,7 +408,7 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
       });
     } else {
       // Non-admins: their own token + completed status, NO aggregated results
-      const user = userQueries.getById(req.user.id);
+      const user = await userQueries.getById(req.user.id);
       const myRecipient = await queryOne<RecipientRow>(
         'SELECT * FROM survey_recipients WHERE survey_id = ? AND email = ?', [survey.id, user!.email]
       );

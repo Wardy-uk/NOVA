@@ -641,7 +641,7 @@ export class CrmQueries {
 export interface User {
   id: number; username: string; display_name: string | null; email: string | null;
   password_hash: string; role: string; auth_provider: string;
-  provider_id: string | null; created_at: string; updated_at: string;
+  provider_id: string | null; team_id: number | null; created_at: string; updated_at: string;
 }
 
 export class UserQueries {
@@ -691,14 +691,35 @@ export class UserQueries {
     );
   }
 
+  async getByEmail(email: string): Promise<User | undefined> {
+    return queryOne<User>(`SELECT * FROM users WHERE LOWER(email) = LOWER(?)`, [email]);
+  }
+
   async delete(id: number): Promise<boolean> {
     await execute(`DELETE FROM users WHERE id = ?`, [id]);
     await execute(`DELETE FROM user_settings WHERE user_id = ?`, [id]);
     return true;
   }
+
+  async ensureServiceAccount(spec: {
+    username: string;
+    password_hash: string;
+    role: string;
+    display_name?: string;
+  }): Promise<boolean> {
+    const existing = await this.getByUsername(spec.username);
+    if (existing) return false;
+    await this.create({
+      username: spec.username,
+      password_hash: spec.password_hash,
+      role: spec.role,
+      display_name: spec.display_name ?? spec.username,
+    });
+    return true;
+  }
 }
 
-// ─── Teams ────────────────────────────────────────────────────────────────────
+// ─── Teams ─────────────────────────────────���──────────────────────────���───────
 
 export interface Team {
   id: number; name: string; description: string | null; created_at: string;

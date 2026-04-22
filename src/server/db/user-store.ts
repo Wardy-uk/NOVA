@@ -7,10 +7,8 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../../../');
+const DATA_DIR = process.env.DATA_DIR || process.cwd();
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 export interface User {

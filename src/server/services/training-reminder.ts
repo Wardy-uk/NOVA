@@ -8,7 +8,7 @@
 
 import sql from 'mssql';
 import type { TrainingQueries } from '../db/queries.js';
-import type { FileUserQueries } from '../db/user-store.js';
+import type { UserQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { EmailService } from './email.js';
 import { trainingReminderHtml } from './email-templates.js';
@@ -54,7 +54,7 @@ async function getActiveAgentEmails(settings: Record<string, string>): Promise<S
 
 export async function sendTrainingReminders(
   trainingQueries: TrainingQueries,
-  userQueries: FileUserQueries,
+  userQueries: UserQueries,
   settingsQueries: SettingsQueries,
 ): Promise<{ sent: number; skipped: number; errors: string[] }> {
   const emailService = new EmailService(() => settingsQueries.getAll());
@@ -70,7 +70,7 @@ export async function sendTrainingReminders(
   const items = await trainingQueries.getItems();
   const scores = await trainingQueries.getScores();
   const memberIds = await trainingQueries.getMembers();
-  const allUsers = userQueries.getAll();
+  const allUsers = await userQueries.getAll();
 
   if (memberIds.length === 0 || items.length === 0) {
     console.log('[TrainingReminder] No members or items — skipping');

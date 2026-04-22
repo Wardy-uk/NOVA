@@ -3,8 +3,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import type { TeamQueries, UserSettingsQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
-import type { FileUserQueries } from '../db/user-store.js';
-type UserQueries = FileUserQueries;
+import type { UserQueries } from '../db/queries.js';
 import { requireRole } from '../middleware/auth.js';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 import { EmailService } from '../services/email.js';
@@ -49,7 +48,7 @@ export function createAdminRoutes(
   // ---- Users ----
 
   router.get('/users', async (_req, res) => {
-    const users = userQueries.getAll();
+    const users = await userQueries.getAll();
     const teams = await teamQueries.getAll();
     res.json({ ok: true, data: { users, teams } });
   });
@@ -73,12 +72,12 @@ export function createAdminRoutes(
     }
     const assignedRole = requested.length > 0 ? requested.join(',') : (allValidRoles.includes('viewer') ? 'viewer' : allValidRoles[1] || 'viewer');
     const normalizedUsername = username.trim().toLowerCase();
-    if (userQueries.getByUsername(normalizedUsername)) {
+    if (await userQueries.getByUsername(normalizedUsername)) {
       res.status(409).json({ ok: false, error: 'Username already taken' });
       return;
     }
     const hash = await bcrypt.hash(password, 10);
-    const id = userQueries.create({
+    const id = await userQueries.create({
       username: normalizedUsername,
       display_name: display_name?.trim() || normalizedUsername,
       email: email?.trim() || undefined,
@@ -88,11 +87,11 @@ export function createAdminRoutes(
     res.json({ ok: true, data: { id } });
   });
 
-  router.put('/users/:id', (req, res) => {
+  router.put('/users/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) { res.status(400).json({ ok: false, error: 'Invalid user ID' }); return; }
 
-    const user = userQueries.getById(id);
+    const user = await userQueries.getById(id);
     if (!user) { res.status(404).json({ ok: false, error: 'User not found' }); return; }
 
     const { display_name, email, role, team_id } = req.body;
@@ -114,7 +113,7 @@ export function createAdminRoutes(
       }
       // Prevent removing the last admin/super_admin
       if (isAdmin(user.role) && !requested.includes('admin') && !requested.includes('super_admin')) {
-        const allUsers = userQueries.getAll();
+        const allUsers = await userQueries.getAll();
         const adminCount = allUsers.filter((u) => isAdmin(u.role)).length;
         if (adminCount <= 1) {
           res.status(400).json({ ok: false, error: 'Cannot remove the last admin' });
@@ -125,7 +124,7 @@ export function createAdminRoutes(
     }
     if (team_id !== undefined) updates.team_id = team_id;
 
-    userQueries.update(id, updates);
+    await userQueries.update(id, updates);
     res.json({ ok: true });
   });
 
@@ -136,15 +135,15 @@ export function createAdminRoutes(
       res.status(400).json({ ok: false, error: 'Password must be at least 6 characters' });
       return;
     }
-    const user = userQueries.getById(id);
+    const user = await userQueries.getById(id);
     if (!user) { res.status(404).json({ ok: false, error: 'User not found' }); return; }
 
     const hash = await bcrypt.hash(password, 10);
-    userQueries.update(id, { password_hash: hash });
+    await userQueries.update(id, { password_hash: hash });
     res.json({ ok: true });
   });
 
-  router.delete('/users/:id', (req, res) => {
+  router.delete('/users/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) { res.status(400).json({ ok: false, error: 'Invalid user ID' }); return; }
 
@@ -154,12 +153,12 @@ export function createAdminRoutes(
       return;
     }
 
-    const user = userQueries.getById(id);
+    const user = await userQueries.getById(id);
     if (!user) { res.status(404).json({ ok: false, error: 'User not found' }); return; }
 
     // Prevent removing the last admin
     if (isAdmin(user.role)) {
-      const allUsers = userQueries.getAll();
+      const allUsers = await userQueries.getAll();
       const adminCount = allUsers.filter((u) => isAdmin(u.role)).length;
       if (adminCount <= 1) {
         res.status(400).json({ ok: false, error: 'Cannot delete the last admin' });
@@ -167,7 +166,7 @@ export function createAdminRoutes(
       }
     }
 
-    userQueries.delete(id);
+    await userQueries.delete(id);
     res.json({ ok: true });
   });
 
@@ -176,7 +175,7 @@ export function createAdminRoutes(
   /** Send invite email to an existing user via SMTP or MCP fallback */
   router.post('/users/:id/invite', async (req, res) => {
     const id = parseInt(req.params.id, 10);
-    const user = userQueries.getById(id);
+    const user = await userQueries.getById(id);
     if (!user) { res.status(404).json({ ok: false, error: 'User not found' }); return; }
     if (!user.email) { res.status(400).json({ ok: false, error: 'User has no email address' }); return; }
 
@@ -239,7 +238,7 @@ export function createAdminRoutes(
       if (!entry.username?.trim()) { skipped.push('(empty username)'); continue; }
       const normalizedUsername = entry.username.trim().toLowerCase();
 
-      if (userQueries.getByUsername(normalizedUsername)) {
+      if (await userQueries.getByUsername(normalizedUsername)) {
         skipped.push(normalizedUsername);
         continue;
       }
@@ -254,7 +253,7 @@ export function createAdminRoutes(
       }
       const hash = await bcrypt.hash(tempPassword, 10);
 
-      userQueries.create({
+      await userQueries.create({
         username: normalizedUsername,
         display_name: entry.display_name?.trim() || normalizedUsername,
         email: entry.email?.trim() || undefined,

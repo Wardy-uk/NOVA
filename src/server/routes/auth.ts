@@ -2,8 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import type { FileUserQueries } from '../db/user-store.js';
-type UserQueries = FileUserQueries;
+import type { UserQueries } from '../db/queries.js';
 import { authMiddleware, type AuthPayload } from '../middleware/auth.js';
 import type { EntraSsoService } from '../services/entra-sso.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
@@ -104,7 +103,7 @@ export function createAuthRoutes(
       return;
     }
 
-    const user = userQueries.getByUsername(username.trim().toLowerCase());
+    const user = await userQueries.getByUsername(username.trim().toLowerCase());
     if (!user) {
       res.status(401).json({ ok: false, error: 'Invalid username or password' });
       return;
@@ -138,7 +137,7 @@ export function createAuthRoutes(
       return;
     }
 
-    const userCount = userQueries.count();
+    const userCount = await userQueries.count();
 
     // If users already exist, only admin can create new users
     if (userCount > 0) {
@@ -160,14 +159,14 @@ export function createAuthRoutes(
     }
 
     const normalizedUsername = username.trim().toLowerCase();
-    if (userQueries.getByUsername(normalizedUsername)) {
+    if (await userQueries.getByUsername(normalizedUsername)) {
       res.status(409).json({ ok: false, error: 'Username already taken' });
       return;
     }
 
     const hash = await bcrypt.hash(password, 10);
     const role = userCount === 0 ? 'admin' : 'viewer'; // First user is admin
-    const id = userQueries.create({
+    const id = await userQueries.create({
       username: normalizedUsername,
       display_name: display_name?.trim() || normalizedUsername,
       email: email?.trim() || undefined,
@@ -175,14 +174,14 @@ export function createAuthRoutes(
       role,
     });
 
-    const user = userQueries.getById(id)!;
+    const user = (await userQueries.getById(id))!;
     const token = signToken(user, jwtSecret);
     res.json({ ok: true, data: { token, user: safeUser(user), firstUser: userCount === 0 } });
   });
 
   // GET /api/auth/status — public, check if any users exist (for first-run UX)
-  router.get('/status', (_req, res) => {
-    const count = userQueries.count();
+  router.get('/status', async (_req, res) => {
+    const count = await userQueries.count();
     res.json({ ok: true, data: { hasUsers: count > 0 } });
   });
 
@@ -199,7 +198,7 @@ export function createAuthRoutes(
       return;
     }
 
-    const user = userQueries.getByEmail(email.trim().toLowerCase());
+    const user = await userQueries.getByEmail(email.trim().toLowerCase());
     if (!user || (user.auth_provider === 'entra' && !user.password_hash)) {
       // SSO-only or unknown — silently succeed
       res.json({ ok: true });
@@ -251,14 +250,14 @@ export function createAuthRoutes(
       return;
     }
 
-    const user = userQueries.getById(data.userId);
+    const user = await userQueries.getById(data.userId);
     if (!user) {
       res.status(400).json({ ok: false, error: 'User not found' });
       return;
     }
 
     const hash = await bcrypt.hash(password, 10);
-    userQueries.update(user.id, { password_hash: hash });
+    await userQueries.update(user.id, { password_hash: hash });
     resetTokens.delete(token);
     console.log(`[Auth] Password reset completed for user ${user.username}`);
 
@@ -267,7 +266,7 @@ export function createAuthRoutes(
 
   // GET /api/auth/me — requires valid token
   router.get('/me', authMiddleware(jwtSecret), async (req, res) => {
-    const user = userQueries.getById(req.user!.id);
+    const user = await userQueries.getById(req.user!.id);
     if (!user) {
       res.status(401).json({ ok: false, error: 'User not found' });
       return;
@@ -418,7 +417,7 @@ export function createAuthRoutes(
       }
 
       // User resolution: OID lookup → email lookup (link existing) → auto-create
-      let user = userQueries.getByProviderId('entra', claims.oid);
+      let user = await userQueries.getByProviderId('entra', claims.oid);
 
       if (user) {
         ssoLogger.log('user_resolved', `Matched existing user by OID`, { userId: user.id, username: user.username });
@@ -429,15 +428,15 @@ export function createAuthRoutes(
           const existingRoles = parseRoles(user.role);
           const manualRoles = existingRoles.filter(r => !ssoManagedRoles.has(r) && r !== 'admin');
           const mergedRole = [...new Set([...parseRoles(resolvedRole), ...manualRoles])].join(',');
-          userQueries.update(user.id, { role: mergedRole });
-          user = userQueries.getById(user.id);
+          await userQueries.update(user.id, { role: mergedRole });
+          user = await userQueries.getById(user.id);
           ssoLogger.log('user_resolved', `Role merged (SSO + manual)`, { resolvedRole, manualRoles, mergedRole });
         }
       }
 
       if (!user) {
         // Try matching by email to link existing local accounts
-        const existing = userQueries.getByEmail(claims.email);
+        const existing = await userQueries.getByEmail(claims.email);
         if (existing) {
           ssoLogger.log('user_linked', `Linking existing local account by email`, { userId: existing.id, username: existing.username, email: claims.email });
           // Link existing account to Entra, update role from group mapping (preserve manual roles)
@@ -448,14 +447,14 @@ export function createAuthRoutes(
             const manualRoles = existingRoles.filter(r => !ssoManagedRoles.has(r) && r !== 'admin');
             linkedRole = [...new Set([...parseRoles(resolvedRole), ...manualRoles])].join(',');
           }
-          userQueries.update(existing.id, {
+          await userQueries.update(existing.id, {
             auth_provider: 'entra',
             provider_id: claims.oid,
             email: claims.email,
             display_name: claims.name || existing.display_name,
             ...(linkedRole ? { role: linkedRole } : {}),
           });
-          user = userQueries.getById(existing.id);
+          user = await userQueries.getById(existing.id);
         } else {
           ssoLogger.log('user_resolved', `No existing user found by OID or email`, { oid: claims.oid, email: claims.email });
         }
@@ -464,14 +463,14 @@ export function createAuthRoutes(
       if (!user) {
         // Auto-provision new user
         let username = claims.preferredUsername.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
-        if (userQueries.getByUsername(username)) {
+        if (await userQueries.getByUsername(username)) {
           username = `${username}_${Date.now().toString(36)}`;
         }
 
-        const isFirstUser = userQueries.count() === 0;
+        const isFirstUser = (await userQueries.count()) === 0;
         const newRole = isFirstUser ? 'admin' : (resolvedRole || 'viewer');
         ssoLogger.log('user_created', `Auto-provisioning new user`, { username, email: claims.email, role: newRole });
-        const id = userQueries.create({
+        const id = await userQueries.create({
           username,
           display_name: claims.name || username,
           email: claims.email,
@@ -480,7 +479,7 @@ export function createAuthRoutes(
           auth_provider: 'entra',
           provider_id: claims.oid,
         });
-        user = userQueries.getById(id);
+        user = await userQueries.getById(id);
       }
 
       if (!user) {
@@ -524,19 +523,17 @@ export function createAuthRoutes(
   // ── Permissions ──
 
   // GET /api/auth/permissions — public, returns custom roles + caller's resolved area access
-  router.get('/permissions', (req, res) => {
+  router.get('/permissions', async (req, res) => {
     const roles = getCustomRoles(settingsQueries);
     ssoLogger.log('permissions', 'Custom roles loaded', { roles: roles.map(r => ({ id: r.id, name: r.name, areas: r.areas })) });
 
-    // If caller is authenticated, resolve their access using the CURRENT role from DB
-    // (not the token role, which may be stale after an admin role change)
     let areaAccess: Record<string, string> | null = null;
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) {
       try {
         const payload = jwt.verify(authHeader.slice(7), jwtSecret) as { id: number; role: string };
         ssoLogger.log('permissions', 'Token decoded', { id: payload.id, tokenRole: payload.role });
-        const currentUser = userQueries.getById(payload.id);
+        const currentUser = await userQueries.getById(payload.id);
         if (currentUser) {
           ssoLogger.log('permissions', 'DB user found', { id: currentUser.id, username: currentUser.username, dbRole: currentUser.role });
         } else {

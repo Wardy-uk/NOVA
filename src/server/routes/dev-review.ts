@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { DevReviewQueries } from '../db/dev-review-queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
-import type { FileUserQueries } from '../db/user-store.js';
+import type { UserQueries } from '../db/queries.js';
 import type { NotificationQueries } from '../db/notifications.js';
 import type { TeamQueries } from '../db/queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
@@ -81,7 +81,7 @@ function adfDoc(text: string): object {
 export function createDevReviewRoutes(
   devQueries: DevReviewQueries,
   settingsQueries: SettingsQueries,
-  userQueries: FileUserQueries,
+  userQueries: UserQueries,
   notificationQueries: NotificationQueries,
   teamQueries: TeamQueries,
   requireAreaAccess: AreaAccessGuard,
@@ -124,9 +124,9 @@ export function createDevReviewRoutes(
   // Gate: devreview area access (configured in Admin > Permissions)
   router.use(requireAreaAccess('devreview', 'view'));
 
-  const userDisplay = (req: Request): string => {
+  const userDisplay = async (req: Request): Promise<string> => {
     if (!req.user) return 'Unknown';
-    const u = userQueries.getById(req.user.id);
+    const u = await userQueries.getById(req.user.id);
     return u?.display_name || u?.username || req.user.username || 'Unknown';
   };
 
@@ -204,7 +204,7 @@ export function createDevReviewRoutes(
       let userTeamFilterActive = false;
       let userTeamName: string | null = null;
       if (req.user && !isAdmin(req.user.role)) {
-        const user = userQueries.getById(req.user.id);
+        const user = await userQueries.getById(req.user.id);
         if (user?.team_id) {
           const team = await teamQueries.getById(user.team_id);
           const allowed = team?.jira_products;
@@ -309,9 +309,9 @@ export function createDevReviewRoutes(
     await devQueries.addThreadEntry({
       jira_key: String(req.params.key),
       user_id: req.user.id,
-      user_display: userDisplay(req),
+      user_display: await userDisplay(req),
       kind: 'claim',
-      body: `${userDisplay(req)} claimed this ticket`,
+      body: `${await userDisplay(req)} claimed this ticket`,
       syncState: 'skip',
     });
     res.json({ ok: true });
@@ -330,7 +330,7 @@ export function createDevReviewRoutes(
     await devQueries.addThreadEntry({
       jira_key: String(req.params.key),
       user_id: req.user.id,
-      user_display: userDisplay(req),
+      user_display: await userDisplay(req),
       kind: 'fasttrack',
       body: on ? 'Flagged as fast-track' : 'Fast-track cleared',
       syncState: 'skip',
@@ -370,7 +370,7 @@ export function createDevReviewRoutes(
     if (!body) { res.status(400).json({ ok: false, error: 'Body required' }); return; }
 
     const key = String(req.params.key);
-    const display = userDisplay(req);
+    const display = await userDisplay(req);
     const threadId = await devQueries.addThreadEntry({
       jira_key: key,
       user_id: req.user.id,
@@ -610,7 +610,7 @@ export function createDevReviewRoutes(
     const tldr = String(req.body?.tldr || '').trim();
     const developmentDetails = String(req.body?.developmentDetails || '').trim();
     const workItemComment = String(req.body?.workItemComment || '').trim();
-    const display = userDisplay(req);
+    const display = await userDisplay(req);
 
     if (!tldr) {
       res.status(400).json({ ok: false, error: 'TL;DR is required by the Escalate to Development screen' });
@@ -744,7 +744,7 @@ export function createDevReviewRoutes(
     let workItemKey: string | null = null;
     let targetProjectKey: string | null = null;
     if (req.user) {
-      const user = userQueries.getById(req.user.id);
+      const user = await userQueries.getById(req.user.id);
       if (user?.team_id) {
         const team = await teamQueries.getById(user.team_id);
         targetProjectKey = team?.jira_project_key?.trim() || null;
@@ -843,7 +843,7 @@ export function createDevReviewRoutes(
 
     const s = settingsQueries.getAll();
     const returnTransitionId = s.dev_review_return_transition_id ? String(s.dev_review_return_transition_id) : '';
-    const display = userDisplay(req);
+    const display = await userDisplay(req);
 
     const threadId = await devQueries.addThreadEntry({
       jira_key: String(req.params.key),
@@ -892,7 +892,7 @@ export function createDevReviewRoutes(
       // Notify the original submitter in NOVA (best-effort; never blocks response)
       try {
         if (submitter) {
-          const allUsers = userQueries.getAll();
+          const allUsers = await userQueries.getAll();
           // Match by email (since Jira emailAddress is what we stored), then username
           const match = allUsers.find((u) => (u.email && u.email.toLowerCase() === submitter.toLowerCase()))
             || allUsers.find((u) => u.username.toLowerCase() === submitter.toLowerCase());

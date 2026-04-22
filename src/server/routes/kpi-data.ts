@@ -2,7 +2,7 @@ import { Router } from 'express';
 import sql from 'mssql';
 
 import type { SettingsQueries } from '../db/settings-store.js';
-import type { FileUserQueries } from '../db/user-store.js';
+import type { UserQueries } from '../db/queries.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import { ssoLogger } from '../services/sso-logger.js';
 import { TEAM_AGENTS } from './trends.js';
@@ -18,7 +18,7 @@ function suffix(env: Env): string {
   return env === 'uat' ? 'UAT' : '';
 }
 
-export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQueries: FileUserQueries): Router {
+export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQueries: UserQueries): Router {
   const router = Router();
 
 
@@ -65,7 +65,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
    */
   async function resolveAgentScope(req: any): Promise<string | null> {
     if (!req.user || isAdmin(req.user.role)) return null;
-    const user = userQueries.getById(req.user.id);
+    const user = await userQueries.getById(req.user.id);
     if (!user?.email) {
       ssoLogger.warn('agent_scope', `No email on user — cannot scope QA`, { userId: req.user.id, username: req.user.username });
       return null;
@@ -325,7 +325,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       let scopedAgent: string | null;
       if (forceSelf && req.user && isAdmin(req.user.role)) {
         // Admin requesting their own data — resolve like a non-admin
-        const user = userQueries.getById(req.user.id);
+        const user = await userQueries.getById(req.user.id);
         if (user?.email) {
           const r = p.request();
           r.input('email', sql.NVarChar, user.email.toLowerCase());

@@ -1,18 +1,17 @@
 import { Router } from 'express';
 import type { FeedbackQueries, TaskQueries } from '../db/queries.js';
-import type { FileUserQueries } from '../db/user-store.js';
+import type { UserQueries } from '../db/queries.js';
 import type { NotificationQueries } from '../db/notifications.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
-export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueries?: TaskQueries, userQueries?: FileUserQueries, notificationQueries?: NotificationQueries): Router {
+export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueries?: TaskQueries, userQueries?: UserQueries, notificationQueries?: NotificationQueries): Router {
   const router = Router();
 
-  /** Enrich feedback items with username from the file-based user store */
-  function enrichWithUsernames<T extends { user_id: number; username?: string }>(items: T[]): T[] {
+  async function enrichWithUsernames<T extends { user_id: number; username?: string }>(items: T[]): Promise<T[]> {
     if (!userQueries) return items;
     for (const item of items) {
       if (!item.username) {
-        const user = userQueries.getById(item.user_id);
+        const user = await userQueries.getById(item.user_id);
         if (user) item.username = user.display_name || user.username;
       }
     }
@@ -54,7 +53,7 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
 
     const status = req.query.status as string | undefined;
     const items = await feedbackQueries.getAll(status ? { status } : undefined);
-    res.json({ ok: true, data: enrichWithUsernames(items) });
+    res.json({ ok: true, data: await enrichWithUsernames(items) });
   });
 
   // Reply to feedback (admin only)
@@ -69,7 +68,7 @@ export function createFeedbackRoutes(feedbackQueries: FeedbackQueries, taskQueri
 
     await feedbackQueries.reply(id, reply.trim(), adminUserId);
     const updated = await feedbackQueries.getById(id);
-    if (updated) enrichWithUsernames([updated]);
+    if (updated) await enrichWithUsernames([updated]);
 
     // Notify the feedback author that they received a reply
     if (updated && notificationQueries) {

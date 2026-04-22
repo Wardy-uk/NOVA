@@ -1,17 +1,17 @@
 import { Router } from 'express';
 import type { DeliveryQueries, MilestoneQueries, TaskQueries } from '../db/queries.js';
-import type { FileUserQueries } from '../db/user-store.js';
+import type { UserQueries } from '../db/queries.js';
 
 export function createTeamRoutes(
   deliveryQueries: DeliveryQueries,
   milestoneQueries: MilestoneQueries,
   taskQueries: TaskQueries,
-  userQueries: FileUserQueries,
+  userQueries: UserQueries,
 ): Router {
   const router = Router();
 
   router.get('/workload', async (_req, res) => {
-    const users = userQueries.getAll();
+    const users = await userQueries.getAll();
     const deliveries = await deliveryQueries.getAll();
     const allMilestones = await milestoneQueries.getAllWithDelivery();
     const today = new Date().toISOString().split('T')[0];

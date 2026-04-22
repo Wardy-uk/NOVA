@@ -129,9 +129,8 @@ export function createAreaAccessGuard(getRoles: () => CustomRole[]) {
 
 export type AreaAccessGuard = ReturnType<typeof createAreaAccessGuard>;
 
-export function authMiddleware(secret: string, getUserRole?: (id: number) => string | undefined) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    // Accept token from Authorization header or ?token= query param (for <img src> etc.)
+export function authMiddleware(secret: string, getUserRole?: (id: number) => Promise<string | undefined>) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     let token: string | undefined;
     const header = req.headers.authorization;
     if (header?.startsWith('Bearer ')) {
@@ -148,10 +147,8 @@ export function authMiddleware(secret: string, getUserRole?: (id: number) => str
     try {
       const payload = jwt.verify(token, secret) as AuthPayload;
       req.user = payload;
-      // If a role lookup is provided, refresh the role from DB so stale JWTs always
-      // reflect the current role (e.g. after admin changes a user's role without re-login)
       if (getUserRole) {
-        const freshRole = getUserRole(payload.id);
+        const freshRole = await getUserRole(payload.id);
         if (freshRole !== undefined) req.user = { ...payload, role: freshRole };
       }
       next();

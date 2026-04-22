@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import type { TrainingQueries } from '../db/queries.js';
-import type { FileUserQueries } from '../db/user-store.js';
+import type { UserQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import type { AreaAccessGuard } from '../middleware/auth.js';
@@ -8,7 +8,7 @@ import { sendTrainingReminders } from '../services/training-reminder.js';
 
 export function createTrainingRoutes(
   trainingQueries: TrainingQueries,
-  userQueries: FileUserQueries,
+  userQueries: UserQueries,
   requireAreaAccess: AreaAccessGuard,
   settingsQueries?: SettingsQueries,
 ): Router {
@@ -129,12 +129,12 @@ export function createTrainingRoutes(
     const memberIds = await trainingQueries.getMembers();
     if (memberIds.length === 0) {
       // No members table yet — fall back to all users
-      const allUsers = userQueries.getAll();
+      const allUsers = await userQueries.getAll();
       res.json({ ok: true, data: allUsers.map(u => ({ id: u.id, username: u.username, display_name: u.display_name })) });
       return;
     }
     const memberSet = new Set(memberIds);
-    const allUsers = userQueries.getAll();
+    const allUsers = await userQueries.getAll();
     // Preserve the sort order from training_members
     const users = memberIds
       .map(id => allUsers.find(u => u.id === id))
@@ -207,7 +207,7 @@ export function createTrainingRoutes(
       return;
     }
 
-    const allUsers = userQueries.getAll();
+    const allUsers = await userQueries.getAll();
     const skipCols = new Set(['Knowledge Item', 'Total', 'Team Total Score', 'Tech Lead', 'Udemy', '']);
 
     // Clear existing data
@@ -312,7 +312,7 @@ export function createTrainingRoutes(
     const categories = await trainingQueries.getCategories();
     const items = await trainingQueries.getItems();
     const scores = await trainingQueries.getScores();
-    const allUsers = userQueries.getAll();
+    const allUsers = await userQueries.getAll();
 
     // Only include training members (from spreadsheet import)
     const memberIds = await trainingQueries.getMembers();
