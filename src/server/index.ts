@@ -150,6 +150,33 @@ async function main() {
   const crmQueries = new CrmQueries();
   const salesQueries = new SalesQueries();
   const userQueries = new UserQueries();
+
+  // One-time migration: import users.json into MSSQL if the file exists
+  const usersJsonPath = path.resolve('users.json');
+  if (fs.existsSync(usersJsonPath) && (await userQueries.count()) === 0) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(usersJsonPath, 'utf-8')) as { users: Array<Record<string, unknown>> };
+      let migrated = 0;
+      for (const u of raw.users ?? []) {
+        const newId = await userQueries.create({
+          username: u.username as string,
+          display_name: (u.display_name as string) || undefined,
+          email: (u.email as string) || undefined,
+          password_hash: (u.password_hash as string) || '',
+          role: (u.role as string) || 'viewer',
+          auth_provider: (u.auth_provider as string) || 'local',
+          provider_id: (u.provider_id as string) || undefined,
+        });
+        if (u.team_id) await userQueries.update(newId, { team_id: u.team_id as number });
+        migrated++;
+      }
+      fs.renameSync(usersJsonPath, usersJsonPath + '.migrated');
+      console.log(`[Startup] Migrated ${migrated} users from users.json → MSSQL`);
+    } catch (err) {
+      console.error('[Startup] users.json migration failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
   const novaMcpCreated = await userQueries.ensureServiceAccount({
     username: 'nova-mcp',
     password_hash: '$2b$10$14kBcPzWdHR/G2UBK8YMWuQozUp4iQNIbM1jAw9lhvP1zFixAxVMe',
