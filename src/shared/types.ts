@@ -70,7 +70,7 @@ export interface HealthResponse {
 export interface IntegrationField {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'url' | 'group_roles';
+  type: 'text' | 'password' | 'url' | 'group_roles' | 'toggle';
   placeholder?: string;
   required: boolean;
 }
@@ -88,6 +88,7 @@ export interface IntegrationDefinition {
   fields: IntegrationField[];
   enabledKey: string;
   authType: 'credentials' | 'device_code';
+  superAdminOnly?: boolean;
 }
 
 export interface IntegrationStatus {

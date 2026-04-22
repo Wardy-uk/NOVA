@@ -233,7 +233,7 @@ export function AdminView() {
       const res = await fetch('/api/integrations');
       const json = await res.json();
       if (json.ok) {
-        const ADMIN_ONLY = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign', 'llm', 'people-hr', 'teams-webhook', 'whisper']);
+        const ADMIN_ONLY = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign', 'llm', 'ai-agent', 'people-hr', 'teams-webhook', 'whisper']);
         const withFields = (json.data as IntegrationConfig[]).filter(i => ADMIN_ONLY.has(i.id));
         setIntegrations(withFields);
         const vals: Record<string, Record<string, string>> = {};
@@ -1558,6 +1558,27 @@ export function AdminView() {
                           onClick={() => updateMappings([...mappings, { groupId: '', groupName: '', novaRole: '' }])}
                           className="text-[11px] text-[#5ec1ca] hover:text-[#4db0b9] transition-colors"
                         >+ Add group mapping</button>
+                      </div>
+                    );
+                  }
+                  if (field.type === 'toggle') {
+                    const isOn = (integValues[integ.id]?.[field.key] ?? field.placeholder ?? '') === 'true';
+                    return (
+                      <div key={field.key} className="flex items-center justify-between">
+                        <span className="text-xs text-neutral-400">{field.label}</span>
+                        <button
+                          onClick={() => {
+                            setIntegSaved(prev => { const s = new Set(prev); s.delete(integ.id); return s; });
+                            setIntegValues(prev => ({
+                              ...prev,
+                              [integ.id]: { ...prev[integ.id], [field.key]: isOn ? 'false' : 'true' },
+                            }));
+                          }}
+                          className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${isOn ? 'bg-[#5ec1ca]' : 'bg-neutral-700'}`}
+                          title={isOn ? 'Disable' : 'Enable'}
+                        >
+                          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${isOn ? 'left-[18px]' : 'left-0.5'}`} />
+                        </button>
                       </div>
                     );
                   }
