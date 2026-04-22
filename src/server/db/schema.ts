@@ -382,6 +382,52 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_llm_calls') AND name = 'estimated_cost')
      ALTER TABLE agent_llm_calls ADD estimated_cost DECIMAL(10,6) NULL;`,
+
+    // ── Dev Review tables ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dev_review_state') AND type = 'U')
+     CREATE TABLE dev_review_state (
+       jira_key NVARCHAR(30) NOT NULL PRIMARY KEY,
+       status NVARCHAR(30) NOT NULL DEFAULT 'pending',
+       fast_track BIT NOT NULL DEFAULT 0,
+       nova_priority NVARCHAR(10) NOT NULL DEFAULT 'normal',
+       claimed_by_user_id INT NULL,
+       claimed_at DATETIME2 NULL,
+       submitted_by_username NVARCHAR(200) NULL,
+       first_seen_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       last_action_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       accepted_at DATETIME2 NULL,
+       returned_at DATETIME2 NULL,
+       archived_at DATETIME2 NULL,
+       team NVARCHAR(100) NULL
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dev_review_thread') AND type = 'U')
+     CREATE TABLE dev_review_thread (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       jira_key NVARCHAR(30) NOT NULL,
+       user_id INT NOT NULL,
+       user_display NVARCHAR(200) NOT NULL,
+       kind NVARCHAR(20) NOT NULL DEFAULT 'comment',
+       body NVARCHAR(MAX) NULL,
+       meta_json NVARCHAR(MAX) NULL,
+       jira_sync_state NVARCHAR(10) NOT NULL DEFAULT 'pending',
+       jira_sync_error NVARCHAR(MAX) NULL,
+       jira_comment_id NVARCHAR(100) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dev_review_outbox') AND type = 'U')
+     CREATE TABLE dev_review_outbox (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       jira_key NVARCHAR(30) NOT NULL,
+       op NVARCHAR(20) NOT NULL,
+       payload_json NVARCHAR(MAX) NOT NULL,
+       attempts INT NOT NULL DEFAULT 0,
+       status NVARCHAR(10) NOT NULL DEFAULT 'pending',
+       last_error NVARCHAR(MAX) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       processed_at DATETIME2 NULL
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
