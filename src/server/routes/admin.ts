@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import type { TeamQueries, UserSettingsQueries } from '../db/queries.js';
+import type { TeamQueries, UserSettingsQueries, UserTeamQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { UserQueries } from '../db/queries.js';
 import { requireRole } from '../middleware/auth.js';
@@ -20,6 +20,7 @@ export function createAdminRoutes(
   userSettingsQueries: UserSettingsQueries,
   settingsQueries: SettingsQueries,
   getJiraClient: () => JiraRestClient | null,
+  userTeamQueries?: UserTeamQueries,
 ): Router {
   const router = Router();
   router.use(requireRole('admin', 'super_admin'));
@@ -50,7 +51,14 @@ export function createAdminRoutes(
   router.get('/users', async (_req, res) => {
     const users = await userQueries.getAll();
     const teams = await teamQueries.getAll();
-    res.json({ ok: true, data: { users, teams } });
+    // Load multi-team assignments for all users
+    const userTeams: Record<number, number[]> = {};
+    if (userTeamQueries) {
+      for (const u of users) {
+        userTeams[u.id] = await userTeamQueries.getTeamIdsForUser(u.id);
+      }
+    }
+    res.json({ ok: true, data: { users, teams, userTeams } });
   });
 
   router.post('/users', async (req, res) => {
@@ -94,7 +102,7 @@ export function createAdminRoutes(
     const user = await userQueries.getById(id);
     if (!user) { res.status(404).json({ ok: false, error: 'User not found' }); return; }
 
-    const { display_name, email, role, team_id } = req.body;
+    const { display_name, email, role, team_id, team_ids } = req.body;
     const updates: Record<string, unknown> = {};
     if (display_name !== undefined) updates.display_name = display_name;
     if (email !== undefined) updates.email = email;
@@ -122,9 +130,20 @@ export function createAdminRoutes(
       }
       updates.role = requested.join(',');
     }
-    if (team_id !== undefined) updates.team_id = team_id;
+    // Multi-team assignment (preferred) — falls back to legacy single team_id
+    if (userTeamQueries) {
+      if (Array.isArray(team_ids)) {
+        await userTeamQueries.setTeamsForUser(id, team_ids.filter((t: unknown) => typeof t === 'number'));
+      } else if (team_id !== undefined) {
+        await userTeamQueries.setTeamsForUser(id, team_id ? [team_id] : []);
+      }
+    } else if (team_id !== undefined) {
+      updates.team_id = team_id;
+    }
 
-    await userQueries.update(id, updates);
+    if (Object.keys(updates).length > 0) {
+      await userQueries.update(id, updates);
+    }
     res.json({ ok: true });
   });
 

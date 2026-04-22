@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { OnboardingConfigView } from './OnboardingConfigView.js';
 import { AuditLogView } from './AuditPanel.js';
 import { SsoLogPanel } from './SsoLogPanel.js';
@@ -121,9 +121,56 @@ const AREA_DEFS = [
 const ACCESS_LEVELS = ['hidden', 'view', 'edit'] as const;
 type AccessLevel = typeof ACCESS_LEVELS[number];
 
+function TeamMultiSelect({ teams, selected, onChange }: { teams: Team[]; selected: number[]; onChange: (ids: number[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+  const selectedNames = selected.map(id => teams.find(t => t.id === id)?.name).filter(Boolean);
+  const label = selectedNames.length === 0 ? 'No team' : selectedNames.length <= 2 ? selectedNames.join(', ') : `${selectedNames.length} teams`;
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="bg-[#272C33] text-neutral-300 text-xs rounded px-2 py-1 border border-[#3a424d] outline-none hover:border-[#5ec1ca] flex items-center gap-1 min-w-[120px] text-left"
+      >
+        <span className="flex-1 truncate">{label}</span>
+        <span className="text-[8px] text-neutral-500">▼</span>
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 bg-[#272C33] border border-[#3a424d] rounded-lg shadow-xl py-1 min-w-[180px] max-h-[240px] overflow-y-auto">
+          {teams.map(t => {
+            const checked = selected.includes(t.id);
+            return (
+              <label key={t.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#363d47] cursor-pointer text-xs text-neutral-300">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => {
+                    const next = checked ? selected.filter(id => id !== t.id) : [...selected, t.id];
+                    onChange(next);
+                  }}
+                  className="accent-[#5ec1ca]"
+                />
+                {t.name}
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AdminView() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [userTeamsMap, setUserTeamsMap] = useState<Record<number, number[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -209,6 +256,7 @@ export function AdminView() {
       if (json.ok) {
         setUsers(json.data.users);
         setTeams(json.data.teams);
+        if (json.data.userTeams) setUserTeamsMap(json.data.userTeams);
       } else {
         setError(json.error || 'Failed to load users');
       }
@@ -901,14 +949,14 @@ export function AdminView() {
             </button>
             <button
               onClick={() => {
-                const teamName = (id: number | null) => teams.find(t => t.id === id)?.name ?? '';
-                const header = ['Username', 'Display Name', 'Email', 'Roles', 'Team', 'Auth Provider', 'Created'];
+                const teamNames = (uid: number) => (userTeamsMap[uid] || []).map(tid => teams.find(t => t.id === tid)?.name ?? '').filter(Boolean).join('; ');
+                const header = ['Username', 'Display Name', 'Email', 'Roles', 'Teams', 'Auth Provider', 'Created'];
                 const rows = users.map(u => [
                   u.username,
                   u.display_name ?? '',
                   u.email ?? '',
                   u.role,
-                  teamName(u.team_id),
+                  teamNames(u.id),
                   u.auth_provider,
                   u.created_at ? new Date(u.created_at).toLocaleDateString() : '',
                 ]);
@@ -1117,16 +1165,14 @@ export function AdminView() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <select
-                      value={user.team_id ?? ''}
-                      onChange={(e) => updateUser(user.id, { team_id: e.target.value ? parseInt(e.target.value) : null })}
-                      className="bg-[#272C33] text-neutral-300 text-xs rounded px-2 py-1 border border-[#3a424d] outline-none focus:border-[#5ec1ca]"
-                    >
-                      <option value="">No team</option>
-                      {teams.map((t) => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
+                    <TeamMultiSelect
+                      teams={teams}
+                      selected={userTeamsMap[user.id] || []}
+                      onChange={(ids) => {
+                        setUserTeamsMap(prev => ({ ...prev, [user.id]: ids }));
+                        updateUser(user.id, { team_ids: ids });
+                      }}
+                    />
                   </td>
                   <td className="px-4 py-3 text-xs text-neutral-500">
                     {new Date(user.created_at).toLocaleDateString()}
@@ -1206,7 +1252,7 @@ export function AdminView() {
               </thead>
               <tbody>
                 {teams.map((team) => {
-                  const memberCount = users.filter((u) => u.team_id === team.id).length;
+                  const memberCount = users.filter((u) => (userTeamsMap[u.id] || []).includes(team.id)).length;
                   const products = team.jira_products || [];
                   const productLabel = products.length === 0
                     ? 'Sees all'

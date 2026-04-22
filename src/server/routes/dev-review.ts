@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { DevReviewQueries } from '../db/dev-review-queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
-import type { UserQueries } from '../db/queries.js';
+import type { UserQueries, UserTeamQueries } from '../db/queries.js';
 import type { NotificationQueries } from '../db/notifications.js';
 import type { TeamQueries } from '../db/queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
@@ -86,6 +86,7 @@ export function createDevReviewRoutes(
   teamQueries: TeamQueries,
   requireAreaAccess: AreaAccessGuard,
   getJiraClient: () => JiraRestClient | null,
+  userTeamQueries?: UserTeamQueries,
 ): Router {
   const router = Router();
 
@@ -202,19 +203,31 @@ export function createDevReviewRoutes(
       // show/hide the toggle accordingly.
       const showAll = req.query.showAll === '1';
       let userTeamFilterActive = false;
-      let userTeamName: string | null = null;
+      let userTeamNames: string[] = [];
       if (req.user && !isAdmin(req.user.role)) {
-        const user = await userQueries.getById(req.user.id);
-        if (user?.team_id) {
-          const team = await teamQueries.getById(user.team_id);
-          const allowed = team?.jira_products;
-          if (allowed && allowed.length > 0) {
-            userTeamFilterActive = true;
-            userTeamName = team?.name ?? null;
-            if (!showAll) {
-              const allowedSet = new Set(allowed);
-              enriched = enriched.filter((item) => allowedSet.has(item.team));
-            }
+        // Aggregate allowed products from ALL of the user's teams
+        const userTeams = userTeamQueries
+          ? await userTeamQueries.getTeamsForUser(req.user.id, teamQueries)
+          : [];
+        // Fallback to legacy team_id if no user_teams rows
+        if (userTeams.length === 0) {
+          const user = await userQueries.getById(req.user.id);
+          if (user?.team_id) {
+            const t = await teamQueries.getById(user.team_id);
+            if (t) userTeams.push(t);
+          }
+        }
+        const allProducts = new Set<string>();
+        for (const t of userTeams) {
+          if (t.jira_products && t.jira_products.length > 0) {
+            for (const p of t.jira_products) allProducts.add(p);
+            userTeamNames.push(t.name);
+          }
+        }
+        if (allProducts.size > 0) {
+          userTeamFilterActive = true;
+          if (!showAll) {
+            enriched = enriched.filter((item) => allProducts.has(item.team));
           }
         }
       }
@@ -236,7 +249,7 @@ export function createDevReviewRoutes(
         data: enriched,
         meta: {
           userTeamFilterActive,
-          userTeamName,
+          userTeamName: userTeamNames.length > 0 ? userTeamNames.join(', ') : null,
           showingAll: showAll || !userTeamFilterActive,
         },
       });
@@ -744,10 +757,26 @@ export function createDevReviewRoutes(
     let workItemKey: string | null = null;
     let targetProjectKey: string | null = null;
     if (req.user) {
-      const user = await userQueries.getById(req.user.id);
-      if (user?.team_id) {
-        const team = await teamQueries.getById(user.team_id);
-        targetProjectKey = team?.jira_project_key?.trim() || null;
+      // Find the best project key from the user's teams
+      const userTeams = userTeamQueries
+        ? await userTeamQueries.getTeamsForUser(req.user.id, teamQueries)
+        : [];
+      // Fallback to legacy team_id
+      if (userTeams.length === 0) {
+        const user = await userQueries.getById(req.user.id);
+        if (user?.team_id) {
+          const t = await teamQueries.getById(user.team_id);
+          if (t) userTeams.push(t);
+        }
+      }
+      if (userTeams.length === 1) {
+        targetProjectKey = userTeams[0].jira_project_key?.trim() || null;
+      } else if (userTeams.length > 1) {
+        // Pick the team whose products match the ticket's product
+        const ticketState = await devQueries.getState(key);
+        const ticketTeam = ticketState?.team || 'Unassigned';
+        const match = userTeams.find(t => t.jira_products?.includes(ticketTeam));
+        targetProjectKey = (match ?? userTeams[0]).jira_project_key?.trim() || null;
       }
     }
 

@@ -696,6 +696,7 @@ export class UserQueries {
   }
 
   async delete(id: number): Promise<boolean> {
+    await execute(`DELETE FROM user_teams WHERE user_id = ?`, [id]);
     await execute(`DELETE FROM users WHERE id = ?`, [id]);
     await execute(`DELETE FROM user_settings WHERE user_id = ?`, [id]);
     return true;
@@ -772,8 +773,41 @@ export class TeamQueries {
 
   async delete(id: number): Promise<boolean> {
     await execute(`UPDATE users SET team_id = NULL WHERE team_id = ?`, [id]);
+    await execute(`DELETE FROM user_teams WHERE team_id = ?`, [id]);
     await execute(`DELETE FROM teams WHERE id = ?`, [id]);
     return true;
+  }
+}
+
+// ─── User Teams (many-to-many) ───────────────────────────────────────────────
+
+export class UserTeamQueries {
+  async getTeamIdsForUser(userId: number): Promise<number[]> {
+    const rows = await query<{ team_id: number }>(`SELECT team_id FROM user_teams WHERE user_id = ?`, [userId]);
+    return rows.map(r => r.team_id);
+  }
+
+  async getTeamsForUser(userId: number, teamQueries: TeamQueries): Promise<Team[]> {
+    const ids = await this.getTeamIdsForUser(userId);
+    if (ids.length === 0) return [];
+    const all = await teamQueries.getAll();
+    const idSet = new Set(ids);
+    return all.filter(t => idSet.has(t.id));
+  }
+
+  async setTeamsForUser(userId: number, teamIds: number[]): Promise<void> {
+    await execute(`DELETE FROM user_teams WHERE user_id = ?`, [userId]);
+    for (const tid of teamIds) {
+      await execute(`INSERT INTO user_teams (user_id, team_id) VALUES (?, ?)`, [userId, tid]);
+    }
+    // Keep legacy team_id in sync (first team or null)
+    await execute(`UPDATE users SET team_id = ?, updated_at = GETUTCDATE() WHERE id = ?`,
+      [teamIds.length > 0 ? teamIds[0] : null, userId]);
+  }
+
+  async getUserIdsForTeam(teamId: number): Promise<number[]> {
+    const rows = await query<{ user_id: number }>(`SELECT user_id FROM user_teams WHERE team_id = ?`, [teamId]);
+    return rows.map(r => r.user_id);
   }
 }
 

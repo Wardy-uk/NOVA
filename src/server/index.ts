@@ -7,7 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { initializeDatabase, shutdownDatabase } from './db/schema.js';
-import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries, TrainingQueries } from './db/queries.js';
+import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries, TrainingQueries } from './db/queries.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
@@ -155,6 +155,7 @@ async function main() {
   // Matches by email (case-insensitive) or username. Updates existing users'
   // roles and team assignments; creates missing users. Safe to run repeatedly.
   const teamQueries = new TeamQueries();
+  const userTeamQueries = new UserTeamQueries();
   const allTeams = await teamQueries.getAll();
   const teamByName = new Map(allTeams.map(t => [t.name.toLowerCase(), t.id]));
   const SEED_USERS: Array<{ username: string; display_name: string; email: string; role: string; team: string; auth_provider: string }> = [
@@ -731,7 +732,7 @@ async function main() {
   app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries));
   app.use('/api/training', createTrainingRoutes(trainingQueries, userQueries, requireAreaAccess, settingsQueries));
   app.use('/api/o365', createO365Routes(mcpManager));
-  app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries, buildServiceDeskJiraClient));
+  app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries, buildServiceDeskJiraClient, userTeamQueries));
 
   // Wallboard diagnostics log endpoints (admin-only)
   app.get('/api/admin/wallboard-logs', (req, res) => {
@@ -787,6 +788,7 @@ async function main() {
     teamQueries,
     requireAreaAccess,
     buildServiceDeskJiraClient,
+    userTeamQueries,
   ));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries));
   app.use('/api/backfill', requireAreaAccess('qa', 'view'), createBackfillRoutes(settingsQueries));

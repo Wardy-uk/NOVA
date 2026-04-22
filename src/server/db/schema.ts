@@ -428,6 +428,20 @@ async function runMigrations(): Promise<void> {
        created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
        processed_at DATETIME2 NULL
      );`,
+
+    // ── User-Teams many-to-many ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'user_teams') AND type = 'U')
+     CREATE TABLE user_teams (
+       user_id INT NOT NULL,
+       team_id INT NOT NULL,
+       PRIMARY KEY (user_id, team_id)
+     );`,
+
+    // Migrate legacy team_id data into user_teams
+    `INSERT INTO user_teams (user_id, team_id)
+     SELECT id, team_id FROM users
+     WHERE team_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM user_teams ut WHERE ut.user_id = users.id AND ut.team_id = users.team_id);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
