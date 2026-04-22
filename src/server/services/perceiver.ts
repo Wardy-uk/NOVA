@@ -102,9 +102,9 @@ export class Perceiver {
 
     const [openResult, newResult, updatedResult] = await Promise.all([
       this.jiraClient.searchJqlAll(
-        `${projectFilter} AND resolution = EMPTY ORDER BY created DESC`,
+        `${projectFilter} AND statusCategory IN ("To Do", "In Progress") ORDER BY created DESC`,
         DEFAULT_FIELDS,
-        200,
+        1000,
       ),
       this.jiraClient.searchJqlAll(
         `${projectFilter} AND created >= "${formatJqlDate(since)}" ORDER BY created DESC`,
@@ -112,9 +112,9 @@ export class Perceiver {
         50,
       ),
       this.jiraClient.searchJqlAll(
-        `${projectFilter} AND resolution = EMPTY AND updated >= "${formatJqlDate(since)}" AND created < "${formatJqlDate(since)}" ORDER BY updated DESC`,
+        `${projectFilter} AND statusCategory IN ("To Do", "In Progress") AND updated >= "${formatJqlDate(since)}" AND created < "${formatJqlDate(since)}" ORDER BY updated DESC`,
         DEFAULT_FIELDS,
-        50,
+        100,
       ),
     ]);
 

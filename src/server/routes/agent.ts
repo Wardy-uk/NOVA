@@ -721,7 +721,9 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   router.get('/workspace/queue', async (req, res) => {
     try {
       const jira = agentLoop.getJiraClient();
-      const project = req.query.project as string || 'NT';
+      const projectSetting = agentLoop.getSettings().get('agent_jira_project') ?? 'NT';
+      const projects = projectSetting.split(',').map(p => p.trim()).filter(Boolean);
+      const projectFilter = projects.length === 1 ? `project = ${projects[0]}` : `project IN (${projects.join(', ')})`;
       const assigneeFilter = req.query.assignee as string | undefined;
 
       const fields = [
@@ -730,7 +732,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         'customfield_10020', 'customfield_10010', 'labels',
       ];
 
-      let jql = `project = ${project} AND resolution = EMPTY`;
+      let jql = `${projectFilter} AND statusCategory IN ("To Do", "In Progress")`;
       if (assigneeFilter) {
         jql += assigneeFilter === 'unassigned'
           ? ' AND assignee is EMPTY'
@@ -738,7 +740,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       }
       jql += ' ORDER BY created DESC';
 
-      const result = await jira.searchJqlAll(jql, fields, 200);
+      const result = await jira.searchJqlAll(jql, fields, 1000);
 
       // Batch-fetch latest AI decision for each ticket
       const ticketKeys = result.issues.map((i: any) => i.key);
