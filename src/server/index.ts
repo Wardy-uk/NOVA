@@ -1784,7 +1784,9 @@ ${panelHtml}
             }
           }
           if (submitter || escalationIso) {
-            await devReviewQueries.setEscalationMetadata(key, submitter, escalationIso);
+            const escalationDate = escalationIso ? new Date(escalationIso) : null;
+            const safeIso = escalationDate && !isNaN(escalationDate.getTime()) ? escalationDate.toISOString() : null;
+            await devReviewQueries.setEscalationMetadata(key, submitter, safeIso);
           }
         } catch (e) {
           console.warn(`[DevReviewWatcher] Failed to resolve metadata for ${key}: ${e instanceof Error ? e.message : e}`);

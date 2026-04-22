@@ -85,6 +85,18 @@ export class ConfigService implements SettingsQueries {
           updated_by VARCHAR(100) NULL
         );
       `);
+      await pool.request().query(`
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'settings') AND name = 'category')
+          ALTER TABLE dbo.settings ADD category VARCHAR(50) NULL;
+      `);
+      await pool.request().query(`
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'settings') AND name = 'updated_at')
+          ALTER TABLE dbo.settings ADD updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE();
+      `);
+      await pool.request().query(`
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'settings') AND name = 'updated_by')
+          ALTER TABLE dbo.settings ADD updated_by VARCHAR(100) NULL;
+      `);
     } catch (err) {
       console.warn('[config] Failed to ensure settings table:', err instanceof Error ? err.message : err);
     }

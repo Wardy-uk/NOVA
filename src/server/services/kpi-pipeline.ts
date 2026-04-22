@@ -73,6 +73,16 @@ export class KpiPipeline {
       }
 
       const today = new Date().toISOString().slice(0, 10);
+      const s = this.s;
+
+      try {
+        await p.request().query(`
+          IF EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME = 'jira_kpi_daily${s}' AND COLUMN_NAME = 'direction'
+                       AND CHARACTER_MAXIMUM_LENGTH < 50)
+            ALTER TABLE jira_kpi_daily${s} ALTER COLUMN direction NVARCHAR(50);
+        `);
+      } catch { /* ignore */ }
 
       const openResult = await this.jiraClient.jqlCount(
         `project = ${this.jiraProject} AND resolution = EMPTY`,
@@ -109,7 +119,6 @@ export class KpiPipeline {
         { kpi: 'Waiting on Requestor', group: 'Queue', count: Math.max(wor, 0), target: 10, direction: 'Lower is better' },
       ];
 
-      const s = this.s;
       for (const m of metrics) {
         const rag = computeRag(m.count, m.target, m.direction);
         const request = p.request();
@@ -177,6 +186,7 @@ export class KpiPipeline {
       for (const a of agents.recordset) {
         const request = p.request();
         request.input('reportDate', sql.Date, today);
+        request.input('agentId', sql.Int, a.AgentId);
         request.input('agentName', sql.NVarChar, a.AgentName);
         request.input('tierCode', sql.NVarChar, a.TierCode || '');
         request.input('team', sql.NVarChar, a.Team || '');
@@ -191,15 +201,15 @@ export class KpiPipeline {
           USING (SELECT @reportDate AS ReportDate, @agentName AS AgentName) AS s
           ON t.ReportDate = s.ReportDate AND t.AgentName = s.AgentName
           WHEN MATCHED THEN UPDATE SET
-            TierCode = @tierCode, Team = @team,
+            AgentId = @agentId, TierCode = @tierCode, Team = @team,
             OpenTickets_Total = @openTotal, OpenTickets_Over2Hours = @over2h,
             OpenTickets_NoUpdateToday = @noUpdate,
             SolvedTickets_Today = @solvedToday, SolvedTickets_ThisWeek = @solvedWeek
           WHEN NOT MATCHED THEN INSERT
-            (ReportDate, AgentName, TierCode, Team,
+            (ReportDate, AgentId, AgentName, TierCode, Team,
              OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
              SolvedTickets_Today, SolvedTickets_ThisWeek)
-          VALUES (@reportDate, @agentName, @tierCode, @team,
+          VALUES (@reportDate, @agentId, @agentName, @tierCode, @team,
                   @openTotal, @over2h, @noUpdate, @solvedToday, @solvedWeek);
         `);
         rowsAffected++;
