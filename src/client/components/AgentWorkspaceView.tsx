@@ -325,6 +325,7 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
   const [dataSource, setDataSource] = useState<'jira' | 'perceiver' | null>(null);
   const [selectedIdx, setSelectedIdx] = useState(0);
 
+  const [projectFilter, setProjectFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
@@ -370,12 +371,14 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
 
   const { nextFastIn, nextFullIn } = useAutoRefresh(refreshFast, refreshFull);
 
+  const projects = useMemo(() => [...new Set(tickets.map(t => t.key.replace(/-\d+$/, '')))].sort(), [tickets]);
   const statuses = useMemo(() => [...new Set(tickets.map(t => t.status))].sort(), [tickets]);
   const priorities = useMemo(() => [...new Set(tickets.map(t => t.priority))], [tickets]);
   const assignees = useMemo(() => [...new Set(tickets.map(t => t.assignee).filter(Boolean))].sort() as string[], [tickets]);
 
   const filtered = useMemo(() => {
     let list = [...tickets];
+    if (projectFilter !== 'all') list = list.filter(t => t.key.startsWith(projectFilter + '-'));
     if (statusFilter !== 'all') list = list.filter(t => t.status === statusFilter);
     if (priorityFilter !== 'all') list = list.filter(t => t.priority === priorityFilter);
     if (assigneeFilter !== 'all') {
@@ -403,7 +406,7 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
       });
     }
     return list;
-  }, [tickets, statusFilter, priorityFilter, assigneeFilter, slaFilter, searchQuery, sortField, sortDir]);
+  }, [tickets, projectFilter, statusFilter, priorityFilter, assigneeFilter, slaFilter, searchQuery, sortField, sortDir]);
 
   useEffect(() => {
     if (selectedIdx >= filtered.length && filtered.length > 0) setSelectedIdx(filtered.length - 1);
@@ -482,12 +485,13 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
         <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search key, summary, reporter... ( / )"
           data-workspace-search
           className="bg-[#272C33] border border-[#3a424d] text-neutral-200 text-[11px] rounded px-3 py-1.5 w-56 focus:outline-none focus:border-[#5ec1ca]" />
+        {projects.length > 1 && <FilterSelect label="Project" value={projectFilter} onChange={setProjectFilter} options={[{ value: 'all', label: 'All projects' }, ...projects.map(p => ({ value: p, label: p }))]} />}
         <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={[{ value: 'all', label: 'All statuses' }, ...statuses.map(s => ({ value: s, label: s }))]} />
         <FilterSelect label="Priority" value={priorityFilter} onChange={setPriorityFilter} options={[{ value: 'all', label: 'All priorities' }, ...priorities.map(p => ({ value: p, label: p }))]} />
         <FilterSelect label="Assignee" value={assigneeFilter} onChange={setAssigneeFilter} options={[{ value: 'all', label: 'All assignees' }, { value: 'unassigned', label: 'Unassigned' }, ...assignees.map(a => ({ value: a, label: a }))]} />
         <FilterSelect label="SLA" value={slaFilter} onChange={setSlaFilter} options={[{ value: 'all', label: 'All SLA' }, { value: 'breached', label: 'Breached' }, { value: 'at_risk', label: 'At Risk' }, { value: 'ok', label: 'OK' }]} />
-        {(statusFilter !== 'all' || priorityFilter !== 'all' || assigneeFilter !== 'all' || slaFilter !== 'all' || searchQuery) && (
-          <button onClick={() => { setStatusFilter('all'); setPriorityFilter('all'); setAssigneeFilter('all'); setSlaFilter('all'); setSearchQuery(''); }}
+        {(projectFilter !== 'all' || statusFilter !== 'all' || priorityFilter !== 'all' || assigneeFilter !== 'all' || slaFilter !== 'all' || searchQuery) && (
+          <button onClick={() => { setProjectFilter('all'); setStatusFilter('all'); setPriorityFilter('all'); setAssigneeFilter('all'); setSlaFilter('all'); setSearchQuery(''); }}
             className="text-[10px] text-neutral-600 hover:text-red-400 transition-colors">Clear filters</button>
         )}
         <span className="text-[10px] text-neutral-600 ml-auto">{filtered.length} shown</span>
