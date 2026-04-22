@@ -15,7 +15,7 @@ async function runMigrations(): Promise<void> {
        display_name NVARCHAR(200) NULL,
        email NVARCHAR(200) NULL,
        password_hash NVARCHAR(200) NOT NULL DEFAULT '',
-       role NVARCHAR(100) NOT NULL DEFAULT 'viewer',
+       role NVARCHAR(500) NOT NULL DEFAULT 'viewer',
        auth_provider NVARCHAR(50) NOT NULL DEFAULT 'local',
        provider_id NVARCHAR(200) NULL,
        team_id INT NULL,
@@ -23,6 +23,8 @@ async function runMigrations(): Promise<void> {
        updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
        CONSTRAINT UQ_users_username UNIQUE (username)
      );`,
+
+    `ALTER TABLE users ALTER COLUMN role NVARCHAR(500) NOT NULL;`,
 
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'user_settings') AND type = 'U')
      CREATE TABLE user_settings (
