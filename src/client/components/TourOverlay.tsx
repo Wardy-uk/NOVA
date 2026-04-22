@@ -83,6 +83,17 @@ export function TourOverlay({ show, onClose }: { show: boolean; onClose: () => v
     onClose();
   };
 
+  const dismiss = () => {
+    setStep(0);
+    onClose();
+  };
+
+  const dontShowAgain = () => {
+    localStorage.setItem(STORAGE_KEY, 'true');
+    setStep(0);
+    onClose();
+  };
+
   if (!show || !currentStep) return null;
 
   // Tooltip position
@@ -138,7 +149,7 @@ export function TourOverlay({ show, onClose }: { show: boolean; onClose: () => v
           fill="rgba(0,0,0,0.7)"
           mask="url(#tour-mask)"
           style={{ pointerEvents: 'auto' }}
-          onClick={finish}
+          onClick={dismiss}
         />
       </svg>
 
@@ -168,12 +179,20 @@ export function TourOverlay({ show, onClose }: { show: boolean; onClose: () => v
         <div className="text-xs text-neutral-400 leading-relaxed mb-4">{currentStep.description}</div>
 
         <div className="flex items-center justify-between">
-          <button
-            onClick={finish}
-            className="text-[11px] text-neutral-500 hover:text-neutral-300 transition-colors"
-          >
-            Skip tour
-          </button>
+          <div className="flex flex-col gap-1">
+            <button
+              onClick={dismiss}
+              className="text-[11px] text-neutral-500 hover:text-neutral-300 transition-colors text-left"
+            >
+              Skip tour
+            </button>
+            <button
+              onClick={dontShowAgain}
+              className="text-[10px] text-neutral-600 hover:text-neutral-400 transition-colors text-left"
+            >
+              Don't show again
+            </button>
+          </div>
           <div className="flex gap-2">
             {step > 0 && (
               <button

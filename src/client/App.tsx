@@ -39,7 +39,7 @@ import { ChatView } from './components/ChatView.js';
 import { NextActions } from './components/NextActions.js';
 import { StatusBar } from './components/StatusBar.js';
 import { FeedbackModal } from './components/FeedbackModal.js';
-import { ReleaseNotesModal } from './components/ReleaseNotesModal.js';
+import { ReleaseNotesModal, LATEST_RELEASE_VERSION } from './components/ReleaseNotesModal.js';
 import { TourOverlay, useTour } from './components/TourOverlay.js';
 import { SetupPortal } from './components/SetupPortal.js';
 import { SurveyAdminView } from './components/SurveyAdminView.js';
@@ -451,11 +451,11 @@ export function App() {
     if (auth.isAuthenticated) checkFirstVisit();
   }, [auth.isAuthenticated, checkFirstVisit]);
 
-  // Auto-show release notes on new version
+  // Auto-show release notes only when a new entry is added to RELEASE_NOTES
   useEffect(() => {
     if (!auth.isAuthenticated) return;
     const seen = localStorage.getItem('nova_release_notes_seen');
-    if (seen !== __APP_VERSION__) setShowReleaseNotes(true);
+    if (seen !== LATEST_RELEASE_VERSION) setShowReleaseNotes(true);
   }, [auth.isAuthenticated]);
 
   // Listen for release notes event (from StatusBar version click)

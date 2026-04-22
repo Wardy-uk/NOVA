@@ -156,9 +156,11 @@ interface Props {
   onClose: () => void;
 }
 
+export const LATEST_RELEASE_VERSION = RELEASE_NOTES[0]?.version ?? '0.0.0';
+
 export function ReleaseNotesModal({ onClose }: Props) {
   const handleClose = () => {
-    localStorage.setItem('nova_release_notes_seen', __APP_VERSION__);
+    localStorage.setItem('nova_release_notes_seen', LATEST_RELEASE_VERSION);
     onClose();
   };
 
