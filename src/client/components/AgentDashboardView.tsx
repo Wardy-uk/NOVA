@@ -45,6 +45,17 @@ interface ProviderStat {
   avg_latency: number;
 }
 
+interface CostSummary {
+  totalCost: number;
+  totalCalls: number;
+  byProvider: Array<{ provider: string; cost: number; calls: number }>;
+  byModel: Array<{ model: string; provider: string; cost: number; calls: number; input_tokens: number; output_tokens: number }>;
+  byCallType: Array<{ call_type: string; cost: number; calls: number }>;
+  dailyTrend: Array<{ day: string; cost: number; calls: number }>;
+  avgCostPerDecision: number;
+  topTickets: Array<{ ticket_id: string; cost: number; calls: number }>;
+}
+
 interface ConfidenceDay {
   day: string;
   avg_confidence: number;
@@ -160,8 +171,13 @@ function timeAgo(iso: string): string {
 
 // ── Main Component ──
 
-export function AgentDashboardView() {
-  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'quick-actions'>('overview');
+function checkSuperAdmin(role: string): boolean {
+  return role.split(',').map(r => r.trim()).includes('super_admin');
+}
+
+export function AgentDashboardView({ userRole = '' }: { userRole?: string }) {
+  const isSuperAdmin = checkSuperAdmin(userRole);
+  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'quick-actions' | 'costs'>('overview');
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
@@ -172,6 +188,7 @@ export function AgentDashboardView() {
   const [autonomyRules, setAutonomyRules] = useState<AutonomyRule[]>([]);
   const [alerts, setAlerts] = useState<AgentAlert[]>([]);
   const [kbGaps, setKbGaps] = useState<KbGap[]>([]);
+  const [costData, setCostData] = useState<CostSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -223,6 +240,9 @@ export function AgentDashboardView() {
     if (tab === 'kb-gaps') {
       api('/kb-gaps').then(r => { if (r.ok) setKbGaps(r.data); });
     }
+    if (tab === 'costs') {
+      api('/costs?days=30').then(r => { if (r.ok) setCostData(r.data); });
+    }
   }, [tab]);
 
   const doAction = async (action: string) => {
@@ -251,16 +271,16 @@ export function AgentDashboardView() {
           {status && <StatusPill state={status.state} shadow={status.shadowMode} />}
         </div>
         <div className="flex items-center gap-2">
-          {status?.state === 'stopped' && (
+          {isSuperAdmin && status?.state === 'stopped' && (
             <ControlBtn label="Start" onClick={() => doAction('start')} color="green" />
           )}
-          {status?.state === 'running' && (
+          {isSuperAdmin && status?.state === 'running' && (
             <>
               <ControlBtn label="Pause" onClick={() => doAction('pause')} color="amber" />
               <ControlBtn label="Stop" onClick={() => doAction('stop')} color="red" />
             </>
           )}
-          {status?.state === 'paused' && (
+          {isSuperAdmin && status?.state === 'paused' && (
             <>
               <ControlBtn label="Resume" onClick={() => doAction('resume')} color="green" />
               <ControlBtn label="Stop" onClick={() => doAction('stop')} color="red" />
@@ -280,6 +300,7 @@ export function AgentDashboardView() {
           { key: 'kb-gaps', label: 'KB Gaps' },
           { key: 'quick-actions', label: 'Quick Actions' },
           { key: 'providers', label: 'Providers' },
+          ...(isSuperAdmin ? [{ key: 'costs' as const, label: 'Costs' }] : []),
         ] as const).map(t => (
           <button
             key={t.key}
@@ -298,12 +319,13 @@ export function AgentDashboardView() {
       {/* Tab content */}
       {tab === 'overview' && <OverviewTab status={status} stats={stats} decisions={decisions} onSelect={setSelected} />}
       {tab === 'decisions' && <DecisionsTab decisions={decisions} selected={selected} onSelect={setSelected} onRefresh={refresh} />}
-      {tab === 'autonomy' && <AutonomyTab rules={autonomyRules} onRefresh={() => api('/autonomy').then(r => { if (r.ok) setAutonomyRules(r.data); })} />}
+      {tab === 'autonomy' && <AutonomyTab rules={autonomyRules} onRefresh={() => api('/autonomy').then(r => { if (r.ok) setAutonomyRules(r.data); })} isSuperAdmin={isSuperAdmin} />}
       {tab === 'guardrails' && <GuardrailsTab rules={guardrails} onToggle={toggleGuardrail} />}
       {tab === 'alerts' && <AlertsTab alerts={alerts} onRefresh={() => api('/alerts?limit=100&includeAcknowledged=true').then(r => { if (r.ok) setAlerts(r.data); })} />}
       {tab === 'kb-gaps' && <KbGapsTab gaps={kbGaps} onRefresh={() => api('/kb-gaps').then(r => { if (r.ok) setKbGaps(r.data); })} />}
       {tab === 'quick-actions' && <QuickActionsTab />}
       {tab === 'providers' && <ProvidersTab providers={providers} confHistory={confHistory} />}
+      {tab === 'costs' && <CostsTab data={costData} onPeriodChange={(days) => api(`/costs?days=${days}`).then(r => { if (r.ok) setCostData(r.data); })} />}
 
       {/* Detail panel */}
       {selected && <DecisionDetail decision={selected} onClose={() => setSelected(null)} />}
@@ -747,7 +769,7 @@ function ProvidersTab({ providers, confHistory }: { providers: ProviderStat[]; c
 
 // ── Autonomy Tab ──
 
-function AutonomyTab({ rules, onRefresh }: { rules: AutonomyRule[]; onRefresh: () => void }) {
+function AutonomyTab({ rules, onRefresh, isSuperAdmin = false }: { rules: AutonomyRule[]; onRefresh: () => void; isSuperAdmin?: boolean }) {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ category: '', subCategory: '', minConfidence: 0.9, minAcceptRate: 90, minQaScore: 4.0, minDecisions: 50 });
 
@@ -795,9 +817,11 @@ function AutonomyTab({ rules, onRefresh }: { rules: AutonomyRule[]; onRefresh: (
           <button onClick={() => setAdding(!adding)} className="px-3 py-1.5 text-[11px] font-medium rounded bg-[#5ec1ca]/20 text-[#5ec1ca] hover:bg-[#5ec1ca]/30 border border-[#5ec1ca]/30">
             + Add Rule
           </button>
-          <button onClick={killSwitch} className="px-3 py-1.5 text-[11px] font-medium rounded bg-red-900/40 text-red-400 hover:bg-red-900/60 border border-red-800/40">
-            Kill Switch
-          </button>
+          {isSuperAdmin && (
+            <button onClick={killSwitch} className="px-3 py-1.5 text-[11px] font-medium rounded bg-red-900/40 text-red-400 hover:bg-red-900/60 border border-red-800/40">
+              Kill Switch
+            </button>
+          )}
         </div>
       </div>
 
@@ -1367,4 +1391,174 @@ function JsonBlock({ data }: { data: Record<string, unknown> }) {
 function safeJson(s: string | object): Record<string, unknown> | null {
   if (typeof s === 'object') return s as Record<string, unknown>;
   try { return JSON.parse(s); } catch { return null; }
+}
+
+// ── Costs Tab ──
+
+const MODEL_COLORS: Record<string, string> = {
+  'claude-sonnet-4-20250514': '#d4a574',
+  'claude-haiku-4-5-20251001': '#e8c9a0',
+  'gpt-4.1': '#74b9ff',
+  'gpt-4.1-mini': '#a8d8f0',
+};
+
+function fmtCost(n: number): string {
+  if (n >= 1) return `$${n.toFixed(2)}`;
+  if (n >= 0.01) return `$${n.toFixed(3)}`;
+  return `$${n.toFixed(4)}`;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function CostsTab({ data, onPeriodChange }: { data: CostSummary | null; onPeriodChange: (days: number) => void }) {
+  const [days, setDays] = useState(30);
+
+  if (!data) return <div className="text-sm text-neutral-500 py-8 text-center">Loading cost data...</div>;
+
+  const maxDailyCost = Math.max(...data.dailyTrend.map(d => d.cost), 0.001);
+  const totalModelCost = data.byModel.reduce((s, m) => s + m.cost, 0) || 1;
+
+  // Projected monthly: cost per day × 30
+  const daysWithData = data.dailyTrend.length || 1;
+  const dailyRate = data.totalCost / daysWithData;
+  const projectedMonthly = dailyRate * 30;
+
+  // Period buckets from daily trend
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 86_400_000).toISOString().slice(0, 10);
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const thisWeekCost = data.dailyTrend.filter(d => d.day >= weekAgo).reduce((s, d) => s + d.cost, 0);
+  const thisMonthCost = data.dailyTrend.filter(d => d.day >= monthStart).reduce((s, d) => s + d.cost, 0);
+
+  const handlePeriod = (d: number) => { setDays(d); onPeriodChange(d); };
+
+  return (
+    <div className="space-y-4">
+      {/* Period selector */}
+      <div className="flex items-center gap-2">
+        {[7, 30, 90].map(d => (
+          <button
+            key={d}
+            onClick={() => handlePeriod(d)}
+            className={`px-3 py-1 text-xs rounded ${days === d ? 'bg-[#5ec1ca] text-[#1a1f25]' : 'bg-[#2f353d] text-neutral-400 hover:text-neutral-200'}`}
+          >
+            {d}d
+          </button>
+        ))}
+      </div>
+
+      {/* Spend summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <CostCard label="This Week" value={fmtCost(thisWeekCost)} />
+        <CostCard label="This Month" value={fmtCost(thisMonthCost)} />
+        <CostCard label={`All ${days}d`} value={fmtCost(data.totalCost)} sub={`${data.totalCalls} calls`} />
+        <CostCard label="Projected /mo" value={fmtCost(projectedMonthly)} sub={`${fmtCost(dailyRate)}/day`} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Daily trend */}
+        <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+          <h3 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-3">Daily Cost Trend</h3>
+          <div className="space-y-1">
+            {data.dailyTrend.slice(-21).map(day => (
+              <div key={day.day} className="flex items-center gap-2">
+                <span className="text-[10px] text-neutral-500 w-14 shrink-0">{day.day.slice(5)}</span>
+                <div className="flex-1 bg-[#272C33] rounded-full h-3 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-[#5ec1ca] transition-all"
+                    style={{ width: `${(day.cost / maxDailyCost) * 100}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-neutral-400 w-14 text-right font-mono">{fmtCost(day.cost)}</span>
+                <span className="text-[10px] text-neutral-600 w-8 text-right">{day.calls}</span>
+              </div>
+            ))}
+            {data.dailyTrend.length === 0 && <div className="text-xs text-neutral-500">No cost data yet</div>}
+          </div>
+        </div>
+
+        {/* Cost by model (donut-style bar breakdown) */}
+        <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+          <h3 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-3">Cost by Model</h3>
+          <div className="space-y-3">
+            {data.byModel.map(m => {
+              const pct = (m.cost / totalModelCost) * 100;
+              const color = MODEL_COLORS[m.model] ?? '#888';
+              return (
+                <div key={m.model} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-neutral-200 truncate">{m.model.replace('claude-', '').replace('gpt-', '')}</span>
+                    <span className="text-neutral-400 font-mono">{fmtCost(m.cost)} ({pct.toFixed(0)}%)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 bg-[#272C33] rounded-full h-3 overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
+                    </div>
+                    <span className="text-[10px] text-neutral-600 w-20 text-right">{fmtTokens(m.input_tokens + m.output_tokens)} tok</span>
+                  </div>
+                </div>
+              );
+            })}
+            {data.byModel.length === 0 && <div className="text-xs text-neutral-500">No model data</div>}
+          </div>
+        </div>
+
+        {/* Cost by call type */}
+        <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+          <h3 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-3">Cost by Call Type</h3>
+          <div className="space-y-2">
+            {data.byCallType.map(ct => {
+              const pct = data.totalCost > 0 ? (ct.cost / data.totalCost) * 100 : 0;
+              return (
+                <div key={ct.call_type} className="flex items-center gap-2">
+                  <span className="text-xs text-neutral-300 w-28 truncate">{ct.call_type}</span>
+                  <div className="flex-1 bg-[#272C33] rounded-full h-3 overflow-hidden">
+                    <div className="h-full rounded-full bg-amber-500/70 transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-[10px] text-neutral-400 font-mono w-16 text-right">{fmtCost(ct.cost)}</span>
+                  <span className="text-[10px] text-neutral-600 w-10 text-right">{ct.calls}</span>
+                </div>
+              );
+            })}
+            {data.byCallType.length === 0 && <div className="text-xs text-neutral-500">No call data</div>}
+          </div>
+          {data.avgCostPerDecision > 0 && (
+            <div className="mt-3 pt-2 border-t border-[#3a424d] text-xs text-neutral-400">
+              Avg cost per decision: <span className="font-mono text-neutral-200">{fmtCost(data.avgCostPerDecision)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Most expensive tickets */}
+        <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+          <h3 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-3">Top 10 Expensive Tickets</h3>
+          <div className="space-y-1">
+            {data.topTickets.map((t, i) => (
+              <div key={t.ticket_id} className="flex items-center gap-2 text-xs">
+                <span className="text-neutral-600 w-4">{i + 1}.</span>
+                <span className="text-[#5ec1ca] font-mono flex-1 truncate">{t.ticket_id}</span>
+                <span className="text-neutral-400 font-mono w-16 text-right">{fmtCost(t.cost)}</span>
+                <span className="text-neutral-600 w-12 text-right">{t.calls} calls</span>
+              </div>
+            ))}
+            {data.topTickets.length === 0 && <div className="text-xs text-neutral-500">No ticket data</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CostCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-3">
+      <div className="text-[10px] text-neutral-500 uppercase tracking-wider">{label}</div>
+      <div className="text-lg font-semibold text-neutral-100 font-mono">{value}</div>
+      {sub && <div className="text-[10px] text-neutral-500">{sub}</div>}
+    </div>
+  );
 }

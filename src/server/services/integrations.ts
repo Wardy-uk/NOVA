@@ -89,7 +89,9 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
     enabledKey: 'd365_enabled',
     authType: 'device_code',
     fields: [
+      { key: 'd365_base_url', label: 'Base URL', type: 'url', placeholder: 'https://nurtur-prod.crm11.dynamics.com', required: true },
       { key: 'd365_client_id', label: 'Client ID', type: 'text', placeholder: 'Azure AD app registration client ID', required: true },
+      { key: 'd365_client_secret', label: 'Client Secret', type: 'password', placeholder: 'Azure AD app client secret', required: true },
       { key: 'd365_tenant_id', label: 'Tenant ID', type: 'text', placeholder: 'Azure AD directory (tenant) ID', required: true },
     ],
   },
@@ -224,6 +226,38 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'agent_sla_breach_threshold_min', label: 'SLA Breach Alert (minutes)', type: 'text', placeholder: '30', required: false },
       { key: 'agent_unassigned_stale_min', label: 'Unassigned Stale (minutes)', type: 'text', placeholder: '15', required: false },
       { key: 'agent_capacity_threshold', label: 'Capacity Alert (tickets/agent)', type: 'text', placeholder: '10', required: false },
+    ],
+  },
+  {
+    id: 'people-hr',
+    name: 'People HR',
+    description: 'PeopleHR API for team calendar sync — absences, holidays, and availability.',
+    enabledKey: 'people_hr_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'people_hr_api_key', label: 'API Key', type: 'password', placeholder: 'PeopleHR API key', required: true },
+      { key: 'people_hr_base_url', label: 'Base URL', type: 'url', placeholder: 'https://api.peoplehr.net', required: false },
+    ],
+  },
+  {
+    id: 'teams-webhook',
+    name: 'Teams Webhook',
+    description: 'Microsoft Teams incoming webhook for critical alerts and notifications.',
+    enabledKey: 'teams_webhook_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'teams_webhook_url', label: 'Webhook URL', type: 'password', placeholder: 'https://outlook.office.com/webhook/...', required: true },
+    ],
+  },
+  {
+    id: 'whisper',
+    name: 'Whisper (Speech-to-Text)',
+    description: 'OpenAI Whisper API for call recording transcription (used by Call Reviews).',
+    enabledKey: 'whisper_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'whisper_api_url', label: 'Whisper API URL', type: 'url', placeholder: 'https://api.openai.com/v1/audio/transcriptions', required: true },
+      { key: 'whisper_api_key', label: 'API Key (if different from OpenAI)', type: 'password', placeholder: 'Uses OpenAI key if blank', required: false },
     ],
   },
 ];

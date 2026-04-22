@@ -23,13 +23,13 @@ export function createAdminRoutes(
   getJiraClient: () => JiraRestClient | null,
 ): Router {
   const router = Router();
-  router.use(requireRole('admin'));
+  router.use(requireRole('admin', 'super_admin'));
 
   const emailService = new EmailService(() => settingsQueries.getAll());
 
   /** Get valid role IDs — built-in roles always valid, plus any custom roles */
   function getValidRoleIds(): string[] {
-    const builtIn = ['admin', 'editor', 'viewer'];
+    const builtIn = ['super_admin', 'admin', 'editor', 'viewer'];
     const rawRoles = settingsQueries.get('custom_roles');
     let customRoleIds: string[] = [];
     try {
@@ -112,8 +112,8 @@ export function createAdminRoutes(
         res.status(400).json({ ok: false, error: `Invalid role(s): ${invalid.join(', ')}. Valid: ${validRoles.join(', ')}` });
         return;
       }
-      // Prevent removing the last admin
-      if (isAdmin(user.role) && !requested.includes('admin')) {
+      // Prevent removing the last admin/super_admin
+      if (isAdmin(user.role) && !requested.includes('admin') && !requested.includes('super_admin')) {
         const allUsers = userQueries.getAll();
         const adminCount = allUsers.filter((u) => isAdmin(u.role)).length;
         if (adminCount <= 1) {

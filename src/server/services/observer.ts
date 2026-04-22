@@ -127,6 +127,71 @@ export class Observer {
     );
   }
 
+  async getCostSummary(days = 30): Promise<{
+    totalCost: number;
+    totalCalls: number;
+    byProvider: Array<{ provider: string; cost: number; calls: number }>;
+    byModel: Array<{ model: string; provider: string; cost: number; calls: number; input_tokens: number; output_tokens: number }>;
+    byCallType: Array<{ call_type: string; cost: number; calls: number }>;
+    dailyTrend: Array<{ day: string; cost: number; calls: number }>;
+    avgCostPerDecision: number;
+    topTickets: Array<{ ticket_id: string; cost: number; calls: number }>;
+  }> {
+    const [totalRows, byProviderRows, byModelRows, byCallTypeRows, dailyRows, decisionCount, topTicketRows] = await Promise.all([
+      query<{ total_cost: number; total_calls: number }>(
+        `SELECT ISNULL(SUM(estimated_cost), 0) as total_cost, COUNT(*) as total_calls
+         FROM agent_llm_calls WHERE created_at >= DATEADD(day, -?, GETUTCDATE())`, [days],
+      ),
+      query<{ provider: string; cost: number; calls: number }>(
+        `SELECT provider, ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
+         FROM agent_llm_calls WHERE created_at >= DATEADD(day, -?, GETUTCDATE())
+         GROUP BY provider ORDER BY cost DESC`, [days],
+      ),
+      query<{ model: string; provider: string; cost: number; calls: number; input_tokens: number; output_tokens: number }>(
+        `SELECT model, provider, ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls,
+                ISNULL(SUM(input_tokens), 0) as input_tokens, ISNULL(SUM(output_tokens), 0) as output_tokens
+         FROM agent_llm_calls WHERE created_at >= DATEADD(day, -?, GETUTCDATE())
+         GROUP BY model, provider ORDER BY cost DESC`, [days],
+      ),
+      query<{ call_type: string; cost: number; calls: number }>(
+        `SELECT call_type, ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
+         FROM agent_llm_calls WHERE created_at >= DATEADD(day, -?, GETUTCDATE())
+         GROUP BY call_type ORDER BY cost DESC`, [days],
+      ),
+      query<{ day: string; cost: number; calls: number }>(
+        `SELECT CONVERT(VARCHAR(10), created_at, 120) as day,
+                ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
+         FROM agent_llm_calls WHERE created_at >= DATEADD(day, -?, GETUTCDATE())
+         GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY day`, [days],
+      ),
+      query<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM agent_decisions
+         WHERE created_at >= DATEADD(day, -?, GETUTCDATE())`, [days],
+      ),
+      query<{ ticket_id: string; cost: number; calls: number }>(
+        `SELECT TOP(10) ticket_id, ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
+         FROM agent_llm_calls
+         WHERE created_at >= DATEADD(day, -?, GETUTCDATE()) AND ticket_id IS NOT NULL
+         GROUP BY ticket_id ORDER BY cost DESC`, [days],
+      ),
+    ]);
+
+    const totalCost = totalRows[0]?.total_cost ?? 0;
+    const totalCalls = totalRows[0]?.total_calls ?? 0;
+    const decisions = decisionCount[0]?.cnt ?? 0;
+
+    return {
+      totalCost,
+      totalCalls,
+      byProvider: byProviderRows,
+      byModel: byModelRows,
+      byCallType: byCallTypeRows,
+      dailyTrend: dailyRows,
+      avgCostPerDecision: decisions > 0 ? totalCost / decisions : 0,
+      topTickets: topTicketRows,
+    };
+  }
+
   async getOverrideLog(limit = 50): Promise<unknown[]> {
     return query(
       `SELECT TOP(?) * FROM agent_decisions

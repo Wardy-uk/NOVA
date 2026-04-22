@@ -162,6 +162,13 @@ async function main() {
     display_name: 'NOVA MCP Service Account',
   });
   if (novaMcpCreated) console.log('[Startup] Bootstrapped service account: nova-mcp');
+
+  // Seed super_admin role for nickw (one-time promotion)
+  const nickw = userQueries.getByUsername('nickw');
+  if (nickw && nickw.role === 'admin') {
+    userQueries.update(nickw.id, { role: 'super_admin' });
+    console.log('[Startup] Promoted nickw to super_admin');
+  }
   const teamQueries = new TeamQueries();
   const userSettingsQueries = new UserSettingsQueries();
   const feedbackQueries = new FeedbackQueries();
@@ -816,7 +823,7 @@ async function main() {
     });
 
     // Operational workflow routes (WP-22)
-    app.get('/api/agent/abuse-reports', requireRole('admin'), async (req, res) => {
+    app.get('/api/agent/abuse-reports', requireRole('admin', 'super_admin'), async (req, res) => {
       try {
         const status = req.query.status as string | undefined;
         const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
@@ -827,7 +834,7 @@ async function main() {
       }
     });
 
-    app.post('/api/agent/call-reviews', requireRole('admin'), async (req, res) => {
+    app.post('/api/agent/call-reviews', requireRole('admin', 'super_admin'), async (req, res) => {
       try {
         const result = await callReviewService.reviewCall(req.body);
         res.json({ ok: true, data: result });
@@ -836,7 +843,7 @@ async function main() {
       }
     });
 
-    app.get('/api/agent/call-reviews', requireRole('admin'), async (req, res) => {
+    app.get('/api/agent/call-reviews', requireRole('admin', 'super_admin'), async (req, res) => {
       try {
         const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
         const agentName = req.query.agentName as string | undefined;
@@ -847,7 +854,7 @@ async function main() {
       }
     });
 
-    app.post('/api/agent/product-cancellation/check', requireRole('admin'), async (_req, res) => {
+    app.post('/api/agent/product-cancellation/check', requireRole('admin', 'super_admin'), async (_req, res) => {
       try {
         const result = await productCancellation.checkForCancellations();
         res.json({ ok: true, data: result });

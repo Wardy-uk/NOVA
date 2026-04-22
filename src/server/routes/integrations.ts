@@ -10,7 +10,7 @@ import type { Dynamics365Service } from '../services/dynamics365.js';
 import type { IntegrationStatus, McpServerStatus } from '../../shared/types.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { BymClient } from '../services/bym-client.js';
-import { isAdmin } from '../utils/role-helpers.js';
+import { isAdmin, isSuperAdmin } from '../utils/role-helpers.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -38,7 +38,10 @@ const ms365Env = {
 };
 
 // Admin-only integrations: credentials stay in global settings.json
-const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign']);
+const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign', 'llm', 'people-hr', 'teams-webhook', 'whisper']);
+
+// Super-admin-only: contain API keys/secrets — hidden from regular admins entirely
+const SUPER_ADMIN_ONLY_IDS = new Set(['llm', 'people-hr', 'teams-webhook', 'whisper', 'sso', 'kpi-sql', 'business-central', 'adobe-sign']);
 
 const execFileAsync = promisify(execFile);
 
@@ -89,6 +92,7 @@ export function createIntegrationRoutes(
     const userId = (req as any).user?.id as number | undefined;
     const userRole = (req as any).user?.role as string | undefined;
     const userIsAdmin = userRole ? isAdmin(userRole) : false;
+    const userIsSuperAdmin = userRole ? isSuperAdmin(userRole) : false;
     const globalSettings = settingsQueries.getAll();
     const userSettings = userId ? await userSettingsQueries.getAllForUser(userId) : {};
     const mcpStatuses = mcpManager.getStatus();
@@ -96,6 +100,9 @@ export function createIntegrationRoutes(
     const results: IntegrationStatus[] = [];
 
     for (const integ of INTEGRATIONS) {
+      // Super-admin-only integrations: completely hidden from regular admins
+      if (SUPER_ADMIN_ONLY_IDS.has(integ.id) && !userIsSuperAdmin) continue;
+
       const mcpInfo = mcpStatuses.find((s) => s.name === integ.id);
       const values: Record<string, string> = {};
       const isAdminOnly = ADMIN_ONLY_IDS.has(integ.id);
@@ -184,6 +191,12 @@ export function createIntegrationRoutes(
     const userId = (req as any).user?.id as number | undefined;
     const userRole = (req as any).user?.role as string | undefined;
     const isAdminOnly = ADMIN_ONLY_IDS.has(integId);
+
+    // Super-admin-only integrations require super_admin role
+    if (SUPER_ADMIN_ONLY_IDS.has(integId) && (!userRole || !isSuperAdmin(userRole))) {
+      res.status(403).json({ ok: false, error: 'Super admin access required to modify this integration' });
+      return;
+    }
 
     // Admin-only integrations require admin role
     if (isAdminOnly && (!userRole || !isAdmin(userRole))) {

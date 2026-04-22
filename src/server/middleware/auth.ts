@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { parseRoles, isAdmin } from '../utils/role-helpers.js';
+import { parseRoles, isAdmin, isSuperAdmin } from '../utils/role-helpers.js';
 import { ssoLogger } from '../services/sso-logger.js';
 
 // Default access for areas not explicitly set in saved custom roles.
@@ -43,6 +43,21 @@ export function requireRole(...roles: string[]) {
   };
 }
 
+/** Middleware that requires super_admin role. */
+export function requireSuperAdmin() {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({ ok: false, error: 'Not authenticated' });
+      return;
+    }
+    if (!isSuperAdmin(req.user.role)) {
+      res.status(403).json({ ok: false, error: 'Super admin access required' });
+      return;
+    }
+    next();
+  };
+}
+
 /** Custom role definition with per-area access levels */
 export interface CustomRole {
   id: string;
@@ -65,7 +80,7 @@ export function createAreaAccessGuard(getRoles: () => CustomRole[]) {
         res.status(401).json({ ok: false, error: 'Not authenticated' });
         return;
       }
-      // Admin always has full access
+      // Admin and super_admin always have full access
       if (isAdmin(req.user.role)) {
         next();
         return;

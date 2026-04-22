@@ -1203,7 +1203,7 @@ export function App() {
             <AgentWorkspaceView />
           )}
           {view === 'agent-dashboard' && canSeeArea('ai-agent') && (
-            <AgentDashboardView />
+            <AgentDashboardView userRole={auth.user?.role ?? ''} />
           )}
           {view === 'agent-coaching' && canSeeArea('ai-agent') && (
             <AgentCoachingView />

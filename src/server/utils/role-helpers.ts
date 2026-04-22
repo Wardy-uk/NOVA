@@ -8,7 +8,13 @@ export function hasRole(roleStr: string, target: string): boolean {
   return parseRoles(roleStr).includes(target);
 }
 
-/** Check if a comma-separated role string includes admin. */
+/** Check if a comma-separated role string includes admin or super_admin. */
 export function isAdmin(roleStr: string): boolean {
-  return hasRole(roleStr, 'admin');
+  const roles = parseRoles(roleStr);
+  return roles.includes('admin') || roles.includes('super_admin');
+}
+
+/** Check if a comma-separated role string includes super_admin. */
+export function isSuperAdmin(roleStr: string): boolean {
+  return hasRole(roleStr, 'super_admin');
 }

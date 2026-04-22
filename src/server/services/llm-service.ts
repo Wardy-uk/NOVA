@@ -55,6 +55,20 @@ const DEFAULT_MODELS: Record<LlmProvider, Record<LlmTier, string>> = {
   },
 };
 
+// Per-million-token pricing (USD). Updated April 2025.
+export const MODEL_PRICING: Record<string, { inputPerM: number; outputPerM: number }> = {
+  'claude-sonnet-4-20250514':   { inputPerM: 3.00,  outputPerM: 15.00 },
+  'claude-haiku-4-5-20251001':  { inputPerM: 1.00,  outputPerM: 5.00  },
+  'gpt-4.1':                    { inputPerM: 2.00,  outputPerM: 8.00  },
+  'gpt-4.1-mini':               { inputPerM: 0.40,  outputPerM: 1.60  },
+};
+
+export function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
+  const pricing = MODEL_PRICING[model];
+  if (!pricing) return 0;
+  return (inputTokens * pricing.inputPerM + outputTokens * pricing.outputPerM) / 1_000_000;
+}
+
 // ── Circuit breakers (per-provider) ──
 
 const circuits = new Map<LlmProvider, CircuitState>();
@@ -183,10 +197,11 @@ async function logCall(
   error: string | null,
 ): Promise<void> {
   try {
+    const cost = estimateCost(model, inputTokens, outputTokens);
     await executeAndGetId(
-      `INSERT INTO agent_llm_calls (ticket_id, call_type, provider, model, input_tokens, output_tokens, latency_ms, success, error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [ticketId, callType, provider, model, inputTokens, outputTokens, latencyMs, success ? 1 : 0, error],
+      `INSERT INTO agent_llm_calls (ticket_id, call_type, provider, model, input_tokens, output_tokens, latency_ms, success, error, estimated_cost)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [ticketId, callType, provider, model, inputTokens, outputTokens, latencyMs, success ? 1 : 0, error, cost],
     );
   } catch (e) {
     console.warn('[llm-service] Failed to log call:', e);

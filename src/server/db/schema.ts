@@ -350,6 +350,9 @@ async function runMigrations(): Promise<void> {
        concerns NVARCHAR(MAX) NULL,
        created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
      );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_llm_calls') AND name = 'estimated_cost')
+     ALTER TABLE agent_llm_calls ADD estimated_cost DECIMAL(10,6) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

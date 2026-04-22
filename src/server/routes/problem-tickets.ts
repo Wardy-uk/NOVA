@@ -47,7 +47,7 @@ export function createProblemTicketRoutes(
   });
 
   // PUT /config/:rule — update rule config (admin only)
-  router.put('/config/:rule', requireRole('admin'), async (req, res) => {
+  router.put('/config/:rule', requireRole('admin', 'super_admin'), async (req, res) => {
     try {
       const rule = req.params.rule as string;
       const { enabled, weight, threshold_json } = req.body;

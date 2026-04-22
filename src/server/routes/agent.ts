@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { requireRole } from '../middleware/auth.js';
+import { requireRole, requireSuperAdmin } from '../middleware/auth.js';
 import type { AgentLoop } from '../services/agent-loop.js';
 import { query, execute } from '../services/database.js';
+import { MODEL_PRICING } from '../services/llm-service.js';
 import { RespondResultSchema, type RespondResult } from '../services/respond-schema.js';
 import { ResolveSummarySchema, type ResolveSummaryResult } from '../services/resolve-schema.js';
 import { loadPrompt } from '../services/prompt-loader.js';
@@ -29,28 +30,28 @@ interface AgentRouteDeps {
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
   const router = Router();
 
-  router.use(requireRole('admin'));
+  router.use(requireRole('admin', 'super_admin'));
 
   router.get('/status', (_req, res) => {
     res.json({ ok: true, data: agentLoop.status });
   });
 
-  router.post('/start', (_req, res) => {
+  router.post('/start', requireSuperAdmin(), (_req, res) => {
     agentLoop.start();
     res.json({ ok: true, data: agentLoop.status });
   });
 
-  router.post('/stop', (_req, res) => {
+  router.post('/stop', requireSuperAdmin(), (_req, res) => {
     agentLoop.stop();
     res.json({ ok: true, data: agentLoop.status });
   });
 
-  router.post('/pause', (_req, res) => {
+  router.post('/pause', requireSuperAdmin(), (_req, res) => {
     agentLoop.pause();
     res.json({ ok: true, data: agentLoop.status });
   });
 
-  router.post('/resume', (_req, res) => {
+  router.post('/resume', requireSuperAdmin(), (_req, res) => {
     agentLoop.resume();
     res.json({ ok: true, data: agentLoop.status });
   });
@@ -146,6 +147,20 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data: stats });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get provider stats' });
+    }
+  });
+
+  router.get('/costs/pricing', requireSuperAdmin(), (_req, res) => {
+    res.json({ ok: true, data: MODEL_PRICING });
+  });
+
+  router.get('/costs', requireSuperAdmin(), async (req, res) => {
+    const days = Math.min(parseInt(req.query.days as string, 10) || 30, 365);
+    try {
+      const data = await agentLoop.getObserver().getCostSummary(days);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get cost data' });
     }
   });
 
@@ -257,7 +272,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
-  router.post('/autonomy/kill-switch', async (_req, res) => {
+  router.post('/autonomy/kill-switch', requireSuperAdmin(), async (_req, res) => {
     try {
       await agentLoop.getAutonomyEngine().killSwitch();
       res.json({ ok: true, data: { message: 'All autonomy rules disabled.' } });
