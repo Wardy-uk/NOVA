@@ -179,17 +179,17 @@ export function createDevReviewRoutes(
           await devQueries.archive(row.jira_key);
         }
       }
-      // Merge: for each live issue, attach NOVA state + resolved team
-      let enriched = await Promise.all(issues.map(async (issue) => {
-        const state = await devQueries.getState(issue.key);
+      // Merge: batch-fetch all NOVA states in one query, then attach to each issue
+      const stateMap = await devQueries.getStatesForKeys(issues.map(i => i.key));
+      let enriched = issues.map((issue) => {
         const product = (issue.fields as { customfield_13183?: { value?: string } }).customfield_13183?.value || null;
         return {
           key: issue.key,
           fields: issue.fields,
-          state: state || null,
+          state: stateMap.get(issue.key) || null,
           team: productToTeam(product),
         };
-      }));
+      });
 
       // Filter by user's NOVA team jira_products. Admins always see all.
       // If the user's team has no products set (NULL or empty), they see all

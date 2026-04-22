@@ -9,7 +9,7 @@ function buildConfig(): sql.config {
       ...parseConnectionString(connStr),
       options: { encrypt: true, trustServerCertificate: true },
       requestTimeout: 30000,
-      pool: { min: 2, max: 10, idleTimeoutMillis: 30000 },
+      pool: { min: 2, max: 25, idleTimeoutMillis: 30000 },
     } as sql.config;
   }
 
@@ -31,7 +31,7 @@ function buildConfig(): sql.config {
     password,
     options: { encrypt: true, trustServerCertificate: true },
     requestTimeout: 30000,
-    pool: { min: 2, max: 10, idleTimeoutMillis: 30000 },
+    pool: { min: 2, max: 25, idleTimeoutMillis: 30000 },
   };
 }
 

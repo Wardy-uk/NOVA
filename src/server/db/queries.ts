@@ -809,6 +809,16 @@ export class UserTeamQueries {
     const rows = await query<{ user_id: number }>(`SELECT user_id FROM user_teams WHERE team_id = ?`, [teamId]);
     return rows.map(r => r.user_id);
   }
+
+  async getAllUserTeamIds(): Promise<Record<number, number[]>> {
+    const rows = await query<{ user_id: number; team_id: number }>(`SELECT user_id, team_id FROM user_teams`);
+    const map: Record<number, number[]> = {};
+    for (const r of rows) {
+      if (!map[r.user_id]) map[r.user_id] = [];
+      map[r.user_id].push(r.team_id);
+    }
+    return map;
+  }
 }
 
 // ─── User Settings ────────────────────────────────────────────────────────────

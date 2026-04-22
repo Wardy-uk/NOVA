@@ -124,6 +124,19 @@ export class DevReviewQueries {
     return row ?? null;
   }
 
+  /** Batch-fetch states for multiple keys in one query. */
+  async getStatesForKeys(jiraKeys: string[]): Promise<Map<string, DevReviewState>> {
+    if (jiraKeys.length === 0) return new Map();
+    const placeholders = jiraKeys.map(() => '?').join(',');
+    const rows = await query<DevReviewState>(
+      `SELECT * FROM dev_review_state WHERE jira_key IN (${placeholders})`,
+      jiraKeys,
+    );
+    const map = new Map<string, DevReviewState>();
+    for (const r of rows) map.set(r.jira_key, r);
+    return map;
+  }
+
   /** Upsert state — used by the Jira poller when it first sees a T3 ticket. */
   async upsertFromPoll(jiraKey: string, submittedBy: string | null): Promise<void> {
     const existing = await this.getState(jiraKey);

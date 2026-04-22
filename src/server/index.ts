@@ -679,8 +679,17 @@ async function main() {
   // Calyx portal — public + portal-JWT auth (no NOVA auth)
   app.use('/api/calyx/portal', createCalyxPortalRoutes(calyxDb, settingsQueries));
 
-  // Protected API routes — look up fresh role from DB so stale JWTs always reflect current role
-  app.use('/api', authMiddleware(jwtSecret, async (id) => (await userQueries.getById(id))?.role));
+  // Protected API routes — role cache with 30s TTL avoids hitting DB on every single request
+  const roleCache = new Map<number, { role: string; expires: number }>();
+  const ROLE_CACHE_TTL = 30_000;
+  app.use('/api', authMiddleware(jwtSecret, async (id) => {
+    const now = Date.now();
+    const cached = roleCache.get(id);
+    if (cached && cached.expires > now) return cached.role;
+    const user = await userQueries.getById(id);
+    if (user?.role) roleCache.set(id, { role: user.role, expires: now + ROLE_CACHE_TTL });
+    return user?.role;
+  }));
 
   // Lightweight user list — any authenticated user
   app.get('/api/users/list', async (_req, res) => {

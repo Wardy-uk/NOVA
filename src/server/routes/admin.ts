@@ -49,15 +49,11 @@ export function createAdminRoutes(
   // ---- Users ----
 
   router.get('/users', async (_req, res) => {
-    const users = await userQueries.getAll();
-    const teams = await teamQueries.getAll();
-    // Load multi-team assignments for all users
-    const userTeams: Record<number, number[]> = {};
-    if (userTeamQueries) {
-      for (const u of users) {
-        userTeams[u.id] = await userTeamQueries.getTeamIdsForUser(u.id);
-      }
-    }
+    const [users, teams, userTeams] = await Promise.all([
+      userQueries.getAll(),
+      teamQueries.getAll(),
+      userTeamQueries ? userTeamQueries.getAllUserTeamIds() : Promise.resolve({} as Record<number, number[]>),
+    ]);
     res.json({ ok: true, data: { users, teams, userTeams } });
   });
 
