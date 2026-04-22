@@ -127,6 +127,13 @@ export class ConfigService implements SettingsQueries {
         return envVal;
       }
 
+      // Check DB before fallback — secrets like jwt_secret may be stored there
+      if (this.configCache.has(key)) {
+        const dbVal = this.configCache.get(key)!;
+        this.secretCache.set(key, { value: dbVal, expiresAt: Date.now() + ConfigService.CACHE_TTL_MS });
+        return dbVal;
+      }
+
       return this.fallback?.get(key) ?? null;
     }
 
@@ -137,6 +144,10 @@ export class ConfigService implements SettingsQueries {
   set(key: string, value: string): void {
     if (isSecret(key)) {
       this.secretCache.set(key, { value, expiresAt: Date.now() + ConfigService.CACHE_TTL_MS });
+      this.configCache.set(key, value);
+      this.writeToDb(key, value).catch(err =>
+        console.warn(`[config] Failed to write secret ${key} to DB:`, err instanceof Error ? err.message : err)
+      );
       if (this.fallback) this.fallback.set(key, value);
       return;
     }

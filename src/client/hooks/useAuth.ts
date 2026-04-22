@@ -46,9 +46,11 @@ function clearToken() {
 }
 
 // Install fetch interceptor that injects Authorization header for /api/ calls
-// and triggers logout on 401 responses
+// and triggers logout on 401 responses (with resilience against transient failures)
 let currentToken: string | null = getStoredToken();
 let onUnauthorized: (() => void) | null = null;
+let consecutive401s = 0;
+const LOGOUT_THRESHOLD = 3;
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -65,9 +67,15 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
 
   const response = await originalFetch(input, init);
 
-  // Auto-logout on 401 (but not for auth endpoints)
-  if (response.status === 401 && !url.startsWith('/api/auth/') && onUnauthorized) {
-    onUnauthorized();
+  if (!url.startsWith('/api/auth/')) {
+    if (response.status === 401) {
+      consecutive401s++;
+      if (consecutive401s >= LOGOUT_THRESHOLD && onUnauthorized) {
+        onUnauthorized();
+      }
+    } else if (response.ok) {
+      consecutive401s = 0;
+    }
   }
 
   return response;
