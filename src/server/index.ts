@@ -151,42 +151,55 @@ async function main() {
   const salesQueries = new SalesQueries();
   const userQueries = new UserQueries();
 
-  // One-time seed: restore users from CSV export (2026-04-16) if the table is empty
+  // Idempotent user restore from CSV backup (2026-04-16).
+  // Matches by email (case-insensitive) or username. Updates existing users'
+  // roles and team assignments; creates missing users. Safe to run repeatedly.
   const teamQueries = new TeamQueries();
-  if ((await userQueries.count()) === 0) {
-    console.log('[Startup] Users table empty — restoring from backup seed...');
-    const allTeams = await teamQueries.getAll();
-    const teamByName = new Map(allTeams.map(t => [t.name.toLowerCase(), t.id]));
-    const SEED_USERS: Array<{ username: string; display_name: string; email: string; role: string; team: string; auth_provider: string }> = [
-      { username: 'nickw', display_name: 'Nick Ward', email: 'nickw@nurtur.tech', role: 'super_admin,support,design,uat,briefing,kpi,sales,qa,ai-approver', team: 'Support', auth_provider: 'entra' },
-      { username: 'support', display_name: 'Support', email: '', role: 'support', team: 'Support', auth_provider: 'local' },
-      { username: 'seb', display_name: 'Sebastian Broome', email: 'sebastian.broome@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
-      { username: 'onboarding', display_name: 'Onboarding', email: '', role: 'onboader', team: 'Onboarding', auth_provider: 'local' },
-      { username: 'isabel.busk@nurtur.tech', display_name: 'Isabel Busk', email: 'Isabel.Busk@nurtur.tech', role: 'onboader,support,qa,kpi', team: 'Design', auth_provider: 'entra' },
-      { username: 'chris@nurtur.tech', display_name: 'Chris Middleton', email: 'chris@nurtur.tech', role: 'onboader,admin,support,uat,design,kpi,briefing,sales,qa,ai-approver', team: '', auth_provider: 'entra' },
-      { username: 'abdi.mohamed@nurtur.tech', display_name: 'Abdi Mohamed', email: 'abdi.mohamed@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
-      { username: 'stephen.mitchell@nurtur.tech', display_name: 'Stephen Mitchell', email: 'stephen.mitchell@nurtur.tech', role: 'onboader,support,ai-approver,qa', team: 'Support', auth_provider: 'entra' },
-      { username: 'naomi.wentworth@nurtur.tech', display_name: 'Naomi Wentworth', email: 'naomi.wentworth@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
-      { username: 'hope.goodall@nurtur.tech', display_name: 'Hope Goodall', email: 'hope.goodall@nurtur.tech', role: 'onboader,support,briefing,qa', team: 'Support', auth_provider: 'local' },
-      { username: 'arman.shazad@nurtur.tech', display_name: 'Arman Shazad', email: 'Arman.Shazad@nurtur.tech', role: 'onboader,support,viewer,qa', team: 'Support', auth_provider: 'entra' },
-      { username: 'joshua.mills', display_name: 'Joshua Mills', email: 'joshua.mills@nurtur.tech', role: 'admin,onboader', team: '', auth_provider: 'entra' },
-      { username: 'nathan.rutland@nurtur.tech', display_name: 'Nathan Rutland', email: 'Nathan.Rutland@nurtur.tech', role: 'viewer,onboader,support,design,kpi,qa,briefing', team: 'Support', auth_provider: 'local' },
-      { username: 'richardc@nurtur.tech', display_name: 'Richard', email: 'richardc@nurtur.tech', role: 'viewer,onboader,sales', team: 'Onboarding', auth_provider: 'local' },
-      { username: 'luke.scaife', display_name: 'Luke Scaife', email: 'luke.scaife@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
-      { username: 'heidi.power@nurtur.tech', display_name: 'Heidi Power', email: 'Heidi.Power@nurtur.tech', role: 'onboader,support,viewer,qa', team: 'Support', auth_provider: 'entra' },
-      { username: 'willem.kruger@nurtur.tech', display_name: 'Willem', email: 'Willem.Kruger@nurtur.tech', role: 'viewer,onboader,support,qa,briefing', team: 'Support', auth_provider: 'local' },
-      { username: 'zoe.rees@nurtur.tech', display_name: 'Zoe Rees', email: 'zoe.rees@nurtur.tech', role: 'onboader,support,viewer,qa,ai-approver', team: 'Support', auth_provider: 'entra' },
-      { username: 'jmtesting', display_name: 'JM Testing', email: 'JMTesting@nurtur.tech', role: 'admin,onboader,support,uat,kpi', team: '', auth_provider: 'entra' },
-      { username: 'georginag@nurtur.tech', display_name: 'Georgie', email: 'GeorginaG@nurtur.tech', role: 'viewer,onboader,design,kpi,sales,qa,mi', team: '', auth_provider: 'local' },
-      { username: 'ward.nickj@gmail.com', display_name: 'Nick Test', email: 'ward.nickj@gmail.com', role: 'viewer,onboader,support,uat,design,kpi,briefing,sales,qa', team: 'UAT', auth_provider: 'local' },
-      { username: 'kayleigh.russell', display_name: 'Kayleigh Russell', email: 'Kayleigh.Russell@nurtur.tech', role: 'onboader,support', team: '', auth_provider: 'entra' },
-      { username: 'maria.pappa@nurtur.tech', display_name: 'Maria', email: 'Maria.Pappa@nurtur.tech', role: 'viewer,support,kpi', team: 'Support', auth_provider: 'local' },
-      { username: 'adele.norman-swift@nurtur.tech', display_name: 'Adele', email: 'Adele.Norman-Swift@nurtur.tech', role: 'viewer,support,kpi', team: 'Support', auth_provider: 'local' },
-      { username: 'ricky.bostock@nurtur.tech', display_name: 'Ricky', email: 'Ricky.Bostock@nurtur.tech', role: 'viewer,admin,onboader,support,uat,design,kpi,briefing,sales,qa,ai-approver', team: '', auth_provider: 'local' },
-    ];
-    let restored = 0;
-    for (const u of SEED_USERS) {
-      try {
+  const allTeams = await teamQueries.getAll();
+  const teamByName = new Map(allTeams.map(t => [t.name.toLowerCase(), t.id]));
+  const SEED_USERS: Array<{ username: string; display_name: string; email: string; role: string; team: string; auth_provider: string }> = [
+    { username: 'nickw', display_name: 'Nick Ward', email: 'nickw@nurtur.tech', role: 'super_admin,support,design,uat,briefing,kpi,sales,qa,ai-approver', team: 'Support', auth_provider: 'entra' },
+    { username: 'support', display_name: 'Support', email: '', role: 'support', team: 'Support', auth_provider: 'local' },
+    { username: 'seb', display_name: 'Sebastian Broome', email: 'sebastian.broome@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
+    { username: 'onboarding', display_name: 'Onboarding', email: '', role: 'onboader', team: 'Onboarding', auth_provider: 'local' },
+    { username: 'isabel.busk@nurtur.tech', display_name: 'Isabel Busk', email: 'Isabel.Busk@nurtur.tech', role: 'onboader,support,qa,kpi', team: 'Design', auth_provider: 'entra' },
+    { username: 'chris@nurtur.tech', display_name: 'Chris Middleton', email: 'chris@nurtur.tech', role: 'onboader,admin,support,uat,design,kpi,briefing,sales,qa,ai-approver', team: '', auth_provider: 'entra' },
+    { username: 'abdi.mohamed@nurtur.tech', display_name: 'Abdi Mohamed', email: 'abdi.mohamed@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
+    { username: 'stephen.mitchell@nurtur.tech', display_name: 'Stephen Mitchell', email: 'stephen.mitchell@nurtur.tech', role: 'onboader,support,ai-approver,qa', team: 'Support', auth_provider: 'entra' },
+    { username: 'naomi.wentworth@nurtur.tech', display_name: 'Naomi Wentworth', email: 'naomi.wentworth@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
+    { username: 'hope.goodall@nurtur.tech', display_name: 'Hope Goodall', email: 'hope.goodall@nurtur.tech', role: 'onboader,support,briefing,qa', team: 'Support', auth_provider: 'local' },
+    { username: 'arman.shazad@nurtur.tech', display_name: 'Arman Shazad', email: 'Arman.Shazad@nurtur.tech', role: 'onboader,support,viewer,qa', team: 'Support', auth_provider: 'entra' },
+    { username: 'joshua.mills', display_name: 'Joshua Mills', email: 'joshua.mills@nurtur.tech', role: 'admin,onboader', team: '', auth_provider: 'entra' },
+    { username: 'nathan.rutland@nurtur.tech', display_name: 'Nathan Rutland', email: 'Nathan.Rutland@nurtur.tech', role: 'viewer,onboader,support,design,kpi,qa,briefing', team: 'Support', auth_provider: 'local' },
+    { username: 'richardc@nurtur.tech', display_name: 'Richard', email: 'richardc@nurtur.tech', role: 'viewer,onboader,sales', team: 'Onboarding', auth_provider: 'local' },
+    { username: 'luke.scaife', display_name: 'Luke Scaife', email: 'luke.scaife@nurtur.tech', role: 'onboader,support,qa', team: 'Support', auth_provider: 'entra' },
+    { username: 'heidi.power@nurtur.tech', display_name: 'Heidi Power', email: 'Heidi.Power@nurtur.tech', role: 'onboader,support,viewer,qa', team: 'Support', auth_provider: 'entra' },
+    { username: 'willem.kruger@nurtur.tech', display_name: 'Willem', email: 'Willem.Kruger@nurtur.tech', role: 'viewer,onboader,support,qa,briefing', team: 'Support', auth_provider: 'local' },
+    { username: 'zoe.rees@nurtur.tech', display_name: 'Zoe Rees', email: 'zoe.rees@nurtur.tech', role: 'onboader,support,viewer,qa,ai-approver', team: 'Support', auth_provider: 'entra' },
+    { username: 'jmtesting', display_name: 'JM Testing', email: 'JMTesting@nurtur.tech', role: 'admin,onboader,support,uat,kpi', team: '', auth_provider: 'entra' },
+    { username: 'georginag@nurtur.tech', display_name: 'Georgie', email: 'GeorginaG@nurtur.tech', role: 'viewer,onboader,design,kpi,sales,qa,mi', team: '', auth_provider: 'local' },
+    { username: 'ward.nickj@gmail.com', display_name: 'Nick Test', email: 'ward.nickj@gmail.com', role: 'viewer,onboader,support,uat,design,kpi,briefing,sales,qa', team: 'UAT', auth_provider: 'local' },
+    { username: 'kayleigh.russell', display_name: 'Kayleigh Russell', email: 'Kayleigh.Russell@nurtur.tech', role: 'onboader,support', team: '', auth_provider: 'entra' },
+    { username: 'maria.pappa@nurtur.tech', display_name: 'Maria', email: 'Maria.Pappa@nurtur.tech', role: 'viewer,support,kpi', team: 'Support', auth_provider: 'local' },
+    { username: 'adele.norman-swift@nurtur.tech', display_name: 'Adele', email: 'Adele.Norman-Swift@nurtur.tech', role: 'viewer,support,kpi', team: 'Support', auth_provider: 'local' },
+    { username: 'ricky.bostock@nurtur.tech', display_name: 'Ricky', email: 'Ricky.Bostock@nurtur.tech', role: 'viewer,admin,onboader,support,uat,design,kpi,briefing,sales,qa,ai-approver', team: '', auth_provider: 'local' },
+  ];
+  let seedCreated = 0, seedUpdated = 0;
+  for (const u of SEED_USERS) {
+    try {
+      const teamId = u.team ? (teamByName.get(u.team.toLowerCase()) ?? null) : null;
+      // Match by email first (catches SSO-created accounts with suffixed usernames), then username
+      let existing = u.email ? await userQueries.getByEmail(u.email) : undefined;
+      if (!existing) existing = await userQueries.getByUsername(u.username);
+      if (existing) {
+        await userQueries.update(existing.id, {
+          display_name: u.display_name || existing.display_name,
+          email: u.email || existing.email,
+          role: u.role,
+          ...(teamId ? { team_id: teamId } : {}),
+        });
+        seedUpdated++;
+      } else {
         const newId = await userQueries.create({
           username: u.username,
           display_name: u.display_name || undefined,
@@ -195,14 +208,30 @@ async function main() {
           role: u.role,
           auth_provider: u.auth_provider,
         });
-        const teamId = u.team ? teamByName.get(u.team.toLowerCase()) : undefined;
         if (teamId) await userQueries.update(newId, { team_id: teamId });
-        restored++;
-      } catch (err) {
-        console.warn(`[Startup] Failed to restore user ${u.username}:`, err instanceof Error ? err.message : err);
+        seedCreated++;
       }
+    } catch (err) {
+      console.warn(`[Startup] Failed to seed user ${u.username}:`, err instanceof Error ? err.message : err);
     }
-    console.log(`[Startup] Restored ${restored} users from backup seed`);
+  }
+  if (seedCreated > 0 || seedUpdated > 0) {
+    console.log(`[Startup] User seed: ${seedCreated} created, ${seedUpdated} updated`);
+  }
+
+  // Clean up duplicate SSO accounts — if a user was auto-provisioned with a
+  // suffixed username (e.g. nickw_mo9wyy88) but the canonical seed account
+  // now exists, delete the duplicate.
+  const allUsers = await userQueries.getAll();
+  for (const u of allUsers) {
+    if (!u.email) continue;
+    const canonical = SEED_USERS.find(s => s.email && s.email.toLowerCase() === u.email!.toLowerCase());
+    if (!canonical) continue;
+    const canonicalUser = await userQueries.getByUsername(canonical.username);
+    if (canonicalUser && canonicalUser.id !== u.id && u.username !== canonical.username) {
+      await userQueries.delete(u.id);
+      console.log(`[Startup] Removed duplicate account ${u.username} (canonical: ${canonical.username})`);
+    }
   }
 
   const novaMcpCreated = await userQueries.ensureServiceAccount({
