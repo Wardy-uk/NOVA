@@ -878,6 +878,7 @@ export function createDevReviewRoutes(
             issuetype: { name: 'Bug' },
             summary: `[Support] ${issueSummary}`,
             description: adfDoc(descriptionText),
+            customfield_14147: { id: '13596' }, // Work Classification: General Maintenance
           },
         });
         workItemKey = createdBug.key;
