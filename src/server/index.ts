@@ -1751,7 +1751,7 @@ ${panelHtml}
       if (!client) return;
       const result = await client.searchJqlAll(
         `project = NT AND cf[12981] = "Tier 3" AND statusCategory != Done`,
-        ['summary', 'updated', 'reporter'],
+        ['summary', 'updated', 'reporter', 'assignee'],
         200,
       );
       const liveKeys = new Set<string>();
@@ -1782,10 +1782,11 @@ ${panelHtml}
       for (const key of missing) {
         try {
           const issue = await client.getIssue(key, ['summary'], { expand: ['changelog'] });
-          const changelog = (issue as { changelog?: { histories?: Array<{ created?: string; author?: { emailAddress?: string; displayName?: string }; items?: Array<{ field?: string; fieldId?: string; toString?: string }> }> } } | null)?.changelog;
+          const changelog = (issue as { changelog?: { histories?: Array<{ created?: string; author?: { emailAddress?: string; displayName?: string }; items?: Array<{ field?: string; fieldId?: string; from?: string; fromString?: string; to?: string; toString?: string }> }> } } | null)?.changelog;
           const histories = changelog?.histories || [];
           let submitter: string | null = null;
           let escalationIso: string | null = null;
+          let assigneeClearedByT3: string | null = null;
           for (let i = histories.length - 1; i >= 0; i--) {
             const h = histories[i];
             const tierChange = h.items?.find((it) =>
@@ -1795,6 +1796,14 @@ ${panelHtml}
             if (tierChange) {
               submitter = h.author?.emailAddress || h.author?.displayName || null;
               escalationIso = h.created || null;
+              // Check if assignee was cleared in the same changelog entry
+              // (Jira workflow post-function strips assignee on T3 transition)
+              const assigneeCleared = h.items?.find((it) =>
+                it.field === 'assignee' && it.from && !it.to,
+              );
+              if (assigneeCleared?.from) {
+                assigneeClearedByT3 = assigneeCleared.from;
+              }
               break;
             }
           }
@@ -1802,6 +1811,19 @@ ${panelHtml}
             const escalationDate = escalationIso ? new Date(escalationIso) : null;
             const safeIso = escalationDate && !isNaN(escalationDate.getTime()) ? escalationDate.toISOString() : null;
             await devReviewQueries.setEscalationMetadata(key, submitter, safeIso);
+          }
+          // Restore assignee if the Jira T3 post-function stripped it
+          if (assigneeClearedByT3) {
+            try {
+              const current = await client.getIssue(key, ['assignee']);
+              const currentAssignee = (current?.fields as { assignee?: { accountId?: string } | null } | undefined)?.assignee;
+              if (!currentAssignee?.accountId) {
+                await client.updateFields(key, { assignee: { accountId: assigneeClearedByT3 } });
+                console.log(`[DevReviewWatcher] Restored assignee on ${key} (cleared by T3 post-function)`);
+              }
+            } catch (restoreErr) {
+              console.warn(`[DevReviewWatcher] Failed to restore assignee on ${key}: ${restoreErr instanceof Error ? restoreErr.message : restoreErr}`);
+            }
           }
         } catch (e) {
           console.warn(`[DevReviewWatcher] Failed to resolve metadata for ${key}: ${e instanceof Error ? e.message : e}`);
