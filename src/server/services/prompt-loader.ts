@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROMPTS_DIR = path.resolve(__dirname, '../config/prompts');
+// tsc doesn't copy .txt files to dist/, so always read from the source tree.
+// process.cwd() is the project root in both dev (tsx) and prod (NSSM AppDirectory).
+const PROMPTS_DIR = path.join(process.cwd(), 'src/server/config/prompts');
 
 const cache = new Map<string, string>();
 
