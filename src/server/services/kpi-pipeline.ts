@@ -2,6 +2,7 @@ import sql from 'mssql';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { LlmService } from './llm-service.js';
 import type { JiraRestClient } from './jira-client.js';
+import type { JiraCacheQueries } from './jira-cache-queries.js';
 import { DailyDigestSchema, WeeklyDigestSchema, type DailyDigest, type WeeklyDigest } from './kpi-schemas.js';
 import { loadPrompt } from './prompt-loader.js';
 import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
@@ -49,6 +50,7 @@ export class KpiPipeline {
     private jiraClient: JiraRestClient,
     private jiraProject: string = 'NT',
     private monitor?: PipelineMonitor,
+    private cache?: JiraCacheQueries,
   ) {}
 
   private get target(): PipelineTarget {
@@ -84,31 +86,46 @@ export class KpiPipeline {
         `);
       } catch { /* ignore */ }
 
-      const openResult = await this.jiraClient.jqlCount(
-        `project = ${this.jiraProject} AND resolution = EMPTY`,
-      );
+      let openResult: number;
+      let breachedCount: number;
+      let unassignedResult: number;
+      let resolvedTodayResult: number;
+      let createdTodayResult: number;
+      let wor: number;
 
-      const breachedResult = await this.jiraClient.searchJql(
-        `project = ${this.jiraProject} AND resolution = EMPTY AND "Time to resolution" = breached()`,
-        ['key'], 1,
-      );
-      const breachedCount = breachedResult?.total ?? 0;
-
-      const unassignedResult = await this.jiraClient.jqlCount(
-        `project = ${this.jiraProject} AND resolution = EMPTY AND assignee is EMPTY`,
-      );
-
-      const resolvedTodayResult = await this.jiraClient.jqlCount(
-        `project = ${this.jiraProject} AND resolved >= startOfDay()`,
-      );
-
-      const createdTodayResult = await this.jiraClient.jqlCount(
-        `project = ${this.jiraProject} AND created >= startOfDay()`,
-      );
-
-      const wor = await this.jiraClient.jqlCount(
-        `project = ${this.jiraProject} AND status = "Waiting on Requestor" AND resolution = EMPTY`,
-      );
+      if (this.cache) {
+        const startOfDay = new Date();
+        startOfDay.setUTCHours(0, 0, 0, 0);
+        [openResult, breachedCount, unassignedResult, resolvedTodayResult, createdTodayResult, wor] = await Promise.all([
+          this.cache.countOpen(this.jiraProject),
+          this.cache.countBreachedSla(this.jiraProject),
+          this.cache.countUnassigned(this.jiraProject),
+          this.cache.countResolvedSince(this.jiraProject, startOfDay),
+          this.cache.countCreatedSince(this.jiraProject, startOfDay),
+          this.cache.countByStatus(this.jiraProject, 'Waiting on Requestor'),
+        ]);
+      } else {
+        openResult = await this.jiraClient.jqlCount(
+          `project = ${this.jiraProject} AND resolution = EMPTY`,
+        );
+        const breachedResult = await this.jiraClient.searchJql(
+          `project = ${this.jiraProject} AND resolution = EMPTY AND "Time to resolution" = breached()`,
+          ['key'], 1,
+        );
+        breachedCount = breachedResult?.total ?? 0;
+        unassignedResult = await this.jiraClient.jqlCount(
+          `project = ${this.jiraProject} AND resolution = EMPTY AND assignee is EMPTY`,
+        );
+        resolvedTodayResult = await this.jiraClient.jqlCount(
+          `project = ${this.jiraProject} AND resolved >= startOfDay()`,
+        );
+        createdTodayResult = await this.jiraClient.jqlCount(
+          `project = ${this.jiraProject} AND created >= startOfDay()`,
+        );
+        wor = await this.jiraClient.jqlCount(
+          `project = ${this.jiraProject} AND status = "Waiting on Requestor" AND resolution = EMPTY`,
+        );
+      }
 
       const metrics: Array<{ kpi: string; group: string; count: number; target: number; direction: string }> = [
         { kpi: 'Open Tickets', group: 'Queue', count: Math.max(openResult, 0), target: 30, direction: 'Lower is better' },

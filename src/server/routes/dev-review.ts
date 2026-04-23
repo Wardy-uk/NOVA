@@ -5,6 +5,8 @@ import type { UserQueries, UserTeamQueries } from '../db/queries.js';
 import type { NotificationQueries } from '../db/notifications.js';
 import type { TeamQueries } from '../db/queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
+import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
+import type { JiraSyncService } from '../services/jira-sync-service.js';
 import type { AreaAccessGuard } from '../middleware/auth.js';
 import { isAdmin } from '../utils/role-helpers.js';
 
@@ -87,6 +89,8 @@ export function createDevReviewRoutes(
   requireAreaAccess: AreaAccessGuard,
   getJiraClient: () => JiraRestClient | null,
   userTeamQueries?: UserTeamQueries,
+  cache?: JiraCacheQueries,
+  syncService?: JiraSyncService | null,
 ): Router {
   const router = Router();
 
@@ -135,27 +139,41 @@ export function createDevReviewRoutes(
 
   router.get('/queue', async (req: Request, res: Response) => {
     try {
-      const client = getJiraClient();
-      if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
-
-      const jql = `project = NT AND cf[12981] = "Tier 3" AND statusCategory != Done ORDER BY updated DESC`;
-      // Only fetch fields actually rendered in the queue card (summary,
-      // TL;DR preview, product chip, age, claimed indicator). Heavy
-      // escalation textareas (Agent Summary, Troubleshooting, Expected
-      // Outcome, Environment, Development Details) are big ADF docs and
-      // are loaded only when the user clicks into a ticket via /ticket/:key.
-      const fields = [
-        'summary', 'status', 'assignee', 'reporter', 'updated',
-        CF_CURRENT_TIER, CF_TLDR, CF_NURTUR_PRODUCT,
-      ];
-
       let issues: Array<{ key: string; fields: Record<string, unknown> }> = [];
-      try {
-        const result = await client.searchJqlAll(jql, fields, 200);
-        issues = result.issues;
-      } catch (e) {
-        res.status(502).json({ ok: false, error: e instanceof Error ? e.message : 'Jira search failed' });
-        return;
+
+      if (cache) {
+        // Read from local MSSQL cache — instant, no Jira API call
+        const cached = await cache.getTier3Issues();
+        issues = cached.map(ci => ({
+          key: ci.issue_key,
+          fields: {
+            summary: ci.summary,
+            status: { name: ci.status_name, statusCategory: { key: ci.status_category } },
+            assignee: ci.assignee_email ? { displayName: ci.assignee_display, emailAddress: ci.assignee_email, accountId: ci.assignee_account_id } : null,
+            reporter: ci.reporter_email ? { displayName: ci.reporter_display, emailAddress: ci.reporter_email } : null,
+            updated: ci.jira_updated?.toISOString() ?? null,
+            [CF_CURRENT_TIER]: ci.current_tier ? { value: ci.current_tier } : null,
+            [CF_TLDR]: ci.tldr_text ?? null,
+            [CF_NURTUR_PRODUCT]: ci.nurtur_product ? { value: ci.nurtur_product } : null,
+          },
+        }));
+      } else {
+        const client = getJiraClient();
+        if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
+
+        const jql = `project = NT AND cf[12981] = "Tier 3" AND statusCategory != Done ORDER BY updated DESC`;
+        const fields = [
+          'summary', 'status', 'assignee', 'reporter', 'updated',
+          CF_CURRENT_TIER, CF_TLDR, CF_NURTUR_PRODUCT,
+        ];
+
+        try {
+          const result = await client.searchJqlAll(jql, fields, 200);
+          issues = result.issues;
+        } catch (e) {
+          res.status(502).json({ ok: false, error: e instanceof Error ? e.message : 'Jira search failed' });
+          return;
+        }
       }
 
       // Sync NOVA state: upsert anything newly seen, archive anything no longer in T3.
@@ -262,25 +280,53 @@ export function createDevReviewRoutes(
 
   router.get('/ticket/:key', async (req: Request, res: Response) => {
     try {
-      const client = getJiraClient();
-      if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
       const key = String(req.params.key);
+      let issueFields: Record<string, unknown> | null = null;
 
-      const issue = await client.getIssue(key, [
-        'summary', 'description', 'status', 'assignee', 'reporter', 'priority',
-        'created', 'updated', 'duedate', 'issuetype',
-        CF_CURRENT_TIER, CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
-        CF_ESCALATION_REASON, CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT, CF_NURTUR_PRODUCT,
-        CF_DEVELOPMENT_DETAILS,
-      ]);
+      if (cache) {
+        const ci = await cache.getIssue(key);
+        if (ci?.fields_json) {
+          issueFields = JSON.parse(ci.fields_json);
+        }
+      }
 
-      if (!issue) { res.status(404).json({ ok: false, error: 'Not found' }); return; }
+      // Fallback to live API if not in cache
+      if (!issueFields) {
+        const client = getJiraClient();
+        if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
+        const issue = await client.getIssue(key, [
+          'summary', 'description', 'status', 'assignee', 'reporter', 'priority',
+          'created', 'updated', 'duedate', 'issuetype',
+          CF_CURRENT_TIER, CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
+          CF_ESCALATION_REASON, CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT, CF_NURTUR_PRODUCT,
+          CF_DEVELOPMENT_DETAILS,
+        ]);
+        if (!issue) { res.status(404).json({ ok: false, error: 'Not found' }); return; }
+        issueFields = issue.fields;
+      }
 
-      // Pull the latest 20 Jira comments and import any not yet in the
-      // local thread. Same logic as the global comment watcher but scoped
-      // to this single ticket — gives the detail pane near-real-time
-      // freshness without waiting for the 2-min sweep.
-      const jiraComments = await client.getComments(key, 20).catch(() => []);
+      // Comments: prefer cache, fall back to live API
+      let jiraComments: Array<{ id: string; author: { displayName: string; accountId?: string; emailAddress?: string }; body: unknown; created: string; jsdPublic?: boolean }> = [];
+      if (cache) {
+        const cached = await cache.getComments(key, 20);
+        jiraComments = cached.map(c => ({
+          id: c.jira_comment_id,
+          author: { displayName: c.author_display ?? 'Unknown', accountId: c.author_account_id ?? undefined, emailAddress: c.author_email ?? undefined },
+          body: c.body_adf ? JSON.parse(c.body_adf) : null,
+          created: c.jira_created?.toISOString() ?? '',
+          jsdPublic: c.is_public,
+        }));
+      } else {
+        const client = getJiraClient();
+        if (client) {
+          jiraComments = await client.getComments(key, 20).catch(() => []);
+        }
+      }
+
+      // Trigger background cache refresh for this issue
+      if (syncService) {
+        syncService.syncSingleIssue(key).catch(() => {});
+      }
       let importedExternal = 0;
       for (const c of jiraComments) {
         if (await devQueries.hasJiraComment(key, c.id)) continue;
@@ -308,7 +354,7 @@ export function createDevReviewRoutes(
       const state = await devQueries.getState(key);
       const thread = await devQueries.getThread(key);
 
-      res.json({ ok: true, data: { key, fields: issue.fields, state, thread, jiraComments } });
+      res.json({ ok: true, data: { key, fields: issueFields, state, thread, jiraComments } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'detail failed' });
     }

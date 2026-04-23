@@ -81,6 +81,8 @@ import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-cli
 import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
 import { createAgentRoutes } from './routes/agent.js';
 import { AgentLoop } from './services/agent-loop.js';
+import { JiraSyncService } from './services/jira-sync-service.js';
+import { JiraCacheQueries } from './services/jira-cache-queries.js';
 import { LlmService } from './services/llm-service.js';
 import { AssignmentEngine } from './services/assignment-engine.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
@@ -425,6 +427,10 @@ async function main() {
   }
 
   const aggregator = new TaskAggregator(mcpManager, taskQueries, settingsQueries, buildServiceDeskJiraClient);
+
+  // Jira cache layer — single background sync replaces per-consumer live API calls
+  const jiraCacheQueries = new JiraCacheQueries();
+  let jiraSyncService: JiraSyncService | null = null;
 
   // 4. Express app
   const app = express();
@@ -799,6 +805,7 @@ async function main() {
     settingsQueries,
     devReviewQueries,
     buildServiceDeskJiraClient,
+    jiraCacheQueries,
   ));
   app.use('/api/dev-review', createDevReviewRoutes(
     devReviewQueries,
@@ -809,6 +816,8 @@ async function main() {
     requireAreaAccess,
     buildServiceDeskJiraClient,
     userTeamQueries,
+    jiraCacheQueries,
+    jiraSyncService,
   ));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries));
   app.use('/api/backfill', requireAreaAccess('qa', 'view'), createBackfillRoutes(settingsQueries));
@@ -821,11 +830,21 @@ async function main() {
   app.use('/api/chat', requireAreaAccess('nova_features', 'view'), createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
   app.use('/api/people', createPeopleRoutes({ userQueries, settingsQueries, mcpManager, notificationQueries }));
 
+  // Jira sync service — background sync populates the cache tables
+  const syncJiraClient = buildServiceDeskJiraClient();
+  if (syncJiraClient) {
+    jiraSyncService = new JiraSyncService(syncJiraClient, settingsQueries);
+    jiraSyncService.fullSync().catch(err =>
+      console.error('[jira-sync] Initial full sync failed:', err instanceof Error ? err.message : err)
+    );
+    jiraSyncService.start(45_000);
+  }
+
   // Agent loop — feature-flagged, admin-only
   const agentJiraClient = buildServiceDeskJiraClient();
   const llmService = new LlmService(settingsQueries);
   if (agentJiraClient) {
-    agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries);
+    agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);
 
     const assignmentEngine = new AssignmentEngine(agentJiraClient, 'NT');
     const availabilityService = new AgentAvailabilityService();
@@ -840,7 +859,7 @@ async function main() {
       pipelineMonitor.truncateUatTables()
     ).catch(e => console.warn('[pipeline-monitor] UAT table setup failed:', e.message));
 
-    const kpiPipeline = new KpiPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
+    const kpiPipeline = new KpiPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor, jiraCacheQueries);
     const qaPipeline = new QaPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
 
     // Calendar sync (WP-12)

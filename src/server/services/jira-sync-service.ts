@@ -1,0 +1,412 @@
+import type { JiraRestClient, JiraIssue, JiraComment } from './jira-client.js';
+import type { SettingsQueries } from '../db/settings-store.js';
+import { query, queryOne, execute } from './database.js';
+
+const ALL_FIELDS = [
+  'summary', 'description', 'status', 'priority', 'issuetype',
+  'assignee', 'reporter', 'created', 'updated', 'duedate',
+  'resolution', 'labels', 'issuelinks',
+  'customfield_10010', // SLA
+  'customfield_10020', // Request type
+  'customfield_12981', // Current Tier
+  'customfield_13183', // Nurtur Product
+  'customfield_13184', // TL;DR
+  'customfield_13185', // Agent Summary
+  'customfield_13186', // Escalation Reason
+  'customfield_13212', // Troubleshooting
+  'customfield_13213', // Issue Environment
+  'customfield_13214', // Expected Outcome
+  'customfield_13215', // Development Details
+  'customfield_14048', // Problem ticket field
+  'customfield_14081', // Problem ticket field
+  'customfield_14185', // Problem ticket field
+  'customfield_14494', // Resolution type
+  'customfield_14527', // Problem ticket field
+];
+
+export class JiraSyncService {
+  private jiraClient: JiraRestClient;
+  private settings: SettingsQueries;
+  private lastSyncAt: Date | null = null;
+  private syncing = false;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private fullSyncDone = false;
+  private consecutiveErrors = 0;
+
+  constructor(jiraClient: JiraRestClient, settings: SettingsQueries) {
+    this.jiraClient = jiraClient;
+    this.settings = settings;
+  }
+
+  getStatus() {
+    return {
+      lastSyncAt: this.lastSyncAt?.toISOString() ?? null,
+      syncing: this.syncing,
+      fullSyncDone: this.fullSyncDone,
+      consecutiveErrors: this.consecutiveErrors,
+    };
+  }
+
+  isReady(): boolean {
+    return this.fullSyncDone;
+  }
+
+  start(intervalMs = 45_000): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => this.incrementalSync(), intervalMs);
+    console.log(`[jira-sync] Started incremental sync every ${intervalMs / 1000}s`);
+  }
+
+  stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  private buildProjectFilter(): string {
+    const raw = this.settings.get('agent_jira_project') ?? 'NT';
+    return raw.split(',').map(p => p.trim()).filter(Boolean).join(', ');
+  }
+
+  private buildProjectJql(): string {
+    const projects = this.buildProjectFilter();
+    if (!projects.includes(',')) return `project = ${projects}`;
+    return `project IN (${projects})`;
+  }
+
+  async fullSync(): Promise<void> {
+    if (this.syncing) return;
+    this.syncing = true;
+    const start = Date.now();
+    let issueCount = 0;
+    let commentCount = 0;
+
+    try {
+      const projectJql = this.buildProjectJql();
+      console.log('[jira-sync] Starting full sync...');
+
+      // Fetch all open + recently closed issues
+      const jql = `${projectJql} AND (statusCategory != Done OR updated >= -7d) ORDER BY updated DESC`;
+      const result = await this.jiraClient.searchJqlAll(jql, ALL_FIELDS, 2000);
+      console.log(`[jira-sync] Full sync fetched ${result.issues.length} issues`);
+
+      // Upsert in batches
+      for (const issue of result.issues) {
+        await this.upsertIssue(issue);
+        issueCount++;
+      }
+
+      // Fetch comments for open issues (batched to avoid hammering)
+      const openIssues = result.issues.filter(i =>
+        (i.fields.status as any)?.statusCategory?.key !== 'done'
+      );
+      console.log(`[jira-sync] Syncing comments for ${openIssues.length} open issues...`);
+
+      for (const issue of openIssues) {
+        try {
+          const comments = await this.jiraClient.getComments(issue.key, 20);
+          for (const comment of comments) {
+            await this.upsertComment(issue.key, comment);
+            commentCount++;
+          }
+        } catch (err) {
+          console.warn(`[jira-sync] Failed to sync comments for ${issue.key}:`, err instanceof Error ? err.message : err);
+        }
+      }
+
+      this.lastSyncAt = new Date();
+      this.fullSyncDone = true;
+      this.consecutiveErrors = 0;
+
+      const duration = Date.now() - start;
+      console.log(`[jira-sync] Full sync complete: ${issueCount} issues, ${commentCount} comments in ${duration}ms`);
+
+      await this.recordSync('full', issueCount, commentCount, duration);
+    } catch (err) {
+      this.consecutiveErrors++;
+      const duration = Date.now() - start;
+      console.error('[jira-sync] Full sync failed:', err instanceof Error ? err.message : err);
+      await this.recordSync('full', issueCount, commentCount, duration, err instanceof Error ? err.message : String(err));
+    } finally {
+      this.syncing = false;
+    }
+  }
+
+  async incrementalSync(): Promise<void> {
+    if (this.syncing) return;
+    if (!this.lastSyncAt) {
+      await this.fullSync();
+      return;
+    }
+
+    this.syncing = true;
+    const start = Date.now();
+    let issueCount = 0;
+    let commentCount = 0;
+
+    try {
+      const projectJql = this.buildProjectJql();
+      // Look back slightly further than lastSync to avoid missing edge cases
+      const since = new Date(this.lastSyncAt.getTime() - 30_000);
+      const sinceJql = formatJqlDate(since);
+
+      const jql = `${projectJql} AND updated >= "${sinceJql}" ORDER BY updated ASC`;
+      const result = await this.jiraClient.searchJqlAll(jql, ALL_FIELDS, 500);
+
+      for (const issue of result.issues) {
+        await this.upsertIssue(issue);
+        issueCount++;
+
+        // Re-fetch comments for updated issues
+        try {
+          const comments = await this.jiraClient.getComments(issue.key, 20);
+          for (const comment of comments) {
+            await this.upsertComment(issue.key, comment);
+            commentCount++;
+          }
+        } catch (err) {
+          console.warn(`[jira-sync] Failed to sync comments for ${issue.key}:`, err instanceof Error ? err.message : err);
+        }
+      }
+
+      this.lastSyncAt = new Date();
+      this.consecutiveErrors = 0;
+
+      if (issueCount > 0) {
+        const duration = Date.now() - start;
+        console.log(`[jira-sync] Incremental sync: ${issueCount} issues, ${commentCount} comments (${duration}ms)`);
+      }
+    } catch (err) {
+      this.consecutiveErrors++;
+      console.error('[jira-sync] Incremental sync failed:', err instanceof Error ? err.message : err);
+    } finally {
+      this.syncing = false;
+    }
+  }
+
+  async syncSingleIssue(issueKey: string): Promise<void> {
+    try {
+      const issue = await this.jiraClient.getIssue(issueKey, ALL_FIELDS);
+      if (!issue) return;
+      await this.upsertIssue(issue);
+
+      const comments = await this.jiraClient.getComments(issueKey, 20);
+      for (const comment of comments) {
+        await this.upsertComment(issueKey, comment);
+      }
+    } catch (err) {
+      console.warn(`[jira-sync] Failed to sync ${issueKey}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  private async upsertIssue(issue: JiraIssue): Promise<void> {
+    const f = issue.fields;
+    const status = f.status as any;
+    const assignee = f.assignee as any;
+    const reporter = f.reporter as any;
+    const priority = f.priority as any;
+    const issuetype = f.issuetype as any;
+    const resolution = f.resolution as any;
+
+    const descriptionText = extractText(f.description);
+    const descriptionAdf = f.description ? JSON.stringify(f.description) : null;
+    const currentTier = (f.customfield_12981 as any)?.value ?? null;
+    const nurturProduct = (f.customfield_13183 as any)?.value ?? null;
+    const requestType = (f.customfield_10020 as any)?.requestType?.name ?? null;
+    const tldrText = extractText(f.customfield_13184);
+    const agentSummaryText = extractText(f.customfield_13185);
+    const troubleshootingText = extractText(f.customfield_13212);
+    const escalationReasonText = extractText(f.customfield_13186);
+    const expectedOutcomeText = extractText(f.customfield_13214);
+    const issueEnvironmentText = extractText(f.customfield_13213);
+    const developmentDetailsText = extractText(f.customfield_13215);
+    const resolutionType = (f.customfield_14494 as any)?.value ?? null;
+    const slaBreachTime = extractSlaBreachTime(f.customfield_10010);
+    const slaBreached = extractSlaBreached(f.customfield_10010);
+    const labels = Array.isArray(f.labels) ? (f.labels as string[]).join(';') : null;
+    const issueLinksJson = f.issuelinks ? JSON.stringify(f.issuelinks) : null;
+    const fieldsJson = JSON.stringify(f);
+
+    await execute(`
+      MERGE jira_issue_cache AS target
+      USING (SELECT ? AS issue_key) AS source ON target.issue_key = source.issue_key
+      WHEN MATCHED THEN UPDATE SET
+        jira_id = ?, project_key = ?, summary = ?, description_text = ?, description_adf = ?,
+        status_name = ?, status_category = ?, priority_name = ?, issuetype_name = ?,
+        resolution_name = ?, assignee_account_id = ?, assignee_display = ?, assignee_email = ?,
+        reporter_account_id = ?, reporter_display = ?, reporter_email = ?,
+        jira_created = ?, jira_updated = ?, due_date = ?,
+        current_tier = ?, nurtur_product = ?, request_type = ?,
+        tldr_text = ?, agent_summary_text = ?, troubleshooting_text = ?,
+        escalation_reason_text = ?, expected_outcome_text = ?, issue_environment_text = ?,
+        development_details_text = ?, resolution_type = ?,
+        sla_breach_time = ?, sla_breached = ?, labels = ?,
+        issue_links_json = ?, fields_json = ?, synced_at = GETUTCDATE()
+      WHEN NOT MATCHED THEN INSERT (
+        issue_key, jira_id, project_key, summary, description_text, description_adf,
+        status_name, status_category, priority_name, issuetype_name,
+        resolution_name, assignee_account_id, assignee_display, assignee_email,
+        reporter_account_id, reporter_display, reporter_email,
+        jira_created, jira_updated, due_date,
+        current_tier, nurtur_product, request_type,
+        tldr_text, agent_summary_text, troubleshooting_text,
+        escalation_reason_text, expected_outcome_text, issue_environment_text,
+        development_details_text, resolution_type,
+        sla_breach_time, sla_breached, labels,
+        issue_links_json, fields_json
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?,
+        ?, ?, ?,
+        ?, ?
+      );`,
+      [
+        // Source key
+        issue.key,
+        // UPDATE values
+        issue.id, issue.key.split('-')[0], f.summary as string ?? null,
+        descriptionText || null, descriptionAdf,
+        status?.name ?? null, status?.statusCategory?.key ?? null,
+        priority?.name ?? null, issuetype?.name ?? null,
+        resolution?.name ?? null,
+        assignee?.accountId ?? null, assignee?.displayName ?? null, assignee?.emailAddress ?? null,
+        reporter?.accountId ?? null, reporter?.displayName ?? null, reporter?.emailAddress ?? null,
+        f.created ? new Date(f.created as string) : null,
+        f.updated ? new Date(f.updated as string) : null,
+        f.duedate ? new Date(f.duedate as string) : null,
+        currentTier, nurturProduct, requestType,
+        tldrText || null, agentSummaryText || null, troubleshootingText || null,
+        escalationReasonText || null, expectedOutcomeText || null, issueEnvironmentText || null,
+        developmentDetailsText || null, resolutionType,
+        slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, labels,
+        issueLinksJson, fieldsJson,
+        // INSERT values (same order as columns)
+        issue.key, issue.id, issue.key.split('-')[0], f.summary as string ?? null,
+        descriptionText || null, descriptionAdf,
+        status?.name ?? null, status?.statusCategory?.key ?? null,
+        priority?.name ?? null, issuetype?.name ?? null,
+        resolution?.name ?? null,
+        assignee?.accountId ?? null, assignee?.displayName ?? null, assignee?.emailAddress ?? null,
+        reporter?.accountId ?? null, reporter?.displayName ?? null, reporter?.emailAddress ?? null,
+        f.created ? new Date(f.created as string) : null,
+        f.updated ? new Date(f.updated as string) : null,
+        f.duedate ? new Date(f.duedate as string) : null,
+        currentTier, nurturProduct, requestType,
+        tldrText || null, agentSummaryText || null, troubleshootingText || null,
+        escalationReasonText || null, expectedOutcomeText || null, issueEnvironmentText || null,
+        developmentDetailsText || null, resolutionType,
+        slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, labels,
+        issueLinksJson, fieldsJson,
+      ],
+    );
+  }
+
+  private async upsertComment(issueKey: string, comment: JiraComment): Promise<void> {
+    const bodyText = extractText(comment.body);
+    const bodyAdf = comment.body ? JSON.stringify(comment.body) : null;
+    const isPublic = comment.jsdPublic !== false;
+
+    await execute(`
+      MERGE jira_comment_cache AS target
+      USING (SELECT ? AS jira_comment_id) AS source ON target.jira_comment_id = source.jira_comment_id
+      WHEN MATCHED THEN UPDATE SET
+        issue_key = ?, author_account_id = ?, author_display = ?, author_email = ?,
+        body_text = ?, body_adf = ?, is_public = ?,
+        jira_created = ?, jira_updated = ?, synced_at = GETUTCDATE()
+      WHEN NOT MATCHED THEN INSERT (
+        jira_comment_id, issue_key, author_account_id, author_display, author_email,
+        body_text, body_adf, is_public, jira_created, jira_updated
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+      [
+        comment.id,
+        // UPDATE
+        issueKey,
+        comment.author?.accountId ?? null, comment.author?.displayName ?? null,
+        comment.author?.emailAddress ?? null,
+        bodyText || null, bodyAdf, isPublic,
+        new Date(comment.created), new Date(comment.updated),
+        // INSERT
+        comment.id, issueKey,
+        comment.author?.accountId ?? null, comment.author?.displayName ?? null,
+        comment.author?.emailAddress ?? null,
+        bodyText || null, bodyAdf, isPublic,
+        new Date(comment.created), new Date(comment.updated),
+      ],
+    );
+  }
+
+  private async recordSync(
+    type: string, issues: number, comments: number, durationMs: number, error?: string,
+  ): Promise<void> {
+    try {
+      const projects = this.settings.get('agent_jira_project') ?? 'NT';
+      await execute(
+        `INSERT INTO jira_sync_state (sync_type, project_key, last_synced_at, issues_synced, comments_synced, duration_ms, error)
+         VALUES (?, ?, GETUTCDATE(), ?, ?, ?, ?)`,
+        [type, projects, issues, comments, durationMs, error ?? null],
+      );
+    } catch { /* don't fail the sync for logging issues */ }
+  }
+}
+
+function extractText(adf: unknown): string {
+  if (!adf || typeof adf !== 'object') return '';
+  if (typeof adf === 'string') return adf;
+  try {
+    const content = (adf as any).content;
+    if (!Array.isArray(content)) return JSON.stringify(adf).slice(0, 2000);
+    return content
+      .flatMap((node: any) => {
+        if (node.type === 'paragraph' && Array.isArray(node.content)) {
+          return node.content.map((c: any) => c.text ?? '').join('');
+        }
+        if (node.type === 'heading' && Array.isArray(node.content)) {
+          return node.content.map((c: any) => c.text ?? '').join('');
+        }
+        return node.text ?? '';
+      })
+      .join('\n')
+      .trim();
+  } catch {
+    return '';
+  }
+}
+
+function extractSlaBreachTime(slaField: unknown): string | null {
+  if (!slaField || typeof slaField !== 'object') return null;
+  try {
+    const ongoing = (slaField as any)?.ongoingCycle;
+    if (ongoing?.breachTime?.epochMillis) {
+      return new Date(ongoing.breachTime.epochMillis).toISOString();
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function extractSlaBreached(slaField: unknown): boolean {
+  if (!slaField || typeof slaField !== 'object') return false;
+  try {
+    const completed = (slaField as any)?.completedCycles;
+    if (Array.isArray(completed)) {
+      return completed.some((c: any) => c.breached === true);
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
+function formatJqlDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const h = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  return `${y}/${m}/${d} ${h}:${min}`;
+}

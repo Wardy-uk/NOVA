@@ -540,6 +540,107 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_agent_actions_snapshot')
      ALTER TABLE agent_121_actions ADD CONSTRAINT FK_agent_actions_snapshot
        FOREIGN KEY (snapshot_id) REFERENCES agent_121_snapshots(id) ON DELETE SET NULL;`,
+
+    // ── Jira Issue Cache ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'jira_issue_cache') AND type = 'U')
+     CREATE TABLE jira_issue_cache (
+       issue_key       NVARCHAR(30)  NOT NULL PRIMARY KEY,
+       jira_id         NVARCHAR(20)  NOT NULL,
+       project_key     NVARCHAR(10)  NOT NULL,
+       summary         NVARCHAR(500) NULL,
+       description_text NVARCHAR(MAX) NULL,
+       description_adf NVARCHAR(MAX) NULL,
+       status_name     NVARCHAR(100) NULL,
+       status_category NVARCHAR(50)  NULL,
+       priority_name   NVARCHAR(50)  NULL,
+       issuetype_name  NVARCHAR(100) NULL,
+       resolution_name NVARCHAR(100) NULL,
+       assignee_account_id NVARCHAR(200) NULL,
+       assignee_display    NVARCHAR(200) NULL,
+       assignee_email      NVARCHAR(200) NULL,
+       reporter_account_id NVARCHAR(200) NULL,
+       reporter_display    NVARCHAR(200) NULL,
+       reporter_email      NVARCHAR(200) NULL,
+       jira_created    DATETIME2     NULL,
+       jira_updated    DATETIME2     NULL,
+       due_date        DATE          NULL,
+       current_tier    NVARCHAR(100) NULL,
+       nurtur_product  NVARCHAR(200) NULL,
+       request_type    NVARCHAR(200) NULL,
+       tldr_text       NVARCHAR(MAX) NULL,
+       agent_summary_text   NVARCHAR(MAX) NULL,
+       troubleshooting_text NVARCHAR(MAX) NULL,
+       escalation_reason_text NVARCHAR(MAX) NULL,
+       expected_outcome_text  NVARCHAR(MAX) NULL,
+       issue_environment_text NVARCHAR(MAX) NULL,
+       development_details_text NVARCHAR(MAX) NULL,
+       resolution_type NVARCHAR(200) NULL,
+       sla_breach_time DATETIME2     NULL,
+       sla_breached    BIT           NOT NULL DEFAULT 0,
+       labels          NVARCHAR(1000) NULL,
+       issue_links_json NVARCHAR(MAX) NULL,
+       fields_json     NVARCHAR(MAX) NULL,
+       synced_at       DATETIME2     NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_project_status')
+     CREATE INDEX IX_jira_cache_project_status ON jira_issue_cache (project_key, status_category)
+       INCLUDE (issue_key, summary, assignee_display, priority_name, jira_updated);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_status_updated')
+     CREATE INDEX IX_jira_cache_status_updated ON jira_issue_cache (status_category, jira_updated DESC)
+       INCLUDE (issue_key, project_key, summary);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_assignee')
+     CREATE INDEX IX_jira_cache_assignee ON jira_issue_cache (assignee_email)
+       INCLUDE (issue_key, summary, status_name, priority_name);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_tier')
+     CREATE INDEX IX_jira_cache_tier ON jira_issue_cache (current_tier)
+       INCLUDE (issue_key, summary, status_name, nurtur_product, jira_updated);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_updated')
+     CREATE INDEX IX_jira_cache_updated ON jira_issue_cache (jira_updated DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_created')
+     CREATE INDEX IX_jira_cache_created ON jira_issue_cache (jira_created DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_product')
+     CREATE INDEX IX_jira_cache_product ON jira_issue_cache (nurtur_product)
+       WHERE nurtur_product IS NOT NULL;`,
+
+    // ── Jira Comment Cache ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'jira_comment_cache') AND type = 'U')
+     CREATE TABLE jira_comment_cache (
+       jira_comment_id NVARCHAR(50)  NOT NULL PRIMARY KEY,
+       issue_key       NVARCHAR(30)  NOT NULL,
+       author_account_id NVARCHAR(200) NULL,
+       author_display  NVARCHAR(200) NULL,
+       author_email    NVARCHAR(200) NULL,
+       body_text       NVARCHAR(MAX) NULL,
+       body_adf        NVARCHAR(MAX) NULL,
+       is_public       BIT           NOT NULL DEFAULT 1,
+       jira_created    DATETIME2     NOT NULL,
+       jira_updated    DATETIME2     NOT NULL,
+       synced_at       DATETIME2     NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_comment_issue')
+     CREATE INDEX IX_jira_comment_issue ON jira_comment_cache (issue_key, jira_created DESC);`,
+
+    // ── Jira Sync State ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'jira_sync_state') AND type = 'U')
+     CREATE TABLE jira_sync_state (
+       id              INT IDENTITY(1,1) PRIMARY KEY,
+       sync_type       NVARCHAR(50)  NOT NULL,
+       project_key     NVARCHAR(10)  NOT NULL,
+       last_synced_at  DATETIME2     NOT NULL,
+       issues_synced   INT           NOT NULL DEFAULT 0,
+       comments_synced INT           NOT NULL DEFAULT 0,
+       duration_ms     INT           NULL,
+       error           NVARCHAR(MAX) NULL,
+       created_at      DATETIME2     NOT NULL DEFAULT GETUTCDATE()
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

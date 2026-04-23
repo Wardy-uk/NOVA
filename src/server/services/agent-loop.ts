@@ -11,6 +11,7 @@ import { KbSearchService } from './kb-search.js';
 import { TicketStateStore } from './ticket-state.js';
 import { StaleSweep } from './stale-sweep.js';
 import { ResolutionReviewer } from './resolution-reviewer.js';
+import type { JiraCacheQueries } from './jira-cache-queries.js';
 import { Guardrails, type GuardrailResult } from './guardrails.js';
 import { QueueMonitor } from './queue-monitor.js';
 import { AutonomyEngine } from './autonomy-engine.js';
@@ -56,10 +57,11 @@ export class AgentLoop {
     llmService: LlmService,
     settings: SettingsQueries,
     approvalQueries?: ApprovalQueries,
+    cache?: JiraCacheQueries,
   ) {
     const kbSearch = new KbSearchService(settings);
     this.autonomyEngine = new AutonomyEngine();
-    this.perceiver = new Perceiver(jiraClient, settings);
+    this.perceiver = new Perceiver(jiraClient, settings, cache);
     this.reasoner = new Reasoner(llmService, kbSearch, this.autonomyEngine);
     this.actor = new Actor(jiraClient);
     this.observer = new Observer();

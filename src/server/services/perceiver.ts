@@ -1,4 +1,5 @@
 import type { JiraRestClient, JiraIssue, JiraComment } from './jira-client.js';
+import type { JiraCacheQueries, CachedIssue, CachedComment } from './jira-cache-queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { QueuePerception, TicketEvent, CommentSnapshot } from './agent-types.js';
 
@@ -27,6 +28,45 @@ function toTicketEvent(issue: JiraIssue, eventType: TicketEvent['eventType']): T
     updated: (f.updated as string) ?? '',
     slaBreachTime: extractSlaBreachTime(f.customfield_10010),
     fields: f,
+  };
+}
+
+function cachedToTicketEvent(ci: CachedIssue, eventType: TicketEvent['eventType']): TicketEvent {
+  return {
+    ticketId: ci.jira_id,
+    ticketKey: ci.issue_key,
+    eventType,
+    summary: ci.summary ?? '',
+    description: ci.description_text ?? '',
+    status: ci.status_name ?? 'Unknown',
+    priority: ci.priority_name ?? 'Medium',
+    requestType: ci.request_type ?? '',
+    assignee: ci.assignee_display ?? null,
+    reporter: ci.reporter_display ?? null,
+    organisation: ci.reporter_email?.split('@')[1] ?? null,
+    created: ci.jira_created?.toISOString() ?? '',
+    updated: ci.jira_updated?.toISOString() ?? '',
+    slaBreachTime: ci.sla_breach_time?.toISOString() ?? null,
+    fields: ci.fields_json ? JSON.parse(ci.fields_json) : {},
+  };
+}
+
+function cachedToJiraIssue(ci: CachedIssue): JiraIssue {
+  const fields = ci.fields_json ? JSON.parse(ci.fields_json) : {};
+  return {
+    id: ci.jira_id,
+    key: ci.issue_key,
+    self: '',
+    fields,
+  };
+}
+
+function cachedCommentToSnapshot(c: CachedComment): CommentSnapshot {
+  return {
+    author: c.author_display ?? 'Unknown',
+    body: c.body_text ?? '',
+    created: c.jira_created?.toISOString() ?? '',
+    isPublic: c.is_public,
   };
 }
 
@@ -73,54 +113,134 @@ function toCommentSnapshot(c: JiraComment): CommentSnapshot {
 
 export class Perceiver {
   private jiraClient: JiraRestClient;
+  private cache: JiraCacheQueries | null;
   private settings: SettingsQueries;
   private lastTickAt: Date | null = null;
   private lastOpenIssues: JiraIssue[] = [];
 
-  constructor(jiraClient: JiraRestClient, settings: SettingsQueries) {
+  constructor(jiraClient: JiraRestClient, settings: SettingsQueries, cache?: JiraCacheQueries) {
     this.jiraClient = jiraClient;
     this.settings = settings;
+    this.cache = cache ?? null;
   }
 
   getLastOpenIssues(): JiraIssue[] {
     return this.lastOpenIssues;
   }
 
-  private buildProjectFilter(): string {
+  private getProjects(): string[] {
     const raw = this.settings.get('agent_jira_project') ?? 'NT';
-    const projects = raw.split(',').map(p => p.trim()).filter(Boolean);
+    return raw.split(',').map(p => p.trim()).filter(Boolean);
+  }
+
+  private buildProjectFilter(): string {
+    const projects = this.getProjects();
     if (projects.length === 1) return `project = ${projects[0]}`;
     return `project IN (${projects.join(', ')})`;
   }
 
   async perceive(): Promise<QueuePerception> {
+    if (this.cache) {
+      return this.perceiveFromCache();
+    }
+    return this.perceiveFromApi();
+  }
+
+  private async perceiveFromCache(): Promise<QueuePerception> {
+    const projects = this.getProjects();
+    const now = new Date();
+    const since = this.lastTickAt ?? new Date(now.getTime() - 60 * 60 * 1000);
+    const agentEmail = this.settings.get('jira_ob_email') ?? '';
+
+    const [openIssues, newIssues, updatedIssues] = await Promise.all([
+      this.cache!.getOpenIssues(projects),
+      this.cache!.getRecentlyCreated(projects, since),
+      this.cache!.getRecentlyUpdated(projects, since),
+    ]);
+
+    const byStatus: Record<string, number> = {};
+    const slaAtRisk: TicketEvent[] = [];
+    const staleThresholdMs = 4 * 60 * 60 * 1000;
+
+    for (const ci of openIssues) {
+      const status = ci.status_name ?? 'Unknown';
+      byStatus[status] = (byStatus[status] ?? 0) + 1;
+
+      if (ci.sla_breach_time) {
+        const breachMs = new Date(ci.sla_breach_time).getTime() - now.getTime();
+        if (breachMs > 0 && breachMs < 60 * 60 * 1000) {
+          slaAtRisk.push(cachedToTicketEvent(ci, 'sla_warning'));
+        }
+      }
+    }
+
+    const staleTickets = openIssues
+      .filter(ci => {
+        const updated = ci.jira_updated ? new Date(ci.jira_updated).getTime() : 0;
+        return now.getTime() - updated > staleThresholdMs;
+      })
+      .slice(0, 20)
+      .map(ci => cachedToTicketEvent(ci, 'stale'));
+
+    const newEvents = newIssues.map(ci => cachedToTicketEvent(ci, 'ticket_created'));
+
+    // Detect new comments from cache
+    const commentEvents: TicketEvent[] = [];
+    const newKeys = new Set(newIssues.map(ci => ci.issue_key));
+    const updatedCandidates = updatedIssues.filter(ci => !newKeys.has(ci.issue_key));
+
+    for (const ci of updatedCandidates.slice(0, 20)) {
+      const recentComments = await this.cache!.getRecentComments(ci.issue_key, since);
+      const recentPublic = recentComments.filter(c => {
+        const isPublic = c.is_public;
+        const isAgent = agentEmail && c.author_email === agentEmail;
+        return isPublic && !isAgent;
+      });
+      if (recentPublic.length > 0) {
+        const allComments = await this.cache!.getComments(ci.issue_key, 5);
+        const event = cachedToTicketEvent(ci, 'comment_added');
+        event.comments = allComments.map(cachedCommentToSnapshot);
+        commentEvents.push(event);
+      }
+    }
+
+    this.lastTickAt = now;
+    this.lastOpenIssues = openIssues.map(cachedToJiraIssue);
+
+    return {
+      timestamp: now.toISOString(),
+      totalOpen: openIssues.length,
+      byStatus,
+      newEvents: [...newEvents, ...commentEvents],
+      slaAtRisk,
+      staleTickets,
+    };
+  }
+
+  private async perceiveFromApi(): Promise<QueuePerception> {
     const projectFilter = this.buildProjectFilter();
     const now = new Date();
     const since = this.lastTickAt ?? new Date(now.getTime() - 60 * 60 * 1000);
-
     const agentEmail = this.settings.get('jira_ob_email') ?? '';
 
     const [openResult, newResult, updatedResult] = await Promise.all([
       this.jiraClient.searchJqlAll(
         `${projectFilter} AND statusCategory IN ("To Do", "In Progress") ORDER BY created DESC`,
-        DEFAULT_FIELDS,
-        1000,
+        DEFAULT_FIELDS, 1000,
       ),
       this.jiraClient.searchJqlAll(
         `${projectFilter} AND created >= "${formatJqlDate(since)}" ORDER BY created DESC`,
-        DEFAULT_FIELDS,
-        50,
+        DEFAULT_FIELDS, 50,
       ),
       this.jiraClient.searchJqlAll(
         `${projectFilter} AND statusCategory IN ("To Do", "In Progress") AND updated >= "${formatJqlDate(since)}" AND created < "${formatJqlDate(since)}" ORDER BY updated DESC`,
-        DEFAULT_FIELDS,
-        100,
+        DEFAULT_FIELDS, 100,
       ),
     ]);
 
     const byStatus: Record<string, number> = {};
     const slaAtRisk: TicketEvent[] = [];
-    const staleThresholdMs = 4 * 60 * 60 * 1000; // 4 hours
+    const staleThresholdMs = 4 * 60 * 60 * 1000;
 
     for (const issue of openResult.issues) {
       const status = (issue.fields.status as any)?.name ?? 'Unknown';
@@ -145,7 +265,6 @@ export class Perceiver {
 
     const newEvents = newResult.issues.map(issue => toTicketEvent(issue, 'ticket_created'));
 
-    // Detect new comments on existing tickets
     const commentEvents: TicketEvent[] = [];
     const newKeys = new Set(newResult.issues.map(i => i.key));
     const updatedCandidates = updatedResult.issues.filter(i => !newKeys.has(i.key));

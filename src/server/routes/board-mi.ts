@@ -3,6 +3,7 @@ import sql from 'mssql';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { DevReviewQueries } from '../db/dev-review-queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
+import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
 import { queryOne, execute, query } from '../services/database.js';
 
 /**
@@ -108,6 +109,7 @@ export function createBoardMiRoutes(
   settingsQueries: SettingsQueries,
   devQueries: DevReviewQueries,
   getJiraClient: () => JiraRestClient | null,
+  cache?: JiraCacheQueries,
 ): Router {
   const router = Router();
   const holder: PoolHolder = { pool: null };
@@ -174,7 +176,7 @@ export function createBoardMiRoutes(
 
       const uniqueKpis = Array.from(new Set(kpiRows.map((r) => r.kpi))).sort();
 
-      // ── 2. Live JQL queries (run in parallel, each wrapped to not fail fast) ──
+      // ── 2. Backlog queries — cache-first, fallback to live JQL ──
       const client = getJiraClient();
       let aging = null as {
         under4h: number; h4to24: number; d1to3: number; d3to7: number; over7d: number;
@@ -187,8 +189,69 @@ export function createBoardMiRoutes(
       let agedDev = null as { total: number; over30d: number; over90d: number; over180d: number; oldestDays: number | null } | null;
       let openedResolved = null as { opened: number; resolved: number; prevOpened: number; prevResolved: number } | null;
 
-      if (client) {
-        // Aging buckets — all currently unresolved NT tickets by creation age
+      if (cache) {
+        // All counts from local MSSQL cache — instant SQL queries, no Jira calls
+        try {
+          const [u4, h4, d1, d3, o7] = await Promise.all([
+            cache.countOpenByAgeBucket('NT', null, 4),
+            cache.countOpenByAgeBucket('NT', 4, 24),
+            cache.countOpenByAgeBucket('NT', 24, 72),
+            cache.countOpenByAgeBucket('NT', 72, 168),
+            cache.countOpenByAgeBucket('NT', 168, null),
+          ]);
+          aging = { under4h: u4, h4to24: h4, d1to3: d1, d3to7: d3, over7d: o7 };
+        } catch { /* leave null */ }
+
+        try {
+          const tpjProducts = [
+            'The Property Jungle - IOMart Website',
+            'The Property Jungle - Wordpress Website',
+            'The Property Jungle - M365',
+          ];
+          const [cc, t2, t3, production, dev, inc, sr, tpj] = await Promise.all([
+            cache.countOpenByTier('NT', 'Customer Care'),
+            cache.countOpenByTier('NT', 'Tier 2'),
+            cache.countOpenByTier('NT', 'Tier 3'),
+            cache.countOpenByTier('NT', 'Production'),
+            cache.countOpenByTier('NT', 'Development'),
+            cache.countByRequestType('NT', 'Incident'),
+            cache.countByRequestType('NT', 'Service Request'),
+            cache.countOpenByProduct('NT', tpjProducts),
+          ]);
+          backlogSplit = { cc, incidents: inc, serviceReq: sr, tpj, t2, t3, production, dev };
+        } catch { /* leave null */ }
+
+        try {
+          const rows = await cache.getTopProducts('NT', 5);
+          topProducts = rows.map(r => ({ product: r.nurtur_product, count: r.cnt }));
+        } catch { /* leave empty */ }
+
+        try {
+          const [total, o30, o90, o180] = await Promise.all([
+            cache.countOpenByTier('NT', 'Development'),
+            cache.countOpenByAgeBucket('NT', 720, null),   // 30d = 720h
+            cache.countOpenByAgeBucket('NT', 2160, null),  // 90d = 2160h
+            cache.countOpenByAgeBucket('NT', 4320, null),  // 180d = 4320h
+          ]);
+          const oldest = await cache.getOldestByTier('NT', 'Development');
+          let oldestDays: number | null = null;
+          if (oldest?.jira_created) {
+            oldestDays = Math.floor((Date.now() - new Date(oldest.jira_created).getTime()) / 86400000);
+          }
+          agedDev = { total, over30d: o30, over90d: o90, over180d: o180, oldestDays };
+        } catch { /* leave null */ }
+
+        try {
+          const [opened, resolved, prevOpened, prevResolved] = await Promise.all([
+            cache.countCreatedInRange('NT', new Date(start), new Date(end)),
+            cache.countResolvedInRange('NT', new Date(start), new Date(end)),
+            cache.countCreatedInRange('NT', new Date(prevStart), new Date(prevEnd)),
+            cache.countResolvedInRange('NT', new Date(prevStart), new Date(prevEnd)),
+          ]);
+          openedResolved = { opened, resolved, prevOpened, prevResolved };
+        } catch { /* leave null */ }
+      } else if (client) {
+        // Fallback: live Jira API calls
         try {
           const [u4, h4, d1, d3, o7] = await Promise.all([
             jqlCount(client, `project = NT AND statusCategory != Done AND created >= -4h`),
@@ -200,9 +263,6 @@ export function createBoardMiRoutes(
           aging = { under4h: u4, h4to24: h4, d1to3: d1, d3to7: d3, over7d: o7 };
         } catch { /* leave null */ }
 
-        // Backlog split by current tier — CC further sub-divided into
-        // Incidents (JSM Request Type = Incident), Service Requests, and
-        // TPJ (Nurtur Product in the TPJ variants).
         try {
           const tpjProducts =
             '"The Property Jungle - IOMart Website", "The Property Jungle - Wordpress Website", "The Property Jungle - M365"';
@@ -219,12 +279,10 @@ export function createBoardMiRoutes(
           backlogSplit = { cc, incidents: inc, serviceReq: sr, tpj, t2, t3, production, dev };
         } catch { /* leave null */ }
 
-        // Top 5 products — facet in memory from top 200 unresolved
         try {
           const r = await client.searchJql(
             `project = NT AND statusCategory != Done ORDER BY updated DESC`,
-            ['customfield_13183'],
-            200,
+            ['customfield_13183'], 200,
           );
           const counts = new Map<string, number>();
           for (const i of r.issues) {
@@ -238,7 +296,6 @@ export function createBoardMiRoutes(
             .slice(0, 5);
         } catch { /* leave empty */ }
 
-        // Aged Dev backlog
         try {
           const [total, o30, o90, o180] = await Promise.all([
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Development"`),
@@ -246,13 +303,11 @@ export function createBoardMiRoutes(
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Development" AND created < -90d`),
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Development" AND created < -180d`),
           ]);
-          // Oldest — sort ascending by created
           let oldestDays: number | null = null;
           try {
             const r = await client.searchJql(
               `project = NT AND statusCategory != Done AND cf[12981] = "Development" ORDER BY created ASC`,
-              ['created'],
-              1,
+              ['created'], 1,
             );
             const createdIso = (r.issues[0]?.fields as { created?: string } | undefined)?.created;
             if (createdIso) {
@@ -262,11 +317,6 @@ export function createBoardMiRoutes(
           agedDev = { total, over30d: o30, over90d: o90, over180d: o180, oldestDays };
         } catch { /* leave null */ }
 
-        // Opened vs Resolved for the month + previous month.
-        // "Resolved" = statusCategory flipped to Done during the period.
-        // We use statusCategoryChangedDate rather than the `resolved` field
-        // because many NT tickets get closed without a resolution being set,
-        // which would silently drop them from a `resolved >= X` query.
         try {
           const [opened, resolved, prevOpened, prevResolved] = await Promise.all([
             jqlCount(client, `project = NT AND created >= "${start}" AND created <= "${end}"`),
