@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -420,6 +421,7 @@ async function main() {
 
   // 4. Express app
   const app = express();
+  app.use(compression());
   app.use(helmet({ contentSecurityPolicy: false })); // CSP off for SPA
   app.use(cors());
   app.use(express.json({ limit: '20mb' }));
