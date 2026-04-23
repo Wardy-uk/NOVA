@@ -498,27 +498,66 @@ export class AgentLoop {
 
   private formatInternalNote(decision: AgentDecision): string {
     const classification = decision.output.classification as { category?: string; sub_category?: string; confidence?: number } | undefined;
+    const intent = decision.inputs.intent as { type?: string; confidence?: number } | undefined;
     const priorityAssessment = decision.output.priority_assessment as { suggested_priority?: number; reasoning?: string } | undefined;
     const internalNote = (decision.output.internal_note as string) ?? '';
+    const sentiment = (decision.inputs.sentiment as string) ?? null;
+    const slaRisk = (decision.inputs.sla_risk as string) ?? null;
+
+    const triggerLabel = decision.eventType === 'ticket_created' ? 'New Ticket Triage'
+      : decision.eventType === 'comment_added' ? 'New Customer Reply'
+      : decision.eventType === 'stale' ? 'Stale Ticket Review'
+      : 'Ticket Review';
 
     const shadowTag = decision.shadowMode ? ' [SHADOW MODE — observe only]' : '';
-    const statusLine = decision.shadowMode
-      ? `Status: Shadow mode — would ${decision.approvalRequired ? 'submit to approval queue' : 'execute ' + decision.action}`
-      : decision.approvalRequired ? `Status: Submitted to approval queue` : `Status: Executing directly`;
+
+    const actionLabels: Record<string, string> = {
+      respond: 'Send a reply to the customer',
+      draft_response: 'Draft a reply for agent review',
+      gather_context: 'Ask the customer for more information before proceeding',
+      escalate: 'Escalate to a senior agent or specialist',
+      assign: 'Assign to an available agent',
+      close: 'Close the ticket',
+      no_action: 'No action needed at this time',
+      chase: 'Chase the customer for a response',
+      transition: 'Move ticket to a new status',
+    };
+
+    const actionDesc = actionLabels[decision.output.recommended_action as string ?? decision.action] ?? decision.action;
+
+    const statusDesc = decision.shadowMode
+      ? `This is shadow mode — the AI is observing only. No action has been taken.`
+      : decision.approvalRequired
+        ? `A draft reply has been submitted to the NOVA approval queue for agent review before sending.`
+        : `This action was executed automatically based on autonomy rules.`;
 
     const lines = [
-      `🤖 AI Agent Analysis${shadowTag} (${decision.provider ?? 'unknown'}/${decision.model ?? 'unknown'})`,
+      `🤖 AI ${triggerLabel}${shadowTag}`,
       ``,
       internalNote,
       ``,
-      `Classification: ${classification?.category ?? 'unknown'} / ${classification?.sub_category ?? 'unknown'} (confidence: ${(classification?.confidence ?? 0).toFixed(2)})`,
-      `Sentiment: ${(decision.inputs.sentiment as string) ?? 'unknown'}`,
-      `SLA Risk: ${(decision.inputs.sla_risk as string) ?? 'unknown'}`,
-      `Suggested Priority: ${priorityAssessment?.suggested_priority ?? 'unchanged'} — ${priorityAssessment?.reasoning ?? ''}`,
-      `Recommended Action: ${decision.output.recommended_action ?? decision.action}`,
-      `Confidence: ${decision.confidence.toFixed(2)}`,
-      statusLine,
+      `**Recommendation:** ${actionDesc}`,
+      `**Confidence:** ${(decision.confidence * 100).toFixed(0)}%`,
     ];
+
+    if (sentiment) lines.push(`**Sentiment:** ${sentiment}`);
+
+    if (classification?.category && classification.category !== 'unknown') {
+      const sub = classification.sub_category ? ` / ${classification.sub_category}` : '';
+      lines.push(`**Category:** ${classification.category}${sub}`);
+    }
+    if (intent?.type) {
+      lines.push(`**Customer Intent:** ${intent.type.replace(/_/g, ' ')}`);
+    }
+
+    if (slaRisk && slaRisk !== 'unknown') lines.push(`**SLA Risk:** ${slaRisk}`);
+
+    if (priorityAssessment?.suggested_priority) {
+      lines.push(`**Suggested Priority:** ${priorityAssessment.suggested_priority} — ${priorityAssessment.reasoning ?? ''}`);
+    }
+
+    lines.push(``, statusDesc);
+    lines.push(``, `_${decision.provider ?? 'unknown'}/${decision.model ?? 'unknown'}_`);
 
     return lines.join('\n');
   }
