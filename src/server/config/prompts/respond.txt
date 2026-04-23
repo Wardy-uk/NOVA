@@ -17,9 +17,11 @@ Reporter: {{reporter}}
 Organisation: {{organisation}}
 Created: {{created}}
 
-## Previous AI Triage (if available)
+## Prior AI Decisions on This Ticket
 
 {{previous_triage}}
+
+Use this context to maintain continuity. If the AI previously recommended an action, consider whether the customer's reply confirms, contradicts, or changes the situation. Reference prior reasoning when relevant — don't start from scratch if you have context.
 
 ## Conversation Thread (newest first)
 

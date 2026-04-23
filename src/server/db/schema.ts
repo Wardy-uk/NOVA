@@ -641,6 +641,46 @@ async function runMigrations(): Promise<void> {
        error           NVARCHAR(MAX) NULL,
        created_at      DATETIME2     NOT NULL DEFAULT GETUTCDATE()
      );`,
+
+    // ── WP-23b: Ticket Lifecycle columns on agent_ticket_state ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'lifecycle')
+     ALTER TABLE agent_ticket_state ADD lifecycle NVARCHAR(50) NOT NULL DEFAULT 'new';`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'assignee')
+     ALTER TABLE agent_ticket_state ADD assignee NVARCHAR(200) NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'assignee_name')
+     ALTER TABLE agent_ticket_state ADD assignee_name NVARCHAR(200) NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'last_comment_id')
+     ALTER TABLE agent_ticket_state ADD last_comment_id NVARCHAR(100) NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'last_triage_decision_id')
+     ALTER TABLE agent_ticket_state ADD last_triage_decision_id INT NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'last_respond_decision_id')
+     ALTER TABLE agent_ticket_state ADD last_respond_decision_id INT NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'comment_count')
+     ALTER TABLE agent_ticket_state ADD comment_count INT NOT NULL DEFAULT 0;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'last_transition_at')
+     ALTER TABLE agent_ticket_state ADD last_transition_at DATETIME2 NOT NULL DEFAULT GETUTCDATE();`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'last_agent_action_at')
+     ALTER TABLE agent_ticket_state ADD last_agent_action_at DATETIME2 NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'last_customer_reply_at')
+     ALTER TABLE agent_ticket_state ADD last_customer_reply_at DATETIME2 NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'approval_id')
+     ALTER TABLE agent_ticket_state ADD approval_id INT NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_ticket_state') AND name = 'approval_submitted_at')
+     ALTER TABLE agent_ticket_state ADD approval_submitted_at DATETIME2 NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_ticket_state_lifecycle')
+     CREATE INDEX IX_agent_ticket_state_lifecycle ON agent_ticket_state (lifecycle);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

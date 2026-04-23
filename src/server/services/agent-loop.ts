@@ -2,14 +2,13 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { JiraRestClient } from './jira-client.js';
 import type { LlmService } from './llm-service.js';
 import type { ApprovalQueries } from '../db/queries.js';
-import type { AgentState, AgentStatus, AgentDecision } from './agent-types.js';
+import type { AgentState, AgentStatus, AgentDecision, AssignedTicketMode } from './agent-types.js';
 import { Perceiver } from './perceiver.js';
 import { Reasoner } from './reasoner.js';
 import { Actor } from './actor.js';
 import { Observer } from './observer.js';
 import { KbSearchService } from './kb-search.js';
-import { TicketStateStore } from './ticket-state.js';
-import { StaleSweep } from './stale-sweep.js';
+import { LifecycleManager } from './lifecycle-manager.js';
 import { ResolutionReviewer } from './resolution-reviewer.js';
 import type { JiraCacheQueries } from './jira-cache-queries.js';
 import { Guardrails, type GuardrailResult } from './guardrails.js';
@@ -37,8 +36,7 @@ export class AgentLoop {
   private reasoner: Reasoner;
   private actor: Actor;
   private observer: Observer;
-  private ticketState: TicketStateStore;
-  private staleSweep: StaleSweep;
+  private lifecycleManager: LifecycleManager;
   private resolutionReviewer: ResolutionReviewer;
   private guardrails: Guardrails;
   private queueMonitor: QueueMonitor;
@@ -65,12 +63,15 @@ export class AgentLoop {
     this.reasoner = new Reasoner(llmService, kbSearch, this.autonomyEngine);
     this.actor = new Actor(jiraClient);
     this.observer = new Observer();
-    this.ticketState = new TicketStateStore();
-    this.staleSweep = new StaleSweep(jiraClient, settings, llmService);
+    this.alertService = new AlertService(settings);
+    this.lifecycleManager = new LifecycleManager(
+      settings, jiraClient, this.alertService, this.observer,
+      approvalQueries, cache, llmService,
+    );
+    this.reasoner.setLifecycleManager(this.lifecycleManager);
     this.resolutionReviewer = new ResolutionReviewer(jiraClient, settings, llmService);
     this.guardrails = new Guardrails(settings);
     this.queueMonitor = new QueueMonitor(jiraClient, settings);
-    this.alertService = new AlertService(settings);
     const agentProject = settings.get('agent_jira_project') ?? 'NT';
     const primaryProject = agentProject.split(',')[0].trim();
     this.ticketClassifier = new TicketClassifier(llmService, jiraClient, primaryProject);
@@ -132,6 +133,10 @@ export class AgentLoop {
 
   getPerceiver(): Perceiver {
     return this.perceiver;
+  }
+
+  getLifecycleManager(): LifecycleManager {
+    return this.lifecycleManager;
   }
 
   start(): void {
@@ -231,10 +236,10 @@ export class AgentLoop {
       // 5. QUEUE MONITOR + ALERTS
       await this.runQueueMonitor();
 
-      // 6. SWEEP + RESOLUTION REVIEW + CLASSIFICATION + COACHING (every Nth tick)
+      // 6. LIFECYCLE SWEEP + RESOLUTION REVIEW + CLASSIFICATION + COACHING (every Nth tick)
       const sweepInterval = this.getNumber('agent_sweep_interval_ticks', DEFAULT_SWEEP_INTERVAL_TICKS);
       if (this.tickCount % sweepInterval === 0) {
-        await this.runSweep(shadow);
+        await this.runLifecycleSweep(shadow);
         await this.runResolutionReview(shadow);
         await this.runTicketClassification();
         await this.runCoachingHealthChecks();
@@ -284,19 +289,16 @@ export class AgentLoop {
     }
   }
 
-  private async runSweep(shadow: boolean): Promise<void> {
+  private async runLifecycleSweep(shadow: boolean): Promise<void> {
     try {
-      console.log(`[agent] Running stale ticket sweep...`);
-      const result = await this.staleSweep.sweep();
-      const all = [...result.aiRequestStuck, ...result.worChase, ...result.worAutoClose];
-      for (const d of all) d.shadowMode = shadow;
-      for (const decision of all) {
-        await this.executeDecision(decision);
-      }
-      console.log(`[agent] Sweep complete — ${all.length} actions`);
+      console.log(`[agent] Running lifecycle sweep...`);
+      const result = await this.lifecycleManager.sweep(shadow);
+      const total = result.approvalTimeouts + result.customerReplies + result.staleTransitions
+        + result.chaseSent + result.autoCloseCandidates + result.autoClosed;
+      console.log(`[agent] Lifecycle sweep complete — ${total} actions (timeouts: ${result.approvalTimeouts}, replies: ${result.customerReplies}, stale: ${result.staleTransitions}, chased: ${result.chaseSent}, closed: ${result.autoClosed})`);
     } catch (err) {
       this.errorCount++;
-      console.error(`[agent] Sweep failed:`, err instanceof Error ? err.message : err);
+      console.error(`[agent] Lifecycle sweep failed:`, err instanceof Error ? err.message : err);
     }
   }
 
@@ -349,19 +351,48 @@ export class AgentLoop {
 
   private async executeDecision(decision: AgentDecision): Promise<void> {
     const decisionId = await this.observer.logDecision(decision);
+    const ticketState = this.lifecycleManager.getTicketState();
 
     // Track ticket state for conversation continuity
     try {
-      await this.ticketState.updateAfterDecision(
+      await ticketState.updateAfterDecision(
         decision.ticketKey, decisionId, decision.eventType,
       );
     } catch (err) {
       console.warn(`[agent] Failed to update ticket state for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
     }
 
-    // Always post internal note if we have one (internal notes are safe in shadow mode too)
+    // Lifecycle: transition to 'triaged' on new ticket triage
+    if (decision.eventType === 'ticket_created' && decision.action !== 'no_action') {
+      try {
+        const assignee = decision.inputs.assignee as string | null;
+        const assigneeName = decision.inputs.assignee as string | null;
+        await ticketState.transition(decision.ticketKey, 'triaged', {
+          lastTriageDecisionId: decisionId,
+          assignee: assignee ?? null,
+          assigneeName: assigneeName ?? null,
+        });
+      } catch (err) {
+        console.warn(`[agent] Failed lifecycle transition for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    // Assigned ticket mode check
+    const mode = this.lifecycleManager.getAssignedTicketMode();
+    const isAssigned = !!(decision.inputs.assignee);
+    if (isAssigned && mode === 'hands_off') {
+      await this.observer.logOutcome(decisionId, {
+        success: true, action: decision.action, ticketKey: decision.ticketKey,
+        detail: `[HANDS_OFF] Ticket assigned — agent stopped tracking. No note posted.`,
+      });
+      this.ticketsProcessed++;
+      return;
+    }
+
+    // Post internal note (safe in all modes — except hands_off handled above)
     const internalNote = decision.output.internal_note as string | undefined;
-    if (internalNote) {
+    const shouldPostNote = internalNote && !(isAssigned && mode === 'hands_off');
+    if (shouldPostNote) {
       try {
         await this.jiraClient.addComment(decision.ticketKey, this.formatInternalNote(decision), { internal: true });
         console.log(`[agent] Posted internal note on ${decision.ticketKey}${decision.shadowMode ? ' [SHADOW]' : ''}`);
@@ -371,6 +402,16 @@ export class AgentLoop {
     }
 
     if (decision.action === 'no_action') {
+      this.ticketsProcessed++;
+      return;
+    }
+
+    // Observer mode: post notes only, no external actions on assigned tickets
+    if (isAssigned && mode === 'observer') {
+      await this.observer.logOutcome(decisionId, {
+        success: true, action: decision.action, ticketKey: decision.ticketKey,
+        detail: `[OBSERVER] Ticket assigned — posted internal note only, no external action taken.`,
+      });
       this.ticketsProcessed++;
       return;
     }
@@ -481,6 +522,14 @@ export class AgentLoop {
         detail: `Submitted to approval queue (approval #${approvalId}). Confidence: ${decision.confidence.toFixed(2)}`,
       });
 
+      // Lifecycle: move to awaiting_approval
+      try {
+        await this.lifecycleManager.getTicketState().transition(decision.ticketKey, 'awaiting_approval', {
+          approvalId: approvalId,
+          approvalSubmittedAt: new Date().toISOString(),
+        });
+      } catch { /* best effort */ }
+
       console.log(`[agent] Submitted ${decision.ticketKey} to approval queue (id: ${approvalId})`);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -503,6 +552,7 @@ export class AgentLoop {
     const internalNote = (decision.output.internal_note as string) ?? '';
     const sentiment = (decision.inputs.sentiment as string) ?? null;
     const slaRisk = (decision.inputs.sla_risk as string) ?? null;
+    const assigneeName = (decision.inputs.assignee as string) ?? null;
 
     const triggerLabel = decision.eventType === 'ticket_created' ? 'New Ticket Triage'
       : decision.eventType === 'comment_added' ? 'New Customer Reply'
@@ -512,18 +562,22 @@ export class AgentLoop {
     const shadowTag = decision.shadowMode ? ' [SHADOW MODE — observe only]' : '';
 
     const actionLabels: Record<string, string> = {
-      respond: 'Send a reply to the customer',
-      draft_response: 'Draft a reply for agent review',
-      gather_context: 'Ask the customer for more information before proceeding',
-      escalate: 'Escalate to a senior agent or specialist',
-      assign: 'Assign to an available agent',
-      close: 'Close the ticket',
-      no_action: 'No action needed at this time',
-      chase: 'Chase the customer for a response',
-      transition: 'Move ticket to a new status',
+      respond: 'send a reply to the customer',
+      draft_response: 'draft a reply for agent review',
+      gather_context: 'ask the customer for more information before proceeding',
+      escalate: 'escalate to a senior agent or specialist',
+      assign: 'assign to an available agent',
+      close: 'close the ticket',
+      no_action: 'no action needed at this time',
+      chase: 'chase the customer for a response',
+      transition: 'move ticket to a new status',
     };
 
-    const actionDesc = actionLabels[decision.output.recommended_action as string ?? decision.action] ?? decision.action;
+    const rawAction = (decision.output.recommended_action as string) ?? decision.action;
+    const actionDesc = actionLabels[rawAction] ?? rawAction;
+    const forWhom = assigneeName
+      ? `**For ${assigneeName}:** ${actionDesc}`
+      : `**For next available agent:** ${actionDesc}`;
 
     const statusDesc = decision.shadowMode
       ? `This is shadow mode — the AI is observing only. No action has been taken.`
@@ -532,18 +586,19 @@ export class AgentLoop {
         : `This action was executed automatically based on autonomy rules.`;
 
     const lines = [
-      `🤖 AI ${triggerLabel}${shadowTag}`,
+      `\u{1F916} AI ${triggerLabel}${shadowTag}`,
       ``,
       internalNote,
       ``,
-      `**Recommendation:** ${actionDesc}`,
+      forWhom,
       `**Confidence:** ${(decision.confidence * 100).toFixed(0)}%`,
     ];
 
     if (sentiment) lines.push(`**Sentiment:** ${sentiment}`);
 
     if (classification?.category && classification.category !== 'unknown') {
-      const sub = classification.sub_category ? ` / ${classification.sub_category}` : '';
+      const sub = classification.sub_category && classification.sub_category !== 'unknown'
+        ? ` / ${classification.sub_category}` : '';
       lines.push(`**Category:** ${classification.category}${sub}`);
     }
     if (intent?.type) {
@@ -590,6 +645,17 @@ export class AgentLoop {
         try {
           await this.jiraClient.addComment(ticketKey, responseText, { internal: false });
           console.log(`[agent] Posted approved response on ${ticketKey}`);
+
+          // Lifecycle: move to response_sent → awaiting_customer
+          try {
+            await this.lifecycleManager.getTicketState().transition(ticketKey, 'response_sent', {
+              approvalId: null,
+              approvalSubmittedAt: null,
+              lastAgentActionAt: new Date().toISOString(),
+            });
+            await this.lifecycleManager.getTicketState().transition(ticketKey, 'awaiting_customer');
+          } catch { /* best effort */ }
+
           if (decisionId) {
             await this.observer.logOutcome(decisionId, {
               success: true, action: 'draft_response', ticketKey,

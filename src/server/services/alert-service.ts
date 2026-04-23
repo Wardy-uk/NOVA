@@ -85,7 +85,7 @@ export class AlertService {
     });
   }
 
-  private async createAlert(alert: Omit<AgentAlert, 'id' | 'acknowledged' | 'createdAt'>): Promise<AgentAlert | null> {
+  async createAlert(alert: Omit<AgentAlert, 'id' | 'acknowledged' | 'createdAt'>): Promise<AgentAlert | null> {
     // Dedup: skip if same type + ticket within dedup window
     const isDupe = await this.isDuplicate(alert.alertType, alert.ticketKey);
     if (isDupe) return null;

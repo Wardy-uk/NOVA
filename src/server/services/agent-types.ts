@@ -1,5 +1,39 @@
 export type AgentState = 'stopped' | 'running' | 'paused';
 
+// ── WP-23b: Ticket Lifecycle ──
+
+export type TicketLifecycle =
+  | 'new'
+  | 'triaged'
+  | 'awaiting_approval'
+  | 'response_sent'
+  | 'awaiting_customer'
+  | 'customer_replied'
+  | 're_evaluating'
+  | 'resolved'
+  | 'stale'
+  | 'chase_sent'
+  | 'auto_close_candidate'
+  | 'closed';
+
+export type AssignedTicketMode = 'observer' | 'active_assistant' | 'hands_off';
+
+export interface TicketLifecycleState {
+  ticketId: string;
+  lifecycle: TicketLifecycle;
+  assignee: string | null;
+  assigneeName: string | null;
+  lastCommentId: string | null;
+  lastTriageDecisionId: number | null;
+  lastRespondDecisionId: number | null;
+  commentCount: number;
+  lastTransitionAt: string;
+  lastAgentActionAt: string | null;
+  lastCustomerReplyAt: string | null;
+  approvalId: number | null;
+  approvalSubmittedAt: string | null;
+}
+
 export type AgentAction =
   | 'no_action'
   | 'respond'
@@ -132,6 +166,8 @@ export type AlertType =
   | 'capacity_low'
   | 'agent_loop_unhealthy'
   | 'autonomy_execution'
+  | 'approval_timeout'
+  | 'approval_abandoned'
   | 'error';
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';

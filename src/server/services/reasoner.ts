@@ -2,6 +2,7 @@ import type { TicketEvent, AgentDecision, AutonomyCheck } from './agent-types.js
 import type { LlmService } from './llm-service.js';
 import type { KbSearchService } from './kb-search.js';
 import type { AutonomyEngine } from './autonomy-engine.js';
+import type { LifecycleManager } from './lifecycle-manager.js';
 import { TriageResultSchema, type TriageResult } from './triage-schema.js';
 import { RespondResultSchema, type RespondResult } from './respond-schema.js';
 import { loadPrompt } from './prompt-loader.js';
@@ -14,12 +15,17 @@ export class Reasoner {
   private llmService: LlmService;
   private kbSearch: KbSearchService;
   private autonomyEngine: AutonomyEngine | null;
+  private lifecycleManager: LifecycleManager | null = null;
   private lastAutonomyCheck: AutonomyCheck | null = null;
 
   constructor(llmService: LlmService, kbSearch: KbSearchService, autonomyEngine?: AutonomyEngine) {
     this.llmService = llmService;
     this.kbSearch = kbSearch;
     this.autonomyEngine = autonomyEngine ?? null;
+  }
+
+  setLifecycleManager(manager: LifecycleManager): void {
+    this.lifecycleManager = manager;
   }
 
   getLastAutonomyCheck(): AutonomyCheck | null {
@@ -145,6 +151,17 @@ export class Reasoner {
       .map(c => `[${c.created}] ${c.author}${c.isPublic ? '' : ' (internal)'}:\n${c.body}`)
       .join('\n\n---\n\n');
 
+    // Decision continuity: load prior decisions for this ticket
+    let priorDecisionText = 'No prior AI decisions for this ticket.';
+    if (this.lifecycleManager) {
+      try {
+        const priorDecisions = await this.lifecycleManager.getPriorDecisions(event.ticketKey, 3);
+        priorDecisionText = this.lifecycleManager.formatPriorDecisionContext(priorDecisions);
+      } catch (err) {
+        console.warn(`[reasoner] Failed to load prior decisions for ${event.ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
     const systemPrompt = loadPrompt('respond', {
       ticket_key: event.ticketKey,
       summary: event.summary,
@@ -156,7 +173,7 @@ export class Reasoner {
       reporter: event.reporter ?? 'Unknown',
       organisation: event.organisation ?? 'Unknown',
       created: event.created,
-      previous_triage: 'Not available (will be linked via ticket state in future)',
+      previous_triage: priorDecisionText,
       conversation_thread: conversationThread || '(no comments)',
       customer_context: customerContext,
       kb_matches: kbText,

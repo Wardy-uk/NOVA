@@ -1614,6 +1614,93 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // ── Lifecycle (WP-23b) ──
+
+  const LIFECYCLE_SETTINGS_KEYS = [
+    'agent_approval_timeout_mins',
+    'agent_auto_approve_threshold',
+    'agent_awaiting_customer_hours',
+    'agent_retriage_interval_hours',
+    'agent_abandoned_approval_alert_mins',
+    'agent_assigned_ticket_mode',
+    'agent_human_inaction_hours',
+  ] as const;
+
+  const LIFECYCLE_DEFAULTS: Record<string, string> = {
+    agent_approval_timeout_mins: '30',
+    agent_auto_approve_threshold: '0.85',
+    agent_awaiting_customer_hours: '48',
+    agent_retriage_interval_hours: '24',
+    agent_abandoned_approval_alert_mins: '15',
+    agent_assigned_ticket_mode: 'observer',
+    agent_human_inaction_hours: '4',
+  };
+
+  router.get('/lifecycle/breakdown', async (_req, res) => {
+    try {
+      const lm = agentLoop.getLifecycleManager();
+      const breakdown = await lm.getTicketState().getLifecycleBreakdown();
+      res.json({ ok: true, data: breakdown });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get lifecycle breakdown' });
+    }
+  });
+
+  router.get('/lifecycle/approval-health', async (_req, res) => {
+    try {
+      const lm = agentLoop.getLifecycleManager();
+      const health = await lm.getTicketState().getApprovalHealth();
+      res.json({ ok: true, data: health });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get approval health' });
+    }
+  });
+
+  router.get('/lifecycle/settings', (_req, res) => {
+    const settings = deps?.settingsQueries;
+    if (!settings) {
+      res.status(503).json({ ok: false, error: 'Settings not available' });
+      return;
+    }
+    const data: Record<string, string> = {};
+    for (const key of LIFECYCLE_SETTINGS_KEYS) {
+      data[key] = settings.get(key) ?? LIFECYCLE_DEFAULTS[key] ?? '';
+    }
+    res.json({ ok: true, data });
+  });
+
+  router.put('/lifecycle/settings', (req, res) => {
+    const settings = deps?.settingsQueries;
+    if (!settings) {
+      res.status(503).json({ ok: false, error: 'Settings not available' });
+      return;
+    }
+    const body = req.body as Record<string, string>;
+    const validKeys = new Set<string>(LIFECYCLE_SETTINGS_KEYS);
+    for (const [key, value] of Object.entries(body)) {
+      if (validKeys.has(key)) {
+        settings.set(key, String(value));
+      }
+    }
+    const data: Record<string, string> = {};
+    for (const key of LIFECYCLE_SETTINGS_KEYS) {
+      data[key] = settings.get(key) ?? LIFECYCLE_DEFAULTS[key] ?? '';
+    }
+    res.json({ ok: true, data });
+  });
+
+  router.get('/lifecycle/tickets', async (req, res) => {
+    try {
+      const lm = agentLoop.getLifecycleManager();
+      const lifecycle = req.query.lifecycle as string | undefined;
+      const states = lifecycle ? lifecycle.split(',') as any[] : undefined;
+      const tickets = await lm.getTicketState().getAll(states);
+      res.json({ ok: true, data: tickets });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get lifecycle tickets' });
+    }
+  });
+
   return router;
 }
 

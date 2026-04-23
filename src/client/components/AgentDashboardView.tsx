@@ -175,6 +175,18 @@ function checkSuperAdmin(role: string): boolean {
   return role.split(',').map(r => r.trim()).includes('super_admin');
 }
 
+interface LifecycleBreakdown {
+  [key: string]: number;
+}
+
+interface ApprovalHealth {
+  pendingCount: number;
+  oldestPendingMins: number | null;
+  avgWaitMins: number | null;
+  autoApprovedToday: number;
+  escalatedToday: number;
+}
+
 export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { userRole?: string; onNavigateToWorkspace?: (filter: { aiAction?: string }) => void }) {
   const isSuperAdmin = checkSuperAdmin(userRole);
   const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'quick-actions' | 'costs'>('overview');
@@ -189,21 +201,27 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
   const [alerts, setAlerts] = useState<AgentAlert[]>([]);
   const [kbGaps, setKbGaps] = useState<KbGap[]>([]);
   const [costData, setCostData] = useState<CostSummary | null>(null);
+  const [lifecycleBreakdown, setLifecycleBreakdown] = useState<LifecycleBreakdown | null>(null);
+  const [approvalHealth, setApprovalHealth] = useState<ApprovalHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [sRes, stRes, dRes, aRes] = await Promise.all([
+      const [sRes, stRes, dRes, aRes, lcRes, ahRes] = await Promise.all([
         api('/status'),
         api('/stats'),
         api('/decisions?limit=50'),
         api('/alerts?limit=20'),
+        api('/lifecycle/breakdown'),
+        api('/lifecycle/approval-health'),
       ]);
       if (sRes.ok) setStatus(sRes.data);
       if (stRes.ok) setStats(stRes.data);
       if (dRes.ok) setDecisions(dRes.data);
       if (aRes.ok) setAlerts(aRes.data);
+      if (lcRes.ok) setLifecycleBreakdown(lcRes.data);
+      if (ahRes.ok) setApprovalHealth(ahRes.data);
       setError(null);
     } catch (err: any) {
       setError(err.message ?? 'Failed to load agent data');
@@ -317,7 +335,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       </div>
 
       {/* Tab content */}
-      {tab === 'overview' && <OverviewTab status={status} stats={stats} decisions={decisions} onSelect={setSelected} onNavigateToWorkspace={onNavigateToWorkspace} />}
+      {tab === 'overview' && <OverviewTab status={status} stats={stats} decisions={decisions} onSelect={setSelected} onNavigateToWorkspace={onNavigateToWorkspace} lifecycleBreakdown={lifecycleBreakdown} approvalHealth={approvalHealth} />}
       {tab === 'decisions' && <DecisionsTab decisions={decisions} selected={selected} onSelect={setSelected} onRefresh={refresh} />}
       {tab === 'autonomy' && <AutonomyTab rules={autonomyRules} onRefresh={() => api('/autonomy').then(r => { if (r.ok) setAutonomyRules(r.data); })} isSuperAdmin={isSuperAdmin} />}
       {tab === 'guardrails' && <GuardrailsTab rules={guardrails} onToggle={toggleGuardrail} />}
@@ -376,13 +394,30 @@ function KpiCard({ value, label, color }: { value: number | string; label: strin
 
 // ── Overview Tab ──
 
-function OverviewTab({ status, stats, decisions, onSelect, onNavigateToWorkspace }: {
+function OverviewTab({ status, stats, decisions, onSelect, onNavigateToWorkspace, lifecycleBreakdown, approvalHealth }: {
   status: AgentStatus | null;
   stats: AgentStats | null;
   decisions: Decision[];
   onSelect: (d: Decision) => void;
   onNavigateToWorkspace?: (filter: { aiAction?: string }) => void;
+  lifecycleBreakdown?: LifecycleBreakdown | null;
+  approvalHealth?: ApprovalHealth | null;
 }) {
+  const lifecycleLabels: Record<string, string> = {
+    new: 'New', triaged: 'Triaged', awaiting_approval: 'Awaiting Approval',
+    response_sent: 'Response Sent', awaiting_customer: 'Awaiting Customer',
+    customer_replied: 'Customer Replied', re_evaluating: 'Re-evaluating',
+    resolved: 'Resolved', stale: 'Stale', chase_sent: 'Chase Sent',
+    auto_close_candidate: 'Auto-close Candidate', closed: 'Closed',
+  };
+  const lifecycleColors: Record<string, string> = {
+    new: '#60a5fa', triaged: '#5ec1ca', awaiting_approval: '#f59e0b',
+    response_sent: '#22c55e', awaiting_customer: '#a78bfa',
+    customer_replied: '#38bdf8', re_evaluating: '#f59e0b',
+    resolved: '#22c55e', stale: '#ef4444', chase_sent: '#f97316',
+    auto_close_candidate: '#ef4444', closed: '#6b7280',
+  };
+
   return (
     <div className="space-y-4">
       {/* KPI row */}
@@ -449,6 +484,69 @@ function OverviewTab({ status, stats, decisions, onSelect, onNavigateToWorkspace
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Lifecycle Breakdown + Approval Health (WP-23b) */}
+      {(lifecycleBreakdown || approvalHealth) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {lifecycleBreakdown && (
+            <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+              <h3 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-3">Ticket Lifecycle</h3>
+              <div className="space-y-1.5">
+                {Object.entries(lifecycleBreakdown)
+                  .filter(([, count]) => count > 0)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([state, count]) => (
+                    <div key={state} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: lifecycleColors[state] ?? '#6b7280' }} />
+                        <span className="text-neutral-300">{lifecycleLabels[state] ?? state}</span>
+                      </div>
+                      <span className="text-neutral-400 font-mono">{count}</span>
+                    </div>
+                  ))}
+                {Object.values(lifecycleBreakdown).every(v => v === 0) && (
+                  <div className="text-xs text-neutral-500">No tickets tracked yet</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {approvalHealth && (
+            <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+              <h3 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-3">Approval Queue Health</h3>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <div className="text-neutral-500 mb-0.5">Pending</div>
+                  <div className={`text-lg font-bold ${approvalHealth.pendingCount > 5 ? 'text-red-400' : approvalHealth.pendingCount > 0 ? 'text-amber-400' : 'text-green-400'}`}>
+                    {approvalHealth.pendingCount}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-neutral-500 mb-0.5">Oldest Pending</div>
+                  <div className="text-lg font-bold text-neutral-200">
+                    {approvalHealth.oldestPendingMins != null ? `${approvalHealth.oldestPendingMins}m` : '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-neutral-500 mb-0.5">Avg Wait</div>
+                  <div className="text-neutral-200 font-semibold">
+                    {approvalHealth.avgWaitMins != null ? `${approvalHealth.avgWaitMins}m` : '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-neutral-500 mb-0.5">Today</div>
+                  <div className="text-neutral-200 font-semibold">
+                    <span className="text-green-400">{approvalHealth.autoApprovedToday}</span>
+                    <span className="text-neutral-500 mx-1">auto</span>
+                    <span className="text-amber-400">{approvalHealth.escalatedToday}</span>
+                    <span className="text-neutral-500 ml-1">esc</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
