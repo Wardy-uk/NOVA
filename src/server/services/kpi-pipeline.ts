@@ -174,7 +174,8 @@ export class KpiPipeline {
 
       // Always READ from the live Agent table
       const agents = await p.request().query(`
-        SELECT AgentId, AgentName, AgentSurname, TierCode, Team,
+        SELECT AgentId, RTRIM(AgentName + ' ' + ISNULL(AgentSurname, '')) AS AgentName,
+               TierCode, Team,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                SolvedTickets_Today, SolvedTickets_ThisWeek
         FROM dbo.Agent WHERE IsActive = 1
