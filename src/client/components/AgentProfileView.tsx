@@ -635,7 +635,10 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
   // Generate AI prep
   const [prepError, setPrepError] = useState<string | null>(null);
   const generatePrep = useCallback(async () => {
-    if (!resolvedAgent) return;
+    if (!resolvedAgent) {
+      setPrepError('No agent resolved — cannot generate prep');
+      return;
+    }
     setGeneratingPrep(true);
     setPrepError(null);
     try {

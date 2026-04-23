@@ -193,6 +193,8 @@ export function AgentRosterView({ onSelectAgent }: {
   const [calendarData, setCalendarData] = useState<Record<string, CalendarEntry | null>>({});
   const [loading, setLoading] = useState(true);
   const [snapshotting, setSnapshotting] = useState<string | null>(null);
+  const [generatingPrepFor, setGeneratingPrepFor] = useState<string | null>(null);
+  const [prepResult, setPrepResult] = useState<{ agent: string; ok: boolean; error?: string } | null>(null);
   const [filterTeam, setFilterTeam] = useState<string>('all');
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
@@ -317,13 +319,24 @@ export function AgentRosterView({ onSelectAgent }: {
   }, []);
 
   const generatePrep = useCallback(async (agentName: string) => {
+    setGeneratingPrepFor(agentName);
+    setPrepResult(null);
     try {
-      await fetch(`/api/people/agent/${encodeURIComponent(agentName)}/generate-prep`, {
+      const res = await fetch(`/api/people/agent/${encodeURIComponent(agentName)}/generate-prep`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-    } catch { /* ignore */ }
+      const json = await res.json();
+      if (json.ok) {
+        setPrepResult({ agent: agentName, ok: true });
+      } else {
+        setPrepResult({ agent: agentName, ok: false, error: json.error || 'Unknown error' });
+      }
+    } catch (err: any) {
+      setPrepResult({ agent: agentName, ok: false, error: err.message || 'Network error' });
+    }
+    setGeneratingPrepFor(null);
   }, []);
 
   if (loading) {
@@ -540,13 +553,16 @@ export function AgentRosterView({ onSelectAgent }: {
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={e => { e.stopPropagation(); generatePrep(card.name); }}
+                disabled={generatingPrepFor === card.name}
                 style={{
                   flex: 1, padding: '6px 0', borderRadius: 8,
-                  border: `1px solid ${C.border}`, background: C.glass,
-                  color: C.text2, fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                  border: `1px solid ${prepResult?.agent === card.name && !prepResult.ok ? '#ef4444' : C.border}`,
+                  background: prepResult?.agent === card.name && prepResult.ok ? `${C.green}15` : C.glass,
+                  color: generatingPrepFor === card.name ? C.text3 : prepResult?.agent === card.name && prepResult.ok ? C.green : C.text2,
+                  fontSize: 10, fontWeight: 600, cursor: generatingPrepFor === card.name ? 'wait' : 'pointer',
                   transition: 'all 0.2s',
                 }}
-              >Generate 1-2-1 Prep</button>
+              >{generatingPrepFor === card.name ? 'Generating...' : prepResult?.agent === card.name && prepResult.ok ? '✓ Prep Ready' : prepResult?.agent === card.name && !prepResult.ok ? 'Failed' : 'Generate 1-2-1 Prep'}</button>
               <button
                 onClick={e => { e.stopPropagation(); createSnapshot(card.name); }}
                 disabled={snapshotting === card.name}
