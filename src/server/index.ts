@@ -435,7 +435,7 @@ async function main() {
   let jiraSyncService: JiraSyncService | null = null;
 
   // Create sync service early so routes can reference it
-  const syncJiraClient = buildServiceDeskJiraClient();
+  const syncJiraClient = buildOnboardingJiraClient();
   if (syncJiraClient) {
     jiraSyncService = new JiraSyncService(syncJiraClient, settingsQueries);
   }
@@ -848,7 +848,7 @@ async function main() {
   }
 
   // Agent loop — feature-flagged, admin-only
-  const agentJiraClient = buildServiceDeskJiraClient();
+  const agentJiraClient = buildOnboardingJiraClient();
   const llmService = new LlmService(settingsQueries);
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);
