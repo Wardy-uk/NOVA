@@ -337,6 +337,22 @@ export class JiraCacheQueries {
     );
   }
 
+  // ── Untriaged ticket detection (agent catch-up) ──
+
+  async getUntriagedIssues(projects: string[], limit = 10, maxAgeDays = 3): Promise<CachedIssue[]> {
+    const placeholders = projects.map(() => '?').join(',');
+    return query<CachedIssue>(
+      `SELECT TOP (?) c.* FROM jira_issue_cache c
+       LEFT JOIN agent_ticket_state ts ON ts.ticket_id = c.issue_key
+       WHERE c.project_key IN (${placeholders})
+         AND c.status_category IN ('new', 'indeterminate')
+         AND ts.ticket_id IS NULL
+         AND c.jira_created >= DATEADD(day, -?, GETUTCDATE())
+       ORDER BY c.jira_created DESC`,
+      [limit, ...projects, maxAgeDays],
+    );
+  }
+
   // ── Comment queries ──
 
   async getComments(issueKey: string, limit = 20): Promise<CachedComment[]> {

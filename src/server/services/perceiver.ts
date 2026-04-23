@@ -149,14 +149,21 @@ export class Perceiver {
   private async perceiveFromCache(): Promise<QueuePerception> {
     const projects = this.getProjects();
     const now = new Date();
-    const since = this.lastTickAt ?? new Date(now.getTime() - 60 * 60 * 1000);
+    // Use 30s buffer before lastTickAt to avoid missing tickets created during previous tick
+    const rawSince = this.lastTickAt ?? new Date(now.getTime() - 60 * 60 * 1000);
+    const since = new Date(rawSince.getTime() - 30_000);
     const agentEmail = this.settings.get('jira_ob_email') ?? '';
 
-    const [openIssues, newIssues, updatedIssues] = await Promise.all([
+    const [openIssues, newIssues, updatedIssues, untriagedIssues] = await Promise.all([
       this.cache!.getOpenIssues(projects),
       this.cache!.getRecentlyCreated(projects, since),
       this.cache!.getRecentlyUpdated(projects, since),
+      this.cache!.getUntriagedIssues(projects, 10),
     ]);
+
+    if (newIssues.length > 0 || untriagedIssues.length > 0) {
+      console.log(`[perceiver] since=${since.toISOString()} | new=${newIssues.length} untriaged=${untriagedIssues.length}`);
+    }
 
     const byStatus: Record<string, number> = {};
     const slaAtRisk: TicketEvent[] = [];
@@ -182,12 +189,21 @@ export class Perceiver {
       .slice(0, 20)
       .map(ci => cachedToTicketEvent(ci, 'stale'));
 
-    const newEvents = newIssues.map(ci => cachedToTicketEvent(ci, 'ticket_created'));
+    // Merge recently created + untriaged (catch-up) tickets, dedup by key
+    const seenKeys = new Set<string>();
+    const allNewCandidates = [...newIssues];
+    for (const ci of newIssues) seenKeys.add(ci.issue_key);
+    for (const ci of untriagedIssues) {
+      if (!seenKeys.has(ci.issue_key)) {
+        allNewCandidates.push(ci);
+        seenKeys.add(ci.issue_key);
+      }
+    }
+    const newEvents = allNewCandidates.map(ci => cachedToTicketEvent(ci, 'ticket_created'));
 
     // Detect new comments from cache
     const commentEvents: TicketEvent[] = [];
-    const newKeys = new Set(newIssues.map(ci => ci.issue_key));
-    const updatedCandidates = updatedIssues.filter(ci => !newKeys.has(ci.issue_key));
+    const updatedCandidates = updatedIssues.filter(ci => !seenKeys.has(ci.issue_key));
 
     for (const ci of updatedCandidates.slice(0, 20)) {
       const recentComments = await this.cache!.getRecentComments(ci.issue_key, since);
@@ -220,7 +236,8 @@ export class Perceiver {
   private async perceiveFromApi(): Promise<QueuePerception> {
     const projectFilter = this.buildProjectFilter();
     const now = new Date();
-    const since = this.lastTickAt ?? new Date(now.getTime() - 60 * 60 * 1000);
+    const rawSince = this.lastTickAt ?? new Date(now.getTime() - 60 * 60 * 1000);
+    const since = new Date(rawSince.getTime() - 30_000);
     const agentEmail = this.settings.get('jira_ob_email') ?? '';
 
     const [openResult, newResult, updatedResult] = await Promise.all([
