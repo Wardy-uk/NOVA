@@ -1,13 +1,9 @@
 import { z } from 'zod';
 
 export const RespondResultSchema = z.object({
-  intent: z.object({
-    type: z.enum([
-      'providing_info', 'asking_question', 'confirming_resolution',
-      'reporting_new_issue', 'expressing_frustration', 'follow_up', 'thanking',
-    ]),
-    confidence: z.number().min(0).max(1),
-  }),
+  intent: z.object({ type: z.string(), confidence: z.number() }).or(
+    z.string().transform(s => ({ type: s, confidence: 0.5 }))
+  ).pipe(z.object({ type: z.string(), confidence: z.number() })),
   sentiment: z.enum(['positive', 'neutral', 'frustrated', 'angry', 'urgent']),
   recommended_action: z.enum(['respond', 'escalate', 'close', 'gather_context', 'assign', 'no_action']),
   draft_response: z.string().nullable(),

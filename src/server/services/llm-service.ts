@@ -252,7 +252,7 @@ export class LlmService {
   async call<T>(
     systemPrompt: string,
     userMessage: string,
-    schema: z.ZodType<T>,
+    schema: z.ZodType<T, z.ZodTypeDef, unknown>,
     options: LlmCallOptions,
   ): Promise<LlmResult<T>> {
     const tier = options.tier ?? 'reasoning';
