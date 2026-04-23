@@ -140,10 +140,9 @@ export class CoachingEngine {
     if (scored.length > 0) {
       const scores = scored.map((e: any) => JSON.parse(e.golden_rule_scores) as GoldenRulesScore);
       averages = {
-        clarity: Math.round(scores.reduce((s, sc) => s + sc.clarity, 0) / scores.length * 10) / 10,
-        empathy: Math.round(scores.reduce((s, sc) => s + sc.empathy, 0) / scores.length * 10) / 10,
-        action: Math.round(scores.reduce((s, sc) => s + sc.action, 0) / scores.length * 10) / 10,
-        ownership: Math.round(scores.reduce((s, sc) => s + sc.ownership, 0) / scores.length * 10) / 10,
+        ownership: Math.round(scores.reduce((s, sc) => s + (sc.ownership ?? 0), 0) / scores.length * 10) / 10,
+        nextAction: Math.round(scores.reduce((s, sc) => s + (sc.nextAction ?? 0), 0) / scores.length * 10) / 10,
+        timeframe: Math.round(scores.reduce((s, sc) => s + (sc.timeframe ?? 0), 0) / scores.length * 10) / 10,
         overall: Math.round(scores.reduce((s, sc) => s + sc.overall, 0) / scores.length * 10) / 10,
         feedback: '',
         strengths: [],
@@ -170,10 +169,9 @@ export class CoachingEngine {
     return query<any>(`
       SELECT c.agent_user_id,
              COUNT(*) as assessments,
-             AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.clarity') AS FLOAT)) as avg_clarity,
-             AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.empathy') AS FLOAT)) as avg_empathy,
-             AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.action') AS FLOAT)) as avg_action,
              AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.ownership') AS FLOAT)) as avg_ownership,
+             AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.nextAction') AS FLOAT)) as avg_nextAction,
+             AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.timeframe') AS FLOAT)) as avg_timeframe,
              AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.overall') AS FLOAT)) as avg_overall
       FROM agent_coaching c
       WHERE c.created_at >= ? AND c.golden_rule_scores IS NOT NULL
@@ -228,7 +226,7 @@ export class CoachingEngine {
     if (criticalNudges.length === 0) return;
 
     const nudgeText = criticalNudges.map(n => `• ${n.message}`).join('\n');
-    const note = `🤖 Coaching Note\n\n${nudgeText}\n\nGolden Rules: Clarity ${assessment.golden_rules.clarity}/5 | Empathy ${assessment.golden_rules.empathy}/5 | Action ${assessment.golden_rules.action}/5 | Ownership ${assessment.golden_rules.ownership}/5`;
+    const note = `🤖 Coaching Note\n\n${nudgeText}\n\nGolden Rules: Ownership ${assessment.golden_rules.ownership}/3 | Next Action ${assessment.golden_rules.nextAction}/3 | Timeframe ${assessment.golden_rules.timeframe}/3`;
 
     try {
       await this.jiraClient.addComment(ticketKey, note, { internal: true });

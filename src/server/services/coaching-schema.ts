@@ -1,11 +1,10 @@
 import { z } from 'zod';
 
 export const GoldenRulesScoreSchema = z.object({
-  clarity: z.number().int().min(1).max(5),
-  empathy: z.number().int().min(1).max(5),
-  action: z.number().int().min(1).max(5),
-  ownership: z.number().int().min(1).max(5),
-  overall: z.number().min(1).max(5),
+  ownership: z.number().int().min(0).max(3),
+  nextAction: z.number().int().min(0).max(3),
+  timeframe: z.number().int().min(0).max(3),
+  overall: z.number().min(0).max(3),
   feedback: z.string(),
   strengths: z.array(z.string()),
   improvements: z.array(z.string()),

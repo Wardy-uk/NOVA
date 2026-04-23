@@ -487,14 +487,14 @@ export function QAView() {
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
             <StatCard label="Comments QA'd" value={grSummary?.total ?? null} colour={C.teal} />
             <StatCard label="Avg Score" value={grSummary?.avgScore != null ? Number(grSummary.avgScore).toFixed(1) : null} colour={grSummary?.avgScore != null ? (Number(grSummary.avgScore) >= 2.5 ? C.green : Number(grSummary.avgScore) >= 1.5 ? C.amber : C.red) : undefined} />
-            <StatCard label="R1 Pass %" value={grSummary?.total ? `${Math.round((grSummary.rule1Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
-            <StatCard label="R2 Pass %" value={grSummary?.total ? `${Math.round((grSummary.rule2Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
-            <StatCard label="R3 Pass %" value={grSummary?.total ? `${Math.round((grSummary.rule3Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
+            <StatCard label="Ownership Pass %" value={grSummary?.total ? `${Math.round((grSummary.rule1Pass / grSummary.total) * 100)}%` : '—'} colour={grSummary?.total ? (grSummary.rule1Pass / grSummary.total >= 0.7 ? C.green : grSummary.rule1Pass / grSummary.total >= 0.5 ? C.amber : C.red) : C.teal} />
+            <StatCard label="Next Action Pass %" value={grSummary?.total ? `${Math.round((grSummary.rule2Pass / grSummary.total) * 100)}%` : '—'} colour={grSummary?.total ? (grSummary.rule2Pass / grSummary.total >= 0.7 ? C.green : grSummary.rule2Pass / grSummary.total >= 0.5 ? C.amber : C.red) : C.teal} />
+            <StatCard label="Timeframe Pass %" value={grSummary?.total ? `${Math.round((grSummary.rule3Pass / grSummary.total) * 100)}%` : '—'} colour={grSummary?.total ? (grSummary.rule3Pass / grSummary.total >= 0.7 ? C.green : grSummary.rule3Pass / grSummary.total >= 0.5 ? C.amber : C.red) : C.teal} />
           </div>
           {grSummary && grSummary.total > 0 && (
             <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text2, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>Golden Rule Pass Rates</div>
-              {(['Rule 1 — Ownership', "Rule 2 — What's Happening", 'Rule 3 — Timeframes'] as const).map((label, i) => {
+              {(['Ownership', 'Next Action', 'Timeframe'] as const).map((label, i) => {
                 const passes = [grSummary.rule1Pass, grSummary.rule2Pass, grSummary.rule3Pass][i];
                 const pct = grSummary.total ? Math.round((passes / grSummary.total) * 100) : 0;
                 const colour = pct >= 70 ? C.green : pct >= 50 ? C.amber : C.red;
@@ -613,13 +613,13 @@ export function QAView() {
               <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
                 <StatCard label="Comments QA'd" value={grSummary.total ?? null} />
                 <StatCard label="Avg Score" value={grSummary.avgScore != null ? Number(grSummary.avgScore).toFixed(1) : null} colour={grSummary.avgScore != null ? (Number(grSummary.avgScore) >= 2.5 ? C.green : Number(grSummary.avgScore) >= 1.5 ? C.amber : C.red) : undefined} />
-                <StatCard label="R1 Pass %" value={grSummary.total ? `${Math.round((grSummary.rule1Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
-                <StatCard label="R2 Pass %" value={grSummary.total ? `${Math.round((grSummary.rule2Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
-                <StatCard label="R3 Pass %" value={grSummary.total ? `${Math.round((grSummary.rule3Pass / grSummary.total) * 100)}%` : '—'} colour={C.teal} />
+                <StatCard label="Ownership Pass %" value={grSummary.total ? `${Math.round((grSummary.rule1Pass / grSummary.total) * 100)}%` : '—'} colour={grSummary.total ? (grSummary.rule1Pass / grSummary.total >= 0.7 ? C.green : grSummary.rule1Pass / grSummary.total >= 0.5 ? C.amber : C.red) : C.teal} />
+                <StatCard label="Next Action Pass %" value={grSummary.total ? `${Math.round((grSummary.rule2Pass / grSummary.total) * 100)}%` : '—'} colour={grSummary.total ? (grSummary.rule2Pass / grSummary.total >= 0.7 ? C.green : grSummary.rule2Pass / grSummary.total >= 0.5 ? C.amber : C.red) : C.teal} />
+                <StatCard label="Timeframe Pass %" value={grSummary.total ? `${Math.round((grSummary.rule3Pass / grSummary.total) * 100)}%` : '—'} colour={grSummary.total ? (grSummary.rule3Pass / grSummary.total >= 0.7 ? C.green : grSummary.rule3Pass / grSummary.total >= 0.5 ? C.amber : C.red) : C.teal} />
               </div>
               <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
                 <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text2, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>Rule Pass Rates</div>
-                {(['Rule 1 — Ownership', 'Rule 2 — What\'s Happening', 'Rule 3 — Timeframes'] as const).map((label, i) => {
+                {(['Ownership', 'Next Action', 'Timeframe'] as const).map((label, i) => {
                   const passes = [grSummary.rule1Pass, grSummary.rule2Pass, grSummary.rule3Pass][i];
                   const pct = grSummary.total ? Math.round((passes / grSummary.total) * 100) : 0;
                   const colour = pct >= 70 ? C.green : pct >= 50 ? C.amber : C.red;
@@ -644,7 +644,7 @@ export function QAView() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <thead>
                   <tr>
-                    {['Agent', 'Comments', 'Avg', 'R1 Pass', 'R2 Pass', 'R3 Pass'].map(h => (
+                    {['Agent', 'Comments', 'Avg', 'Ownership', 'Next Action', 'Timeframe'].map(h => (
                       <th key={h} style={th}>{h}</th>
                     ))}
                   </tr>
@@ -690,7 +690,7 @@ export function QAView() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                 <thead>
                   <tr>
-                    {['Ticket', 'Agent', 'Score', 'R1', 'R2', 'R3', 'Priority', 'Date', ''].map(h => (
+                    {['Ticket', 'Agent', 'Score', 'Own', 'Action', 'Time', 'Priority', 'Date', ''].map(h => (
                       <th key={h} style={th}>{h}</th>
                     ))}
                   </tr>

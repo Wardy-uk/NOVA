@@ -218,12 +218,13 @@ export class QaPipeline {
     const grRequest = p.request();
     grRequest.input('issueKey', sql.NVarChar, issue.key);
     grRequest.input('overallScore', sql.Float, qa.overallScore);
-    grRequest.input('rule1Score', sql.Float, qa.clarityScore);
-    grRequest.input('rule2Score', sql.Float, qa.toneScore);
-    grRequest.input('rule3Score', sql.Float, qa.accuracyScore);
-    grRequest.input('rule1Pass', sql.Bit, qa.clarityScore >= 5 ? 1 : 0);
-    grRequest.input('rule2Pass', sql.Bit, qa.toneScore >= 5 ? 1 : 0);
-    grRequest.input('rule3Pass', sql.Bit, qa.accuracyScore >= 5 ? 1 : 0);
+    const gr = qa.goldenRules;
+    grRequest.input('rule1Score', sql.Float, gr.ownership);
+    grRequest.input('rule2Score', sql.Float, gr.nextAction);
+    grRequest.input('rule3Score', sql.Float, gr.timeframe);
+    grRequest.input('rule1Pass', sql.Bit, gr.ownership >= 2 ? 1 : 0);
+    grRequest.input('rule2Pass', sql.Bit, gr.nextAction >= 2 ? 1 : 0);
+    grRequest.input('rule3Pass', sql.Bit, gr.timeframe >= 2 ? 1 : 0);
     grRequest.input('summary', sql.NVarChar, qa.summary.slice(0, 2000));
     grRequest.input('assignee', sql.NVarChar, assignee);
 

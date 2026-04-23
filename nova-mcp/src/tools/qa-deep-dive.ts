@@ -184,7 +184,7 @@ export async function qaDeepDive(args: { agent?: string; days: number }): Promis
       .map(([g, d]) => `${g} ${d.pct}%`)
       .join(', ')}. ` +
     `${concerningRows.length} concerning ticket(s). ` +
-    `Golden Rules avg: ${goldenRules.averageScore}/10, pass rates — ownership ${goldenRules.rule1_ownership}%, ` +
+    `Golden Rules avg: ${goldenRules.averageScore}/3, pass rates — ownership ${goldenRules.rule1_ownership}%, ` +
     `next action ${goldenRules.rule2_nextAction}%, timeframe ${goldenRules.rule3_timeframe}%. ` +
     `Coaching priority: ${coachingPriority} (lowest at ${dimEntries[0].score}).`;
 

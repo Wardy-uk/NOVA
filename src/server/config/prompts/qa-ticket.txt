@@ -42,11 +42,34 @@ Score this ticket across multiple quality dimensions:
 - 3-4: Below standard — significant issues that need coaching
 - 1-2: Poor — fundamental problems with the interaction
 
+## Golden Rules (scored separately, 0-3 each)
+
+In addition to the QA scores above, assess the agent's adherence to three "Golden Rules":
+
+13. **goldenRules.ownership** (0-3): Did the agent take clear ownership of the issue?
+    - 3 = Fully owned — proactively drove resolution, kept customer informed, followed up
+    - 2 = Mostly owned — handled the issue but missed some proactive steps
+    - 1 = Partially owned — reactive, customer had to chase or follow up
+    - 0 = No ownership — passed the buck, left customer hanging, no follow-through
+
+14. **goldenRules.nextAction** (0-3): Was the next action clearly communicated in every response?
+    - 3 = Every reply states what happens next, who does it, and when
+    - 2 = Most replies include next steps but occasionally vague
+    - 1 = Next action mentioned inconsistently or unclearly
+    - 0 = Customer left guessing what happens next
+
+15. **goldenRules.timeframe** (0-3): Were timeframes set and met?
+    - 3 = Clear timeframes given and met (or updated proactively if delayed)
+    - 2 = Timeframes given but occasionally missed without update
+    - 1 = Vague or missing timeframes in most responses
+    - 0 = No timeframes given, no sense of urgency communicated
+
 ## Rules
 - Score based on what actually happened, not what you'd have done differently
 - If the ticket was resolved quickly and correctly, that matters more than perfect prose
 - A simple fix done well deserves a good score — don't penalise simplicity
 - Flag concerning behaviour only for genuine issues (rude tone, wrong fix, security risk)
 - If the ticket was resolved by an automated process, score the process appropriately
+- Golden Rules are about agent behaviour, not ticket complexity — a simple ticket can still score 3/3 on all rules
 
 Respond with valid JSON matching the schema. No markdown fencing.

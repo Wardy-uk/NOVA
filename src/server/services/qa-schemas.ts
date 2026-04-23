@@ -13,5 +13,10 @@ export const QaTicketResultSchema = z.object({
   firstReplyAssessment: z.string(),
   closureAssessment: z.string(),
   issuesFound: z.array(z.string()),
+  goldenRules: z.object({
+    ownership: z.number().int().min(0).max(3),
+    nextAction: z.number().int().min(0).max(3),
+    timeframe: z.number().int().min(0).max(3),
+  }),
 });
 export type QaTicketResult = z.infer<typeof QaTicketResultSchema>;
