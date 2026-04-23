@@ -892,9 +892,9 @@ export function createDevReviewRoutes(
         // Link the Bug to the NT support ticket
         try {
           await client.createIssueLink({
-            type: { name: 'Relates' },
-            inwardIssue: { key: createdBug.key },
-            outwardIssue: { key },
+            type: { name: 'Developer Escalations' },
+            outwardIssue: { key: createdBug.key },
+            inwardIssue: { key },
           });
         } catch (linkErr) {
           const msg = linkErr instanceof Error ? linkErr.message : 'Link creation failed';
