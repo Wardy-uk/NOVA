@@ -851,6 +851,7 @@ async function main() {
       kpiPipeline,
       qaPipeline,
       pipelineMonitor,
+      settingsQueries,
     }));
 
     // KPI pipeline timers

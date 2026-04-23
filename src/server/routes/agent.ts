@@ -14,6 +14,7 @@ import type { CoachingEngine } from '../services/coach.js';
 import type { KpiPipeline } from '../services/kpi-pipeline.js';
 import type { QaPipeline } from '../services/qa-pipeline.js';
 import type { PipelineMonitor } from '../services/pipeline-monitor.js';
+import type { FileSettingsQueries } from '../db/settings-store.js';
 
 interface AgentRouteDeps {
   agentLoop: AgentLoop;
@@ -25,6 +26,7 @@ interface AgentRouteDeps {
   kpiPipeline: KpiPipeline;
   qaPipeline: QaPipeline;
   pipelineMonitor: PipelineMonitor;
+  settingsQueries: FileSettingsQueries;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
@@ -38,11 +40,13 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
   router.post('/start', requireSuperAdmin(), (_req, res) => {
     agentLoop.start();
+    deps?.settingsQueries?.set('agent_enabled', 'true');
     res.json({ ok: true, data: agentLoop.status });
   });
 
   router.post('/stop', requireSuperAdmin(), (_req, res) => {
     agentLoop.stop();
+    deps?.settingsQueries?.set('agent_enabled', 'false');
     res.json({ ok: true, data: agentLoop.status });
   });
 

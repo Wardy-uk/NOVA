@@ -96,7 +96,7 @@ export class Perceiver {
   async perceive(): Promise<QueuePerception> {
     const projectFilter = this.buildProjectFilter();
     const now = new Date();
-    const since = this.lastTickAt ?? new Date(now.getTime() - 5 * 60 * 1000);
+    const since = this.lastTickAt ?? new Date(now.getTime() - 60 * 60 * 1000);
 
     const agentEmail = this.settings.get('jira_ob_email') ?? '';
 
