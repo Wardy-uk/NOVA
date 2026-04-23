@@ -71,6 +71,8 @@ import { AgentWorkspaceView } from './components/AgentWorkspaceView.js';
 import { AgentCoachingView } from './components/AgentCoachingView.js';
 import { AgentPipelinesView } from './components/AgentPipelinesView.js';
 import { UatComparisonView } from './components/UatComparisonView.js';
+import { AgentProfileView } from './components/AgentProfileView.js';
+import { AgentRosterView } from './components/AgentRosterView.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -89,7 +91,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'agent-kpis' | 'qa'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support'
   | 'backfill-status'
-  | 'surveys'
+  | 'surveys' | 'people-roster' | 'people-profile'
   | 'training-matrix' | 'training-summary'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
@@ -121,6 +123,7 @@ const TAB_AREA_GATE: Partial<Record<View, string>> = {
   standup: 'nova_features',
   'team-workload': 'nova_features',
   chat: 'nova_features',
+  'people-roster': 'admin',
 };
 
 const AREAS: Record<Area, AreaDef> = {
@@ -178,9 +181,11 @@ const AREAS: Record<Area, AreaDef> = {
     ],
   },
   people: {
-    label: 'Surveys',
-    defaultView: 'surveys',
+    label: 'People',
+    defaultView: 'people-profile',
     tabs: [
+      { view: 'people-roster', label: 'My Team' },
+      { view: 'people-profile', label: 'My Performance' },
       { view: 'surveys', label: 'Team Surveys' },
     ],
   },
@@ -283,7 +288,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue', 'calyx-dashboard', 'calyx-playlist', 'calyx-tickets', 'calyx-kb', 'calyx-improvements', 'calyx-settings', 'calyx-problems', 'calyx-changes', 'calyx-major-incidents', 'calyx-slo-settings', 'calyx-business-hours', 'calyx-organisations', 'agent-dashboard', 'agent-workspace']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue', 'calyx-dashboard', 'calyx-playlist', 'calyx-tickets', 'calyx-kb', 'calyx-improvements', 'calyx-settings', 'calyx-problems', 'calyx-changes', 'calyx-major-incidents', 'calyx-slo-settings', 'calyx-business-hours', 'calyx-organisations', 'agent-dashboard', 'agent-workspace', 'people-roster', 'people-profile']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -376,6 +381,7 @@ export function App() {
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [homepage, setHomepage] = useState<View | null>(null);
+  const [selectedAgentName, setSelectedAgentName] = useState<string | null>(null);
   const [sdFilter, setSdFilter] = useState<OwnershipFilter>(() => {
     if (typeof window === 'undefined') return null;
     const stored = window.localStorage.getItem('nova_sd_filter');
@@ -1131,7 +1137,17 @@ export function App() {
             <SalesHotboxView canWrite={areaAccess.sales === 'edit'} />
           )}
 
-          {/* People — Surveys */}
+          {/* People */}
+          {view === 'people-roster' && (
+            <AgentRosterView onSelectAgent={(name) => { setSelectedAgentName(name); setView('people-profile' as View); }} />
+          )}
+          {view === 'people-profile' && (
+            <AgentProfileView
+              agentName={selectedAgentName}
+              userRole={auth.user?.role}
+              onNavigate={navigate}
+            />
+          )}
           {view === 'surveys' && (
             <SurveyAdminView userRole={auth.user?.role} />
           )}

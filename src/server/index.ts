@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { initializeDatabase, shutdownDatabase } from './db/schema.js';
+import { query, queryOne } from './services/database.js';
 import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries, TrainingQueries } from './db/queries.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
@@ -105,6 +106,7 @@ import { createCalyxPhase4Routes } from './routes/calyx-phase4.js';
 import { createCalyxPhase5Routes } from './routes/calyx-phase5.js';
 import { createCalyxReportRoutes } from './routes/calyx-reports.js';
 import { createCalyxPortalRoutes } from './routes/calyx-portal.js';
+import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
 import { checkSloBreaches } from './services/calyx-slo-engine.js';
 import { processEmailQueue } from './services/calyx-email.js';
 import { syncCalyxKpisToNova } from './services/calyx-kpi-sync.js';
@@ -808,6 +810,7 @@ async function main() {
   app.use('/api/team', requireAreaAccess('nova_features', 'view'), createTeamRoutes(deliveryQueries, milestoneQueries, taskQueries, userQueries));
   app.use('/api/notifications', createNotificationRoutes(notificationQueries, notificationEngine));
   app.use('/api/chat', requireAreaAccess('nova_features', 'view'), createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
+  app.use('/api/people', createPeopleRoutes({ userQueries, settingsQueries, mcpManager, notificationQueries }));
 
   // Agent loop — feature-flagged, admin-only
   const agentJiraClient = buildServiceDeskJiraClient();
@@ -1987,6 +1990,73 @@ ${panelHtml}
     }
   }, 60 * 60 * 1000); // Check hourly
 
+  // Auto-prep scheduling: daily at 18:00, generate 1-2-1 prep for agents with meetings tomorrow
+  const autoPrepTimer = setInterval(async () => {
+    try {
+      const now = new Date();
+      if (now.getHours() !== 18 || now.getMinutes() >= 10) return;
+
+      const tools = mcpManager.getServerTools('msgraph');
+      const hasCalendarView = tools.includes('get-calendar-view') || tools.includes('list-calendar-events');
+      if (!hasCalendarView) return;
+
+      const tomorrow = new Date(now.getTime() + 86400000);
+      const tomorrowStart = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate());
+      const tomorrowEnd = new Date(tomorrowStart.getTime() + 86400000);
+
+      const toolName = tools.includes('get-calendar-view') ? 'get-calendar-view' : 'list-calendar-events';
+      const result = await mcpManager.callTool('msgraph', toolName, {
+        startDateTime: tomorrowStart.toISOString(),
+        endDateTime: tomorrowEnd.toISOString(),
+      });
+
+      const text = (result as any)?.content?.[0]?.text;
+      let events: any[] = [];
+      if (text) {
+        try { const parsed = JSON.parse(text); events = Array.isArray(parsed) ? parsed : (parsed?.value ?? []); } catch { /* */ }
+      }
+
+      const agents = await query<{ agent_name: string }>(`
+        SELECT agent_name FROM agent_development_plans WHERE status IN ('active', 'deferred')
+      `);
+
+      const today = now.toISOString().slice(0, 10);
+      const adminUser = await queryOne<{ id: number }>(`SELECT TOP 1 id FROM users WHERE role = 'admin'`);
+      let generated = 0;
+
+      for (const agent of agents) {
+        const firstName = agent.agent_name.split(' ')[0].toLowerCase();
+        const match = events.find((e: any) => {
+          const subject = (e.subject ?? e.Subject ?? '').toLowerCase();
+          return subject.includes(firstName) && (
+            subject.includes('1-2-1') || subject.includes('121') ||
+            subject.includes('one to one') || subject.includes('1:1') ||
+            subject.includes('catch up') || subject.includes('catchup')
+          );
+        });
+        if (!match) continue;
+
+        const existing = await queryOne<{ id: number }>(`
+          SELECT TOP 1 id FROM agent_121_snapshots
+          WHERE agent_name = ? AND snapshot_date = ? AND prep_json IS NOT NULL
+        `, [agent.agent_name, today]);
+        if (existing) continue;
+
+        try {
+          await generatePrepForAgent(agent.agent_name, settingsQueries, notificationQueries, adminUser?.id);
+          generated++;
+          console.log(`[auto-prep] Generated prep for ${agent.agent_name}`);
+        } catch (err) {
+          console.warn(`[auto-prep] Failed for ${agent.agent_name}:`, err instanceof Error ? err.message : err);
+        }
+      }
+
+      if (generated > 0) console.log(`[auto-prep] Generated ${generated} prep(s) for tomorrow's 1-2-1s`);
+    } catch (err) {
+      console.warn('[auto-prep] Error:', err instanceof Error ? err.message : err);
+    }
+  }, 10 * 60 * 1000);
+
   // Graceful shutdown
   const shutdown = async () => {
     console.log('[N.O.V.A] Shutting down...');
@@ -1995,6 +2065,7 @@ ${panelHtml}
     clearInterval(portalCleanupTimer);
     clearInterval(surveyTimer);
     clearInterval(trainingReminderTimer);
+    clearInterval(autoPrepTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     agentLoop?.stop();
     watcher.stop();

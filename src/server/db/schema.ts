@@ -442,6 +442,104 @@ async function runMigrations(): Promise<void> {
      SELECT id, team_id FROM users
      WHERE team_id IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM user_teams ut WHERE ut.user_id = users.id AND ut.team_id = users.team_id);`,
+
+    // ── People / Agent Development Plans ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_development_plans') AND type = 'U')
+     CREATE TABLE agent_development_plans (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       agent_name NVARCHAR(200) NOT NULL,
+       plan_period NVARCHAR(100) NULL,
+       role_title NVARCHAR(200) NULL,
+       function_name NVARCHAR(200) NULL,
+       role_clarity NVARCHAR(MAX) NULL,
+       strengths NVARCHAR(MAX) NULL,
+       important_context NVARCHAR(MAX) NULL,
+       status NVARCHAR(20) NOT NULL DEFAULT 'active',
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_development_goals') AND type = 'U')
+     CREATE TABLE agent_development_goals (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       plan_id INT NOT NULL,
+       title NVARCHAR(500) NOT NULL,
+       description NVARCHAR(MAX) NULL,
+       measure_description NVARCHAR(MAX) NULL,
+       metric_key NVARCHAR(100) NULL,
+       metric_target FLOAT NULL,
+       target_date NVARCHAR(20) NULL,
+       status NVARCHAR(30) NOT NULL DEFAULT 'not_started',
+       sort_order INT NOT NULL DEFAULT 0
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_training_items') AND type = 'U')
+     CREATE TABLE agent_training_items (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       plan_id INT NOT NULL,
+       title NVARCHAR(500) NOT NULL,
+       description NVARCHAR(MAX) NULL,
+       target_date NVARCHAR(20) NULL,
+       completed BIT NOT NULL DEFAULT 0,
+       completed_at DATETIME2 NULL,
+       sort_order INT NOT NULL DEFAULT 0
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_121_snapshots') AND type = 'U')
+     CREATE TABLE agent_121_snapshots (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       agent_name NVARCHAR(200) NOT NULL,
+       snapshot_date NVARCHAR(20) NOT NULL,
+       metrics_json NVARCHAR(MAX) NULL,
+       goals_json NVARCHAR(MAX) NULL,
+       prep_json NVARCHAR(MAX) NULL,
+       transcript_md NVARCHAR(MAX) NULL,
+       notes NVARCHAR(MAX) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_121_actions') AND type = 'U')
+     CREATE TABLE agent_121_actions (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       snapshot_id INT NULL,
+       agent_name NVARCHAR(200) NOT NULL,
+       description NVARCHAR(MAX) NOT NULL,
+       owner NVARCHAR(200) NULL,
+       due_date NVARCHAR(20) NULL,
+       status NVARCHAR(30) NOT NULL DEFAULT 'open',
+       completed_at DATETIME2 NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_dev_plans_agent')
+     CREATE INDEX IX_agent_dev_plans_agent ON agent_development_plans (agent_name, status);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_dev_goals_plan')
+     CREATE INDEX IX_agent_dev_goals_plan ON agent_development_goals (plan_id);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_training_plan')
+     CREATE INDEX IX_agent_training_plan ON agent_training_items (plan_id);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_121_snapshots_agent')
+     CREATE INDEX IX_agent_121_snapshots_agent ON agent_121_snapshots (agent_name, snapshot_date DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_121_actions_agent')
+     CREATE INDEX IX_agent_121_actions_agent ON agent_121_actions (agent_name, status);`,
+
+    `IF COL_LENGTH('agent_development_plans', 'manager_status') IS NULL
+     ALTER TABLE agent_development_plans ADD manager_status NVARCHAR(50) NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_agent_goals_plan')
+     ALTER TABLE agent_development_goals ADD CONSTRAINT FK_agent_goals_plan
+       FOREIGN KEY (plan_id) REFERENCES agent_development_plans(id) ON DELETE CASCADE;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_agent_training_plan')
+     ALTER TABLE agent_training_items ADD CONSTRAINT FK_agent_training_plan
+       FOREIGN KEY (plan_id) REFERENCES agent_development_plans(id) ON DELETE CASCADE;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_agent_actions_snapshot')
+     ALTER TABLE agent_121_actions ADD CONSTRAINT FK_agent_actions_snapshot
+       FOREIGN KEY (snapshot_id) REFERENCES agent_121_snapshots(id) ON DELETE SET NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
