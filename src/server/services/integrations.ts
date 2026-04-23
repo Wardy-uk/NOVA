@@ -212,7 +212,7 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'anthropic_api_key', label: 'Anthropic API Key', type: 'password', placeholder: 'sk-ant-...', required: true },
       { key: 'openai_api_key', label: 'OpenAI API Key (failover)', type: 'password', placeholder: 'sk-...', required: false },
       { key: 'llm_primary_provider', label: 'Primary Provider', type: 'text', placeholder: 'anthropic', required: false },
-      { key: 'llm_primary_model', label: 'Primary Model', type: 'text', placeholder: 'claude-sonnet-4-20250514', required: false },
+      { key: 'llm_primary_model', label: 'Primary Model', type: 'text', placeholder: 'claude-sonnet-4-6-20250627', required: false },
       { key: 'llm_failover_provider', label: 'Failover Provider', type: 'text', placeholder: 'openai', required: false },
       { key: 'llm_failover_model', label: 'Failover Model', type: 'text', placeholder: 'gpt-4.1', required: false },
       { key: 'llm_temperature', label: 'Temperature', type: 'text', placeholder: '0.3', required: false },

@@ -97,11 +97,19 @@ export class JiraSyncService {
         issueCount++;
       }
 
-      // Fetch comments for open issues (batched to avoid hammering)
+      // Mark issues as synced immediately so perceiver switches to cache
+      this.lastSyncAt = new Date();
+      this.fullSyncDone = true;
+      this.consecutiveErrors = 0;
+
+      const issueDuration = Date.now() - start;
+      console.log(`[jira-sync] Issue sync complete: ${issueCount} issues in ${issueDuration}ms — cache now active`);
+
+      // Backfill comments for open issues in background (non-blocking)
       const openIssues = result.issues.filter(i =>
         (i.fields.status as any)?.statusCategory?.key !== 'done'
       );
-      console.log(`[jira-sync] Syncing comments for ${openIssues.length} open issues...`);
+      console.log(`[jira-sync] Backfilling comments for ${openIssues.length} open issues...`);
 
       for (const issue of openIssues) {
         try {
@@ -114,10 +122,6 @@ export class JiraSyncService {
           console.warn(`[jira-sync] Failed to sync comments for ${issue.key}:`, err instanceof Error ? err.message : err);
         }
       }
-
-      this.lastSyncAt = new Date();
-      this.fullSyncDone = true;
-      this.consecutiveErrors = 0;
 
       const duration = Date.now() - start;
       console.log(`[jira-sync] Full sync complete: ${issueCount} issues, ${commentCount} comments in ${duration}ms`);
