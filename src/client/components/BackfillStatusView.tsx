@@ -40,7 +40,7 @@ export function BackfillStatusView() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now());
-  const tickRef = useRef<ReturnType<typeof setInterval>>();
+  const tickRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const fetchStatus = useCallback(async () => {
     try {

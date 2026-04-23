@@ -317,7 +317,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       </div>
 
       {/* Tab content */}
-      {tab === 'overview' && <OverviewTab status={status} stats={stats} decisions={decisions} onSelect={setSelected} />}
+      {tab === 'overview' && <OverviewTab status={status} stats={stats} decisions={decisions} onSelect={setSelected} onNavigateToWorkspace={onNavigateToWorkspace} />}
       {tab === 'decisions' && <DecisionsTab decisions={decisions} selected={selected} onSelect={setSelected} onRefresh={refresh} />}
       {tab === 'autonomy' && <AutonomyTab rules={autonomyRules} onRefresh={() => api('/autonomy').then(r => { if (r.ok) setAutonomyRules(r.data); })} isSuperAdmin={isSuperAdmin} />}
       {tab === 'guardrails' && <GuardrailsTab rules={guardrails} onToggle={toggleGuardrail} />}
@@ -376,11 +376,12 @@ function KpiCard({ value, label, color }: { value: number | string; label: strin
 
 // ── Overview Tab ──
 
-function OverviewTab({ status, stats, decisions, onSelect }: {
+function OverviewTab({ status, stats, decisions, onSelect, onNavigateToWorkspace }: {
   status: AgentStatus | null;
   stats: AgentStats | null;
   decisions: Decision[];
   onSelect: (d: Decision) => void;
+  onNavigateToWorkspace?: (filter: { aiAction?: string }) => void;
 }) {
   return (
     <div className="space-y-4">

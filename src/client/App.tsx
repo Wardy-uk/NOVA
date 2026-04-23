@@ -1289,7 +1289,7 @@ export function App() {
 function DebugView({
   tasks, loading, syncing, error, apiDebug, lastSuggest, spDebug, spDebugLoading, setSpDebugLoading, setSpDebug, d365Debug,
 }: {
-  tasks: Array<{ id: string; raw_data: unknown; [k: string]: unknown }>;
+  tasks: unknown[];
   loading: boolean;
   syncing: boolean;
   error: string | null;
@@ -1384,20 +1384,20 @@ function DebugView({
                     : 'none'}
                 </pre>
               </div>
-              {spDebug.lastAttempt && (
+              {spDebug.lastAttempt ? (
                 <div className="text-[11px]">
                   <span className="text-neutral-500">Last attempt: </span>
                   <span className="text-neutral-300">{String(spDebug.lastAttempt)}</span>
                 </div>
-              )}
-              {spDebug.lastResult && (
+              ) : null}
+              {spDebug.lastResult ? (
                 <div className="text-[11px]">
                   <div className="text-neutral-500 mb-0.5">Last result:</div>
                   <pre className="text-[10px] text-neutral-300 overflow-auto max-h-[200px] whitespace-pre-wrap bg-[#272C33] rounded p-2">
                     {JSON.stringify(spDebug.lastResult, null, 2)}
                   </pre>
                 </div>
-              )}
+              ) : null}
             </div>
           )
         ) : (
@@ -1421,7 +1421,7 @@ function DebugView({
       <div className="border border-[#3a424d] rounded-lg p-4 bg-[#2f353d]">
         <div className="text-xs text-neutral-500 uppercase tracking-wider mb-2">Raw Data Sample</div>
         <pre className="text-[11px] text-neutral-300 overflow-auto max-h-[420px]">
-          {JSON.stringify(tasks[0]?.raw_data ?? null, null, 2)}
+          {JSON.stringify((tasks[0] as Record<string, unknown>)?.raw_data ?? null, null, 2)}
         </pre>
       </div>
     </div>

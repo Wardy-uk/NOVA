@@ -319,7 +319,7 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
           // Set active tab from DB entries when xlsx isn't available
           if (!xlsxJson.ok && dbJson.data?.length > 0 && !activeTab) {
             const products = [...new Set(dbJson.data.map((e: DbEntry) => e.product))];
-            if (products.length > 0) setActiveTab(products[0]);
+            if (products.length > 0) setActiveTab(products[0] as string);
           }
         }
         // Only show error if both xlsx AND DB entries failed

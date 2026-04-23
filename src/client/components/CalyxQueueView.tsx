@@ -121,7 +121,7 @@ function StatusBadge({ status }: { status: TicketStatus }) {
 }
 
 function SlaBlock({ label, sla }: { label: string; sla: { text: string; breached: boolean; paused: boolean } }) {
-  let color = C.text2;
+  let color: string = C.text2;
   let icon = '';
   let anim = false;
 
