@@ -94,6 +94,7 @@ import { KpiPipeline } from './services/kpi-pipeline.js';
 import { QaPipeline } from './services/qa-pipeline.js';
 import { PipelineMonitor } from './services/pipeline-monitor.js';
 import { ConfigService } from './services/config-service.js';
+import { SuggestionEngine } from './services/suggestion-engine.js';
 import { CalendarSyncService } from './services/calendar-sync.js';
 import { ProductCancellationService } from './services/product-cancellation.js';
 import { AbuseReportProcessor } from './services/abuse-report-processor.js';
@@ -881,6 +882,8 @@ async function main() {
     const abuseReportProcessor = new AbuseReportProcessor(settingsQueries, agentJiraClient);
     const callReviewService = new CallReviewService(settingsQueries, llmService);
 
+    const suggestionEngine = new SuggestionEngine(agentLoop.getGuardrails(), agentLoop.getAutonomyEngine());
+
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,
       availabilityService,
@@ -893,6 +896,7 @@ async function main() {
       settingsQueries,
       jiraCache: jiraCacheQueries,
       jiraSyncService,
+      suggestionEngine,
     }));
 
     // KPI pipeline timers

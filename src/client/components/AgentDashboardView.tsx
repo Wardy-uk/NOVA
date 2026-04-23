@@ -754,7 +754,111 @@ function DecisionDetail({ decision: d, onClose }: { decision: Decision; onClose:
   );
 }
 
+// ── Suggestion types + component ──
+
+interface SuggestionItem {
+  id: number;
+  type: 'guardrail' | 'autonomy';
+  suggestionKey: string;
+  suggestion: { action: string; title: string; description: string; [k: string]: unknown };
+  evidence: Record<string, unknown>;
+  status: string;
+  createdAt: string;
+}
+
+const ACTION_ICONS: Record<string, string> = {
+  disable_rule: '\u{1F6AB}', loosen_rule: '\u{1F527}', amend_rule: '\u{270F}\u{FE0F}', new_rule: '\u{1F6E1}\u{FE0F}',
+  enable_autonomy: '\u{26A1}', raise_threshold: '\u{2B06}\u{FE0F}', lower_threshold: '\u{2B07}\u{FE0F}', new_category: '\u{1F4C2}',
+};
+
+function SuggestionCards({ type, onRulesChanged }: { type: 'guardrail' | 'autonomy'; onRulesChanged: () => void }) {
+  const [items, setItems] = useState<SuggestionItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await api(`/suggestions?type=${type}`);
+    if (res.ok) setItems(res.data);
+    setLoading(false);
+  }, [type]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    await api('/suggestions/refresh', { method: 'POST' });
+    await load();
+    setRefreshing(false);
+  };
+
+  const apply = async (id: number) => {
+    const res = await api(`/suggestions/${id}/apply`, { method: 'POST' });
+    if (res.ok) { await load(); onRulesChanged(); }
+  };
+
+  const dismiss = async (id: number) => {
+    await api(`/suggestions/${id}/dismiss`, { method: 'POST' });
+    setItems(prev => prev.filter(s => s.id !== id));
+  };
+
+  if (loading && items.length === 0) return null;
+
+  return (
+    <div className="space-y-2 mt-4">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-medium">AI Suggestions</div>
+        <button onClick={refresh} disabled={refreshing}
+          className="text-[10px] text-blue-400 hover:text-blue-300 disabled:opacity-50">
+          {refreshing ? 'Analysing...' : 'Refresh'}
+        </button>
+      </div>
+      {items.length === 0 ? (
+        <div className="text-[10px] text-neutral-600 py-2">No suggestions — click Refresh to analyse decision history.</div>
+      ) : items.map(s => (
+        <div key={s.id} className="border border-[#3a424d] rounded-lg bg-[#272C33] p-3">
+          <div className="flex items-start gap-2">
+            <span className="text-sm mt-0.5">{ACTION_ICONS[s.suggestion.action] ?? '\u{1F4A1}'}</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-neutral-200 font-medium">{s.suggestion.title}</div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">{s.suggestion.description}</div>
+              {s.evidence && Object.keys(s.evidence).length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-1.5">
+                  {Object.entries(s.evidence).filter(([k]) => k !== 'sampleTickets').map(([k, v]) => (
+                    <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-[#363d47] text-neutral-400">
+                      {k.replace(/([A-Z])/g, ' $1').toLowerCase()}: {String(v)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-1 shrink-0">
+              <button onClick={() => apply(s.id)}
+                className="px-2 py-1 text-[10px] font-medium rounded bg-green-800/50 text-green-400 hover:bg-green-700/50 border border-green-800/40 transition-colors">
+                Apply
+              </button>
+              <button onClick={() => dismiss(s.id)}
+                className="px-2 py-1 text-[10px] font-medium rounded bg-neutral-800/50 text-neutral-400 hover:bg-neutral-700/50 border border-neutral-700/40 transition-colors">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Guardrails Tab ──
+
+function slugify(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 60);
+}
+
+function validateRegex(pattern: string): string | null {
+  if (!pattern.trim()) return null;
+  try { new RegExp(pattern, 'i'); return null; } catch (e) { return e instanceof Error ? e.message : 'Invalid regex'; }
+}
 
 function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[]; onToggle: (id: string, enabled: boolean) => void; onRefresh: () => void }) {
   const [showForm, setShowForm] = useState(false);
@@ -765,8 +869,16 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
   const [formPattern, setFormPattern] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const regexError = validateRegex(formPattern);
 
   const resetForm = () => { setShowForm(false); setEditingId(null); setFormId(''); setFormDesc(''); setFormSeverity('block'); setFormPattern(''); setFormError(null); };
+
+  const onDescChange = (val: string) => {
+    setFormDesc(val);
+    if (!editingId) setFormId(slugify(val));
+  };
 
   const startEdit = (r: GuardrailRule) => {
     setEditingId(r.id); setFormId(r.id); setFormDesc(r.description); setFormSeverity(r.severity as 'block' | 'warn'); setFormPattern(r.pattern ?? ''); setShowForm(true); setFormError(null);
@@ -774,6 +886,7 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
 
   const handleSave = async () => {
     if (!formId.trim() || !formDesc.trim() || !formPattern.trim()) { setFormError('All fields are required'); return; }
+    if (regexError) { setFormError(`Invalid regex: ${regexError}`); return; }
     setSaving(true); setFormError(null);
     const body = { id: formId.trim(), description: formDesc.trim(), severity: formSeverity, pattern: formPattern.trim(), enabled: true };
     const res = editingId
@@ -784,6 +897,8 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
   };
 
   const handleDelete = async (id: string) => {
+    if (confirmDelete !== id) { setConfirmDelete(id); return; }
+    setConfirmDelete(null);
     const res = await api(`/guardrails/${id}`, { method: 'DELETE' });
     if (res.ok) onRefresh();
   };
@@ -797,7 +912,7 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
         <p className="text-xs text-neutral-500">
           Guardrails are validated on every agent decision before execution. Blocked rules prevent the action entirely.
         </p>
-        <button onClick={() => { resetForm(); setShowForm(true); }} className="px-3 py-1.5 text-[11px] font-medium rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors">
+        <button onClick={() => { resetForm(); setShowForm(true); }} className="px-3 py-1.5 text-[11px] font-medium rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors shrink-0">
           + Add Rule
         </button>
       </div>
@@ -805,11 +920,16 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
       {showForm && (
         <div className="border border-blue-800/50 rounded-lg bg-[#1e2530] p-4 space-y-3">
           <div className="text-xs font-medium text-neutral-300">{editingId ? 'Edit Rule' : 'New Custom Rule'}</div>
+          <div>
+            <label className="text-[10px] text-neutral-500 block mb-1">Description</label>
+            <input value={formDesc} onChange={e => onDescChange(e.target.value)} placeholder="Human-readable description of what this rule catches"
+              className="w-full px-2 py-1.5 text-[11px] rounded bg-[#2a303a] border border-[#3a424d] text-neutral-200 focus:border-blue-600 outline-none" />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] text-neutral-500 block mb-1">Rule ID (slug)</label>
-              <input value={formId} onChange={e => setFormId(e.target.value)} disabled={!!editingId} placeholder="e.g. no_password_disclosure"
-                className="w-full px-2 py-1.5 text-[11px] rounded bg-[#2a303a] border border-[#3a424d] text-neutral-200 focus:border-blue-600 outline-none disabled:opacity-50" />
+              <label className="text-[10px] text-neutral-500 block mb-1">Rule ID (auto-generated)</label>
+              <input value={formId} onChange={e => setFormId(e.target.value)} disabled={!!editingId} placeholder="auto_from_description"
+                className="w-full px-2 py-1.5 text-[11px] rounded bg-[#2a303a] border border-[#3a424d] text-neutral-200 font-mono focus:border-blue-600 outline-none disabled:opacity-50" />
             </div>
             <div>
               <label className="text-[10px] text-neutral-500 block mb-1">Severity</label>
@@ -821,18 +941,15 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
             </div>
           </div>
           <div>
-            <label className="text-[10px] text-neutral-500 block mb-1">Description</label>
-            <input value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="Human-readable description of what this rule catches"
-              className="w-full px-2 py-1.5 text-[11px] rounded bg-[#2a303a] border border-[#3a424d] text-neutral-200 focus:border-blue-600 outline-none" />
-          </div>
-          <div>
             <label className="text-[10px] text-neutral-500 block mb-1">Pattern (regex, matched against draft response)</label>
             <input value={formPattern} onChange={e => setFormPattern(e.target.value)} placeholder="e.g. \b(password|secret|credential)\b"
-              className="w-full px-2 py-1.5 text-[11px] rounded bg-[#2a303a] border border-[#3a424d] text-neutral-200 font-mono focus:border-blue-600 outline-none" />
+              className={`w-full px-2 py-1.5 text-[11px] rounded bg-[#2a303a] border text-neutral-200 font-mono outline-none ${regexError ? 'border-red-600' : 'border-[#3a424d] focus:border-blue-600'}`} />
+            {regexError && <div className="text-[9px] text-red-400 mt-0.5">{regexError}</div>}
+            {formPattern && !regexError && <div className="text-[9px] text-green-400 mt-0.5">Valid regex</div>}
           </div>
           {formError && <div className="text-[10px] text-red-400">{formError}</div>}
           <div className="flex gap-2">
-            <button onClick={handleSave} disabled={saving} className="px-3 py-1.5 text-[11px] font-medium rounded bg-green-700 hover:bg-green-600 text-white transition-colors disabled:opacity-50">
+            <button onClick={handleSave} disabled={saving || !!regexError} className="px-3 py-1.5 text-[11px] font-medium rounded bg-green-700 hover:bg-green-600 text-white transition-colors disabled:opacity-50">
               {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
             </button>
             <button onClick={resetForm} className="px-3 py-1.5 text-[11px] font-medium rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-300 transition-colors">Cancel</button>
@@ -846,6 +963,7 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
             <tr className="bg-[#272C33] text-neutral-500 uppercase tracking-wider text-left">
               <th className="px-4 py-2 font-medium w-10">On</th>
               <th className="px-4 py-2 font-medium">Rule</th>
+              <th className="px-4 py-2 font-medium w-20">Type</th>
               <th className="px-4 py-2 font-medium w-20">Severity</th>
               <th className="px-4 py-2 font-medium w-20">Actions</th>
             </tr>
@@ -864,13 +982,16 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
                   <div className="text-[10px] text-neutral-600 font-mono mt-0.5">{r.id}</div>
                 </td>
                 <td className="px-4 py-2">
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500 border border-neutral-700/50 font-medium">BUILT-IN</span>
+                </td>
+                <td className="px-4 py-2">
                   <span className={`text-[10px] font-semibold uppercase ${r.severity === 'block' ? 'text-red-400' : 'text-amber-400'}`}>{r.severity}</span>
                 </td>
-                <td className="px-4 py-2 text-[10px] text-neutral-600">built-in</td>
+                <td className="px-4 py-2" />
               </tr>
             ))}
             {customRules.length > 0 && builtinRules.length > 0 && (
-              <tr><td colSpan={4} className="px-4 py-1.5 bg-[#272C33] text-[10px] text-neutral-500 font-medium uppercase tracking-wider">Custom Rules</td></tr>
+              <tr><td colSpan={5} className="px-4 py-1.5 bg-[#272C33] text-[10px] text-neutral-500 font-medium uppercase tracking-wider">Custom Rules</td></tr>
             )}
             {customRules.map(r => (
               <tr key={r.id} className="hover:bg-[#363d47]/50 transition-colors">
@@ -886,12 +1007,17 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
                   {r.pattern && <div className="text-[10px] text-blue-400/60 font-mono mt-0.5">/{r.pattern}/i</div>}
                 </td>
                 <td className="px-4 py-2">
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 border border-blue-800/40 font-medium">CUSTOM</span>
+                </td>
+                <td className="px-4 py-2">
                   <span className={`text-[10px] font-semibold uppercase ${r.severity === 'block' ? 'text-red-400' : 'text-amber-400'}`}>{r.severity}</span>
                 </td>
                 <td className="px-4 py-2">
                   <div className="flex gap-1">
                     <button onClick={() => startEdit(r)} className="text-[10px] text-blue-400 hover:text-blue-300">edit</button>
-                    <button onClick={() => handleDelete(r.id)} className="text-[10px] text-red-400 hover:text-red-300">delete</button>
+                    <button onClick={() => handleDelete(r.id)} className={`text-[10px] ${confirmDelete === r.id ? 'text-red-300 font-semibold' : 'text-red-400 hover:text-red-300'}`}>
+                      {confirmDelete === r.id ? 'confirm?' : 'delete'}
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -902,6 +1028,8 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
           <div className="px-4 py-6 text-center text-xs text-neutral-500">No guardrail rules loaded</div>
         )}
       </div>
+
+      <SuggestionCards type="guardrail" onRulesChanged={onRefresh} />
     </div>
   );
 }
@@ -1124,6 +1252,8 @@ function AutonomyTab({ rules, onRefresh, isSuperAdmin = false }: { rules: Autono
           <div className="px-4 py-6 text-center text-xs text-neutral-500">No autonomy rules configured. All decisions require approval.</div>
         )}
       </div>
+
+      <SuggestionCards type="autonomy" onRulesChanged={onRefresh} />
     </div>
   );
 }

@@ -681,6 +681,23 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_ticket_state_lifecycle')
      CREATE INDEX IX_agent_ticket_state_lifecycle ON agent_ticket_state (lifecycle);`,
+
+    // ── Agent Suggestions table ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_suggestions') AND type = 'U')
+     CREATE TABLE agent_suggestions (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       type NVARCHAR(20) NOT NULL,
+       suggestion_key NVARCHAR(200) NOT NULL,
+       suggestion_json NVARCHAR(MAX) NOT NULL,
+       evidence_json NVARCHAR(MAX) NULL,
+       status NVARCHAR(20) NOT NULL DEFAULT 'pending',
+       dismissed_hash NVARCHAR(64) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_suggestions_type_status')
+     CREATE INDEX IX_agent_suggestions_type_status ON agent_suggestions (type, status, created_at DESC);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

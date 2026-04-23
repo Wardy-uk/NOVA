@@ -17,6 +17,7 @@ import type { PipelineMonitor } from '../services/pipeline-monitor.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
 import type { JiraSyncService } from '../services/jira-sync-service.js';
+import type { SuggestionEngine } from '../services/suggestion-engine.js';
 
 interface AgentRouteDeps {
   agentLoop: AgentLoop;
@@ -31,6 +32,7 @@ interface AgentRouteDeps {
   settingsQueries: FileSettingsQueries;
   jiraCache: JiraCacheQueries;
   jiraSyncService: JiraSyncService | null;
+  suggestionEngine: SuggestionEngine | null;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
@@ -1023,6 +1025,84 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   router.get('/llm-status', requireSuperAdmin(), (_req, res) => {
     const diag = agentLoop.getLlmService().getDiagnostics();
     res.json({ ok: true, data: diag });
+  });
+
+  // ── Suggestions ──
+
+  const suggestionEngine = deps?.suggestionEngine;
+
+  router.get('/suggestions', async (req, res) => {
+    if (!suggestionEngine) { res.json({ ok: true, data: [] }); return; }
+    try {
+      const type = req.query.type as 'guardrail' | 'autonomy' | undefined;
+      const status = (req.query.status as string) ?? 'pending';
+      const data = await suggestionEngine.getSuggestions(type, status);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get suggestions' });
+    }
+  });
+
+  router.post('/suggestions/refresh', async (_req, res) => {
+    if (!suggestionEngine) { res.json({ ok: true, data: { created: 0 } }); return; }
+    try {
+      const created = await suggestionEngine.generateSuggestions();
+      res.json({ ok: true, data: { created } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to refresh suggestions' });
+    }
+  });
+
+  router.post('/suggestions/:id/apply', async (req, res) => {
+    if (!suggestionEngine) { res.status(404).json({ ok: false, error: 'Suggestions not available' }); return; }
+    try {
+      const suggestion = await suggestionEngine.applySuggestion(parseInt(req.params.id));
+      if (!suggestion) { res.status(404).json({ ok: false, error: 'Suggestion not found or already processed' }); return; }
+
+      // Auto-apply the suggestion to the relevant system
+      const s = suggestion.suggestion;
+      if (suggestion.type === 'guardrail') {
+        if (s.action === 'disable_rule' && s.ruleId) {
+          agentLoop.getGuardrails().setRuleEnabled(s.ruleId as string, false);
+        }
+      } else if (suggestion.type === 'autonomy') {
+        if (s.action === 'enable_autonomy' || s.action === 'new_category') {
+          const autonomy = agentLoop.getAutonomyEngine();
+          await autonomy.createRule({
+            category: s.category as string,
+            subCategory: null,
+            enabled: true,
+            minConfidence: (s.suggestedConfidence as number) ?? 0.85,
+            minAcceptRate: (s.suggestedAcceptRate as number) ?? 90,
+            minQaScore: 0,
+            minDecisions: (s.suggestedMinDecisions as number) ?? 50,
+            autonomousActions: ['draft_response'],
+            updatedBy: (req as any).user?.username ?? 'system',
+          });
+        } else if ((s.action === 'raise_threshold' || s.action === 'lower_threshold') && s.ruleId) {
+          const autonomy = agentLoop.getAutonomyEngine();
+          await autonomy.updateRule(s.ruleId as number, {
+            minConfidence: s.suggestedConfidence as number,
+            updatedBy: (req as any).user?.username ?? 'system',
+          });
+        }
+      }
+
+      res.json({ ok: true, data: suggestion });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to apply suggestion' });
+    }
+  });
+
+  router.post('/suggestions/:id/dismiss', async (req, res) => {
+    if (!suggestionEngine) { res.status(404).json({ ok: false, error: 'Suggestions not available' }); return; }
+    try {
+      const ok = await suggestionEngine.dismissSuggestion(parseInt(req.params.id));
+      if (!ok) { res.status(404).json({ ok: false, error: 'Suggestion not found or already processed' }); return; }
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to dismiss suggestion' });
+    }
   });
 
   // ── Escalation (WP-13) ──
