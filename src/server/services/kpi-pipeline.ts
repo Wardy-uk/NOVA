@@ -53,7 +53,7 @@ export class KpiPipeline {
 
   private get target(): PipelineTarget {
     const val = this.settings.get('kpi_pipeline_target');
-    return val === 'live' ? 'live' : 'uat';
+    return val === 'uat' ? 'uat' : 'live';
   }
 
   private get s(): string {
