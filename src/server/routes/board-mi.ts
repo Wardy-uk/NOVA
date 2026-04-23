@@ -4,6 +4,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { DevReviewQueries } from '../db/dev-review-queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
+import type { JiraSyncService } from '../services/jira-sync-service.js';
 import { queryOne, execute, query } from '../services/database.js';
 
 /**
@@ -110,6 +111,7 @@ export function createBoardMiRoutes(
   devQueries: DevReviewQueries,
   getJiraClient: () => JiraRestClient | null,
   cache?: JiraCacheQueries,
+  syncService?: JiraSyncService | null,
 ): Router {
   const router = Router();
   const holder: PoolHolder = { pool: null };
@@ -189,7 +191,7 @@ export function createBoardMiRoutes(
       let agedDev = null as { total: number; over30d: number; over90d: number; over180d: number; oldestDays: number | null } | null;
       let openedResolved = null as { opened: number; resolved: number; prevOpened: number; prevResolved: number } | null;
 
-      if (cache) {
+      if (cache && syncService?.isReady()) {
         // All counts from local MSSQL cache — instant SQL queries, no Jira calls
         try {
           const [u4, h4, d1, d3, o7] = await Promise.all([

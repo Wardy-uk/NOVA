@@ -135,10 +135,6 @@ async function main() {
   initializeCalyxSchema(calyxDb);
   seedCalyxData(calyxDb);
   const calyxQueries = new CalyxQueries(calyxDb);
-  setInterval(() => checkSloBreaches(calyxDb, settingsQueries.getAll()), 5 * 60 * 1000);
-  setInterval(() => processEmailQueue(calyxDb, settingsQueries.getAll()), 60_000);
-  setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 30 * 60 * 1000);
-  setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 10_000);
 
   const taskQueries = new TaskQueries();
   const fileSettings = new FileSettingsQueries();
@@ -147,6 +143,12 @@ async function main() {
     console.warn('[N.O.V.A] Config service init failed, using file fallback:', err instanceof Error ? err.message : err)
   );
   const settingsQueries = configService as FileSettingsQueries;
+
+  // Calyx background timers (must be after settingsQueries is initialized)
+  setInterval(() => checkSloBreaches(calyxDb, settingsQueries.getAll()), 5 * 60 * 1000);
+  setInterval(() => processEmailQueue(calyxDb, settingsQueries.getAll()), 60_000);
+  setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 30 * 60 * 1000);
+  setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 10_000);
   const ritualQueries = new RitualQueries();
   const deliveryQueries = new DeliveryQueries();
   // Auto-assign onboarding IDs to any entries missing them
@@ -431,6 +433,12 @@ async function main() {
   // Jira cache layer — single background sync replaces per-consumer live API calls
   const jiraCacheQueries = new JiraCacheQueries();
   let jiraSyncService: JiraSyncService | null = null;
+
+  // Create sync service early so routes can reference it
+  const syncJiraClient = buildServiceDeskJiraClient();
+  if (syncJiraClient) {
+    jiraSyncService = new JiraSyncService(syncJiraClient, settingsQueries);
+  }
 
   // 4. Express app
   const app = express();
@@ -806,6 +814,7 @@ async function main() {
     devReviewQueries,
     buildServiceDeskJiraClient,
     jiraCacheQueries,
+    jiraSyncService,
   ));
   app.use('/api/dev-review', createDevReviewRoutes(
     devReviewQueries,
@@ -830,10 +839,8 @@ async function main() {
   app.use('/api/chat', requireAreaAccess('nova_features', 'view'), createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
   app.use('/api/people', createPeopleRoutes({ userQueries, settingsQueries, mcpManager, notificationQueries }));
 
-  // Jira sync service — background sync populates the cache tables
-  const syncJiraClient = buildServiceDeskJiraClient();
-  if (syncJiraClient) {
-    jiraSyncService = new JiraSyncService(syncJiraClient, settingsQueries);
+  // Start Jira sync (service was created earlier so routes can reference it)
+  if (jiraSyncService) {
     jiraSyncService.fullSync().catch(err =>
       console.error('[jira-sync] Initial full sync failed:', err instanceof Error ? err.message : err)
     );

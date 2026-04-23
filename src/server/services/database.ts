@@ -50,6 +50,8 @@ function parseConnectionString(str: string): Partial<sql.config> {
   };
 }
 
+let reconnecting: Promise<sql.ConnectionPool> | null = null;
+
 export async function initPool(): Promise<sql.ConnectionPool> {
   if (pool?.connected) return pool;
   const config = buildConfig();
@@ -63,6 +65,14 @@ export function getPool(): sql.ConnectionPool {
     throw new Error('Database pool not initialized. Call initPool() first.');
   }
   return pool;
+}
+
+async function ensurePool(): Promise<sql.ConnectionPool> {
+  if (pool?.connected) return pool;
+  if (reconnecting) return reconnecting;
+  console.warn('[N.O.V.A] MSSQL pool disconnected — reconnecting...');
+  reconnecting = initPool().finally(() => { reconnecting = null; });
+  return reconnecting;
 }
 
 export async function closePool(): Promise<void> {
@@ -101,7 +111,8 @@ export async function query<T = Record<string, unknown>>(
   sqlText: string,
   params: unknown[] = []
 ): Promise<T[]> {
-  const request = getPool().request();
+  const p = await ensurePool();
+  const request = p.request();
   bindParams(request, params);
   const converted = convertPositionalParams(sqlText);
   const result = await request.query<T>(converted);
@@ -120,7 +131,8 @@ export async function execute(
   sqlText: string,
   params: unknown[] = []
 ): Promise<{ rowsAffected: number }> {
-  const request = getPool().request();
+  const p = await ensurePool();
+  const request = p.request();
   bindParams(request, params);
   const converted = convertPositionalParams(sqlText);
   const result = await request.query(converted);
@@ -133,7 +145,8 @@ export async function executeAndGetId(
   params: unknown[] = []
 ): Promise<number> {
   const combined = sqlText.trimEnd().replace(/;?\s*$/, '') + '; SELECT SCOPE_IDENTITY() AS id;';
-  const request = getPool().request();
+  const p = await ensurePool();
+  const request = p.request();
   bindParams(request, params);
   const converted = convertPositionalParams(combined);
   const result = await request.query(converted);
@@ -145,7 +158,8 @@ export async function executeAndGetId(
 export async function transaction<T>(
   fn: (tx: sql.Transaction) => Promise<T>
 ): Promise<T> {
-  const tx = new sql.Transaction(getPool());
+  const p = await ensurePool();
+  const tx = new sql.Transaction(p);
   await tx.begin();
   try {
     const result = await fn(tx);

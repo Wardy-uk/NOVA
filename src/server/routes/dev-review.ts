@@ -141,7 +141,8 @@ export function createDevReviewRoutes(
     try {
       let issues: Array<{ key: string; fields: Record<string, unknown> }> = [];
 
-      if (cache) {
+      const useCache = cache && syncService?.isReady();
+      if (useCache) {
         // Read from local MSSQL cache — instant, no Jira API call
         const cached = await cache.getTier3Issues();
         issues = cached.map(ci => ({
@@ -283,7 +284,7 @@ export function createDevReviewRoutes(
       const key = String(req.params.key);
       let issueFields: Record<string, unknown> | null = null;
 
-      if (cache) {
+      if (cache && syncService?.isReady()) {
         const ci = await cache.getIssue(key);
         if (ci?.fields_json) {
           issueFields = JSON.parse(ci.fields_json);
@@ -307,7 +308,7 @@ export function createDevReviewRoutes(
 
       // Comments: prefer cache, fall back to live API
       let jiraComments: Array<{ id: string; author: { displayName: string; accountId?: string; emailAddress?: string }; body: unknown; created: string; jsdPublic?: boolean }> = [];
-      if (cache) {
+      if (cache && syncService?.isReady()) {
         const cached = await cache.getComments(key, 20);
         jiraComments = cached.map(c => ({
           id: c.jira_comment_id,
