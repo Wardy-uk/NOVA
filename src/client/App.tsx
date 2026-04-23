@@ -137,7 +137,6 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'tasks', label: 'My Tasks' },
       { view: 'standup', label: 'NOVA Briefing' },
       { view: 'team-workload', label: 'My Team' },
-      { view: 'chat', label: 'My Chat' },
     ],
   },
   servicedesk: {

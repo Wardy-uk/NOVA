@@ -7,6 +7,7 @@
  */
 
 import { createHash } from 'crypto';
+import { z } from 'zod';
 import { JiraRestClient, type JiraIssue, type JiraComment } from './jira-client.js';
 import {
   isResolutionSlaBreached,
@@ -19,6 +20,7 @@ import type {
   ProblemTicketConfigRow,
   ProblemTicketAlertReason,
 } from '../db/queries.js';
+import type { LlmService } from './llm-service.js';
 
 // ── Types ──
 
@@ -47,6 +49,25 @@ interface SettingsAccessor {
 interface UserSettingsAccessor {
   get(userId: number, key: string): string | null;
 }
+
+const SentimentBatchSchema = z.object({
+  results: z.array(z.object({
+    issueKey: z.string(),
+    score: z.number().min(-1).max(1),
+    summary: z.string(),
+  })),
+});
+type SentimentBatch = z.infer<typeof SentimentBatchSchema>;
+
+const CommitmentBatchSchema = z.object({
+  results: z.array(z.object({
+    issueKey: z.string(),
+    commitmentDate: z.string().nullable(),
+    followedUp: z.boolean(),
+    quote: z.string(),
+  })),
+});
+type CommitmentBatch = z.infer<typeof CommitmentBatchSchema>;
 
 // ── Helpers ──
 
@@ -124,6 +145,7 @@ export class ProblemTicketScanner {
     private queries: ProblemTicketQueries,
     private settings: SettingsAccessor,
     private userSettings?: UserSettingsAccessor,
+    private llmService?: LlmService,
   ) {}
 
   /** Update the Jira client (e.g. after OAuth token refresh) */
@@ -479,27 +501,15 @@ export class ProblemTicketScanner {
     tickets: Array<{ issue: JiraIssue; reasons: Omit<ProblemTicketAlertReason, 'alert_id'>[] }>,
     sentimentConfig: ProblemTicketConfigRow | undefined,
   ): Promise<void> {
-    if (!sentimentConfig?.enabled || !this.jira || tickets.length === 0) return;
-
-    // Resolve API key: user settings → global settings → env
-    const apiKey = this.settings.get('openai_api_key')?.trim()
-      ?? process.env.OPENAI_API_KEY?.trim()
-      ?? process.env.OPENAI_KEY?.trim();
-
-    if (!apiKey) {
-      console.log('[ProblemTicketScanner] No OpenAI API key — skipping sentiment analysis');
-      return;
-    }
+    if (!sentimentConfig?.enabled || !this.jira || !this.llmService || tickets.length === 0) return;
 
     const threshold = JSON.parse(sentimentConfig.threshold_json ?? '{}');
     const negativeThreshold = threshold.negativeThreshold ?? -0.3;
 
-    // Process in batches of 10
     const batchSize = 10;
     for (let i = 0; i < tickets.length; i += batchSize) {
       const batch = tickets.slice(i, i + batchSize);
 
-      // Fetch last 3 comments for each ticket
       const ticketComments: Array<{ issueKey: string; comments: string }> = [];
       for (const { issue } of batch) {
         try {
@@ -522,55 +532,27 @@ export class ProblemTicketScanner {
           .map(tc => `--- ${tc.issueKey} ---\n${tc.comments}`)
           .join('\n\n');
 
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            temperature: 0.3,
-            response_format: { type: 'json_object' },
-            messages: [
-              {
-                role: 'system',
-                content: `You analyze Jira service desk ticket comments for customer sentiment.
-Return JSON: { "results": [{ "issueKey": "...", "score": -1.0 to 1.0, "summary": "one sentence" }] }
+        const result = await this.llmService.call<SentimentBatch>(
+          `You analyze Jira service desk ticket comments for customer sentiment.
 Score guide: -1.0 = very angry/frustrated, -0.5 = unhappy, 0 = neutral, 0.5 = satisfied, 1.0 = very happy.
 Focus on the customer's tone, not the agent's. If no customer comments, score 0.`,
-              },
-              { role: 'user', content: prompt },
-            ],
-          }),
-        });
+          prompt,
+          SentimentBatchSchema,
+          { tier: 'fast', temperature: 0.3, callType: 'sentiment_analysis' },
+        );
 
-        if (!response.ok) {
-          console.warn(`[ProblemTicketScanner] Sentiment API error: ${response.status}`);
-          continue;
-        }
-
-        const data = await response.json() as any;
-        const content = data.choices?.[0]?.message?.content;
-        if (!content) continue;
-
-        const parsed = JSON.parse(content) as { results: Array<{ issueKey: string; score: number; summary: string }> };
-
-        for (const result of parsed.results ?? []) {
-          const alert = await this.queries.getAlertByIssueKey(result.issueKey);
+        for (const entry of result.data.results) {
+          const alert = await this.queries.getAlertByIssueKey(entry.issueKey);
           if (!alert) continue;
 
-          // Update sentiment on the alert
-          const sentimentScore = Math.max(-1, Math.min(1, result.score));
+          const sentimentScore = Math.max(-1, Math.min(1, entry.score));
 
-          // Add sentiment weight if negative enough
           let extraScore = 0;
           if (sentimentScore <= negativeThreshold) {
             extraScore = sentimentConfig.weight;
           }
 
           if (extraScore > 0 || sentimentScore !== 0) {
-            // Re-upsert with sentiment data and potentially higher score
             const newScore = Math.min(100, alert.score + extraScore);
             const newSeverity = newScore >= 60 ? 'P1' : newScore >= 35 ? 'P2' : 'P3';
 
@@ -580,7 +562,7 @@ Focus on the customer's tone, not the agent's. If no customer comments, score 0.
                 rule: 'sentiment',
                 label: 'Negative Sentiment',
                 weight: sentimentConfig.weight,
-                detail: result.summary,
+                detail: entry.summary,
               });
             }
 
@@ -589,7 +571,7 @@ Focus on the customer's tone, not the agent's. If no customer comments, score 0.
               score: newScore,
               severity: newSeverity,
               sentiment_score: sentimentScore,
-              sentiment_summary: result.summary,
+              sentiment_summary: entry.summary,
             }, reasons);
           }
         }
@@ -604,22 +586,14 @@ Focus on the customer's tone, not the agent's. If no customer comments, score 0.
     tickets: Array<{ issue: JiraIssue; reasons: Omit<ProblemTicketAlertReason, 'alert_id'>[] }>,
     commitmentConfig: ProblemTicketConfigRow | undefined,
   ): Promise<void> {
-    if (!commitmentConfig?.enabled || !this.jira || tickets.length === 0) return;
+    if (!commitmentConfig?.enabled || !this.jira || !this.llmService || tickets.length === 0) return;
 
-    const apiKey = this.settings.get('openai_api_key')?.trim()
-      ?? process.env.OPENAI_API_KEY?.trim()
-      ?? process.env.OPENAI_KEY?.trim();
-
-    if (!apiKey) {
-      console.log('[ProblemTicketScanner] No OpenAI API key — skipping commitment analysis');
-      return;
-    }
+    const today = new Date().toISOString().slice(0, 10);
 
     const batchSize = 10;
     for (let i = 0; i < tickets.length; i += batchSize) {
       const batch = tickets.slice(i, i + batchSize);
 
-      // Fetch last 10 comments for each ticket (need more context for commitment detection)
       const ticketComments: Array<{ issueKey: string; comments: string }> = [];
       for (const { issue } of batch) {
         try {
@@ -642,24 +616,9 @@ Focus on the customer's tone, not the agent's. If no customer comments, score 0.
           .map(tc => `--- ${tc.issueKey} ---\n${tc.comments}`)
           .join('\n\n');
 
-        const today = new Date().toISOString().slice(0, 10);
-
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            temperature: 0.2,
-            response_format: { type: 'json_object' },
-            messages: [
-              {
-                role: 'system',
-                content: `You analyze Jira service desk comments for update commitments made by support agents.
+        const result = await this.llmService.call<CommitmentBatch>(
+          `You analyze Jira service desk comments for update commitments made by support agents.
 Today's date is ${today}.
-Return JSON: { "results": [{ "issueKey": "...", "commitmentDate": "YYYY-MM-DD" or null, "followedUp": true or false, "quote": "exact phrase from agent" }] }
 Rules:
 - Look for agent promises like "will update by Friday", "get back to you by 15th March", "expect an update by end of week", "I'll have this resolved by tomorrow"
 - Only flag commitments from agents/support staff, not from customers/reporters
@@ -667,32 +626,16 @@ Rules:
 - followedUp = true if a comment from the same agent (or any agent) exists AFTER the commitment date
 - Only flag missed commitments: where commitmentDate is in the past AND followedUp is false
 - If no commitment found or commitment was followed up, set commitmentDate to null`,
-              },
-              { role: 'user', content: prompt },
-            ],
-          }),
-        });
+          prompt,
+          CommitmentBatchSchema,
+          { tier: 'fast', temperature: 0.2, callType: 'commitment_analysis' },
+        );
 
-        if (!response.ok) {
-          console.warn(`[ProblemTicketScanner] Commitment API error: ${response.status}`);
-          continue;
-        }
+        for (const entry of result.data.results) {
+          if (!entry.commitmentDate || entry.followedUp) continue;
+          if (entry.commitmentDate > today) continue;
 
-        const data = await response.json() as any;
-        const content = data.choices?.[0]?.message?.content;
-        if (!content) continue;
-
-        const parsed = JSON.parse(content) as {
-          results: Array<{ issueKey: string; commitmentDate: string | null; followedUp: boolean; quote: string }>
-        };
-
-        for (const result of parsed.results ?? []) {
-          if (!result.commitmentDate || result.followedUp) continue;
-
-          // Verify the commitment date is actually in the past
-          if (result.commitmentDate > today) continue;
-
-          const alert = await this.queries.getAlertByIssueKey(result.issueKey);
+          const alert = await this.queries.getAlertByIssueKey(entry.issueKey);
           if (!alert) continue;
 
           const newScore = Math.min(100, alert.score + commitmentConfig.weight);
@@ -703,7 +646,7 @@ Rules:
             rule: 'missed_commitment',
             label: 'Missed Commitment',
             weight: commitmentConfig.weight,
-            detail: `Promised update by ${result.commitmentDate}${result.quote ? `: "${result.quote}"` : ''}`,
+            detail: `Promised update by ${entry.commitmentDate}${entry.quote ? `: "${entry.quote}"` : ''}`,
           });
 
           await this.queries.upsertAlert({

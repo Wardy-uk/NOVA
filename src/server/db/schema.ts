@@ -78,7 +78,7 @@ async function runMigrations(): Promise<void> {
      CREATE TABLE agent_ticket_state (
        id INT IDENTITY(1,1) PRIMARY KEY,
        ticket_id NVARCHAR(100) NOT NULL,
-       conversation_state NVARCHAR(MAX) NOT NULL,
+       conversation_state NVARCHAR(MAX) NOT NULL DEFAULT '{}',
        last_event_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
        created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
        CONSTRAINT UQ_agent_ticket_state_ticket UNIQUE (ticket_id)
@@ -695,6 +695,9 @@ async function runMigrations(): Promise<void> {
        created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
        updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
      );`,
+
+    // Allow NULL on conversation_state — it was NOT NULL with no default, causing INSERT failures
+    `ALTER TABLE agent_ticket_state ALTER COLUMN conversation_state NVARCHAR(MAX) NULL;`,
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_suggestions_type_status')
      CREATE INDEX IX_agent_suggestions_type_status ON agent_suggestions (type, status, created_at DESC);`,

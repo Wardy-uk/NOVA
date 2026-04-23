@@ -55,7 +55,7 @@ import { MilestoneWorkflowEngine } from './services/milestone-workflow.js';
 import { AuditQueries } from './db/audit.js';
 import { createAuditRoutes } from './routes/audit.js';
 import { createTeamRoutes } from './routes/team.js';
-import { createChatRoutes } from './routes/chat.js';
+// import { createChatRoutes } from './routes/chat.js'; // Chat disabled — needs redesign
 import { JiraOAuthService } from './services/jira-oauth.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
@@ -837,7 +837,8 @@ async function main() {
   app.use('/api/audit', createAuditRoutes(auditQueries));
   app.use('/api/team', requireAreaAccess('nova_features', 'view'), createTeamRoutes(deliveryQueries, milestoneQueries, taskQueries, userQueries));
   app.use('/api/notifications', createNotificationRoutes(notificationQueries, notificationEngine));
-  app.use('/api/chat', requireAreaAccess('nova_features', 'view'), createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
+  // Chat disabled — feature needs redesign (was direct OpenAI, needs consolidating with AI Agent)
+  // app.use('/api/chat', requireAreaAccess('nova_features', 'view'), createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
   app.use('/api/people', createPeopleRoutes({ userQueries, settingsQueries, mcpManager, notificationQueries }));
 
   // Start Jira sync (service was created earlier so routes can reference it)
@@ -1103,6 +1104,8 @@ async function main() {
     buildOnboardingJiraClient(),
     problemTicketQueries,
     settingsQueries,
+    undefined,
+    llmService,
   );
   app.use('/api/problem-tickets', createProblemTicketRoutes(problemTicketQueries, () => {
     // Refresh Jira client on each scan (credentials may change)
