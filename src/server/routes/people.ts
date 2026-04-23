@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import sql from 'mssql';
 import { query, queryOne, execute, executeAndGetId } from '../services/database.js';
 import type { UserQueries } from '../db/queries.js';
 import type { NotificationQueries } from '../db/notifications.js';
@@ -7,6 +8,25 @@ import type { McpClientManager } from '../services/mcp-client.js';
 import { LlmService } from '../services/llm-service.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
+
+let kpiPool: sql.ConnectionPool | null = null;
+async function getKpiPool(settings: FileSettingsQueries): Promise<sql.ConnectionPool> {
+  if (kpiPool?.connected) return kpiPool;
+  const all = settings.getAll();
+  const server = all.kpi_sql_server;
+  const database = all.kpi_sql_database;
+  const user = all.kpi_sql_user;
+  const password = all.kpi_sql_password;
+  if (!server || !database || !user || !password) {
+    throw new Error('KPI SQL Server not configured');
+  }
+  kpiPool = await new sql.ConnectionPool({
+    server, database, user, password,
+    options: { encrypt: true, trustServerCertificate: true },
+    requestTimeout: 30000,
+  }).connect();
+  return kpiPool;
+}
 
 interface PeopleDeps {
   userQueries: UserQueries;
@@ -29,18 +49,28 @@ export async function generatePrepForAgent(
   const sinceDate = lastSnap?.snapshot_date
     ?? new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const kpiRows = await query<any>(`
-    SELECT * FROM jira_agent_kpi_daily
-    WHERE AgentName = ? AND KpiDate >= ?
-    ORDER BY KpiDate DESC
-  `, [agentName, sinceDate]);
+  const kpiDb = await getKpiPool(settingsQueries);
 
-  const qaRows = await query<any>(`
+  const kpiReq = kpiDb.request();
+  kpiReq.input('agent', sql.NVarChar, agentName);
+  kpiReq.input('since', sql.NVarChar, sinceDate);
+  const kpiResult = await kpiReq.query(`
+    SELECT * FROM dbo.jira_agent_kpi_daily
+    WHERE AgentName = @agent AND KpiDate >= @since
+    ORDER BY KpiDate DESC
+  `);
+  const kpiRows = kpiResult.recordset;
+
+  const qaReq = kpiDb.request();
+  qaReq.input('agent', sql.NVarChar, agentName);
+  qaReq.input('since', sql.NVarChar, sinceDate);
+  const qaResult = await qaReq.query(`
     SELECT TOP 20 TicketKey, OverallScore, TrafficLight, QADate, Comments
-    FROM jira_qa_results
-    WHERE AgentName = ? AND QADate >= ?
+    FROM dbo.jira_qa_results
+    WHERE AgentName = @agent AND QADate >= @since
     ORDER BY QADate DESC
-  `, [agentName, sinceDate]);
+  `);
+  const qaRows = qaResult.recordset;
 
   const concerningQa = qaRows.filter((r: any) =>
     r.TrafficLight === 'RED' || (r.OverallScore != null && r.OverallScore < 6.5)
