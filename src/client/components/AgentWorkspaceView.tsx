@@ -33,6 +33,8 @@ interface QueueTicket {
   reporter: string | null;
   organisation: string | null;
   requestType: string | null;
+  currentTier: string | null;
+  project: string;
   labels: string[];
   created: string;
   updated: string;
@@ -330,9 +332,23 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
   const [slaFilter, setSlaFilter] = useState<string>('all');
+  const [tierFilter, setTierFilter] = useState<string>('all');
+  const [aiActionFilter, setAiActionFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('urgency');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+
+  // Read filter from Dashboard navigation
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('agent_workspace_filter');
+      if (stored) {
+        sessionStorage.removeItem('agent_workspace_filter');
+        const f = JSON.parse(stored);
+        if (f.aiAction) setAiActionFilter(f.aiAction);
+      }
+    } catch {}
+  }, []);
 
   const selectedRowRef = useRef<HTMLTableRowElement>(null);
 
@@ -371,20 +387,24 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
 
   const { nextFastIn, nextFullIn } = useAutoRefresh(refreshFast, refreshFull);
 
-  const projects = useMemo(() => [...new Set(tickets.map(t => t.key.replace(/-\d+$/, '')))].sort(), [tickets]);
+  const projects = useMemo(() => [...new Set(tickets.map(t => t.project ?? t.key.replace(/-\d+$/, '')))].sort(), [tickets]);
   const statuses = useMemo(() => [...new Set(tickets.map(t => t.status))].sort(), [tickets]);
   const priorities = useMemo(() => [...new Set(tickets.map(t => t.priority))], [tickets]);
   const assignees = useMemo(() => [...new Set(tickets.map(t => t.assignee).filter(Boolean))].sort() as string[], [tickets]);
+  const tiers = useMemo(() => [...new Set(tickets.map(t => t.currentTier).filter(Boolean))].sort() as string[], [tickets]);
+  const aiActions = useMemo(() => [...new Set(tickets.map(t => t.ai?.action).filter(Boolean))].sort() as string[], [tickets]);
 
   const filtered = useMemo(() => {
     let list = [...tickets];
-    if (projectFilter !== 'all') list = list.filter(t => t.key.startsWith(projectFilter + '-'));
+    if (projectFilter !== 'all') list = list.filter(t => (t.project ?? t.key.replace(/-\d+$/, '')) === projectFilter);
     if (statusFilter !== 'all') list = list.filter(t => t.status === statusFilter);
     if (priorityFilter !== 'all') list = list.filter(t => t.priority === priorityFilter);
     if (assigneeFilter !== 'all') {
       list = assigneeFilter === 'unassigned' ? list.filter(t => !t.assignee) : list.filter(t => t.assignee === assigneeFilter);
     }
     if (slaFilter !== 'all') list = list.filter(t => t.sla.status === slaFilter);
+    if (tierFilter !== 'all') list = list.filter(t => (t.currentTier ?? 'none') === tierFilter);
+    if (aiActionFilter !== 'all') list = list.filter(t => t.ai?.action === aiActionFilter);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter(t =>
@@ -406,7 +426,7 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
       });
     }
     return list;
-  }, [tickets, projectFilter, statusFilter, priorityFilter, assigneeFilter, slaFilter, searchQuery, sortField, sortDir]);
+  }, [tickets, projectFilter, statusFilter, priorityFilter, assigneeFilter, slaFilter, tierFilter, aiActionFilter, searchQuery, sortField, sortDir]);
 
   useEffect(() => {
     if (selectedIdx >= filtered.length && filtered.length > 0) setSelectedIdx(filtered.length - 1);
@@ -490,8 +510,10 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
         <FilterSelect label="Priority" value={priorityFilter} onChange={setPriorityFilter} options={[{ value: 'all', label: 'All priorities' }, ...priorities.map(p => ({ value: p, label: p }))]} />
         <FilterSelect label="Assignee" value={assigneeFilter} onChange={setAssigneeFilter} options={[{ value: 'all', label: 'All assignees' }, { value: 'unassigned', label: 'Unassigned' }, ...assignees.map(a => ({ value: a, label: a }))]} />
         <FilterSelect label="SLA" value={slaFilter} onChange={setSlaFilter} options={[{ value: 'all', label: 'All SLA' }, { value: 'breached', label: 'Breached' }, { value: 'at_risk', label: 'At Risk' }, { value: 'ok', label: 'OK' }]} />
-        {(projectFilter !== 'all' || statusFilter !== 'all' || priorityFilter !== 'all' || assigneeFilter !== 'all' || slaFilter !== 'all' || searchQuery) && (
-          <button onClick={() => { setProjectFilter('all'); setStatusFilter('all'); setPriorityFilter('all'); setAssigneeFilter('all'); setSlaFilter('all'); setSearchQuery(''); }}
+        {tiers.length > 0 && <FilterSelect label="Tier" value={tierFilter} onChange={setTierFilter} options={[{ value: 'all', label: 'All Tiers' }, { value: 'none', label: 'No Tier' }, ...tiers.map(t => ({ value: t, label: t }))]} />}
+        {aiActions.length > 0 && <FilterSelect label="AI Action" value={aiActionFilter} onChange={setAiActionFilter} options={[{ value: 'all', label: 'All Actions' }, ...aiActions.map(a => ({ value: a, label: a === 'draft_response' ? 'Draft Response' : a === 'no_action' ? 'No Action' : a.charAt(0).toUpperCase() + a.slice(1) }))]} />}
+        {(projectFilter !== 'all' || statusFilter !== 'all' || priorityFilter !== 'all' || assigneeFilter !== 'all' || slaFilter !== 'all' || tierFilter !== 'all' || aiActionFilter !== 'all' || searchQuery) && (
+          <button onClick={() => { setProjectFilter('all'); setStatusFilter('all'); setPriorityFilter('all'); setAssigneeFilter('all'); setSlaFilter('all'); setTierFilter('all'); setAiActionFilter('all'); setSearchQuery(''); }}
             className="text-[10px] text-neutral-600 hover:text-red-400 transition-colors">Clear filters</button>
         )}
         <span className="text-[10px] text-neutral-600 ml-auto">{filtered.length} shown</span>

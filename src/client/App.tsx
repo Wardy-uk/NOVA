@@ -1219,7 +1219,10 @@ export function App() {
             <AgentWorkspaceView />
           )}
           {view === 'agent-dashboard' && canSeeArea('ai-agent') && (
-            <AgentDashboardView userRole={auth.user?.role ?? ''} />
+            <AgentDashboardView userRole={auth.user?.role ?? ''} onNavigateToWorkspace={(filter) => {
+              if (filter.aiAction) sessionStorage.setItem('agent_workspace_filter', JSON.stringify(filter));
+              setView('agent-workspace');
+            }} />
           )}
           {view === 'agent-coaching' && canSeeArea('ai-agent') && (
             <AgentCoachingView />

@@ -175,7 +175,7 @@ function checkSuperAdmin(role: string): boolean {
   return role.split(',').map(r => r.trim()).includes('super_admin');
 }
 
-export function AgentDashboardView({ userRole = '' }: { userRole?: string }) {
+export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { userRole?: string; onNavigateToWorkspace?: (filter: { aiAction?: string }) => void }) {
   const isSuperAdmin = checkSuperAdmin(userRole);
   const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'quick-actions' | 'costs'>('overview');
   const [status, setStatus] = useState<AgentStatus | null>(null);
@@ -436,7 +436,9 @@ function OverviewTab({ status, stats, decisions, onSelect }: {
               {Object.entries(stats.byAction)
                 .sort((a, b) => b[1] - a[1])
                 .map(([action, count]) => (
-                  <div key={action} className="flex items-center justify-between text-xs">
+                  <div key={action}
+                    onClick={() => onNavigateToWorkspace?.({ aiAction: action })}
+                    className={`flex items-center justify-between text-xs ${onNavigateToWorkspace ? 'cursor-pointer hover:bg-[#363d47]/50 -mx-2 px-2 py-0.5 rounded transition-colors' : ''}`}>
                     <span className="text-neutral-300">{actionLabel(action)}</span>
                     <span className="text-neutral-400 font-mono">{count}</span>
                   </div>
@@ -1403,9 +1405,9 @@ const MODEL_COLORS: Record<string, string> = {
 };
 
 function fmtCost(n: number): string {
-  if (n >= 1) return `$${n.toFixed(2)}`;
-  if (n >= 0.01) return `$${n.toFixed(3)}`;
-  return `$${n.toFixed(4)}`;
+  if (n >= 1) return `£${n.toFixed(2)}`;
+  if (n >= 0.01) return `£${n.toFixed(3)}`;
+  return `£${n.toFixed(4)}`;
 }
 
 function fmtTokens(n: number): string {

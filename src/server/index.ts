@@ -887,6 +887,8 @@ async function main() {
       qaPipeline,
       pipelineMonitor,
       settingsQueries,
+      jiraCache: jiraCacheQueries,
+      jiraSyncService,
     }));
 
     // KPI pipeline timers

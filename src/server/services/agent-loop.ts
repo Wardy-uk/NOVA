@@ -359,14 +359,12 @@ export class AgentLoop {
       console.warn(`[agent] Failed to update ticket state for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
     }
 
-    // Post internal note to Jira — but NOT in shadow mode, because Jira
-    // automation rules fire on any comment (including internal) and change
-    // ticket status (e.g. Waiting On Partner → Work in progress).
+    // Always post internal note if we have one (internal notes are safe in shadow mode too)
     const internalNote = decision.output.internal_note as string | undefined;
-    if (internalNote && !decision.shadowMode) {
+    if (internalNote) {
       try {
         await this.jiraClient.addComment(decision.ticketKey, this.formatInternalNote(decision), { internal: true });
-        console.log(`[agent] Posted internal note on ${decision.ticketKey}`);
+        console.log(`[agent] Posted internal note on ${decision.ticketKey}${decision.shadowMode ? ' [SHADOW]' : ''}`);
       } catch (err) {
         console.warn(`[agent] Failed to post internal note on ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
       }

@@ -15,6 +15,8 @@ import type { KpiPipeline } from '../services/kpi-pipeline.js';
 import type { QaPipeline } from '../services/qa-pipeline.js';
 import type { PipelineMonitor } from '../services/pipeline-monitor.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
+import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
+import type { JiraSyncService } from '../services/jira-sync-service.js';
 
 interface AgentRouteDeps {
   agentLoop: AgentLoop;
@@ -27,6 +29,8 @@ interface AgentRouteDeps {
   qaPipeline: QaPipeline;
   pipelineMonitor: PipelineMonitor;
   settingsQueries: FileSettingsQueries;
+  jiraCache: JiraCacheQueries;
+  jiraSyncService: JiraSyncService | null;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
@@ -724,30 +728,84 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
   router.get('/workspace/queue', async (req, res) => {
     try {
-      const jira = agentLoop.getJiraClient();
+      const cache = deps?.jiraCache;
+      const syncReady = deps?.jiraSyncService?.isReady();
       const projectSetting = agentLoop.getSettings().get('agent_jira_project') ?? 'NT';
       const projects = projectSetting.split(',').map(p => p.trim()).filter(Boolean);
-      const projectFilter = projects.length === 1 ? `project = ${projects[0]}` : `project IN (${projects.join(', ')})`;
       const assigneeFilter = req.query.assignee as string | undefined;
+      const projectFilterParam = req.query.project as string | undefined;
+      const tierFilter = req.query.tier as string | undefined;
 
-      const fields = [
-        'summary', 'description', 'status', 'priority', 'issuetype',
-        'assignee', 'reporter', 'created', 'updated',
-        'customfield_10020', 'customfield_10010', 'labels',
-      ];
+      let rawIssues: Array<{ key: string; id: string; fields: Record<string, any> }>;
 
-      let jql = `${projectFilter} AND statusCategory IN ("To Do", "In Progress")`;
-      if (assigneeFilter) {
-        jql += assigneeFilter === 'unassigned'
-          ? ' AND assignee is EMPTY'
-          : ` AND assignee = "${assigneeFilter}"`;
+      if (cache && syncReady) {
+        const cached = await cache.getOpenIssues(projectFilterParam ? [projectFilterParam] : projects);
+        rawIssues = cached.map(ci => ({
+          key: ci.issue_key,
+          id: ci.jira_id,
+          fields: {
+            summary: ci.summary,
+            status: { name: ci.status_name, statusCategory: { key: ci.status_category } },
+            priority: { name: ci.priority_name },
+            issuetype: { name: ci.issuetype_name },
+            assignee: ci.assignee_account_id ? { displayName: ci.assignee_display, accountId: ci.assignee_account_id, emailAddress: ci.assignee_email } : null,
+            reporter: ci.reporter_display ? { displayName: ci.reporter_display, emailAddress: ci.reporter_email } : null,
+            created: ci.jira_created?.toISOString() ?? null,
+            updated: ci.jira_updated?.toISOString() ?? null,
+            labels: ci.labels ? ci.labels.split(';') : [],
+            customfield_10020: ci.request_type ? { requestType: { name: ci.request_type } } : null,
+            customfield_12981: ci.current_tier ? { value: ci.current_tier } : null,
+            _sla_breach_time: ci.sla_breach_time,
+            _sla_breached: ci.sla_breached,
+          },
+        }));
+      } else {
+        const jira = agentLoop.getJiraClient();
+        const projectJql = projects.length === 1 ? `project = ${projects[0]}` : `project IN (${projects.join(', ')})`;
+
+        const fields = [
+          'summary', 'description', 'status', 'priority', 'issuetype',
+          'assignee', 'reporter', 'created', 'updated',
+          'customfield_10020', 'customfield_10010', 'customfield_12981', 'labels',
+        ];
+
+        let jql = `${projectJql} AND statusCategory IN ("To Do", "In Progress")`;
+        if (assigneeFilter) {
+          jql += assigneeFilter === 'unassigned'
+            ? ' AND assignee is EMPTY'
+            : ` AND assignee = "${assigneeFilter}"`;
+        }
+        jql += ' ORDER BY created DESC';
+
+        const result = await jira.searchJqlAll(jql, fields, 1000);
+        rawIssues = result.issues;
       }
-      jql += ' ORDER BY created DESC';
 
-      const result = await jira.searchJqlAll(jql, fields, 1000);
+      // Apply assignee filter (for cache path)
+      if (assigneeFilter && cache && syncReady) {
+        rawIssues = rawIssues.filter(i => {
+          if (assigneeFilter === 'unassigned') return !i.fields.assignee;
+          return i.fields.assignee?.displayName === assigneeFilter || i.fields.assignee?.accountId === assigneeFilter;
+        });
+      }
+
+      // Apply tier filter (multi-select, comma-separated)
+      if (tierFilter) {
+        const tiers = new Set(tierFilter.split(',').map(t => t.trim()));
+        rawIssues = rawIssues.filter(i => {
+          const tier = i.fields.customfield_12981?.value ?? null;
+          if (tiers.has('none')) return !tier || tiers.has(tier);
+          return tier && tiers.has(tier);
+        });
+      }
+
+      // Apply project filter (for cache path when filtering to subset)
+      if (projectFilterParam && !(cache && syncReady)) {
+        rawIssues = rawIssues.filter(i => i.key.startsWith(projectFilterParam + '-'));
+      }
 
       // Batch-fetch latest AI decision for each ticket
-      const ticketKeys = result.issues.map((i: any) => i.key);
+      const ticketKeys = rawIssues.map(i => i.key);
       let aiDecisions: Record<string, any> = {};
       if (ticketKeys.length > 0) {
         const placeholders = ticketKeys.map(() => '?').join(',');
@@ -772,13 +830,25 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       }
 
       const now = Date.now();
-      const tickets = result.issues.map((issue: any) => {
+      const tickets = rawIssues.map(issue => {
         const f = issue.fields;
-        const slaField = f.customfield_10010;
         let slaStatus: 'ok' | 'at_risk' | 'breached' = 'ok';
         let slaMinutesRemaining: number | null = null;
         let slaType: string | null = null;
 
+        // Cache path: use denormalized SLA fields
+        if (f._sla_breach_time) {
+          const breachMs = new Date(f._sla_breach_time).getTime();
+          const remaining = (breachMs - now) / 60000;
+          slaMinutesRemaining = Math.round(remaining);
+          if (remaining <= 0 || f._sla_breached) slaStatus = 'breached';
+          else if (remaining <= 60) slaStatus = 'at_risk';
+        } else if (f._sla_breached) {
+          slaStatus = 'breached';
+        }
+
+        // Live API path: use raw SLA field
+        const slaField = f.customfield_10010;
         if (slaField) {
           const ongoing = slaField?.ongoingCycle;
           if (ongoing?.breachTime?.epochMillis) {
@@ -814,6 +884,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
         const createdAt = new Date(f.created ?? '');
         const ageMinutes = Math.round((now - createdAt.getTime()) / 60000);
+        const currentTier = f.customfield_12981?.value ?? null;
 
         const priorityOrder: Record<string, number> = { Highest: 0, High: 1, Medium: 2, Low: 3, Lowest: 4 };
 
@@ -831,6 +902,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
           reporter: f.reporter?.displayName ?? null,
           organisation: f.reporter?.emailAddress?.split('@')[1] ?? null,
           requestType: f.customfield_10020?.requestType?.name ?? null,
+          currentTier,
+          project: issue.key.split('-')[0],
           labels: f.labels ?? [],
           created: f.created ?? '',
           updated: f.updated ?? '',
@@ -863,7 +936,19 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         return b.ageMinutes - a.ageMinutes;
       });
 
-      res.json({ ok: true, data: { tickets, total: tickets.length, source: 'jira', cached: false } });
+      // Collect distinct values for filter dropdowns
+      const allTiers = new Set<string>();
+      const allProjects = new Set<string>();
+      for (const t of tickets) {
+        if (t.currentTier) allTiers.add(t.currentTier);
+        allProjects.add(t.project);
+      }
+
+      res.json({ ok: true, data: {
+        tickets, total: tickets.length,
+        source: (cache && syncReady) ? 'cache' : 'jira', cached: !!(cache && syncReady),
+        filters: { tiers: [...allTiers].sort(), projects: [...allProjects].sort() },
+      } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get workspace queue' });
     }
