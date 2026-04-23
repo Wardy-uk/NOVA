@@ -128,6 +128,40 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: agentLoop.getGuardrails().getRules() });
   });
 
+  router.post('/guardrails', (req, res) => {
+    const { id, description, severity, pattern, enabled } = req.body;
+    if (!id || !description || !severity || !pattern) {
+      res.status(400).json({ ok: false, error: 'id, description, severity, and pattern are required' });
+      return;
+    }
+    const result = agentLoop.getGuardrails().addCustomRule({
+      id, description,
+      severity: severity === 'warn' ? 'warn' : 'block',
+      pattern,
+      enabled: enabled !== false,
+    });
+    if (!result.ok) { res.status(400).json(result); return; }
+    res.json({ ok: true, data: agentLoop.getGuardrails().getRules() });
+  });
+
+  router.patch('/guardrails/:ruleId', (req, res) => {
+    const { description, severity, pattern, enabled } = req.body;
+    const result = agentLoop.getGuardrails().updateCustomRule(req.params.ruleId, {
+      ...(description !== undefined && { description }),
+      ...(severity !== undefined && { severity: severity === 'warn' ? 'warn' : 'block' }),
+      ...(pattern !== undefined && { pattern }),
+      ...(enabled !== undefined && { enabled }),
+    });
+    if (!result.ok) { res.status(400).json(result); return; }
+    res.json({ ok: true, data: agentLoop.getGuardrails().getRules() });
+  });
+
+  router.delete('/guardrails/:ruleId', (req, res) => {
+    const result = agentLoop.getGuardrails().deleteCustomRule(req.params.ruleId);
+    if (!result.ok) { res.status(400).json(result); return; }
+    res.json({ ok: true, data: agentLoop.getGuardrails().getRules() });
+  });
+
   router.post('/sweep', async (_req, res) => {
     try {
       // Manual sweep trigger (runs immediately, outside normal tick schedule)

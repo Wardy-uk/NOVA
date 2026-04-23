@@ -67,6 +67,8 @@ interface GuardrailRule {
   description: string;
   severity: string;
   enabled: boolean;
+  builtin: boolean;
+  pattern?: string;
 }
 
 interface AutonomyRule {
@@ -106,8 +108,10 @@ interface KbGap {
 
 // ── Helpers ──
 
-function api(path: string, opts?: RequestInit) {
-  return fetch(`/api/agent${path}`, opts).then(r => r.json());
+async function api(path: string, opts?: RequestInit) {
+  const r = await fetch(`/api/agent${path}`, opts);
+  const text = await r.text();
+  try { return JSON.parse(text); } catch { return { ok: false, error: `Non-JSON response (${r.status})` }; }
 }
 
 function apiPost(path: string) {
@@ -208,7 +212,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
 
   const refresh = useCallback(async () => {
     try {
-      const [sRes, stRes, dRes, aRes, lcRes, ahRes] = await Promise.all([
+      const results = await Promise.allSettled([
         api('/status'),
         api('/stats'),
         api('/decisions?limit=50'),
@@ -216,13 +220,16 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
         api('/lifecycle/breakdown'),
         api('/lifecycle/approval-health'),
       ]);
-      if (sRes.ok) setStatus(sRes.data);
-      if (stRes.ok) setStats(stRes.data);
-      if (dRes.ok) setDecisions(dRes.data);
-      if (aRes.ok) setAlerts(aRes.data);
-      if (lcRes.ok) setLifecycleBreakdown(lcRes.data);
-      if (ahRes.ok) setApprovalHealth(ahRes.data);
-      setError(null);
+      const val = (i: number) => results[i].status === 'fulfilled' ? results[i].value : null;
+      const sRes = val(0), stRes = val(1), dRes = val(2), aRes = val(3), lcRes = val(4), ahRes = val(5);
+      if (sRes?.ok) setStatus(sRes.data);
+      if (stRes?.ok) setStats(stRes.data);
+      if (dRes?.ok) setDecisions(dRes.data);
+      if (aRes?.ok) setAlerts(aRes.data);
+      if (lcRes?.ok) setLifecycleBreakdown(lcRes.data);
+      if (ahRes?.ok) setApprovalHealth(ahRes.data);
+      const allFailed = results.every(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value?.ok));
+      setError(allFailed ? 'All agent endpoints failed — check server connection' : null);
     } catch (err: any) {
       setError(err.message ?? 'Failed to load agent data');
     } finally {
@@ -338,7 +345,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       {tab === 'overview' && <OverviewTab status={status} stats={stats} decisions={decisions} onSelect={setSelected} onNavigateToWorkspace={onNavigateToWorkspace} lifecycleBreakdown={lifecycleBreakdown} approvalHealth={approvalHealth} />}
       {tab === 'decisions' && <DecisionsTab decisions={decisions} selected={selected} onSelect={setSelected} onRefresh={refresh} />}
       {tab === 'autonomy' && <AutonomyTab rules={autonomyRules} onRefresh={() => api('/autonomy').then(r => { if (r.ok) setAutonomyRules(r.data); })} isSuperAdmin={isSuperAdmin} />}
-      {tab === 'guardrails' && <GuardrailsTab rules={guardrails} onToggle={toggleGuardrail} />}
+      {tab === 'guardrails' && <GuardrailsTab rules={guardrails} onToggle={toggleGuardrail} onRefresh={() => api('/guardrails').then(r => { if (r.ok) setGuardrails(r.data); })} />}
       {tab === 'alerts' && <AlertsTab alerts={alerts} onRefresh={() => api('/alerts?limit=100&includeAcknowledged=true').then(r => { if (r.ok) setAlerts(r.data); })} />}
       {tab === 'kb-gaps' && <KbGapsTab gaps={kbGaps} onRefresh={() => api('/kb-gaps').then(r => { if (r.ok) setKbGaps(r.data); })} />}
       {tab === 'quick-actions' && <QuickActionsTab />}
@@ -749,12 +756,90 @@ function DecisionDetail({ decision: d, onClose }: { decision: Decision; onClose:
 
 // ── Guardrails Tab ──
 
-function GuardrailsTab({ rules, onToggle }: { rules: GuardrailRule[]; onToggle: (id: string, enabled: boolean) => void }) {
+function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[]; onToggle: (id: string, enabled: boolean) => void; onRefresh: () => void }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formId, setFormId] = useState('');
+  const [formDesc, setFormDesc] = useState('');
+  const [formSeverity, setFormSeverity] = useState<'block' | 'warn'>('block');
+  const [formPattern, setFormPattern] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const resetForm = () => { setShowForm(false); setEditingId(null); setFormId(''); setFormDesc(''); setFormSeverity('block'); setFormPattern(''); setFormError(null); };
+
+  const startEdit = (r: GuardrailRule) => {
+    setEditingId(r.id); setFormId(r.id); setFormDesc(r.description); setFormSeverity(r.severity as 'block' | 'warn'); setFormPattern(r.pattern ?? ''); setShowForm(true); setFormError(null);
+  };
+
+  const handleSave = async () => {
+    if (!formId.trim() || !formDesc.trim() || !formPattern.trim()) { setFormError('All fields are required'); return; }
+    setSaving(true); setFormError(null);
+    const body = { id: formId.trim(), description: formDesc.trim(), severity: formSeverity, pattern: formPattern.trim(), enabled: true };
+    const res = editingId
+      ? await api(`/guardrails/${editingId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      : await api('/guardrails', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    setSaving(false);
+    if (res.ok) { onRefresh(); resetForm(); } else { setFormError(res.error ?? 'Failed to save rule'); }
+  };
+
+  const handleDelete = async (id: string) => {
+    const res = await api(`/guardrails/${id}`, { method: 'DELETE' });
+    if (res.ok) onRefresh();
+  };
+
+  const builtinRules = rules.filter(r => r.builtin);
+  const customRules = rules.filter(r => !r.builtin);
+
   return (
     <div className="space-y-3">
-      <p className="text-xs text-neutral-500">
-        Guardrails are validated on every agent decision before execution. Blocked rules prevent the action entirely.
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-neutral-500">
+          Guardrails are validated on every agent decision before execution. Blocked rules prevent the action entirely.
+        </p>
+        <button onClick={() => { resetForm(); setShowForm(true); }} className="px-3 py-1.5 text-[11px] font-medium rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors">
+          + Add Rule
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="border border-blue-800/50 rounded-lg bg-[#1e2530] p-4 space-y-3">
+          <div className="text-xs font-medium text-neutral-300">{editingId ? 'Edit Rule' : 'New Custom Rule'}</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] text-neutral-500 block mb-1">Rule ID (slug)</label>
+              <input value={formId} onChange={e => setFormId(e.target.value)} disabled={!!editingId} placeholder="e.g. no_password_disclosure"
+                className="w-full px-2 py-1.5 text-[11px] rounded bg-[#2a303a] border border-[#3a424d] text-neutral-200 focus:border-blue-600 outline-none disabled:opacity-50" />
+            </div>
+            <div>
+              <label className="text-[10px] text-neutral-500 block mb-1">Severity</label>
+              <select value={formSeverity} onChange={e => setFormSeverity(e.target.value as 'block' | 'warn')}
+                className="w-full px-2 py-1.5 text-[11px] rounded bg-[#2a303a] border border-[#3a424d] text-neutral-200 focus:border-blue-600 outline-none">
+                <option value="block">BLOCK</option>
+                <option value="warn">WARN</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] text-neutral-500 block mb-1">Description</label>
+            <input value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="Human-readable description of what this rule catches"
+              className="w-full px-2 py-1.5 text-[11px] rounded bg-[#2a303a] border border-[#3a424d] text-neutral-200 focus:border-blue-600 outline-none" />
+          </div>
+          <div>
+            <label className="text-[10px] text-neutral-500 block mb-1">Pattern (regex, matched against draft response)</label>
+            <input value={formPattern} onChange={e => setFormPattern(e.target.value)} placeholder="e.g. \b(password|secret|credential)\b"
+              className="w-full px-2 py-1.5 text-[11px] rounded bg-[#2a303a] border border-[#3a424d] text-neutral-200 font-mono focus:border-blue-600 outline-none" />
+          </div>
+          {formError && <div className="text-[10px] text-red-400">{formError}</div>}
+          <div className="flex gap-2">
+            <button onClick={handleSave} disabled={saving} className="px-3 py-1.5 text-[11px] font-medium rounded bg-green-700 hover:bg-green-600 text-white transition-colors disabled:opacity-50">
+              {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
+            </button>
+            <button onClick={resetForm} className="px-3 py-1.5 text-[11px] font-medium rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-300 transition-colors">Cancel</button>
+          </div>
+        </div>
+      )}
+
       <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-hidden">
         <table className="w-full text-[11px]">
           <thead>
@@ -762,16 +847,15 @@ function GuardrailsTab({ rules, onToggle }: { rules: GuardrailRule[]; onToggle: 
               <th className="px-4 py-2 font-medium w-10">On</th>
               <th className="px-4 py-2 font-medium">Rule</th>
               <th className="px-4 py-2 font-medium w-20">Severity</th>
+              <th className="px-4 py-2 font-medium w-20">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#3a424d]">
-            {rules.map(r => (
+            {builtinRules.map(r => (
               <tr key={r.id} className="hover:bg-[#363d47]/50 transition-colors">
                 <td className="px-4 py-2">
-                  <button
-                    onClick={() => onToggle(r.id, !r.enabled)}
-                    className={`w-8 h-4 rounded-full transition-colors relative ${r.enabled ? 'bg-green-600' : 'bg-neutral-700'}`}
-                  >
+                  <button onClick={() => onToggle(r.id, !r.enabled)}
+                    className={`w-8 h-4 rounded-full transition-colors relative ${r.enabled ? 'bg-green-600' : 'bg-neutral-700'}`}>
                     <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${r.enabled ? 'left-4' : 'left-0.5'}`} />
                   </button>
                 </td>
@@ -780,9 +864,35 @@ function GuardrailsTab({ rules, onToggle }: { rules: GuardrailRule[]; onToggle: 
                   <div className="text-[10px] text-neutral-600 font-mono mt-0.5">{r.id}</div>
                 </td>
                 <td className="px-4 py-2">
-                  <span className={`text-[10px] font-semibold uppercase ${r.severity === 'block' ? 'text-red-400' : 'text-amber-400'}`}>
-                    {r.severity}
-                  </span>
+                  <span className={`text-[10px] font-semibold uppercase ${r.severity === 'block' ? 'text-red-400' : 'text-amber-400'}`}>{r.severity}</span>
+                </td>
+                <td className="px-4 py-2 text-[10px] text-neutral-600">built-in</td>
+              </tr>
+            ))}
+            {customRules.length > 0 && builtinRules.length > 0 && (
+              <tr><td colSpan={4} className="px-4 py-1.5 bg-[#272C33] text-[10px] text-neutral-500 font-medium uppercase tracking-wider">Custom Rules</td></tr>
+            )}
+            {customRules.map(r => (
+              <tr key={r.id} className="hover:bg-[#363d47]/50 transition-colors">
+                <td className="px-4 py-2">
+                  <button onClick={() => onToggle(r.id, !r.enabled)}
+                    className={`w-8 h-4 rounded-full transition-colors relative ${r.enabled ? 'bg-green-600' : 'bg-neutral-700'}`}>
+                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${r.enabled ? 'left-4' : 'left-0.5'}`} />
+                  </button>
+                </td>
+                <td className="px-4 py-2.5">
+                  <div className="text-neutral-200 text-xs">{r.description}</div>
+                  <div className="text-[10px] text-neutral-600 font-mono mt-0.5">{r.id}</div>
+                  {r.pattern && <div className="text-[10px] text-blue-400/60 font-mono mt-0.5">/{r.pattern}/i</div>}
+                </td>
+                <td className="px-4 py-2">
+                  <span className={`text-[10px] font-semibold uppercase ${r.severity === 'block' ? 'text-red-400' : 'text-amber-400'}`}>{r.severity}</span>
+                </td>
+                <td className="px-4 py-2">
+                  <div className="flex gap-1">
+                    <button onClick={() => startEdit(r)} className="text-[10px] text-blue-400 hover:text-blue-300">edit</button>
+                    <button onClick={() => handleDelete(r.id)} className="text-[10px] text-red-400 hover:text-red-300">delete</button>
+                  </div>
                 </td>
               </tr>
             ))}

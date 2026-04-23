@@ -107,6 +107,16 @@ function buildDefaultRules(): GuardrailRule[] {
   ];
 }
 
+export interface CustomGuardrailDef {
+  id: string;
+  description: string;
+  severity: 'block' | 'warn';
+  pattern: string;
+  enabled: boolean;
+}
+
+const BUILTIN_IDS = new Set<string>();
+
 export class Guardrails {
   private rules: GuardrailRule[];
   private settings: SettingsQueries;
@@ -114,6 +124,8 @@ export class Guardrails {
   constructor(settings: SettingsQueries) {
     this.settings = settings;
     this.rules = buildDefaultRules();
+    for (const r of this.rules) BUILTIN_IDS.add(r.id);
+    this.loadOverrides();
     this.loadCustomRules();
   }
 
@@ -132,12 +144,14 @@ export class Guardrails {
     return { allowed: !blocked, violations };
   }
 
-  getRules(): Array<{ id: string; description: string; severity: string; enabled: boolean }> {
+  getRules(): Array<{ id: string; description: string; severity: string; enabled: boolean; builtin: boolean; pattern?: string }> {
     return this.rules.map(r => ({
       id: r.id,
       description: r.description,
       severity: r.severity,
       enabled: r.enabled,
+      builtin: BUILTIN_IDS.has(r.id),
+      ...(!BUILTIN_IDS.has(r.id) && (r as any)._pattern ? { pattern: (r as any)._pattern } : {}),
     }));
   }
 
@@ -145,11 +159,74 @@ export class Guardrails {
     const rule = this.rules.find(r => r.id === ruleId);
     if (!rule) return false;
     rule.enabled = enabled;
-    this.saveCustomRules();
+    this.saveOverrides();
     return true;
   }
 
-  private loadCustomRules(): void {
+  addCustomRule(def: CustomGuardrailDef): { ok: boolean; error?: string } {
+    if (BUILTIN_IDS.has(def.id)) return { ok: false, error: 'Cannot use a built-in rule ID' };
+    if (this.rules.find(r => r.id === def.id)) return { ok: false, error: 'Rule ID already exists' };
+    if (!def.id.match(/^[a-z0-9_]+$/)) return { ok: false, error: 'Rule ID must be lowercase alphanumeric with underscores' };
+    try { new RegExp(def.pattern, 'i'); } catch { return { ok: false, error: 'Invalid regex pattern' }; }
+    this.rules.push(this.buildCustomRule(def));
+    this.saveCustomRules();
+    return { ok: true };
+  }
+
+  updateCustomRule(ruleId: string, def: Partial<CustomGuardrailDef>): { ok: boolean; error?: string } {
+    if (BUILTIN_IDS.has(ruleId)) return { ok: false, error: 'Cannot edit built-in rules' };
+    const idx = this.rules.findIndex(r => r.id === ruleId);
+    if (idx === -1) return { ok: false, error: 'Rule not found' };
+    if (def.pattern) {
+      try { new RegExp(def.pattern, 'i'); } catch { return { ok: false, error: 'Invalid regex pattern' }; }
+    }
+    const existing = this.getCustomDefs().find(d => d.id === ruleId);
+    if (!existing) return { ok: false, error: 'Custom rule data not found' };
+    const updated = { ...existing, ...def, id: ruleId };
+    this.rules[idx] = this.buildCustomRule(updated);
+    this.saveCustomRules();
+    return { ok: true };
+  }
+
+  deleteCustomRule(ruleId: string): { ok: boolean; error?: string } {
+    if (BUILTIN_IDS.has(ruleId)) return { ok: false, error: 'Cannot delete built-in rules' };
+    const idx = this.rules.findIndex(r => r.id === ruleId);
+    if (idx === -1) return { ok: false, error: 'Rule not found' };
+    this.rules.splice(idx, 1);
+    this.saveCustomRules();
+    return { ok: true };
+  }
+
+  private buildCustomRule(def: CustomGuardrailDef): GuardrailRule {
+    const regex = new RegExp(def.pattern, 'i');
+    const rule: GuardrailRule & { _pattern: string } = {
+      id: def.id,
+      description: def.description,
+      severity: def.severity,
+      enabled: def.enabled,
+      _pattern: def.pattern,
+      check: (d: AgentDecision): GuardrailViolation | null => {
+        const draft = (d.output.draft_response as string) ?? (d.output.response as string) ?? '';
+        if (!draft) return null;
+        const match = draft.match(regex);
+        if (match) {
+          return { rule: def.id, severity: def.severity, detail: `${def.description} — matched: "${match[0]}"` };
+        }
+        return null;
+      },
+    };
+    return rule;
+  }
+
+  private getCustomDefs(): CustomGuardrailDef[] {
+    try {
+      const json = this.settings.get('agent_custom_guardrails');
+      if (!json) return [];
+      return JSON.parse(json) as CustomGuardrailDef[];
+    } catch { return []; }
+  }
+
+  private loadOverrides(): void {
     try {
       const json = this.settings.get('agent_guardrail_overrides');
       if (!json) return;
@@ -165,11 +242,36 @@ export class Guardrails {
     }
   }
 
-  private saveCustomRules(): void {
+  private loadCustomRules(): void {
+    for (const def of this.getCustomDefs()) {
+      if (!this.rules.find(r => r.id === def.id)) {
+        this.rules.push(this.buildCustomRule(def));
+      }
+    }
+  }
+
+  private saveOverrides(): void {
     const overrides: Record<string, { enabled: boolean }> = {};
     for (const rule of this.rules) {
-      overrides[rule.id] = { enabled: rule.enabled };
+      if (BUILTIN_IDS.has(rule.id)) {
+        overrides[rule.id] = { enabled: rule.enabled };
+      }
     }
     this.settings.set('agent_guardrail_overrides', JSON.stringify(overrides));
+  }
+
+  private saveCustomRules(): void {
+    const defs: CustomGuardrailDef[] = [];
+    for (const rule of this.rules) {
+      if (BUILTIN_IDS.has(rule.id)) continue;
+      defs.push({
+        id: rule.id,
+        description: rule.description,
+        severity: rule.severity,
+        pattern: (rule as any)._pattern ?? '',
+        enabled: rule.enabled,
+      });
+    }
+    this.settings.set('agent_custom_guardrails', JSON.stringify(defs));
   }
 }
