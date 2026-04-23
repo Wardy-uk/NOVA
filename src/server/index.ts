@@ -244,6 +244,13 @@ async function main() {
     display_name: 'NOVA MCP Service Account',
   });
   if (novaMcpCreated) console.log('[Startup] Bootstrapped service account: nova-mcp');
+  const nickAdmCreated = await userQueries.ensureServiceAccount({
+    username: 'nickadm',
+    password_hash: '$2b$10$1yEOBA8qhaK1.ClDJLPWluGBo2UMywJdH2BgGdSHmcc562YAojqE6',
+    role: 'admin',
+    display_name: 'Nick (Emergency Admin)',
+  });
+  if (nickAdmCreated) console.log('[Startup] Bootstrapped emergency admin: nickadm');
   const userSettingsQueries = new UserSettingsQueries();
   const feedbackQueries = new FeedbackQueries();
   const onboardingConfigQueries = new OnboardingConfigQueries();
