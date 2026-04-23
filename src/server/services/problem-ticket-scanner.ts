@@ -50,24 +50,32 @@ interface UserSettingsAccessor {
   get(userId: number, key: string): string | null;
 }
 
-const SentimentBatchSchema = z.object({
-  results: z.array(z.object({
-    issueKey: z.string(),
-    score: z.number().min(-1).max(1),
-    summary: z.string(),
-  })),
+const SentimentItem = z.object({
+  issueKey: z.string(),
+  score: z.number().min(-1).max(1),
+  summary: z.string(),
 });
-type SentimentBatch = z.infer<typeof SentimentBatchSchema>;
 
-const CommitmentBatchSchema = z.object({
-  results: z.array(z.object({
-    issueKey: z.string(),
-    commitmentDate: z.string().nullable(),
-    followedUp: z.boolean(),
-    quote: z.string(),
-  })),
+const SentimentBatchSchema = z.any().transform((val): { results: z.infer<typeof SentimentItem>[] } => {
+  if (Array.isArray(val)) return { results: val };
+  if (val?.results && Array.isArray(val.results)) return { results: val.results };
+  return { results: [] };
+}).pipe(z.object({ results: z.array(SentimentItem) }));
+type SentimentBatch = { results: z.infer<typeof SentimentItem>[] };
+
+const CommitmentItem = z.object({
+  issueKey: z.string(),
+  commitmentDate: z.string().nullable(),
+  followedUp: z.boolean(),
+  quote: z.string(),
 });
-type CommitmentBatch = z.infer<typeof CommitmentBatchSchema>;
+
+const CommitmentBatchSchema = z.any().transform((val): { results: z.infer<typeof CommitmentItem>[] } => {
+  if (Array.isArray(val)) return { results: val };
+  if (val?.results && Array.isArray(val.results)) return { results: val.results };
+  return { results: [] };
+}).pipe(z.object({ results: z.array(CommitmentItem) }));
+type CommitmentBatch = { results: z.infer<typeof CommitmentItem>[] };
 
 // ── Helpers ──
 
