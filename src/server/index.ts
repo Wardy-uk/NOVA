@@ -823,7 +823,7 @@ async function main() {
     notificationQueries,
     teamQueries,
     requireAreaAccess,
-    buildServiceDeskJiraClient,
+    buildOnboardingJiraClient,
     userTeamQueries,
     jiraCacheQueries,
     jiraSyncService,

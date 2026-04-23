@@ -906,9 +906,11 @@ export function createDevReviewRoutes(
         // Post customer-facing comment on the NT ticket
         try {
           const customerComment =
-            'This issue requires work by our development team. ' +
-            'Development work operates under a 60 working day SLA. ' +
-            'If you have any concerns or wish to escalate, please contact your Account Manager.';
+            `Thank you for raising this with us.\n\n` +
+            `Following review by our Development team, this has been confirmed as requiring development work and has now been accepted into our development pipeline.\n\n` +
+            `Your reference for this work is ${createdBug.key} — please quote this in any follow-up communication.\n\n` +
+            `Development work is prioritised alongside our wider roadmap and may take up to 60 working days to complete, depending on prioritisation.\n\n` +
+            `We'll keep you updated as this progresses. If you have any concerns or need to discuss prioritisation, please contact your Account Manager.`;
           await client.addComment(key, customerComment);
         } catch (commentErr) {
           const msg = commentErr instanceof Error ? commentErr.message : 'Customer comment failed';
