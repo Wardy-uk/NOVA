@@ -83,6 +83,14 @@ export class KpiPipeline {
                      WHERE TABLE_NAME = 'jira_kpi_daily${s}' AND COLUMN_NAME = 'direction'
                        AND CHARACTER_MAXIMUM_LENGTH < 50)
             ALTER TABLE jira_kpi_daily${s} ALTER COLUMN direction NVARCHAR(50);
+          IF EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME = 'jira_kpi_daily${s}' AND COLUMN_NAME = 'kpi'
+                       AND CHARACTER_MAXIMUM_LENGTH < 100)
+            ALTER TABLE jira_kpi_daily${s} ALTER COLUMN kpi NVARCHAR(100);
+          IF EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME = 'jira_kpi_daily${s}' AND COLUMN_NAME = 'kpiGroup'
+                       AND CHARACTER_MAXIMUM_LENGTH < 100)
+            ALTER TABLE jira_kpi_daily${s} ALTER COLUMN kpiGroup NVARCHAR(100);
         `);
       } catch { /* ignore */ }
 
@@ -191,11 +199,16 @@ export class KpiPipeline {
 
       // Always READ from the live Agent table
       const agents = await p.request().query(`
-        SELECT AgentId, RTRIM(AgentName + ' ' + ISNULL(AgentSurname, '')) AS AgentName,
-               TierCode, Team,
-               OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
-               SolvedTickets_Today, SolvedTickets_ThisWeek
-        FROM dbo.Agent WHERE IsActive = 1
+        SELECT AgentId,
+               RTRIM(ISNULL(AgentName, '') + ' ' + ISNULL(AgentSurname, '')) AS AgentName,
+               ISNULL(TierCode, '') AS TierCode,
+               ISNULL(Team, '') AS Team,
+               ISNULL(OpenTickets_Total, 0) AS OpenTickets_Total,
+               ISNULL(OpenTickets_Over2Hours, 0) AS OpenTickets_Over2Hours,
+               ISNULL(OpenTickets_NoUpdateToday, 0) AS OpenTickets_NoUpdateToday,
+               ISNULL(SolvedTickets_Today, 0) AS SolvedTickets_Today,
+               ISNULL(SolvedTickets_ThisWeek, 0) AS SolvedTickets_ThisWeek
+        FROM dbo.Agent WHERE IsActive = 1 AND AgentId IS NOT NULL
       `);
 
       if (agents.recordset.length === 0) return;

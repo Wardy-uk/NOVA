@@ -209,6 +209,17 @@ export class JiraSyncService {
     const issuetype = f.issuetype as any;
     const resolution = f.resolution as any;
 
+    // Normalise status name: Jira returns localised names (e.g. Chinese) depending on
+    // the API user's locale. Fall back to statusCategory for non-ASCII names.
+    const statusName = (() => {
+      const name = status?.name as string | undefined;
+      if (name && /^[\x20-\x7E]+$/.test(name)) return name;
+      const cat = status?.statusCategory;
+      if (cat?.name && /^[\x20-\x7E]+$/.test(cat.name as string)) return cat.name as string;
+      const keyMap: Record<string, string> = { new: 'Open', indeterminate: 'In Progress', done: 'Done' };
+      return keyMap[cat?.key as string] ?? (cat?.key as string) ?? name ?? null;
+    })();
+
     const descriptionText = extractText(f.description);
     const descriptionAdf = f.description ? JSON.stringify(f.description) : null;
     const currentTier = (f.customfield_12981 as any)?.value ?? null;
@@ -274,7 +285,7 @@ export class JiraSyncService {
         // UPDATE values
         issue.id, issue.key.split('-')[0], f.summary as string ?? null,
         descriptionText || null, descriptionAdf,
-        status?.name ?? null, status?.statusCategory?.key ?? null,
+        statusName, status?.statusCategory?.key ?? null,
         priority?.name ?? null, issuetype?.name ?? null,
         resolution?.name ?? null,
         assignee?.accountId ?? null, assignee?.displayName ?? null, assignee?.emailAddress ?? null,
@@ -291,7 +302,7 @@ export class JiraSyncService {
         // INSERT values (same order as columns)
         issue.key, issue.id, issue.key.split('-')[0], f.summary as string ?? null,
         descriptionText || null, descriptionAdf,
-        status?.name ?? null, status?.statusCategory?.key ?? null,
+        statusName, status?.statusCategory?.key ?? null,
         priority?.name ?? null, issuetype?.name ?? null,
         resolution?.name ?? null,
         assignee?.accountId ?? null, assignee?.displayName ?? null, assignee?.emailAddress ?? null,

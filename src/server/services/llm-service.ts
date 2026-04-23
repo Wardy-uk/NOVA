@@ -335,4 +335,26 @@ export class LlmService {
   resetCircuitBreakers(): void {
     circuits.clear();
   }
+
+  getDiagnostics(): {
+    primaryProvider: string; primaryModel: string; primaryKeyPrefix: string; primaryAvailable: boolean;
+    failoverProvider: string; failoverModel: string; failoverKeyPrefix: string; failoverAvailable: boolean;
+    anthropicCircuit: string; openaiCircuit: string;
+  } {
+    const primary = this.getPrimaryConfig('reasoning');
+    const failover = this.getFailoverConfig('reasoning');
+    const maskKey = (k: string | undefined) => k ? k.slice(0, 8) + '...' : '(not set)';
+    return {
+      primaryProvider: this.settings.get('llm_primary_provider') ?? 'anthropic (default)',
+      primaryModel: primary?.model ?? '(no key)',
+      primaryKeyPrefix: maskKey(primary?.apiKey),
+      primaryAvailable: !!primary,
+      failoverProvider: this.settings.get('llm_failover_provider') ?? 'openai (default)',
+      failoverModel: failover?.model ?? '(no key)',
+      failoverKeyPrefix: maskKey(failover?.apiKey),
+      failoverAvailable: !!failover,
+      anthropicCircuit: isCircuitOpen('anthropic') ? 'OPEN' : 'closed',
+      openaiCircuit: isCircuitOpen('openai') ? 'OPEN' : 'closed',
+    };
+  }
 }

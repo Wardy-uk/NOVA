@@ -986,6 +986,11 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     });
   });
 
+  router.get('/llm-status', requireSuperAdmin(), (_req, res) => {
+    const diag = agentLoop.getLlmService().getDiagnostics();
+    res.json({ ok: true, data: diag });
+  });
+
   // ── Escalation (WP-13) ──
 
   router.get('/escalation/reasons', async (_req, res) => {

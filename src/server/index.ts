@@ -850,6 +850,10 @@ async function main() {
   // Agent loop — feature-flagged, admin-only
   const agentJiraClient = buildOnboardingJiraClient();
   const llmService = new LlmService(settingsQueries);
+  const llmDiag = llmService.getDiagnostics();
+  console.log(`[N.O.V.A] LLM config: primary=${llmDiag.primaryProvider} (${llmDiag.primaryKeyPrefix}), failover=${llmDiag.failoverProvider} (${llmDiag.failoverKeyPrefix})`);
+  if (!llmDiag.primaryAvailable) console.warn(`[N.O.V.A] WARNING: Primary LLM provider has no API key configured!`);
+
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);
 
