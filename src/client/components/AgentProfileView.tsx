@@ -633,9 +633,11 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
   }, [resolvedAgent, fetchPlan]);
 
   // Generate AI prep
+  const [prepError, setPrepError] = useState<string | null>(null);
   const generatePrep = useCallback(async () => {
     if (!resolvedAgent) return;
     setGeneratingPrep(true);
+    setPrepError(null);
     try {
       const res = await fetch(`/api/people/agent/${encodeURIComponent(resolvedAgent)}/generate-prep`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
@@ -645,8 +647,12 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
         await fetchSnapshots(resolvedAgent);
         setShowHistory(true);
         if (json.data?.snapshotId) setExpandedSnapshot(json.data.snapshotId);
+      } else {
+        setPrepError(json.error || 'Unknown error');
       }
-    } catch { /* ignore */ }
+    } catch (err: any) {
+      setPrepError(err.message || 'Network error');
+    }
     setGeneratingPrep(false);
   }, [resolvedAgent, fetchSnapshots]);
 
@@ -809,6 +815,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
                   background: `${C.purple}15`, color: C.purple, opacity: generatingPrep ? 0.6 : 1,
                 }}
               >{generatingPrep ? 'Generating...' : 'Generate Prep'}</button>
+              {prepError && <span style={{ fontSize: 11, color: C.red, marginLeft: 8 }}>{prepError}</span>}
               <button
                 onClick={takeSnapshot}
                 disabled={takingSnapshot}
