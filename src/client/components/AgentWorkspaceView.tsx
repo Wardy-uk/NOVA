@@ -335,8 +335,8 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
   const [tierFilter, setTierFilter] = useState<string>('all');
   const [aiActionFilter, setAiActionFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortField, setSortField] = useState<SortField>('urgency');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [sortField, setSortField] = useState<SortField>('age');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
 
   // Read filter from Dashboard navigation
   useEffect(() => {
