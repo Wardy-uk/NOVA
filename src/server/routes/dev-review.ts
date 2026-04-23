@@ -772,7 +772,6 @@ export function createDevReviewRoutes(
       if (userTeams.length === 1) {
         targetProjectKey = userTeams[0].jira_project_key?.trim() || null;
       } else if (userTeams.length > 1) {
-        // Pick the team whose products match the ticket's product
         const ticketState = await devQueries.getState(key);
         const ticketTeam = ticketState?.team || 'Unassigned';
         const match = userTeams.find(t => t.jira_products?.includes(ticketTeam));
@@ -780,8 +779,22 @@ export function createDevReviewRoutes(
       }
     }
 
+    // Fallback: use the ticket's assigned team project key
     if (!targetProjectKey) {
-      console.warn(`[DevReview/accept] No jira_project_key for accepting user's team — skipping Bug creation for ${key}`);
+      const ticketState = await devQueries.getState(key);
+      const ticketTeam = ticketState?.team;
+      if (ticketTeam) {
+        const allTeams = await teamQueries.getAll();
+        const teamMatch = allTeams.find(t =>
+          t.name.toLowerCase() === ticketTeam.toLowerCase() ||
+          t.jira_products?.some(p => p.toLowerCase() === ticketTeam.toLowerCase()),
+        );
+        targetProjectKey = teamMatch?.jira_project_key?.trim() || null;
+      }
+    }
+
+    if (!targetProjectKey) {
+      console.warn(`[DevReview/accept] No jira_project_key for user or ticket team — skipping Bug creation for ${key}`);
       warnings.push('No Jira project key configured for your team — work item not created');
     } else {
       try {
