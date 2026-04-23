@@ -196,10 +196,10 @@ export class AgentLoop {
       const perception = await this.perceiver.perceive();
       console.log(`[agent] Perceived: ${perception.totalOpen} open, ${perception.newEvents.length} new, ${perception.slaAtRisk.length} SLA risk`);
 
-      // Merge all events worth processing
+      // Only send actionable events to the reasoner — SLA warnings are
+      // informational (shown in perception stats) and handled by alerts, not decisions.
       const events = [
         ...perception.newEvents,
-        ...perception.slaAtRisk,
       ];
 
       if (events.length === 0) {

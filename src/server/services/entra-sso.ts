@@ -1,62 +1,33 @@
 import { ConfidentialClientApplication } from '@azure/msal-node';
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
 
 const SSO_SCOPES = ['openid', 'profile', 'email', 'User.Read', 'GroupMember.Read.All'];
 
-// File-backed PKCE + state store — survives process restarts and builds.
-const DATA_DIR = process.env.DATA_DIR || process.cwd();
-const PENDING_FILE = path.join(DATA_DIR, 'sso-pending.json');
 const EXPIRY_MS = 10 * 60 * 1000;
 
 type PendingEntry = { verifier: string; createdAt: number };
-type PendingStore = Record<string, PendingEntry>;
 
-function loadPending(): PendingStore {
-  try {
-    if (fs.existsSync(PENDING_FILE)) {
-      return JSON.parse(fs.readFileSync(PENDING_FILE, 'utf-8')) as PendingStore;
-    }
-  } catch {
-    console.warn('[SSO] Failed to read sso-pending.json, starting fresh');
-  }
-  return {};
-}
+// In-memory store — no file I/O races. Node is single-threaded so Map ops are atomic.
+// A restart just means in-flight SSO users click login again (10-min window max).
+const pendingStore = new Map<string, PendingEntry>();
 
-function savePending(store: PendingStore): void {
-  try {
-    fs.writeFileSync(PENDING_FILE, JSON.stringify(store), 'utf-8');
-  } catch (err) {
-    console.error('[SSO] Failed to persist sso-pending.json:', err instanceof Error ? err.message : err);
-  }
-}
-
-function cleanExpired(store: PendingStore): PendingStore {
+function cleanExpired(): void {
   const now = Date.now();
-  let changed = false;
-  for (const key of Object.keys(store)) {
-    if (now - store[key].createdAt > EXPIRY_MS) {
-      delete store[key];
-      changed = true;
-    }
+  for (const [key, entry] of pendingStore) {
+    if (now - entry.createdAt > EXPIRY_MS) pendingStore.delete(key);
   }
-  if (changed) savePending(store);
-  return store;
 }
 
 function putPending(state: string, verifier: string): void {
-  const store = cleanExpired(loadPending());
-  store[state] = { verifier, createdAt: Date.now() };
-  savePending(store);
+  cleanExpired();
+  pendingStore.set(state, { verifier, createdAt: Date.now() });
 }
 
 function takePending(state: string): PendingEntry | null {
-  const store = cleanExpired(loadPending());
-  const entry = store[state];
+  cleanExpired();
+  const entry = pendingStore.get(state);
   if (!entry) return null;
-  delete store[state];
-  savePending(store);
+  pendingStore.delete(state);
   return entry;
 }
 
