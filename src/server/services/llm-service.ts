@@ -230,21 +230,21 @@ export class LlmService {
   }
 
   private getPrimaryConfig(tier: LlmTier): ProviderConfig | null {
-    const provider = (this.settings.get('llm_primary_provider') ?? 'anthropic') as LlmProvider;
-    const model = this.settings.get('llm_primary_model') ?? DEFAULT_MODELS[provider]?.[tier] ?? DEFAULT_MODELS.anthropic[tier];
+    const provider = (this.settings.get('llm_primary_provider')?.trim() || 'anthropic') as LlmProvider;
+    const model = this.settings.get('llm_primary_model')?.trim() || DEFAULT_MODELS[provider]?.[tier] || DEFAULT_MODELS.anthropic[tier];
     const apiKey = provider === 'anthropic'
-      ? (this.settings.get('anthropic_api_key') ?? process.env.ANTHROPIC_API_KEY ?? '')
-      : (this.settings.get('openai_api_key') ?? process.env.OPENAI_API_KEY ?? '');
+      ? (this.settings.get('anthropic_api_key')?.trim() || process.env.ANTHROPIC_API_KEY || '')
+      : (this.settings.get('openai_api_key')?.trim() || process.env.OPENAI_API_KEY || '');
     if (!apiKey) return null;
     return { provider, model, apiKey };
   }
 
   private getFailoverConfig(tier: LlmTier): ProviderConfig | null {
-    const provider = (this.settings.get('llm_failover_provider') ?? 'openai') as LlmProvider;
-    const model = this.settings.get('llm_failover_model') ?? DEFAULT_MODELS[provider]?.[tier] ?? DEFAULT_MODELS.openai[tier];
+    const provider = (this.settings.get('llm_failover_provider')?.trim() || 'openai') as LlmProvider;
+    const model = this.settings.get('llm_failover_model')?.trim() || DEFAULT_MODELS[provider]?.[tier] || DEFAULT_MODELS.openai[tier];
     const apiKey = provider === 'anthropic'
-      ? (this.settings.get('anthropic_api_key') ?? process.env.ANTHROPIC_API_KEY ?? '')
-      : (this.settings.get('openai_api_key') ?? process.env.OPENAI_API_KEY ?? '');
+      ? (this.settings.get('anthropic_api_key')?.trim() || process.env.ANTHROPIC_API_KEY || '')
+      : (this.settings.get('openai_api_key')?.trim() || process.env.OPENAI_API_KEY || '');
     if (!apiKey) return null;
     return { provider, model, apiKey };
   }
@@ -256,8 +256,8 @@ export class LlmService {
     options: LlmCallOptions,
   ): Promise<LlmResult<T>> {
     const tier = options.tier ?? 'reasoning';
-    const maxTokens = options.maxTokens ?? parseInt(this.settings.get('llm_max_tokens') ?? '4096', 10);
-    const temperature = options.temperature ?? parseFloat(this.settings.get('llm_temperature') ?? '0.3');
+    const maxTokens = options.maxTokens ?? parseInt(this.settings.get('llm_max_tokens')?.trim() || '4096', 10);
+    const temperature = options.temperature ?? parseFloat(this.settings.get('llm_temperature')?.trim() || '0.3');
     const ticketId = options.ticketId ?? null;
 
     const configs: ProviderConfig[] = [];
