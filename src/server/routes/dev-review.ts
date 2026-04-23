@@ -745,12 +745,17 @@ export function createDevReviewRoutes(
       return;
     }
 
-    // Step 1 — bare transition (no fields, no comment). The transition
-    // screen doesn't include TL;DR / Dev Details / comment, and its
-    // post-function clears the assignee. We do all writes in step 2
-    // to avoid fighting those post-functions.
+    // Step 1 — transition with required comment. The transition screen
+    // mandates a Comment field. Post-functions clear the assignee and
+    // some fields, so we restore everything in step 2.
+    const transitionComment = note || `Accepted into development backlog by ${display}`;
     try {
-      await client.transitionIssue(key, transitionId);
+      await client.transitionIssue(key, transitionId, {
+        comment: {
+          body: adfDoc(transitionComment),
+          internal: true,
+        },
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Transition failed';
       await devQueries.markThreadSyncFailed(threadId, msg);
