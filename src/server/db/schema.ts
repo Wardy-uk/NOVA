@@ -703,6 +703,13 @@ async function runMigrations(): Promise<void> {
      CREATE INDEX IX_agent_suggestions_type_status ON agent_suggestions (type, status, created_at DESC);`,
 
     `ALTER TABLE problem_ticket_alerts ADD last_analysed_at DATETIME2 NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'sso_pending_states')
+     CREATE TABLE sso_pending_states (
+       state NVARCHAR(64) PRIMARY KEY,
+       verifier NVARCHAR(200) NOT NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

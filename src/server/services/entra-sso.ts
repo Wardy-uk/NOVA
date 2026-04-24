@@ -1,34 +1,25 @@
 import { ConfidentialClientApplication } from '@azure/msal-node';
 import crypto from 'crypto';
+import { execute, queryOne } from './database.js';
 
 const SSO_SCOPES = ['openid', 'profile', 'email', 'User.Read', 'GroupMember.Read.All'];
 
-const EXPIRY_MS = 10 * 60 * 1000;
+const EXPIRY_MINUTES = 10;
 
-type PendingEntry = { verifier: string; createdAt: number };
-
-// In-memory store — no file I/O races. Node is single-threaded so Map ops are atomic.
-// A restart just means in-flight SSO users click login again (10-min window max).
-const pendingStore = new Map<string, PendingEntry>();
-
-function cleanExpired(): void {
-  const now = Date.now();
-  for (const [key, entry] of pendingStore) {
-    if (now - entry.createdAt > EXPIRY_MS) pendingStore.delete(key);
-  }
+async function putPending(state: string, verifier: string): Promise<void> {
+  await execute(`DELETE FROM sso_pending_states WHERE created_at < DATEADD(minute, -?, GETUTCDATE())`, [EXPIRY_MINUTES]);
+  await execute(`INSERT INTO sso_pending_states (state, verifier) VALUES (?, ?)`, [state, verifier]);
 }
 
-function putPending(state: string, verifier: string): void {
-  cleanExpired();
-  pendingStore.set(state, { verifier, createdAt: Date.now() });
-}
-
-function takePending(state: string): PendingEntry | null {
-  cleanExpired();
-  const entry = pendingStore.get(state);
-  if (!entry) return null;
-  pendingStore.delete(state);
-  return entry;
+async function takePending(state: string): Promise<{ verifier: string } | null> {
+  const row = await queryOne<{ verifier: string; created_at: string }>(
+    `SELECT verifier, created_at FROM sso_pending_states WHERE state = ?`, [state],
+  );
+  if (!row) return null;
+  await execute(`DELETE FROM sso_pending_states WHERE state = ?`, [state]);
+  const age = Date.now() - new Date(row.created_at).getTime();
+  if (age > EXPIRY_MINUTES * 60 * 1000) return null;
+  return { verifier: row.verifier };
 }
 
 function generatePkce(): { verifier: string; challenge: string } {
@@ -79,7 +70,7 @@ export class EntraSsoService {
 
     const { verifier, challenge } = generatePkce();
     const state = crypto.randomBytes(16).toString('hex');
-    putPending(state, verifier);
+    await putPending(state, verifier);
 
     const url = await app.getAuthCodeUrl({
       scopes: SSO_SCOPES,
@@ -96,8 +87,8 @@ export class EntraSsoService {
     const app = this.getApp();
     if (!app) throw new Error('SSO not configured');
 
-    const pending = takePending(state);
-    if (!pending) throw new Error('Invalid or expired SSO state. Please try logging in again.');
+    const pending = await takePending(state);
+    if (!pending) throw new Error('SSO session expired — the service may have restarted. Please sign in again.');
 
     const result = await app.acquireTokenByCode({
       code,
