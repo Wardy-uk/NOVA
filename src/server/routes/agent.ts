@@ -19,6 +19,7 @@ import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
 import type { JiraSyncService } from '../services/jira-sync-service.js';
 import type { SuggestionEngine } from '../services/suggestion-engine.js';
+import type { RiskScorer } from '../services/risk-scorer.js';
 
 interface AgentRouteDeps {
   agentLoop: AgentLoop;
@@ -34,6 +35,7 @@ interface AgentRouteDeps {
   jiraCache: JiraCacheQueries;
   jiraSyncService: JiraSyncService | null;
   suggestionEngine: SuggestionEngine | null;
+  riskScorer: RiskScorer | null;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
@@ -218,6 +220,41 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get cost data' });
+    }
+  });
+
+  // ── Flagged tickets (risk alerting) ──
+
+  router.get('/flagged', async (_req, res) => {
+    if (!deps?.riskScorer) return res.status(503).json({ ok: false, error: 'Risk scorer not available' });
+    try {
+      const data = await deps.riskScorer.getFlagged();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get flagged tickets' });
+    }
+  });
+
+  router.get('/flagged/summary', async (_req, res) => {
+    if (!deps?.riskScorer) return res.json({ ok: true, data: { count: 0, highestRisk: null, avgScore: 0 } });
+    try {
+      const data = await deps.riskScorer.getFlaggedSummary();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get flagged summary' });
+    }
+  });
+
+  router.post('/flagged/:key/review', async (req, res) => {
+    if (!deps?.riskScorer) return res.status(503).json({ ok: false, error: 'Risk scorer not available' });
+    const { key } = req.params;
+    const dismiss = req.body?.dismiss === true;
+    const username = (req as any).user?.username ?? 'unknown';
+    try {
+      await deps.riskScorer.reviewTicket(key, username, dismiss);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to review ticket' });
     }
   });
 

@@ -235,6 +235,9 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'agent_sla_breach_threshold_min', label: 'SLA Breach Alert (minutes)', type: 'text', placeholder: '30', required: false },
       { key: 'agent_unassigned_stale_min', label: 'Unassigned Stale (minutes)', type: 'text', placeholder: '15', required: false },
       { key: 'agent_capacity_threshold', label: 'Capacity Alert (tickets/agent)', type: 'text', placeholder: '10', required: false },
+      { key: 'agent_risk_threshold', label: 'Risk Alert Threshold (0-100)', type: 'text', placeholder: '60', required: false },
+      { key: 'agent_risk_alert_hours', label: 'Risk Alert Hours (HH:MM-HH:MM)', type: 'text', placeholder: '08:00-18:00', required: false },
+      { key: 'agent_risk_alert_to', label: 'Risk Alert Webhook (override)', type: 'url', placeholder: 'Uses Teams Webhook if blank', required: false },
     ],
   },
   {

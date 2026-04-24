@@ -120,6 +120,35 @@ interface KbGap {
   ticket_ids: string;
 }
 
+interface RiskFactor {
+  id: string;
+  label: string;
+  score: number;
+  detail?: string;
+}
+
+interface FlaggedTicket {
+  id: number;
+  ticket_key: string;
+  risk_score: number;
+  risk_factors: RiskFactor[];
+  summary: string | null;
+  assignee: string | null;
+  reporter: string | null;
+  priority: string | null;
+  flagged_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  status: 'pending' | 'reviewed' | 'dismissed';
+  last_notified_score: number;
+}
+
+interface FlaggedSummary {
+  count: number;
+  highestRisk: FlaggedTicket | null;
+  avgScore: number;
+}
+
 // ── Helpers ──
 
 async function api(path: string, opts?: RequestInit) {
@@ -207,7 +236,7 @@ interface ApprovalHealth {
 
 export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { userRole?: string; onNavigateToWorkspace?: (filter: { aiAction?: string }) => void }) {
   const isSuperAdmin = checkSuperAdmin(userRole);
-  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'quick-actions' | 'costs'>('overview');
+  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'quick-actions' | 'costs' | 'flagged'>('overview');
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
@@ -219,6 +248,8 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
   const [alerts, setAlerts] = useState<AgentAlert[]>([]);
   const [kbGaps, setKbGaps] = useState<KbGap[]>([]);
   const [costData, setCostData] = useState<CostSummary | null>(null);
+  const [flaggedTickets, setFlaggedTickets] = useState<FlaggedTicket[]>([]);
+  const [flaggedSummary, setFlaggedSummary] = useState<FlaggedSummary | null>(null);
   const [lifecycleBreakdown, setLifecycleBreakdown] = useState<LifecycleBreakdown | null>(null);
   const [approvalHealth, setApprovalHealth] = useState<ApprovalHealth | null>(null);
   const [loading, setLoading] = useState(true);
@@ -233,15 +264,17 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
         api('/alerts?limit=20'),
         api('/lifecycle/breakdown'),
         api('/lifecycle/approval-health'),
+        api('/flagged/summary'),
       ]);
       const val = (i: number) => results[i].status === 'fulfilled' ? results[i].value : null;
-      const sRes = val(0), stRes = val(1), dRes = val(2), aRes = val(3), lcRes = val(4), ahRes = val(5);
+      const sRes = val(0), stRes = val(1), dRes = val(2), aRes = val(3), lcRes = val(4), ahRes = val(5), fsRes = val(6);
       if (sRes?.ok) setStatus(sRes.data);
       if (stRes?.ok) setStats(stRes.data);
       if (dRes?.ok) setDecisions(dRes.data);
       if (aRes?.ok) setAlerts(aRes.data);
       if (lcRes?.ok) setLifecycleBreakdown(lcRes.data);
       if (ahRes?.ok) setApprovalHealth(ahRes.data);
+      if (fsRes?.ok) setFlaggedSummary(fsRes.data);
       const allFailed = results.every(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value?.ok));
       setError(allFailed ? 'All agent endpoints failed — check server connection' : null);
     } catch (err: any) {
@@ -281,6 +314,9 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
     }
     if (tab === 'costs') {
       api('/costs?days=30').then(r => { if (r.ok) setCostData(r.data); });
+    }
+    if (tab === 'flagged') {
+      api('/flagged').then(r => { if (r.ok) setFlaggedTickets(r.data); });
     }
   }, [tab]);
 
@@ -336,6 +372,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
           { key: 'autonomy', label: 'Autonomy' },
           { key: 'guardrails', label: 'Guardrails' },
           { key: 'alerts', label: `Alerts${alerts.filter(a => !a.acknowledged).length > 0 ? ` (${alerts.filter(a => !a.acknowledged).length})` : ''}` },
+          { key: 'flagged', label: `Flagged${(flaggedSummary?.count ?? 0) > 0 ? ` (${flaggedSummary!.count})` : ''}` },
           { key: 'kb-gaps', label: 'KB Gaps' },
           { key: 'quick-actions', label: 'Quick Actions' },
           { key: 'providers', label: 'Providers' },
@@ -356,7 +393,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       </div>
 
       {/* Tab content */}
-      {tab === 'overview' && <OverviewTab status={status} stats={stats} decisions={decisions} onSelect={setSelected} onNavigateToWorkspace={onNavigateToWorkspace} lifecycleBreakdown={lifecycleBreakdown} approvalHealth={approvalHealth} />}
+      {tab === 'overview' && <OverviewTab status={status} stats={stats} decisions={decisions} onSelect={setSelected} onNavigateToWorkspace={onNavigateToWorkspace} lifecycleBreakdown={lifecycleBreakdown} approvalHealth={approvalHealth} flaggedSummary={flaggedSummary} onFlaggedClick={() => setTab('flagged')} />}
       {tab === 'decisions' && <DecisionsTab decisions={decisions} selected={selected} onSelect={setSelected} onRefresh={refresh} />}
       {tab === 'autonomy' && <AutonomyTab rules={autonomyRules} onRefresh={() => api('/autonomy').then(r => { if (r.ok) setAutonomyRules(r.data); })} isSuperAdmin={isSuperAdmin} />}
       {tab === 'guardrails' && <GuardrailsTab rules={guardrails} onToggle={toggleGuardrail} onRefresh={() => api('/guardrails').then(r => { if (r.ok) setGuardrails(r.data); })} />}
@@ -364,6 +401,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       {tab === 'kb-gaps' && <KbGapsTab gaps={kbGaps} onRefresh={() => api('/kb-gaps').then(r => { if (r.ok) setKbGaps(r.data); })} />}
       {tab === 'quick-actions' && <QuickActionsTab />}
       {tab === 'providers' && <ProvidersTab providers={providers} confHistory={confHistory} />}
+      {tab === 'flagged' && <FlaggedTab tickets={flaggedTickets} onRefresh={() => { api('/flagged').then(r => { if (r.ok) setFlaggedTickets(r.data); }); api('/flagged/summary').then(r => { if (r.ok) setFlaggedSummary(r.data); }); }} />}
       {tab === 'costs' && <CostsTab data={costData} onPeriodChange={(days) => api(`/costs?days=${days}`).then(r => { if (r.ok) setCostData(r.data); })} />}
 
       {/* Detail panel */}
@@ -415,7 +453,7 @@ function KpiCard({ value, label, color }: { value: number | string; label: strin
 
 // ── Overview Tab ──
 
-function OverviewTab({ status, stats, decisions, onSelect, onNavigateToWorkspace, lifecycleBreakdown, approvalHealth }: {
+function OverviewTab({ status, stats, decisions, onSelect, onNavigateToWorkspace, lifecycleBreakdown, approvalHealth, flaggedSummary, onFlaggedClick }: {
   status: AgentStatus | null;
   stats: AgentStats | null;
   decisions: Decision[];
@@ -423,6 +461,8 @@ function OverviewTab({ status, stats, decisions, onSelect, onNavigateToWorkspace
   onNavigateToWorkspace?: (filter: { aiAction?: string }) => void;
   lifecycleBreakdown?: LifecycleBreakdown | null;
   approvalHealth?: ApprovalHealth | null;
+  flaggedSummary?: FlaggedSummary | null;
+  onFlaggedClick?: () => void;
 }) {
   const lifecycleLabels: Record<string, string> = {
     new: 'New', triaged: 'Triaged', awaiting_approval: 'Awaiting Approval',
@@ -568,6 +608,35 @@ function OverviewTab({ status, stats, decisions, onSelect, onNavigateToWorkspace
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Flagged for Review summary */}
+      {flaggedSummary && flaggedSummary.count > 0 && (
+        <div onClick={onFlaggedClick} className="border border-red-800/40 rounded-lg bg-red-950/20 p-4 cursor-pointer hover:bg-red-950/30 transition-colors">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-semibold text-red-400 uppercase tracking-wider">Flagged for Review</h3>
+            <span className="text-[10px] text-neutral-500">Click to view</span>
+          </div>
+          <div className="grid grid-cols-3 gap-4 text-xs">
+            <div>
+              <div className="text-neutral-500 mb-0.5">Flagged</div>
+              <div className="text-lg font-bold text-red-400">{flaggedSummary.count}</div>
+            </div>
+            <div>
+              <div className="text-neutral-500 mb-0.5">Highest Risk</div>
+              <div className="text-lg font-bold text-neutral-200">
+                {flaggedSummary.highestRisk ? `${flaggedSummary.highestRisk.risk_score}/100` : '—'}
+              </div>
+              {flaggedSummary.highestRisk && (
+                <div className="text-[10px] text-neutral-500 truncate">{flaggedSummary.highestRisk.ticket_key}</div>
+              )}
+            </div>
+            <div>
+              <div className="text-neutral-500 mb-0.5">Avg Score</div>
+              <div className="text-lg font-bold text-neutral-200">{Math.round(flaggedSummary.avgScore)}</div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1925,6 +1994,121 @@ function SpendChart() {
           <Line data={chartData} options={chartOptions} />
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Flagged Tab ──
+
+function riskScoreColor(score: number): string {
+  if (score >= 80) return 'text-red-400';
+  if (score >= 60) return 'text-amber-400';
+  return 'text-yellow-400';
+}
+
+function riskScoreBg(score: number): string {
+  if (score >= 80) return 'bg-red-950/30 border-red-800/40';
+  if (score >= 60) return 'bg-amber-950/20 border-amber-800/30';
+  return 'bg-yellow-950/20 border-yellow-800/30';
+}
+
+function FlaggedTab({ tickets, onRefresh }: { tickets: FlaggedTicket[]; onRefresh: () => void }) {
+  const [reviewing, setReviewing] = useState<string | null>(null);
+
+  const handleReview = async (key: string, dismiss: boolean) => {
+    setReviewing(key);
+    try {
+      await api(`/flagged/${key}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dismiss }),
+      });
+      onRefresh();
+    } finally {
+      setReviewing(null);
+    }
+  };
+
+  const pending = tickets.filter(t => t.status === 'pending');
+  const reviewed = tickets.filter(t => t.status === 'reviewed');
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h3 className="text-sm font-semibold text-neutral-200">Flagged for Review</h3>
+          <span className="text-xs text-neutral-500">{pending.length} pending</span>
+        </div>
+        <button onClick={onRefresh} className="px-2.5 py-1 text-[11px] font-medium rounded bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:text-neutral-200 transition-colors">Refresh</button>
+      </div>
+
+      {pending.length === 0 && reviewed.length === 0 && (
+        <div className="text-sm text-neutral-500 py-8 text-center">No flagged tickets — the risk sweep hasn't found anything above threshold yet.</div>
+      )}
+
+      {pending.length > 0 && (
+        <div className="space-y-2">
+          {pending.map(t => (
+            <div key={t.ticket_key} className={`border rounded-lg p-4 ${riskScoreBg(t.risk_score)}`}>
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex items-center gap-3">
+                  <span className={`text-xl font-bold ${riskScoreColor(t.risk_score)}`}>{t.risk_score}</span>
+                  <div>
+                    <span className="text-sm font-mono text-[#5ec1ca]">{t.ticket_key}</span>
+                    <span className="text-xs text-neutral-500 ml-2">{t.priority}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={reviewing === t.ticket_key}
+                    onClick={() => handleReview(t.ticket_key, false)}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded bg-green-900/30 text-green-400 border border-green-800/40 hover:bg-green-900/50 transition-colors disabled:opacity-50"
+                  >Reviewed</button>
+                  <button
+                    disabled={reviewing === t.ticket_key}
+                    onClick={() => handleReview(t.ticket_key, true)}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:text-neutral-200 transition-colors disabled:opacity-50"
+                  >Dismiss</button>
+                </div>
+              </div>
+              <div className="text-xs text-neutral-300 mb-2">{t.summary ?? 'No summary'}</div>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {t.risk_factors.map((f, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full bg-[#272C33] border border-[#3a424d] text-neutral-400">
+                    <span className="font-mono text-neutral-500">+{f.score}</span> {f.label}
+                  </span>
+                ))}
+              </div>
+              <div className="flex items-center gap-4 text-[10px] text-neutral-500">
+                <span>Assignee: {t.assignee ?? 'Unassigned'}</span>
+                <span>Reporter: {t.reporter ?? '—'}</span>
+                <span>Flagged {timeAgo(t.flagged_at)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {reviewed.length > 0 && (
+        <div className="mt-6">
+          <h4 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Recently Reviewed</h4>
+          <div className="space-y-1">
+            {reviewed.slice(0, 10).map(t => (
+              <div key={t.ticket_key} className="flex items-center justify-between px-3 py-2 rounded bg-[#2f353d] border border-[#3a424d] text-xs">
+                <div className="flex items-center gap-3">
+                  <span className="text-neutral-500 font-mono w-6">{t.risk_score}</span>
+                  <span className="text-[#5ec1ca] font-mono">{t.ticket_key}</span>
+                  <span className="text-neutral-400 truncate max-w-md">{t.summary}</span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-neutral-600">
+                  <span>by {t.reviewed_by}</span>
+                  <span>{t.reviewed_at ? timeAgo(t.reviewed_at) : ''}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

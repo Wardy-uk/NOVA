@@ -898,6 +898,7 @@ async function main() {
       jiraCache: jiraCacheQueries,
       jiraSyncService,
       suggestionEngine,
+      riskScorer: agentLoop.getRiskScorer(),
     }));
 
     // KPI pipeline timers

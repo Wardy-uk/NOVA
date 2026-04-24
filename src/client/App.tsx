@@ -390,6 +390,7 @@ export function App() {
   });
   const [sdIssueTypeFilter, setSdIssueTypeFilter] = useState<string | null>(null);
   const [approvalBadge, setApprovalBadge] = useState(0);
+  const [flaggedBadge, setFlaggedBadge] = useState(0);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const standupChecked = useRef(false);
 
@@ -498,6 +499,20 @@ export function App() {
     };
     poll();
     const iv = setInterval(poll, 30000);
+    return () => clearInterval(iv);
+  }, [auth.isAuthenticated]);
+
+  // Poll flagged ticket count
+  useEffect(() => {
+    if (!auth.isAuthenticated) return;
+    const poll = () => {
+      fetch('/api/agent/flagged/summary')
+        .then(r => r.json())
+        .then(json => { if (json.ok) setFlaggedBadge(json.data.count); })
+        .catch(() => {});
+    };
+    poll();
+    const iv = setInterval(poll, 60000);
     return () => clearInterval(iv);
   }, [auth.isAuthenticated]);
 
@@ -877,6 +892,9 @@ export function App() {
                   {tab.label}
                   {tab.view === 'ai-approvals' && approvalBadge > 0 && (
                     <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-400">{approvalBadge}</span>
+                  )}
+                  {tab.view === 'agent-workspace' && flaggedBadge > 0 && (
+                    <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-red-500/20 text-red-400">{flaggedBadge}</span>
                   )}
                 </button>
               ))}

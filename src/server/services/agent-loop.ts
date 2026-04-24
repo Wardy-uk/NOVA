@@ -17,6 +17,7 @@ import { AutonomyEngine } from './autonomy-engine.js';
 import { AlertService } from './alert-service.js';
 import { TicketClassifier } from './ticket-classifier.js';
 import { CoachingEngine } from './coach.js';
+import { RiskScorer } from './risk-scorer.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 
 const DEFAULT_INTERVAL_MS = 60_000;
@@ -44,6 +45,7 @@ export class AgentLoop {
   private alertService: AlertService;
   private ticketClassifier: TicketClassifier;
   private coachingEngine: CoachingEngine;
+  private riskScorer: RiskScorer;
   private jiraClient: JiraRestClient;
   private llmService: LlmService;
   private settings: SettingsQueries;
@@ -76,6 +78,7 @@ export class AgentLoop {
     const primaryProject = agentProject.split(',')[0].trim();
     this.ticketClassifier = new TicketClassifier(llmService, jiraClient, primaryProject);
     this.coachingEngine = new CoachingEngine(llmService, jiraClient, primaryProject);
+    this.riskScorer = new RiskScorer(settings);
     this.jiraClient = jiraClient;
     this.llmService = llmService;
     this.settings = settings;
@@ -113,6 +116,10 @@ export class AgentLoop {
 
   getAutonomyEngine(): AutonomyEngine {
     return this.autonomyEngine;
+  }
+
+  getRiskScorer(): RiskScorer {
+    return this.riskScorer;
   }
 
   getAlertService(): AlertService {
@@ -243,6 +250,7 @@ export class AgentLoop {
         await this.runResolutionReview(shadow);
         await this.runTicketClassification();
         await this.runCoachingHealthChecks();
+        await this.runRiskSweep();
       }
 
       this.lastTickAt = new Date();
@@ -346,6 +354,20 @@ export class AgentLoop {
       if (checked > 0) console.log(`[agent] Coaching health checks complete — ${checked} tickets checked`);
     } catch (err) {
       console.warn(`[agent] Coaching health checks failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  private async runRiskSweep(): Promise<void> {
+    try {
+      const agentProject = this.settings.get('agent_jira_project') || 'NT';
+      const projects = agentProject.split(',').map(p => p.trim()).filter(Boolean);
+      if (projects.length === 0) return;
+
+      console.log(`[agent] Running risk sweep...`);
+      const result = await this.riskScorer.runRiskSweep(projects);
+      console.log(`[agent] Risk sweep complete — ${result.flagged} flagged, ${result.notified} notified`);
+    } catch (err) {
+      console.warn(`[agent] Risk sweep failed:`, err instanceof Error ? err.message : err);
     }
   }
 

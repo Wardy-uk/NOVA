@@ -710,6 +710,30 @@ async function runMigrations(): Promise<void> {
        verifier NVARCHAR(200) NOT NULL,
        created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
      );`,
+
+    // ── Risk Alerting: Flagged tickets ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_flagged_tickets') AND type = 'U')
+     CREATE TABLE agent_flagged_tickets (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key NVARCHAR(30) NOT NULL,
+       risk_score INT NOT NULL,
+       risk_factors NVARCHAR(MAX) NOT NULL,
+       summary NVARCHAR(500) NULL,
+       assignee NVARCHAR(200) NULL,
+       reporter NVARCHAR(200) NULL,
+       priority NVARCHAR(50) NULL,
+       flagged_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       reviewed_at DATETIME2 NULL,
+       reviewed_by NVARCHAR(100) NULL,
+       status NVARCHAR(20) NOT NULL DEFAULT 'pending',
+       last_notified_score INT NOT NULL DEFAULT 0
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_flagged_tickets_status')
+     CREATE INDEX IX_agent_flagged_tickets_status ON agent_flagged_tickets (status, risk_score DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_flagged_tickets_key')
+     CREATE UNIQUE INDEX IX_agent_flagged_tickets_key ON agent_flagged_tickets (ticket_key) WHERE status != 'dismissed';`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
