@@ -137,42 +137,47 @@ export class Observer {
     avgCostPerDecision: number;
     topTickets: Array<{ ticket_id: string; cost: number; calls: number }>;
   }> {
+    // days=1 means "today from midnight UTC", not rolling 24h
+    const dateFilter = days === 1
+      ? `created_at >= CAST(GETUTCDATE() AS DATE)`
+      : `created_at >= DATEADD(day, -${days}, GETUTCDATE())`;
+
     const [totalRows, byProviderRows, byModelRows, byCallTypeRows, dailyRows, decisionCount, topTicketRows] = await Promise.all([
       query<{ total_cost: number; total_calls: number }>(
         `SELECT ISNULL(SUM(estimated_cost), 0) as total_cost, COUNT(*) as total_calls
-         FROM agent_llm_calls WHERE created_at >= DATEADD(day, -?, GETUTCDATE())`, [days],
+         FROM agent_llm_calls WHERE ${dateFilter}`,
       ),
       query<{ provider: string; cost: number; calls: number }>(
         `SELECT provider, ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
-         FROM agent_llm_calls WHERE created_at >= DATEADD(day, -?, GETUTCDATE())
-         GROUP BY provider ORDER BY cost DESC`, [days],
+         FROM agent_llm_calls WHERE ${dateFilter}
+         GROUP BY provider ORDER BY cost DESC`,
       ),
       query<{ model: string; provider: string; cost: number; calls: number; input_tokens: number; output_tokens: number }>(
         `SELECT model, provider, ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls,
                 ISNULL(SUM(input_tokens), 0) as input_tokens, ISNULL(SUM(output_tokens), 0) as output_tokens
-         FROM agent_llm_calls WHERE created_at >= DATEADD(day, -?, GETUTCDATE())
-         GROUP BY model, provider ORDER BY cost DESC`, [days],
+         FROM agent_llm_calls WHERE ${dateFilter}
+         GROUP BY model, provider ORDER BY cost DESC`,
       ),
       query<{ call_type: string; cost: number; calls: number }>(
         `SELECT call_type, ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
-         FROM agent_llm_calls WHERE created_at >= DATEADD(day, -?, GETUTCDATE())
-         GROUP BY call_type ORDER BY cost DESC`, [days],
+         FROM agent_llm_calls WHERE ${dateFilter}
+         GROUP BY call_type ORDER BY cost DESC`,
       ),
       query<{ day: string; cost: number; calls: number }>(
         `SELECT CONVERT(VARCHAR(10), created_at, 120) as day,
                 ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
-         FROM agent_llm_calls WHERE created_at >= DATEADD(day, -?, GETUTCDATE())
-         GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY day`, [days],
+         FROM agent_llm_calls WHERE ${dateFilter}
+         GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY day`,
       ),
       query<{ cnt: number }>(
         `SELECT COUNT(*) as cnt FROM agent_decisions
-         WHERE created_at >= DATEADD(day, -?, GETUTCDATE())`, [days],
+         WHERE ${dateFilter}`,
       ),
       query<{ ticket_id: string; cost: number; calls: number }>(
         `SELECT TOP(10) ticket_id, ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
          FROM agent_llm_calls
-         WHERE created_at >= DATEADD(day, -?, GETUTCDATE()) AND ticket_id IS NOT NULL
-         GROUP BY ticket_id ORDER BY cost DESC`, [days],
+         WHERE ${dateFilter} AND ticket_id IS NOT NULL
+         GROUP BY ticket_id ORDER BY cost DESC`,
       ),
     ]);
 
