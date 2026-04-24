@@ -2141,7 +2141,7 @@ function CostsTab({ data, onPeriodChange }: { data: CostSummary | null; onPeriod
 
       {/* Period selector for cards below */}
       <div className="flex items-center gap-2">
-        {[7, 30, 90].map(d => (
+        {[1, 7, 30, 90].map(d => (
           <button
             key={d}
             onClick={() => handlePeriod(d)}
