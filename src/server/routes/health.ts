@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { McpClientManager } from '../services/mcp-client.js';
 import type { HealthResponse } from '../../shared/types.js';
+import { getPoolStats } from '../services/database.js';
 
 const startTime = Date.now();
 
@@ -12,11 +13,13 @@ export function createHealthRoutes(mcpManager: McpClientManager): Router {
     const servers = mcpManager.getStatus();
     const allConnected =
       servers.length > 0 && servers.every((s) => s.status === 'connected');
+    const pool = getPoolStats();
 
-    const response: HealthResponse = {
+    const response: HealthResponse & { pool?: typeof pool } = {
       status: allConnected ? 'ok' : 'degraded',
       uptime: Math.floor((Date.now() - startTime) / 1000),
       servers,
+      pool,
     };
 
     res.json(response);

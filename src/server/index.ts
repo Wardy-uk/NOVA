@@ -149,7 +149,7 @@ async function main() {
   setInterval(() => checkSloBreaches(calyxDb, settingsQueries.getAll()), 5 * 60 * 1000);
   setInterval(() => processEmailQueue(calyxDb, settingsQueries.getAll()), 60_000);
   setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 30 * 60 * 1000);
-  setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 10_000);
+  setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 60_000);
   const ritualQueries = new RitualQueries();
   const deliveryQueries = new DeliveryQueries();
   // Auto-assign onboarding IDs to any entries missing them
@@ -901,10 +901,10 @@ async function main() {
       riskScorer: agentLoop.getRiskScorer(),
     }));
 
-    // KPI pipeline timers
+    // KPI pipeline timers (initial kicks staggered to avoid startup storm)
     setInterval(() => kpiPipeline.collectJiraSnapshot().catch(e => console.warn('[kpi-pipeline] snapshot failed:', e.message)), 10 * 60 * 1000);
     setInterval(() => kpiPipeline.snapshotAgentKpis().catch(e => console.warn('[kpi-pipeline] agent snapshot failed:', e.message)), 30 * 60 * 1000);
-    setTimeout(() => kpiPipeline.collectJiraSnapshot().catch(() => {}), 30_000);
+    setTimeout(() => kpiPipeline.collectJiraSnapshot().catch(() => {}), 90_000);
 
     // Daily digest at 17:30, weekly digest Monday 09:00
     setInterval(() => {
@@ -919,7 +919,7 @@ async function main() {
 
     // QA pipeline — score resolved tickets every 2 hours
     setInterval(() => qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] scoring failed:', e.message)), 2 * 60 * 60 * 1000);
-    setTimeout(() => qaPipeline.scoreRecentlyResolved(24).catch(() => {}), 60_000);
+    setTimeout(() => qaPipeline.scoreRecentlyResolved(24).catch(() => {}), 120_000);
 
     // Pipeline health check — every 15 min
     setInterval(() => pipelineMonitor.checkStaleRuns().catch(() => {}), 15 * 60 * 1000);
@@ -932,7 +932,7 @@ async function main() {
       }
     };
     setInterval(runCalendarSync, 30 * 60 * 1000);
-    setTimeout(runCalendarSync, 45_000);
+    setTimeout(runCalendarSync, 105_000);
 
     // Calendar availability routes (WP-12) — already behind global /api auth
     app.get('/api/calendar/availability', async (req, res) => {
@@ -1006,8 +1006,10 @@ async function main() {
     }, 4 * 60 * 60 * 1000);
 
     if (settingsQueries.get('agent_enabled') === 'true') {
-      agentLoop.start();
-      console.log('[N.O.V.A] Agent loop auto-started (agent_enabled=true)');
+      setTimeout(() => {
+        agentLoop!.start();
+        console.log('[N.O.V.A] Agent loop auto-started (agent_enabled=true, delayed 60s for startup stagger)');
+      }, 60_000);
     }
   } else {
     console.log('[N.O.V.A] Agent loop not available — no Jira credentials configured.');
@@ -1685,7 +1687,7 @@ ${panelHtml}
     }
   }, 15 * 60 * 1000);
 
-  // Problem Ticket Scanner: every 15 minutes + initial scan after 30s
+  // Problem Ticket Scanner: every 15 minutes + initial scan after 90s (staggered)
   const ptScanTimer = setInterval(async () => {
     try {
       problemTicketScanner.setJiraClient(buildOnboardingJiraClient());
@@ -1701,7 +1703,7 @@ ${panelHtml}
     } catch (err) {
       console.error('[ProblemTicketScanner] Initial scan failed:', err instanceof Error ? err.message : err);
     }
-  }, 30_000);
+  }, 90_000);
 
   // Adobe Sign agreement sync — every 5 minutes
   setInterval(async () => {
@@ -1905,7 +1907,7 @@ ${panelHtml}
     }
   };
   setInterval(devWatch, 5 * 60 * 1000);
-  setTimeout(devWatch, 45_000);
+  setTimeout(devWatch, 75_000);
 
   // ── Dev Review comment watcher — pulls external (agent) Jira comments ──
   // Every 2 min, for each active dev_review_state row, fetches the last 20
@@ -1968,7 +1970,7 @@ ${panelHtml}
     }
   };
   setInterval(commentWatch, 2 * 60 * 1000);
-  setTimeout(commentWatch, 60_000);
+  setTimeout(commentWatch, 120_000);
 
   // Expose last sync time + per-source intervals
   app.get('/api/sync/status', (_req, res) => {

@@ -57,7 +57,30 @@ export async function initPool(): Promise<sql.ConnectionPool> {
   const config = buildConfig();
   pool = await new sql.ConnectionPool(config).connect();
   console.log(`[N.O.V.A] Connected to MSSQL: ${config.server}/${config.database}`);
+
+  setInterval(() => {
+    if (!pool?.connected) return;
+    const s = getPoolStats();
+    if (s.used > 0 || s.pending > 0) {
+      const pct = Math.round((s.used / s.size) * 100);
+      const level = pct >= 80 ? 'WARN' : 'info';
+      const fn = pct >= 80 ? console.warn : console.log;
+      fn(`[pool-${level}] ${s.used}/${s.size} active (${pct}%), ${s.free} free, ${s.pending} pending`);
+    }
+  }, 60_000);
+
   return pool;
+}
+
+export function getPoolStats(): { size: number; used: number; free: number; pending: number } {
+  if (!pool?.connected) return { size: 0, used: 0, free: 0, pending: 0 };
+  const tp = (pool as unknown as { pool: { numUsed(): number; numFree(): number; numPendingAcquires(): number } }).pool;
+  return {
+    size: tp.numUsed() + tp.numFree(),
+    used: tp.numUsed(),
+    free: tp.numFree(),
+    pending: tp.numPendingAcquires(),
+  };
 }
 
 export function getPool(): sql.ConnectionPool {

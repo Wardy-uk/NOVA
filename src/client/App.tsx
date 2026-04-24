@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, Component, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useCallback, Component, Suspense, lazy, type ReactNode } from 'react';
 import { TaskList } from './components/TaskList.js';
 import { SettingsView } from './components/SettingsView.js';
 import { StandupView } from './components/StandupView.js';
@@ -12,8 +12,8 @@ import { NewContractWizard } from './components/NewContractWizard.js';
 import { MyFocusView } from './components/MyFocusView.js';
 import { LoginView } from './components/LoginView.js';
 import { HelpView } from './components/HelpView.js';
-import { AdminView } from './components/AdminView.js';
-import { OnboardingConfigView } from './components/OnboardingConfigView.js';
+const AdminView = lazy(() => import('./components/AdminView.js').then(m => ({ default: m.AdminView })));
+const OnboardingConfigView = lazy(() => import('./components/OnboardingConfigView.js').then(m => ({ default: m.OnboardingConfigView })));
 import { OnboardingCalendar } from './components/OnboardingCalendar.js';
 import { OnboardingDashboard } from './components/OnboardingDashboard.js';
 import { OverdueDeliveriesView } from './components/OverdueDeliveriesView.js';
@@ -24,15 +24,15 @@ import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
 import { ServiceDeskDashboard } from './components/ServiceDeskDashboard.js';
 import { AIApprovalQueue } from './components/AIApprovalQueue.js';
-import { KpiDashboardView } from './components/KpiDashboardView.js';
-import { KpiDataView } from './components/KpiDataView.js';
-import { KpiComparisonView } from './components/KpiComparisonView.js';
-import { KpiLeaderboardView } from './components/KpiLeaderboardView.js';
-import { KpiDailyHistoryView } from './components/KpiDailyHistoryView.js';
-import { KpiBreachedView } from './components/KpiBreachedView.js';
-import { QAView } from './components/QAView.js';
-import { BackfillStatusView } from './components/BackfillStatusView.js';
-import { SalesHotboxView } from './components/SalesHotboxView.js';
+const KpiDashboardView = lazy(() => import('./components/KpiDashboardView.js').then(m => ({ default: m.KpiDashboardView })));
+const KpiDataView = lazy(() => import('./components/KpiDataView.js').then(m => ({ default: m.KpiDataView })));
+const KpiComparisonView = lazy(() => import('./components/KpiComparisonView.js').then(m => ({ default: m.KpiComparisonView })));
+const KpiLeaderboardView = lazy(() => import('./components/KpiLeaderboardView.js').then(m => ({ default: m.KpiLeaderboardView })));
+const KpiDailyHistoryView = lazy(() => import('./components/KpiDailyHistoryView.js').then(m => ({ default: m.KpiDailyHistoryView })));
+const KpiBreachedView = lazy(() => import('./components/KpiBreachedView.js').then(m => ({ default: m.KpiBreachedView })));
+const QAView = lazy(() => import('./components/QAView.js').then(m => ({ default: m.QAView })));
+const BackfillStatusView = lazy(() => import('./components/BackfillStatusView.js').then(m => ({ default: m.BackfillStatusView })));
+const SalesHotboxView = lazy(() => import('./components/SalesHotboxView.js').then(m => ({ default: m.SalesHotboxView })));
 import { TeamWorkloadView } from './components/TeamWorkloadView.js';
 import { NotificationBell } from './components/NotificationBell.js';
 import { ChatView } from './components/ChatView.js';
@@ -42,40 +42,41 @@ import { FeedbackModal } from './components/FeedbackModal.js';
 import { ReleaseNotesModal, LATEST_RELEASE_VERSION } from './components/ReleaseNotesModal.js';
 import { TourOverlay, useTour } from './components/TourOverlay.js';
 import { SetupPortal } from './components/SetupPortal.js';
-import { SurveyAdminView } from './components/SurveyAdminView.js';
+const SurveyAdminView = lazy(() => import('./components/SurveyAdminView.js').then(m => ({ default: m.SurveyAdminView })));
 import { SurveyRespondView } from './components/SurveyRespondView.js';
 import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
-import { TrendsView } from './components/TrendsView.js';
-import { TrainingMatrixView } from './components/TrainingMatrixView.js';
-import { TrainingSummaryView } from './components/TrainingSummaryView.js';
-import { BoardMiView } from './components/BoardMiView.js';
-import { DevReviewView } from './components/DevReviewView.js';
-import { DevReviewDashboard } from './components/DevReviewDashboard.js';
-import { AgentKpisView } from './components/AgentKpisView.js';
-import { CalyxQueueView } from './components/CalyxQueueView.js';
-import { CalyxDashboardView } from './components/CalyxDashboardView.js';
-import { CalyxPlaylistView } from './components/CalyxPlaylistView.js';
-import { CalyxProblemsView } from './components/CalyxProblemsView.js';
-import { CalyxChangesView } from './components/CalyxChangesView.js';
-import { CalyxKnowledgeBaseView } from './components/CalyxKnowledgeBaseView.js';
-import { CalyxMajorIncidentsView } from './components/CalyxMajorIncidentsView.js';
-import { CalyxImprovementsView } from './components/CalyxImprovementsView.js';
-import { CalyxSloSettingsView } from './components/CalyxSloSettingsView.js';
-import { CalyxBusinessHoursView } from './components/CalyxBusinessHoursView.js';
-import { CalyxOrganisationsView } from './components/CalyxOrganisationsView.js';
-import { CalyxTicketsView } from './components/CalyxTicketsView.js';
-import { CalyxSettingsView } from './components/CalyxSettingsView.js';
-import { CalyxPortal } from './components/CalyxPortal.js';
-import { AgentDashboardView } from './components/AgentDashboardView.js';
-import { AgentWorkspaceView } from './components/AgentWorkspaceView.js';
-import { AgentCoachingView } from './components/AgentCoachingView.js';
-import { AgentPipelinesView } from './components/AgentPipelinesView.js';
-import { UatComparisonView } from './components/UatComparisonView.js';
-import { AgentProfileView } from './components/AgentProfileView.js';
-import { AgentRosterView } from './components/AgentRosterView.js';
+const TrendsView = lazy(() => import('./components/TrendsView.js').then(m => ({ default: m.TrendsView })));
+const TrainingMatrixView = lazy(() => import('./components/TrainingMatrixView.js').then(m => ({ default: m.TrainingMatrixView })));
+const TrainingSummaryView = lazy(() => import('./components/TrainingSummaryView.js').then(m => ({ default: m.TrainingSummaryView })));
+const BoardMiView = lazy(() => import('./components/BoardMiView.js').then(m => ({ default: m.BoardMiView })));
+const DevReviewView = lazy(() => import('./components/DevReviewView.js').then(m => ({ default: m.DevReviewView })));
+const DevReviewDashboard = lazy(() => import('./components/DevReviewDashboard.js').then(m => ({ default: m.DevReviewDashboard })));
+const AgentKpisView = lazy(() => import('./components/AgentKpisView.js').then(m => ({ default: m.AgentKpisView })));
+const CalyxQueueView = lazy(() => import('./components/CalyxQueueView.js').then(m => ({ default: m.CalyxQueueView })));
+const CalyxDashboardView = lazy(() => import('./components/CalyxDashboardView.js').then(m => ({ default: m.CalyxDashboardView })));
+const CalyxPlaylistView = lazy(() => import('./components/CalyxPlaylistView.js').then(m => ({ default: m.CalyxPlaylistView })));
+const CalyxProblemsView = lazy(() => import('./components/CalyxProblemsView.js').then(m => ({ default: m.CalyxProblemsView })));
+const CalyxChangesView = lazy(() => import('./components/CalyxChangesView.js').then(m => ({ default: m.CalyxChangesView })));
+const CalyxKnowledgeBaseView = lazy(() => import('./components/CalyxKnowledgeBaseView.js').then(m => ({ default: m.CalyxKnowledgeBaseView })));
+const CalyxMajorIncidentsView = lazy(() => import('./components/CalyxMajorIncidentsView.js').then(m => ({ default: m.CalyxMajorIncidentsView })));
+const CalyxImprovementsView = lazy(() => import('./components/CalyxImprovementsView.js').then(m => ({ default: m.CalyxImprovementsView })));
+const CalyxSloSettingsView = lazy(() => import('./components/CalyxSloSettingsView.js').then(m => ({ default: m.CalyxSloSettingsView })));
+const CalyxBusinessHoursView = lazy(() => import('./components/CalyxBusinessHoursView.js').then(m => ({ default: m.CalyxBusinessHoursView })));
+const CalyxOrganisationsView = lazy(() => import('./components/CalyxOrganisationsView.js').then(m => ({ default: m.CalyxOrganisationsView })));
+const CalyxTicketsView = lazy(() => import('./components/CalyxTicketsView.js').then(m => ({ default: m.CalyxTicketsView })));
+const CalyxSettingsView = lazy(() => import('./components/CalyxSettingsView.js').then(m => ({ default: m.CalyxSettingsView })));
+const CalyxPortal = lazy(() => import('./components/CalyxPortal.js').then(m => ({ default: m.CalyxPortal })));
+const AgentDashboardView = lazy(() => import('./components/AgentDashboardView.js').then(m => ({ default: m.AgentDashboardView })));
+const AgentWorkspaceView = lazy(() => import('./components/AgentWorkspaceView.js').then(m => ({ default: m.AgentWorkspaceView })));
+const AgentCoachingView = lazy(() => import('./components/AgentCoachingView.js').then(m => ({ default: m.AgentCoachingView })));
+const AgentPipelinesView = lazy(() => import('./components/AgentPipelinesView.js').then(m => ({ default: m.AgentPipelinesView })));
+const UatComparisonView = lazy(() => import('./components/UatComparisonView.js').then(m => ({ default: m.UatComparisonView })));
+const AgentProfileView = lazy(() => import('./components/AgentProfileView.js').then(m => ({ default: m.AgentProfileView })));
+const AgentRosterView = lazy(() => import('./components/AgentRosterView.js').then(m => ({ default: m.AgentRosterView })));
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
+import { useVisibilityInterval } from './hooks/useVisibilityInterval.js';
 import { type OwnershipFilter } from './utils/taskHelpers.js';
 
 declare const __APP_VERSION__: string;
@@ -488,33 +489,27 @@ export function App() {
       .catch(() => {});
   }, [auth.isAuthenticated, setView, homepage]);
 
-  // Poll approval queue badge count
-  useEffect(() => {
+  // Poll approval queue badge count (pauses when tab hidden)
+  const pollApprovals = useCallback(() => {
     if (!auth.isAuthenticated) return;
-    const poll = () => {
-      fetch('/api/approvals/count')
-        .then(r => r.json())
-        .then(json => { if (json.ok) setApprovalBadge(json.data.count); })
-        .catch(() => {});
-    };
-    poll();
-    const iv = setInterval(poll, 30000);
-    return () => clearInterval(iv);
+    fetch('/api/approvals/count')
+      .then(r => r.json())
+      .then(json => { if (json.ok) setApprovalBadge(json.data.count); })
+      .catch(() => {});
   }, [auth.isAuthenticated]);
+  useEffect(() => { pollApprovals(); }, [pollApprovals]);
+  useVisibilityInterval(pollApprovals, 30000);
 
-  // Poll flagged ticket count
-  useEffect(() => {
+  // Poll flagged ticket count (pauses when tab hidden)
+  const pollFlagged = useCallback(() => {
     if (!auth.isAuthenticated) return;
-    const poll = () => {
-      fetch('/api/agent/flagged/summary')
-        .then(r => r.json())
-        .then(json => { if (json.ok) setFlaggedBadge(json.data.count); })
-        .catch(() => {});
-    };
-    poll();
-    const iv = setInterval(poll, 60000);
-    return () => clearInterval(iv);
+    fetch('/api/agent/flagged/summary')
+      .then(r => r.json())
+      .then(json => { if (json.ok) setFlaggedBadge(json.data.count); })
+      .catch(() => {});
   }, [auth.isAuthenticated]);
+  useEffect(() => { pollFlagged(); }, [pollFlagged]);
+  useVisibilityInterval(pollFlagged, 60000);
 
   useEffect(() => {
     if (view !== 'debug') return;
@@ -969,6 +964,7 @@ export function App() {
 
         {/* Main content */}
         <main className={`flex-1 px-6 py-6 mx-auto w-full ${isFullWidth ? 'max-w-full' : 'max-w-4xl'}`}>
+        <Suspense fallback={<div className="flex items-center justify-center py-20 text-zinc-400">Loading...</div>}>
           {/* Command Centre */}
           {view === 'daily' && (
             <>
@@ -1281,6 +1277,7 @@ export function App() {
               d365Debug={d365Debug}
             />
           )}
+        </Suspense>
         </main>
 
         {/* Status bar */}

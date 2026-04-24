@@ -72,7 +72,6 @@ export function useTasks() {
     // Show cached tasks immediately, then sync in background
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     fetchTasks().then(() => {
-      // Background sync — don't block initial render
       const doSync = async () => {
         try {
           const res = await fetch('/api/tasks/sync', { method: 'POST' });
@@ -98,9 +97,14 @@ export function useTasks() {
       };
       doSync();
     });
-    // Background poll every 30s — silent, no UI disruption
-    const interval = setInterval(fetchTasks, 30_000);
-    return () => { clearInterval(interval); if (retryTimer) clearTimeout(retryTimer); };
+    // Background poll every 30s — pauses when tab is hidden
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const start = () => { if (!interval) interval = setInterval(fetchTasks, 30_000); };
+    const stop = () => { if (interval) { clearInterval(interval); interval = null; } };
+    const onVis = () => { if (document.hidden) stop(); else { fetchTasks(); start(); } };
+    start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVis); if (retryTimer) clearTimeout(retryTimer); };
   }, [fetchTasks]);
 
   return { tasks, loading, error, syncing, fetchTasks, syncTasks, updateTask };
@@ -121,8 +125,13 @@ export function useHealth() {
       }
     };
     fetchHealth();
-    const interval = setInterval(fetchHealth, 30_000);
-    return () => clearInterval(interval);
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const start = () => { if (!interval) interval = setInterval(fetchHealth, 30_000); };
+    const stop = () => { if (interval) { clearInterval(interval); interval = null; } };
+    const onVis = () => { if (document.hidden) stop(); else { fetchHealth(); start(); } };
+    start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
   return health;

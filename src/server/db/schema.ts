@@ -734,6 +734,27 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_flagged_tickets_key')
      CREATE UNIQUE INDEX IX_agent_flagged_tickets_key ON agent_flagged_tickets (ticket_key) WHERE status != 'dismissed';`,
+
+    // ── Performance indexes (audit Apr 2026) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_ticket_created')
+     CREATE INDEX IX_agent_decisions_ticket_created ON agent_decisions (ticket_id, created_at DESC)
+       INCLUDE (action, confidence, outcome, inputs);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_llm_calls_created')
+     CREATE INDEX IX_agent_llm_calls_created ON agent_llm_calls (created_at DESC)
+       INCLUDE (provider, model, estimated_cost, call_type, ticket_id);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_llm_calls_ticket')
+     CREATE INDEX IX_agent_llm_calls_ticket ON agent_llm_calls (ticket_id, created_at DESC)
+       INCLUDE (estimated_cost, call_type);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_ticket_state_lifecycle_transition')
+     CREATE INDEX IX_agent_ticket_state_lifecycle_transition ON agent_ticket_state (lifecycle, last_transition_at DESC)
+       INCLUDE (ticket_id, assignee, comment_count);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_comment_cache_issue_author')
+     CREATE INDEX IX_jira_comment_cache_issue_author ON jira_comment_cache (issue_key, author_account_id)
+       INCLUDE (is_public, jira_created);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

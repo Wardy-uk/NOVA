@@ -191,6 +191,12 @@ export class RiskScorer {
     const reassignMap = new Map(reassignCounts.map(r => [r.ticket_id, r.reassigns]));
     const reporterCountMap = new Map(reporterCounts.map(r => [r.reporter_account_id, r.open_count]));
 
+    // Pre-fetch all existing flagged tickets in one query (avoids N+1)
+    const existingFlagged = await query<{ id: number; ticket_key: string; risk_score: number; last_notified_score: number; status: string }>(
+      `SELECT id, ticket_key, risk_score, last_notified_score, status FROM agent_flagged_tickets WHERE status != 'dismissed'`,
+    );
+    const existingMap = new Map(existingFlagged.map(r => [r.ticket_key, r]));
+
     let flagged = 0;
     let notified = 0;
 
@@ -222,11 +228,7 @@ export class RiskScorer {
       const { score, factors } = this.scoreTicket(input);
       if (score < threshold) continue;
 
-      // Upsert flagged ticket
-      const existing = await queryOne<{ id: number; risk_score: number; last_notified_score: number; status: string }>(
-        `SELECT id, risk_score, last_notified_score, status FROM agent_flagged_tickets WHERE ticket_key = ? AND status != 'dismissed'`,
-        [ticket.issue_key],
-      );
+      const existing = existingMap.get(ticket.issue_key);
 
       if (existing) {
         await execute(
