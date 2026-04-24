@@ -140,25 +140,35 @@ export function createDevReviewRoutes(
   router.get('/queue', async (req: Request, res: Response) => {
     try {
       let issues: Array<{ key: string; fields: Record<string, unknown> }> = [];
+      let dataSource: 'cache' | 'api' = 'cache';
 
-      const useCache = cache && syncService?.isReady();
-      if (useCache) {
-        // Read from local MSSQL cache — instant, no Jira API call
-        const cached = await cache.getTier3Issues();
-        issues = cached.map(ci => ({
-          key: ci.issue_key,
-          fields: {
-            summary: ci.summary,
-            status: { name: ci.status_name, statusCategory: { key: ci.status_category } },
-            assignee: ci.assignee_email ? { displayName: ci.assignee_display, emailAddress: ci.assignee_email, accountId: ci.assignee_account_id } : null,
-            reporter: ci.reporter_email ? { displayName: ci.reporter_display, emailAddress: ci.reporter_email } : null,
-            updated: ci.jira_updated?.toISOString() ?? null,
-            [CF_CURRENT_TIER]: ci.current_tier ? { value: ci.current_tier } : null,
-            [CF_TLDR]: ci.tldr_text ?? null,
-            [CF_NURTUR_PRODUCT]: ci.nurtur_product ? { value: ci.nurtur_product } : null,
-          },
-        }));
-      } else {
+      // Try cache first — even if full sync hasn't completed, partial data may exist
+      if (cache) {
+        try {
+          const cached = await cache.getTier3Issues();
+          if (cached.length > 0) {
+            issues = cached.map(ci => ({
+              key: ci.issue_key,
+              fields: {
+                summary: ci.summary,
+                status: { name: ci.status_name, statusCategory: { key: ci.status_category } },
+                assignee: ci.assignee_email ? { displayName: ci.assignee_display, emailAddress: ci.assignee_email, accountId: ci.assignee_account_id } : null,
+                reporter: ci.reporter_email ? { displayName: ci.reporter_display, emailAddress: ci.reporter_email } : null,
+                updated: ci.jira_updated?.toISOString() ?? null,
+                [CF_CURRENT_TIER]: ci.current_tier ? { value: ci.current_tier } : null,
+                [CF_TLDR]: ci.tldr_text ?? null,
+                [CF_NURTUR_PRODUCT]: ci.nurtur_product ? { value: ci.nurtur_product } : null,
+              },
+            }));
+          }
+        } catch (cacheErr) {
+          console.warn('[dev-review] Cache query failed, trying live API:', cacheErr instanceof Error ? cacheErr.message : cacheErr);
+        }
+      }
+
+      // Fall back to live Jira only if cache returned nothing
+      if (issues.length === 0) {
+        dataSource = 'api';
         const client = getJiraClient();
         if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
 
@@ -177,27 +187,31 @@ export function createDevReviewRoutes(
         }
       }
 
-      // Sync NOVA state: upsert anything newly seen, archive anything no longer in T3.
-      //
-      // Performance note: every per-row write previously called saveDb() which
-      // flushes the entire sql.js DB to disk. With ~20 active tickets that was
-      // 40+ disk writes per queue load. We now defer all writes and call
-      // saveDb() ONCE at the end of the sync block. Crash-window data loss is
-      // bounded by the 15s periodic flush — and these rows are all derivable
-      // from Jira state on the next poll anyway.
-      const liveKeys = new Set(issues.map((i) => i.key));
-      for (const issue of issues) {
-        const submitter = (issue.fields.assignee as { emailAddress?: string } | null)?.emailAddress || null;
-        await devQueries.upsertFromPoll(issue.key, submitter);
-        const product = (issue.fields as { customfield_13183?: { value?: string } }).customfield_13183?.value || null;
-        await devQueries.setTeam(issue.key, productToTeam(product));
-      }
-      // Archive stale rows
-      for (const row of await devQueries.listQueue()) {
-        if (!liveKeys.has(row.jira_key)) {
-          await devQueries.archive(row.jira_key);
+      // Sync NOVA state in the background — don't block the response.
+      // These writes are all derivable from Jira state on the next poll,
+      // so fire-and-forget is safe here.
+      const syncKeys = issues.map(i => i.key);
+      const syncIssues = issues.map(i => ({
+        key: i.key,
+        submitter: (i.fields.assignee as { emailAddress?: string } | null)?.emailAddress || null,
+        product: (i.fields as { customfield_13183?: { value?: string } }).customfield_13183?.value || null,
+      }));
+      setImmediate(async () => {
+        try {
+          const liveKeys = new Set(syncKeys);
+          for (const si of syncIssues) {
+            await devQueries.upsertFromPoll(si.key, si.submitter);
+            await devQueries.setTeam(si.key, productToTeam(si.product));
+          }
+          for (const row of await devQueries.listQueue()) {
+            if (!liveKeys.has(row.jira_key)) {
+              await devQueries.archive(row.jira_key);
+            }
+          }
+        } catch (err) {
+          console.warn('[dev-review] Background state sync failed:', err instanceof Error ? err.message : err);
         }
-      }
+      });
       // Merge: batch-fetch all NOVA states in one query, then attach to each issue
       const stateMap = await devQueries.getStatesForKeys(issues.map(i => i.key));
       let enriched = issues.map((issue) => {
@@ -267,6 +281,7 @@ export function createDevReviewRoutes(
         ok: true,
         data: enriched,
         meta: {
+          dataSource,
           userTeamFilterActive,
           userTeamName: userTeamNames.length > 0 ? userTeamNames.join(', ') : null,
           showingAll: showAll || !userTeamFilterActive,

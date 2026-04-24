@@ -92,19 +92,27 @@ export class JiraSyncService {
       const result = await this.jiraClient.searchJqlAll(jql, ALL_FIELDS, 2000);
       console.log(`[jira-sync] Full sync fetched ${result.issues.length} issues`);
 
-      // Upsert in batches
+      // Upsert individually — tolerate per-issue failures so the sync completes
+      let upsertErrors = 0;
       for (const issue of result.issues) {
-        await this.upsertIssue(issue);
-        issueCount++;
+        try {
+          await this.upsertIssue(issue);
+          issueCount++;
+        } catch (err) {
+          upsertErrors++;
+          if (upsertErrors <= 3) {
+            console.warn(`[jira-sync] Failed to sync ${issue.key}: ${err instanceof Error ? err.message : err}`);
+          }
+        }
       }
 
-      // Mark issues as synced immediately so perceiver switches to cache
+      // Mark cache as active even if some issues failed — partial data is better than no data
       this.lastSyncAt = new Date();
       this.fullSyncDone = true;
       this.consecutiveErrors = 0;
 
       const issueDuration = Date.now() - start;
-      console.log(`[jira-sync] Issue sync complete: ${issueCount} issues in ${issueDuration}ms — cache now active`);
+      console.log(`[jira-sync] Issue sync complete: ${issueCount} issues in ${issueDuration}ms${upsertErrors > 0 ? ` (${upsertErrors} failed)` : ''} — cache now active`);
 
       // Backfill comments for open issues in background (non-blocking)
       const openIssues = result.issues.filter(i =>
