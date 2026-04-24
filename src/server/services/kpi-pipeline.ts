@@ -308,7 +308,7 @@ export class KpiPipeline {
         prompt,
         'Generate the daily KPI digest for today.',
         DailyDigestSchema,
-        { tier: 'reasoning', temperature: 0.3, callType: 'kpi_daily_digest' },
+        { temperature: 0.3, callType: 'kpi_daily_digest' },
       );
 
       if (result.data) {
@@ -395,7 +395,7 @@ export class KpiPipeline {
         prompt,
         'Generate the weekly KPI digest.',
         WeeklyDigestSchema,
-        { tier: 'reasoning', temperature: 0.3, callType: 'kpi_weekly_digest' },
+        { temperature: 0.3, callType: 'kpi_weekly_digest' },
       );
 
       if (result.data) {

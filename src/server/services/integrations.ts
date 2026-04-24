@@ -205,18 +205,16 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
   {
     id: 'llm',
     name: 'AI / LLM',
-    description: 'LLM providers for agent reasoning — Anthropic Claude (primary) and OpenAI (failover).',
+    description: 'LLM providers for agent reasoning — 3-tier routing across Anthropic, OpenAI, and OpenRouter.',
     enabledKey: 'llm_enabled',
     authType: 'credentials',
     fields: [
       { key: 'anthropic_api_key', label: 'Anthropic API Key', type: 'password', placeholder: 'sk-ant-...', required: true },
-      { key: 'openai_api_key', label: 'OpenAI API Key (failover)', type: 'password', placeholder: 'sk-...', required: false },
-      { key: 'llm_primary_provider', label: 'Primary Provider', type: 'text', placeholder: 'anthropic', required: false },
-      { key: 'llm_primary_model', label: 'Primary Model', type: 'text', placeholder: 'claude-sonnet-4-6-20250627', required: false },
-      { key: 'llm_failover_provider', label: 'Failover Provider', type: 'text', placeholder: 'openai', required: false },
-      { key: 'llm_failover_model', label: 'Failover Model', type: 'text', placeholder: 'gpt-4.1', required: false },
+      { key: 'openai_api_key', label: 'OpenAI API Key', type: 'password', placeholder: 'sk-...', required: false },
+      { key: 'openrouter_api_key', label: 'OpenRouter API Key', type: 'password', placeholder: 'sk-or-...', required: false },
       { key: 'llm_temperature', label: 'Temperature', type: 'text', placeholder: '0.3', required: false },
       { key: 'llm_max_tokens', label: 'Max Tokens', type: 'text', placeholder: '4096', required: false },
+      { key: 'agent_model_routing', label: 'Tier Routing (JSON)', type: 'text', placeholder: '{"reasoning":{"primary":{"provider":"anthropic"}},...}', required: false },
     ],
   },
   {

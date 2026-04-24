@@ -110,7 +110,7 @@ export class StaleSweep {
           systemPrompt,
           'Draft a contextual follow-up message for this stale ticket.',
           ChaseResultSchema,
-          { tier: 'fast', ticketId: ticketKey, callType: 'chase', temperature: 0.3 },
+          { ticketId: ticketKey, callType: 'chase', temperature: 0.3 },
         );
 
         const decision = this.buildSweepDecision(issue, 'chase', 'stale',

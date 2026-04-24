@@ -76,7 +76,7 @@ export class BriefEngine {
       prompt,
       `Generate a pre-assignment brief for ${ticketKey}: ${summary}`,
       BriefResultSchema,
-      { tier: 'reasoning', temperature: 0.2, ticketId: ticketKey, callType: 'brief' },
+      { temperature: 0.2, ticketId: ticketKey, callType: 'brief' },
     );
 
     return result.data;

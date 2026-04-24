@@ -82,7 +82,6 @@ export class Reasoner {
       userMessage,
       TriageResultSchema,
       {
-        tier: 'reasoning',
         ticketId: event.ticketKey,
         callType: 'triage',
         temperature: 0.2,
@@ -184,7 +183,6 @@ export class Reasoner {
       `Analyse the latest comment on this ticket and produce the structured JSON assessment.`,
       RespondResultSchema,
       {
-        tier: 'reasoning',
         ticketId: event.ticketKey,
         callType: 'respond',
         temperature: 0.2,

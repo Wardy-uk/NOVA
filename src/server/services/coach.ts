@@ -62,7 +62,7 @@ export class CoachingEngine {
       prompt,
       `Assess this agent response for Golden Rules compliance.\n\nAgent's response:\n${responseText.slice(0, 1000)}`,
       CoachingAssessmentSchema,
-      { tier: 'fast', temperature: 0.1, ticketId: ticketKey, callType: 'coaching' },
+      { temperature: 0.1, ticketId: ticketKey, callType: 'coaching' },
     );
 
     if (result.data) {

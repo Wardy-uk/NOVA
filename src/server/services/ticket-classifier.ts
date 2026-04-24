@@ -74,7 +74,7 @@ export class TicketClassifier {
       prompt,
       `Classify this resolved support ticket.\n\nTicket: ${issue.key} — ${summary}`,
       ClassificationResultSchema,
-      { tier: 'fast', temperature: 0.1, ticketId: issue.key, callType: 'classification' },
+      { temperature: 0.1, ticketId: issue.key, callType: 'classification' },
     );
 
     return result.data;
@@ -131,7 +131,7 @@ export class TicketClassifier {
       prompt,
       'Analyse ticket trends for the service desk.',
       TrendAnalysisResultSchema,
-      { tier: 'reasoning', temperature: 0.3, callType: 'trend_analysis' },
+      { temperature: 0.3, callType: 'trend_analysis' },
     );
 
     if (result.data) {

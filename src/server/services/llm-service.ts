@@ -6,8 +6,8 @@ import type { SettingsQueries } from '../db/settings-store.js';
 
 // ── Types ──
 
-export type LlmTier = 'reasoning' | 'fast';
-export type LlmProvider = 'anthropic' | 'openai';
+export type LlmTier = 'reasoning' | 'standard' | 'cheap';
+export type LlmProvider = 'anthropic' | 'openai' | 'openrouter';
 
 export interface LlmCallOptions {
   tier?: LlmTier;
@@ -32,6 +32,11 @@ interface ProviderConfig {
   apiKey: string;
 }
 
+interface TierConfig {
+  primary: { provider: LlmProvider; model?: string };
+  failover: { provider: LlmProvider; model?: string };
+}
+
 interface CircuitState {
   failures: number;
   openUntil: number;
@@ -47,21 +52,70 @@ const RETRY_VALIDATION_ATTEMPTS = 1;
 const DEFAULT_MODELS: Record<LlmProvider, Record<LlmTier, string>> = {
   anthropic: {
     reasoning: 'claude-sonnet-4-6-20250627',
-    fast: 'claude-haiku-4-5-20251001',
+    standard: 'claude-haiku-4-5-20251001',
+    cheap: 'claude-haiku-4-5-20251001',
   },
   openai: {
     reasoning: 'gpt-4.1',
-    fast: 'gpt-4.1-mini',
+    standard: 'gpt-4.1-mini',
+    cheap: 'gpt-4.1-mini',
+  },
+  openrouter: {
+    reasoning: 'anthropic/claude-sonnet-4',
+    standard: 'anthropic/claude-haiku-4',
+    cheap: 'google/gemini-2.0-flash-lite-001',
   },
 };
 
-// Per-million-token pricing (USD). Updated April 2025.
+const DEFAULT_TIER_CONFIG: Record<LlmTier, TierConfig> = {
+  reasoning: {
+    primary: { provider: 'anthropic' },
+    failover: { provider: 'openai' },
+  },
+  standard: {
+    primary: { provider: 'anthropic' },
+    failover: { provider: 'openai' },
+  },
+  cheap: {
+    primary: { provider: 'openrouter' },
+    failover: { provider: 'openrouter', model: 'deepseek/deepseek-chat-v3-0324' },
+  },
+};
+
+const CALL_TYPE_TIER_MAP: Record<string, LlmTier> = {
+  triage: 'reasoning',
+  respond: 'reasoning',
+  coaching: 'reasoning',
+  qa_scoring: 'reasoning',
+  resolution_review: 'reasoning',
+  brief: 'reasoning',
+  chase: 'standard',
+  trend_analysis: 'standard',
+  quick_reply: 'standard',
+  quick_resolve: 'standard',
+  call_review: 'standard',
+  '121-prep': 'standard',
+  sentiment_analysis: 'cheap',
+  commitment_analysis: 'cheap',
+  ticket_analysis: 'cheap',
+  ticket_classification: 'cheap',
+  classification: 'cheap',
+  kpi_daily_digest: 'cheap',
+  kpi_weekly_digest: 'cheap',
+};
+
+// Per-million-token pricing (USD).
 export const MODEL_PRICING: Record<string, { inputPerM: number; outputPerM: number }> = {
   'claude-sonnet-4-6-20250627': { inputPerM: 3.00,  outputPerM: 15.00 },
   'claude-sonnet-4-20250514':   { inputPerM: 3.00,  outputPerM: 15.00 },
   'claude-haiku-4-5-20251001':  { inputPerM: 1.00,  outputPerM: 5.00  },
   'gpt-4.1':                    { inputPerM: 2.00,  outputPerM: 8.00  },
   'gpt-4.1-mini':               { inputPerM: 0.40,  outputPerM: 1.60  },
+  // OpenRouter models
+  'google/gemini-2.0-flash-lite-001':  { inputPerM: 0.075, outputPerM: 0.30  },
+  'deepseek/deepseek-chat-v3-0324':    { inputPerM: 0.27,  outputPerM: 1.10  },
+  'anthropic/claude-sonnet-4':         { inputPerM: 3.00,  outputPerM: 15.00 },
+  'anthropic/claude-haiku-4':          { inputPerM: 1.00,  outputPerM: 5.00  },
 };
 
 export function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
@@ -142,8 +196,10 @@ async function callOpenAI(
   apiKey: string,
   maxTokens: number,
   temperature: number,
+  baseURL?: string,
+  defaultHeaders?: Record<string, string>,
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
-  const client = new OpenAI({ apiKey });
+  const client = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}), ...(defaultHeaders ? { defaultHeaders } : {}) });
   const response = await client.chat.completions.create({
     model,
     temperature,
@@ -176,6 +232,11 @@ async function callProvider(
   try {
     if (provider === 'anthropic') {
       return await callAnthropic(systemPrompt, userMessage, model, apiKey, maxTokens, temperature);
+    } else if (provider === 'openrouter') {
+      return await callOpenAI(systemPrompt, userMessage, model, apiKey, maxTokens, temperature,
+        'https://openrouter.ai/api/v1',
+        { 'HTTP-Referer': 'https://nova.nurtur.tech', 'X-Title': 'N.O.V.A' },
+      );
     } else {
       return await callOpenAI(systemPrompt, userMessage, model, apiKey, maxTokens, temperature);
     }
@@ -217,6 +278,9 @@ function extractJson(raw: string): string {
   const braceStart = raw.indexOf('{');
   const braceEnd = raw.lastIndexOf('}');
   if (braceStart !== -1 && braceEnd > braceStart) return raw.slice(braceStart, braceEnd + 1);
+  const bracketStart = raw.indexOf('[');
+  const bracketEnd = raw.lastIndexOf(']');
+  if (bracketStart !== -1 && bracketEnd > bracketStart) return raw.slice(bracketStart, bracketEnd + 1);
   return raw.trim();
 }
 
@@ -229,24 +293,50 @@ export class LlmService {
     this.settings = settings;
   }
 
-  private getPrimaryConfig(tier: LlmTier): ProviderConfig | null {
-    const provider = (this.settings.get('llm_primary_provider')?.trim() || 'anthropic') as LlmProvider;
-    const model = this.settings.get('llm_primary_model')?.trim() || DEFAULT_MODELS[provider]?.[tier] || DEFAULT_MODELS.anthropic[tier];
-    const apiKey = provider === 'anthropic'
-      ? (this.settings.get('anthropic_api_key')?.trim() || process.env.ANTHROPIC_API_KEY || '')
-      : (this.settings.get('openai_api_key')?.trim() || process.env.OPENAI_API_KEY || '');
-    if (!apiKey) return null;
-    return { provider, model, apiKey };
+  private getApiKey(provider: LlmProvider): string {
+    if (provider === 'anthropic') {
+      return this.settings.get('anthropic_api_key')?.trim() || process.env.ANTHROPIC_API_KEY || '';
+    }
+    if (provider === 'openrouter') {
+      return this.settings.get('openrouter_api_key')?.trim() || process.env.OPENROUTER_API_KEY || '';
+    }
+    return this.settings.get('openai_api_key')?.trim() || process.env.OPENAI_API_KEY || '';
   }
 
-  private getFailoverConfig(tier: LlmTier): ProviderConfig | null {
-    const provider = (this.settings.get('llm_failover_provider')?.trim() || 'openai') as LlmProvider;
-    const model = this.settings.get('llm_failover_model')?.trim() || DEFAULT_MODELS[provider]?.[tier] || DEFAULT_MODELS.openai[tier];
-    const apiKey = provider === 'anthropic'
-      ? (this.settings.get('anthropic_api_key')?.trim() || process.env.ANTHROPIC_API_KEY || '')
-      : (this.settings.get('openai_api_key')?.trim() || process.env.OPENAI_API_KEY || '');
-    if (!apiKey) return null;
-    return { provider, model, apiKey };
+  private getTierConfig(tier: LlmTier): TierConfig {
+    const routingJson = this.settings.get('agent_model_routing')?.trim();
+    if (routingJson) {
+      try {
+        const routing = JSON.parse(routingJson);
+        if (routing[tier]) return routing[tier] as TierConfig;
+      } catch { /* fall through to defaults */ }
+    }
+    return DEFAULT_TIER_CONFIG[tier];
+  }
+
+  private getConfigsForTier(tier: LlmTier): ProviderConfig[] {
+    const tierCfg = this.getTierConfig(tier);
+    const configs: ProviderConfig[] = [];
+
+    const primaryKey = this.getApiKey(tierCfg.primary.provider);
+    if (primaryKey) {
+      configs.push({
+        provider: tierCfg.primary.provider,
+        model: tierCfg.primary.model || DEFAULT_MODELS[tierCfg.primary.provider]?.[tier] || DEFAULT_MODELS.anthropic[tier],
+        apiKey: primaryKey,
+      });
+    }
+
+    const failoverKey = this.getApiKey(tierCfg.failover.provider);
+    if (failoverKey) {
+      const failoverModel = tierCfg.failover.model || DEFAULT_MODELS[tierCfg.failover.provider]?.[tier] || DEFAULT_MODELS.openai[tier];
+      const failoverConfig: ProviderConfig = { provider: tierCfg.failover.provider, model: failoverModel, apiKey: failoverKey };
+      if (failoverConfig.provider !== configs[0]?.provider || failoverConfig.model !== configs[0]?.model) {
+        configs.push(failoverConfig);
+      }
+    }
+
+    return configs;
   }
 
   async call<T>(
@@ -255,21 +345,34 @@ export class LlmService {
     schema: z.ZodType<T, z.ZodTypeDef, unknown>,
     options: LlmCallOptions,
   ): Promise<LlmResult<T>> {
-    const tier = options.tier ?? 'reasoning';
+    const tier = options.tier ?? CALL_TYPE_TIER_MAP[options.callType] ?? 'standard';
     const maxTokens = options.maxTokens ?? parseInt(this.settings.get('llm_max_tokens')?.trim() || '4096', 10);
     const temperature = options.temperature ?? parseFloat(this.settings.get('llm_temperature')?.trim() || '0.3');
     const ticketId = options.ticketId ?? null;
 
-    const configs: ProviderConfig[] = [];
-    const primary = this.getPrimaryConfig(tier);
-    const failover = this.getFailoverConfig(tier);
-    if (primary && !isCircuitOpen(primary.provider)) configs.push(primary);
-    if (failover && !isCircuitOpen(failover.provider)) configs.push(failover);
-    if (primary && !configs.includes(primary)) configs.push(primary);
-    if (failover && !configs.includes(failover)) configs.push(failover);
+    // Build provider chain: tier configs, then fall-up chain (cheap → standard → reasoning)
+    const tiers: LlmTier[] = tier === 'cheap' ? ['cheap', 'standard', 'reasoning']
+      : tier === 'standard' ? ['standard', 'reasoning'] : ['reasoning'];
 
-    if (configs.length === 0) {
-      throw new Error('No LLM providers configured. Set anthropic_api_key or openai_api_key in Settings.');
+    const seen = new Set<string>();
+    const configs: ProviderConfig[] = [];
+    for (const t of tiers) {
+      for (const cfg of this.getConfigsForTier(t)) {
+        const key = `${cfg.provider}:${cfg.model}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          configs.push(cfg);
+        }
+      }
+    }
+
+    // Filter by circuit breaker, but keep circuit-broken ones as last resort
+    const available = configs.filter(c => !isCircuitOpen(c.provider));
+    const tripped = configs.filter(c => isCircuitOpen(c.provider));
+    const orderedConfigs = [...available, ...tripped];
+
+    if (orderedConfigs.length === 0) {
+      throw new Error('No LLM providers configured. Set anthropic_api_key, openai_api_key, or openrouter_api_key in Settings.');
     }
 
     const jsonInstruction = '\n\nRespond with valid JSON only. No markdown fencing, no commentary.';
@@ -277,7 +380,7 @@ export class LlmService {
 
     let lastError: Error | null = null;
 
-    for (const config of configs) {
+    for (const config of orderedConfigs) {
       for (let attempt = 0; attempt <= RETRY_VALIDATION_ATTEMPTS; attempt++) {
         const start = Date.now();
         let rawContent = '';
@@ -340,22 +443,32 @@ export class LlmService {
   getDiagnostics(): {
     primaryProvider: string; primaryModel: string; primaryKeyPrefix: string; primaryAvailable: boolean;
     failoverProvider: string; failoverModel: string; failoverKeyPrefix: string; failoverAvailable: boolean;
-    anthropicCircuit: string; openaiCircuit: string;
+    anthropicCircuit: string; openaiCircuit: string; openrouterCircuit: string;
+    tierRouting: Record<LlmTier, TierConfig>;
+    callTypeTiers: Record<string, LlmTier>;
   } {
-    const primary = this.getPrimaryConfig('reasoning');
-    const failover = this.getFailoverConfig('reasoning');
+    const reasoningCfgs = this.getConfigsForTier('reasoning');
+    const primary = reasoningCfgs[0] ?? null;
+    const failover = reasoningCfgs[1] ?? null;
     const maskKey = (k: string | undefined) => k ? k.slice(0, 8) + '...' : '(not set)';
     return {
-      primaryProvider: this.settings.get('llm_primary_provider') ?? 'anthropic (default)',
+      primaryProvider: primary?.provider ?? '(none)',
       primaryModel: primary?.model ?? '(no key)',
       primaryKeyPrefix: maskKey(primary?.apiKey),
       primaryAvailable: !!primary,
-      failoverProvider: this.settings.get('llm_failover_provider') ?? 'openai (default)',
+      failoverProvider: failover?.provider ?? '(none)',
       failoverModel: failover?.model ?? '(no key)',
       failoverKeyPrefix: maskKey(failover?.apiKey),
       failoverAvailable: !!failover,
       anthropicCircuit: isCircuitOpen('anthropic') ? 'OPEN' : 'closed',
       openaiCircuit: isCircuitOpen('openai') ? 'OPEN' : 'closed',
+      openrouterCircuit: isCircuitOpen('openrouter') ? 'OPEN' : 'closed',
+      tierRouting: {
+        reasoning: this.getTierConfig('reasoning'),
+        standard: this.getTierConfig('standard'),
+        cheap: this.getTierConfig('cheap'),
+      },
+      callTypeTiers: { ...CALL_TYPE_TIER_MAP },
     };
   }
 }

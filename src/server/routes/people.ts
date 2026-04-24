@@ -167,7 +167,6 @@ ${plan?.important_context ?? 'None'}`;
   const llmService = new LlmService(settingsQueries);
   const llmResult = await llmService.call(systemPrompt, userMessage, prepSchema, {
     callType: '121-prep',
-    tier: 'fast',
     maxTokens: 2048,
     temperature: 0.4,
   });

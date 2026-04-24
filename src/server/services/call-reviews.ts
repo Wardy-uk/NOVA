@@ -41,7 +41,7 @@ export class CallReviewService {
       `You are a call quality reviewer for a tech support team. Analyse this support call transcript and score the interaction.\n\n## Call Details\n- Agent: ${input.agentName}\n- Customer: ${input.customerName ?? 'Unknown'}\n- Ticket: ${input.ticketKey ?? 'N/A'}\n\n## Transcript\n${transcript.slice(0, 8000)}\n\n## Your Task\nProvide a structured review with: summary, sentiment, key topics, action items, customer satisfaction score (1-10), agent performance score (1-10), and any concerns.`,
       'Review this support call transcript.',
       CallReviewSchema,
-      { tier: 'fast', temperature: 0.2, callType: 'call_review' },
+      { temperature: 0.2, callType: 'call_review' },
     );
 
     const review = result.data;

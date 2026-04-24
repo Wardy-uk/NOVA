@@ -487,7 +487,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         systemPrompt,
         'Draft a response to this ticket based on the conversation so far.',
         RespondResultSchema,
-        { tier: 'fast', ticketId: ticketKey, callType: 'quick_reply', temperature: 0.3 },
+        { ticketId: ticketKey, callType: 'quick_reply', temperature: 0.3 },
       );
 
       res.json({
@@ -584,7 +584,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         systemPrompt,
         'Draft a resolution summary and closing message for this ticket.',
         ResolveSummarySchema,
-        { tier: 'fast', ticketId: ticketKey, callType: 'quick_resolve', temperature: 0.3 },
+        { ticketId: ticketKey, callType: 'quick_resolve', temperature: 0.3 },
       );
 
       res.json({

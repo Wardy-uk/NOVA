@@ -50,32 +50,21 @@ interface UserSettingsAccessor {
   get(userId: number, key: string): string | null;
 }
 
-const SentimentItem = z.object({
+const AnalysisItem = z.object({
   issueKey: z.string(),
-  score: z.number().min(-1).max(1),
-  summary: z.string(),
-});
-
-const SentimentBatchSchema = z.any().transform((val): { results: z.infer<typeof SentimentItem>[] } => {
-  if (Array.isArray(val)) return { results: val };
-  if (val?.results && Array.isArray(val.results)) return { results: val.results };
-  return { results: [] };
-}).pipe(z.object({ results: z.array(SentimentItem) }));
-type SentimentBatch = { results: z.infer<typeof SentimentItem>[] };
-
-const CommitmentItem = z.object({
-  issueKey: z.string(),
+  sentimentScore: z.number().min(-1).max(1),
+  sentimentSummary: z.string(),
   commitmentDate: z.string().nullable(),
   followedUp: z.boolean(),
-  quote: z.string(),
+  commitmentQuote: z.string().nullable().default(null),
 });
 
-const CommitmentBatchSchema = z.any().transform((val): { results: z.infer<typeof CommitmentItem>[] } => {
+const AnalysisBatchSchema = z.any().transform((val): { results: z.infer<typeof AnalysisItem>[] } => {
   if (Array.isArray(val)) return { results: val };
   if (val?.results && Array.isArray(val.results)) return { results: val.results };
   return { results: [] };
-}).pipe(z.object({ results: z.array(CommitmentItem) }));
-type CommitmentBatch = { results: z.infer<typeof CommitmentItem>[] };
+}).pipe(z.object({ results: z.array(AnalysisItem) }));
+type AnalysisBatch = { results: z.infer<typeof AnalysisItem>[] };
 
 // ── Helpers ──
 
@@ -449,11 +438,8 @@ export class ProblemTicketScanner {
         else alertsCreated++;
       }
 
-      // Run sentiment analysis in batches
-      await this.runSentimentAnalysis(needsSentiment, config.get('sentiment'));
-
-      // Run missed commitment analysis
-      await this.runCommitmentAnalysis(needsSentiment, config.get('missed_commitment'));
+      // Run combined sentiment + commitment analysis (single LLM call per batch)
+      await this.runAnalysisBatch(needsSentiment, config.get('sentiment'), config.get('missed_commitment'));
 
       // Run "no next reply" analysis — customer waiting for agent response
       await this.runNoReplyAnalysis(allIssues, config.get('no_next_reply'), scanId, now);
@@ -504,103 +490,40 @@ export class ProblemTicketScanner {
     }
   }
 
-  /** Batch-run LLM sentiment analysis on tickets with deterministic signals */
-  private async runSentimentAnalysis(
+  /** Combined sentiment + commitment analysis in a single LLM call per batch, with dedup */
+  private async runAnalysisBatch(
     tickets: Array<{ issue: JiraIssue; reasons: Omit<ProblemTicketAlertReason, 'alert_id'>[] }>,
     sentimentConfig: ProblemTicketConfigRow | undefined,
-  ): Promise<void> {
-    if (!sentimentConfig?.enabled || !this.jira || !this.llmService || tickets.length === 0) return;
-
-    const threshold = JSON.parse(sentimentConfig.threshold_json ?? '{}');
-    const negativeThreshold = threshold.negativeThreshold ?? -0.3;
-
-    const batchSize = 10;
-    for (let i = 0; i < tickets.length; i += batchSize) {
-      const batch = tickets.slice(i, i + batchSize);
-
-      const ticketComments: Array<{ issueKey: string; comments: string }> = [];
-      for (const { issue } of batch) {
-        try {
-          const comments = await this.jira.getComments(issue.key, 3);
-          const text = comments
-            .map((c: JiraComment) => `[${c.author.displayName}]: ${adfToText(c.body)}`)
-            .join('\n');
-          if (text.trim()) {
-            ticketComments.push({ issueKey: issue.key, comments: text });
-          }
-        } catch {
-          // Skip if comments fail
-        }
-      }
-
-      if (ticketComments.length === 0) continue;
-
-      try {
-        const prompt = ticketComments
-          .map(tc => `--- ${tc.issueKey} ---\n${tc.comments}`)
-          .join('\n\n');
-
-        const result = await this.llmService.call<SentimentBatch>(
-          `You analyze Jira service desk ticket comments for customer sentiment.
-Score guide: -1.0 = very angry/frustrated, -0.5 = unhappy, 0 = neutral, 0.5 = satisfied, 1.0 = very happy.
-Focus on the customer's tone, not the agent's. If no customer comments, score 0.`,
-          prompt,
-          SentimentBatchSchema,
-          { tier: 'fast', temperature: 0.3, callType: 'sentiment_analysis' },
-        );
-
-        for (const entry of result.data.results) {
-          const alert = await this.queries.getAlertByIssueKey(entry.issueKey);
-          if (!alert) continue;
-
-          const sentimentScore = Math.max(-1, Math.min(1, entry.score));
-
-          let extraScore = 0;
-          if (sentimentScore <= negativeThreshold) {
-            extraScore = sentimentConfig.weight;
-          }
-
-          if (extraScore > 0 || sentimentScore !== 0) {
-            const newScore = Math.min(100, alert.score + extraScore);
-            const newSeverity = newScore >= 60 ? 'P1' : newScore >= 35 ? 'P2' : 'P3';
-
-            const reasons = alert.reasons ?? [];
-            if (extraScore > 0) {
-              reasons.push({
-                rule: 'sentiment',
-                label: 'Negative Sentiment',
-                weight: sentimentConfig.weight,
-                detail: entry.summary,
-              });
-            }
-
-            await this.queries.upsertAlert({
-              ...alert,
-              score: newScore,
-              severity: newSeverity,
-              sentiment_score: sentimentScore,
-              sentiment_summary: entry.summary,
-            }, reasons);
-          }
-        }
-      } catch (err: any) {
-        console.warn(`[ProblemTicketScanner] Sentiment batch failed:`, err.message);
-      }
-    }
-  }
-
-  /** Batch-run LLM analysis to detect missed agent update commitments */
-  private async runCommitmentAnalysis(
-    tickets: Array<{ issue: JiraIssue; reasons: Omit<ProblemTicketAlertReason, 'alert_id'>[] }>,
     commitmentConfig: ProblemTicketConfigRow | undefined,
   ): Promise<void> {
-    if (!commitmentConfig?.enabled || !this.jira || !this.llmService || tickets.length === 0) return;
+    const sentimentEnabled = sentimentConfig?.enabled ?? false;
+    const commitmentEnabled = commitmentConfig?.enabled ?? false;
+    if ((!sentimentEnabled && !commitmentEnabled) || !this.jira || !this.llmService || tickets.length === 0) return;
 
+    const threshold = JSON.parse(sentimentConfig?.threshold_json ?? '{}');
+    const negativeThreshold = threshold.negativeThreshold ?? -0.3;
     const today = new Date().toISOString().slice(0, 10);
 
+    // Dedup: skip tickets that haven't been updated since last analysis
+    const needsAnalysis: typeof tickets = [];
+    for (const t of tickets) {
+      const alert = await this.queries.getAlertByIssueKey(t.issue.key);
+      const jiraUpdated = t.issue.fields.updated as string | undefined;
+      if (alert?.last_analysed_at && jiraUpdated) {
+        if (new Date(jiraUpdated) <= new Date(alert.last_analysed_at)) continue;
+      }
+      needsAnalysis.push(t);
+    }
+
+    const skipped = tickets.length - needsAnalysis.length;
+    if (skipped > 0) {
+      console.log(`[ProblemTicketScanner] Dedup: skipped ${skipped}/${tickets.length} tickets (unchanged since last analysis)`);
+    }
+    if (needsAnalysis.length === 0) return;
+
     const batchSize = 10;
-    for (let i = 0; i < tickets.length; i += batchSize) {
-      const batch = tickets.slice(i, i + batchSize);
+    for (let i = 0; i < needsAnalysis.length; i += batchSize) {
+      const batch = needsAnalysis.slice(i, i + batchSize);
 
       const ticketComments: Array<{ issueKey: string; comments: string }> = [];
       for (const { issue } of batch) {
@@ -624,47 +547,74 @@ Focus on the customer's tone, not the agent's. If no customer comments, score 0.
           .map(tc => `--- ${tc.issueKey} ---\n${tc.comments}`)
           .join('\n\n');
 
-        const result = await this.llmService.call<CommitmentBatch>(
-          `You analyze Jira service desk comments for update commitments made by support agents.
+        const result = await this.llmService.call<AnalysisBatch>(
+          `You analyse Jira service desk ticket comments. For each ticket, provide BOTH:
+
+1. **Sentiment**: Score the customer's tone from -1.0 (very angry) to 1.0 (very happy). Focus on customer comments, not agent comments. If no customer comments, score 0.
+
+2. **Missed commitments**: Check if any agent/support staff promised an update by a specific date that has now passed without follow-up.
 Today's date is ${today}.
-Rules:
-- Look for agent promises like "will update by Friday", "get back to you by 15th March", "expect an update by end of week", "I'll have this resolved by tomorrow"
-- Only flag commitments from agents/support staff, not from customers/reporters
-- commitmentDate must be a concrete date (resolve relative dates like "Friday" or "end of week" using the comment timestamp)
-- followedUp = true if a comment from the same agent (or any agent) exists AFTER the commitment date
-- Only flag missed commitments: where commitmentDate is in the past AND followedUp is false
-- If no commitment found or commitment was followed up, set commitmentDate to null`,
+- Look for agent promises like "will update by Friday", "get back to you by 15th March"
+- Resolve relative dates using the comment timestamp
+- followedUp = true if any agent commented AFTER the commitment date
+- If no commitment found or it was followed up, set commitmentDate to null`,
           prompt,
-          CommitmentBatchSchema,
-          { tier: 'fast', temperature: 0.2, callType: 'commitment_analysis' },
+          AnalysisBatchSchema,
+          { temperature: 0.3, callType: 'ticket_analysis' },
         );
 
-        for (const entry of result.data.results) {
-          if (!entry.commitmentDate || entry.followedUp) continue;
-          if (entry.commitmentDate > today) continue;
+        const analysedKeys: string[] = [];
 
+        for (const entry of result.data.results) {
           const alert = await this.queries.getAlertByIssueKey(entry.issueKey);
           if (!alert) continue;
 
-          const newScore = Math.min(100, alert.score + commitmentConfig.weight);
-          const newSeverity = newScore >= 60 ? 'P1' : newScore >= 35 ? 'P2' : 'P3';
-
+          analysedKeys.push(entry.issueKey);
+          let extraScore = 0;
           const reasons = alert.reasons ?? [];
-          reasons.push({
-            rule: 'missed_commitment',
-            label: 'Missed Commitment',
-            weight: commitmentConfig.weight,
-            detail: `Promised update by ${entry.commitmentDate}${entry.quote ? `: "${entry.quote}"` : ''}`,
-          });
 
-          await this.queries.upsertAlert({
-            ...alert,
-            score: newScore,
-            severity: newSeverity,
-          }, reasons);
+          // Sentiment scoring
+          if (sentimentEnabled) {
+            const sentimentScore = Math.max(-1, Math.min(1, entry.sentimentScore));
+            if (sentimentScore <= negativeThreshold) {
+              extraScore += sentimentConfig!.weight;
+              reasons.push({
+                rule: 'sentiment',
+                label: 'Negative Sentiment',
+                weight: sentimentConfig!.weight,
+                detail: entry.sentimentSummary,
+              });
+            }
+
+            if (extraScore > 0 || sentimentScore !== 0) {
+              alert.sentiment_score = sentimentScore;
+              alert.sentiment_summary = entry.sentimentSummary;
+            }
+          }
+
+          // Commitment scoring
+          if (commitmentEnabled && entry.commitmentDate && !entry.followedUp && entry.commitmentDate <= today) {
+            extraScore += commitmentConfig!.weight;
+            reasons.push({
+              rule: 'missed_commitment',
+              label: 'Missed Commitment',
+              weight: commitmentConfig!.weight,
+              detail: `Promised update by ${entry.commitmentDate}${entry.commitmentQuote ? `: "${entry.commitmentQuote}"` : ''}`,
+            });
+          }
+
+          if (extraScore > 0 || alert.sentiment_score !== null) {
+            const newScore = Math.min(100, alert.score + extraScore);
+            const newSeverity = newScore >= 60 ? 'P1' : newScore >= 35 ? 'P2' : 'P3';
+            await this.queries.upsertAlert({ ...alert, score: newScore, severity: newSeverity }, reasons);
+          }
+        }
+
+        if (analysedKeys.length > 0) {
+          await this.queries.markAnalysed(analysedKeys);
         }
       } catch (err: any) {
-        console.warn(`[ProblemTicketScanner] Commitment batch failed:`, err.message);
+        console.warn(`[ProblemTicketScanner] Analysis batch failed:`, err.message);
       }
     }
   }

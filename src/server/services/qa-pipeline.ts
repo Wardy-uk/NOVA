@@ -151,7 +151,7 @@ export class QaPipeline {
       prompt,
       `Score this resolved ticket for QA.\n\nTicket: ${issue.key} — ${summary}`,
       QaTicketResultSchema,
-      { tier: 'fast', temperature: 0.1, ticketId: issue.key, callType: 'qa_scoring' },
+      { temperature: 0.1, ticketId: issue.key, callType: 'qa_scoring' },
     );
 
     return result.data;

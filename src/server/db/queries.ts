@@ -1566,7 +1566,7 @@ export interface ProblemTicketAlert {
   score: number; fingerprint: string; first_seen: string; last_seen: string;
   resolved_at: string | null; sla_remaining_ms: number | null;
   sentiment_score: number | null; sentiment_summary: string | null;
-  scan_id: string; reasons?: ProblemTicketAlertReason[];
+  scan_id: string; last_analysed_at: string | null; reasons?: ProblemTicketAlertReason[];
 }
 export interface ProblemTicketAlertReason { rule: string; label: string; weight: number; detail: string | null; }
 export interface ProblemTicketIgnore {
@@ -1577,7 +1577,7 @@ export interface ProblemTicketConfigRow { rule: string; enabled: boolean; weight
 
 export class ProblemTicketQueries {
   async upsertAlert(
-    alert: Omit<ProblemTicketAlert, 'id' | 'first_seen' | 'last_seen' | 'resolved_at' | 'reasons'>,
+    alert: Omit<ProblemTicketAlert, 'id' | 'first_seen' | 'last_seen' | 'resolved_at' | 'reasons' | 'last_analysed_at'>,
     reasons: Omit<ProblemTicketAlertReason, 'alert_id'>[]
   ): Promise<number> {
     await execute(`
@@ -1760,7 +1760,17 @@ export class ProblemTicketQueries {
       sla_remaining_ms: (row.sla_remaining_ms as number) ?? null,
       sentiment_score: (row.sentiment_score as number) ?? null,
       sentiment_summary: (row.sentiment_summary as string) ?? null, scan_id: row.scan_id as string,
+      last_analysed_at: (row.last_analysed_at as string) ?? null,
     };
+  }
+
+  async markAnalysed(issueKeys: string[]): Promise<void> {
+    if (issueKeys.length === 0) return;
+    const placeholders = issueKeys.map(() => '?').join(',');
+    await execute(
+      `UPDATE problem_ticket_alerts SET last_analysed_at = GETUTCDATE() WHERE issue_key IN (${placeholders})`,
+      issueKeys
+    );
   }
 }
 

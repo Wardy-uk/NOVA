@@ -85,7 +85,6 @@ export class ResolutionReviewer {
       'Review this resolved ticket against the quality checks and produce the structured JSON assessment.',
       ResolutionReviewSchema,
       {
-        tier: 'reasoning',
         ticketId: issue.key,
         callType: 'resolution_review',
         temperature: 0.2,
