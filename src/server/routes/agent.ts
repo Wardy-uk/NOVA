@@ -245,6 +245,16 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.get('/flagged/diagnose/:key', async (req, res) => {
+    if (!deps?.riskScorer) return res.status(503).json({ ok: false, error: 'Risk scorer not available' });
+    try {
+      const data = await deps.riskScorer.diagnoseTicket(req.params.key);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Diagnosis failed' });
+    }
+  });
+
   router.post('/flagged/:key/review', async (req, res) => {
     if (!deps?.riskScorer) return res.status(503).json({ ok: false, error: 'Risk scorer not available' });
     const { key } = req.params;

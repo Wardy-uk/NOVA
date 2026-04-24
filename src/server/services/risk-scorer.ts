@@ -74,15 +74,19 @@ export class RiskScorer {
 
     // 2. Escalation language
     if (input.hasEscalationLanguage) {
-      factors.push({ id: 'escalation_language', label: 'Escalation requested', score: 25 });
+      factors.push({ id: 'escalation_language', label: 'Escalation requested', score: 30 });
     }
 
-    // 3. Age + activity mismatch
+    // 3. Age + activity mismatch (graduated scoring)
     if (input.jiraCreated) {
       const ageDays = (now - input.jiraCreated.getTime()) / 86_400_000;
-      if (ageDays >= 5 && input.commentCount >= 10) {
-        factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 20 });
+      if (ageDays >= 7 && input.commentCount >= 15) {
+        factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 30 });
+      } else if (ageDays >= 5 && input.commentCount >= 10) {
+        factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 25 });
       } else if (ageDays >= 10 && input.commentCount >= 5) {
+        factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 20 });
+      } else if (ageDays >= 5 && input.commentCount >= 5) {
         factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 15 });
       }
     }
@@ -92,7 +96,7 @@ export class RiskScorer {
       factors.push({ id: 'bounced', label: `Bounced ${input.reassignCount}x`, score: 20 });
     }
     if (input.uniqueInternalCommenters >= 4) {
-      factors.push({ id: 'many_hands', label: `${input.uniqueInternalCommenters} internal commenters`, score: 10 });
+      factors.push({ id: 'many_hands', label: `${input.uniqueInternalCommenters} internal commenters`, score: 15 });
     }
 
     // 5. Agent inaction
@@ -343,6 +347,96 @@ export class RiskScorer {
       console.warn('[RiskScorer] Teams webhook error:', err instanceof Error ? err.message : err);
       return false;
     }
+  }
+
+  async diagnoseTicket(ticketKey: string): Promise<{
+    found: boolean;
+    input: TicketRiskInput | null;
+    score: number;
+    threshold: number;
+    factors: RiskFactor[];
+    enrichment: Record<string, unknown>;
+  }> {
+    const threshold = this.getThreshold();
+
+    const ticket = await queryOne<{
+      issue_key: string; summary: string; assignee_display: string; assignee_account_id: string;
+      reporter_display: string; reporter_account_id: string; priority_name: string;
+      jira_created: string; sla_breach_time: string | null; sla_breached: number;
+    }>(
+      `SELECT issue_key, summary, assignee_display, assignee_account_id,
+              reporter_display, reporter_account_id, priority_name,
+              jira_created, sla_breach_time, sla_breached
+       FROM jira_issue_cache WHERE issue_key = ?`, [ticketKey],
+    );
+
+    if (!ticket) return { found: false, input: null, score: 0, threshold, factors: [], enrichment: {} };
+
+    const [stateRow, sentimentRow, commentRow, reassignRow, reporterRow] = await Promise.all([
+      queryOne<{ comment_count: number; last_customer_reply_at: string | null; last_agent_action_at: string | null }>(
+        `SELECT comment_count, last_customer_reply_at, last_agent_action_at
+         FROM agent_ticket_state WHERE ticket_id = ?`, [ticketKey],
+      ),
+      queryOne<{ sentiment_score: number }>(
+        `SELECT sentiment_score FROM problem_ticket_alerts
+         WHERE issue_key = ? AND sentiment_score IS NOT NULL AND resolved_at IS NULL`, [ticketKey],
+      ),
+      queryOne<{ unique_authors: number; has_escalation: number }>(
+        `SELECT COUNT(DISTINCT author_account_id) as unique_authors,
+                MAX(CASE WHEN body_text LIKE '%escalat%' OR body_text LIKE '%manager%'
+                         OR body_text LIKE '%urgent%' OR body_text LIKE '%asap%'
+                         OR body_text LIKE '%complaint%' OR body_text LIKE '%unacceptable%'
+                    THEN 1 ELSE 0 END) as has_escalation
+         FROM jira_comment_cache WHERE issue_key = ? AND is_public = 1`, [ticketKey],
+      ),
+      queryOne<{ reassigns: number }>(
+        `SELECT COUNT(*) as reassigns FROM agent_decisions
+         WHERE ticket_id = ? AND action = 'assign'`, [ticketKey],
+      ),
+      queryOne<{ open_count: number }>(
+        `SELECT COUNT(*) as open_count FROM jira_issue_cache
+         WHERE reporter_account_id = (SELECT reporter_account_id FROM jira_issue_cache WHERE issue_key = ?)
+           AND status_category != 'done'`, [ticketKey],
+      ),
+    ]);
+
+    const input: TicketRiskInput = {
+      issueKey: ticket.issue_key,
+      summary: ticket.summary,
+      assignee: ticket.assignee_display,
+      assigneeAccountId: ticket.assignee_account_id,
+      reporter: ticket.reporter_display,
+      reporterAccountId: ticket.reporter_account_id,
+      priority: ticket.priority_name,
+      jiraCreated: ticket.jira_created ? new Date(ticket.jira_created) : null,
+      slaBreachTime: ticket.sla_breach_time ? new Date(ticket.sla_breach_time) : null,
+      slaBreached: ticket.sla_breached === 1,
+      commentCount: stateRow?.comment_count ?? 0,
+      lastCustomerReplyAt: stateRow?.last_customer_reply_at ? new Date(stateRow.last_customer_reply_at) : null,
+      lastAgentActionAt: stateRow?.last_agent_action_at ? new Date(stateRow.last_agent_action_at) : null,
+      sentimentScore: sentimentRow?.sentiment_score ?? null,
+      reassignCount: reassignRow?.reassigns ?? 0,
+      uniqueInternalCommenters: commentRow?.unique_authors ?? 0,
+      hasEscalationLanguage: (commentRow?.has_escalation ?? 0) === 1,
+      reporterOpenTicketCount: reporterRow?.open_count ?? 0,
+    };
+
+    const { score, factors } = this.scoreTicket(input);
+
+    return {
+      found: true,
+      input,
+      score,
+      threshold,
+      factors,
+      enrichment: {
+        agentTicketState: stateRow ?? 'NOT FOUND',
+        sentimentAlert: sentimentRow ?? 'NOT FOUND',
+        commentCache: commentRow ?? 'NOT FOUND',
+        reassignDecisions: reassignRow ?? 'NOT FOUND',
+        reporterOpenCount: reporterRow ?? 'NOT FOUND',
+      },
+    };
   }
 
   // ── Query methods for API ──
