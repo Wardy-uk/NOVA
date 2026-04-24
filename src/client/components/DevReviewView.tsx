@@ -41,6 +41,7 @@ interface DevReviewState {
   last_action_at: string;
   accepted_at: string | null;
   returned_at: string | null;
+  work_item_key: string | null;
 }
 
 interface QueueItem {
@@ -446,14 +447,15 @@ export function DevReviewView() {
         if (json.warnings?.length) {
           setTimeout(() => fireToast('err', json.warnings.join('; ')), 500);
         }
-        setItems(prev => prev.filter(i => i.key !== selectedKey));
+        // Update item state locally instead of removing
+        setItems(prev => prev.map(i => i.key === selectedKey
+          ? { ...i, state: { ...i.state!, status: 'accepted' as const, accepted_at: new Date().toISOString(), work_item_key: json.workItemKey ?? null } }
+          : i));
         setShowAcceptModal(false);
         if (json.workItemKey) {
           setAcceptedWorkItem({ key: json.workItemKey, sourceKey: selectedKey });
         } else {
           fireToast('ok', 'Accepted to development');
-          setSelectedKey(null);
-          setDetail(null);
         }
       } else {
         fireToast('err', json.error || 'Accept failed');
@@ -824,7 +826,7 @@ export function DevReviewView() {
       )}
 
       {acceptedWorkItem && (
-        <Modal onClose={() => { setAcceptedWorkItem(null); setCopied(false); setSelectedKey(null); setDetail(null); }}>
+        <Modal onClose={() => { setAcceptedWorkItem(null); setCopied(false); }}>
           <div className="text-center">
             <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ background: 'rgba(16,185,129,0.15)' }}>
               <span className="text-3xl">✓</span>
@@ -854,7 +856,7 @@ export function DevReviewView() {
             </div>
             <div className="flex items-center justify-center gap-3">
               <button
-                onClick={() => { setAcceptedWorkItem(null); setCopied(false); setSelectedKey(null); setDetail(null); }}
+                onClick={() => { setAcceptedWorkItem(null); setCopied(false); }}
                 className="px-5 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5"
               >
                 Close
@@ -1077,8 +1079,24 @@ function TicketDetailPane({
           {/* Actions — gated behind claim ownership */}
           <div className="flex items-center gap-2 flex-shrink-0">
             {terminal ? (
-              <div className="text-[11px] text-neutral-500 italic px-3 py-2">
-                {state?.status === 'accepted' ? 'Accepted to development — no further action' : 'Returned to CC — no further action'}
+              <div className="flex items-center gap-2 px-3 py-2">
+                <span className="text-[11px] text-neutral-500 italic">
+                  {state?.status === 'accepted' ? 'Accepted to development' : 'Returned to CC — no further action'}
+                </span>
+                {state?.status === 'accepted' && state.work_item_key && (
+                  <>
+                    <span className="text-[11px] text-neutral-600">·</span>
+                    <a
+                      href={`https://nurturtech.atlassian.net/browse/${state.work_item_key}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] font-mono font-semibold hover:underline"
+                      style={{ color: '#5ec1ca' }}
+                    >
+                      {state.work_item_key} ↗
+                    </a>
+                  </>
+                )}
               </div>
             ) : !state?.claimed_by_user_id ? (
               /* Unclaimed — prominent claim button */

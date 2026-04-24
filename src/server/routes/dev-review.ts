@@ -960,6 +960,7 @@ export function createDevReviewRoutes(
         });
         workItemKey = createdBug.key;
         console.log(`[DevReview/accept] Created Bug ${workItemKey} in ${targetProjectKey} for ${key}`);
+        await devQueries.markAccepted(key, workItemKey);
 
         // Link the Bug to the NT support ticket
         try {

@@ -14,6 +14,7 @@ export interface DevReviewState {
   returned_at: string | null;
   archived_at: string | null;
   team: string | null;
+  work_item_key: string | null;
 }
 
 export interface DevReviewThreadEntry {
@@ -265,12 +266,13 @@ export class DevReviewQueries {
     );
   }
 
-  async markAccepted(jiraKey: string): Promise<void> {
+  async markAccepted(jiraKey: string, workItemKey?: string | null): Promise<void> {
     await execute(
       `UPDATE dev_review_state
-       SET status='accepted', accepted_at=GETUTCDATE(), last_action_at=GETUTCDATE()
+       SET status='accepted', accepted_at=GETUTCDATE(), last_action_at=GETUTCDATE(),
+           work_item_key=ISNULL(?, work_item_key)
        WHERE jira_key=?`,
-      [jiraKey],
+      [workItemKey ?? null, jiraKey],
     );
   }
 

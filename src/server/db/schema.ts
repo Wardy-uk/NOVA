@@ -764,6 +764,9 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_dev_review_thread_comment_lookup')
      CREATE INDEX IX_dev_review_thread_comment_lookup ON dev_review_thread (jira_key, jira_comment_id)
        WHERE jira_comment_id IS NOT NULL;`,
+
+    `IF COL_LENGTH('dev_review_state', 'work_item_key') IS NULL
+     ALTER TABLE dev_review_state ADD work_item_key NVARCHAR(50) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
