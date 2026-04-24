@@ -755,6 +755,15 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_comment_cache_issue_author')
      CREATE INDEX IX_jira_comment_cache_issue_author ON jira_comment_cache (issue_key, author_account_id)
        INCLUDE (is_public, jira_created);`,
+
+    // ── Dev Review indexes ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_dev_review_state_status')
+     CREATE INDEX IX_dev_review_state_status ON dev_review_state (status)
+       INCLUDE (claimed_by_user_id, fast_track, team, first_seen_at);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_dev_review_thread_comment_lookup')
+     CREATE INDEX IX_dev_review_thread_comment_lookup ON dev_review_thread (jira_key, jira_comment_id)
+       WHERE jira_comment_id IS NOT NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

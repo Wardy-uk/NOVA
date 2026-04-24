@@ -220,7 +220,7 @@ export class DevReviewQueries {
   }): Promise<DevReviewState[]> {
     let sql = 'SELECT * FROM dev_review_state WHERE 1=1';
     const params: (string | number)[] = [];
-    if (!filters?.includeArchived) sql += " AND status != 'archived'";
+    if (!filters?.includeArchived) sql += " AND status NOT IN ('archived','accepted','returned')";
     if (filters?.status) { sql += ' AND status = ?'; params.push(filters.status); }
     if (filters?.claimedBy !== undefined) {
       if (filters.claimedBy === null) sql += ' AND claimed_by_user_id IS NULL';
@@ -374,6 +374,15 @@ export class DevReviewQueries {
       [jiraKey, jiraCommentId],
     );
     return !!row;
+  }
+
+  /** Batch-fetch all known Jira comment IDs for a ticket — avoids N+1 hasJiraComment calls. */
+  async getKnownJiraCommentIds(jiraKey: string): Promise<Set<string>> {
+    const rows = await query<{ jira_comment_id: string }>(
+      `SELECT jira_comment_id FROM dev_review_thread WHERE jira_key = ? AND jira_comment_id IS NOT NULL`,
+      [jiraKey],
+    );
+    return new Set(rows.map(r => r.jira_comment_id));
   }
 
   /** Get all keys currently in an active review state — used by the comment

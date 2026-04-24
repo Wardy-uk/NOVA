@@ -48,6 +48,7 @@ interface QueueItem {
   fields: JiraFields;
   state: DevReviewState | null;
   team: string;
+  claimed_by_display: string | null;
 }
 
 interface ThreadEntry {
@@ -69,6 +70,7 @@ interface TicketDetail {
   state: DevReviewState | null;
   thread: ThreadEntry[];
   jiraComments: Array<{ id: string; author?: { displayName?: string }; body?: unknown; created?: string }>;
+  claimed_by_display: string | null;
 }
 
 // ── API helpers ────────────────────────────────────────────────────────────
@@ -444,10 +446,14 @@ export function DevReviewView() {
         if (json.warnings?.length) {
           setTimeout(() => fireToast('err', json.warnings.join('; ')), 500);
         }
+        // Remove from queue immediately and deselect
+        setItems(prev => prev.filter(i => i.key !== selectedKey));
+        setSelectedKey(null);
+        setDetail(null);
       } else {
         fireToast('err', json.error || 'Accept failed');
+        await Promise.all([loadQueue({ silent: true }), loadDetail(selectedKey)]);
       }
-      await Promise.all([loadQueue({ silent: true }), loadDetail(selectedKey)]);
     } catch (e) {
       fireToast('err', e instanceof Error ? e.message : 'Accept failed');
     } finally {
@@ -460,13 +466,24 @@ export function DevReviewView() {
     setShowAcceptModal(false);
   };
   const onReturn = async () => {
-    if (returnDraft.trim().length < 10) {
+    if (returnDraft.trim().length < 10 || !selectedKey) {
       fireToast('err', 'Next steps must be at least 10 characters');
       return;
     }
-    await doAction(`/ticket/${selectedKey}/return`, {
-      method: 'POST', body: JSON.stringify({ nextSteps: returnDraft }),
-    }, 'Returned to Customer Care');
+    setBusy(true);
+    try {
+      await api(`/ticket/${selectedKey}/return`, {
+        method: 'POST', body: JSON.stringify({ nextSteps: returnDraft }),
+      });
+      fireToast('ok', 'Returned to Customer Care');
+      setItems(prev => prev.filter(i => i.key !== selectedKey));
+      setSelectedKey(null);
+      setDetail(null);
+    } catch (e) {
+      fireToast('err', e instanceof Error ? e.message : 'Return failed');
+    } finally {
+      setBusy(false);
+    }
     setReturnDraft('');
     setShowReturnModal(false);
   };
@@ -686,6 +703,7 @@ export function DevReviewView() {
                 onComment={onComment}
                 onAcceptClick={openAcceptModal}
                 onReturnClick={() => setShowReturnModal(true)}
+                claimedByDisplay={detail.claimed_by_display || selectedItem?.claimed_by_display || null}
               />
             ) : null}
           </div>
@@ -921,7 +939,9 @@ function QueueRow({
             </span>
           )}
           {claimed ? (
-            <span className="text-[#c4b5fd]">◉ claimed</span>
+            <span className="text-[#c4b5fd]" title={item.claimed_by_display || undefined}>
+              ◉ {isMine ? 'mine' : item.claimed_by_display || 'claimed'}
+            </span>
           ) : (
             <span className="text-amber-400">○ unclaimed</span>
           )}
@@ -935,7 +955,7 @@ function QueueRow({
 function TicketDetailPane({
   detail, selectedItem, busy, currentUserId,
   commentDraft, setCommentDraft, onClaim, onUnclaim, onFastTrack, onComment,
-  onAcceptClick, onReturnClick,
+  onAcceptClick, onReturnClick, claimedByDisplay,
 }: {
   detail: TicketDetail;
   selectedItem: QueueItem | undefined;
@@ -949,6 +969,7 @@ function TicketDetailPane({
   onComment: () => void;
   onAcceptClick: () => void;
   onReturnClick: () => void;
+  claimedByDisplay: string | null;
 }) {
   const { fields, state, thread } = detail;
   const tldr = adfToText(fields.customfield_13184);
@@ -993,33 +1014,57 @@ function TicketDetailPane({
               {state?.claimed_by_user_id && (
                 <>
                   <span className="text-neutral-600">·</span>
-                  <span className="text-[#c4b5fd] font-semibold">Claimed {timeAgo(state.claimed_at)} ago</span>
+                  <span className="text-[#c4b5fd] font-semibold">
+                    {isMine ? 'Claimed by you' : `Claimed by ${claimedByDisplay || 'reviewer'}`} {timeAgo(state.claimed_at)} ago
+                  </span>
                 </>
               )}
             </div>
           </div>
 
-          {/* Actions */}
+          {/* Actions — gated behind claim ownership */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {!terminal && (
+            {terminal ? (
+              <div className="text-[11px] text-neutral-500 italic px-3 py-2">
+                {state?.status === 'accepted' ? 'Accepted to development — no further action' : 'Returned to CC — no further action'}
+              </div>
+            ) : !state?.claimed_by_user_id ? (
+              /* Unclaimed — prominent claim button */
+              <button
+                onClick={onClaim}
+                disabled={busy}
+                className="px-5 py-2.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
+                style={{
+                  background: 'linear-gradient(135deg, #f59e0b, #f97316)',
+                  boxShadow: '0 4px 16px rgba(245,158,11,0.4)',
+                }}
+              >
+                ◉ Claim to review
+              </button>
+            ) : !isMine ? (
+              /* Claimed by someone else — read-only */
+              <div className="flex items-center gap-2">
+                <div
+                  className="text-[11px] font-semibold px-3 py-2 rounded-lg"
+                  style={{
+                    background: 'rgba(155,106,237,0.1)',
+                    border: '1px solid rgba(155,106,237,0.3)',
+                    color: '#c4b5fd',
+                  }}
+                >
+                  Claimed by {claimedByDisplay || 'another reviewer'}
+                </div>
+              </div>
+            ) : (
+              /* Claimed by me — full action set */
               <>
-                {!state?.claimed_by_user_id || !isMine ? (
-                  <button
-                    onClick={onClaim}
-                    disabled={busy}
-                    className="px-3 py-2 text-xs rounded-lg font-semibold text-neutral-200 border border-white/10 hover:bg-white/5 disabled:opacity-40"
-                  >
-                    {state?.claimed_by_user_id ? 'Steal claim' : 'Claim'}
-                  </button>
-                ) : (
-                  <button
-                    onClick={onUnclaim}
-                    disabled={busy}
-                    className="px-3 py-2 text-xs rounded-lg font-semibold text-neutral-400 border border-white/10 hover:bg-white/5 disabled:opacity-40"
-                  >
-                    Unclaim
-                  </button>
-                )}
+                <button
+                  onClick={onUnclaim}
+                  disabled={busy}
+                  className="px-3 py-2 text-xs rounded-lg font-semibold text-neutral-400 border border-white/10 hover:bg-white/5 disabled:opacity-40"
+                >
+                  Release
+                </button>
                 <button
                   onClick={() => onFastTrack(!state?.fast_track)}
                   disabled={busy}
@@ -1049,11 +1094,6 @@ function TicketDetailPane({
                   ✓ Accept
                 </button>
               </>
-            )}
-            {terminal && (
-              <div className="text-[11px] text-neutral-500 italic px-3 py-2">
-                {state?.status === 'accepted' ? 'Accepted to development — no further action' : 'Returned to CC — no further action'}
-              </div>
             )}
           </div>
         </div>
@@ -1091,7 +1131,7 @@ function TicketDetailPane({
             )}
             {thread.map((t) => <ThreadEntryRow key={t.id} entry={t} />)}
           </div>
-          {!terminal && (
+          {!terminal && isMine && (
             <div className="pt-3 border-t border-white/5">
               <textarea
                 value={commentDraft}
@@ -1110,6 +1150,13 @@ function TicketDetailPane({
                 >
                   Post Comment
                 </button>
+              </div>
+            </div>
+          )}
+          {!terminal && !isMine && (
+            <div className="pt-3 border-t border-white/5 text-center">
+              <div className="text-[11px] text-neutral-500 py-2">
+                {state?.claimed_by_user_id ? 'Claimed by another reviewer' : 'Claim this ticket to comment'}
               </div>
             </div>
           )}

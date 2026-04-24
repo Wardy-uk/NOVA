@@ -139,6 +139,7 @@ export function createDevReviewRoutes(
 
   router.get('/queue', async (req: Request, res: Response) => {
     try {
+      const t0 = Date.now();
       let issues: Array<{ key: string; fields: Record<string, unknown> }> = [];
       let dataSource: 'cache' | 'api' = 'cache';
 
@@ -214,13 +215,27 @@ export function createDevReviewRoutes(
       });
       // Merge: batch-fetch all NOVA states in one query, then attach to each issue
       const stateMap = await devQueries.getStatesForKeys(issues.map(i => i.key));
+
+      // Build a map of user_id → display_name for claimed tickets
+      const claimerIds = new Set<number>();
+      for (const s of stateMap.values()) {
+        if (s.claimed_by_user_id) claimerIds.add(s.claimed_by_user_id);
+      }
+      const claimerDisplayMap = new Map<number, string>();
+      for (const uid of claimerIds) {
+        const u = await userQueries.getById(uid);
+        if (u) claimerDisplayMap.set(uid, u.display_name || u.username);
+      }
+
       let enriched = issues.map((issue) => {
         const product = (issue.fields as { customfield_13183?: { value?: string } }).customfield_13183?.value || null;
+        const st = stateMap.get(issue.key) || null;
         return {
           key: issue.key,
           fields: issue.fields,
-          state: stateMap.get(issue.key) || null,
+          state: st,
           team: productToTeam(product),
+          claimed_by_display: st?.claimed_by_user_id ? claimerDisplayMap.get(st.claimed_by_user_id) || null : null,
         };
       });
 
@@ -277,6 +292,11 @@ export function createDevReviewRoutes(
         return new Date(b.state?.last_action_at || 0).getTime() - new Date(a.state?.last_action_at || 0).getTime();
       });
 
+      const elapsed = Date.now() - t0;
+      if (elapsed > 500) {
+        console.warn(`[dev-review/queue] took ${elapsed}ms (source=${dataSource}, items=${enriched.length})`);
+      }
+
       res.json({
         ok: true,
         data: enriched,
@@ -296,10 +316,12 @@ export function createDevReviewRoutes(
 
   router.get('/ticket/:key', async (req: Request, res: Response) => {
     try {
+      const t0 = Date.now();
       const key = String(req.params.key);
       let issueFields: Record<string, unknown> | null = null;
+      let detailSource: 'cache' | 'api' = 'cache';
 
-      if (cache && syncService?.isReady()) {
+      if (cache) {
         const ci = await cache.getIssue(key);
         if (ci?.fields_json) {
           issueFields = JSON.parse(ci.fields_json);
@@ -308,6 +330,7 @@ export function createDevReviewRoutes(
 
       // Fallback to live API if not in cache
       if (!issueFields) {
+        detailSource = 'api';
         const client = getJiraClient();
         if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
         const issue = await client.getIssue(key, [
@@ -339,13 +362,18 @@ export function createDevReviewRoutes(
         }
       }
 
-      // Trigger background cache refresh for this issue
+      const tComments = Date.now();
+
+      // Trigger background cache refresh for this issue (non-blocking)
       if (syncService) {
         syncService.syncSingleIssue(key).catch(() => {});
       }
+
+      // Batch-fetch known comment IDs in one query (avoids N+1 hasJiraComment)
+      const knownCommentIds = await devQueries.getKnownJiraCommentIds(key);
       let importedExternal = 0;
       for (const c of jiraComments) {
-        if (await devQueries.hasJiraComment(key, c.id)) continue;
+        if (knownCommentIds.has(c.id)) continue;
         const body = adfToPlainText(c.body);
         const authorName = c.author?.displayName || 'Unknown';
         await devQueries.addExternalJiraComment({
@@ -358,8 +386,7 @@ export function createDevReviewRoutes(
         });
         importedExternal++;
       }
-      // Any new external reply flips waiting_on_assignee → in_review so
-      // the queue immediately reflects "ball back in dev court".
+      // Any new external reply flips waiting_on_assignee → in_review
       if (importedExternal > 0) {
         const cur = await devQueries.getState(key);
         if (cur?.status === 'waiting_on_assignee') {
@@ -367,14 +394,39 @@ export function createDevReviewRoutes(
         }
       }
 
-      const state = await devQueries.getState(key);
-      const thread = await devQueries.getThread(key);
+      const [state, thread] = await Promise.all([
+        devQueries.getState(key),
+        devQueries.getThread(key),
+      ]);
 
-      res.json({ ok: true, data: { key, fields: issueFields, state, thread, jiraComments } });
+      const elapsed = Date.now() - t0;
+      if (elapsed > 500) {
+        console.warn(`[dev-review/detail] ${key} took ${elapsed}ms (source=${detailSource}, comments=${Date.now() - tComments}ms, imported=${importedExternal})`);
+      }
+
+      let claimed_by_display: string | null = null;
+      if (state?.claimed_by_user_id) {
+        const u = await userQueries.getById(state.claimed_by_user_id);
+        if (u) claimed_by_display = u.display_name || u.username;
+      }
+
+      res.json({ ok: true, data: { key, fields: issueFields, state, thread, jiraComments, claimed_by_display } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'detail failed' });
     }
   });
+
+  // ── Claim guard — actions require the requesting user to hold the claim ──
+
+  async function requireClaim(req: Request, res: Response): Promise<boolean> {
+    if (!req.user) { res.status(401).json({ ok: false }); return false; }
+    const state = await devQueries.getState(String(req.params.key));
+    if (!state || state.claimed_by_user_id !== req.user.id) {
+      res.status(403).json({ ok: false, error: 'You must claim this ticket before taking action' });
+      return false;
+    }
+    return true;
+  }
 
   // ── Claim / unclaim / fast-track / priority ────────────────────────────
 
@@ -400,6 +452,7 @@ export function createDevReviewRoutes(
 
   router.post('/ticket/:key/fast-track', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
+    if (!await requireClaim(req, res)) return;
     const on = !!req.body?.on;
     await devQueries.setFastTrack(String(req.params.key), on);
     await devQueries.addThreadEntry({
@@ -415,6 +468,7 @@ export function createDevReviewRoutes(
 
   router.post('/ticket/:key/priority', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
+    if (!await requireClaim(req, res)) return;
     const priority = req.body?.priority as 'low' | 'normal' | 'high';
     if (!['low', 'normal', 'high'].includes(priority)) {
       res.status(400).json({ ok: false, error: 'Invalid priority' }); return;
@@ -441,6 +495,7 @@ export function createDevReviewRoutes(
 
   router.post('/ticket/:key/comment', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
+    if (!await requireClaim(req, res)) return;
     const body = String(req.body?.body ?? '').trim();
     if (!body) { res.status(400).json({ ok: false, error: 'Body required' }); return; }
 
@@ -677,6 +732,7 @@ export function createDevReviewRoutes(
 
   router.post('/ticket/:key/accept', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
+    if (!await requireClaim(req, res)) return;
     const client = getJiraClient();
     if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
 
@@ -946,6 +1002,7 @@ export function createDevReviewRoutes(
 
   router.post('/ticket/:key/return', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
+    if (!await requireClaim(req, res)) return;
     const nextSteps = String(req.body?.nextSteps || '').trim();
     if (nextSteps.length < 10) {
       res.status(400).json({ ok: false, error: 'Next steps required (min 10 chars)' }); return;
