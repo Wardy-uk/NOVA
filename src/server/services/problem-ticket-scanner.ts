@@ -21,6 +21,7 @@ import type {
   ProblemTicketAlertReason,
 } from '../db/queries.js';
 import type { LlmService } from './llm-service.js';
+import { resolveStatusName } from '../utils/jira-status.js';
 
 // ── Types ──
 
@@ -71,29 +72,6 @@ type AnalysisBatch = { results: z.infer<typeof AnalysisItem>[] };
 /** Extract a usable English status name from Jira's status field.
  *  Jira may return localized names (e.g. "打开" for "Open") depending on
  *  the API user's locale. Fall back to statusCategory.name or key. */
-function resolveStatusName(statusField: unknown): string | null {
-  if (!statusField || typeof statusField !== 'object') return null;
-  const s = statusField as Record<string, unknown>;
-  const name = typeof s.name === 'string' ? s.name : null;
-
-  // If the name is ASCII, it's likely English — use it as-is
-  if (name && /^[\x20-\x7E]+$/.test(name)) return name;
-
-  // Non-ASCII (localized) — prefer statusCategory
-  const cat = s.statusCategory as Record<string, unknown> | undefined;
-  if (cat) {
-    const catName = typeof cat.name === 'string' ? cat.name : null;
-    if (catName && /^[\x20-\x7E]+$/.test(catName)) return catName;
-    // Last resort: category key (new, indeterminate, done)
-    const catKey = typeof cat.key === 'string' ? cat.key : null;
-    if (catKey) {
-      const keyMap: Record<string, string> = { new: 'Open', indeterminate: 'In Progress', done: 'Done' };
-      return keyMap[catKey] ?? catKey;
-    }
-  }
-
-  return name; // Return whatever we have, even if localized
-}
 
 /** Extract plain text from ADF body (Atlassian Document Format) */
 function adfToText(body: unknown): string {

@@ -193,18 +193,18 @@ export class Observer {
   }
 
   async getCostTrend(startDate: string, endDate: string): Promise<Array<{ period: string; cost: number; calls: number }>> {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const diffDays = (end.getTime() - start.getTime()) / 86_400_000;
+    const start = new Date(startDate + 'T00:00:00Z');
+    const end = new Date(endDate + 'T00:00:00Z');
+    const diffDays = Math.round((end.getTime() - start.getTime()) / 86_400_000);
 
     if (diffDays <= 1) {
       return query<{ period: string; cost: number; calls: number }>(
         `SELECT FORMAT(created_at, 'HH') as period,
                 ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
          FROM agent_llm_calls
-         WHERE created_at >= ? AND created_at < DATEADD(day, 1, CONVERT(DATE, ?))
+         WHERE CONVERT(DATE, created_at) = CONVERT(DATE, ?)
          GROUP BY FORMAT(created_at, 'HH') ORDER BY period`,
-        [startDate, startDate],
+        [startDate],
       );
     }
 
@@ -212,7 +212,8 @@ export class Observer {
       `SELECT CONVERT(VARCHAR(10), created_at, 120) as period,
               ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
        FROM agent_llm_calls
-       WHERE created_at >= ? AND created_at < DATEADD(day, 1, CONVERT(DATE, ?))
+       WHERE CONVERT(DATE, created_at) >= CONVERT(DATE, ?)
+         AND CONVERT(DATE, created_at) <= CONVERT(DATE, ?)
        GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY period`,
       [startDate, endDate],
     );

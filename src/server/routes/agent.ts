@@ -3,6 +3,7 @@ import { requireRole, requireSuperAdmin } from '../middleware/auth.js';
 import type { AgentLoop } from '../services/agent-loop.js';
 import { query, execute } from '../services/database.js';
 import { MODEL_PRICING } from '../services/llm-service.js';
+import { resolveStatusName, resolveStatusFromCache } from '../utils/jira-status.js';
 import { RespondResultSchema, type RespondResult } from '../services/respond-schema.js';
 import { ResolveSummarySchema, type ResolveSummaryResult } from '../services/resolve-schema.js';
 import { loadPrompt } from '../services/prompt-loader.js';
@@ -731,7 +732,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
           key: issue.key,
           id: issue.id,
           summary: f.summary ?? '',
-          status: (f.status as any)?.name ?? 'Unknown',
+          status: resolveStatusName(f.status) ?? 'Unknown',
           statusCategory: (f.status as any)?.statusCategory?.key ?? 'undefined',
           priority: (f.priority as any)?.name ?? 'Medium',
           priorityOrder: priorityOrder[(f.priority as any)?.name] ?? 2,
@@ -793,7 +794,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
           id: ci.jira_id,
           fields: {
             summary: ci.summary,
-            status: { name: ci.status_name, statusCategory: { key: ci.status_category } },
+            status: { name: resolveStatusFromCache(ci.status_name, ci.status_category), statusCategory: { key: ci.status_category } },
             priority: { name: ci.priority_name },
             issuetype: { name: ci.issuetype_name },
             assignee: ci.assignee_account_id ? { displayName: ci.assignee_display, accountId: ci.assignee_account_id, emailAddress: ci.assignee_email } : null,
