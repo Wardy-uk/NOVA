@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useVisibilityInterval } from '../hooks/useVisibilityInterval.js';
 
 interface NotificationItem {
   id: number;
@@ -149,38 +150,25 @@ export function NotificationBell() {
     }, 300);
   }, []);
 
-  // Poll count every 60s — also trigger check + full fetch periodically
-  useEffect(() => {
-    fetchNotifications();
-    const interval = setInterval(() => {
-      // Trigger notification generation, then fetch
-      fetch('/api/notifications/check', { method: 'POST' })
-        .then(r => r.json())
-        .then(json => {
-          if (json.ok && json.created > 0) {
-            fetchNotifications();
-          } else {
-            // Even if no new ones created, refresh count
-            fetch('/api/notifications/count')
-              .then(r => r.json())
-              .then(j => { if (j.ok) setUnreadCount(j.count); })
-              .catch(() => {});
-          }
-        })
-        .catch(() => {});
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [fetchNotifications]);
+  // Fetch on mount
+  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
 
-  // Also trigger check on mount
-  useEffect(() => {
+  // Poll every 60s with visibility gating — trigger check then refresh
+  useVisibilityInterval(() => {
     fetch('/api/notifications/check', { method: 'POST' })
       .then(r => r.json())
       .then(json => {
-        if (json.ok && json.created > 0) fetchNotifications();
+        if (json.ok && json.created > 0) {
+          fetchNotifications();
+        } else {
+          fetch('/api/notifications/count')
+            .then(r => r.json())
+            .then(j => { if (j.ok) setUnreadCount(j.count); })
+            .catch(() => {});
+        }
       })
       .catch(() => {});
-  }, [fetchNotifications]);
+  }, 60000);
 
   // Close on outside click
   useEffect(() => {

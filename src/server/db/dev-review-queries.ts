@@ -506,111 +506,150 @@ export class DevReviewQueries {
       }>;
     };
   }> {
-    // ── Queue snapshot ──────────────────────────────────────────────────
+    // ── Queue + counts in a single scan ──────────────────────────────────
+    const [countsRow] = await this.rows<Record<string, number>>(
+      `SELECT
+        SUM(CASE WHEN status NOT IN ('archived','accepted','returned') THEN 1 ELSE 0 END) AS q_total,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS q_pending,
+        SUM(CASE WHEN status = 'in_review' THEN 1 ELSE 0 END) AS q_in_review,
+        SUM(CASE WHEN fast_track = 1 AND status NOT IN ('archived','accepted','returned') THEN 1 ELSE 0 END) AS q_fast_track,
+        SUM(CASE WHEN claimed_by_user_id IS NULL AND status NOT IN ('archived','accepted','returned') THEN 1 ELSE 0 END) AS q_unclaimed,
+        SUM(CASE WHEN CAST(first_seen_at AS DATE) = CAST(GETDATE() AS DATE) AND status != 'archived' THEN 1 ELSE 0 END) AS today_new,
+        SUM(CASE WHEN CAST(accepted_at AS DATE) = CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS today_accepted,
+        SUM(CASE WHEN CAST(returned_at AS DATE) = CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS today_returned,
+        SUM(CASE WHEN first_seen_at >= DATEADD(day, -7, GETUTCDATE()) AND status != 'archived' THEN 1 ELSE 0 END) AS week_new,
+        SUM(CASE WHEN accepted_at >= DATEADD(day, -7, GETUTCDATE()) THEN 1 ELSE 0 END) AS week_accepted,
+        SUM(CASE WHEN returned_at >= DATEADD(day, -7, GETUTCDATE()) THEN 1 ELSE 0 END) AS week_returned,
+        SUM(CASE WHEN accepted_at IS NOT NULL THEN 1 ELSE 0 END) AS all_accepted,
+        SUM(CASE WHEN returned_at IS NOT NULL THEN 1 ELSE 0 END) AS all_returned
+       FROM dev_review_state`,
+    );
+    const c = countsRow ?? {} as Record<string, number>;
+
     const queueObj = {
-      total: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE status NOT IN ('archived','accepted','returned')`,
-      ),
-      pending: await this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE status = 'pending'`),
-      in_review: await this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE status = 'in_review'`),
-      fast_track: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE fast_track = 1 AND status NOT IN ('archived','accepted','returned')`,
-      ),
-      unclaimed: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE claimed_by_user_id IS NULL AND status NOT IN ('archived','accepted','returned')`,
-      ),
+      total: c.q_total ?? 0,
+      pending: c.q_pending ?? 0,
+      in_review: c.q_in_review ?? 0,
+      fast_track: c.q_fast_track ?? 0,
+      unclaimed: c.q_unclaimed ?? 0,
     };
 
-    // ── Today / Week ─────────────────────────────────────────────────────
-    // Exclude archived rows from "new" counts — they were either closed
-    // or never actually escalated to T3 (cleaned up by the watcher).
     const today = {
-      new: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state
-         WHERE CAST(first_seen_at AS DATE) = CAST(GETDATE() AS DATE) AND status != 'archived'`,
-      ),
-      accepted: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE CAST(accepted_at AS DATE) = CAST(GETDATE() AS DATE)`,
-      ),
-      returned: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE CAST(returned_at AS DATE) = CAST(GETDATE() AS DATE)`,
-      ),
-      processed: 0,
+      new: c.today_new ?? 0,
+      accepted: c.today_accepted ?? 0,
+      returned: c.today_returned ?? 0,
+      processed: (c.today_accepted ?? 0) + (c.today_returned ?? 0),
     };
-    today.processed = today.accepted + today.returned;
 
     const week = {
-      new: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state
-         WHERE first_seen_at >= DATEADD(day, -7, GETUTCDATE()) AND status != 'archived'`,
-      ),
-      accepted: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE accepted_at >= DATEADD(day, -7, GETUTCDATE())`,
-      ),
-      returned: await this.scalar(
-        `SELECT COUNT(*) FROM dev_review_state WHERE returned_at >= DATEADD(day, -7, GETUTCDATE())`,
-      ),
+      new: c.week_new ?? 0,
+      accepted: c.week_accepted ?? 0,
+      returned: c.week_returned ?? 0,
     };
 
     const allTime = {
-      accepted: await this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE accepted_at IS NOT NULL`),
-      returned: await this.scalar(`SELECT COUNT(*) FROM dev_review_state WHERE returned_at IS NOT NULL`),
+      accepted: c.all_accepted ?? 0,
+      returned: c.all_returned ?? 0,
     };
 
-    // ── Averages ─────────────────────────────────────────────────────────
+    // ── Averages + per-developer + sparklines (parallelized) ────────────
     const decisionTotal = allTime.accepted + allTime.returned;
     const acceptanceRatePct =
       decisionTotal > 0 ? Math.round((allTime.accepted / decisionTotal) * 1000) / 10 : null;
 
-    const avgTimeToClaimSec = await this.scalar(
-      `SELECT AVG(DATEDIFF(second, first_seen_at, claimed_at))
-       FROM dev_review_state
-       WHERE claimed_at IS NOT NULL AND first_seen_at IS NOT NULL`,
-    );
+    const [
+      avgTimeToClaimSec,
+      avgDecisionSec,
+      oldestSec,
+      claimedRows,
+      threadCounts,
+      arrivals14d,
+      decisionRowsByDay,
+      teamQueueRows,
+      teamDecisionRows,
+      stateRows,
+      firstPickupRows,
+    ] = await Promise.all([
+      this.scalar(
+        `SELECT AVG(DATEDIFF(second, first_seen_at, claimed_at))
+         FROM dev_review_state
+         WHERE claimed_at IS NOT NULL AND first_seen_at IS NOT NULL`,
+      ),
+      this.scalar(
+        `SELECT AVG(DATEDIFF(second, claimed_at, COALESCE(accepted_at, returned_at)))
+         FROM dev_review_state
+         WHERE claimed_at IS NOT NULL AND (accepted_at IS NOT NULL OR returned_at IS NOT NULL)`,
+      ),
+      this.scalar(
+        `SELECT MAX(DATEDIFF(second, first_seen_at, GETUTCDATE()))
+         FROM dev_review_state
+         WHERE status NOT IN ('archived','accepted','returned')`,
+      ),
+      this.rows<{ user_id: number; display: string | null; cnt: number }>(
+        `SELECT s.claimed_by_user_id AS user_id,
+                COALESCE(u.display_name, u.username) AS display,
+                COUNT(*) AS cnt
+         FROM dev_review_state s
+         LEFT JOIN users u ON u.id = s.claimed_by_user_id
+         WHERE s.claimed_by_user_id IS NOT NULL AND s.status NOT IN ('archived','accepted','returned')
+         GROUP BY s.claimed_by_user_id, u.display_name, u.username`,
+      ),
+      this.rows<{ user_id: number; display: string; kind: string; total: number; today: number; week: number }>(
+        `SELECT user_id, user_display AS display, kind,
+                COUNT(*) AS total,
+                SUM(CASE WHEN CAST(created_at AS DATE) = CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS today,
+                SUM(CASE WHEN created_at >= DATEADD(day, -7, GETUTCDATE()) THEN 1 ELSE 0 END) AS week
+         FROM dev_review_thread
+         WHERE kind IN ('accept','return')
+         GROUP BY user_id, user_display, kind`,
+      ),
+      this.rows<{ date: string; count: number }>(
+        `SELECT CONVERT(varchar, CAST(first_seen_at AS DATE), 23) AS date, COUNT(*) AS count
+         FROM dev_review_state
+         WHERE first_seen_at >= DATEADD(day, -14, GETUTCDATE()) AND status != 'archived'
+         GROUP BY CAST(first_seen_at AS DATE)
+         ORDER BY CAST(first_seen_at AS DATE) ASC`,
+      ),
+      this.rows<{ date: string; kind: string; cnt: number }>(
+        `SELECT CONVERT(varchar, CAST(created_at AS DATE), 23) AS date, kind, COUNT(*) AS cnt
+         FROM dev_review_thread
+         WHERE kind IN ('accept','return') AND created_at >= DATEADD(day, -14, GETUTCDATE())
+         GROUP BY CAST(created_at AS DATE), kind
+         ORDER BY CAST(created_at AS DATE) ASC`,
+      ),
+      this.rows<{ team: string; in_queue: number; waiting: number }>(
+        `SELECT COALESCE(team, 'Unassigned') AS team,
+                SUM(CASE WHEN status NOT IN ('archived','accepted','returned','waiting_on_assignee') THEN 1 ELSE 0 END) AS in_queue,
+                SUM(CASE WHEN status = 'waiting_on_assignee' THEN 1 ELSE 0 END) AS waiting
+         FROM dev_review_state
+         WHERE status NOT IN ('archived')
+         GROUP BY COALESCE(team, 'Unassigned')`,
+      ),
+      this.rows<{ team: string; kind: string; total: number; week: number }>(
+        `SELECT COALESCE(s.team, 'Unassigned') AS team, t.kind,
+                COUNT(*) AS total,
+                SUM(CASE WHEN t.created_at >= DATEADD(day, -7, GETUTCDATE()) THEN 1 ELSE 0 END) AS week
+         FROM dev_review_thread t
+         LEFT JOIN dev_review_state s ON s.jira_key = t.jira_key
+         WHERE t.kind IN ('accept','return')
+         GROUP BY COALESCE(s.team, 'Unassigned'), t.kind`,
+      ),
+      this.rows<{ jira_key: string; first_seen_at: string; team: string | null; status: string }>(
+        `SELECT jira_key, first_seen_at, team, status
+         FROM dev_review_state
+         WHERE status != 'archived' AND first_seen_at IS NOT NULL`,
+      ),
+      this.rows<{ jira_key: string; first_action_at: string }>(
+        `SELECT jira_key, MIN(created_at) AS first_action_at
+         FROM dev_review_thread
+         WHERE kind IN ('comment','accept','return')
+         GROUP BY jira_key`,
+      ),
+    ]);
+
     const avgTimeToClaimMinutes = avgTimeToClaimSec > 0 ? Math.round(avgTimeToClaimSec / 60) : null;
-
-    const avgDecisionSec = await this.scalar(
-      `SELECT AVG(DATEDIFF(second, claimed_at, COALESCE(accepted_at, returned_at)))
-       FROM dev_review_state
-       WHERE claimed_at IS NOT NULL AND (accepted_at IS NOT NULL OR returned_at IS NOT NULL)`,
-    );
     const avgTimeToDecisionMinutes = avgDecisionSec > 0 ? Math.round(avgDecisionSec / 60) : null;
-
-    const oldestSec = await this.scalar(
-      `SELECT MAX(DATEDIFF(second, first_seen_at, GETUTCDATE()))
-       FROM dev_review_state
-       WHERE status NOT IN ('archived','accepted','returned')`,
-    );
     const oldestPendingHours = oldestSec > 0 ? Math.round(oldestSec / 3600) : null;
-
-    // ── Per developer ────────────────────────────────────────────────────
-    // Currently claimed (pulled from dev_review_state)
-    const claimedRows = await this.rows<{ user_id: number; display: string | null; cnt: number }>(
-      `SELECT s.claimed_by_user_id AS user_id,
-              COALESCE(u.display_name, u.username) AS display,
-              COUNT(*) AS cnt
-       FROM dev_review_state s
-       LEFT JOIN users u ON u.id = s.claimed_by_user_id
-       WHERE s.claimed_by_user_id IS NOT NULL AND s.status NOT IN ('archived','accepted','returned')
-       GROUP BY s.claimed_by_user_id, u.display_name, u.username`,
-    );
-    // Accept/return counts come from the thread table (which records who took the action)
-    const threadCounts = await this.rows<{
-      user_id: number;
-      display: string;
-      kind: string;
-      total: number;
-      today: number;
-      week: number;
-    }>(
-      `SELECT user_id, user_display AS display, kind,
-              COUNT(*) AS total,
-              SUM(CASE WHEN CAST(created_at AS DATE) = CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS today,
-              SUM(CASE WHEN created_at >= DATEADD(day, -7, GETUTCDATE()) THEN 1 ELSE 0 END) AS week
-       FROM dev_review_thread
-       WHERE kind IN ('accept','return')
-       GROUP BY user_id, user_display, kind`,
-    );
 
     const perDevMap = new Map<number, {
       user_id: number; display: string;
@@ -655,22 +694,7 @@ export class DevReviewQueries {
       (a, b) => (b.claimed_now + b.accepted_week + b.returned_week) - (a.claimed_now + a.accepted_week + a.returned_week),
     );
 
-    // ── 14-day arrival + decision sparklines ─────────────────────────────
-    const arrivals14d = await this.rows<{ date: string; count: number }>(
-      `SELECT CONVERT(varchar, CAST(first_seen_at AS DATE), 23) AS date, COUNT(*) AS count
-       FROM dev_review_state
-       WHERE first_seen_at >= DATEADD(day, -14, GETUTCDATE()) AND status != 'archived'
-       GROUP BY CAST(first_seen_at AS DATE)
-       ORDER BY CAST(first_seen_at AS DATE) ASC`,
-    );
-
-    const decisionRowsByDay = await this.rows<{ date: string; kind: string; cnt: number }>(
-      `SELECT CONVERT(varchar, CAST(created_at AS DATE), 23) AS date, kind, COUNT(*) AS cnt
-       FROM dev_review_thread
-       WHERE kind IN ('accept','return') AND created_at >= DATEADD(day, -14, GETUTCDATE())
-       GROUP BY CAST(created_at AS DATE), kind
-       ORDER BY CAST(created_at AS DATE) ASC`,
-    );
+    // ── 14-day sparklines (data already fetched above) ───────────────────
     const decByDay = new Map<string, { accepted: number; returned: number }>();
     for (const r of decisionRowsByDay) {
       const e = decByDay.get(r.date) || { accepted: 0, returned: 0 };
@@ -682,25 +706,7 @@ export class DevReviewQueries {
       .map(([date, v]) => ({ date, ...v }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    // ── Per team breakdown ───────────────────────────────────────────────
-    const teamQueueRows = await this.rows<{ team: string; in_queue: number; waiting: number }>(
-      `SELECT COALESCE(team, 'Unassigned') AS team,
-              SUM(CASE WHEN status NOT IN ('archived','accepted','returned','waiting_on_assignee') THEN 1 ELSE 0 END) AS in_queue,
-              SUM(CASE WHEN status = 'waiting_on_assignee' THEN 1 ELSE 0 END) AS waiting
-       FROM dev_review_state
-       WHERE status NOT IN ('archived')
-       GROUP BY COALESCE(team, 'Unassigned')`,
-    );
-    const teamDecisionRows = await this.rows<{ team: string; kind: string; total: number; week: number }>(
-      `SELECT COALESCE(s.team, 'Unassigned') AS team, t.kind,
-              COUNT(*) AS total,
-              SUM(CASE WHEN t.created_at >= DATEADD(day, -7, GETUTCDATE()) THEN 1 ELSE 0 END) AS week
-       FROM dev_review_thread t
-       LEFT JOIN dev_review_state s ON s.jira_key = t.jira_key
-       WHERE t.kind IN ('accept','return')
-       GROUP BY COALESCE(s.team, 'Unassigned'), t.kind`,
-    );
-
+    // ── Per team breakdown (data already fetched above) ────────────────
     const teamMap = new Map<string, {
       team: string;
       in_queue: number;
@@ -736,33 +742,7 @@ export class DevReviewQueries {
       (a, b) => (b.in_queue + b.waiting + b.accepted_week + b.returned_week) - (a.in_queue + a.waiting + a.accepted_week + a.returned_week),
     );
 
-    // ── Unpicked KPI: tickets that went 8 working hours without being ──
-    // picked up (no dev accept/return/comment action within the deadline).
-    // "Breach date" is the calendar date the 8-working-hour window expired.
-    //
-    // Two outputs:
-    //   - 14-day history bucketed by breach date
-    //   - Live list of currently-breached tickets (still active, still no
-    //     dev action recorded)
-    //
-    // We pull every non-archived state row with first_seen_at set, load the
-    // first pickup action per jira_key in one query, then bucket in JS.
-    const stateRows = await this.rows<{
-      jira_key: string;
-      first_seen_at: string;
-      team: string | null;
-      status: string;
-    }>(
-      `SELECT jira_key, first_seen_at, team, status
-       FROM dev_review_state
-       WHERE status != 'archived' AND first_seen_at IS NOT NULL`,
-    );
-    const firstPickupRows = await this.rows<{ jira_key: string; first_action_at: string }>(
-      `SELECT jira_key, MIN(created_at) AS first_action_at
-       FROM dev_review_thread
-       WHERE kind IN ('comment','accept','return')
-       GROUP BY jira_key`,
-    );
+    // ── Unpicked KPI (data already fetched above) ──────────────────────
     const firstPickupMap = new Map<string, number>();
     for (const r of firstPickupRows) {
       firstPickupMap.set(r.jira_key, new Date(r.first_action_at).getTime());

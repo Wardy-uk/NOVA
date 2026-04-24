@@ -70,41 +70,19 @@ export function useTasks() {
 
   useEffect(() => {
     // Show cached tasks immediately, then sync in background
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     fetchTasks().then(() => {
-      const doSync = async () => {
-        try {
-          const res = await fetch('/api/tasks/sync', { method: 'POST' });
-          const json = await res.json();
-          await fetchTasks();
-
-          if (json.ok && Array.isArray(json.data)) {
-            const transientSources = ['planner', 'todo', 'calendar', 'email'];
-            const emptyTransient = json.data.some(
-              (r: { source: string; count: number }) =>
-                transientSources.includes(r.source) && r.count === 0
-            );
-            if (emptyTransient) {
-              retryTimer = setTimeout(async () => {
-                await fetch('/api/tasks/sync', { method: 'POST' }).catch(() => {});
-                fetchTasks();
-              }, 10_000);
-            }
-          }
-        } catch {
-          // Silently fail on initial sync
-        }
-      };
-      doSync();
+      fetch('/api/tasks/sync', { method: 'POST' })
+        .then(() => fetchTasks())
+        .catch(() => {});
     });
-    // Background poll every 30s — pauses when tab is hidden
+    // Background poll every 60s — pauses when tab is hidden
     let interval: ReturnType<typeof setInterval> | null = null;
-    const start = () => { if (!interval) interval = setInterval(fetchTasks, 30_000); };
+    const start = () => { if (!interval) interval = setInterval(fetchTasks, 60_000); };
     const stop = () => { if (interval) { clearInterval(interval); interval = null; } };
     const onVis = () => { if (document.hidden) stop(); else { fetchTasks(); start(); } };
     start();
     document.addEventListener('visibilitychange', onVis);
-    return () => { stop(); document.removeEventListener('visibilitychange', onVis); if (retryTimer) clearTimeout(retryTimer); };
+    return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
   }, [fetchTasks]);
 
   return { tasks, loading, error, syncing, fetchTasks, syncTasks, updateTask };

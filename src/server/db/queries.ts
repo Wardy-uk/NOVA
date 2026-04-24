@@ -388,6 +388,18 @@ export class DeliveryQueries {
     return query<DeliveryEntry>(sql, params);
   }
 
+  async getUpcomingGoLive(withinDays = 7): Promise<DeliveryEntry[]> {
+    return query<DeliveryEntry>(
+      `SELECT * FROM delivery_entries
+       WHERE status != 'complete'
+         AND go_live_date IS NOT NULL
+         AND go_live_date >= CAST(GETUTCDATE() AS DATE)
+         AND go_live_date <= DATEADD(day, ?, GETUTCDATE())
+       ORDER BY go_live_date`,
+      [withinDays]
+    );
+  }
+
   async getById(id: number): Promise<DeliveryEntry | undefined> {
     return queryOne<DeliveryEntry>(`SELECT * FROM delivery_entries WHERE id = ?`, [id]);
   }
@@ -1384,6 +1396,18 @@ export class MilestoneQueries {
       SELECT dm.*, de.account, de.product, de.onboarding_id, de.onboarder
       FROM delivery_milestones dm
       JOIN delivery_entries de ON dm.delivery_id = de.id
+      ORDER BY dm.target_date, de.account, dm.template_name
+    `);
+  }
+
+  async getOverdue(): Promise<Array<DeliveryMilestone & { account: string; product: string; onboarding_id: string | null; onboarder: string | null }>> {
+    return query<any>(`
+      SELECT dm.*, de.account, de.product, de.onboarding_id, de.onboarder
+      FROM delivery_milestones dm
+      JOIN delivery_entries de ON dm.delivery_id = de.id
+      WHERE dm.status != 'complete'
+        AND dm.target_date IS NOT NULL
+        AND dm.target_date < CAST(GETUTCDATE() AS DATE)
       ORDER BY dm.target_date, de.account, dm.template_name
     `);
   }

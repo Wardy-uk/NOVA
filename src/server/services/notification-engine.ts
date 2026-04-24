@@ -11,14 +11,10 @@ export class NotificationEngine {
 
   async checkAndCreate(userId: number): Promise<number> {
     let created = 0;
-    const today = new Date().toISOString().split('T')[0];
 
-    // 1. Overdue milestones
+    // 1. Overdue milestones — filtered in SQL, not full table scan
     try {
-      const allMilestones = await this.milestoneQueries.getAllWithDelivery();
-      const overdue = allMilestones.filter(m =>
-        m.status !== 'complete' && m.target_date && m.target_date < today
-      );
+      const overdue = await this.milestoneQueries.getOverdue();
       for (const m of overdue) {
         const ok = await this.notificationQueries.create({
           user_id: userId,
@@ -32,16 +28,9 @@ export class NotificationEngine {
       }
     } catch { /* ignore */ }
 
-    // 2. Deliveries due within 7 days
+    // 2. Deliveries due within 7 days — filtered in SQL, not full table scan
     try {
-      const entries = await this.deliveryQueries.getAll();
-      const sevenDays = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      const upcoming = entries.filter(e =>
-        e.status !== 'complete' &&
-        e.go_live_date &&
-        e.go_live_date >= today &&
-        e.go_live_date <= sevenDays
-      );
+      const upcoming = await this.deliveryQueries.getUpcomingGoLive(7);
       for (const e of upcoming) {
         const ok = await this.notificationQueries.create({
           user_id: userId,
@@ -58,13 +47,7 @@ export class NotificationEngine {
     // 3. SLA breach warnings (within 30 minutes)
     try {
       if (this.taskQueries) {
-        const slaTasksAll = await this.taskQueries.getTasksWithUpcomingSla(30);
-        // Only notify for tasks owned by this user
-        const slaTasks = slaTasksAll.filter(t => {
-          const taskId = t.id;
-          // Tasks have composite IDs like "source:source_id" — check user_id column via raw query
-          return true; // notify all users about upcoming SLA breaches
-        });
+        const slaTasks = await this.taskQueries.getTasksWithUpcomingSla(30);
         for (const t of slaTasks) {
           const mins = Math.round((new Date(t.sla_breach_at!).getTime() - Date.now()) / 60000);
           const ok = await this.notificationQueries.create({

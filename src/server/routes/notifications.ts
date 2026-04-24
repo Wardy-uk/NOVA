@@ -42,12 +42,25 @@ export function createNotificationRoutes(
     res.json({ ok: true, count });
   });
 
-  // POST /api/notifications/check — trigger notification generation
+  // POST /api/notifications/check — trigger notification generation (5s timeout)
   router.post('/check', async (req, res) => {
     const userId = (req as any).user?.id as number;
     if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
-    const created = await notificationEngine.checkAndCreate(userId);
-    res.json({ ok: true, created });
+    try {
+      const result = await Promise.race([
+        notificationEngine.checkAndCreate(userId),
+        new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 5000)),
+      ]);
+      if (result === 'timeout') {
+        console.warn('[notifications] /check timed out after 5s for user', userId);
+        res.json({ ok: true, created: 0, timedOut: true });
+        return;
+      }
+      res.json({ ok: true, created: result });
+    } catch (err) {
+      console.error('[notifications] /check error:', err);
+      res.json({ ok: true, created: 0 });
+    }
   });
 
   return router;
