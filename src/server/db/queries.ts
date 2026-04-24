@@ -388,16 +388,19 @@ export class DeliveryQueries {
     return query<DeliveryEntry>(sql, params);
   }
 
-  async getUpcomingGoLive(withinDays = 7): Promise<DeliveryEntry[]> {
-    return query<DeliveryEntry>(
-      `SELECT * FROM delivery_entries
+  async getUpcomingGoLive(withinDays = 7, onboarderName?: string): Promise<DeliveryEntry[]> {
+    let sql = `SELECT * FROM delivery_entries
        WHERE status != 'complete'
          AND go_live_date IS NOT NULL
          AND go_live_date >= CAST(GETUTCDATE() AS DATE)
-         AND go_live_date <= DATEADD(day, ?, GETUTCDATE())
-       ORDER BY go_live_date`,
-      [withinDays]
-    );
+         AND go_live_date <= DATEADD(day, ?, GETUTCDATE())`;
+    const params: unknown[] = [withinDays];
+    if (onboarderName) {
+      sql += ` AND LOWER(onboarder) LIKE ?`;
+      params.push(`%${onboarderName.toLowerCase()}%`);
+    }
+    sql += ` ORDER BY go_live_date`;
+    return query<DeliveryEntry>(sql, params);
   }
 
   async getById(id: number): Promise<DeliveryEntry | undefined> {
@@ -1400,16 +1403,21 @@ export class MilestoneQueries {
     `);
   }
 
-  async getOverdue(): Promise<Array<DeliveryMilestone & { account: string; product: string; onboarding_id: string | null; onboarder: string | null }>> {
-    return query<any>(`
+  async getOverdue(onboarderName?: string): Promise<Array<DeliveryMilestone & { account: string; product: string; onboarding_id: string | null; onboarder: string | null }>> {
+    let sql = `
       SELECT dm.*, de.account, de.product, de.onboarding_id, de.onboarder
       FROM delivery_milestones dm
       JOIN delivery_entries de ON dm.delivery_id = de.id
       WHERE dm.status != 'complete'
         AND dm.target_date IS NOT NULL
-        AND dm.target_date < CAST(GETUTCDATE() AS DATE)
-      ORDER BY dm.target_date, de.account, dm.template_name
-    `);
+        AND dm.target_date < CAST(GETUTCDATE() AS DATE)`;
+    const params: unknown[] = [];
+    if (onboarderName) {
+      sql += ` AND LOWER(de.onboarder) LIKE ?`;
+      params.push(`%${onboarderName.toLowerCase()}%`);
+    }
+    sql += ` ORDER BY dm.target_date, de.account, dm.template_name`;
+    return query<any>(sql, params);
   }
 
   async getSummary(): Promise<{ total: number; pending: number; in_progress: number; complete: number; overdue: number }> {

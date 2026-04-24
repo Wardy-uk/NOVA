@@ -1,5 +1,5 @@
 import type { NotificationQueries } from '../db/notifications.js';
-import type { MilestoneQueries, DeliveryQueries, TaskQueries } from '../db/queries.js';
+import type { MilestoneQueries, DeliveryQueries, TaskQueries, UserQueries } from '../db/queries.js';
 
 export class NotificationEngine {
   constructor(
@@ -7,14 +7,22 @@ export class NotificationEngine {
     private milestoneQueries: MilestoneQueries,
     private deliveryQueries: DeliveryQueries,
     private taskQueries?: TaskQueries,
+    private userQueries?: UserQueries,
   ) {}
 
   async checkAndCreate(userId: number): Promise<number> {
     let created = 0;
 
-    // 1. Overdue milestones — filtered in SQL, not full table scan
+    // Resolve user's display name for scoping delivery notifications
+    let userName: string | undefined;
+    if (this.userQueries) {
+      const user = await this.userQueries.getById(userId);
+      userName = user?.display_name || user?.username;
+    }
+
+    // 1. Overdue milestones — scoped to user's deliveries
     try {
-      const overdue = await this.milestoneQueries.getOverdue();
+      const overdue = await this.milestoneQueries.getOverdue(userName);
       for (const m of overdue) {
         const ok = await this.notificationQueries.create({
           user_id: userId,
@@ -28,9 +36,9 @@ export class NotificationEngine {
       }
     } catch { /* ignore */ }
 
-    // 2. Deliveries due within 7 days — filtered in SQL, not full table scan
+    // 2. Deliveries due within 7 days — scoped to user's deliveries
     try {
-      const upcoming = await this.deliveryQueries.getUpcomingGoLive(7);
+      const upcoming = await this.deliveryQueries.getUpcomingGoLive(7, userName);
       for (const e of upcoming) {
         const ok = await this.notificationQueries.create({
           user_id: userId,

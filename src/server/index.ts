@@ -263,7 +263,7 @@ async function main() {
   const milestoneQueries = new MilestoneQueries();
   const auditQueries = new AuditQueries();
   const notificationQueries = new NotificationQueries();
-  const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries, taskQueries);
+  const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries, taskQueries, userQueries);
   const problemTicketQueries = new ProblemTicketQueries();
   const instanceSetupQueries = new InstanceSetupQueries();
   const branchQueries = new BranchQueries();
