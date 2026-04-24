@@ -166,13 +166,14 @@ export class RiskScorer {
         `SELECT issue_key, sentiment_score FROM problem_ticket_alerts
          WHERE issue_key IN (${keyPlaceholders}) AND sentiment_score IS NOT NULL AND resolved_at IS NULL`, ticketKeys,
       ),
-      query<{ issue_key: string; unique_authors: number; has_escalation: number }>(
+      query<{ issue_key: string; unique_authors: number; has_escalation: number; total_comments: number }>(
         `SELECT issue_key,
                 COUNT(DISTINCT author_account_id) as unique_authors,
                 MAX(CASE WHEN body_text LIKE '%escalat%' OR body_text LIKE '%manager%'
                          OR body_text LIKE '%urgent%' OR body_text LIKE '%asap%'
                          OR body_text LIKE '%complaint%' OR body_text LIKE '%unacceptable%'
-                    THEN 1 ELSE 0 END) as has_escalation
+                    THEN 1 ELSE 0 END) as has_escalation,
+                COUNT(*) as total_comments
          FROM jira_comment_cache
          WHERE issue_key IN (${keyPlaceholders}) AND is_public = 1
          GROUP BY issue_key`, ticketKeys,
@@ -219,7 +220,7 @@ export class RiskScorer {
         jiraCreated: ticket.jira_created ? new Date(ticket.jira_created) : null,
         slaBreachTime: ticket.sla_breach_time ? new Date(ticket.sla_breach_time) : null,
         slaBreached: ticket.sla_breached === 1,
-        commentCount: state?.comment_count ?? 0,
+        commentCount: state?.comment_count ?? comments?.total_comments ?? 0,
         lastCustomerReplyAt: state?.last_customer_reply_at ? new Date(state.last_customer_reply_at) : null,
         lastAgentActionAt: state?.last_agent_action_at ? new Date(state.last_agent_action_at) : null,
         sentimentScore: sentimentMap.get(ticket.issue_key) ?? null,
@@ -381,12 +382,13 @@ export class RiskScorer {
         `SELECT sentiment_score FROM problem_ticket_alerts
          WHERE issue_key = ? AND sentiment_score IS NOT NULL AND resolved_at IS NULL`, [ticketKey],
       ),
-      queryOne<{ unique_authors: number; has_escalation: number }>(
+      queryOne<{ unique_authors: number; has_escalation: number; total_comments: number }>(
         `SELECT COUNT(DISTINCT author_account_id) as unique_authors,
                 MAX(CASE WHEN body_text LIKE '%escalat%' OR body_text LIKE '%manager%'
                          OR body_text LIKE '%urgent%' OR body_text LIKE '%asap%'
                          OR body_text LIKE '%complaint%' OR body_text LIKE '%unacceptable%'
-                    THEN 1 ELSE 0 END) as has_escalation
+                    THEN 1 ELSE 0 END) as has_escalation,
+                COUNT(*) as total_comments
          FROM jira_comment_cache WHERE issue_key = ? AND is_public = 1`, [ticketKey],
       ),
       queryOne<{ reassigns: number }>(
@@ -411,7 +413,7 @@ export class RiskScorer {
       jiraCreated: ticket.jira_created ? new Date(ticket.jira_created) : null,
       slaBreachTime: ticket.sla_breach_time ? new Date(ticket.sla_breach_time) : null,
       slaBreached: ticket.sla_breached === 1,
-      commentCount: stateRow?.comment_count ?? 0,
+      commentCount: stateRow?.comment_count ?? commentRow?.total_comments ?? 0,
       lastCustomerReplyAt: stateRow?.last_customer_reply_at ? new Date(stateRow.last_customer_reply_at) : null,
       lastAgentActionAt: stateRow?.last_agent_action_at ? new Date(stateRow.last_agent_action_at) : null,
       sentimentScore: sentimentRow?.sentiment_score ?? null,
