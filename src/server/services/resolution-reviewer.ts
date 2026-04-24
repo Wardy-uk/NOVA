@@ -26,7 +26,7 @@ export class ResolutionReviewer {
   }
 
   async reviewRecentResolutions(): Promise<AgentDecision[]> {
-    const project = this.settings.get('agent_jira_project') ?? 'NT';
+    const project = this.settings.get('agent_jira_project') || 'NT';
     const now = new Date();
     const since = new Date(now.getTime() - REVIEW_WINDOW_HOURS * 60 * 60 * 1000);
 

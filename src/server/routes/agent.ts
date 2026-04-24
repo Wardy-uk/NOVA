@@ -198,6 +198,18 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: MODEL_PRICING });
   });
 
+  router.get('/costs/trend', requireSuperAdmin(), async (req, res) => {
+    const start = req.query.start as string;
+    const end = req.query.end as string;
+    if (!start || !end) return res.status(400).json({ ok: false, error: 'start and end query params required' });
+    try {
+      const data = await agentLoop.getObserver().getCostTrend(start, end);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get cost trend' });
+    }
+  });
+
   router.get('/costs', requireSuperAdmin(), async (req, res) => {
     const days = Math.min(parseInt(req.query.days as string, 10) || 30, 365);
     try {
@@ -766,7 +778,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     try {
       const cache = deps?.jiraCache;
       const syncReady = deps?.jiraSyncService?.isReady();
-      const projectSetting = agentLoop.getSettings().get('agent_jira_project') ?? 'NT';
+      const projectSetting = agentLoop.getSettings().get('agent_jira_project') || 'NT';
       const projects = projectSetting.split(',').map(p => p.trim()).filter(Boolean);
       const assigneeFilter = req.query.assignee as string | undefined;
       const projectFilterParam = req.query.project as string | undefined;

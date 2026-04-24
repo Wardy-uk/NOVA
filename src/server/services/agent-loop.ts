@@ -72,7 +72,7 @@ export class AgentLoop {
     this.resolutionReviewer = new ResolutionReviewer(jiraClient, settings, llmService);
     this.guardrails = new Guardrails(settings);
     this.queueMonitor = new QueueMonitor(jiraClient, settings);
-    const agentProject = settings.get('agent_jira_project') ?? 'NT';
+    const agentProject = settings.get('agent_jira_project') || 'NT';
     const primaryProject = agentProject.split(',')[0].trim();
     this.ticketClassifier = new TicketClassifier(llmService, jiraClient, primaryProject);
     this.coachingEngine = new CoachingEngine(llmService, jiraClient, primaryProject);

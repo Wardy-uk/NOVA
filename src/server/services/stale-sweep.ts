@@ -33,7 +33,7 @@ export class StaleSweep {
   }
 
   async sweep(): Promise<SweepResult> {
-    const project = this.settings.get('agent_jira_project') ?? 'NT';
+    const project = this.settings.get('agent_jira_project') || 'NT';
     const now = new Date();
 
     const aiStaleHours = this.getNumber('agent_sweep_ai_request_hours', DEFAULT_AI_REQUEST_STALE_HOURS);

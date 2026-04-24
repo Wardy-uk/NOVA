@@ -129,12 +129,13 @@ export class Perceiver {
   }
 
   private getProjects(): string[] {
-    const raw = this.settings.get('agent_jira_project') ?? 'NT';
+    const raw = this.settings.get('agent_jira_project') || 'NT';
     return raw.split(',').map(p => p.trim()).filter(Boolean);
   }
 
   private buildProjectFilter(): string {
     const projects = this.getProjects();
+    if (projects.length === 0) throw new Error('agent_jira_project not configured — cannot build JQL');
     if (projects.length === 1) return `project = ${projects[0]}`;
     return `project IN (${projects.join(', ')})`;
   }

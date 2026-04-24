@@ -1,5 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
 import { TeamAvailabilityWidget } from './TeamAvailabilityWidget.js';
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
 // ── Types ──
 
@@ -1755,12 +1769,171 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
+type TrendRange = 'today' | 'yesterday' | 'week' | 'month' | 'custom';
+
+function getDateRange(range: TrendRange, customStart?: string, customEnd?: string): { start: string; end: string; label: string } {
+  const now = new Date();
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  switch (range) {
+    case 'today': return { start: fmt(now), end: fmt(now), label: 'Today' };
+    case 'yesterday': { const y = new Date(now.getTime() - 86_400_000); return { start: fmt(y), end: fmt(y), label: 'Yesterday' }; }
+    case 'week': { const w = new Date(now.getTime() - 6 * 86_400_000); return { start: fmt(w), end: fmt(now), label: 'This Week' }; }
+    case 'month': { const m = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`; return { start: m, end: fmt(now), label: 'This Month' }; }
+    case 'custom': return { start: customStart || fmt(now), end: customEnd || fmt(now), label: 'Custom' };
+  }
+}
+
+function SpendChart() {
+  const [range, setRange] = useState<TrendRange>('today');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const [trendData, setTrendData] = useState<Array<{ period: string; cost: number; calls: number }>>([]);
+  const [loading, setLoading] = useState(false);
+
+  const loadTrend = useCallback(async (r: TrendRange, cs?: string, ce?: string) => {
+    const { start, end } = getDateRange(r, cs, ce);
+    setLoading(true);
+    try {
+      const res = await api(`/costs/trend?start=${start}&end=${end}`);
+      if (res.ok) setTrendData(res.data);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadTrend('today'); }, [loadTrend]);
+
+  const handleRange = (r: TrendRange) => {
+    setRange(r);
+    if (r !== 'custom') loadTrend(r);
+  };
+
+  const handleCustomApply = () => {
+    if (customStart && customEnd) loadTrend('custom', customStart, customEnd);
+  };
+
+  const { label } = getDateRange(range, customStart, customEnd);
+  const isHourly = range === 'today' || range === 'yesterday';
+
+  const allHours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+  const periodMap = new Map(trendData.map(d => [d.period, d]));
+
+  const labels = isHourly
+    ? allHours.map(h => `${h}:00`)
+    : trendData.map(d => d.period.slice(5));
+
+  const costValues = isHourly
+    ? allHours.map(h => periodMap.get(h)?.cost ?? 0)
+    : trendData.map(d => d.cost);
+
+  const callValues = isHourly
+    ? allHours.map(h => periodMap.get(h)?.calls ?? 0)
+    : trendData.map(d => d.calls);
+
+  const chartData = {
+    labels,
+    datasets: [
+      {
+        label: 'Spend (£)',
+        data: costValues,
+        borderColor: '#5ec1ca',
+        backgroundColor: 'rgba(94, 193, 202, 0.1)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: isHourly ? 3 : 2,
+        pointHoverRadius: 5,
+        yAxisID: 'y',
+      },
+      {
+        label: 'Calls',
+        data: callValues,
+        borderColor: '#f59e0b',
+        backgroundColor: 'transparent',
+        borderDash: [4, 2],
+        tension: 0.3,
+        pointRadius: isHourly ? 2 : 1,
+        pointHoverRadius: 4,
+        yAxisID: 'y1',
+      },
+    ],
+  };
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index' as const, intersect: false },
+    plugins: {
+      legend: { display: true, position: 'top' as const, labels: { color: '#9ca3af', font: { size: 10 }, boxWidth: 12 } },
+      tooltip: {
+        callbacks: {
+          label: (ctx: any) =>
+            ctx.dataset.label === 'Spend (£)' ? `${ctx.dataset.label}: ${fmtCost(ctx.parsed.y ?? 0)}` : `${ctx.dataset.label}: ${ctx.parsed.y ?? 0}`,
+        },
+      },
+    },
+    scales: {
+      x: { ticks: { color: '#6b7280', font: { size: 9 }, maxRotation: 0 }, grid: { color: '#2f353d' } },
+      y: {
+        type: 'linear' as const, position: 'left' as const,
+        ticks: { color: '#5ec1ca', font: { size: 9 }, callback: (v: number | string) => `£${Number(v).toFixed(2)}` },
+        grid: { color: '#2f353d' },
+        title: { display: false },
+      },
+      y1: {
+        type: 'linear' as const, position: 'right' as const,
+        ticks: { color: '#f59e0b', font: { size: 9 } },
+        grid: { drawOnChartArea: false },
+        title: { display: false },
+      },
+    },
+  };
+
+  return (
+    <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">
+          Spend Trend — {label}
+        </h3>
+        <div className="flex items-center gap-1">
+          {(['today', 'yesterday', 'week', 'month'] as TrendRange[]).map(r => (
+            <button key={r} onClick={() => handleRange(r)}
+              className={`px-2 py-0.5 text-[10px] rounded ${range === r ? 'bg-[#5ec1ca] text-[#1a1f25]' : 'bg-[#272C33] text-neutral-400 hover:text-neutral-200'}`}
+            >{r === 'today' ? 'Today' : r === 'yesterday' ? 'Yest' : r === 'week' ? '7d' : '30d'}</button>
+          ))}
+          <button onClick={() => handleRange('custom')}
+            className={`px-2 py-0.5 text-[10px] rounded ${range === 'custom' ? 'bg-[#5ec1ca] text-[#1a1f25]' : 'bg-[#272C33] text-neutral-400 hover:text-neutral-200'}`}
+          >Custom</button>
+        </div>
+      </div>
+      {range === 'custom' && (
+        <div className="flex items-center gap-2 mb-3">
+          <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
+            className="bg-[#272C33] text-neutral-200 text-xs px-2 py-1 rounded border border-[#3a424d]" />
+          <span className="text-neutral-500 text-xs">to</span>
+          <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)}
+            className="bg-[#272C33] text-neutral-200 text-xs px-2 py-1 rounded border border-[#3a424d]" />
+          <button onClick={handleCustomApply}
+            className="px-2 py-1 text-[10px] rounded bg-[#5ec1ca] text-[#1a1f25]">Apply</button>
+        </div>
+      )}
+      <div style={{ height: 220 }}>
+        {loading ? (
+          <div className="flex items-center justify-center h-full text-xs text-neutral-500">Loading...</div>
+        ) : trendData.length === 0 && !isHourly ? (
+          <div className="flex items-center justify-center h-full text-xs text-neutral-500">No data for this period</div>
+        ) : (
+          <Line data={chartData} options={chartOptions} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CostsTab({ data, onPeriodChange }: { data: CostSummary | null; onPeriodChange: (days: number) => void }) {
   const [days, setDays] = useState(30);
 
   if (!data) return <div className="text-sm text-neutral-500 py-8 text-center">Loading cost data...</div>;
 
-  const maxDailyCost = Math.max(...data.dailyTrend.map(d => d.cost), 0.001);
   const totalModelCost = data.byModel.reduce((s, m) => s + m.cost, 0) || 1;
 
   // Projected monthly: cost per day × 30
@@ -1779,7 +1952,10 @@ function CostsTab({ data, onPeriodChange }: { data: CostSummary | null; onPeriod
 
   return (
     <div className="space-y-4">
-      {/* Period selector */}
+      {/* Spend line chart — full width */}
+      <SpendChart />
+
+      {/* Period selector for cards below */}
       <div className="flex items-center gap-2">
         {[7, 30, 90].map(d => (
           <button
@@ -1801,26 +1977,6 @@ function CostsTab({ data, onPeriodChange }: { data: CostSummary | null; onPeriod
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Daily trend */}
-        <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
-          <h3 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-3">Daily Cost Trend</h3>
-          <div className="space-y-1">
-            {data.dailyTrend.slice(-21).map(day => (
-              <div key={day.day} className="flex items-center gap-2">
-                <span className="text-[10px] text-neutral-500 w-14 shrink-0">{day.day.slice(5)}</span>
-                <div className="flex-1 bg-[#272C33] rounded-full h-3 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-[#5ec1ca] transition-all"
-                    style={{ width: `${(day.cost / maxDailyCost) * 100}%` }}
-                  />
-                </div>
-                <span className="text-[10px] text-neutral-400 w-14 text-right font-mono">{fmtCost(day.cost)}</span>
-                <span className="text-[10px] text-neutral-600 w-8 text-right">{day.calls}</span>
-              </div>
-            ))}
-            {data.dailyTrend.length === 0 && <div className="text-xs text-neutral-500">No cost data yet</div>}
-          </div>
-        </div>
 
         {/* Cost by model (donut-style bar breakdown) */}
         <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">

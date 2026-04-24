@@ -261,7 +261,7 @@ export class LifecycleManager {
     const awaitingHours = this.getNumber('agent_awaiting_customer_hours', 48);
     const chaseDays = 5;
     const closeDays = 10;
-    const project = this.settings.get('agent_jira_project') ?? 'NT';
+    const project = this.settings.get('agent_jira_project') || 'NT';
     const now = new Date();
 
     let stale = 0;

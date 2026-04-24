@@ -65,12 +65,13 @@ export class JiraSyncService {
   }
 
   private buildProjectFilter(): string {
-    const raw = this.settings.get('agent_jira_project') ?? 'NT';
+    const raw = this.settings.get('agent_jira_project') || 'NT';
     return raw.split(',').map(p => p.trim()).filter(Boolean).join(', ');
   }
 
   private buildProjectJql(): string {
     const projects = this.buildProjectFilter();
+    if (!projects) throw new Error('agent_jira_project not configured — cannot build JQL');
     if (!projects.includes(',')) return `project = ${projects}`;
     return `project IN (${projects})`;
   }
@@ -362,7 +363,7 @@ export class JiraSyncService {
     type: string, issues: number, comments: number, durationMs: number, error?: string,
   ): Promise<void> {
     try {
-      const projects = this.settings.get('agent_jira_project') ?? 'NT';
+      const projects = this.settings.get('agent_jira_project') || 'NT';
       await execute(
         `INSERT INTO jira_sync_state (sync_type, project_key, last_synced_at, issues_synced, comments_synced, duration_ms, error)
          VALUES (?, ?, GETUTCDATE(), ?, ?, ?, ?)`,
