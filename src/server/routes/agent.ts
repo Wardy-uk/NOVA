@@ -443,6 +443,21 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.get('/kb-gaps/counts', async (_req, res) => {
+    try {
+      const rows = await query<{ status: string; cnt: number }>(
+        `SELECT status, COUNT(DISTINCT CONCAT(category, '||', ISNULL(suggested_title, ''))) as cnt
+         FROM kb_gap_log
+         GROUP BY status`,
+      );
+      const counts: Record<string, number> = { open: 0, article_drafted: 0, article_published: 0, dismissed: 0 };
+      for (const r of rows) counts[r.status] = r.cnt;
+      res.json({ ok: true, data: counts });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get KB gap counts' });
+    }
+  });
+
   router.put('/kb-gaps/:id/status', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const { status: newStatus } = req.body;

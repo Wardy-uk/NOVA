@@ -1423,6 +1423,12 @@ function AlertsTab({ alerts, onRefresh }: { alerts: AgentAlert[]; onRefresh: () 
 // ── KB Gaps Tab ──
 
 function KbGapsTab({ gaps, onRefresh }: { gaps: KbGap[]; onRefresh: () => void }) {
+  const [counts, setCounts] = useState<{ open: number; article_drafted: number; article_published: number; dismissed: number } | null>(null);
+
+  useEffect(() => {
+    api('/kb-gaps/counts').then(r => { if (r.ok) setCounts(r.data); });
+  }, [gaps]);
+
   const dismiss = async (category: string, suggestedTitle: string | null) => {
     await apiJson('/kb-gaps/dismiss', 'POST', { category, suggestedTitle });
     onRefresh();
@@ -1433,6 +1439,25 @@ function KbGapsTab({ gaps, onRefresh }: { gaps: KbGap[]; onRefresh: () => void }
       <p className="text-xs text-neutral-500">
         Ticket types where the AI identified a missing KB article. Grouped by category and suggested title, sorted by frequency.
       </p>
+      {counts && (
+        <div className="flex gap-3">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#2f353d] border border-[#3a424d]">
+            <span className="w-2 h-2 rounded-full bg-amber-400" />
+            <span className="text-[11px] text-neutral-400">Open</span>
+            <span className="text-sm font-semibold text-neutral-200 ml-1">{counts.open}</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#2f353d] border border-[#3a424d]">
+            <span className="w-2 h-2 rounded-full bg-green-400" />
+            <span className="text-[11px] text-neutral-400">Published</span>
+            <span className="text-sm font-semibold text-neutral-200 ml-1">{counts.article_published}</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#2f353d] border border-[#3a424d]">
+            <span className="w-2 h-2 rounded-full bg-neutral-500" />
+            <span className="text-[11px] text-neutral-400">Dismissed</span>
+            <span className="text-sm font-semibold text-neutral-200 ml-1">{counts.dismissed}</span>
+          </div>
+        </div>
+      )}
       <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-hidden">
         <table className="w-full text-[11px]">
           <thead>
