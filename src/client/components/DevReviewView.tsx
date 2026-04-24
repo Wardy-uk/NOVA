@@ -242,6 +242,8 @@ export function DevReviewView() {
   const [acceptDevDetails, setAcceptDevDetails] = useState('');
   const [acceptWorkItemComment, setAcceptWorkItemComment] = useState('');
   const [showAcceptModal, setShowAcceptModal] = useState(false);
+  const [acceptedWorkItem, setAcceptedWorkItem] = useState<{ key: string; sourceKey: string } | null>(null);
+  const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
 
@@ -441,15 +443,18 @@ export function DevReviewView() {
       });
       const json = await res.json();
       if (json.ok) {
-        const workItemMsg = json.workItemKey ? ` · ${json.workItemKey} created` : '';
-        fireToast('ok', `Accepted to development${workItemMsg}`);
         if (json.warnings?.length) {
           setTimeout(() => fireToast('err', json.warnings.join('; ')), 500);
         }
-        // Remove from queue immediately and deselect
         setItems(prev => prev.filter(i => i.key !== selectedKey));
-        setSelectedKey(null);
-        setDetail(null);
+        setShowAcceptModal(false);
+        if (json.workItemKey) {
+          setAcceptedWorkItem({ key: json.workItemKey, sourceKey: selectedKey });
+        } else {
+          fireToast('ok', 'Accepted to development');
+          setSelectedKey(null);
+          setDetail(null);
+        }
       } else {
         fireToast('err', json.error || 'Accept failed');
         await Promise.all([loadQueue({ silent: true }), loadDetail(selectedKey)]);
@@ -463,7 +468,6 @@ export function DevReviewView() {
     setAcceptTldr('');
     setAcceptDevDetails('');
     setAcceptWorkItemComment('');
-    setShowAcceptModal(false);
   };
   const onReturn = async () => {
     if (returnDraft.trim().length < 10 || !selectedKey) {
@@ -813,6 +817,54 @@ export function DevReviewView() {
                 style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}
               >
                 {busy ? 'Accepting…' : '✓ Move to Development'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {acceptedWorkItem && (
+        <Modal onClose={() => { setAcceptedWorkItem(null); setCopied(false); setSelectedKey(null); setDetail(null); }}>
+          <div className="text-center">
+            <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ background: 'rgba(16,185,129,0.15)' }}>
+              <span className="text-3xl">✓</span>
+            </div>
+            <h3 className="text-lg font-bold text-neutral-50 mb-1" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+              Work item created
+            </h3>
+            <p className="text-[12px] text-neutral-400 mb-5">
+              {acceptedWorkItem.sourceKey} has been escalated to development
+            </p>
+            <div
+              className="flex items-center justify-center gap-3 mx-auto px-5 py-3 rounded-xl mb-5"
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              <span className="text-xl font-bold font-mono text-[#5ec1ca]">{acceptedWorkItem.key}</span>
+              <button
+                onClick={() => { navigator.clipboard.writeText(acceptedWorkItem.key); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                className="px-3 py-1.5 text-[11px] rounded-lg font-semibold border transition-all"
+                style={{
+                  background: copied ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.06)',
+                  borderColor: copied ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.1)',
+                  color: copied ? '#10b981' : '#94a3b8',
+                }}
+              >
+                {copied ? '✓ Copied' : 'Copy'}
+              </button>
+            </div>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => { setAcceptedWorkItem(null); setCopied(false); setSelectedKey(null); setDetail(null); }}
+                className="px-5 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => window.open(`https://nurturtech.atlassian.net/browse/${acceptedWorkItem.key}`, '_blank')}
+                className="px-5 py-2 text-xs rounded-lg font-bold text-[#0f172a]"
+                style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}
+              >
+                Open in Jira ↗
               </button>
             </div>
           </div>
