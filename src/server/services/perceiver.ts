@@ -10,6 +10,13 @@ const DEFAULT_FIELDS = [
   'labels', 'resolution',
 ];
 
+const KNOWN_AUTOMATION_NAMES = [
+  'automation for jira',
+  'jira automation',
+  'n8n',
+  'nova',
+];
+
 function toTicketEvent(issue: JiraIssue, eventType: TicketEvent['eventType']): TicketEvent {
   const f = issue.fields;
   return {
@@ -117,11 +124,55 @@ export class Perceiver {
   private settings: SettingsQueries;
   private lastTickAt: Date | null = null;
   private lastOpenIssues: JiraIssue[] = [];
+  private processedCommentIds = new Set<string>();
+  private excludedAccountIds = new Set<string>();
+  private excludedAccountsLoaded = false;
 
   constructor(jiraClient: JiraRestClient, settings: SettingsQueries, cache?: JiraCacheQueries) {
     this.jiraClient = jiraClient;
     this.settings = settings;
     this.cache = cache ?? null;
+  }
+
+  private loadExcludedAccounts(): void {
+    if (this.excludedAccountsLoaded) return;
+    this.excludedAccountsLoaded = true;
+    const raw = this.settings.get('agent_comment_exclude_accounts') ?? '';
+    for (const id of raw.split(',').map(s => s.trim()).filter(Boolean)) {
+      this.excludedAccountIds.add(id);
+    }
+    if (this.excludedAccountIds.size > 0) {
+      console.log(`[perceiver] Loaded ${this.excludedAccountIds.size} excluded account IDs`);
+    }
+  }
+
+  private isInternalAuthor(comment: CachedComment): boolean {
+    if (comment.author_email?.endsWith('@nurtur.tech')) return true;
+    if (comment.author_account_id && this.excludedAccountIds.has(comment.author_account_id)) return true;
+    const name = (comment.author_display ?? '').toLowerCase();
+    if (KNOWN_AUTOMATION_NAMES.some(n => name.includes(n))) return true;
+    return false;
+  }
+
+  private isInternalAuthorApi(comment: JiraComment, agentEmail: string): boolean {
+    if (agentEmail && comment.author?.emailAddress === agentEmail) return true;
+    const email = comment.author?.emailAddress ?? '';
+    if (email.endsWith('@nurtur.tech')) return true;
+    const accountId = comment.author?.accountId ?? '';
+    if (accountId && this.excludedAccountIds.has(accountId)) return true;
+    const name = (comment.author?.displayName ?? '').toLowerCase();
+    if (KNOWN_AUTOMATION_NAMES.some(n => name.includes(n))) return true;
+    return false;
+  }
+
+  private hasAgentRepliedAfter(allComments: CachedComment[], triggeringComment: CachedComment): boolean {
+    const triggerTime = new Date(triggeringComment.jira_created).getTime();
+    return allComments.some(c => {
+      if (!c.is_public) return false;
+      const commentTime = new Date(c.jira_created).getTime();
+      if (commentTime <= triggerTime) return false;
+      return this.isInternalAuthor(c);
+    });
   }
 
   getLastOpenIssues(): JiraIssue[] {
@@ -148,12 +199,11 @@ export class Perceiver {
   }
 
   private async perceiveFromCache(): Promise<QueuePerception> {
+    this.loadExcludedAccounts();
     const projects = this.getProjects();
     const now = new Date();
-    // Use 30s buffer before lastTickAt to avoid missing tickets created during previous tick
     const rawSince = this.lastTickAt ?? new Date(now.getTime() - 60 * 60 * 1000);
     const since = new Date(rawSince.getTime() - 30_000);
-    const agentEmail = this.settings.get('jira_ob_email') ?? '';
 
     const [openIssues, newIssues, updatedIssues, untriagedIssues] = await Promise.all([
       this.cache!.getOpenIssues(projects),
@@ -190,7 +240,6 @@ export class Perceiver {
       .slice(0, 20)
       .map(ci => cachedToTicketEvent(ci, 'stale'));
 
-    // Merge recently created + untriaged (catch-up) tickets, dedup by key
     const seenKeys = new Set<string>();
     const allNewCandidates = [...newIssues];
     for (const ci of newIssues) seenKeys.add(ci.issue_key);
@@ -202,23 +251,41 @@ export class Perceiver {
     }
     const newEvents = allNewCandidates.map(ci => cachedToTicketEvent(ci, 'ticket_created'));
 
-    // Detect new comments from cache
     const commentEvents: TicketEvent[] = [];
     const updatedCandidates = updatedIssues.filter(ci => !seenKeys.has(ci.issue_key));
 
     for (const ci of updatedCandidates.slice(0, 20)) {
       const recentComments = await this.cache!.getRecentComments(ci.issue_key, since);
-      const recentPublic = recentComments.filter(c => {
-        const isPublic = c.is_public;
-        const isAgent = agentEmail && c.author_email === agentEmail;
-        return isPublic && !isAgent;
+      // Filter: public, not internal author, not already processed
+      const newCustomerComments = recentComments.filter(c => {
+        if (!c.is_public) return false;
+        if (this.isInternalAuthor(c)) return false;
+        if (this.processedCommentIds.has(c.jira_comment_id)) return false;
+        return true;
       });
-      if (recentPublic.length > 0) {
-        const allComments = await this.cache!.getComments(ci.issue_key, 5);
-        const event = cachedToTicketEvent(ci, 'comment_added');
-        event.comments = allComments.map(cachedCommentToSnapshot);
-        commentEvents.push(event);
+      if (newCustomerComments.length === 0) continue;
+
+      // Check if an agent already replied after the triggering comment
+      const allComments = await this.cache!.getComments(ci.issue_key, 20);
+      const latestCustomerComment = newCustomerComments[0]; // newest first from query
+      if (this.hasAgentRepliedAfter(allComments, latestCustomerComment)) {
+        for (const c of newCustomerComments) this.processedCommentIds.add(c.jira_comment_id);
+        console.log(`[perceiver] Skipping ${ci.issue_key} — agent already replied after customer comment`);
+        continue;
       }
+
+      // Mark all recent comments as processed to prevent duplicates
+      for (const c of recentComments) this.processedCommentIds.add(c.jira_comment_id);
+
+      const event = cachedToTicketEvent(ci, 'comment_added');
+      event.comments = allComments.slice(0, 5).map(cachedCommentToSnapshot);
+      commentEvents.push(event);
+    }
+
+    // Prevent unbounded memory growth — trim oldest entries
+    if (this.processedCommentIds.size > 5000) {
+      const arr = [...this.processedCommentIds];
+      this.processedCommentIds = new Set(arr.slice(arr.length - 3000));
     }
 
     this.lastTickAt = now;
@@ -235,6 +302,7 @@ export class Perceiver {
   }
 
   private async perceiveFromApi(): Promise<QueuePerception> {
+    this.loadExcludedAccounts();
     const projectFilter = this.buildProjectFilter();
     const now = new Date();
     const rawSince = this.lastTickAt ?? new Date(now.getTime() - 60 * 60 * 1000);
@@ -289,21 +357,46 @@ export class Perceiver {
 
     for (const issue of updatedCandidates.slice(0, 20)) {
       try {
-        const comments = await this.jiraClient.getComments(issue.key, 5);
-        const recentPublic = comments.filter(c => {
+        const comments = await this.jiraClient.getComments(issue.key, 20);
+        const recentCustomer = comments.filter(c => {
           const isRecent = new Date(c.created).getTime() > since.getTime();
           const isPublic = c.jsdPublic !== false;
-          const isAgent = agentEmail && c.author?.emailAddress === agentEmail;
-          return isRecent && isPublic && !isAgent;
+          if (!isRecent || !isPublic) return false;
+          if (this.isInternalAuthorApi(c, agentEmail)) return false;
+          if (this.processedCommentIds.has(c.id)) return false;
+          return true;
         });
-        if (recentPublic.length > 0) {
-          const event = toTicketEvent(issue, 'comment_added');
-          event.comments = comments.map(c => toCommentSnapshot(c));
-          commentEvents.push(event);
+        if (recentCustomer.length === 0) continue;
+
+        // Check if agent already replied after the latest customer comment
+        const latestCustomerTime = new Date(recentCustomer[0].created).getTime();
+        const agentRepliedAfter = comments.some(c => {
+          if (c.jsdPublic === false) return false;
+          const t = new Date(c.created).getTime();
+          if (t <= latestCustomerTime) return false;
+          return this.isInternalAuthorApi(c, agentEmail);
+        });
+        if (agentRepliedAfter) {
+          for (const c of recentCustomer) this.processedCommentIds.add(c.id);
+          console.log(`[perceiver] Skipping ${issue.key} — agent already replied after customer comment`);
+          continue;
         }
+
+        for (const c of comments.filter(x => new Date(x.created).getTime() > since.getTime())) {
+          this.processedCommentIds.add(c.id);
+        }
+
+        const event = toTicketEvent(issue, 'comment_added');
+        event.comments = comments.slice(0, 5).map(c => toCommentSnapshot(c));
+        commentEvents.push(event);
       } catch (err) {
         console.warn(`[perceiver] Failed to check comments on ${issue.key}:`, err instanceof Error ? err.message : err);
       }
+    }
+
+    if (this.processedCommentIds.size > 5000) {
+      const arr = [...this.processedCommentIds];
+      this.processedCommentIds = new Set(arr.slice(arr.length - 3000));
     }
 
     this.lastTickAt = now;

@@ -143,6 +143,7 @@ function recordFailure(provider: LlmProvider): void {
   state.failures++;
   if (state.failures >= CIRCUIT_BREAKER_THRESHOLD) {
     state.openUntil = Date.now() + CIRCUIT_BREAKER_COOLDOWN_MS;
+    console.warn(`[llm] Circuit breaker TRIPPED for ${provider} — ${state.failures} failures, cooldown ${CIRCUIT_BREAKER_COOLDOWN_MS / 1000}s`);
   }
   circuits.set(provider, state);
 }
@@ -373,6 +374,14 @@ export class LlmService {
 
     if (orderedConfigs.length === 0) {
       throw new Error('No LLM providers configured. Set anthropic_api_key, openai_api_key, or openrouter_api_key in Settings.');
+    }
+
+    // Log provider selection for diagnostics
+    const selectedProvider = orderedConfigs[0];
+    if (tripped.length > 0) {
+      console.log(`[llm] ${options.callType} → tier=${tier} → ${selectedProvider.provider}/${selectedProvider.model} (circuits tripped: ${tripped.map(c => c.provider).join(', ')})`);
+    } else {
+      console.log(`[llm] ${options.callType} → tier=${tier} → ${selectedProvider.provider}/${selectedProvider.model}`);
     }
 
     const jsonInstruction = '\n\nRespond with valid JSON only. No markdown fencing, no commentary.';

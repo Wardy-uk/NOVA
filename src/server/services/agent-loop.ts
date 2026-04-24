@@ -575,6 +575,7 @@ export class AgentLoop {
     const sentiment = (decision.inputs.sentiment as string) ?? null;
     const slaRisk = (decision.inputs.sla_risk as string) ?? null;
     const assigneeName = (decision.inputs.assignee as string) ?? null;
+    const draftResponse = (decision.output.draft_response as string) ?? null;
 
     const triggerLabel = decision.eventType === 'ticket_created' ? 'New Ticket Triage'
       : decision.eventType === 'comment_added' ? 'New Customer Reply'
@@ -631,6 +632,30 @@ export class AgentLoop {
 
     if (priorityAssessment?.suggested_priority) {
       lines.push(`**Suggested Priority:** ${priorityAssessment.suggested_priority} — ${priorityAssessment.reasoning ?? ''}`);
+    }
+
+    // Ticket context block
+    const priority = (decision.inputs.priority as string) ?? null;
+    const requestType = (decision.inputs.requestType as string) ?? null;
+    const created = (decision.inputs.created as string) ?? null;
+    const contextParts: string[] = [];
+    if (priority) contextParts.push(`Priority: ${priority}`);
+    if (requestType) contextParts.push(`Request Type: ${requestType}`);
+    if (assigneeName) contextParts.push(`Assignee: ${assigneeName}`);
+    if (created) {
+      const ageDays = Math.floor((Date.now() - new Date(created).getTime()) / 86_400_000);
+      contextParts.push(`Age: ${ageDays}d`);
+    }
+    if (slaRisk && slaRisk !== 'unknown' && slaRisk !== 'none') {
+      contextParts.push(`SLA: ${slaRisk}`);
+    }
+    if (contextParts.length > 0) {
+      lines.push(``, `--- Ticket Context ---`, contextParts.join(' | '));
+    }
+
+    // Draft response (shown in shadow mode so agents can copy/paste)
+    if (draftResponse) {
+      lines.push(``, `**Suggested response:**`, draftResponse);
     }
 
     lines.push(``, statusDesc);
