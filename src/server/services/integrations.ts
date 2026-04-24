@@ -238,6 +238,7 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'agent_risk_threshold', label: 'Risk Alert Threshold (0-100)', type: 'text', placeholder: '60', required: false },
       { key: 'agent_risk_alert_hours', label: 'Risk Alert Hours (HH:MM-HH:MM)', type: 'text', placeholder: '08:00-18:00', required: false },
       { key: 'agent_risk_alert_to', label: 'Risk Alert Webhook (override)', type: 'url', placeholder: 'Uses Teams Webhook if blank', required: false },
+      { key: 'agent_comment_exclude_accounts', label: 'Exclude Account IDs (comma-separated)', type: 'text', placeholder: 'Jira account IDs to ignore (n8n bot, service accounts)', required: false },
     ],
   },
   {
