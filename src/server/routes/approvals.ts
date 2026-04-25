@@ -60,6 +60,23 @@ export function createApprovalRoutes(
     res.json({ ok: true, data: { item, canInteract } });
   });
 
+  // POST /api/approvals/bulk-decline — decline all pending approvals
+  router.post('/bulk-decline', async (req: Request, res: Response) => {
+    if (!isApprover(req)) {
+      res.status(403).json({ ok: false, error: 'You do not have AI Approver permissions' });
+      return;
+    }
+    const user = (req as any).user;
+    const reason = req.body?.reason || 'Bulk declined';
+    const pending = await approvalQueries.getPending();
+    let declined = 0;
+    for (const item of pending) {
+      const ok = await approvalQueries.decide(item.id, 'declined', user.username, undefined, reason);
+      if (ok) declined++;
+    }
+    res.json({ ok: true, data: { declined, total: pending.length } });
+  });
+
   // POST /api/approvals/:id/decide — approve or decline
   router.post('/:id/decide', async (req: Request, res: Response) => {
     const user = (req as any).user;

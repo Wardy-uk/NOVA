@@ -51,6 +51,7 @@ interface Decision {
   provider: string | null;
   model: string | null;
   approval_required: boolean;
+  approval_status: string | null;
   shadow_mode: boolean;
   created_at: string;
   resolved_at: string | null;
@@ -775,8 +776,31 @@ function DecisionsTab({ decisions, selected, onSelect, onRefresh }: {
   onRefresh: () => void;
 }) {
   const [filter, setFilter] = useState<string>('all');
-  const filtered = filter === 'all' ? decisions : decisions.filter(d => d.event_type === filter);
+  const [declining, setDeclining] = useState(false);
+  const filtered = filter === 'pending_approval'
+    ? decisions.filter(d => d.approval_required && (!d.approval_status || d.approval_status === 'pending'))
+    : filter === 'all' ? decisions : decisions.filter(d => d.event_type === filter);
   const eventTypes = [...new Set(decisions.map(d => d.event_type))];
+  const pendingCount = decisions.filter(d => d.approval_required && (!d.approval_status || d.approval_status === 'pending')).length;
+
+  const handleDeclineAll = async () => {
+    if (!confirm(`Decline all ${pendingCount} pending approvals? This cannot be undone.`)) return;
+    setDeclining(true);
+    try {
+      const r = await fetch('/api/approvals/bulk-decline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Bulk declined from Decisions tab' }),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || 'Failed');
+      onRefresh();
+    } catch (err: any) {
+      alert(`Decline failed: ${err.message}`);
+    } finally {
+      setDeclining(false);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -787,8 +811,18 @@ function DecisionsTab({ decisions, selected, onSelect, onRefresh }: {
           className="bg-[#272C33] border border-[#3a424d] text-neutral-300 text-xs rounded px-2 py-1"
         >
           <option value="all">All Events</option>
+          <option value="pending_approval">Pending Approval{pendingCount > 0 ? ` (${pendingCount})` : ''}</option>
           {eventTypes.map(et => <option key={et} value={et}>{eventLabel(et)}</option>)}
         </select>
+        {filter === 'pending_approval' && pendingCount > 0 && (
+          <button
+            onClick={handleDeclineAll}
+            disabled={declining}
+            className="text-xs px-2.5 py-1 rounded bg-red-600/20 text-red-400 border border-red-600/30 hover:bg-red-600/30 transition-colors disabled:opacity-50"
+          >
+            {declining ? 'Declining…' : `Decline All (${pendingCount})`}
+          </button>
+        )}
         <button onClick={onRefresh} className="text-xs text-[#5ec1ca] hover:text-[#7dd3d8] transition-colors">Refresh</button>
         <span className="text-[10px] text-neutral-600 ml-auto">{filtered.length} decisions</span>
       </div>
