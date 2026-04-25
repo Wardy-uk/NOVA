@@ -830,6 +830,181 @@ export function KpiLeaderboardView() {
           </div>
         )}
       </div>
+
+      {/* Gamification section */}
+      <GamificationPanel />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Gamification Panel                                                 */
+/* ------------------------------------------------------------------ */
+
+interface GamLeaderEntry {
+  user_id: number;
+  display_name: string;
+  achievement_count: number;
+  best_streak: number;
+  current_streak: number;
+}
+
+interface GamAchievement {
+  id: number;
+  achievement_type: string;
+  detail: string | null;
+  earned_at: string;
+}
+
+interface GamStreak {
+  streak_type: string;
+  current_count: number;
+  best_count: number;
+  last_date: string | null;
+}
+
+interface GamProfile {
+  achievements: GamAchievement[];
+  streaks: GamStreak[];
+  totalAchievements: number;
+  currentStreaks: Record<string, number>;
+  bestStreaks: Record<string, number>;
+}
+
+const ACHIEVEMENT_ICONS: Record<string, string> = {
+  first_resolve: '🎯',
+  speed_demon: '⚡',
+  sla_perfect_day: '🏆',
+  streak_5: '🔥',
+  streak_10: '💪',
+  streak_20: '🏅',
+  century: '💯',
+  qa_star: '⭐',
+  zero_inbox: '📭',
+  early_bird: '🐦',
+};
+
+function GamificationPanel() {
+  const [leaderboard, setLeaderboard] = useState<GamLeaderEntry[]>([]);
+  const [profile, setProfile] = useState<GamProfile | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/gamification/leaderboard').then(r => r.json()).then(r => { if (r.ok) setLeaderboard(r.data); }).catch(() => {});
+    fetch('/api/gamification/profile').then(r => r.json()).then(r => { if (r.ok) setProfile(r.data); }).catch(() => {});
+  }, []);
+
+  const checkAchievements = async () => {
+    setChecking(true);
+    try {
+      const r = await fetch('/api/gamification/check', { method: 'POST' });
+      const json = await r.json();
+      if (json.ok && json.data.awarded.length > 0) {
+        const pr = await fetch('/api/gamification/profile');
+        const pj = await pr.json();
+        if (pj.ok) setProfile(pj.data);
+      }
+    } catch {}
+    setChecking(false);
+  };
+
+  return (
+    <div style={{ marginTop: 24, borderTop: `1px solid ${C.border}`, paddingTop: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text1, margin: 0 }}>
+          Achievements & Streaks
+        </h3>
+        <button
+          onClick={checkAchievements}
+          disabled={checking}
+          style={{
+            padding: '4px 12px', fontSize: 11, borderRadius: 6,
+            background: C.teal, color: '#000', border: 'none', cursor: 'pointer',
+            opacity: checking ? 0.5 : 1,
+          }}
+        >
+          {checking ? 'Checking…' : 'Check Achievements'}
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        {/* My achievements */}
+        <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 12 }}>
+          <h4 style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginBottom: 8 }}>My Achievements</h4>
+          {profile && profile.achievements.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {profile.achievements.map(a => (
+                <span
+                  key={a.id}
+                  title={`${a.achievement_type}: ${a.detail || ''}\nEarned: ${new Date(a.earned_at).toLocaleDateString()}`}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '3px 8px', borderRadius: 12,
+                    background: C.bg3, fontSize: 11, color: C.text1,
+                  }}
+                >
+                  <span>{ACHIEVEMENT_ICONS[a.achievement_type] || '🏅'}</span>
+                  <span>{a.achievement_type.replace(/_/g, ' ')}</span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: C.text3 }}>No achievements yet. Keep resolving tickets!</div>
+          )}
+
+          {profile && Object.keys(profile.currentStreaks).length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <h4 style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginBottom: 6 }}>Active Streaks</h4>
+              <div style={{ display: 'flex', gap: 12 }}>
+                {Object.entries(profile.currentStreaks).map(([type, count]) => (
+                  <div key={type} style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: count >= 5 ? GOLD : C.text1 }}>
+                      {count}
+                    </div>
+                    <div style={{ fontSize: 10, color: C.text3 }}>{type.replace(/_/g, ' ')}</div>
+                    <div style={{ fontSize: 9, color: C.text3 }}>best: {profile.bestStreaks[type] || 0}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Achievement leaderboard */}
+        <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 12 }}>
+          <h4 style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginBottom: 8 }}>Achievement Leaderboard</h4>
+          {leaderboard.length > 0 ? (
+            <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ color: C.text3, textAlign: 'left' }}>
+                  <th style={{ padding: '2px 8px', fontWeight: 500 }}>#</th>
+                  <th style={{ padding: '2px 8px', fontWeight: 500 }}>Agent</th>
+                  <th style={{ padding: '2px 8px', fontWeight: 500 }}>Achievements</th>
+                  <th style={{ padding: '2px 8px', fontWeight: 500 }}>Streak</th>
+                  <th style={{ padding: '2px 8px', fontWeight: 500 }}>Best</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaderboard.map((e, i) => (
+                  <tr key={e.user_id} style={{ color: C.text1 }}>
+                    <td style={{ padding: '3px 8px', color: i < 3 ? [GOLD, SILVER, BRONZE][i] : C.text3, fontWeight: 700 }}>
+                      {i + 1}
+                    </td>
+                    <td style={{ padding: '3px 8px' }}>{e.display_name}</td>
+                    <td style={{ padding: '3px 8px', textAlign: 'center' }}>{e.achievement_count}</td>
+                    <td style={{ padding: '3px 8px', textAlign: 'center', color: e.current_streak >= 5 ? GOLD : C.text2 }}>
+                      {e.current_streak > 0 ? `${e.current_streak}🔥` : '—'}
+                    </td>
+                    <td style={{ padding: '3px 8px', textAlign: 'center', color: C.text3 }}>{e.best_streak}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ fontSize: 11, color: C.text3 }}>No achievement data yet.</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

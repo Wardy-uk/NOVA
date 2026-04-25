@@ -798,6 +798,94 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_hybrid_action_log_ticket')
      CREATE INDEX IX_hybrid_action_log_ticket ON hybrid_action_log (source_ticket_key, created_at DESC);`,
+
+    // ── Daily briefings ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'daily_briefings') AND type = 'U')
+     CREATE TABLE daily_briefings (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       user_id INT NULL,
+       role_type NVARCHAR(20) NOT NULL,
+       briefing_date DATE NOT NULL,
+       content_json NVARCHAR(MAX) NOT NULL,
+       generated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       dismissed_at DATETIME2 NULL
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_daily_briefings_user_date')
+     CREATE INDEX IX_daily_briefings_user_date ON daily_briefings (user_id, briefing_date DESC);`,
+
+    // ── KB article drafts ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'kb_article_drafts') AND type = 'U')
+     CREATE TABLE kb_article_drafts (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       gap_id INT NULL,
+       title NVARCHAR(500) NOT NULL,
+       body NVARCHAR(MAX) NOT NULL,
+       category NVARCHAR(100) NULL,
+       labels NVARCHAR(500) NULL,
+       status NVARCHAR(20) NOT NULL DEFAULT 'draft',
+       confluence_page_id NVARCHAR(100) NULL,
+       confluence_url NVARCHAR(500) NULL,
+       created_by INT NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       published_at DATETIME2 NULL
+     );`,
+
+    // ── AI comparison log (shadow mode: NOVA vs n8n) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ai_comparison_log') AND type = 'U')
+     CREATE TABLE ai_comparison_log (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key NVARCHAR(30) NOT NULL,
+       nova_action NVARCHAR(50) NULL,
+       n8n_action NVARCHAR(50) NULL,
+       nova_confidence FLOAT NULL,
+       agreement BIT NOT NULL DEFAULT 0,
+       diff_summary NVARCHAR(MAX) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ai_comparison_log_ticket')
+     CREATE INDEX IX_ai_comparison_log_ticket ON ai_comparison_log (ticket_key, created_at DESC);`,
+
+    // ── AI improvement signals (human edits to AI drafts) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ai_improvement_signals') AND type = 'U')
+     CREATE TABLE ai_improvement_signals (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key NVARCHAR(30) NOT NULL,
+       signal_type NVARCHAR(30) NOT NULL,
+       ai_output NVARCHAR(MAX) NULL,
+       human_output NVARCHAR(MAX) NULL,
+       diff_summary NVARCHAR(MAX) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    // ── Agent achievements (gamification) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_achievements') AND type = 'U')
+     CREATE TABLE agent_achievements (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       user_id INT NOT NULL,
+       achievement_type NVARCHAR(100) NOT NULL,
+       detail NVARCHAR(500) NULL,
+       earned_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_achievements_user')
+     CREATE INDEX IX_agent_achievements_user ON agent_achievements (user_id, earned_at DESC);`,
+
+    // ── Agent streaks (gamification) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_streaks') AND type = 'U')
+     CREATE TABLE agent_streaks (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       user_id INT NOT NULL,
+       streak_type NVARCHAR(100) NOT NULL,
+       current_count INT NOT NULL DEFAULT 0,
+       best_count INT NOT NULL DEFAULT 0,
+       last_date DATE NULL,
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_agent_streaks_user_type')
+     CREATE UNIQUE INDEX UX_agent_streaks_user_type ON agent_streaks (user_id, streak_type);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

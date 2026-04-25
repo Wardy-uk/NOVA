@@ -112,11 +112,11 @@ export class CalendarSyncService {
     const leaveNames = new Set(onLeave.map((r: any) => r.employee_name));
 
     const allAgents = await query(
-      `SELECT DISTINCT agent_name, pool FROM agent_roster WHERE is_active = 1 ORDER BY agent_name`,
+      `SELECT DISTINCT display_name, pool FROM agent_roster WHERE active = 1 ORDER BY display_name`,
       []
     );
 
-    const available = (allAgents as any[]).filter(a => !leaveNames.has(a.agent_name));
+    const available = (allAgents as any[]).filter(a => !leaveNames.has(a.display_name));
     const unavailable = onLeave;
 
     return {
@@ -124,7 +124,7 @@ export class CalendarSyncService {
       totalRoster: allAgents.length,
       availableCount: available.length,
       unavailableCount: unavailable.length,
-      available: available.map((a: any) => ({ name: a.agent_name, pool: a.pool, status: 'available' })),
+      available: available.map((a: any) => ({ name: a.display_name, pool: a.pool, status: 'available' })),
       unavailable: unavailable.map((r: any) => ({
         name: r.employee_name,
         team: r.team,

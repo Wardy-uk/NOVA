@@ -30,6 +30,13 @@ import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
 import { createBoardMiRoutes } from './routes/board-mi.js';
 import { createDevReviewRoutes } from './routes/dev-review.js';
+import { createBriefingRoutes } from './routes/briefing.js';
+import { createKbArticleRoutes } from './routes/kb-articles.js';
+import { KbArticleService } from './services/kb-article-service.js';
+import { createAiImprovementRoutes } from './routes/ai-improvement.js';
+import { AiImprovementService } from './services/ai-improvement.js';
+import { createGamificationRoutes } from './routes/gamification.js';
+import { GamificationService } from './services/gamification.js';
 import { DevReviewQueries } from './db/dev-review-queries.js';
 import { createTrendsRoutes } from './routes/trends.js';
 import { createFeedbackRoutes } from './routes/feedback.js';
@@ -96,6 +103,8 @@ import { PipelineMonitor } from './services/pipeline-monitor.js';
 import { ConfigService } from './services/config-service.js';
 import { SuggestionEngine } from './services/suggestion-engine.js';
 import { CalendarSyncService } from './services/calendar-sync.js';
+import { DailyBriefingService } from './services/daily-briefing.js';
+import { EmailService } from './services/email.js';
 import { ProductCancellationService } from './services/product-cancellation.js';
 import { AbuseReportProcessor } from './services/abuse-report-processor.js';
 import { CallReviewService } from './services/call-reviews.js';
@@ -886,6 +895,23 @@ async function main() {
 
     const suggestionEngine = new SuggestionEngine(agentLoop.getGuardrails(), agentLoop.getAutonomyEngine(), settingsQueries);
 
+    // Daily briefing service
+    const briefingEmailService = new EmailService(() => settingsQueries.getAll());
+    const dailyBriefingService = new DailyBriefingService(llmService, jiraCacheQueries, settingsQueries, calendarSync, briefingEmailService);
+    app.use('/api/briefing', createBriefingRoutes(dailyBriefingService, userQueries));
+
+    // KB article service
+    const kbArticleService = new KbArticleService(llmService, settingsQueries, mcpManager);
+    app.use('/api/kb-articles', createKbArticleRoutes(kbArticleService));
+
+    // AI self-improvement engine
+    const aiImprovementService = new AiImprovementService(llmService, settingsQueries);
+    app.use('/api/ai-improvement', createAiImprovementRoutes(aiImprovementService));
+
+    // Gamification
+    const gamificationService = new GamificationService();
+    app.use('/api/gamification', createGamificationRoutes(gamificationService));
+
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,
       availabilityService,
@@ -924,6 +950,26 @@ async function main() {
 
     // Pipeline health check — every 15 min
     setInterval(() => pipelineMonitor.checkStaleRuns().catch(() => {}), 15 * 60 * 1000);
+
+    // Daily briefing generation — check every 10 min, generate at configured time (default 07:00)
+    setInterval(async () => {
+      try {
+        const briefingTime = settingsQueries.get('agent_briefing_time') || '07:00';
+        const [targetH, targetM] = briefingTime.split(':').map(Number);
+        const now = new Date();
+        const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
+        const ukMinute = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }));
+        if (ukHour === targetH && ukMinute >= targetM && ukMinute < targetM + 10) {
+          const allUsers = await userQueries.getAll();
+          const eligible = allUsers.filter(u => u.email && u.role);
+          await dailyBriefingService.generateAll(eligible.map(u => ({
+            id: u.id, email: u.email!, display_name: u.display_name || u.username, role: u.role,
+          })));
+        }
+      } catch (e) {
+        console.warn('[daily-briefing] Timer failed:', e instanceof Error ? e.message : e);
+      }
+    }, 10 * 60 * 1000);
 
     // Calendar sync (WP-12) — every 30 min during working hours
     const runCalendarSync = () => {
@@ -1523,6 +1569,48 @@ ${panelHtml}
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       logWallboard('/wallboard/tech-support', 'error', 500, Date.now() - wbStart, msg, { sqlServer: settingsQueries.getAll().kpi_sql_server, error: msg, stack: err instanceof Error ? err.stack : undefined });
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  });
+
+  // Key Accounts wallboard
+  app.get('/wallboard/key-accounts', async (_req, res) => {
+    const wbStart = Date.now();
+    try {
+      const html = await renderStatWallboard(settingsQueries, 'Key Accounts', 'Account health & ticket overview', [
+        { label: 'Key Account Tickets', kpi: 'Number of Key Account Tickets' },
+        { label: 'Key Accounts — No Reply', kpi: 'Number of Key Account Tickets With No Reply' },
+        { label: 'Key Accounts — Over SLA', kpi: 'Key Account Tickets over SLA (actionable)' },
+        { label: 'Enterprise Tickets', kpi: 'Number of Enterprise Tickets' },
+        { label: 'Enterprise — No Reply', kpi: 'Number of Enterprise Tickets With No Reply' },
+        { label: 'Enterprise — Over SLA', kpi: 'Enterprise Tickets over SLA (actionable)' },
+      ], 3, '/wallboard/key-accounts');
+      res.send(html);
+      logWallboard('/wallboard/key-accounts', 'info', 200, Date.now() - wbStart, 'OK');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard('/wallboard/key-accounts', 'error', 500, Date.now() - wbStart, msg);
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  });
+
+  // Customer Success wallboard
+  app.get('/wallboard/customer-success', async (_req, res) => {
+    const wbStart = Date.now();
+    try {
+      const html = await renderStatWallboard(settingsQueries, 'Customer Success', 'Onboarding & satisfaction metrics', [
+        { label: 'Active Onboardings', kpi: 'Number of Active Onboardings' },
+        { label: 'Onboarding — Overdue', kpi: 'Number of Overdue Onboardings' },
+        { label: 'CSAT Average (7d)', kpi: 'CSAT Average 7 Day' },
+        { label: 'CS Tickets Open', kpi: 'Number of CS Tickets Open' },
+        { label: 'CS Tickets — No Reply', kpi: 'Number of CS Tickets With No Reply' },
+        { label: 'CS — Over SLA', kpi: 'CS Tickets over SLA (actionable)' },
+      ], 3, '/wallboard/customer-success');
+      res.send(html);
+      logWallboard('/wallboard/customer-success', 'info', 200, Date.now() - wbStart, 'OK');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard('/wallboard/customer-success', 'error', 500, Date.now() - wbStart, msg);
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });

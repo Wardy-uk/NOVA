@@ -73,6 +73,8 @@ const AgentPipelinesView = lazy(() => import('./components/AgentPipelinesView.js
 const UatComparisonView = lazy(() => import('./components/UatComparisonView.js').then(m => ({ default: m.UatComparisonView })));
 const AgentProfileView = lazy(() => import('./components/AgentProfileView.js').then(m => ({ default: m.AgentProfileView })));
 const AgentRosterView = lazy(() => import('./components/AgentRosterView.js').then(m => ({ default: m.AgentRosterView })));
+const BriefingView = lazy(() => import('./components/BriefingView.js').then(m => ({ default: m.BriefingView })));
+import { BriefingPopup } from './components/BriefingPopup.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -84,13 +86,13 @@ declare const __APP_VERSION__: string;
 // ── Area / View definitions ──
 
 type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'calyx' | 'ai-agent';
-type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova'
+type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload' | 'chat'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'agent-kpis' | 'qa'
-  | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support'
+  | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
   | 'training-matrix' | 'training-summary'
@@ -121,6 +123,7 @@ const DEFAULT_AREA_ACCESS: AreaAccess = {
 
 // Map certain command sub-tabs to their own permission area
 const TAB_AREA_GATE: Partial<Record<View, string>> = {
+  briefing: 'nova_features',
   standup: 'nova_features',
   'team-workload': 'nova_features',
   chat: 'nova_features',
@@ -132,11 +135,12 @@ const AREAS: Record<Area, AreaDef> = {
     label: 'My NOVA',
     defaultView: 'focus',
     tabs: [
+      { view: 'briefing', label: 'Briefing' },
       { view: 'focus', label: 'My Focus' },
       { view: 'daily', label: 'My Dashboard' },
       { view: 'nova', label: 'NOVA Insights' },
       { view: 'tasks', label: 'My Tasks' },
-      { view: 'standup', label: 'NOVA Briefing' },
+      { view: 'standup', label: 'NOVA Standup' },
       { view: 'team-workload', label: 'My Team' },
     ],
   },
@@ -225,6 +229,8 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'wb-team-kpis', label: 'KPI Breach Board' },
       { view: 'wb-cc', label: 'Customer Care' },
       { view: 'wb-tech-support', label: 'Technical Support' },
+      { view: 'wb-key-accounts', label: 'Key Accounts' },
+      { view: 'wb-customer-success', label: 'Customer Success' },
     ],
   },
   training: {
@@ -988,6 +994,11 @@ export function App() {
               <TaskList tasks={tasks} loading={loading} onUpdateTask={updateTask} />
             </>
           )}
+          {view === 'briefing' && (
+            <Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400" /></div>}>
+              <BriefingView />
+            </Suspense>
+          )}
           {view === 'standup' && (
             <StandupView onUpdateTask={updateTask} onNavigate={navigate} />
           )}
@@ -1109,6 +1120,20 @@ export function App() {
               src="/wallboard/tech-support"
               style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
               title="Technical Support"
+            />
+          )}
+          {view === 'wb-key-accounts' && (
+            <iframe
+              src="/wallboard/key-accounts"
+              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
+              title="Key Accounts"
+            />
+          )}
+          {view === 'wb-customer-success' && (
+            <iframe
+              src="/wallboard/customer-success"
+              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
+              title="Customer Success"
             />
           )}
 
@@ -1286,6 +1311,7 @@ export function App() {
       {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
       {showReleaseNotes && <ReleaseNotesModal onClose={() => setShowReleaseNotes(false)} />}
       <TourOverlay show={showTour} onClose={closeTour} />
+      {user && <BriefingPopup onNavigate={navigate} />}
       {wbDrill && (
         <WallboardDrillPanel
           kpi={wbDrill.kpi}
