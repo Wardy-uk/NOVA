@@ -306,6 +306,19 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
     return () => clearInterval(iv);
   }, [refresh]);
 
+  // Auto-navigate to pending approval decision from AI Approval Queue
+  useEffect(() => {
+    const pendingTicket = sessionStorage.getItem('agent_pending_ticket');
+    if (pendingTicket && decisions.length > 0) {
+      sessionStorage.removeItem('agent_pending_ticket');
+      const match = decisions.find(d => d.ticket_id === pendingTicket && d.approval_required);
+      if (match) {
+        setTab('decisions');
+        setSelected(match);
+      }
+    }
+  }, [decisions]);
+
   useEffect(() => {
     if (tab === 'providers') {
       Promise.all([

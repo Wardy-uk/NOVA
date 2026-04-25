@@ -1052,7 +1052,10 @@ export function App() {
             <ServiceDeskDashboard />
           )}
           {view === 'ai-approvals' && !sdFilter && (
-            <AIApprovalQueue canInteract={(areaAccess['ai_approvals'] || 'hidden') === 'edit'} />
+            <AIApprovalQueue canInteract={(areaAccess['ai_approvals'] || 'hidden') === 'edit'} onNavigateToAgent={(ticketId) => {
+              sessionStorage.setItem('agent_pending_ticket', ticketId);
+              setView('agent-dashboard');
+            }} />
           )}
           {/* KPIs */}
           {view === 'kpi-dashboard' && (

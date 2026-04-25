@@ -825,6 +825,7 @@ export class AgentLoop {
         resume_url: `${this.baseUrl}/api/public/agent/approval-callback?ticketKey=${encodeURIComponent(decision.ticketKey)}`,
         priority: (decision.inputs.priority as string) ?? undefined,
         expires_at: expiresAt,
+        source: 'nova_ai',
       });
 
       await this.observer.logOutcome(decisionId, {
@@ -833,6 +834,17 @@ export class AgentLoop {
         ticketKey: decision.ticketKey,
         detail: `Submitted to approval queue (approval #${approvalId}). Confidence: ${decision.confidence.toFixed(2)}`,
       });
+
+      // Post internal note on Jira to prevent manual resolution while awaiting approval
+      try {
+        await this.jiraClient.addComment(
+          decision.ticketKey,
+          '⏳ NOVA AI has processed this ticket and is awaiting human approval.\n\nPlease do not resolve or action this ticket manually — log into NOVA to review and approve/decline the AI recommendation.',
+          { internal: true },
+        );
+      } catch (noteErr) {
+        console.warn(`[agent] Failed to post approval hold note on ${decision.ticketKey}:`, noteErr instanceof Error ? noteErr.message : noteErr);
+      }
 
       // Lifecycle: move to awaiting_approval
       try {

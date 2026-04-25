@@ -18,6 +18,7 @@ interface ApprovalItem {
   priority: string | null;
   created_at: string;
   expires_at: string;
+  source: string | null;
 }
 
 interface AIApprovalDrawerProps {

@@ -19,6 +19,7 @@ interface ApprovalItem {
   priority: string | null;
   created_at: string;
   expires_at: string;
+  source: string | null;
 }
 
 interface ApprovalStats {
@@ -31,6 +32,7 @@ interface ApprovalStats {
 
 interface AIApprovalQueueProps {
   canInteract: boolean;
+  onNavigateToAgent?: (ticketId: string) => void;
 }
 
 const API_BASE = '/api/approvals';
@@ -86,7 +88,7 @@ const URGENCY_COLORS: Record<string, string> = {
 
 let toastIdCounter = 0;
 
-export function AIApprovalQueue({ canInteract }: AIApprovalQueueProps) {
+export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQueueProps) {
   const [items, setItems] = useState<ApprovalItem[]>([]);
   const [stats, setStats] = useState<ApprovalStats>({ pending: 0, approved: 0, declined: 0, timed_out: 0, today_decided: 0 });
   const [statusFilter, setStatusFilter] = useState<string>('pending');
@@ -415,6 +417,7 @@ export function AIApprovalQueue({ canInteract }: AIApprovalQueueProps) {
                   )}
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Ticket</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Summary</th>
+                  <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Source</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Reporter</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Priority</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Age</th>
@@ -461,6 +464,11 @@ export function AIApprovalQueue({ canInteract }: AIApprovalQueueProps) {
                       <td className="px-3 py-3 text-[13px] text-neutral-300 max-w-xs truncate">
                         {item.ticket_summary}
                       </td>
+                      <td className="px-3 py-3">
+                        <span className={`inline-block px-2 py-0.5 text-[10px] font-semibold rounded ${item.source === 'nova_ai' ? 'bg-[#5ec1ca]/15 text-[#5ec1ca]' : 'bg-violet-500/15 text-violet-400'}`}>
+                          {item.source === 'nova_ai' ? 'NOVA AI' : 'n8n AI'}
+                        </span>
+                      </td>
                       <td className="px-3 py-3 text-[13px] text-neutral-400">
                         {item.reporter_name || item.reporter_email || 'Unknown'}
                       </td>
@@ -485,12 +493,21 @@ export function AIApprovalQueue({ canInteract }: AIApprovalQueueProps) {
                         )}
                       </td>
                       <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={() => openDrawer(item)}
-                          className="text-[12px] px-3 py-1.5 rounded-lg bg-[#3a424d] text-neutral-300 hover:bg-[#444d59] hover:text-neutral-100 transition-colors font-medium"
-                        >
-                          Review
-                        </button>
+                        {item.source === 'nova_ai' && onNavigateToAgent ? (
+                          <button
+                            onClick={() => onNavigateToAgent(item.ticket_id)}
+                            className="text-[12px] px-3 py-1.5 rounded-lg bg-[#5ec1ca]/15 text-[#5ec1ca] hover:bg-[#5ec1ca]/25 transition-colors font-medium"
+                          >
+                            Review in Agent
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => openDrawer(item)}
+                            className="text-[12px] px-3 py-1.5 rounded-lg bg-[#3a424d] text-neutral-300 hover:bg-[#444d59] hover:text-neutral-100 transition-colors font-medium"
+                          >
+                            Review
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

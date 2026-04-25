@@ -896,6 +896,9 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_processed_comments_at')
      CREATE INDEX IX_processed_comments_at ON processed_comments (processed_at);`,
+
+    `IF COL_LENGTH('approval_queue', 'source') IS NULL
+     ALTER TABLE approval_queue ADD source NVARCHAR(20) NULL DEFAULT 'n8n_ai';`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
