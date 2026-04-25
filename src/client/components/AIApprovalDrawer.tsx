@@ -233,6 +233,9 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
               <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${statusStyle}`}>
                 {item.status.replace('_', ' ').toUpperCase()}
               </span>
+              <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${item.source === 'nova_ai' ? 'bg-[#5ec1ca]/15 text-[#5ec1ca]' : 'bg-violet-500/15 text-violet-400'}`}>
+                {item.source === 'nova_ai' ? 'NOVA AI' : 'n8n AI'}
+              </span>
             </div>
             <div className="text-sm text-neutral-100 font-semibold truncate">{item.ticket_summary}</div>
           </div>
@@ -335,8 +338,11 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
           {/* AI Proposed Resolution */}
           <div className="border border-[#3a424d] rounded-lg bg-[#272C33] p-4">
             <div className="flex items-center justify-between mb-3">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 flex items-center gap-2">
                 AI Proposed Resolution
+                <span className={`px-1.5 py-0.5 text-[9px] font-semibold rounded normal-case tracking-normal ${item.source === 'nova_ai' ? 'bg-[#5ec1ca]/15 text-[#5ec1ca]' : 'bg-violet-500/15 text-violet-400'}`}>
+                  {item.source === 'nova_ai' ? 'NOVA AI' : 'n8n AI'}
+                </span>
               </div>
               {canInteract && isPending && (
                 <button
