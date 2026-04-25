@@ -27,6 +27,7 @@ export class CalendarSyncService {
       console.log('[calendar-sync] Skipping — people_hr_api_key not configured');
       return { synced: 0, created: 0, updated: 0, removed: 0 };
     }
+    console.log(`[calendar-sync] Using API key: ${apiKey.slice(0, 8)}...`);
 
     try {
       const absences = await this.fetchAbsences(apiKey);

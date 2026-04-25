@@ -1,8 +1,9 @@
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { JiraRestClient } from './jira-client.js';
 import type { TicketEvent, HybridActionMatch } from './agent-types.js';
-import { executeAndGetId } from './database.js';
+import { executeAndGetId, query } from './database.js';
 
+const MAX_RETRY_COUNT = 3;
 const PLUGIN_REPORTER_EMAIL = 'smart.plugin.manager@wpengine.com';
 const PLUGIN_SUMMARY_PATTERNS = [
   /plugins were not updated/i,
@@ -29,6 +30,10 @@ export class HybridActionDetector {
 
     const pluginMatch = this.detectPluginToTpj(event);
     if (pluginMatch) {
+      const retryExhausted = await this.checkRetryExhausted(event.ticketKey, 'plugin_to_tpj');
+      if (retryExhausted) {
+        return null;
+      }
       const preEmpted = await this.checkPluginPreEmption(event.ticketKey, jiraClient);
       if (preEmpted) {
         await this.logPreEmption(event, 'plugin_to_tpj', preEmpted);
@@ -39,6 +44,10 @@ export class HybridActionDetector {
 
     const abuseMatch = this.detectAbuseReport(event);
     if (abuseMatch) {
+      const retryExhausted = await this.checkRetryExhausted(event.ticketKey, 'abuse_report');
+      if (retryExhausted) {
+        return null;
+      }
       const preEmpted = await this.checkAbusePreEmption(event.ticketKey, jiraClient);
       if (preEmpted) {
         await this.logPreEmption(event, 'abuse_report', preEmpted);
@@ -143,6 +152,30 @@ export class HybridActionDetector {
     } catch (err) {
       console.warn(`[hybrid-detector] Pre-emption check failed for ${ticketKey}:`, err);
       return null;
+    }
+  }
+
+  private async checkRetryExhausted(ticketKey: string, actionId: string): Promise<boolean> {
+    try {
+      const rows = await query<{ cnt: number }>(
+        `SELECT COUNT(*) AS cnt FROM hybrid_action_log
+         WHERE source_ticket_key = ? AND action_id = ? AND status = 'failed'`,
+        [ticketKey, actionId],
+      );
+      const failCount = rows[0]?.cnt ?? 0;
+      if (failCount >= MAX_RETRY_COUNT) {
+        console.warn(`[hybrid-detector] ${actionId} on ${ticketKey} exhausted ${MAX_RETRY_COUNT} retries — marking as permanently failed`);
+        await executeAndGetId(
+          `INSERT INTO hybrid_action_log (action_id, source_ticket_key, status, detail)
+           VALUES (?, ?, 'failed_permanent', ?)`,
+          [actionId, ticketKey, `Exhausted ${MAX_RETRY_COUNT} retries — manual intervention needed`],
+        );
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.warn(`[hybrid-detector] Retry check failed for ${ticketKey}:`, err);
+      return false;
     }
   }
 

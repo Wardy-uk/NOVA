@@ -886,6 +886,16 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_agent_streaks_user_type')
      CREATE UNIQUE INDEX UX_agent_streaks_user_type ON agent_streaks (user_id, streak_type);`,
+
+    // ── Processed comments dedup (survives restarts) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'processed_comments') AND type = 'U')
+     CREATE TABLE processed_comments (
+       comment_id NVARCHAR(100) NOT NULL PRIMARY KEY,
+       processed_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_processed_comments_at')
+     CREATE INDEX IX_processed_comments_at ON processed_comments (processed_at);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

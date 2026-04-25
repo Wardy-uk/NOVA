@@ -2,6 +2,7 @@ import type { JiraRestClient, JiraIssue, JiraComment } from './jira-client.js';
 import type { JiraCacheQueries, CachedIssue, CachedComment } from './jira-cache-queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { QueuePerception, TicketEvent, CommentSnapshot } from './agent-types.js';
+import { query, execute } from './database.js';
 
 const DEFAULT_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
@@ -125,14 +126,50 @@ export class Perceiver {
   private lastTickAt: Date | null = null;
   private lastOpenIssues: JiraIssue[] = [];
   private processedCommentIds = new Set<string>();
+  private pendingCommentIds: string[] = [];
   private excludedAccountIds = new Set<string>();
   private knownAgentNames = new Set<string>();
   private excludedAccountsLoaded = false;
+  private dbLoaded = false;
 
   constructor(jiraClient: JiraRestClient, settings: SettingsQueries, cache?: JiraCacheQueries) {
     this.jiraClient = jiraClient;
     this.settings = settings;
     this.cache = cache ?? null;
+  }
+
+  async loadProcessedComments(): Promise<void> {
+    if (this.dbLoaded) return;
+    try {
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const rows = await query<{ comment_id: string }>(
+        `SELECT comment_id FROM processed_comments WHERE processed_at >= ?`, [cutoff],
+      );
+      for (const r of rows) this.processedCommentIds.add(r.comment_id);
+      this.dbLoaded = true;
+      console.log(`[perceiver] Loaded ${rows.length} processed comment IDs from DB`);
+    } catch (err) {
+      console.warn('[perceiver] Failed to load processed comments from DB:', err instanceof Error ? err.message : err);
+      this.dbLoaded = true;
+    }
+  }
+
+  private async flushPendingComments(): Promise<void> {
+    if (this.pendingCommentIds.length === 0) return;
+    const batch = this.pendingCommentIds.splice(0);
+    try {
+      for (const id of batch) {
+        await execute(
+          `IF NOT EXISTS (SELECT 1 FROM processed_comments WHERE comment_id = ?)
+           INSERT INTO processed_comments (comment_id) VALUES (?)`, [id, id],
+        );
+      }
+    } catch (err) {
+      console.warn('[perceiver] Failed to persist processed comments:', err instanceof Error ? err.message : err);
+    }
+    try {
+      await execute(`DELETE FROM processed_comments WHERE processed_at < DATEADD(hour, -48, GETUTCDATE())`, []);
+    } catch { /* best effort cleanup */ }
   }
 
   private loadExcludedAccounts(): void {
@@ -199,11 +236,20 @@ export class Perceiver {
     return `project IN (${projects.join(', ')})`;
   }
 
-  async perceive(): Promise<QueuePerception> {
-    if (this.cache) {
-      return this.perceiveFromCache();
+  private trackComment(id: string): void {
+    if (!this.processedCommentIds.has(id)) {
+      this.processedCommentIds.add(id);
+      this.pendingCommentIds.push(id);
     }
-    return this.perceiveFromApi();
+  }
+
+  async perceive(): Promise<QueuePerception> {
+    await this.loadProcessedComments();
+    const result = this.cache
+      ? await this.perceiveFromCache()
+      : await this.perceiveFromApi();
+    await this.flushPendingComments();
+    return result;
   }
 
   private async perceiveFromCache(): Promise<QueuePerception> {
@@ -277,13 +323,13 @@ export class Perceiver {
       const allComments = await this.cache!.getComments(ci.issue_key, 20);
       const latestCustomerComment = newCustomerComments[0]; // newest first from query
       if (this.hasAgentRepliedAfter(allComments, latestCustomerComment)) {
-        for (const c of newCustomerComments) this.processedCommentIds.add(c.jira_comment_id);
+        for (const c of newCustomerComments) this.trackComment(c.jira_comment_id);
         console.log(`[perceiver] Skipping ${ci.issue_key} — agent already replied after customer comment`);
         continue;
       }
 
       // Mark all recent comments as processed to prevent duplicates
-      for (const c of recentComments) this.processedCommentIds.add(c.jira_comment_id);
+      for (const c of recentComments) this.trackComment(c.jira_comment_id);
 
       const event = cachedToTicketEvent(ci, 'comment_added');
       event.comments = allComments.slice(0, 5).map(cachedCommentToSnapshot);
@@ -385,13 +431,13 @@ export class Perceiver {
           return this.isInternalAuthorApi(c, agentEmail);
         });
         if (agentRepliedAfter) {
-          for (const c of recentCustomer) this.processedCommentIds.add(c.id);
+          for (const c of recentCustomer) this.trackComment(c.id);
           console.log(`[perceiver] Skipping ${issue.key} — agent already replied after customer comment`);
           continue;
         }
 
         for (const c of comments.filter(x => new Date(x.created).getTime() > since.getTime())) {
-          this.processedCommentIds.add(c.id);
+          this.trackComment(c.id);
         }
 
         const event = toTicketEvent(issue, 'comment_added');

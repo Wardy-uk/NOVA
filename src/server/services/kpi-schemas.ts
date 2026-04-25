@@ -1,11 +1,22 @@
 import { z } from 'zod';
 
+const flexStringArray = z.any().transform((val): string[] => {
+  if (Array.isArray(val)) return val.map(v => typeof v === 'string' ? v : JSON.stringify(v));
+  if (typeof val === 'string') return val.split('\n').map(s => s.replace(/^[-•*]\s*/, '').trim()).filter(Boolean);
+  return [];
+});
+
 export const DailyDigestSchema = z.object({
   headline: z.string(),
-  kpi_summary: z.array(z.string()),
-  agent_highlights: z.string(),
-  concerns: z.array(z.string()),
-  actions: z.array(z.string()),
+  kpi_summary: flexStringArray,
+  agent_highlights: z.any().transform((val): string => {
+    if (typeof val === 'string') return val;
+    if (Array.isArray(val)) return val.join('; ');
+    if (val && typeof val === 'object') return JSON.stringify(val);
+    return '';
+  }),
+  concerns: flexStringArray,
+  actions: flexStringArray,
   narrative: z.string(),
 });
 export type DailyDigest = z.infer<typeof DailyDigestSchema>;

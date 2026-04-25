@@ -95,8 +95,6 @@ const CALL_TYPE_TIER_MAP: Record<string, LlmTier> = {
   quick_resolve: 'standard',
   call_review: 'standard',
   '121-prep': 'standard',
-  sentiment_analysis: 'cheap',
-  commitment_analysis: 'cheap',
   ticket_analysis: 'cheap',
   ticket_classification: 'cheap',
   classification: 'cheap',
