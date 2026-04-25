@@ -1311,7 +1311,7 @@ export function App() {
       {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
       {showReleaseNotes && <ReleaseNotesModal onClose={() => setShowReleaseNotes(false)} />}
       <TourOverlay show={showTour} onClose={closeTour} />
-      {user && <BriefingPopup onNavigate={navigate} />}
+      {auth.user && <BriefingPopup onNavigate={navigate} />}
       {wbDrill && (
         <WallboardDrillPanel
           kpi={wbDrill.kpi}
