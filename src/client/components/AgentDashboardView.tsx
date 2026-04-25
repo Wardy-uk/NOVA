@@ -477,7 +477,7 @@ function StatusPill({ state, shadow, shadowEnum, mode, weekendOverrideUntil }: {
       )}
       {state === 'running' && weekendOverrideUntil ? (
         <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-orange-900/60 text-orange-300 border border-orange-700/40">
-          Full mode (override until {formatOverrideUntil(weekendOverrideUntil)})
+          Weekend override (until {formatOverrideUntil(weekendOverrideUntil)})
         </span>
       ) : state === 'running' && mode === 'reduced' ? (
         <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-blue-900/60 text-blue-300 border border-blue-700/40">
