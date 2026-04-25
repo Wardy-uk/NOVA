@@ -2397,7 +2397,60 @@ function CostsTab({ data, onPeriodChange }: { data: CostSummary | null; onPeriod
             {data.topTickets.length === 0 && <div className="text-xs text-neutral-500">No ticket data</div>}
           </div>
         </div>
+
+        {/* Daily spend (last 10 days) */}
+        <DailySpendCard />
       </div>
+    </div>
+  );
+}
+
+function DailySpendCard() {
+  const [rows, setRows] = useState<Array<{ period: string; cost: number; calls: number }>>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const end = new Date().toISOString().slice(0, 10);
+    const start = new Date(Date.now() - 9 * 86_400_000).toISOString().slice(0, 10);
+    api(`/costs/trend?start=${start}&end=${end}`).then(r => {
+      if (r.ok) setRows(r.data);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const dailyAvg = rows.length > 0 ? rows.reduce((s, r) => s + r.cost, 0) / rows.length : 0;
+  const sorted = [...rows].sort((a, b) => b.period.localeCompare(a.period));
+
+  return (
+    <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+      <h3 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-3">Daily Spend (Last 10 Days)</h3>
+      {loading ? (
+        <div className="text-xs text-neutral-500 py-4 text-center">Loading...</div>
+      ) : (
+        <>
+          <div className="space-y-1">
+            {sorted.map(r => {
+              const isToday = r.period === today;
+              return (
+                <div key={r.period} className={`flex items-center gap-2 text-xs rounded px-1.5 py-0.5 ${isToday ? 'bg-[#5ec1ca]/10 border border-[#5ec1ca]/20' : ''}`}>
+                  <span className={`font-mono w-20 ${isToday ? 'text-[#5ec1ca] font-medium' : 'text-neutral-400'}`}>
+                    {isToday ? 'Today' : new Date(r.period + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+                  </span>
+                  <span className={`font-mono flex-1 text-right ${isToday ? 'text-neutral-100 font-medium' : 'text-neutral-300'}`}>{fmtCost(r.cost)}</span>
+                  <span className="text-neutral-600 w-16 text-right">{r.calls} calls</span>
+                </div>
+              );
+            })}
+            {sorted.length === 0 && <div className="text-xs text-neutral-500">No data</div>}
+          </div>
+          {rows.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-[#3a424d] flex items-center justify-between text-xs text-neutral-400">
+              <span>Daily average</span>
+              <span className="font-mono text-neutral-200">{fmtCost(dailyAvg)}</span>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

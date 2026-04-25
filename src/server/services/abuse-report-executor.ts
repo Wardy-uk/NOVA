@@ -41,18 +41,20 @@ export class AbuseReportExecutor {
       // 1. Insert log row into AbuseReportAutomationLog
       try {
         const pool = await this.externalDb.getAbuseReportPool();
+        const summary = match.summary?.slice(0, 255) ?? '';
         const result = await pool.request()
           .input('TicketKey', ticketKey)
-          .input('ContactID', parseInt(contactId, 10))
-          .input('InstanceID', parseInt(instanceId, 10))
-          .input('InstanceUrl', instanceUrl)
+          .input('Summary', summary)
           .input('AbuseEmail', abuseEmail)
-          .input('Source', 'NOVA-Agent')
+          .input('InstanceId', parseInt(instanceId, 10))
+          .input('ContactId', parseInt(contactId, 10))
+          .input('InstanceUrl', instanceUrl)
+          .input('ProcessedBy', 'NOVA-Agent')
           .query(`INSERT INTO dbo.AbuseReportAutomationLog
-                  (TicketKey, ContactID, InstanceID, InstanceUrl, AbuseEmail, Source, CreatedAt)
-                  OUTPUT INSERTED.Id
-                  VALUES (@TicketKey, @ContactID, @InstanceID, @InstanceUrl, @AbuseEmail, @Source, GETUTCDATE())`);
-        logId = result.recordset?.[0]?.Id ?? null;
+                  (TicketKey, Summary, AbuseEmail, InstanceId, ContactId, InstanceUrl, ProcessedBy, LoggedAtUtc)
+                  OUTPUT INSERTED.LogId
+                  VALUES (@TicketKey, @Summary, @AbuseEmail, @InstanceId, @ContactId, @InstanceUrl, @ProcessedBy, GETUTCDATE())`);
+        logId = result.recordset?.[0]?.LogId ?? null;
         console.log(`[abuse-report] Logged to AbuseReportAutomationLog (id=${logId}) for ${ticketKey}`);
       } catch (err) {
         console.error(`[abuse-report] Failed to insert abuse log for ${ticketKey}:`, err);
@@ -206,13 +208,13 @@ export class AbuseReportExecutor {
     try {
       const pool = await this.externalDb.getAbuseReportPool();
       await pool.request()
-        .input('Id', logId)
+        .input('LogId', logId)
         .input('SqlProcessed', stage === 'sql_ok' ? 1 : 0)
         .input('ErrorStage', stage)
         .input('ErrorMessage', err ? (err instanceof Error ? err.message : String(err)) : null)
         .query(`UPDATE dbo.AbuseReportAutomationLog
                 SET SqlProcessed = @SqlProcessed, ErrorStage = @ErrorStage, ErrorMessage = @ErrorMessage
-                WHERE Id = @Id`);
+                WHERE LogId = @LogId`);
     } catch (e) {
       console.warn(`[abuse-report] Failed to update external log ${logId}:`, e);
     }
@@ -223,7 +225,7 @@ export class AbuseReportExecutor {
     try {
       const pool = await this.externalDb.getAbuseReportPool();
       await pool.request()
-        .input('Id', logId)
+        .input('LogId', logId)
         .input('JiraWebhookOk', httpStatus >= 200 && httpStatus < 300 ? 1 : 0)
         .input('JiraHttpStatus', httpStatus)
         .input('ErrorStage', error ? 'webhook_error' : 'done')
@@ -231,7 +233,7 @@ export class AbuseReportExecutor {
         .query(`UPDATE dbo.AbuseReportAutomationLog
                 SET JiraWebhookOk = @JiraWebhookOk, JiraHttpStatus = @JiraHttpStatus,
                     ErrorStage = @ErrorStage, ErrorMessage = @ErrorMessage
-                WHERE Id = @Id`);
+                WHERE LogId = @LogId`);
     } catch (e) {
       console.warn(`[abuse-report] Failed to update external log done ${logId}:`, e);
     }
