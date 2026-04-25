@@ -47,15 +47,17 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: agentLoop.status });
   });
 
-  router.post('/start', requireSuperAdmin(), (_req, res) => {
+  router.post('/start', requireSuperAdmin(), async (_req, res) => {
     agentLoop.start();
     deps?.settingsQueries?.set('agent_enabled', 'true');
+    try { await execute(`MERGE agent_config AS t USING (SELECT 'agent_enabled' AS config_key) AS s ON t.config_key = s.config_key WHEN MATCHED THEN UPDATE SET config_value = 'true', updated_at = GETUTCDATE() WHEN NOT MATCHED THEN INSERT (config_key, config_value) VALUES ('agent_enabled', 'true');`); } catch {}
     res.json({ ok: true, data: agentLoop.status });
   });
 
-  router.post('/stop', requireSuperAdmin(), (_req, res) => {
+  router.post('/stop', requireSuperAdmin(), async (_req, res) => {
     agentLoop.stop();
     deps?.settingsQueries?.set('agent_enabled', 'false');
+    try { await execute(`MERGE agent_config AS t USING (SELECT 'agent_enabled' AS config_key) AS s ON t.config_key = s.config_key WHEN MATCHED THEN UPDATE SET config_value = 'false', updated_at = GETUTCDATE() WHEN NOT MATCHED THEN INSERT (config_key, config_value) VALUES ('agent_enabled', 'false');`); } catch {}
     res.json({ ok: true, data: agentLoop.status });
   });
 

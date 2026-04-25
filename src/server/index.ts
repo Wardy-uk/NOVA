@@ -1052,7 +1052,13 @@ async function main() {
       }
     }, 4 * 60 * 60 * 1000);
 
-    if (settingsQueries.get('agent_enabled') === 'true') {
+    // Check MSSQL agent_config first (survives deploys), fall back to settings.json
+    let agentEnabled = settingsQueries.get('agent_enabled') === 'true';
+    try {
+      const row = await queryOne<{ config_value: string }>(`SELECT config_value FROM agent_config WHERE config_key = 'agent_enabled'`);
+      if (row) agentEnabled = row.config_value === 'true';
+    } catch {}
+    if (agentEnabled) {
       setTimeout(() => {
         agentLoop!.start();
         console.log('[N.O.V.A] Agent loop auto-started (agent_enabled=true, delayed 60s for startup stagger)');
