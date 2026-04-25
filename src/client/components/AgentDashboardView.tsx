@@ -25,6 +25,8 @@ interface AgentStatus {
   ticketsProcessed: number;
   intervalMs: number;
   errors: number;
+  mode: 'full' | 'reduced';
+  modeChangedAt: string | null;
 }
 
 interface AgentStats {
@@ -343,7 +345,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-neutral-100">AI Agent</h2>
-          {status && <StatusPill state={status.state} shadow={status.shadowMode} />}
+          {status && <StatusPill state={status.state} shadow={status.shadowMode} mode={status.mode} />}
         </div>
         <div className="flex items-center gap-2">
           {isSuperAdmin && status?.state === 'stopped' && (
@@ -412,7 +414,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
 
 // ── Sub-components ──
 
-function StatusPill({ state, shadow }: { state: string; shadow: boolean }) {
+function StatusPill({ state, shadow, mode }: { state: string; shadow: boolean; mode?: 'full' | 'reduced' }) {
   const stateColor = state === 'running' ? 'bg-green-500' : state === 'paused' ? 'bg-amber-500' : 'bg-neutral-600';
   return (
     <div className="flex items-center gap-2">
@@ -423,6 +425,11 @@ function StatusPill({ state, shadow }: { state: string; shadow: boolean }) {
       {shadow && (
         <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-purple-900/60 text-purple-300 border border-purple-700/40">
           Shadow
+        </span>
+      )}
+      {state === 'running' && mode === 'reduced' && (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-blue-900/60 text-blue-300 border border-blue-700/40">
+          Reduced (out of hours)
         </span>
       )}
     </div>
@@ -2140,6 +2147,11 @@ function FlaggedTab({ tickets, onRefresh }: { tickets: FlaggedTicket[]; onRefres
 
 function CostsTab({ data, onPeriodChange }: { data: CostSummary | null; onPeriodChange: (days: number) => void }) {
   const [days, setDays] = useState(30);
+  const [modeCosts, setModeCosts] = useState<{ working: { cost: number; calls: number }; outOfHours: { cost: number; calls: number } } | null>(null);
+
+  useEffect(() => {
+    api(`/costs/by-mode?days=${days}`).then(r => r.ok && setModeCosts(r.data)).catch(() => {});
+  }, [days]);
 
   if (!data) return <div className="text-sm text-neutral-500 py-8 text-center">Loading cost data...</div>;
 
@@ -2184,6 +2196,14 @@ function CostsTab({ data, onPeriodChange }: { data: CostSummary | null; onPeriod
         <CostCard label={`All ${days}d`} value={fmtCost(data.totalCost)} sub={`${data.totalCalls} calls`} />
         <CostCard label="Projected /mo" value={fmtCost(projectedMonthly)} sub={`${fmtCost(dailyRate)}/day`} />
       </div>
+
+      {/* Working hours vs out-of-hours split */}
+      {modeCosts && (modeCosts.working.calls > 0 || modeCosts.outOfHours.calls > 0) && (
+        <div className="grid grid-cols-2 gap-3">
+          <CostCard label="Working Hours" value={fmtCost(modeCosts.working.cost)} sub={`${modeCosts.working.calls} calls`} />
+          <CostCard label="Out of Hours" value={fmtCost(modeCosts.outOfHours.cost)} sub={`${modeCosts.outOfHours.calls} calls`} />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 

@@ -883,7 +883,7 @@ async function main() {
     const abuseReportProcessor = new AbuseReportProcessor(settingsQueries, agentJiraClient);
     const callReviewService = new CallReviewService(settingsQueries, llmService);
 
-    const suggestionEngine = new SuggestionEngine(agentLoop.getGuardrails(), agentLoop.getAutonomyEngine());
+    const suggestionEngine = new SuggestionEngine(agentLoop.getGuardrails(), agentLoop.getAutonomyEngine(), settingsQueries);
 
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,

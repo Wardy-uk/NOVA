@@ -2,8 +2,12 @@ import { z } from 'zod';
 
 export const TriageResultSchema = z.object({
   classification: z.object({
-    category: z.enum(['bug', 'how-to', 'config-change', 'data-request', 'feature-request', 'access', 'incident', 'other']),
+    ticket_type: z.enum(['incident', 'service_request', 'change', 'problem']),
+    category: z.string(),
     sub_category: z.string(),
+    impact: z.enum(['high', 'medium', 'low']),
+    urgency: z.enum(['high', 'medium', 'low']),
+    priority_matrix: z.enum(['P1', 'P2', 'P3', 'P4']),
     confidence: z.number().min(0).max(1),
   }),
   priority_assessment: z.object({

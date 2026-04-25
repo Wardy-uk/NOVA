@@ -181,9 +181,9 @@ export class TicketClassifier {
 
   private async saveClassification(ticketKey: string, type: string, result: ClassificationResult): Promise<void> {
     await executeAndGetId(`
-      INSERT INTO ticket_classifications (ticket_key, classification_type, category, sub_category, software_area, problem_type, root_cause, confidence, provider, model)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [ticketKey, type, result.category, result.sub_category, result.software_area, result.problem_type, result.root_cause, result.confidence, null, null]);
+      INSERT INTO ticket_classifications (ticket_key, classification_type, category, sub_category, software_area, problem_type, root_cause, confidence, provider, model, ticket_type, impact, urgency, priority_matrix)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [ticketKey, type, result.category, result.sub_category, result.software_area, result.problem_type, result.root_cause, result.confidence, null, null, result.ticket_type ?? null, result.impact ?? null, result.urgency ?? null, result.priority_matrix ?? null]);
   }
 
   private async saveTrendSnapshot(result: TrendAnalysisResult, current: any[], prevMap: Map<string, number>, days: number): Promise<void> {

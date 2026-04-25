@@ -2,6 +2,7 @@ import { query, execute, executeAndGetId } from './database.js';
 import { createHash } from 'crypto';
 import type { Guardrails } from './guardrails.js';
 import type { AutonomyEngine } from './autonomy-engine.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 
 // ── Types ──
 
@@ -59,10 +60,18 @@ function mapRow(row: RawSuggestionRow): Suggestion {
 export class SuggestionEngine {
   private guardrails: Guardrails;
   private autonomy: AutonomyEngine;
+  private settings: SettingsQueries;
 
-  constructor(guardrails: Guardrails, autonomy: AutonomyEngine) {
+  constructor(guardrails: Guardrails, autonomy: AutonomyEngine, settings: SettingsQueries) {
     this.guardrails = guardrails;
     this.autonomy = autonomy;
+    this.settings = settings;
+  }
+
+  private getGoLiveDays(): number {
+    const goLiveStr = this.settings.get('agent_go_live_date') ?? '2026-04-23';
+    const goLive = new Date(goLiveStr + 'T00:00:00Z');
+    return Math.max(0, Math.floor((Date.now() - goLive.getTime()) / 86_400_000));
   }
 
   // ── CRUD ──
@@ -146,25 +155,29 @@ export class SuggestionEngine {
     return created;
   }
 
-  // ── Guardrail: rule hasn't triggered in 90+ days → suggest disable ──
+  // ── Guardrail: rule hasn't triggered since go-live → suggest disable (only after 30+ days live) ──
 
   private async analyzeDisableRule(
     insert: (t: 'guardrail', k: string, s: SuggestionPayload, e: Record<string, unknown>) => Promise<void>,
   ): Promise<void> {
+    const daysLive = this.getGoLiveDays();
+    if (daysLive < 30) return; // too early to suggest disabling rules
+
+    const lookbackDays = Math.min(daysLive, 90);
     const rules = this.guardrails.getRules().filter(r => r.enabled);
     for (const rule of rules) {
       const rows = await query<{ cnt: number }>(
         `SELECT COUNT(*) as cnt FROM agent_decisions
-         WHERE outcome LIKE ? AND created_at >= DATEADD(day, -90, GETUTCDATE())`,
-        [`%${rule.id}%`],
+         WHERE outcome LIKE ? AND created_at >= DATEADD(day, -?, GETUTCDATE())`,
+        [`%${rule.id}%`, lookbackDays],
       );
       if ((rows[0]?.cnt ?? 0) === 0) {
         await insert('guardrail', `disable_${rule.id}`, {
           action: 'disable_rule',
           title: `Disable "${rule.id}"`,
-          description: `This guardrail hasn't triggered in 90+ days. Consider disabling it to reduce processing overhead.`,
+          description: `This guardrail hasn't triggered in ${lookbackDays} days (agent live since ${this.settings.get('agent_go_live_date') ?? '2026-04-23'}). Consider disabling it to reduce processing overhead.`,
           ruleId: rule.id,
-        }, { ruleId: rule.id, triggerCount: 0, days: 90 });
+        }, { ruleId: rule.id, triggerCount: 0, days: lookbackDays });
       }
     }
   }

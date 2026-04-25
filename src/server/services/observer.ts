@@ -224,6 +224,44 @@ export class Observer {
     );
   }
 
+  async getCostsByMode(days: number, workingHours: string, workingDays: string): Promise<{
+    working: { cost: number; calls: number };
+    outOfHours: { cost: number; calls: number };
+  }> {
+    const match = workingHours.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+    const startHour = match ? parseInt(match[1], 10) : 8;
+    const endHour = match ? parseInt(match[3], 10) : 18;
+    const daySet = workingDays.split(',').map(d => d.trim()).join(',');
+
+    const dateFilter = days === 1
+      ? `created_at >= CAST(GETUTCDATE() AS DATE)`
+      : `created_at >= DATEADD(day, -${days}, GETUTCDATE())`;
+
+    const rows = await query<{ is_working: number; cost: number; calls: number }>(
+      `SELECT
+         CASE WHEN DATEPART(WEEKDAY, created_at) - 1 IN (${daySet})
+              AND DATEPART(HOUR, created_at) >= ${startHour}
+              AND DATEPART(HOUR, created_at) < ${endHour}
+              THEN 1 ELSE 0 END as is_working,
+         ISNULL(SUM(estimated_cost), 0) as cost,
+         COUNT(*) as calls
+       FROM agent_llm_calls
+       WHERE ${dateFilter}
+       GROUP BY CASE WHEN DATEPART(WEEKDAY, created_at) - 1 IN (${daySet})
+                     AND DATEPART(HOUR, created_at) >= ${startHour}
+                     AND DATEPART(HOUR, created_at) < ${endHour}
+                     THEN 1 ELSE 0 END`,
+    );
+
+    const working = rows.find(r => r.is_working === 1);
+    const outOfHours = rows.find(r => r.is_working === 0);
+
+    return {
+      working: { cost: working?.cost ?? 0, calls: working?.calls ?? 0 },
+      outOfHours: { cost: outOfHours?.cost ?? 0, calls: outOfHours?.calls ?? 0 },
+    };
+  }
+
   async getOverrideLog(limit = 50): Promise<unknown[]> {
     return query(
       `SELECT TOP(?) * FROM agent_decisions

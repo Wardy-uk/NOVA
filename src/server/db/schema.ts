@@ -767,6 +767,16 @@ async function runMigrations(): Promise<void> {
 
     `IF COL_LENGTH('dev_review_state', 'work_item_key') IS NULL
      ALTER TABLE dev_review_state ADD work_item_key NVARCHAR(50) NULL;`,
+
+    // ITIL classification columns on ticket_classifications
+    `IF COL_LENGTH('ticket_classifications', 'ticket_type') IS NULL
+     ALTER TABLE ticket_classifications ADD ticket_type NVARCHAR(30) NULL;`,
+    `IF COL_LENGTH('ticket_classifications', 'impact') IS NULL
+     ALTER TABLE ticket_classifications ADD impact NVARCHAR(20) NULL;`,
+    `IF COL_LENGTH('ticket_classifications', 'urgency') IS NULL
+     ALTER TABLE ticket_classifications ADD urgency NVARCHAR(20) NULL;`,
+    `IF COL_LENGTH('ticket_classifications', 'priority_matrix') IS NULL
+     ALTER TABLE ticket_classifications ADD priority_matrix NVARCHAR(5) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

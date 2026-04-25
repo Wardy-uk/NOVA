@@ -1,11 +1,15 @@
 import { z } from 'zod';
 
 export const ClassificationResultSchema = z.object({
+  ticket_type: z.enum(['incident', 'service_request', 'change', 'problem']).optional(),
   category: z.string(),
   sub_category: z.string(),
   software_area: z.string().nullable(),
   problem_type: z.enum(['bug', 'config', 'user-error', 'data-issue', 'integration', 'performance', 'access', 'feature-gap', 'documentation', 'unknown']),
   root_cause: z.string().nullable(),
+  impact: z.enum(['high', 'medium', 'low']).optional(),
+  urgency: z.enum(['high', 'medium', 'low']).optional(),
+  priority_matrix: z.enum(['P1', 'P2', 'P3', 'P4']).optional(),
   confidence: z.number().min(0).max(1),
   reasoning: z.string(),
 });

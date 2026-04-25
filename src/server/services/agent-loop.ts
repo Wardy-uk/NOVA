@@ -2,7 +2,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { JiraRestClient } from './jira-client.js';
 import type { LlmService } from './llm-service.js';
 import type { ApprovalQueries } from '../db/queries.js';
-import type { AgentState, AgentStatus, AgentDecision, AssignedTicketMode } from './agent-types.js';
+import type { AgentState, AgentStatus, AgentDecision, AgentMode, AssignedTicketMode } from './agent-types.js';
 import { Perceiver } from './perceiver.js';
 import { Reasoner } from './reasoner.js';
 import { Actor } from './actor.js';
@@ -21,6 +21,7 @@ import { RiskScorer } from './risk-scorer.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 
 const DEFAULT_INTERVAL_MS = 60_000;
+const REDUCED_INTERVAL_MS = 5 * 60_000; // 5 min tick in reduced (out-of-hours) mode
 const HEALTH_STALE_THRESHOLD_MS = 10 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_TICKS = 30; // sweep every 30th tick (~30 min at 1 min interval)
 
@@ -32,6 +33,8 @@ export class AgentLoop {
   private ticketsProcessed = 0;
   private errorCount = 0;
   private processing = false;
+  private currentMode: AgentMode = 'full';
+  private modeChangedAt: Date | null = null;
 
   private perceiver: Perceiver;
   private reasoner: Reasoner;
@@ -97,6 +100,8 @@ export class AgentLoop {
       ticketsProcessed: this.ticketsProcessed,
       intervalMs: this.getIntervalMs(),
       errors: this.errorCount,
+      mode: this.currentMode,
+      modeChangedAt: this.modeChangedAt?.toISOString() ?? null,
     };
   }
 
@@ -148,9 +153,11 @@ export class AgentLoop {
 
   start(): void {
     if (this.state === 'running') return;
+    this.currentMode = this.isWorkingHours() ? 'full' : 'reduced';
+    this.modeChangedAt = new Date();
     const intervalMs = this.getIntervalMs();
     this.state = 'running';
-    console.log(`[agent] Starting agent loop (interval: ${intervalMs}ms)`);
+    console.log(`[agent] Starting agent loop (interval: ${intervalMs}ms, mode: ${this.currentMode})`);
 
     this.tick();
     this.timer = setInterval(() => this.tick(), intervalMs);
@@ -181,12 +188,79 @@ export class AgentLoop {
   }
 
   private getIntervalMs(): number {
+    if (this.currentMode === 'reduced') return REDUCED_INTERVAL_MS;
     const configured = this.settings.get('agent_interval_ms');
     if (configured) {
       const parsed = parseInt(configured, 10);
       if (!isNaN(parsed) && parsed >= 10_000) return parsed;
     }
     return DEFAULT_INTERVAL_MS;
+  }
+
+  private isWeekendModeEnabled(): boolean {
+    const val = this.settings.get('agent_weekend_mode');
+    if (!val) return true; // default: enabled
+    return val.toLowerCase() !== 'false' && val !== '0';
+  }
+
+  private isWorkingHours(): boolean {
+    if (!this.isWeekendModeEnabled()) return true; // always full mode if disabled
+
+    const now = new Date();
+    const day = now.getUTCDay(); // 0=Sun, 6=Sat
+    const workingDaysStr = this.settings.get('agent_working_days') ?? '1,2,3,4,5';
+    const workingDays = new Set(workingDaysStr.split(',').map(d => parseInt(d.trim(), 10)));
+    if (!workingDays.has(day)) return false;
+
+    const hoursStr = this.settings.get('agent_working_hours') ?? '08:00-18:00';
+    const match = hoursStr.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+    if (!match) return true;
+    const startHour = parseInt(match[1], 10);
+    const startMin = parseInt(match[2], 10);
+    const endHour = parseInt(match[3], 10);
+    const endMin = parseInt(match[4], 10);
+
+    const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const startMinutes = startHour * 60 + startMin;
+    const endMinutes = endHour * 60 + endMin;
+
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+  }
+
+  private restartTimer(): void {
+    if (this.timer) clearInterval(this.timer);
+    const intervalMs = this.getIntervalMs();
+    this.timer = setInterval(() => this.tick(), intervalMs);
+    console.log(`[agent] Timer restarted with interval ${intervalMs}ms`);
+  }
+
+  private async checkModeTransition(): Promise<boolean> {
+    const shouldBeFull = this.isWorkingHours();
+    const newMode: AgentMode = shouldBeFull ? 'full' : 'reduced';
+    if (newMode === this.currentMode) return false;
+
+    const oldMode = this.currentMode;
+    this.currentMode = newMode;
+    this.modeChangedAt = new Date();
+
+    if (newMode === 'full') {
+      console.log(`[agent] Resuming full mode (working hours started)`);
+      this.restartTimer();
+      // Run immediate full sweep to catch up on paused tasks
+      const shadow = this.isShadowMode();
+      console.log(`[agent] Running catch-up sweep after hours...`);
+      await this.runLifecycleSweep(shadow);
+      await this.runResolutionReview(shadow);
+      await this.runTicketClassification();
+      await this.runCoachingHealthChecks();
+      await this.runRiskSweep();
+      console.log(`[agent] Catch-up sweep complete`);
+    } else {
+      console.log(`[agent] Entering reduced mode (outside working hours)`);
+      this.restartTimer();
+    }
+
+    return true;
   }
 
   private isShadowMode(): boolean {
@@ -204,7 +278,8 @@ export class AgentLoop {
     const tickStart = Date.now();
 
     try {
-      console.log(`[agent] Tick #${this.tickCount} starting...`);
+      await this.checkModeTransition();
+      console.log(`[agent] Tick #${this.tickCount} starting... (${this.currentMode} mode)`);
 
       // 1. PERCEIVE
       const perception = await this.perceiver.perceive();
@@ -246,11 +321,16 @@ export class AgentLoop {
       // 6. LIFECYCLE SWEEP + RESOLUTION REVIEW + CLASSIFICATION + COACHING (every Nth tick)
       const sweepInterval = this.getNumber('agent_sweep_interval_ticks', DEFAULT_SWEEP_INTERVAL_TICKS);
       if (this.tickCount % sweepInterval === 0) {
+        // Lifecycle manager runs in all modes (approval timeouts + SLA breaches matter out of hours)
         await this.runLifecycleSweep(shadow);
-        await this.runResolutionReview(shadow);
-        await this.runTicketClassification();
-        await this.runCoachingHealthChecks();
-        await this.runRiskSweep();
+
+        // These only run during working hours
+        if (this.currentMode === 'full') {
+          await this.runResolutionReview(shadow);
+          await this.runTicketClassification();
+          await this.runCoachingHealthChecks();
+          await this.runRiskSweep();
+        }
       }
 
       this.lastTickAt = new Date();
@@ -338,9 +418,11 @@ export class AgentLoop {
   private async runCoachingHealthChecks(): Promise<void> {
     try {
       const openIssues = this.perceiver.getLastOpenIssues();
+      console.log(`[agent] Coaching health checks starting — ${openIssues.length} open issues available`);
       if (openIssues.length === 0) return;
 
       let checked = 0;
+      let nudgeCount = 0;
       for (const issue of openIssues.slice(0, 20)) {
         const assignee = (issue.fields as any)?.assignee?.accountId;
         if (!assignee) continue;
@@ -348,10 +430,11 @@ export class AgentLoop {
         const nudges = await this.coachingEngine.checkTicketHealth(issue.key, assignee);
         if (nudges.length > 0) {
           console.log(`[agent] Coaching health check: ${issue.key} — ${nudges.join(', ')}`);
+          nudgeCount += nudges.length;
         }
         checked++;
       }
-      if (checked > 0) console.log(`[agent] Coaching health checks complete — ${checked} tickets checked`);
+      console.log(`[agent] Coaching health checks complete — ${checked} tickets checked, ${nudgeCount} nudges generated`);
     } catch (err) {
       console.warn(`[agent] Coaching health checks failed:`, err instanceof Error ? err.message : err);
     }
@@ -568,7 +651,7 @@ export class AgentLoop {
   }
 
   private formatInternalNote(decision: AgentDecision): string {
-    const classification = decision.output.classification as { category?: string; sub_category?: string; confidence?: number } | undefined;
+    const classification = decision.output.classification as { ticket_type?: string; category?: string; sub_category?: string; confidence?: number; impact?: string; urgency?: string; priority_matrix?: string } | undefined;
     const intent = decision.inputs.intent as { type?: string; confidence?: number } | undefined;
     const priorityAssessment = decision.output.priority_assessment as { suggested_priority?: number; reasoning?: string } | undefined;
     const internalNote = (decision.output.internal_note as string) ?? '';
@@ -619,9 +702,19 @@ export class AgentLoop {
 
     if (sentiment) lines.push(`**Sentiment:** ${sentiment}`);
 
-    if (classification?.category && classification.category !== 'unknown') {
+    if (classification?.ticket_type) {
+      const typeLabel = classification.ticket_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const catLabel = classification.category && classification.sub_category
+        ? `${classification.category} > ${classification.sub_category}`
+        : classification.category ?? '';
+      lines.push(`**Type:** ${typeLabel}`);
+      if (catLabel) lines.push(`**Category:** ${catLabel}`);
+      if (classification.impact && classification.urgency && classification.priority_matrix) {
+        lines.push(`**Impact:** ${classification.impact} | **Urgency:** ${classification.urgency} | **Priority:** ${classification.priority_matrix}`);
+      }
+    } else if (classification?.category && classification.category !== 'unknown') {
       const sub = classification.sub_category && classification.sub_category !== 'unknown'
-        ? ` / ${classification.sub_category}` : '';
+        ? ` > ${classification.sub_category}` : '';
       lines.push(`**Category:** ${classification.category}${sub}`);
     }
     if (intent?.type) {

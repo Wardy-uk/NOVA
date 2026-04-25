@@ -106,6 +106,8 @@ export interface ActionResult {
   error?: string;
 }
 
+export type AgentMode = 'full' | 'reduced';
+
 export interface AgentStatus {
   state: AgentState;
   shadowMode: boolean;
@@ -114,6 +116,8 @@ export interface AgentStatus {
   ticketsProcessed: number;
   intervalMs: number;
   errors: number;
+  mode: AgentMode;
+  modeChangedAt: string | null;
 }
 
 // ── WP-09: Queue Monitor ──

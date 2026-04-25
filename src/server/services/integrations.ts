@@ -239,6 +239,10 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'agent_risk_alert_hours', label: 'Risk Alert Hours (HH:MM-HH:MM)', type: 'text', placeholder: '08:00-18:00', required: false },
       { key: 'agent_risk_alert_to', label: 'Risk Alert Webhook (override)', type: 'url', placeholder: 'Uses Teams Webhook if blank', required: false },
       { key: 'agent_comment_exclude_accounts', label: 'Exclude Account IDs (comma-separated)', type: 'text', placeholder: 'Jira account IDs to ignore (n8n bot, service accounts)', required: false },
+      { key: 'agent_go_live_date', label: 'Agent Go-Live Date', type: 'text', placeholder: '2026-04-23', required: false },
+      { key: 'agent_weekend_mode', label: 'Out-of-Hours Reduced Mode', type: 'toggle', placeholder: 'true', required: false },
+      { key: 'agent_working_hours', label: 'Working Hours (HH:MM-HH:MM)', type: 'text', placeholder: '08:00-18:00', required: false },
+      { key: 'agent_working_days', label: 'Working Days (0=Sun, 6=Sat)', type: 'text', placeholder: '1,2,3,4,5', required: false },
     ],
   },
   {

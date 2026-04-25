@@ -27,13 +27,31 @@ Created: {{created}}
 
 Produce a JSON object with the following structure:
 
-1. **classification** — What type of issue is this?
-   - category: one of bug, how-to, config-change, data-request, feature-request, access, incident, other
-   - sub_category: more specific classification (free text, e.g. "feed-integration", "email-delivery", "login-issue")
+1. **classification** — ITIL-aligned classification of this ticket:
+   - ticket_type: one of:
+     - "incident" — something is broken or not working as expected (unplanned interruption to service)
+     - "service_request" — a request for help, information, access, or a standard change (predefined, pre-approved)
+     - "change" — a request to modify configuration, settings, or functionality
+     - "problem" — a recurring underlying issue causing multiple incidents
+   - category: broad area (e.g. "Email", "Website", "CRM", "Data Feed", "Portal", "Integration", "Reporting", "User Management")
+   - sub_category: specific sub-area (e.g. "Template Editor", "Property Feed", "User Access", "Email Delivery")
+   - impact: how broadly this affects the customer/business:
+     - "high" — multiple users or customers affected, or business-critical function down
+     - "medium" — single user affected significantly, or non-critical function impaired
+     - "low" — minor inconvenience, cosmetic, or affects only the reporter
+   - urgency: how time-sensitive this is:
+     - "high" — SLA at risk, customer blocked from working, revenue impact
+     - "medium" — customer can work around it but needs resolution soon
+     - "low" — no immediate time pressure, can wait for scheduled resolution
+   - priority_matrix: derived from impact × urgency using this ITIL matrix:
+     - P1: high impact + high urgency
+     - P2: high impact + medium urgency, OR medium impact + high urgency
+     - P3: medium impact + medium urgency, OR high impact + low urgency, OR low impact + high urgency
+     - P4: low impact + low urgency, OR low impact + medium urgency, OR medium impact + low urgency
    - confidence: your confidence in this classification (0.0 to 1.0)
 
-2. **priority_assessment** — Should the priority change?
-   - suggested_priority: 1 (critical), 2 (high), 3 (medium), or 4 (low)
+2. **priority_assessment** — Should the Jira priority change?
+   - suggested_priority: 1 (critical), 2 (high), 3 (medium), or 4 (low). Should align with priority_matrix (P1→1, P2→2, etc.)
    - reasoning: one sentence explaining why
 
 3. **sentiment** — Customer's emotional state: positive, neutral, frustrated, angry, urgent
