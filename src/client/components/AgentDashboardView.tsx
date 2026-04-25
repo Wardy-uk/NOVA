@@ -790,11 +790,12 @@ function DecisionsTab({ decisions, selected, onSelect, onRefresh }: {
 }) {
   const [filter, setFilter] = useState<string>('all');
   const [declining, setDeclining] = useState(false);
+  const isPendingApproval = (d: Decision) => d.approval_required && !d.shadow_mode && (!d.approval_status || d.approval_status === 'pending');
   const filtered = filter === 'pending_approval'
-    ? decisions.filter(d => d.approval_required && (!d.approval_status || d.approval_status === 'pending'))
+    ? decisions.filter(isPendingApproval)
     : filter === 'all' ? decisions : decisions.filter(d => d.event_type === filter);
   const eventTypes = [...new Set(decisions.map(d => d.event_type))];
-  const pendingCount = decisions.filter(d => d.approval_required && (!d.approval_status || d.approval_status === 'pending')).length;
+  const pendingCount = decisions.filter(isPendingApproval).length;
 
   const handleDeclineAll = async () => {
     if (!confirm(`Decline all ${pendingCount} pending approvals? This cannot be undone.`)) return;
@@ -904,8 +905,8 @@ function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decisio
   const output = safeJson(d.output);
   const outcome = d.outcome ? safeJson(d.outcome) : null;
 
-  const isPendingApproval = d.approval_required && (!d.approval_status || d.approval_status === 'pending');
-  const isResolved = d.approval_required && d.approval_status && d.approval_status !== 'pending';
+  const isPendingApproval = d.approval_required && !d.shadow_mode && (!d.approval_status || d.approval_status === 'pending');
+  const isResolved = d.approval_required && !d.shadow_mode && d.approval_status && d.approval_status !== 'pending';
 
   const [approvalId, setApprovalId] = useState<number | null>(null);
   const [approvalLoading, setApprovalLoading] = useState(false);

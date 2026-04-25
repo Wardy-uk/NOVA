@@ -899,6 +899,12 @@ async function runMigrations(): Promise<void> {
 
     `IF COL_LENGTH('approval_queue', 'source') IS NULL
      ALTER TABLE approval_queue ADD source NVARCHAR(20) NULL DEFAULT 'n8n_ai';`,
+
+    `UPDATE approval_queue SET source = 'nova_ai'
+     WHERE source IS NULL AND resume_url LIKE '%/api/public/agent/approval-callback%';`,
+
+    `UPDATE approval_queue SET source = 'n8n_ai'
+     WHERE source IS NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
