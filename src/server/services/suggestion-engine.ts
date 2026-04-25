@@ -266,6 +266,7 @@ export class SuggestionEngine {
       if (existingCategories.has(row.category)) continue;
       const acceptRate = row.total > 0 ? (row.approved / row.total) * 100 : 0;
       if (acceptRate >= 90 && row.avg_conf >= 0.85) {
+        const detail = await this.getCategoryDetail(row.category, 90);
         await insert('autonomy', `enable_${row.category.replace(/\s+/g, '_').toLowerCase()}`, {
           action: 'enable_autonomy',
           title: `Enable autonomy for "${row.category}"`,
@@ -274,7 +275,13 @@ export class SuggestionEngine {
           suggestedConfidence: 0.85,
           suggestedAcceptRate: 90,
           suggestedMinDecisions: 50,
-        }, { category: row.category, total: row.total, acceptRate: Math.round(acceptRate), avgConfidence: row.avg_conf });
+        }, {
+          category: row.category,
+          total: row.total,
+          acceptRate: Math.round(acceptRate),
+          avgConfidence: parseFloat(row.avg_conf.toFixed(2)),
+          ...detail,
+        });
       }
     }
   }
@@ -346,12 +353,61 @@ export class SuggestionEngine {
 
     for (const row of rows) {
       if (existingCategories.has(row.category)) continue;
+      const detail = await this.getCategoryDetail(row.category, 30);
       await insert('autonomy', `new_category_${row.category.replace(/\s+/g, '_').toLowerCase()}`, {
         action: 'new_category',
         title: `Create rule for "${row.category}"`,
         description: `${row.cnt} decisions in the last 30 days for this category but no autonomy rule exists. Consider creating one to track performance.`,
         category: row.category,
-      }, { category: row.category, decisionCount: row.cnt, days: 30 });
+      }, { category: row.category, decisionCount: row.cnt, days: 30, ...detail });
     }
+  }
+
+  // ── Shared: fetch action breakdown + example tickets for a category ──
+
+  private async getCategoryDetail(category: string, days: number): Promise<{
+    actionBreakdown: Record<string, number>;
+    exampleTickets: string[];
+    approvedCount: number;
+    declinedCount: number;
+  }> {
+    const actionRows = await query<{ action: string; cnt: number }>(
+      `SELECT action, COUNT(*) as cnt
+       FROM agent_decisions
+       WHERE JSON_VALUE(inputs, '$.classification.category') = ?
+         AND created_at >= DATEADD(day, -?, GETUTCDATE())
+       GROUP BY action
+       ORDER BY cnt DESC`,
+      [category, days],
+    );
+    const actionBreakdown: Record<string, number> = {};
+    for (const r of actionRows) actionBreakdown[r.action] = r.cnt;
+
+    const ticketRows = await query<{ ticket_id: string }>(
+      `SELECT TOP 5 ticket_id
+       FROM agent_decisions
+       WHERE JSON_VALUE(inputs, '$.classification.category') = ?
+         AND created_at >= DATEADD(day, -?, GETUTCDATE())
+       ORDER BY created_at DESC`,
+      [category, days],
+    );
+    const exampleTickets = ticketRows.map(r => r.ticket_id);
+
+    const outcomeRows = await query<{ approved: number; declined: number }>(
+      `SELECT
+         SUM(CASE WHEN outcome LIKE '%Approved%' OR outcome LIKE '%success%' OR outcome LIKE '%auto%' THEN 1 ELSE 0 END) as approved,
+         SUM(CASE WHEN outcome LIKE '%Declined%' OR outcome LIKE '%rejected%' OR outcome LIKE '%edited%' THEN 1 ELSE 0 END) as declined
+       FROM agent_decisions
+       WHERE JSON_VALUE(inputs, '$.classification.category') = ?
+         AND created_at >= DATEADD(day, -?, GETUTCDATE())`,
+      [category, days],
+    );
+
+    return {
+      actionBreakdown,
+      exampleTickets,
+      approvedCount: outcomeRows[0]?.approved ?? 0,
+      declinedCount: outcomeRows[0]?.declined ?? 0,
+    };
   }
 }

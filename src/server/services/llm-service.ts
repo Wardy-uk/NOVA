@@ -378,11 +378,10 @@ export class LlmService {
 
     // Log provider selection for diagnostics
     const selectedProvider = orderedConfigs[0];
-    if (tripped.length > 0) {
-      console.log(`[llm] ${options.callType} → tier=${tier} → ${selectedProvider.provider}/${selectedProvider.model} (circuits tripped: ${tripped.map(c => c.provider).join(', ')})`);
-    } else {
-      console.log(`[llm] ${options.callType} → tier=${tier} → ${selectedProvider.provider}/${selectedProvider.model}`);
-    }
+    const circuitStates = (['anthropic', 'openai', 'openrouter'] as LlmProvider[])
+      .map(p => `${p}:${isCircuitOpen(p) ? 'OPEN' : 'ok'}`)
+      .join(' ');
+    console.log(`[llm] ${options.callType} → tier=${tier} → ${selectedProvider.provider}/${selectedProvider.model} | circuits: ${circuitStates}${tripped.length > 0 ? ' (FAILOVER)' : ''}`);
 
     const jsonInstruction = '\n\nRespond with valid JSON only. No markdown fencing, no commentary.';
     const fullSystem = systemPrompt + jsonInstruction;

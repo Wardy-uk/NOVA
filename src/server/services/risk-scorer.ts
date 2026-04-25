@@ -63,32 +63,31 @@ export class RiskScorer {
     const factors: RiskFactor[] = [];
     const now = Date.now();
 
-    // 1. Sentiment deterioration
+    // 1. Sentiment deterioration — higher weight for strong negative
     if (input.sentimentScore !== null) {
       if (input.sentimentScore <= -0.7) {
-        factors.push({ id: 'sentiment_angry', label: 'Angry customer', score: 25, detail: `Sentiment: ${input.sentimentScore.toFixed(2)}` });
+        factors.push({ id: 'sentiment_angry', label: 'Angry customer', score: 30, detail: `Sentiment: ${input.sentimentScore.toFixed(2)}` });
       } else if (input.sentimentScore <= -0.3) {
         factors.push({ id: 'sentiment_frustrated', label: 'Frustrated customer', score: 15, detail: `Sentiment: ${input.sentimentScore.toFixed(2)}` });
       }
     }
 
-    // 2. Escalation language
+    // 2. Escalation language — highest non-SLA weight
     if (input.hasEscalationLanguage) {
-      factors.push({ id: 'escalation_language', label: 'Escalation requested', score: 30 });
+      factors.push({ id: 'escalation_language', label: 'Escalation requested', score: 35 });
     }
 
-    // 3. Age + activity mismatch (graduated scoring)
+    // 3. Age + activity — ONLY flag if combined with other signals (age alone is NOT flagworthy)
     if (input.jiraCreated) {
       const ageDays = (now - input.jiraCreated.getTime()) / 86_400_000;
       if (ageDays >= 7 && input.commentCount >= 15) {
-        factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 30 });
-      } else if (ageDays >= 5 && input.commentCount >= 10) {
-        factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 25 });
-      } else if (ageDays >= 10 && input.commentCount >= 5) {
         factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 20 });
-      } else if (ageDays >= 5 && input.commentCount >= 5) {
+      } else if (ageDays >= 5 && input.commentCount >= 10) {
         factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 15 });
+      } else if (ageDays >= 10 && input.commentCount >= 5) {
+        factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 10 });
       }
+      // Note: old tickets with few comments are NOT scored — age alone is not a signal
     }
 
     // 4. Bounce detection
@@ -131,6 +130,40 @@ export class RiskScorer {
 
     const score = Math.min(100, factors.reduce((s, f) => s + f.score, 0));
     return { score, factors };
+  }
+
+  async getScoreDistribution(projects: string[]): Promise<{ bucket: string; count: number }[]> {
+    const projectPlaceholders = projects.map(() => '?').join(',');
+    const rows = await query<{ bucket: string; cnt: number }>(
+      `SELECT
+         CASE
+           WHEN risk_score >= 90 THEN '90-100'
+           WHEN risk_score >= 80 THEN '80-89'
+           WHEN risk_score >= 70 THEN '70-79'
+           WHEN risk_score >= 60 THEN '60-69'
+           WHEN risk_score >= 50 THEN '50-59'
+           WHEN risk_score >= 40 THEN '40-49'
+           WHEN risk_score >= 30 THEN '30-39'
+           ELSE '0-29'
+         END AS bucket,
+         COUNT(*) AS cnt
+       FROM agent_flagged_tickets
+       WHERE status != 'dismissed'
+       GROUP BY
+         CASE
+           WHEN risk_score >= 90 THEN '90-100'
+           WHEN risk_score >= 80 THEN '80-89'
+           WHEN risk_score >= 70 THEN '70-79'
+           WHEN risk_score >= 60 THEN '60-69'
+           WHEN risk_score >= 50 THEN '50-59'
+           WHEN risk_score >= 40 THEN '40-49'
+           WHEN risk_score >= 30 THEN '30-39'
+           ELSE '0-29'
+         END
+       ORDER BY bucket DESC`,
+      [],
+    );
+    return rows.map(r => ({ bucket: r.bucket, count: r.cnt }));
   }
 
   async runRiskSweep(projects: string[]): Promise<{ flagged: number; notified: number }> {
@@ -205,6 +238,9 @@ export class RiskScorer {
     let flagged = 0;
     let notified = 0;
 
+    // Score all tickets and log top 20 breakdown
+    const allScores: { key: string; score: number; factors: RiskFactor[]; ticket: typeof tickets[0] }[] = [];
+
     for (const ticket of tickets) {
       const state = stateMap.get(ticket.issue_key);
       const comments = commentMap.get(ticket.issue_key);
@@ -231,9 +267,21 @@ export class RiskScorer {
       };
 
       const { score, factors } = this.scoreTicket(input);
+      allScores.push({ key: ticket.issue_key, score, factors, ticket });
+    }
+
+    // Log top 20 scored tickets with factor breakdown
+    const top20 = allScores.sort((a, b) => b.score - a.score).slice(0, 20);
+    console.log(`[risk] Top 20 scores (threshold=${threshold}):`);
+    for (const { key, score, factors } of top20) {
+      const breakdown = factors.map(f => `${f.id}(${f.score})`).join('+');
+      console.log(`  ${key}: ${score} = ${breakdown || 'none'}`);
+    }
+
+    for (const { key, score, factors, ticket } of allScores) {
       if (score < threshold) continue;
 
-      const existing = existingMap.get(ticket.issue_key);
+      const existing = existingMap.get(key);
 
       if (existing) {
         await execute(
@@ -242,9 +290,8 @@ export class RiskScorer {
           [score, JSON.stringify(factors), ticket.summary, ticket.assignee_display, ticket.reporter_display, ticket.priority_name, existing.id],
         );
 
-        // Re-notify if score increased by 20+
         if (score >= existing.last_notified_score + 20) {
-          const sent = await this.sendRiskAlert(ticket.issue_key, ticket.summary, score, factors, ticket.assignee_display);
+          const sent = await this.sendRiskAlert(key, ticket.summary, score, factors, ticket.assignee_display);
           if (sent) {
             await execute(`UPDATE agent_flagged_tickets SET last_notified_score = ? WHERE id = ?`, [score, existing.id]);
             notified++;
@@ -254,14 +301,14 @@ export class RiskScorer {
         await executeAndGetId(
           `INSERT INTO agent_flagged_tickets (ticket_key, risk_score, risk_factors, summary, assignee, reporter, priority, last_notified_score)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [ticket.issue_key, score, JSON.stringify(factors), ticket.summary, ticket.assignee_display, ticket.reporter_display, ticket.priority_name, score],
+          [key, score, JSON.stringify(factors), ticket.summary, ticket.assignee_display, ticket.reporter_display, ticket.priority_name, score],
         );
 
-        const sent = await this.sendRiskAlert(ticket.issue_key, ticket.summary, score, factors, ticket.assignee_display);
+        const sent = await this.sendRiskAlert(key, ticket.summary, score, factors, ticket.assignee_display);
         if (sent) {
           await execute(
             `UPDATE agent_flagged_tickets SET last_notified_score = ? WHERE ticket_key = ? AND status = 'pending'`,
-            [score, ticket.issue_key],
+            [score, key],
           );
           notified++;
         }

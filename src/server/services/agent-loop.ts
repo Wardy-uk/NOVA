@@ -39,6 +39,7 @@ export class AgentLoop {
   private processing = false;
   private currentMode: AgentMode = 'full';
   private modeChangedAt: Date | null = null;
+  private recentlyProcessedTickets = new Map<string, number>();
 
   private perceiver: Perceiver;
   private reasoner: Reasoner;
@@ -117,6 +118,7 @@ export class AgentLoop {
       errors: this.errorCount,
       mode: this.currentMode,
       modeChangedAt: this.modeChangedAt?.toISOString() ?? null,
+      weekendOverrideUntil: this.getWeekendOverrideUntil(),
     };
   }
 
@@ -218,11 +220,43 @@ export class AgentLoop {
     return val.toLowerCase() !== 'false' && val !== '0';
   }
 
+  private getWeekendOverrideUntil(): string | null {
+    const raw = this.settings.get('agent_weekend_override_until');
+    if (!raw) return null;
+    const until = new Date(raw);
+    if (isNaN(until.getTime())) return null;
+    if (until.getTime() <= Date.now()) {
+      this.settings.set('agent_weekend_override_until', '');
+      console.log(`[agent] Weekend override expired, reverting to normal schedule`);
+      return null;
+    }
+    return until.toISOString();
+  }
+
+  setWeekendOverride(until: Date): void {
+    this.settings.set('agent_weekend_override_until', until.toISOString());
+    console.log(`[agent] Weekend override set until ${until.toISOString()}`);
+    if (this.currentMode === 'reduced') {
+      this.currentMode = 'full';
+      this.modeChangedAt = new Date();
+      this.restartTimer();
+    }
+  }
+
+  clearWeekendOverride(): void {
+    this.settings.set('agent_weekend_override_until', '');
+    console.log(`[agent] Weekend override cleared`);
+    this.checkModeTransition();
+  }
+
   private isWorkingHours(): boolean {
-    if (!this.isWeekendModeEnabled()) return true; // always full mode if disabled
+    if (!this.isWeekendModeEnabled()) return true;
+
+    // Weekend override takes priority
+    if (this.getWeekendOverrideUntil()) return true;
 
     const now = new Date();
-    const day = now.getUTCDay(); // 0=Sun, 6=Sat
+    const day = now.getUTCDay();
     const workingDaysStr = this.settings.get('agent_working_days') ?? '1,2,3,4,5';
     const workingDays = new Set(workingDaysStr.split(',').map(d => parseInt(d.trim(), 10)));
     if (!workingDays.has(day)) return false;
@@ -345,9 +379,24 @@ export class AgentLoop {
         return true;
       });
 
+      // Cross-tick dedup: skip tickets processed in the last 5 minutes
+      const DEDUP_WINDOW_MS = 5 * 60_000;
+      const now = Date.now();
+      for (const [key, ts] of this.recentlyProcessedTickets) {
+        if (now - ts > DEDUP_WINDOW_MS) this.recentlyProcessedTickets.delete(key);
+      }
+      const deduped = unique.filter(e => {
+        const key = `${e.ticketKey}:${e.eventType}`;
+        if (this.recentlyProcessedTickets.has(key)) {
+          console.log(`[agent] Skipping ${e.ticketKey} (${e.eventType}) — already processed this cycle`);
+          return false;
+        }
+        return true;
+      });
+
       // 1.5 HYBRID ACTION DETECTION (before LLM reasoning)
       const hybridHandledKeys = new Set<string>();
-      for (const event of unique) {
+      for (const event of deduped) {
         const match = await this.hybridDetector.detect(event, this.jiraClient);
         if (match && this.isActionAllowedInHybrid(match.actionId)) {
           if (this.currentMode === 'reduced' && !this.isWeekendExempt(match.actionId)) {
@@ -358,7 +407,7 @@ export class AgentLoop {
           hybridHandledKeys.add(event.ticketKey);
         }
       }
-      const llmEvents = unique.filter(e => !hybridHandledKeys.has(e.ticketKey));
+      const llmEvents = deduped.filter(e => !hybridHandledKeys.has(e.ticketKey));
 
       // 2. REASON
       const shadow = this.isShadowMode();
@@ -368,6 +417,14 @@ export class AgentLoop {
       // 3. ACT + 4. OBSERVE
       for (const decision of decisions) {
         await this.executeDecision(decision);
+      }
+
+      // Mark processed for cross-tick dedup
+      for (const d of decisions) {
+        this.recentlyProcessedTickets.set(`${d.ticketKey}:${d.eventType}`, Date.now());
+      }
+      for (const key of hybridHandledKeys) {
+        this.recentlyProcessedTickets.set(`${key}:ticket_created`, Date.now());
       }
 
       // 5. QUEUE MONITOR + ALERTS
@@ -390,7 +447,7 @@ export class AgentLoop {
 
       this.lastTickAt = new Date();
       const tickDuration = Date.now() - tickStart;
-      console.log(`[agent] Tick #${this.tickCount} complete — processed ${unique.length} events (${tickDuration}ms)`);
+      console.log(`[agent] Tick #${this.tickCount} complete — processed ${deduped.length} events (${tickDuration}ms)`);
 
       // 7. TICK HEALTH ALERT (if tick took too long)
       await this.alertService.createLoopHealthAlert(tickDuration);
@@ -879,7 +936,18 @@ export class AgentLoop {
       contextParts.push(`Age: ${ageDays}d`);
     }
     if (slaRisk && slaRisk !== 'unknown' && slaRisk !== 'none') {
-      contextParts.push(`SLA: ${slaRisk}`);
+      const slaBreachTime = (decision.inputs as any).slaBreachTime as string | null;
+      if (slaBreachTime) {
+        const breachMs = new Date(slaBreachTime).getTime() - Date.now();
+        const breachLabel = breachMs < 0
+          ? `BREACHED (${Math.abs(Math.floor(breachMs / 60_000))}m ago)`
+          : breachMs < 3_600_000
+          ? `At risk (${Math.floor(breachMs / 60_000)}m remaining)`
+          : `OK (${Math.floor(breachMs / 3_600_000)}h remaining)`;
+        contextParts.push(`SLA: ${breachLabel}`);
+      } else {
+        contextParts.push(`SLA: ${slaRisk}`);
+      }
     }
     if (contextParts.length > 0) {
       lines.push(``, `--- Ticket Context ---`, contextParts.join(' | '));

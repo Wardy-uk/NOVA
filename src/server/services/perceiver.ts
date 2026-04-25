@@ -126,6 +126,7 @@ export class Perceiver {
   private lastOpenIssues: JiraIssue[] = [];
   private processedCommentIds = new Set<string>();
   private excludedAccountIds = new Set<string>();
+  private knownAgentNames = new Set<string>();
   private excludedAccountsLoaded = false;
 
   constructor(jiraClient: JiraRestClient, settings: SettingsQueries, cache?: JiraCacheQueries) {
@@ -141,8 +142,13 @@ export class Perceiver {
     for (const id of raw.split(',').map(s => s.trim()).filter(Boolean)) {
       this.excludedAccountIds.add(id);
     }
-    if (this.excludedAccountIds.size > 0) {
-      console.log(`[perceiver] Loaded ${this.excludedAccountIds.size} excluded account IDs`);
+    // Load known agent names from setting (comma-separated display names)
+    const names = this.settings.get('agent_known_agent_names') ?? '';
+    for (const name of names.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)) {
+      this.knownAgentNames.add(name);
+    }
+    if (this.excludedAccountIds.size > 0 || this.knownAgentNames.size > 0) {
+      console.log(`[perceiver] Loaded ${this.excludedAccountIds.size} excluded account IDs, ${this.knownAgentNames.size} known agent names`);
     }
   }
 
@@ -151,6 +157,7 @@ export class Perceiver {
     if (comment.author_account_id && this.excludedAccountIds.has(comment.author_account_id)) return true;
     const name = (comment.author_display ?? '').toLowerCase();
     if (KNOWN_AUTOMATION_NAMES.some(n => name.includes(n))) return true;
+    if (this.knownAgentNames.has(name)) return true;
     return false;
   }
 
@@ -162,6 +169,7 @@ export class Perceiver {
     if (accountId && this.excludedAccountIds.has(accountId)) return true;
     const name = (comment.author?.displayName ?? '').toLowerCase();
     if (KNOWN_AUTOMATION_NAMES.some(n => name.includes(n))) return true;
+    if (this.knownAgentNames.has(name)) return true;
     return false;
   }
 

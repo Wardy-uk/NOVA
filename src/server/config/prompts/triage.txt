@@ -65,7 +65,7 @@ Produce a JSON object with the following structure:
    - gather_context: you need more information from the customer before acting
    - assign: route to a human agent via round robin (medium complexity, not AI-handleable)
 
-6. **draft_response** — If action is "respond" or "gather_context", draft a customer-facing response. Otherwise null.
+6. **draft_response** — ALWAYS draft a customer-facing first response for "respond", "gather_context", or "escalate" actions. Only null for "assign" when you have no useful context to share.
    - Write as plain text (NOVA converts to ADF before posting)
    - Address the customer professionally but warmly
    - Reference the ticket key

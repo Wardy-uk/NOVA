@@ -43,14 +43,16 @@ Produce a JSON object with the following structure:
    - type: one of: providing_info, asking_question, confirming_resolution, reporting_new_issue, expressing_frustration, follow_up, thanking
    - confidence: 0.0 to 1.0 — how certain you are of the intent classification
 
-2. **confidence** — Your overall confidence in your recommendation (0.0 to 1.0). Rate this based on:
+2. **confidence** (REQUIRED, number 0.0 to 1.0) — Your overall confidence in your recommendation. This is the MOST IMPORTANT scoring field. Do NOT default to 0.5. Actively assess:
    - How clear the customer's request is
    - How well-matched your recommended action is
    - Whether you have sufficient context to act
-   - 0.9+ = very confident, clear-cut case
-   - 0.7-0.9 = confident, good match
-   - 0.5-0.7 = moderate, some ambiguity
+   - Whether KB matches support your recommendation
+   - 0.9+ = very confident, clear-cut case with strong KB match or obvious resolution
+   - 0.7-0.9 = confident, good match with reasonable certainty
+   - 0.5-0.7 = moderate, some ambiguity or missing context
    - below 0.5 = uncertain, recommend human review
+   You MUST provide this field as a number. Do not omit it.
 
 3. **sentiment** — Customer's emotional state: positive, neutral, frustrated, angry, urgent
 
@@ -63,7 +65,7 @@ Produce a JSON object with the following structure:
    - assign: route to a human agent (medium complexity, not AI-handleable)
    - no_action: internal comment or no customer-facing action needed
 
-5. **draft_response** — If action is "respond" or "gather_context", draft a customer-facing response. Otherwise null.
+5. **draft_response** — ALWAYS draft a customer-facing response when action is "respond", "gather_context", or "escalate". Only null for "no_action" or "close".
    - Write as plain text (NOVA converts to ADF before posting)
    - Address the customer professionally but warmly
    - Reference the ticket key

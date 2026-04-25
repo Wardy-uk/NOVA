@@ -69,6 +69,26 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: agentLoop.status });
   });
 
+  router.post('/weekend-override', requireSuperAdmin(), (req, res) => {
+    const { until } = req.body as { until?: string };
+    if (!until) {
+      res.json({ ok: false, error: 'Missing "until" datetime' });
+      return;
+    }
+    const dt = new Date(until);
+    if (isNaN(dt.getTime()) || dt.getTime() <= Date.now()) {
+      res.json({ ok: false, error: 'Invalid or past datetime' });
+      return;
+    }
+    agentLoop.setWeekendOverride(dt);
+    res.json({ ok: true, data: agentLoop.status });
+  });
+
+  router.delete('/weekend-override', requireSuperAdmin(), (_req, res) => {
+    agentLoop.clearWeekendOverride();
+    res.json({ ok: true, data: agentLoop.status });
+  });
+
   router.get('/decisions', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
     const offset = parseInt(req.query.offset as string, 10) || 0;
@@ -269,6 +289,17 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get flagged summary' });
+    }
+  });
+
+  router.get('/flagged/score-distribution', async (_req, res) => {
+    if (!deps?.riskScorer) return res.json({ ok: true, data: [] });
+    try {
+      const projects = (deps.settingsQueries?.get('agent_jira_project') || 'NT').split(',').map((p: string) => p.trim());
+      const data = await deps.riskScorer.getScoreDistribution(projects);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get score distribution' });
     }
   });
 
@@ -755,11 +786,15 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         const placeholders = ticketKeys.map(() => '?').join(',');
         const rows = await query<{
           ticket_id: string; action: string; confidence: number;
-          reasoning: string; output: string; approval_required: boolean;
+          output_category: string | null; approval_required: boolean;
           approval_status: string | null; shadow_mode: boolean;
           created_at: string; event_type: string;
         }>(
-          `SELECT d.* FROM agent_decisions d
+          `SELECT d.ticket_id, d.action, d.confidence,
+             JSON_VALUE(d.output, '$.classification.category') as output_category,
+             d.approval_required, d.approval_status, d.shadow_mode,
+             d.created_at, d.event_type
+           FROM agent_decisions d
            INNER JOIN (
              SELECT ticket_id, MAX(id) as max_id
              FROM agent_decisions
@@ -802,16 +837,13 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         const ai = aiDecisions[issue.key] ?? null;
         let aiSummary: string | null = null;
         if (ai) {
-          let outputParsed: any = null;
-          try { outputParsed = typeof ai.output === 'string' ? JSON.parse(ai.output) : ai.output; } catch {}
           const actionLabel = ai.action === 'draft_response' ? 'Respond'
             : ai.action === 'escalate' ? 'Escalate'
             : ai.action === 'assign' ? 'Assign'
             : ai.action === 'chase' ? 'Chase'
             : ai.action === 'no_action' ? 'No action'
             : ai.action;
-          const classCategory = outputParsed?.classification?.category;
-          aiSummary = classCategory ? `${actionLabel} — ${classCategory}` : actionLabel;
+          aiSummary = ai.output_category ? `${actionLabel} — ${ai.output_category}` : actionLabel;
         }
 
         const createdAt = new Date(f.created ?? '');
@@ -902,7 +934,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         const projectJql = projects.length === 1 ? `project = ${projects[0]}` : `project IN (${projects.join(', ')})`;
 
         const fields = [
-          'summary', 'description', 'status', 'priority', 'issuetype',
+          'summary', 'status', 'priority', 'issuetype',
           'assignee', 'reporter', 'created', 'updated',
           'customfield_10020', 'customfield_10010', 'customfield_12981', 'labels',
         ];
@@ -942,18 +974,22 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         rawIssues = rawIssues.filter(i => i.key.startsWith(projectFilterParam + '-'));
       }
 
-      // Batch-fetch latest AI decision for each ticket
+      // Batch-fetch latest AI decision for each ticket (lightweight — no reasoning/output/inputs blobs)
       const ticketKeys = rawIssues.map(i => i.key);
       let aiDecisions: Record<string, any> = {};
       if (ticketKeys.length > 0) {
         const placeholders = ticketKeys.map(() => '?').join(',');
         const rows = await query<{
           ticket_id: string; action: string; confidence: number;
-          reasoning: string; output: string; approval_required: boolean;
+          output_category: string | null; approval_required: boolean;
           approval_status: string | null; shadow_mode: boolean;
           created_at: string; event_type: string;
         }>(
-          `SELECT d.* FROM agent_decisions d
+          `SELECT d.ticket_id, d.action, d.confidence,
+             JSON_VALUE(d.output, '$.classification.category') as output_category,
+             d.approval_required, d.approval_status, d.shadow_mode,
+             d.created_at, d.event_type
+           FROM agent_decisions d
            INNER JOIN (
              SELECT ticket_id, MAX(id) as max_id
              FROM agent_decisions
@@ -1006,17 +1042,14 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         const ai = aiDecisions[issue.key] ?? null;
         let aiSummary: string | null = null;
         if (ai) {
-          let outputParsed: any = null;
-          try { outputParsed = typeof ai.output === 'string' ? JSON.parse(ai.output) : ai.output; } catch {}
           const actionLabel = ai.action === 'draft_response' ? 'Respond'
             : ai.action === 'escalate' ? 'Escalate'
             : ai.action === 'assign' ? 'Assign'
             : ai.action === 'chase' ? 'Chase'
             : ai.action === 'no_action' ? 'No action'
             : ai.action;
-          const classCategory = outputParsed?.classification?.category;
-          aiSummary = classCategory
-            ? `${actionLabel} — ${classCategory}`
+          aiSummary = ai.output_category
+            ? `${actionLabel} — ${ai.output_category}`
             : actionLabel;
         }
 

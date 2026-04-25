@@ -1797,6 +1797,63 @@ ${panelHtml}
   // notifies any user with the 'developer' role. Also archives tickets that
   // have left T3 since last poll.
   let devReviewLastSeen = new Set<string>();
+  const devReviewTeamsQueue: Array<{ key: string; summary: string }> = [];
+  const devReviewTeamsSentKeys = new Map<string, number>(); // key → timestamp (24h dedup)
+
+  const isDevReviewWorkingHours = (): boolean => {
+    const now = new Date();
+    const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
+    const ukDay = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'narrow' }).length > 0
+      ? String(new Date(now.toLocaleString('en-US', { timeZone: 'Europe/London' })).getDay())
+      : '0');
+    return ukDay >= 1 && ukDay <= 5 && ukHour >= 8 && ukHour < 18;
+  };
+
+  const sendDevReviewTeamsNotification = async (items: Array<{ key: string; summary: string }>): Promise<void> => {
+    const webhookUrl = settingsQueries.getAll().teams_webhook_url;
+    if (!webhookUrl || items.length === 0) return;
+
+    // 24h dedup
+    const now = Date.now();
+    const fresh = items.filter(i => {
+      const lastSent = devReviewTeamsSentKeys.get(i.key);
+      return !lastSent || (now - lastSent) > 24 * 60 * 60 * 1000;
+    });
+    if (fresh.length === 0) return;
+
+    const lines = fresh.map(i => `- **${i.key}** — ${i.summary}`).join('\n');
+    const payload = {
+      '@type': 'MessageCard',
+      '@context': 'https://schema.org/extensions',
+      themeColor: 'FFA500',
+      summary: `Dev Review: ${fresh.length} new T3 escalation(s)`,
+      sections: [{
+        activityTitle: `🔧 Dev Review — ${fresh.length} new escalation${fresh.length > 1 ? 's' : ''}`,
+        text: lines,
+      }],
+    };
+    try {
+      const resp = await fetch(String(webhookUrl), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (resp.ok) {
+        for (const i of fresh) devReviewTeamsSentKeys.set(i.key, now);
+        console.log(`[DevReviewWatcher] Teams notification sent for ${fresh.length} ticket(s)`);
+      } else {
+        console.warn(`[DevReviewWatcher] Teams webhook failed: ${resp.status}`);
+      }
+    } catch (err) {
+      console.warn('[DevReviewWatcher] Teams webhook error:', err instanceof Error ? err.message : err);
+    }
+
+    // Prune dedup map entries older than 24h
+    for (const [k, ts] of devReviewTeamsSentKeys) {
+      if (now - ts > 24 * 60 * 60 * 1000) devReviewTeamsSentKeys.delete(k);
+    }
+  };
+
   const devWatch = async () => {
     try {
       const client = buildServiceDeskJiraClient();
@@ -1902,6 +1959,20 @@ ${panelHtml}
           }
         }
         console.log(`[DevReviewWatcher] ${newKeys.length} new T3 ticket(s), notified ${devs.length} dev(s)`);
+
+        // Teams webhook: queue for working hours or send immediately
+        if (isDevReviewWorkingHours()) {
+          await sendDevReviewTeamsNotification(newKeys);
+        } else {
+          devReviewTeamsQueue.push(...newKeys);
+          console.log(`[DevReviewWatcher] ${newKeys.length} ticket(s) queued for Teams (outside working hours, queue=${devReviewTeamsQueue.length})`);
+        }
+      }
+
+      // Drain queued Teams notifications at the start of working hours
+      if (devReviewTeamsQueue.length > 0 && isDevReviewWorkingHours()) {
+        const batch = devReviewTeamsQueue.splice(0);
+        await sendDevReviewTeamsNotification(batch);
       }
     } catch (err) {
       console.error('[DevReviewWatcher] Poll failed:', err instanceof Error ? err.message : err);

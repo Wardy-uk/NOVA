@@ -147,6 +147,7 @@ export interface AgentStatus {
   errors: number;
   mode: AgentMode;
   modeChangedAt: string | null;
+  weekendOverrideUntil: string | null;
 }
 
 // ── WP-09: Queue Monitor ──
