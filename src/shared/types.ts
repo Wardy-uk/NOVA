@@ -70,9 +70,10 @@ export interface HealthResponse {
 export interface IntegrationField {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'url' | 'group_roles' | 'toggle';
+  type: 'text' | 'password' | 'url' | 'group_roles' | 'toggle' | 'select';
   placeholder?: string;
   required: boolean;
+  options?: string[];
 }
 
 export interface SsoGroupRoleMapping {

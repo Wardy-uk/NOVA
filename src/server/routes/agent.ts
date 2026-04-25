@@ -235,6 +235,21 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // ── Hybrid action log ──
+
+  router.get('/hybrid-actions', requireSuperAdmin(), async (_req, res) => {
+    try {
+      const limit = Math.min(parseInt(_req.query.limit as string, 10) || 50, 200);
+      const rows = await query(
+        'SELECT TOP(?) * FROM hybrid_action_log ORDER BY created_at DESC',
+        [limit],
+      );
+      res.json({ ok: true, data: rows });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get hybrid actions' });
+    }
+  });
+
   // ── Flagged tickets (risk alerting) ──
 
   router.get('/flagged', async (_req, res) => {

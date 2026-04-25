@@ -14,6 +14,7 @@ const VALID_TRANSITIONS: Record<TicketLifecycle, TicketLifecycle[]> = {
   auto_close_candidate: ['closed', 'customer_replied', 'resolved'],
   resolved:             ['customer_replied', 'closed'],
   closed:               ['customer_replied'],
+  pre_empted:           [],
 };
 
 export class TicketStateStore {

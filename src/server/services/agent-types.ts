@@ -1,5 +1,30 @@
 export type AgentState = 'stopped' | 'running' | 'paused';
 
+// ── WP-23k: Hybrid Shadow Mode ──
+
+export type AgentShadowMode = 'full_shadow' | 'hybrid' | 'live';
+export type HybridActionId = 'plugin_to_tpj' | 'abuse_report';
+
+export interface HybridActionMatch {
+  actionId: HybridActionId;
+  ticketKey: string;
+  ticketId: string;
+  summary: string;
+  description: string;
+  parsedData: Record<string, unknown>;
+  requiresApproval: boolean;
+}
+
+export interface HybridActionResult {
+  success: boolean;
+  actionId: HybridActionId;
+  ticketKey: string;
+  detail: string;
+  error?: string;
+  createdTicketKey?: string;
+  approvalId?: number;
+}
+
 // ── WP-23b: Ticket Lifecycle ──
 
 export type TicketLifecycle =
@@ -14,7 +39,8 @@ export type TicketLifecycle =
   | 'stale'
   | 'chase_sent'
   | 'auto_close_candidate'
-  | 'closed';
+  | 'closed'
+  | 'pre_empted';
 
 export type AssignedTicketMode = 'observer' | 'active_assistant' | 'hands_off';
 
@@ -46,7 +72,9 @@ export type AgentAction =
   | 'comment'
   | 'update_fields'
   | 'alert'
-  | 'bug_redirect';
+  | 'bug_redirect'
+  | 'plugin_to_tpj'
+  | 'abuse_report';
 
 export interface CommentSnapshot {
   author: string;
@@ -111,6 +139,7 @@ export type AgentMode = 'full' | 'reduced';
 export interface AgentStatus {
   state: AgentState;
   shadowMode: boolean;
+  shadowModeEnum: AgentShadowMode;
   lastTickAt: string | null;
   tickCount: number;
   ticketsProcessed: number;

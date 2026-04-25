@@ -2529,6 +2529,7 @@ export interface ApprovalItem {
   decided_by: string | null; decided_at: string | null;
   edited_response_adf: string | null; decline_reason: string | null;
   priority: string | null; created_at: string; expires_at: string;
+  action_type: string | null;
 }
 
 export class ApprovalQueries {
@@ -2575,14 +2576,14 @@ export class ApprovalQueries {
   async create(item: {
     ticket_id: string; ticket_summary: string; reporter_name?: string; reporter_email?: string;
     ai_response_adf?: string; conversation_json?: string; kb_sources?: string;
-    resume_url: string; priority?: string; expires_at: string;
+    resume_url: string; priority?: string; expires_at: string; action_type?: string;
   }): Promise<number> {
     return executeAndGetId(
-      `INSERT INTO approval_queue (ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO approval_queue (ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, expires_at, action_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [item.ticket_id, item.ticket_summary, item.reporter_name || null, item.reporter_email || null,
        item.ai_response_adf || null, item.conversation_json || null, item.kb_sources || null,
-       item.resume_url, item.priority || null, item.expires_at]
+       item.resume_url, item.priority || null, item.expires_at, item.action_type || 'draft_response']
     );
   }
 

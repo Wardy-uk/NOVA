@@ -104,7 +104,7 @@ export function createApprovalRoutes(
     // Hit the n8n resume URL to continue the workflow (skip for cancel — ticket resolved externally)
     if (action !== 'cancel') {
       try {
-        const resumeUrl = `${item.resume_url}?action=${action}`;
+        const resumeUrl = `${item.resume_url}${item.resume_url.includes('?') ? '&' : '?'}action=${action}&approvalId=${id}&decidedBy=${encodeURIComponent(user.username)}`;
         const response = await fetch(resumeUrl, { method: 'GET' });
         if (!response.ok) {
           console.warn(`[Approvals] n8n resume returned ${response.status} for approval ${id}`);

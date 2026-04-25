@@ -225,7 +225,9 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
     authType: 'credentials',
     superAdminOnly: true,
     fields: [
-      { key: 'agent_shadow_mode', label: 'Shadow Mode (observe only, no Jira writes)', type: 'toggle', placeholder: 'true', required: false },
+      { key: 'agent_shadow_mode', label: 'Agent Mode', type: 'select', options: ['full_shadow', 'hybrid', 'live'], placeholder: 'full_shadow', required: false },
+      { key: 'agent_hybrid_allowed_actions', label: 'Hybrid Allowed Actions (JSON)', type: 'text', placeholder: '["plugin_to_tpj","abuse_report"]', required: false },
+      { key: 'agent_weekend_exempt_actions', label: 'Weekend Exempt Actions (JSON)', type: 'text', placeholder: '["plugin_to_tpj","abuse_report"]', required: false },
       { key: 'agent_jira_project', label: 'Jira Projects', type: 'text', placeholder: 'NT,NTPJ', required: false },
       { key: 'agent_sweep_interval_ticks', label: 'Sweep Interval (ticks)', type: 'text', placeholder: '30', required: false },
       { key: 'agent_sweep_ai_request_hours', label: 'AI Request Stale (hours)', type: 'text', placeholder: '2', required: false },
@@ -243,6 +245,8 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'agent_weekend_mode', label: 'Out-of-Hours Reduced Mode', type: 'toggle', placeholder: 'true', required: false },
       { key: 'agent_working_hours', label: 'Working Hours (HH:MM-HH:MM)', type: 'text', placeholder: '08:00-18:00', required: false },
       { key: 'agent_working_days', label: 'Working Days (0=Sun, 6=Sat)', type: 'text', placeholder: '1,2,3,4,5', required: false },
+      { key: 'abuse_report_db_connection', label: 'Abuse Report DB Connection', type: 'password', placeholder: 'Server=...;Database=...;User Id=...;Password=...', required: false },
+      { key: 'abuse_report_admin_db_connection', label: 'Abuse Report Admin DB Connection', type: 'password', placeholder: 'Server=...;Database=...;User Id=...;Password=...', required: false },
     ],
   },
   {

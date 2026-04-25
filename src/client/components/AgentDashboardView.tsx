@@ -20,6 +20,7 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 interface AgentStatus {
   state: 'stopped' | 'running' | 'paused';
   shadowMode: boolean;
+  shadowModeEnum?: 'full_shadow' | 'hybrid' | 'live';
   lastTickAt: string | null;
   tickCount: number;
   ticketsProcessed: number;
@@ -345,7 +346,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-neutral-100">AI Agent</h2>
-          {status && <StatusPill state={status.state} shadow={status.shadowMode} mode={status.mode} />}
+          {status && <StatusPill state={status.state} shadow={status.shadowMode} shadowEnum={status.shadowModeEnum} mode={status.mode} />}
         </div>
         <div className="flex items-center gap-2">
           {isSuperAdmin && status?.state === 'stopped' && (
@@ -414,17 +415,23 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
 
 // ── Sub-components ──
 
-function StatusPill({ state, shadow, mode }: { state: string; shadow: boolean; mode?: 'full' | 'reduced' }) {
+function StatusPill({ state, shadow, shadowEnum, mode }: { state: string; shadow: boolean; shadowEnum?: string; mode?: 'full' | 'reduced' }) {
   const stateColor = state === 'running' ? 'bg-green-500' : state === 'paused' ? 'bg-amber-500' : 'bg-neutral-600';
+  const modeLabel = shadowEnum === 'hybrid' ? 'Hybrid' : shadowEnum === 'live' ? 'Live' : shadow ? 'Shadow' : null;
+  const modeColor = shadowEnum === 'hybrid'
+    ? 'bg-amber-900/60 text-amber-300 border-amber-700/40'
+    : shadowEnum === 'live'
+    ? 'bg-green-900/60 text-green-300 border-green-700/40'
+    : 'bg-purple-900/60 text-purple-300 border-purple-700/40';
   return (
     <div className="flex items-center gap-2">
       <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider ${stateColor} text-white`}>
         <span className={`w-1.5 h-1.5 rounded-full ${state === 'running' ? 'animate-pulse bg-white' : 'bg-white/60'}`} />
         {state}
       </span>
-      {shadow && (
-        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-purple-900/60 text-purple-300 border border-purple-700/40">
-          Shadow
+      {modeLabel && (
+        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border ${modeColor}`}>
+          {modeLabel}
         </span>
       )}
       {state === 'running' && mode === 'reduced' && (

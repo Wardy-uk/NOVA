@@ -777,6 +777,27 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE ticket_classifications ADD urgency NVARCHAR(20) NULL;`,
     `IF COL_LENGTH('ticket_classifications', 'priority_matrix') IS NULL
      ALTER TABLE ticket_classifications ADD priority_matrix NVARCHAR(5) NULL;`,
+
+    // WP-23k: Hybrid shadow mode
+    `IF COL_LENGTH('approval_queue', 'action_type') IS NULL
+     ALTER TABLE approval_queue ADD action_type NVARCHAR(50) NULL DEFAULT 'draft_response';`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'hybrid_action_log') AND type = 'U')
+     CREATE TABLE hybrid_action_log (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       action_id NVARCHAR(50) NOT NULL,
+       source_ticket_key NVARCHAR(100) NOT NULL,
+       created_ticket_key NVARCHAR(100) NULL,
+       status NVARCHAR(50) NOT NULL DEFAULT 'completed',
+       detail NVARCHAR(MAX) NULL,
+       pre_empted BIT NOT NULL DEFAULT 0,
+       pre_emption_reason NVARCHAR(500) NULL,
+       approval_id INT NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_hybrid_action_log_ticket')
+     CREATE INDEX IX_hybrid_action_log_ticket ON hybrid_action_log (source_ticket_key, created_at DESC);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

@@ -529,12 +529,13 @@ async function main() {
     const ticketKey = req.body?.ticketKey || req.query?.ticketKey;
     const approvalId = req.body?.approvalId || req.query?.approvalId;
     const editedResponse = req.body?.editedResponse;
+    const decidedBy = req.body?.decidedBy || req.query?.decidedBy;
     if (!action || !ticketKey) {
       res.status(400).json({ ok: false, error: 'action and ticketKey are required' });
       return;
     }
     try {
-      await agentLoop.handleApprovalCallback(action, ticketKey, approvalId ? Number(approvalId) : undefined, editedResponse);
+      await agentLoop.handleApprovalCallback(action, ticketKey, approvalId ? Number(approvalId) : undefined, editedResponse, decidedBy);
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Callback failed' });

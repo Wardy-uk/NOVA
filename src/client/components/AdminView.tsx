@@ -1628,6 +1628,29 @@ export function AdminView() {
                       </div>
                     );
                   }
+                  if (field.type === 'select') {
+                    const currentVal = integValues[integ.id]?.[field.key] ?? field.placeholder ?? '';
+                    return (
+                      <div key={field.key}>
+                        <label className="block text-xs text-neutral-400 mb-1">{field.label}</label>
+                        <select
+                          value={currentVal}
+                          onChange={(e) => {
+                            setIntegSaved(prev => { const s = new Set(prev); s.delete(integ.id); return s; });
+                            setIntegValues(prev => ({
+                              ...prev,
+                              [integ.id]: { ...prev[integ.id], [field.key]: e.target.value },
+                            }));
+                          }}
+                          className="w-full bg-[#272C33] border border-[#3a424d] rounded px-3 py-1.5 text-sm text-neutral-100 focus:border-[#5ec1ca] focus:outline-none"
+                        >
+                          {(field.options ?? []).map(opt => (
+                            <option key={opt} value={opt}>{opt.replace(/_/g, ' ')}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  }
                   const isBcCompanyField = integ.id === 'business-central' && field.key === 'bc_company_id';
                   return (
                   <div key={field.key}>
