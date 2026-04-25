@@ -57,8 +57,7 @@ export class AbuseReportExecutor {
         logId = result.recordset?.[0]?.LogId ?? null;
         console.log(`[abuse-report] Logged to AbuseReportAutomationLog (id=${logId}) for ${ticketKey}`);
       } catch (err) {
-        console.error(`[abuse-report] Failed to insert abuse log for ${ticketKey}:`, err);
-        return this.fail(ticketKey, 'Failed to log to AbuseReportAutomationLog', err);
+        console.warn(`[abuse-report] Failed to insert abuse log for ${ticketKey} (non-blocking):`, err instanceof Error ? err.message : err);
       }
 
       // 2. Call stored procedure on Admin DB

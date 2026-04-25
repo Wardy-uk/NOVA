@@ -296,10 +296,10 @@ export class AgentLoop {
       console.log(`[agent] Resuming full mode (working hours started)`);
       this.restartTimer();
       // Run immediate full sweep to catch up on paused tasks
-      const shadow = this.isShadowMode();
+      const catchUpShadow = this.getShadowMode() === 'full_shadow';
       console.log(`[agent] Running catch-up sweep after hours...`);
-      await this.runLifecycleSweep(shadow);
-      await this.runResolutionReview(shadow);
+      await this.runLifecycleSweep(catchUpShadow);
+      await this.runResolutionReview(catchUpShadow);
       await this.runTicketClassification();
       await this.runCoachingHealthChecks();
       await this.runRiskSweep();
@@ -410,9 +410,20 @@ export class AgentLoop {
       const llmEvents = deduped.filter(e => !hybridHandledKeys.has(e.ticketKey));
 
       // 2. REASON
-      const shadow = this.isShadowMode();
+      const shadowMode = this.getShadowMode();
       const decisions = await this.reasoner.decideMultiple(llmEvents);
-      for (const d of decisions) d.shadowMode = shadow;
+      for (const d of decisions) {
+        if (shadowMode === 'full_shadow') {
+          d.shadowMode = true;
+        } else if (shadowMode === 'hybrid') {
+          const allowedRaw = this.settings.get('agent_hybrid_allowed_actions') ?? '[]';
+          let allowed: string[] = [];
+          try { allowed = JSON.parse(allowedRaw); } catch {}
+          d.shadowMode = !allowed.includes(d.action);
+        } else {
+          d.shadowMode = false;
+        }
+      }
 
       // 3. ACT + 4. OBSERVE
       for (const decision of decisions) {
@@ -434,11 +445,11 @@ export class AgentLoop {
       const sweepInterval = this.getNumber('agent_sweep_interval_ticks', DEFAULT_SWEEP_INTERVAL_TICKS);
       if (this.tickCount % sweepInterval === 0) {
         // Lifecycle manager runs in all modes (approval timeouts + SLA breaches matter out of hours)
-        await this.runLifecycleSweep(shadow);
+        await this.runLifecycleSweep(shadowMode === 'full_shadow');
 
         // These only run during working hours
         if (this.currentMode === 'full') {
-          await this.runResolutionReview(shadow);
+          await this.runResolutionReview(shadowMode === 'full_shadow');
           await this.runTicketClassification();
           await this.runCoachingHealthChecks();
           await this.runRiskSweep();

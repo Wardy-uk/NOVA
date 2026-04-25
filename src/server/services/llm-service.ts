@@ -420,6 +420,7 @@ export class LlmService {
 
           const validationErr = `Validation failed: ${parsed.error.message}`;
           await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, validationErr);
+          recordFailure(config.provider);
           lastError = new Error(validationErr);
 
         } catch (err) {

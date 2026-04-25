@@ -51,21 +51,58 @@ interface UserSettingsAccessor {
   get(userId: number, key: string): string | null;
 }
 
-const AnalysisItem = z.object({
-  issueKey: z.string(),
-  sentimentScore: z.number().min(-1).max(1),
-  sentimentSummary: z.string(),
-  commitmentDate: z.string().nullable(),
-  followedUp: z.boolean(),
-  commitmentQuote: z.string().nullable().default(null),
+const flexNumber = (min: number, max: number, fallback: number) =>
+  z.any().transform((val): number => {
+    if (typeof val === 'number') return Math.max(min, Math.min(max, val));
+    if (typeof val === 'string') {
+      const n = parseFloat(val);
+      if (!isNaN(n)) return Math.max(min, Math.min(max, n));
+    }
+    if (val && typeof val === 'object') {
+      const candidate = val.score ?? val.value ?? val.sentiment ?? val.sentimentScore;
+      if (typeof candidate === 'number') return Math.max(min, Math.min(max, candidate));
+      if (typeof candidate === 'string') { const n = parseFloat(candidate); if (!isNaN(n)) return Math.max(min, Math.min(max, n)); }
+    }
+    return fallback;
+  });
+
+const flexBool = z.any().transform((val): boolean => {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1' || val.toLowerCase() === 'yes';
+  if (typeof val === 'number') return val !== 0;
+  return false;
 });
 
-const AnalysisBatchSchema = z.any().transform((val): { results: z.infer<typeof AnalysisItem>[] } => {
+const flexStringField = z.any().transform((val): string => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') return val.summary ?? val.description ?? val.value ?? val.text ?? JSON.stringify(val);
+  return String(val ?? '');
+});
+
+const AnalysisItem = z.object({
+  issueKey: z.string(),
+  sentimentScore: flexNumber(-1, 1, 0),
+  sentimentSummary: flexStringField,
+  commitmentDate: z.any().transform((val): string | null => {
+    if (val === null || val === undefined || val === '' || val === 'null' || val === 'none' || val === 'N/A') return null;
+    if (typeof val === 'string') return val;
+    return null;
+  }),
+  followedUp: flexBool,
+  commitmentQuote: z.any().transform((val): string | null => {
+    if (val === null || val === undefined || val === '' || val === 'null' || val === 'none') return null;
+    if (typeof val === 'string') return val;
+    if (val && typeof val === 'object') return val.quote ?? val.text ?? JSON.stringify(val);
+    return null;
+  }),
+});
+
+const AnalysisBatchSchema = z.any().transform((val) => {
   if (Array.isArray(val)) return { results: val };
   if (val?.results && Array.isArray(val.results)) return { results: val.results };
-  return { results: [] };
+  return { results: [] as unknown[] };
 }).pipe(z.object({ results: z.array(AnalysisItem) }));
-type AnalysisBatch = { results: z.infer<typeof AnalysisItem>[] };
+type AnalysisBatch = z.infer<typeof AnalysisBatchSchema>;
 
 // ── Helpers ──
 
