@@ -50,6 +50,14 @@ export function createApprovalRoutes(
     res.json({ ok: true, data: { count } });
   });
 
+  // GET /api/approvals/by-ticket/:ticketId — find pending approval for a ticket
+  router.get('/by-ticket/:ticketId', async (req: Request, res: Response) => {
+    const item = await approvalQueries.getPendingByTicket(req.params.ticketId as string);
+    if (!item) { res.json({ ok: true, data: null }); return; }
+    const canInteract = isApprover(req);
+    res.json({ ok: true, data: { item, canInteract } });
+  });
+
   // GET /api/approvals/:id — get single approval
   router.get('/:id', async (req: Request, res: Response) => {
     const id = parseInt(req.params.id as string, 10);

@@ -441,7 +441,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       {tab === 'costs' && <CostsTab data={costData} onPeriodChange={(days) => api(`/costs?days=${days}`).then(r => { if (r.ok) setCostData(r.data); })} />}
 
       {/* Detail panel */}
-      {selected && <DecisionDetail decision={selected} onClose={() => setSelected(null)} />}
+      {selected && <DecisionDetail decision={selected} onClose={() => setSelected(null)} onRefresh={() => { refresh(); setSelected(null); }} />}
     </div>
   );
 }
@@ -886,15 +886,77 @@ function DecisionsTab({ decisions, selected, onSelect, onRefresh }: {
 
 // ── Decision Detail Panel ──
 
-function DecisionDetail({ decision: d, onClose }: { decision: Decision; onClose: () => void }) {
+function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decision; onClose: () => void; onRefresh: () => void }) {
   const inputs = safeJson(d.inputs);
   const output = safeJson(d.output);
   const outcome = d.outcome ? safeJson(d.outcome) : null;
+
+  const isPendingApproval = d.approval_required && (!d.approval_status || d.approval_status === 'pending');
+  const isResolved = d.approval_required && d.approval_status && d.approval_status !== 'pending';
+
+  const [approvalId, setApprovalId] = useState<number | null>(null);
+  const [approvalLoading, setApprovalLoading] = useState(false);
+  const [acting, setActing] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editedResponse, setEditedResponse] = useState('');
+  const [declineReason, setDeclineReason] = useState('');
+  const [showDeclineInput, setShowDeclineInput] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isPendingApproval) return;
+    setApprovalLoading(true);
+    fetch(`/api/approvals/by-ticket/${encodeURIComponent(d.ticket_id)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok && data.data?.item) {
+          setApprovalId(data.data.item.id);
+          setEditedResponse(data.data.item.ai_response_adf || String(output?.draft_response ?? ''));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setApprovalLoading(false));
+  }, [d.ticket_id, isPendingApproval]);
+
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+
+  const handleDecide = async (action: 'approve' | 'decline', edited?: string) => {
+    if (!approvalId) return;
+    if (action === 'decline' && !declineReason.trim()) {
+      showToast('A reason is required when declining');
+      return;
+    }
+    setActing(true);
+    try {
+      const r = await fetch(`/api/approvals/${approvalId}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          ...(edited ? { editedResponse: edited } : {}),
+          ...(action === 'decline' ? { declineReason: declineReason.trim() } : {}),
+        }),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || 'Failed');
+      showToast(action === 'approve' ? 'Approved — action will execute' : 'Declined — no action taken');
+      setTimeout(onRefresh, 800);
+    } catch (err: any) {
+      showToast(`Error: ${err.message}`);
+    } finally {
+      setActing(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       <div className="relative bg-[#2f353d] border border-[#3a424d] rounded-lg shadow-2xl w-full max-w-3xl max-h-[80vh] overflow-y-auto">
+        {toast && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-60 px-4 py-2 rounded bg-[#272C33] border border-[#3a424d] text-xs text-neutral-200 shadow-lg">
+            {toast}
+          </div>
+        )}
         <div className="sticky top-0 bg-[#2f353d] border-b border-[#3a424d] px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-[#5ec1ca] font-mono font-semibold">{d.ticket_id}</span>
@@ -903,11 +965,85 @@ function DecisionDetail({ decision: d, onClose }: { decision: Decision; onClose:
             </span>
             <span className="text-xs text-neutral-400">{eventLabel(d.event_type)} → {actionLabel(d.action)}</span>
             {d.shadow_mode && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-purple-900/60 text-purple-300 border border-purple-700/40">SHADOW</span>}
+            {isPendingApproval && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-900/60 text-amber-300 border border-amber-700/40">PENDING APPROVAL</span>}
+            {isResolved && <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${d.approval_status === 'approved' ? 'bg-green-900/60 text-green-300 border-green-700/40' : d.approval_status === 'declined' ? 'bg-red-900/60 text-red-300 border-red-700/40' : 'bg-neutral-800 text-neutral-400 border-neutral-600'}`}>{d.approval_status!.toUpperCase()}</span>}
           </div>
           <button onClick={onClose} className="text-neutral-500 hover:text-neutral-300 text-lg">✕</button>
         </div>
 
         <div className="p-6 space-y-5">
+          {/* Approval Actions */}
+          {isPendingApproval && !approvalLoading && approvalId && (
+            <div className="border border-amber-700/40 bg-amber-900/20 rounded-lg p-4 space-y-3">
+              <div className="text-xs font-semibold text-amber-300">Approval Required</div>
+
+              {!editMode && !showDeclineInput && (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => handleDecide('approve')} disabled={acting}
+                    className="px-3 py-1.5 text-xs rounded font-medium bg-green-600/20 text-green-400 border border-green-600/30 hover:bg-green-600/30 transition-colors disabled:opacity-50">
+                    {acting ? 'Processing…' : 'Approve'}
+                  </button>
+                  <button onClick={() => setShowDeclineInput(true)} disabled={acting}
+                    className="px-3 py-1.5 text-xs rounded font-medium bg-red-600/20 text-red-400 border border-red-600/30 hover:bg-red-600/30 transition-colors disabled:opacity-50">
+                    Decline
+                  </button>
+                  {output?.draft_response ? (
+                    <button onClick={() => { setEditMode(true); if (!editedResponse) setEditedResponse(String(output.draft_response)); }} disabled={acting}
+                      className="px-3 py-1.5 text-xs rounded font-medium bg-amber-600/20 text-amber-400 border border-amber-600/30 hover:bg-amber-600/30 transition-colors disabled:opacity-50">
+                      Approve with Edits
+                    </button>
+                  ) : null}
+                </div>
+              )}
+
+              {showDeclineInput && (
+                <div className="space-y-2">
+                  <textarea
+                    value={declineReason}
+                    onChange={e => setDeclineReason(e.target.value)}
+                    placeholder="Reason for declining (required)…"
+                    className="w-full bg-[#272C33] border border-[#3a424d] text-neutral-200 text-xs rounded p-2 resize-y min-h-[60px] focus:outline-none focus:border-red-500/50"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => handleDecide('decline')} disabled={acting || !declineReason.trim()}
+                      className="px-3 py-1.5 text-xs rounded font-medium bg-red-600/20 text-red-400 border border-red-600/30 hover:bg-red-600/30 transition-colors disabled:opacity-50">
+                      {acting ? 'Processing…' : 'Confirm Decline'}
+                    </button>
+                    <button onClick={() => { setShowDeclineInput(false); setDeclineReason(''); }}
+                      className="px-3 py-1.5 text-xs rounded font-medium text-neutral-400 hover:text-neutral-200 transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {editMode && (
+                <div className="space-y-2">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider">Edit Draft Response</div>
+                  <textarea
+                    value={editedResponse}
+                    onChange={e => setEditedResponse(e.target.value)}
+                    className="w-full bg-[#272C33] border border-[#3a424d] text-neutral-200 text-xs rounded p-3 resize-y min-h-[120px] font-mono focus:outline-none focus:border-amber-500/50"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => handleDecide('approve', editedResponse)} disabled={acting || !editedResponse.trim()}
+                      className="px-3 py-1.5 text-xs rounded font-medium bg-amber-600/20 text-amber-400 border border-amber-600/30 hover:bg-amber-600/30 transition-colors disabled:opacity-50">
+                      {acting ? 'Processing…' : 'Approve with Edits'}
+                    </button>
+                    <button onClick={() => setEditMode(false)}
+                      className="px-3 py-1.5 text-xs rounded font-medium text-neutral-400 hover:text-neutral-200 transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isPendingApproval && approvalLoading && (
+            <div className="text-xs text-neutral-500">Loading approval details…</div>
+          )}
+
           {/* Reasoning */}
           <Section title="Reasoning Trace">
             <pre className="text-xs text-neutral-300 whitespace-pre-wrap font-mono leading-relaxed">{d.reasoning}</pre>
@@ -957,6 +1093,7 @@ function DecisionDetail({ decision: d, onClose }: { decision: Decision; onClose:
               <div><span className="text-neutral-500">Created:</span> <span className="text-neutral-300 ml-1">{new Date(d.created_at).toLocaleString()}</span></div>
               <div><span className="text-neutral-500">Resolved:</span> <span className="text-neutral-300 ml-1">{d.resolved_at ? new Date(d.resolved_at).toLocaleString() : 'Pending'}</span></div>
               <div><span className="text-neutral-500">Approval Required:</span> <span className="text-neutral-300 ml-1">{d.approval_required ? 'Yes' : 'No'}</span></div>
+              <div><span className="text-neutral-500">Approval Status:</span> <span className="text-neutral-300 ml-1">{d.approval_status ?? 'N/A'}</span></div>
               <div><span className="text-neutral-500">Shadow Mode:</span> <span className="text-neutral-300 ml-1">{d.shadow_mode ? 'Yes' : 'No'}</span></div>
             </div>
           </Section>

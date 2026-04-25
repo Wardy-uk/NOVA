@@ -2548,6 +2548,10 @@ export class ApprovalQueries {
 
   async getPending(): Promise<ApprovalItem[]> { return this.getAll('pending'); }
 
+  async getPendingByTicket(ticketId: string): Promise<ApprovalItem | undefined> {
+    return queryOne<ApprovalItem>(`SELECT * FROM approval_queue WHERE ticket_id = ? AND status = 'pending' ORDER BY created_at DESC`, [ticketId]);
+  }
+
   async getPendingCount(): Promise<number> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
     const row = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
