@@ -1,18 +1,20 @@
 import sql from 'mssql';
 import type { SettingsQueries } from '../db/settings-store.js';
 
-function parseConnectionString(str: string): Partial<sql.config> {
+function parseConnectionString(str: string): Partial<sql.config> & { _encrypt?: boolean } {
   const parts: Record<string, string> = {};
   for (const segment of str.split(';')) {
     const idx = segment.indexOf('=');
     if (idx === -1) continue;
     parts[segment.slice(0, idx).trim().toLowerCase()] = segment.slice(idx + 1).trim();
   }
+  const encrypt = parts['encrypt']?.toLowerCase();
   return {
     server: parts['server'] || parts['data source'],
     database: parts['database'] || parts['initial catalog'],
     user: parts['user id'] || parts['uid'],
     password: parts['password'] || parts['pwd'],
+    _encrypt: encrypt === undefined ? true : encrypt === 'true',
   };
 }
 
@@ -31,9 +33,12 @@ export class ExternalDbService {
     const connStr = this.settings.get('abuse_report_db_connection');
     if (!connStr) throw new Error('abuse_report_db_connection not configured');
 
+    const parsed = parseConnectionString(connStr);
+    const encrypt = parsed._encrypt ?? true;
+    delete (parsed as any)._encrypt;
     this.abuseReportPool = new sql.ConnectionPool({
-      ...parseConnectionString(connStr),
-      options: { encrypt: true, trustServerCertificate: true },
+      ...parsed,
+      options: { encrypt, trustServerCertificate: true },
       requestTimeout: 30000,
       pool: { min: 0, max: 5, idleTimeoutMillis: 60000 },
     } as sql.config);
@@ -48,9 +53,12 @@ export class ExternalDbService {
     const connStr = this.settings.get('abuse_report_admin_db_connection');
     if (!connStr) throw new Error('abuse_report_admin_db_connection not configured');
 
+    const parsed = parseConnectionString(connStr);
+    const encryptAdmin = parsed._encrypt ?? true;
+    delete (parsed as any)._encrypt;
     this.adminPool = new sql.ConnectionPool({
-      ...parseConnectionString(connStr),
-      options: { encrypt: true, trustServerCertificate: true },
+      ...parsed,
+      options: { encrypt: encryptAdmin, trustServerCertificate: true },
       requestTimeout: 30000,
       pool: { min: 0, max: 5, idleTimeoutMillis: 60000 },
     } as sql.config);
