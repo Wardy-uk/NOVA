@@ -1600,50 +1600,27 @@ ${panelHtml}
     }
   });
 
-  // Key Accounts wallboard — per-account ticket breakdown from jira_issue_cache
+  // Key Accounts wallboard — tickets with Key_Account label from jira_issue_cache
   app.get('/wallboard/key-accounts', async (_req, res) => {
     const wbStart = Date.now();
     try {
-      const settings = settingsQueries.getAll();
-      const keyAccountsRaw = settings.key_accounts || '';
-      const accountNames = keyAccountsRaw.split(',').map((s: string) => s.trim()).filter(Boolean);
-      if (accountNames.length === 0) {
-        res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Key Accounts</title>
-${wallboardRefreshScript('/wallboard/key-accounts')}
-<style>body{font-family:system-ui;background:#1a1f26;color:#64748b;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}</style>
-</head><body><div style="text-align:center"><h2 style="color:#e2e8f0">Key Accounts Wallboard</h2><p>No key accounts configured. Add account names to the <code>key_accounts</code> setting (comma-separated).</p></div></body></html>`);
-        logWallboard('/wallboard/key-accounts', 'info', 200, Date.now() - wbStart, 'No key accounts configured');
-        return;
-      }
-      const sql = await import('mssql');
-      const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
-      const mainPool = (srv && db && usr && pwd) ? await new sql.default.ConnectionPool({
-        server: srv, database: db, user: usr, password: pwd,
-        options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
-      }).connect() : null;
-
       const { getPool } = await import('./services/database.js');
       const novaPool = getPool();
-      const placeholders = accountNames.map((_: string, i: number) => `@acct${i}`).join(',');
-      const req = novaPool.request();
-      accountNames.forEach((name: string, i: number) => req.input(`acct${i}`, sql.default.NVarChar, name));
-      const ticketResult = await req.query(`
+      const ticketResult = await novaPool.request().query(`
         SELECT organisation_name, issue_key, summary, status_name, status_category,
                priority_name, assignee_display, sla_breached, sla_breach_time,
                jira_created, jira_updated, current_tier, labels
         FROM jira_issue_cache
-        WHERE organisation_name IN (${placeholders})
+        WHERE labels LIKE '%Key_Account%'
           AND status_category != 'Done'
         ORDER BY organisation_name, sla_breached DESC, jira_updated ASC
       `);
-      if (mainPool) await mainPool.close();
 
       const byAccount = new Map<string, any[]>();
-      for (const name of accountNames) byAccount.set(name, []);
       for (const row of ticketResult.recordset) {
-        const list = byAccount.get(row.organisation_name) || [];
-        list.push(row);
-        byAccount.set(row.organisation_name, list);
+        const acct = row.organisation_name || 'Unknown';
+        if (!byAccount.has(acct)) byAccount.set(acct, []);
+        byAccount.get(acct)!.push(row);
       }
 
       const now = new Date();
@@ -1700,7 +1677,7 @@ ${wallboardRefreshScript('/wallboard/key-accounts')}
   <div style="font-size:10px;color:#64748b">Auto-refresh 60s &middot; Updated ${timeStr}</div>
 </div>
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
-  ${kpiCard('Tracked Accounts', accountNames.length, '#5ec1ca')}
+  ${kpiCard('Accounts', byAccount.size, '#5ec1ca')}
   ${kpiCard('Open Tickets', totalOpen, '#e2e8f0')}
   ${kpiCard('SLA Breached', totalBreached, totalBreached === 0 ? '#10b981' : '#ef4444')}
   ${kpiCard('Flagged (Critical)', totalFlagged, totalFlagged === 0 ? '#10b981' : '#f59e0b')}
@@ -1708,7 +1685,7 @@ ${wallboardRefreshScript('/wallboard/key-accounts')}
 ${accountSections}
 <div style="text-align:center;margin-top:10px;font-size:10px;color:#475569">nurtur.tech &middot; Key Accounts &middot; ${dateStr}</div>
 </div></body></html>`);
-      logWallboard('/wallboard/key-accounts', 'info', 200, Date.now() - wbStart, `OK — ${accountNames.length} accounts, ${totalOpen} tickets`);
+      logWallboard('/wallboard/key-accounts', 'info', 200, Date.now() - wbStart, `OK — ${byAccount.size} accounts, ${totalOpen} tickets`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       logWallboard('/wallboard/key-accounts', 'error', 500, Date.now() - wbStart, msg);

@@ -155,9 +155,8 @@ Generate:
     if (!draft) throw new Error('Draft not found');
     if (draft.status === 'published') throw new Error('Already published');
 
-    const spaceKey = this.settings.get('kb_confluence_space') || this.settings.get('agent_kb_confluence_space');
-    const parentPageId = this.settings.get('kb_confluence_parent_page_id') || this.settings.get('agent_kb_parent_page_id');
-    if (!spaceKey) throw new Error('Confluence space key not configured (agent_kb_confluence_space)');
+    const spaceKey = this.settings.get('kb_confluence_space') || this.settings.get('agent_kb_confluence_space') || 'NT';
+    const parentPageId = this.settings.get('kb_confluence_parent_page_id') || this.settings.get('agent_kb_parent_page_id') || '2798027072';
 
     if (!this.mcpManager.isConnected('jira')) {
       throw new Error('Jira/Confluence MCP server not connected');
