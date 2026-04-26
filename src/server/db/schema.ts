@@ -619,6 +619,12 @@ async function runMigrations(): Promise<void> {
      CREATE INDEX IX_jira_cache_product ON jira_issue_cache (nurtur_product)
        WHERE nurtur_product IS NOT NULL;`,
 
+    // last_public_comment on jira_issue_cache — populated by jira sync from comment cache
+    `IF COL_LENGTH('jira_issue_cache', 'last_public_comment') IS NULL
+     ALTER TABLE jira_issue_cache ADD last_public_comment NVARCHAR(MAX) NULL;`,
+    `IF COL_LENGTH('jira_issue_cache', 'last_public_comment_updated_at') IS NULL
+     ALTER TABLE jira_issue_cache ADD last_public_comment_updated_at DATETIME2 NULL;`,
+
     // ── Jira Comment Cache ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'jira_comment_cache') AND type = 'U')
      CREATE TABLE jira_comment_cache (
@@ -915,6 +921,18 @@ async function runMigrations(): Promise<void> {
 
     `UPDATE approval_queue SET source = 'n8n_ai'
      WHERE source IS NULL;`,
+
+    // n8n comment tracking on jira_issue_cache — populated by jira sync from comment cache
+    `IF COL_LENGTH('jira_issue_cache', 'last_n8n_comment') IS NULL
+     ALTER TABLE jira_issue_cache ADD last_n8n_comment NVARCHAR(MAX) NULL;`,
+    `IF COL_LENGTH('jira_issue_cache', 'last_n8n_comment_at') IS NULL
+     ALTER TABLE jira_issue_cache ADD last_n8n_comment_at DATETIME2 NULL;`,
+    `IF COL_LENGTH('jira_issue_cache', 'last_n8n_comment_author') IS NULL
+     ALTER TABLE jira_issue_cache ADD last_n8n_comment_author NVARCHAR(255) NULL;`,
+
+    // n8n raw excerpt on ai_comparison_log
+    `IF COL_LENGTH('ai_comparison_log', 'n8n_raw_excerpt') IS NULL
+     ALTER TABLE ai_comparison_log ADD n8n_raw_excerpt NVARCHAR(MAX) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

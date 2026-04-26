@@ -51,7 +51,7 @@ const RETRY_VALIDATION_ATTEMPTS = 1;
 
 const DEFAULT_MODELS: Record<LlmProvider, Record<LlmTier, string>> = {
   anthropic: {
-    reasoning: 'claude-sonnet-4-6-20250514',
+    reasoning: 'claude-sonnet-4-6',
     standard: 'claude-haiku-4-5-20251001',
     cheap: 'claude-haiku-4-5-20251001',
   },
@@ -104,8 +104,7 @@ const CALL_TYPE_TIER_MAP: Record<string, LlmTier> = {
 
 // Per-million-token pricing (USD).
 export const MODEL_PRICING: Record<string, { inputPerM: number; outputPerM: number }> = {
-  'claude-sonnet-4-6-20250514': { inputPerM: 3.00,  outputPerM: 15.00 },
-  'claude-sonnet-4-20250514':   { inputPerM: 3.00,  outputPerM: 15.00 },
+  'claude-sonnet-4-6':           { inputPerM: 3.00,  outputPerM: 15.00 },
   'claude-haiku-4-5-20251001':  { inputPerM: 1.00,  outputPerM: 5.00  },
   'gpt-4.1':                    { inputPerM: 2.00,  outputPerM: 8.00  },
   'gpt-4.1-mini':               { inputPerM: 0.40,  outputPerM: 1.60  },

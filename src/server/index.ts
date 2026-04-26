@@ -859,6 +859,8 @@ async function main() {
     jiraSyncService.start(45_000);
   }
 
+  let aiScanTimer: ReturnType<typeof setInterval> | null = null;
+
   // Agent loop — feature-flagged, admin-only
   const agentJiraClient = buildOnboardingJiraClient();
   const llmService = new LlmService(settingsQueries);
@@ -907,6 +909,25 @@ async function main() {
     // AI self-improvement engine
     const aiImprovementService = new AiImprovementService(llmService, settingsQueries);
     app.use('/api/ai-improvement', createAiImprovementRoutes(aiImprovementService));
+
+    // AI Improvement scan — every 30 minutes, initial run after 2 minutes
+    aiScanTimer = setInterval(async () => {
+      try {
+        const [compared, signals] = await Promise.all([
+          aiImprovementService.runComparisonScan(),
+          aiImprovementService.detectHumanEdits(),
+        ]);
+        if (compared > 0 || signals > 0) {
+          console.log(`[ai-improvement] scan: ${compared} compared, ${signals} signals`);
+        }
+      } catch (err) {
+        console.error('[ai-improvement] scheduled scan failed:', err);
+      }
+    }, 30 * 60 * 1000);
+    setTimeout(() => {
+      aiImprovementService.runComparisonScan().catch(() => {});
+      aiImprovementService.detectHumanEdits().catch(() => {});
+    }, 120_000);
 
     // Gamification
     const gamificationService = new GamificationService();
@@ -2306,6 +2327,7 @@ ${panelHtml}
     clearInterval(surveyTimer);
     clearInterval(trainingReminderTimer);
     clearInterval(autoPrepTimer);
+    if (aiScanTimer) clearInterval(aiScanTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     agentLoop?.stop();
     watcher.stop();

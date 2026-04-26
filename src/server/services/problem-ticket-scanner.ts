@@ -90,10 +90,8 @@ const flexIssueKey = z.any().transform((val): string => {
 const AnalysisItem = z.preprocess((val: unknown) => {
   if (val && typeof val === 'object' && !('issueKey' in val)) {
     const obj = val as Record<string, unknown>;
-    if (obj.issue_key) return { ...obj, issueKey: obj.issue_key };
-    if (obj.key) return { ...obj, issueKey: obj.key };
-    if (obj.ticket_key) return { ...obj, issueKey: obj.ticket_key };
-    if (obj.ticketKey) return { ...obj, issueKey: obj.ticketKey };
+    const mapped = obj.issue_key ?? obj.key ?? obj.ticket_key ?? obj.ticketKey ?? obj.ticket ?? obj.id ?? '';
+    return { ...obj, issueKey: mapped };
   }
   return val;
 }, z.object({
@@ -589,7 +587,9 @@ Today's date is ${today}.
 - Look for agent promises like "will update by Friday", "get back to you by 15th March"
 - Resolve relative dates using the comment timestamp
 - followedUp = true if any agent commented AFTER the commitment date
-- If no commitment found or it was followed up, set commitmentDate to null`,
+- If no commitment found or it was followed up, set commitmentDate to null
+
+Return JSON: { "results": [{ "issueKey": "NT-123", "sentimentScore": 0.0, "sentimentSummary": "...", "commitmentDate": null, "followedUp": false, "commitmentQuote": null }] }`,
           prompt,
           AnalysisBatchSchema,
           { temperature: 0.3, callType: 'ticket_analysis' },

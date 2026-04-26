@@ -2048,8 +2048,9 @@ interface AiImprovementStats {
   agreementRate: number;
   totalSignals: number;
   signalsByType: Record<string, number>;
-  recentDisagreements: Array<{ id: number; ticket_key: string; nova_action: string; n8n_action: string; nova_confidence: number; diff_summary: string; created_at: string }>;
+  recentDisagreements: Array<{ id: number; ticket_key: string; nova_action: string; n8n_action: string; nova_confidence: number; diff_summary: string; n8n_raw_excerpt: string | null; created_at: string }>;
   recentSignals: Array<{ id: number; ticket_key: string; signal_type: string; diff_summary: string; created_at: string }>;
+  comparableTicketsCount7d: number;
 }
 
 async function aiApi(path: string, opts?: RequestInit) {
@@ -2063,6 +2064,7 @@ function AiImprovementTab() {
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{ compared: number; signals: number } | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   useEffect(() => { loadStats(); }, []);
 
@@ -2076,10 +2078,13 @@ function AiImprovementTab() {
   async function runScan() {
     setScanning(true);
     setScanResult(null);
+    setScanError(null);
     const r = await aiApi('/scan', { method: 'POST' });
     if (r.ok) {
       setScanResult(r.data);
       loadStats();
+    } else {
+      setScanError(r.error || 'Scan failed');
     }
     setScanning(false);
   }
@@ -2098,6 +2103,12 @@ function AiImprovementTab() {
       {scanResult && (
         <div className="p-2 bg-green-950/30 border border-green-900/50 rounded text-green-400 text-xs">
           Scan complete: {scanResult.compared} comparisons, {scanResult.signals} improvement signals found.
+        </div>
+      )}
+
+      {scanError && (
+        <div className="p-2 bg-red-950/30 border border-red-900/50 rounded text-red-400 text-xs">
+          Scan failed: {scanError}
         </div>
       )}
 
@@ -2152,6 +2163,7 @@ function AiImprovementTab() {
                     <th className="px-4 py-1.5 font-medium">NOVA</th>
                     <th className="px-4 py-1.5 font-medium">n8n</th>
                     <th className="px-4 py-1.5 font-medium">Confidence</th>
+                    <th className="px-4 py-1.5 font-medium">n8n Excerpt</th>
                     <th className="px-4 py-1.5 font-medium">When</th>
                   </tr>
                 </thead>
@@ -2162,6 +2174,7 @@ function AiImprovementTab() {
                       <td className="px-4 py-1.5 text-neutral-300">{d.nova_action}</td>
                       <td className="px-4 py-1.5 text-neutral-300">{d.n8n_action}</td>
                       <td className="px-4 py-1.5 text-neutral-400">{d.nova_confidence != null ? `${(d.nova_confidence * 100).toFixed(0)}%` : '—'}</td>
+                      <td className="px-4 py-1.5 text-neutral-400 max-w-[200px] truncate" title={d.n8n_raw_excerpt ?? ''}>{d.n8n_raw_excerpt ? d.n8n_raw_excerpt.slice(0, 80) + (d.n8n_raw_excerpt.length > 80 ? '…' : '') : '—'}</td>
                       <td className="px-4 py-1.5 text-[10px] text-neutral-500">{new Date(d.created_at).toLocaleString()}</td>
                     </tr>
                   ))}
@@ -2198,8 +2211,15 @@ function AiImprovementTab() {
           )}
 
           {stats.totalComparisons === 0 && stats.totalSignals === 0 && (
-            <div className="text-center py-8 text-xs text-neutral-500">
-              No comparison data yet. Click "Run Scan" to compare NOVA decisions with n8n outcomes, or wait for data to accumulate.
+            <div className="text-center py-8 text-xs text-neutral-500 space-y-1">
+              {stats.comparableTicketsCount7d === 0 ? (
+                <>
+                  <p>No comparable n8n comments found in the last 7 days.</p>
+                  <p>Confirm the n8n service account is posting AI Summary comments on tickets that NOVA has also assessed.</p>
+                </>
+              ) : (
+                <p>No comparisons yet. The scan runs automatically every 30 minutes, or click "Run Scan" above.</p>
+              )}
             </div>
           )}
         </>

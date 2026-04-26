@@ -127,6 +127,8 @@ export class JiraSyncService {
             await this.upsertComment(issue.key, comment);
             commentCount++;
           }
+          await this.updateLastPublicComment(issue.key);
+          await this.updateLastN8nComment(issue.key);
         } catch (err) {
           console.warn(`[jira-sync] Failed to sync comments for ${issue.key}:`, err instanceof Error ? err.message : err);
         }
@@ -178,6 +180,8 @@ export class JiraSyncService {
             await this.upsertComment(issue.key, comment);
             commentCount++;
           }
+          await this.updateLastPublicComment(issue.key);
+          await this.updateLastN8nComment(issue.key);
         } catch (err) {
           console.warn(`[jira-sync] Failed to sync comments for ${issue.key}:`, err instanceof Error ? err.message : err);
         }
@@ -208,6 +212,8 @@ export class JiraSyncService {
       for (const comment of comments) {
         await this.upsertComment(issueKey, comment);
       }
+      await this.updateLastPublicComment(issueKey);
+      await this.updateLastN8nComment(issueKey);
     } catch (err) {
       console.warn(`[jira-sync] Failed to sync ${issueKey}:`, err instanceof Error ? err.message : err);
     }
@@ -365,6 +371,54 @@ export class JiraSyncService {
         new Date(comment.created), new Date(comment.updated),
       ],
     );
+  }
+
+  async updateLastN8nComment(issueKey: string): Promise<void> {
+    try {
+      const authorEmails = (this.settings.get('n8n_comment_author_emails') || 'Alerts@Nurtur.tech')
+        .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      const authorNames = (this.settings.get('n8n_comment_author_display_names') || 'Nurtur')
+        .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      const bodyMarker = this.settings.get('n8n_comment_body_marker') || 'AI Summary';
+
+      const emailClauses = authorEmails.map(() => 'LOWER(author_email) = ?');
+      const nameClauses = authorNames.map(() => 'LOWER(author_display) = ?');
+      const authorFilter = [...emailClauses, ...nameClauses].join(' OR ');
+
+      await execute(`
+        UPDATE jira_issue_cache SET
+          last_n8n_comment = sub.body_text,
+          last_n8n_comment_at = sub.jira_created,
+          last_n8n_comment_author = sub.author_display
+        FROM jira_issue_cache j
+        CROSS APPLY (
+          SELECT TOP 1 body_text, jira_created, author_display
+          FROM jira_comment_cache c
+          WHERE c.issue_key = ?
+            AND (${authorFilter})
+            AND c.body_text LIKE ?
+          ORDER BY c.jira_created DESC
+        ) sub
+        WHERE j.issue_key = ?`,
+        [issueKey, ...authorEmails, ...authorNames, `%${bodyMarker}%`, issueKey],
+      );
+    } catch { /* non-critical — don't fail the sync */ }
+  }
+
+  private async updateLastPublicComment(issueKey: string): Promise<void> {
+    try {
+      await execute(`
+        UPDATE jira_issue_cache SET
+          last_public_comment = (
+            SELECT TOP 1 body_text FROM jira_comment_cache
+            WHERE issue_key = ? AND is_public = 1 AND body_text IS NOT NULL
+            ORDER BY jira_created DESC
+          ),
+          last_public_comment_updated_at = GETUTCDATE()
+        WHERE issue_key = ?`,
+        [issueKey, issueKey],
+      );
+    } catch { /* non-critical — don't fail the sync */ }
   }
 
   private async recordSync(

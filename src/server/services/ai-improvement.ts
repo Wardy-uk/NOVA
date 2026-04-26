@@ -12,6 +12,7 @@ export interface ComparisonEntry {
   nova_confidence: number | null;
   agreement: boolean;
   diff_summary: string | null;
+  n8n_raw_excerpt: string | null;
   created_at: string;
 }
 
@@ -32,6 +33,40 @@ export interface ImprovementStats {
   signalsByType: Record<string, number>;
   recentDisagreements: ComparisonEntry[];
   recentSignals: ImprovementSignal[];
+  comparableTicketsCount7d: number;
+}
+
+// ── Helpers ──
+
+interface ParsedN8nAction {
+  action: string;
+  priority: string | null;
+  recommendedTier: string | null;
+}
+
+export function parseN8nAction(body: string): ParsedN8nAction | null {
+  if (!body) return null;
+  const lower = body.toLowerCase();
+
+  let action: string | null = null;
+  if (/no escalation is needed|no fault|auto[- ]?resolve|\bclose\b/.test(lower)) {
+    action = 'close';
+  } else if (/escalate to|escalation required|recommend escalation/.test(lower)) {
+    action = 'escalate';
+  } else if (/respond to customer|reply to|\*\*reply:\*\*|\*\*suggested reply:\*\*/i.test(body)) {
+    action = 'respond';
+  }
+
+  if (!action) return null;
+
+  const priorityMatch = body.match(/\*\*Priority:\*\*\s*(Low|Medium|High|Critical)/i);
+  const tierMatch = body.match(/\*\*Recommended Tier:\*\*\s*([^\n*]+)/i);
+
+  return {
+    action,
+    priority: priorityMatch ? priorityMatch[1].trim() : null,
+    recommendedTier: tierMatch ? tierMatch[1].trim() : null,
+  };
 }
 
 // ── Service ──
@@ -47,18 +82,21 @@ export class AiImprovementService {
     novaAction: string,
     novaConfidence: number,
     n8nAction: string,
+    n8nRawBody?: string,
   ): Promise<ComparisonEntry> {
     const agreement = novaAction.toLowerCase() === n8nAction.toLowerCase();
     let diffSummary: string | null = null;
 
     if (!agreement) {
-      diffSummary = `NOVA chose "${novaAction}" (${(novaConfidence * 100).toFixed(0)}% confidence) but n8n executed "${n8nAction}"`;
+      diffSummary = `NOVA chose "${novaAction}" (${(novaConfidence * 100).toFixed(0)}% confidence) but n8n chose "${n8nAction}"`;
     }
 
+    const rawExcerpt = n8nRawBody ? n8nRawBody.slice(0, 500) : null;
+
     const id = await executeAndGetId(
-      `INSERT INTO ai_comparison_log (ticket_key, nova_action, n8n_action, nova_confidence, agreement, diff_summary)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [ticketKey, novaAction, n8nAction, novaConfidence, agreement ? 1 : 0, diffSummary],
+      `INSERT INTO ai_comparison_log (ticket_key, nova_action, n8n_action, nova_confidence, agreement, diff_summary, n8n_raw_excerpt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [ticketKey, novaAction, n8nAction, novaConfidence, agreement ? 1 : 0, diffSummary, rawExcerpt],
     );
 
     return {
@@ -69,6 +107,7 @@ export class AiImprovementService {
       nova_confidence: novaConfidence,
       agreement,
       diff_summary: diffSummary,
+      n8n_raw_excerpt: rawExcerpt,
       created_at: new Date().toISOString(),
     };
   }
@@ -95,37 +134,57 @@ export class AiImprovementService {
   }
 
   async runComparisonScan(): Promise<number> {
-    const novaDecisions = await query<{
+    const decisions = await query<{
       ticket_id: string;
       action: string;
       confidence: number;
+      output: string | null;
       created_at: string;
     }>(
-      `SELECT d.ticket_id, d.action, d.confidence, d.created_at
+      `SELECT d.ticket_id, d.action, d.confidence, d.output, d.created_at
        FROM agent_decisions d
        WHERE d.created_at >= DATEADD(day, -1, GETUTCDATE())
          AND d.action IS NOT NULL
          AND NOT EXISTS (
-           SELECT 1 FROM ai_comparison_log c WHERE c.ticket_key = d.ticket_id AND c.created_at >= DATEADD(day, -1, GETUTCDATE())
+           SELECT 1 FROM ai_comparison_log c
+           WHERE c.ticket_key = d.ticket_id AND c.created_at >= d.created_at
          )
        ORDER BY d.created_at DESC`,
     );
 
     let compared = 0;
-    for (const d of novaDecisions) {
-      const n8nRows = await query<{ action: string }>(
-        `SELECT TOP 1
-           JSON_VALUE(output, '$.action') as action
-         FROM agent_decisions
-         WHERE ticket_id = ? AND event_type = 'n8n_execution' AND created_at >= DATEADD(hour, -2, ?)
-         ORDER BY created_at DESC`,
+    for (const d of decisions) {
+      const rows = await query<{ body: string; created_at: string }>(
+        `SELECT TOP 1 last_n8n_comment AS body, last_n8n_comment_at AS created_at
+         FROM jira_issue_cache
+         WHERE issue_key = ?
+           AND last_n8n_comment IS NOT NULL
+           AND last_n8n_comment_at >= ?`,
         [d.ticket_id, d.created_at],
       );
 
-      if (n8nRows.length > 0 && n8nRows[0].action) {
-        await this.compareDecision(d.ticket_id, d.action, d.confidence, n8nRows[0].action);
-        compared++;
+      if (rows.length === 0) continue;
+
+      const parsed = parseN8nAction(rows[0].body);
+      if (!parsed) continue;
+
+      const diffParts: string[] = [];
+      if (parsed.priority) diffParts.push(`n8n priority: ${parsed.priority}`);
+      if (parsed.recommendedTier) diffParts.push(`n8n tier: ${parsed.recommendedTier}`);
+
+      const entry = await this.compareDecision(
+        d.ticket_id, d.action, d.confidence, parsed.action, rows[0].body,
+      );
+
+      if (!entry.agreement && diffParts.length > 0) {
+        const extraSummary = `${entry.diff_summary}. ${diffParts.join(', ')}`;
+        await execute(
+          `UPDATE ai_comparison_log SET diff_summary = ? WHERE id = ?`,
+          [extraSummary, entry.id],
+        );
       }
+
+      compared++;
     }
 
     return compared;
@@ -141,7 +200,7 @@ export class AiImprovementService {
          JSON_VALUE(d.output, '$.draft_response') as ai_draft,
          j.last_public_comment as actual_response
        FROM agent_decisions d
-       JOIN jira_ticket_cache j ON j.ticket_id = d.ticket_id
+       JOIN jira_issue_cache j ON j.issue_key = d.ticket_id
        WHERE d.created_at >= DATEADD(day, -1, GETUTCDATE())
          AND d.action = 'respond'
          AND JSON_VALUE(d.output, '$.draft_response') IS NOT NULL
@@ -193,6 +252,16 @@ export class AiImprovementService {
       [days],
     );
 
+    const comparableRows = await query<{ cnt: number }>(
+      `SELECT COUNT(DISTINCT d.ticket_id) as cnt
+       FROM agent_decisions d
+       JOIN jira_issue_cache j ON j.issue_key = d.ticket_id
+       WHERE d.created_at >= DATEADD(day, -7, GETUTCDATE())
+         AND d.action IS NOT NULL
+         AND j.last_n8n_comment IS NOT NULL
+         AND j.last_n8n_comment_at >= d.created_at`,
+    );
+
     const total = compRows[0]?.total ?? 0;
     const agreed = compRows[0]?.agreed ?? 0;
     const signalsByType: Record<string, number> = {};
@@ -209,6 +278,7 @@ export class AiImprovementService {
       signalsByType,
       recentDisagreements,
       recentSignals,
+      comparableTicketsCount7d: comparableRows[0]?.cnt ?? 0,
     };
   }
 

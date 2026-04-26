@@ -1,138 +1,103 @@
-# N.O.V.A (Nurtur Operations & Visibility Aggregator)
+# N.O.V.A — Nurtur Operational Virtual Assistant
 
-Personal productivity aggregator for managing tasks across Jira, Microsoft 365, Monday.com, Dynamics 365, and more. Built for the Nurtur tech team.
+Internal operations platform for the Nurtur tech support team. Aggregates tasks, KPIs, onboarding, service desk, CRM, surveys, training, and AI-assisted workflows into a single PWA.
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Express 5 + TypeScript (ESM) |
-| Frontend | React 19 + Tailwind 4 + Vite 6 |
-| Database | sql.js (in-memory SQLite, flushed to `daypilot.db` every 15s) |
-| Auth | JWT (bcrypt passwords) + Entra SSO (PKCE device code flow) |
-| External APIs | MCP protocol (Jira, MS365, Monday), direct REST (Jira, Dynamics 365, Azure DevOps, BriefYourMarket) |
-| AI | OpenAI (standup briefings, chat, AI actions) |
+- **Backend:** Express 5 + TypeScript (ESM), `tsx watch` for dev
+- **Frontend:** React 19 + Tailwind 4 + Vite 6, lazy-loaded views
+- **Primary Database:** MSSQL (Azure SQL via `mssql` package). Connection pool in `services/database.ts`. Schema migrations in `db/schema.ts` use `IF NOT EXISTS` / `ALTER TABLE` pattern.
+- **Legacy SQLite:** sql.js still used for local dev/fallback (`daypilot.db`, in-memory, flushed every 15s). Server must be stopped before external DB scripts.
+- **Calyx Database:** Separate SQLite (`calyx.db`) — never mix queries with main DB.
+- **External DB:** `external-db.ts` manages separate MSSQL pools for abuse reports and admin queries via settings-configured connection strings.
+- **KPI Database:** Separate MSSQL pool (`kpi-pipeline.ts`) connecting to `techservicesjsm` Azure SQL. ONLY touch tables populated by Nick's n8n workflows — see global [CLAUDE.md](http://CLAUDE.md) for forbidden tables.
+- **Auth:** JWT + bcrypt + Entra SSO (PKCE device code flow). `req.user = { id, username, role }`.
+- **AI:** OpenAI (standups, chat, AI actions, coaching), Anthropic SDK
+- **External:** Jira REST, Dynamics 365, Azure DevOps, BriefYourMarket, MCP protocol, nodemailer
 
-## Project Structure
-
-```
-src/
-  server/
-    index.ts              # Express app bootstrap, route wiring, sync timers
-    middleware/auth.ts     # JWT auth, role guards, area access guards
-    db/
-      schema.ts           # sql.js init, migrations (ALTER TABLE try/catch pattern)
-      queries.ts          # All SQL query classes (TaskQueries, DeliveryQueries, etc.)
-      settings-store.ts   # File-based settings (settings.json)
-      user-store.ts       # File-based users (users.json)
-      notifications.ts    # Notification queries
-      audit.ts            # Audit log queries
-    routes/*.ts           # Express Router modules (one per feature area)
-    services/*.ts         # Business logic, external API clients
-    utils/
-      role-helpers.ts     # Role parsing, isAdmin()
-      source-filter.ts    # Task source filtering
-  client/
-    App.tsx               # Main SPA shell — area/view navigation, auth, theme
-    main.tsx              # React entry point
-    components/*.tsx      # All UI components (50+)
-    hooks/                # useTasks, useHealth, useAuth, useTheme
-    utils/                # taskHelpers, etc.
-  shared/
-    types.ts              # Zod schemas + TypeScript interfaces (Task, ApiResponse, etc.)
-    brand-settings-defs.ts
-```
-
-## Dev Commands
+## Project Commands
 
 ```bash
-npm run dev            # Starts API (port 3001) + Vite (port 5173) concurrently
-npm run dev:server     # API only (tsx watch)
-npm run dev:client     # Vite only
-npm run build          # Vite build + tsc server
-npm run db:reset       # Re-run schema migrations
+npm run dev            # API (3001) + Vite (5173) concurrently
+npm run dev:server     # API only
 ```
 
-## Data Storage
+npm run dev:client # Vite only npm run build # vite build + tsc server
 
-- **SQLite** (`daypilot.db`): Tasks, delivery entries, CRM, milestones, onboarding config, audit logs, notifications, problem tickets, instance setup, branches, logos, etc.
-- **settings.json**: All integration credentials, feature flags, UI preferences (file-based, not in SQLite)
-- **users.json**: User accounts (file-based, not in SQLite)
-- **backups/**: Daily DB backups with 7-day rotation
+```
+```
 
-**IMPORTANT**: sql.js is in-memory. The DB file is loaded at startup and flushed periodically. External scripts that touch `daypilot.db` directly must run with the server stopped, or changes will be overwritten.
+## Architecture
 
-## Auth & Roles
+### Server (`src/server/`)
 
-- JWT issued on login, passed as `Authorization: Bearer <token>` or `?token=` query param
-- `req.user` has `{ id, username, role }` on all protected routes
-- Roles: `admin`, plus custom roles defined in `settings.json` key `custom_roles`
-- Area access: Custom roles have per-area access levels (`hidden` / `view` / `edit`)
-- Admin always has full access; `isAdmin()` checks for the `admin` role string
-- Entra SSO: PKCE auth code flow, auto-provisions users on first login
+- `index.ts` — Express bootstrap, route wiring, sync timers, background jobs
+- `db/schema.ts` — sql.js init, idempotent migrations (ALTER TABLE try/catch)
+- `db/queries.ts` — All SQL query classes (TaskQueries, DeliveryQueries, etc.)
+- `db/settings-store.ts` — File-based settings (settings.json)
+- `routes/*.ts` — \~45 Express Router modules, each exporting `createXxxRoutes(deps)` factory
+- `services/*.ts` — \~80 business logic modules, external API clients, AI pipelines
+- `middleware/auth.ts` — JWT auth, role guards, area access guards
+
+### Client (`src/client/`)
+
+- `App.tsx` — Main SPA shell (1400+ lines), area/view navigation, auth, theme
+- `components/*.tsx` — \~100 view components, mix of eager and lazy-loaded
+- `hooks/` — useTasks, useHealth, useAuth, useTheme
+- `utils/` — taskHelpers
+
+### Shared (`src/shared/`)
+
+- `types.ts` — Zod schemas + TypeScript interfaces (Task, ApiResponse, etc.)
+
+## Major Feature Areas
+
+AreaKey ViewsBackendService DeskDashboard, Kanban, Calendar, KPIs, Breached, Problem TicketsJira sync, SLA timers, queue monitor, ticket classifierKPI EngineDashboard, Comparison, Leaderboard, Daily History, Trends, QAkpi-pipeline, qa-pipeline, backfill scripts, Azure SQL readsOnboardingDashboard, Delivery, Overdue, Milestones, Config, Matrixmilestone-workflow, setup-orchestrator, template-builderCalyx (Customer Portal)Queue, Dashboard, Playlists, Problems, Changes, KB, SLOcalyx-db, calyx-slo-engine, calyx-email, portal authAI AgentAgent Dashboard, Workspace, Coaching, Pipelines, Profileagent-loop, autonomy-engine, coach, perceiver, reasoner, actorCRM & SalesCRM, Contracts, Sales Hotbox, Adobe Signdynamics365, bc-client, product-cancellationSurveysAdmin, Respondsurvey routesTrainingMatrix, Summarytraining routesPeopleTeam Workload, Agent Roster, Dev Reviewpeople routes, dev-review-queries
 
 ## Key Patterns
 
-### Route Pattern
-Every route file exports a `createXxxRoutes(deps...)` factory that returns an Express Router. Dependencies are injected from `index.ts`.
+- **Route factory:** Every route file exports `createXxxRoutes(deps)` → Express Router
+- **Idempotent migrations:** ALTER TABLE wrapped in try/catch — safe to re-run
+- **MCP integration:** `mcpManager.callTool(serverName, toolName, args)`
+- **Direct REST clients** for Jira, D365, AzDo, BYM where MCP doesn't cover
+- **Background sync:** Per-source timers (default 5 min), milestone eval every 15 min, problem scan every 15 min, AI improvement scan every 30 min, DB flush every 15s
+- **AI Learning comparison:** Derives n8n's action from `jira_issue_cache.last_n8n_comment` (populated by jira sync matching n8n service account comments). `parseN8nAction()` extracts close/escalate/respond from comment body keywords. Settings: `n8n_comment_author_emails`, `n8n_comment_author_display_names`, `n8n_comment_body_marker`.
+- **Settings:** Flat key-value in settings.json via FileSettingsQueries
+- **API response pattern:** `res.json({ ok: true, data })` / `res.json({ ok: false, error })`
+- **Lazy loading:** Heavy views use `lazy(() => import(...))` in App.tsx
 
-### Migrations
-Schema migrations in `schema.ts` use try/catch around ALTER TABLE — if the column already exists, the error is caught and ignored. This makes migrations idempotent.
+## Subprojects
 
-### MCP Integration
-`McpClientManager` connects to MCP servers (Jira, MS365, Monday) configured via Admin > Integrations UI. Tools called via `mcpManager.callTool(serverName, toolName, args)`.
+- `nova-mcp/` — Standalone MCP server for NOVA KPI deep analysis (separate repo, separate package.json)
+- `calyx-phases/` — Phase-by-phase implementation docs for Calyx customer portal
 
-### Direct REST Clients
-Some integrations bypass MCP for features MCP doesn't support:
-- `JiraRestClient`: Issue creation, linking, custom fields (onboarding tickets, service desk)
-- `Dynamics365Service`: Dataverse Web API via MSAL device code auth
-- `AzDoClient`: Azure DevOps REST (Git push for template compilation)
-- `BymClient`: BriefYourMarket API (instance setup automation)
+## Data Files (Never Commit)
 
-### Background Sync
-- Per-source sync timers with configurable intervals (default 5 min)
-- Full sync runs 5s after startup, then individual source timers take over
-- Milestone workflow evaluation every 15 min
-- Problem ticket scanning every 15 min
-- DB auto-save every 15s, daily backup hourly check
-
-### Settings
-All config is stored in `settings.json` via `FileSettingsQueries`. Keys are flat strings (e.g., `jira_ob_email`, `d365_client_id`, `sso_enabled`). The `.env` file seeds initial values on first run only.
-
-## UI Areas & Views
-
-The frontend organises into 4 main areas plus standalone views:
-
-| Area | Views |
-|------|-------|
-| My NOVA | My Focus, My Dashboard, NOVA Insights, My Tasks, NOVA Briefing, My Team, My Chat |
-| Service Desk | Dashboard, My Tickets, Kanban, Calendar, My Breached |
-| Onboarding | Overview, Delivery, Overdue, Milestones, Onboarding Matrix |
-| Account Management | CRM |
-| Standalone | Settings, Admin Panel, My Feedback, Help |
+- `.env` — credentials
+- `users.json` — password hashes
+- `settings.json` — API tokens, feature flags
+- `daypilot.db` / `calyx.db` — binary databases
+- `.d365-token-cache.json` — MSAL cache
 
 ## Versioning
 
-- Bump patch version in `package.json` with every commit/deploy
-- Status bar shows `v{version} ({gitHash})`
-- `__APP_VERSION__` and `__GIT_HASH__` are injected at build time via Vite `define`
+Bump patch in `package.json` with every commit/deploy. Currently v1.1.157. Status bar shows `v{version} ({gitHash})` via Vite `define`.
 
-## Files to Never Commit
+## Post-Build Rule
 
-- `.env` — contains real credentials
-- `users.json` — contains password hashes
-- `settings.json` — contains API tokens
-- `daypilot.db` — binary database
-- `.d365-token-cache.json` — MSAL token cache
+**After every successful build or significant feature completion, update this [CLAUDE.md](http://CLAUDE.md) to reflect any new routes, services, views, patterns, or architectural changes. Keep it accurate to the codebase — this file IS the project brain.**
 
-These are all in `.gitignore`.
+## Session Start Ritual
 
-## Coding Conventions
+At the start of every session, before writing any code:
 
-- TypeScript strict mode, ESM (`"type": "module"`)
-- Server uses `.js` extensions in imports (TypeScript ESM requirement)
-- All inline JS in the frontend — no separate JS files for pages
-- Tailwind 4 for styling (no config file, uses CSS-based config)
-- Zod for runtime validation of shared types
-- No test framework currently in use
-- Route handlers use `res.json({ ok: true, data })` / `res.json({ ok: false, error })` pattern
+1. Read `.claude/memory/handoff.md` — pick up where the last session left off
+2. Read `.claude/memory/mistakes.md` — avoid repeating past errors
+3. Read `.claude/memory/patterns.md` — follow established conventions
+4. When working in `src/server/db/`, `src/server/services/`, `src/server/routes/`, `src/client/components/`, or `docs/` — read the local `CLAUDE.md` in that directory for precision context
+
+## Session End Rule
+
+When context is getting long (~60%+), or Nick says "write a handoff", or a task is complete — write a handoff summary to `.claude/memory/handoff.md` following the skill in `.claude/skills/handoff.md`.
+md`.
+`.
