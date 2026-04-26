@@ -51,7 +51,7 @@ const RETRY_VALIDATION_ATTEMPTS = 1;
 
 const DEFAULT_MODELS: Record<LlmProvider, Record<LlmTier, string>> = {
   anthropic: {
-    reasoning: 'claude-sonnet-4-6-20250627',
+    reasoning: 'claude-sonnet-4-6-20250514',
     standard: 'claude-haiku-4-5-20251001',
     cheap: 'claude-haiku-4-5-20251001',
   },
@@ -77,8 +77,8 @@ const DEFAULT_TIER_CONFIG: Record<LlmTier, TierConfig> = {
     failover: { provider: 'openai' },
   },
   cheap: {
-    primary: { provider: 'openrouter' },
-    failover: { provider: 'openrouter', model: 'deepseek/deepseek-chat-v3-0324' },
+    primary: { provider: 'openrouter', model: 'deepseek/deepseek-chat-v3-0324' },
+    failover: { provider: 'openai' },
   },
 };
 
@@ -104,7 +104,7 @@ const CALL_TYPE_TIER_MAP: Record<string, LlmTier> = {
 
 // Per-million-token pricing (USD).
 export const MODEL_PRICING: Record<string, { inputPerM: number; outputPerM: number }> = {
-  'claude-sonnet-4-6-20250627': { inputPerM: 3.00,  outputPerM: 15.00 },
+  'claude-sonnet-4-6-20250514': { inputPerM: 3.00,  outputPerM: 15.00 },
   'claude-sonnet-4-20250514':   { inputPerM: 3.00,  outputPerM: 15.00 },
   'claude-haiku-4-5-20251001':  { inputPerM: 1.00,  outputPerM: 5.00  },
   'gpt-4.1':                    { inputPerM: 2.00,  outputPerM: 8.00  },
@@ -427,14 +427,18 @@ export class LlmService {
           const latencyMs = Date.now() - start;
           const errMsg = err instanceof Error ? err.message : String(err);
           await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, errMsg);
+          lastError = err instanceof Error ? err : new Error(errMsg);
 
           if (isRetryableError(err)) {
             recordFailure(config.provider);
-            lastError = err instanceof Error ? err : new Error(errMsg);
             break;
           }
 
-          lastError = err instanceof Error ? err : new Error(errMsg);
+          if (err instanceof SyntaxError) {
+            recordFailure(config.provider);
+            break;
+          }
+
           if (attempt < RETRY_VALIDATION_ATTEMPTS) continue;
         }
       }

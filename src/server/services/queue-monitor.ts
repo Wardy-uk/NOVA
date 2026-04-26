@@ -19,9 +19,12 @@ const DEFAULT_FIELDS = [
   'created', 'updated', 'customfield_10010', // SLA
 ];
 
+const MIN_SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
 export class QueueMonitor {
   private jiraClient: JiraRestClient;
   private settings: SettingsQueries;
+  private lastSnapshotAt = 0;
 
   constructor(jiraClient: JiraRestClient, settings: SettingsQueries) {
     this.jiraClient = jiraClient;
@@ -190,7 +193,9 @@ export class QueueMonitor {
     unassigned: number,
     now: Date,
   ): Promise<void> {
+    if (now.getTime() - this.lastSnapshotAt < MIN_SNAPSHOT_INTERVAL_MS) return;
     try {
+      this.lastSnapshotAt = now.getTime();
       // Count tickets created in the last hour
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
       const createdThisHour = issues.filter(i => {

@@ -79,8 +79,25 @@ const flexStringField = z.any().transform((val): string => {
   return String(val ?? '');
 });
 
-const AnalysisItem = z.object({
-  issueKey: z.string(),
+const flexIssueKey = z.any().transform((val): string => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') {
+    return val.issueKey ?? val.issue_key ?? val.key ?? val.ticket_key ?? val.ticketKey ?? val.id ?? '';
+  }
+  return String(val ?? '');
+});
+
+const AnalysisItem = z.preprocess((val: unknown) => {
+  if (val && typeof val === 'object' && !('issueKey' in val)) {
+    const obj = val as Record<string, unknown>;
+    if (obj.issue_key) return { ...obj, issueKey: obj.issue_key };
+    if (obj.key) return { ...obj, issueKey: obj.key };
+    if (obj.ticket_key) return { ...obj, issueKey: obj.ticket_key };
+    if (obj.ticketKey) return { ...obj, issueKey: obj.ticketKey };
+  }
+  return val;
+}, z.object({
+  issueKey: flexIssueKey,
   sentimentScore: flexNumber(-1, 1, 0),
   sentimentSummary: flexStringField,
   commitmentDate: z.any().transform((val): string | null => {
@@ -95,7 +112,7 @@ const AnalysisItem = z.object({
     if (val && typeof val === 'object') return val.quote ?? val.text ?? JSON.stringify(val);
     return null;
   }),
-});
+}));
 
 const AnalysisBatchSchema = z.any().transform((val) => {
   if (Array.isArray(val)) return { results: val };

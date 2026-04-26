@@ -1,33 +1,70 @@
 import { z } from 'zod';
 
+const flexEnum = <T extends string>(values: readonly [T, ...T[]]) =>
+  z.any().transform((val): T => {
+    if (typeof val === 'string') {
+      const lower = val.toLowerCase() as T;
+      if ((values as readonly string[]).includes(lower)) return lower;
+      if ((values as readonly string[]).includes(val)) return val as T;
+    }
+    if (val && typeof val === 'object') {
+      const candidate = val.value ?? val.type ?? val.level ?? val.name ?? val.label;
+      if (typeof candidate === 'string' && (values as readonly string[]).includes(candidate.toLowerCase())) return candidate.toLowerCase() as T;
+    }
+    return values[values.length - 1];
+  });
+
+const flexString = z.any().transform((val): string => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') return val.description ?? val.summary ?? val.value ?? val.text ?? JSON.stringify(val);
+  return String(val ?? '');
+});
+
+const flexNullableString = z.any().transform((val): string | null => {
+  if (val === null || val === undefined || val === 'null' || val === 'none' || val === 'N/A') return null;
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') return val.description ?? val.value ?? val.text ?? JSON.stringify(val);
+  return String(val ?? '');
+});
+
+const flexConfidence = z.any().transform((val): number => {
+  if (typeof val === 'number') return Math.max(0, Math.min(1, val));
+  if (typeof val === 'string') { const n = parseFloat(val); return isNaN(n) ? 0.5 : Math.max(0, Math.min(1, n)); }
+  if (val && typeof val === 'object') {
+    const c = val.confidence ?? val.score ?? val.value;
+    if (typeof c === 'number') return Math.max(0, Math.min(1, c));
+  }
+  return 0.5;
+});
+
 export const ClassificationResultSchema = z.object({
-  ticket_type: z.enum(['incident', 'service_request', 'change', 'problem']).optional(),
-  category: z.string(),
-  sub_category: z.string(),
-  software_area: z.string().nullable(),
-  problem_type: z.enum(['bug', 'config', 'user-error', 'data-issue', 'integration', 'performance', 'access', 'feature-gap', 'documentation', 'unknown']),
-  root_cause: z.string().nullable(),
-  impact: z.enum(['high', 'medium', 'low']).optional(),
-  urgency: z.enum(['high', 'medium', 'low']).optional(),
-  priority_matrix: z.enum(['P1', 'P2', 'P3', 'P4']).optional(),
-  confidence: z.number().min(0).max(1),
-  reasoning: z.string(),
+  ticket_type: flexEnum(['incident', 'service_request', 'change', 'problem'] as const).optional(),
+  category: flexString,
+  sub_category: flexString,
+  software_area: flexNullableString,
+  problem_type: flexEnum(['bug', 'config', 'user-error', 'data-issue', 'integration', 'performance', 'access', 'feature-gap', 'documentation', 'unknown'] as const),
+  root_cause: flexNullableString,
+  impact: flexEnum(['high', 'medium', 'low'] as const).optional(),
+  urgency: flexEnum(['high', 'medium', 'low'] as const).optional(),
+  priority_matrix: flexEnum(['P1', 'P2', 'P3', 'P4'] as const).optional(),
+  confidence: flexConfidence,
+  reasoning: flexString,
 });
 
 export type ClassificationResult = z.infer<typeof ClassificationResultSchema>;
 
 export const TrendAnalysisResultSchema = z.object({
-  period: z.string(),
+  period: flexString,
   categories: z.array(z.object({
-    category: z.string(),
-    count: z.number(),
-    trend: z.enum(['rising', 'stable', 'falling']),
-    change_pct: z.number(),
+    category: flexString,
+    count: z.any().transform((v): number => typeof v === 'number' ? v : parseInt(String(v), 10) || 0),
+    trend: flexEnum(['rising', 'stable', 'falling'] as const),
+    change_pct: z.any().transform((v): number => typeof v === 'number' ? v : parseFloat(String(v)) || 0),
   })),
-  notable_patterns: z.array(z.string()),
-  emerging_issues: z.array(z.string()),
-  recommendations: z.array(z.string()),
-  narrative: z.string(),
+  notable_patterns: z.array(flexString),
+  emerging_issues: z.array(flexString),
+  recommendations: z.array(flexString),
+  narrative: flexString,
 });
 
 export type TrendAnalysisResult = z.infer<typeof TrendAnalysisResultSchema>;
