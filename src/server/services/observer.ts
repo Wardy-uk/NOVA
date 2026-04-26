@@ -197,13 +197,16 @@ export class Observer {
     };
   }
 
-  async getCostTrend(startDate: string, endDate: string): Promise<Array<{ period: string; cost: number; calls: number }>> {
+  async getCostTrend(startDate: string, endDate: string): Promise<Array<{ period: string; cost: number; calls: number; decisions: number }>> {
     const start = new Date(startDate + 'T00:00:00Z');
     const end = new Date(endDate + 'T00:00:00Z');
     const diffDays = Math.round((end.getTime() - start.getTime()) / 86_400_000);
 
+    let costRows: Array<{ period: string; cost: number; calls: number }>;
+    let decisionRows: Array<{ period: string; decisions: number }>;
+
     if (diffDays <= 1) {
-      return query<{ period: string; cost: number; calls: number }>(
+      costRows = await query<{ period: string; cost: number; calls: number }>(
         `SELECT FORMAT(created_at, 'HH') as period,
                 ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
          FROM agent_llm_calls
@@ -211,17 +214,35 @@ export class Observer {
          GROUP BY FORMAT(created_at, 'HH') ORDER BY period`,
         [startDate],
       );
+      decisionRows = await query<{ period: string; decisions: number }>(
+        `SELECT FORMAT(created_at, 'HH') as period, COUNT(*) as decisions
+         FROM agent_decisions
+         WHERE CONVERT(DATE, created_at) = CONVERT(DATE, ?)
+         GROUP BY FORMAT(created_at, 'HH')`,
+        [startDate],
+      );
+    } else {
+      costRows = await query<{ period: string; cost: number; calls: number }>(
+        `SELECT CONVERT(VARCHAR(10), created_at, 120) as period,
+                ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
+         FROM agent_llm_calls
+         WHERE CONVERT(DATE, created_at) >= CONVERT(DATE, ?)
+           AND CONVERT(DATE, created_at) <= CONVERT(DATE, ?)
+         GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY period`,
+        [startDate, endDate],
+      );
+      decisionRows = await query<{ period: string; decisions: number }>(
+        `SELECT CONVERT(VARCHAR(10), created_at, 120) as period, COUNT(*) as decisions
+         FROM agent_decisions
+         WHERE CONVERT(DATE, created_at) >= CONVERT(DATE, ?)
+           AND CONVERT(DATE, created_at) <= CONVERT(DATE, ?)
+         GROUP BY CONVERT(VARCHAR(10), created_at, 120)`,
+        [startDate, endDate],
+      );
     }
 
-    return query<{ period: string; cost: number; calls: number }>(
-      `SELECT CONVERT(VARCHAR(10), created_at, 120) as period,
-              ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls
-       FROM agent_llm_calls
-       WHERE CONVERT(DATE, created_at) >= CONVERT(DATE, ?)
-         AND CONVERT(DATE, created_at) <= CONVERT(DATE, ?)
-       GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY period`,
-      [startDate, endDate],
-    );
+    const decisionMap = new Map(decisionRows.map(r => [r.period, r.decisions]));
+    return costRows.map(r => ({ ...r, decisions: decisionMap.get(r.period) ?? 0 }));
   }
 
   async getCostsByMode(days: number, workingHours: string, workingDays: string): Promise<{

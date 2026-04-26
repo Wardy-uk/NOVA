@@ -5,15 +5,16 @@ import {
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip,
   Legend,
   Filler,
 } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { Chart } from 'react-chartjs-2';
 import { TeamAvailabilityWidget } from './TeamAvailabilityWidget.js';
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 
 // ── Types ──
 
@@ -2581,7 +2582,7 @@ function SpendChart() {
   const [range, setRange] = useState<TrendRange>('today');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
-  const [trendData, setTrendData] = useState<Array<{ period: string; cost: number; calls: number }>>([]);
+  const [trendData, setTrendData] = useState<Array<{ period: string; cost: number; calls: number; decisions?: number }>>([]);
   const [loading, setLoading] = useState(false);
 
   const loadTrend = useCallback(async (r: TrendRange, cs?: string, ce?: string) => {
@@ -2624,10 +2625,25 @@ function SpendChart() {
     ? allHours.map(h => periodMap.get(h)?.calls ?? 0)
     : trendData.map(d => d.calls);
 
+  const decisionValues = isHourly
+    ? allHours.map(h => periodMap.get(h)?.decisions ?? 0)
+    : trendData.map(d => d.decisions ?? 0);
+
   const chartData = {
     labels,
     datasets: [
       {
+        type: 'bar' as const,
+        label: 'Decisions',
+        data: decisionValues,
+        backgroundColor: 'rgba(139, 92, 246, 0.15)',
+        borderColor: 'rgba(139, 92, 246, 0.3)',
+        borderWidth: 1,
+        yAxisID: 'y1',
+        order: 2,
+      },
+      {
+        type: 'line' as const,
         label: 'Spend (£)',
         data: costValues,
         borderColor: '#5ec1ca',
@@ -2637,8 +2653,10 @@ function SpendChart() {
         pointRadius: isHourly ? 3 : 2,
         pointHoverRadius: 5,
         yAxisID: 'y',
+        order: 1,
       },
       {
+        type: 'line' as const,
         label: 'Calls',
         data: callValues,
         borderColor: '#f59e0b',
@@ -2648,6 +2666,7 @@ function SpendChart() {
         pointRadius: isHourly ? 2 : 1,
         pointHoverRadius: 4,
         yAxisID: 'y1',
+        order: 0,
       },
     ],
   };
@@ -2716,7 +2735,7 @@ function SpendChart() {
         ) : trendData.length === 0 && !isHourly ? (
           <div className="flex items-center justify-center h-full text-xs text-neutral-500">No data for this period</div>
         ) : (
-          <Line data={chartData} options={chartOptions} />
+          <Chart type="bar" data={chartData} options={chartOptions} />
         )}
       </div>
     </div>
