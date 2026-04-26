@@ -37,6 +37,8 @@ import { createAiImprovementRoutes } from './routes/ai-improvement.js';
 import { AiImprovementService } from './services/ai-improvement.js';
 import { createGamificationRoutes } from './routes/gamification.js';
 import { GamificationService } from './services/gamification.js';
+import { createEscalationRoutes } from './routes/escalation.js';
+import { EscalationLogService } from './services/escalation-log-service.js';
 import { DevReviewQueries } from './db/dev-review-queries.js';
 import { createTrendsRoutes } from './routes/trends.js';
 import { createFeedbackRoutes } from './routes/feedback.js';
@@ -933,6 +935,13 @@ async function main() {
     const gamificationService = new GamificationService();
     app.use('/api/gamification', createGamificationRoutes(gamificationService));
 
+    // Escalation logging
+    const escalationLog = new EscalationLogService();
+    app.use('/api/escalations', createEscalationRoutes({
+      escalationLog,
+      jiraClient: agentLoop.getJiraClient(),
+    }));
+
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,
       availabilityService,
@@ -947,6 +956,7 @@ async function main() {
       jiraSyncService,
       suggestionEngine,
       riskScorer: agentLoop.getRiskScorer(),
+      escalationLog,
     }));
 
     // KPI pipeline timers (initial kicks staggered to avoid startup storm)

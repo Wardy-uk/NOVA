@@ -941,6 +941,37 @@ async function runMigrations(): Promise<void> {
     // KB gap status extensions for article workflow
     `IF COL_LENGTH('kb_gap_log', 'confluence_url') IS NULL
      ALTER TABLE kb_gap_log ADD confluence_url NVARCHAR(500) NULL;`,
+
+    // WP-30: Escalation audit log
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'escalation_log') AND type = 'U')
+     CREATE TABLE escalation_log (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key NVARCHAR(30) NOT NULL,
+       escalation_type NVARCHAR(30) NOT NULL,
+       from_tier NVARCHAR(50) NULL,
+       to_tier NVARCHAR(50) NULL,
+       reason_code NVARCHAR(50) NULL,
+       reason_label NVARCHAR(200) NULL,
+       escalated_by NVARCHAR(100) NULL,
+       assigned_to NVARCHAR(200) NULL,
+       notes NVARCHAR(MAX) NULL,
+       decision_id INT NULL,
+       source NVARCHAR(20) NOT NULL DEFAULT 'manual',
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_escalation_log_ticket')
+     CREATE INDEX IX_escalation_log_ticket ON escalation_log (ticket_key, created_at DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_escalation_log_date')
+     CREATE INDEX IX_escalation_log_date ON escalation_log (created_at DESC, escalation_type);`,
+
+    // WP-23j: Add agent_id to gamification tables for Azure SQL bridge
+    `IF COL_LENGTH('agent_achievements', 'agent_id') IS NULL
+     ALTER TABLE agent_achievements ADD agent_id INT NULL;`,
+
+    `IF COL_LENGTH('agent_streaks', 'agent_id') IS NULL
+     ALTER TABLE agent_streaks ADD agent_id INT NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

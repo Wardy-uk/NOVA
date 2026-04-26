@@ -20,6 +20,7 @@ import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
 import type { JiraSyncService } from '../services/jira-sync-service.js';
 import type { SuggestionEngine } from '../services/suggestion-engine.js';
 import type { RiskScorer } from '../services/risk-scorer.js';
+import type { EscalationLogService } from '../services/escalation-log-service.js';
 
 interface AgentRouteDeps {
   agentLoop: AgentLoop;
@@ -36,6 +37,7 @@ interface AgentRouteDeps {
   jiraSyncService: JiraSyncService | null;
   suggestionEngine: SuggestionEngine | null;
   riskScorer: RiskScorer | null;
+  escalationLog: EscalationLogService | null;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
@@ -1302,6 +1304,22 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
             assignee: { accountId: agent.jira_account_id },
           });
         }
+      }
+
+      try {
+        await deps?.escalationLog?.log({
+          ticket_key: ticketKey,
+          escalation_type: 'manual',
+          to_tier: 'T2',
+          reason_code: reasonCode,
+          reason_label: reasonLabel ?? reasonCode,
+          escalated_by: username,
+          assigned_to: assignToAgentId ? String(assignToAgentId) : undefined,
+          notes: additionalNotes,
+          source: 'nova',
+        });
+      } catch (e) {
+        console.warn('[escalation] Failed to log:', e instanceof Error ? e.message : e);
       }
 
       res.json({ ok: true, data: { ticketKey, escalated: true } });

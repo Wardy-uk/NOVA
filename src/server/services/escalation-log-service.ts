@@ -1,0 +1,201 @@
+import { query, execute, executeAndGetId } from './database.js';
+
+export interface EscalationLogEntry {
+  id: number;
+  ticket_key: string;
+  escalation_type: string;
+  from_tier: string | null;
+  to_tier: string | null;
+  reason_code: string | null;
+  reason_label: string | null;
+  escalated_by: string | null;
+  assigned_to: string | null;
+  notes: string | null;
+  decision_id: number | null;
+  source: string;
+  created_at: string;
+}
+
+export interface LogEscalationInput {
+  ticket_key: string;
+  escalation_type: 'manual' | 'ai_agent' | 'jira_transition' | 'sla_risk';
+  from_tier?: string;
+  to_tier?: string;
+  reason_code?: string;
+  reason_label?: string;
+  escalated_by?: string;
+  assigned_to?: string;
+  notes?: string;
+  decision_id?: number;
+  source?: string;
+  created_at?: string;
+}
+
+export interface EscalationStats {
+  total: number;
+  by_type: Array<{ escalation_type: string; count: number }>;
+  by_tier: Array<{ to_tier: string; count: number }>;
+  by_reason: Array<{ reason_code: string; reason_label: string | null; count: number }>;
+  daily: Array<{ date: string; count: number }>;
+  escalation_rate: number | null;
+}
+
+const TIER_PATTERNS: Record<string, string> = {
+  'waiting for support': 'T1',
+  'in progress': 'T1',
+  'waiting for t2 support': 'T2',
+  't2 in progress': 'T2',
+  'waiting for t3 support': 'T3',
+  't3 in progress': 'T3',
+  'with development': 'Dev',
+  'development in progress': 'Dev',
+  'escalated': 'T2',
+};
+
+export function detectTierFromStatus(status: string): string | null {
+  return TIER_PATTERNS[status.toLowerCase()] ?? null;
+}
+
+export class EscalationLogService {
+
+  async log(input: LogEscalationInput): Promise<number> {
+    return executeAndGetId(
+      `INSERT INTO escalation_log
+       (ticket_key, escalation_type, from_tier, to_tier, reason_code, reason_label,
+        escalated_by, assigned_to, notes, decision_id, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.ticket_key,
+        input.escalation_type,
+        input.from_tier ?? null,
+        input.to_tier ?? null,
+        input.reason_code ?? null,
+        input.reason_label ?? null,
+        input.escalated_by ?? null,
+        input.assigned_to ?? null,
+        input.notes ?? null,
+        input.decision_id ?? null,
+        input.source ?? 'manual',
+        input.created_at ?? new Date().toISOString(),
+      ],
+    );
+  }
+
+  async getAll(opts?: { days?: number; type?: string; tier?: string }): Promise<EscalationLogEntry[]> {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (opts?.days) {
+      conditions.push('created_at >= DATEADD(day, ?, GETUTCDATE())');
+      params.push(-opts.days);
+    }
+    if (opts?.type) {
+      conditions.push('escalation_type = ?');
+      params.push(opts.type);
+    }
+    if (opts?.tier) {
+      conditions.push('to_tier = ?');
+      params.push(opts.tier);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    return query<EscalationLogEntry>(
+      `SELECT * FROM escalation_log ${where} ORDER BY created_at DESC`,
+      params,
+    );
+  }
+
+  async getStats(days = 30): Promise<EscalationStats> {
+    const [totalRows, byType, byTier, byReason, daily, ticketCount] = await Promise.all([
+      query<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE())`,
+        [-days],
+      ),
+      query<{ escalation_type: string; count: number }>(
+        `SELECT escalation_type, COUNT(*) as count FROM escalation_log
+         WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+         GROUP BY escalation_type ORDER BY count DESC`,
+        [-days],
+      ),
+      query<{ to_tier: string; count: number }>(
+        `SELECT ISNULL(to_tier, 'Unknown') as to_tier, COUNT(*) as count FROM escalation_log
+         WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+         GROUP BY to_tier ORDER BY count DESC`,
+        [-days],
+      ),
+      query<{ reason_code: string; reason_label: string | null; count: number }>(
+        `SELECT ISNULL(reason_code, 'unknown') as reason_code, MAX(reason_label) as reason_label, COUNT(*) as count
+         FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+         GROUP BY reason_code ORDER BY count DESC`,
+        [-days],
+      ),
+      query<{ date: string; count: number }>(
+        `SELECT CONVERT(VARCHAR(10), created_at, 120) as date, COUNT(*) as count
+         FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+         GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY date`,
+        [-days],
+      ),
+      query<{ cnt: number }>(
+        `SELECT COUNT(DISTINCT ticket_key) as cnt FROM jira_issue_cache
+         WHERE created >= DATEADD(day, ?, GETUTCDATE())`,
+        [-days],
+      ),
+    ]);
+
+    const total = totalRows[0]?.cnt ?? 0;
+    const tickets = ticketCount[0]?.cnt ?? 0;
+
+    return {
+      total,
+      by_type: byType,
+      by_tier: byTier,
+      by_reason: byReason,
+      daily,
+      escalation_rate: tickets > 0 ? Math.round((total / tickets) * 100 * 10) / 10 : null,
+    };
+  }
+
+  async backfillFromChangelog(
+    ticketKey: string,
+    changelog: Array<{
+      created: string;
+      author: { displayName: string };
+      items: Array<{ field: string; fromString: string | null; toString: string | null }>;
+    }>,
+  ): Promise<number> {
+    let inserted = 0;
+    for (const entry of changelog) {
+      const statusChanges = entry.items.filter(i => i.field === 'status');
+      for (const change of statusChanges) {
+        const fromTier = detectTierFromStatus(change.fromString ?? '');
+        const toTier = detectTierFromStatus(change.toString ?? '');
+        if (!fromTier || !toTier || fromTier === toTier) continue;
+
+        const tierRank: Record<string, number> = { T1: 1, T2: 2, T3: 3, Dev: 4 };
+        if ((tierRank[toTier] ?? 0) <= (tierRank[fromTier] ?? 0)) continue;
+
+        const existing = await query<{ cnt: number }>(
+          `SELECT COUNT(*) as cnt FROM escalation_log
+           WHERE ticket_key = ? AND source = 'jira_backfill'
+           AND from_tier = ? AND to_tier = ?
+           AND ABS(DATEDIFF(minute, created_at, ?)) < 5`,
+          [ticketKey, fromTier, toTier, entry.created],
+        );
+        if ((existing[0]?.cnt ?? 0) > 0) continue;
+
+        await this.log({
+          ticket_key: ticketKey,
+          escalation_type: 'jira_transition',
+          from_tier: fromTier,
+          to_tier: toTier,
+          escalated_by: entry.author.displayName,
+          notes: `${change.fromString} → ${change.toString}`,
+          source: 'jira_backfill',
+          created_at: entry.created,
+        });
+        inserted++;
+      }
+    }
+    return inserted;
+  }
+}

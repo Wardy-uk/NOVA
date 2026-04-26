@@ -409,6 +409,25 @@ export class JiraRestClient {
     );
   }
 
+  /** Get issue changelog (status transitions, field changes).
+   *  Returns changelog entries with items array — use to detect escalation transitions. */
+  async getChangelog(issueKey: string, maxResults = 100): Promise<Array<{
+    id: string;
+    created: string;
+    author: { displayName: string; accountId: string };
+    items: Array<{ field: string; fromString: string | null; toString: string | null }>;
+  }>> {
+    const result = await this.request<{
+      values: Array<{
+        id: string;
+        created: string;
+        author: { displayName: string; accountId: string };
+        items: Array<{ field: string; fromString: string | null; toString: string | null }>;
+      }>;
+    }>('GET', `issue/${issueKey}/changelog?maxResults=${maxResults}`);
+    return result?.values ?? [];
+  }
+
   /** Get comments for an issue, newest first. Requests the jsdPublic and
    *  properties expands so internal/public can be distinguished. */
   async getComments(issueKey: string, maxResults = 5): Promise<JiraComment[]> {

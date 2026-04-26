@@ -22,6 +22,7 @@ import { HybridActionDetector } from './hybrid-action-detector.js';
 import { PluginToTpjExecutor } from './plugin-to-tpj-executor.js';
 import { AbuseReportExecutor } from './abuse-report-executor.js';
 import { ExternalDbService } from './external-db.js';
+import { EscalationLogService } from './escalation-log-service.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 
 const DEFAULT_INTERVAL_MS = 60_000;
@@ -75,7 +76,7 @@ export class AgentLoop {
     this.autonomyEngine = new AutonomyEngine();
     this.perceiver = new Perceiver(jiraClient, settings, cache);
     this.reasoner = new Reasoner(llmService, kbSearch, this.autonomyEngine);
-    this.actor = new Actor(jiraClient);
+    this.actor = new Actor(jiraClient, new EscalationLogService());
     this.observer = new Observer();
     this.alertService = new AlertService(settings);
     this.lifecycleManager = new LifecycleManager(

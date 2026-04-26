@@ -46,6 +46,7 @@ const SurveyAdminView = lazy(() => import('./components/SurveyAdminView.js').the
 import { SurveyRespondView } from './components/SurveyRespondView.js';
 import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
 const TrendsView = lazy(() => import('./components/TrendsView.js').then(m => ({ default: m.TrendsView })));
+const EscalationReportView = lazy(() => import('./components/EscalationReportView.js').then(m => ({ default: m.EscalationReportView })));
 const TrainingMatrixView = lazy(() => import('./components/TrainingMatrixView.js').then(m => ({ default: m.TrainingMatrixView })));
 const TrainingSummaryView = lazy(() => import('./components/TrainingSummaryView.js').then(m => ({ default: m.TrainingSummaryView })));
 const BoardMiView = lazy(() => import('./components/BoardMiView.js').then(m => ({ default: m.BoardMiView })));
@@ -92,7 +93,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
-  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'agent-kpis' | 'qa'
+  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
@@ -204,6 +205,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-daily-history', label: 'Daily History' },
       { view: 'kpi-breached', label: 'Agent Breaches' },
       { view: 'kpi-team-breached', label: 'Team Breaches' },
+      { view: 'kpi-escalations', label: 'Escalations' },
       { view: 'agent-kpis', label: 'Agent KPIs' },
     ],
   },
@@ -1099,6 +1101,9 @@ export function App() {
           )}
           {view === 'kpi-trends' && (
             <TrendsView />
+          )}
+          {view === 'kpi-escalations' && (
+            <EscalationReportView />
           )}
           {view === 'qa' && (
             <QAView />

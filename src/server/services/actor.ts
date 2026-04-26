@@ -1,11 +1,14 @@
 import type { JiraRestClient } from './jira-client.js';
 import type { AgentDecision, ActionResult } from './agent-types.js';
+import type { EscalationLogService } from './escalation-log-service.js';
 
 export class Actor {
   private jiraClient: JiraRestClient;
+  private escalationLog?: EscalationLogService;
 
-  constructor(jiraClient: JiraRestClient) {
+  constructor(jiraClient: JiraRestClient, escalationLog?: EscalationLogService) {
     this.jiraClient = jiraClient;
+    this.escalationLog = escalationLog;
   }
 
   async execute(decision: AgentDecision): Promise<ActionResult> {
@@ -98,6 +101,22 @@ export class Actor {
   private async escalate(decision: AgentDecision): Promise<ActionResult> {
     const briefText = `[AI Agent Escalation]\n\nTicket: ${decision.ticketKey}\nConfidence: ${decision.confidence}\nReasoning: ${decision.reasoning}`;
     await this.jiraClient.addComment(decision.ticketKey, briefText, { internal: true });
+
+    try {
+      await this.escalationLog?.log({
+        ticket_key: decision.ticketKey,
+        escalation_type: 'ai_agent',
+        to_tier: (decision.output?.targetTier as string) ?? 'T2',
+        reason_code: (decision.output?.reasonCode as string) ?? undefined,
+        reason_label: decision.reasoning?.slice(0, 200),
+        escalated_by: 'ai_agent',
+        decision_id: undefined,
+        source: 'nova_ai',
+      });
+    } catch (e) {
+      console.warn('[actor] Failed to log escalation:', e instanceof Error ? e.message : e);
+    }
+
     return { success: true, action: 'escalate', ticketKey: decision.ticketKey, detail: 'Escalation brief posted as internal comment.' };
   }
 

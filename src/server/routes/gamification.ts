@@ -52,5 +52,15 @@ export function createGamificationRoutes(service: GamificationService): Router {
     }
   });
 
+  router.get('/points', async (req: Request, res: Response) => {
+    if (!req.user) { res.status(401).json({ ok: false }); return; }
+    try {
+      const points = await service.getPoints(req.user.id);
+      res.json({ ok: true, data: { points } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
   return router;
 }

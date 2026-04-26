@@ -42,6 +42,7 @@ interface RankedAgent {
   available: boolean;
   solvedToday: number;
   solvedWeek: number;
+  solvedMonth: number;
   openTotal: number;
   over2h: number;
   stale: number;
@@ -51,6 +52,7 @@ interface RankedAgent {
   csatScore: number | null;
   goldenRulesScore: number | null;
   compositeScore: number;
+  points: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -214,15 +216,18 @@ export function KpiLeaderboardView() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const env = 'live' as const;
   const [tab, setTab] = useState<LeaderboardTab>('combined');
-  const [period, setPeriod] = useState<'daily' | 'weekly'>('daily');
+  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [nameFilter, setNameFilter] = useState('');
+  const [teamFilter, setTeamFilter] = useState('');
+  const [tierFilter, setTierFilter] = useState('');
 
   const fetchData = useCallback(async () => {
     setError(null);
     try {
+      const dailyDays = period === 'monthly' ? 30 : 7;
       const [agentsRes, dailyRes] = await Promise.all([
         fetch(`/api/kpi-data/agents?env=${env}`),
-        fetch(`/api/kpi-data/agent-daily?env=${env}&days=7`),
+        fetch(`/api/kpi-data/agent-daily?env=${env}&days=${dailyDays}`),
       ]);
 
       const [agentsData, dailyData] = await Promise.all([
@@ -240,7 +245,7 @@ export function KpiLeaderboardView() {
     } finally {
       setLoading(false);
     }
-  }, [env]);
+  }, [env, period]);
 
   useEffect(() => { setLoading(true); fetchData(); }, [fetchData]);
 
@@ -334,6 +339,14 @@ export function KpiLeaderboardView() {
         ? scores.reduce((s, v) => s + v, 0) / scores.length
         : 0;
 
+      const solvedMonth = rows.reduce((sum, r) => sum + (r.SolvedTickets_Today || 0), 0);
+
+      // Points: tickets=1, no-breach bonus=2 per day with 100% SLA, QA green=3 per good score
+      const ticketPts = a.SolvedTickets_ThisWeek * 1;
+      const slaPts = (slaPercent != null && slaPercent >= 95) ? 2 * rows.length : 0;
+      const qaPts = (qa != null && qa >= 4) ? 3 : 0;
+      const points = ticketPts + slaPts + qaPts;
+
       return {
         name: `${a.AgentName} ${a.AgentSurname}`,
         team: a.Team,
@@ -341,6 +354,7 @@ export function KpiLeaderboardView() {
         available: a.IsAvailable,
         solvedToday: a.SolvedTickets_Today,
         solvedWeek: a.SolvedTickets_ThisWeek,
+        solvedMonth,
         openTotal: a.OpenTickets_Total,
         over2h: a.OpenTickets_Over2Hours,
         stale: a.OpenTickets_NoUpdateToday,
@@ -350,6 +364,7 @@ export function KpiLeaderboardView() {
         csatScore: csat,
         goldenRulesScore: gr,
         compositeScore,
+        points,
       };
     });
   })();
@@ -358,7 +373,7 @@ export function KpiLeaderboardView() {
   const sorted = [...merged].sort((a, b) => {
     switch (tab) {
       case 'productivity': {
-        if (period === 'weekly') {
+        if (period === 'monthly' || period === 'weekly') {
           const diff = b.solvedWeek - a.solvedWeek;
           return diff !== 0 ? diff : b.solvedToday - a.solvedToday;
         }
@@ -373,9 +388,11 @@ export function KpiLeaderboardView() {
       default: {
         const cDiff = b.compositeScore - a.compositeScore;
         if (cDiff !== 0) return cDiff;
-        return period === 'weekly'
-          ? b.solvedWeek - a.solvedWeek
-          : b.solvedToday - a.solvedToday;
+        return period === 'monthly'
+          ? b.solvedMonth - a.solvedMonth
+          : period === 'weekly'
+            ? b.solvedWeek - a.solvedWeek
+            : b.solvedToday - a.solvedToday;
       }
     }
   });
@@ -403,10 +420,10 @@ export function KpiLeaderboardView() {
   const maxQa = Math.max(...merged.map(m => m.qaScore ?? 0), 1);
 
   /* ---- Column headers per tab (dynamic based on period) ---- */
-  const solvedLabel = period === 'weekly' ? 'Solved Week' : 'Solved Today';
+  const solvedLabel = period === 'monthly' ? 'Solved Month' : period === 'weekly' ? 'Solved Week' : 'Solved Today';
   const columnHeaders: Record<LeaderboardTab, string[]> = {
-    combined: ['Rank', 'Agent', 'Team', 'Tier', 'Tix/Hr', 'SLA %', 'QA Score', 'CSAT', 'Composite', solvedLabel],
-    productivity: ['Rank', 'Agent', 'Team', 'Tier', 'Tix/Hr', 'Solved Today', 'Solved Week', 'Open', '>2h'],
+    combined: ['Rank', 'Agent', 'Team', 'Tier', 'Points', 'Tix/Hr', 'SLA %', 'QA Score', 'Composite', solvedLabel],
+    productivity: ['Rank', 'Agent', 'Team', 'Tier', 'Points', 'Tix/Hr', 'Solved Today', 'Solved Week', 'Open', '>2h'],
     sla: ['Rank', 'Agent', 'Team', 'Tier', 'SLA %', 'Open', '>2h Overdue', 'Stale', solvedLabel],
     quality: ['Rank', 'Agent', 'Team', 'Tier', 'QA Score', 'CSAT', 'Golden Rules', 'Tix/Hr', solvedLabel],
   };
@@ -563,6 +580,26 @@ export function KpiLeaderboardView() {
           </td>
         );
       }
+      case 'Solved Month': {
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{
+              fontSize: 16, fontWeight: 800,
+              color: agent.solvedMonth > 0 ? C.teal : C.text3,
+            }}>{agent.solvedMonth}</span>
+          </td>
+        );
+      }
+      case 'Points': {
+        return (
+          <td key={header} style={cellStyle()}>
+            <span style={{
+              fontWeight: 800, fontSize: 14,
+              color: agent.points >= 20 ? C.green : agent.points >= 10 ? C.amber : C.text2,
+            }}>{agent.points}</span>
+          </td>
+        );
+      }
       case 'Open':
         return <td key={header} style={{ ...cellStyle(), color: C.text2 }}>{agent.openTotal}</td>;
       case '>2h':
@@ -682,7 +719,7 @@ export function KpiLeaderboardView() {
       }}>
         <StatPill value={totalAgents} label="Agents" color={C.teal} />
         <StatPill value={availableCount} label="Available" color={C.green} />
-        <StatPill value={period === 'daily' ? totalSolvedToday : totalSolvedWeek} label={period === 'daily' ? 'Solved Today' : 'Solved This Week'} color={C.purple} />
+        <StatPill value={period === 'daily' ? totalSolvedToday : totalSolvedWeek} label={period === 'daily' ? 'Solved Today' : period === 'weekly' ? 'Solved This Week' : 'Solved This Month'} color={C.purple} />
         <StatPill value={avgTph} label="Avg Tix/Hr" color={C.teal} />
         <StatPill value={avgSla} label="Avg SLA" color={C.green} />
         <StatPill value={avgQa} label="Avg QA" color={C.amber} />
@@ -712,6 +749,7 @@ export function KpiLeaderboardView() {
           {([
             { id: 'daily' as const, label: 'Daily' },
             { id: 'weekly' as const, label: 'Weekly' },
+            { id: 'monthly' as const, label: 'Monthly' },
           ]).map(p => (
             <button
               key={p.id}
@@ -727,8 +765,8 @@ export function KpiLeaderboardView() {
         </div>
       </div>
 
-      {/* ---- Agent Name Filter ---- */}
-      <div style={{ marginBottom: 16 }}>
+      {/* ---- Filters ---- */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
         <input
           type="text"
           placeholder="Filter by agent name..."
@@ -737,11 +775,48 @@ export function KpiLeaderboardView() {
           style={{
             padding: '8px 16px', borderRadius: 20, border: `1px solid ${C.border}`,
             background: C.glass, color: C.text1, fontSize: 13, fontFamily: 'inherit',
-            width: 260, outline: 'none', transition: 'border-color 0.2s',
+            width: 220, outline: 'none', transition: 'border-color 0.2s',
           }}
           onFocus={e => { e.currentTarget.style.borderColor = `${C.teal}60`; }}
           onBlur={e => { e.currentTarget.style.borderColor = C.border; }}
         />
+        <select
+          value={teamFilter}
+          onChange={e => setTeamFilter(e.target.value)}
+          style={{
+            padding: '7px 14px', borderRadius: 20, border: `1px solid ${C.border}`,
+            background: C.glass, color: C.text1, fontSize: 12, fontFamily: 'inherit',
+            cursor: 'pointer', outline: 'none',
+          }}
+        >
+          <option value="">All Teams</option>
+          {[...new Set(agents.map(a => a.Team).filter(Boolean))].sort().map(t => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+        <select
+          value={tierFilter}
+          onChange={e => setTierFilter(e.target.value)}
+          style={{
+            padding: '7px 14px', borderRadius: 20, border: `1px solid ${C.border}`,
+            background: C.glass, color: C.text1, fontSize: 12, fontFamily: 'inherit',
+            cursor: 'pointer', outline: 'none',
+          }}
+        >
+          <option value="">All Tiers</option>
+          {[...new Set(agents.map(a => a.TierCode).filter(Boolean))].sort().map(t => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+        {(nameFilter || teamFilter || tierFilter) && (
+          <button
+            onClick={() => { setNameFilter(''); setTeamFilter(''); setTierFilter(''); }}
+            style={{
+              padding: '6px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              fontSize: 11, fontWeight: 600, background: `${C.red}15`, color: C.red,
+            }}
+          >Clear</button>
+        )}
       </div>
 
       {/* ---- Leaderboard Table ---- */}
@@ -769,9 +844,10 @@ export function KpiLeaderboardView() {
             </thead>
             <tbody>
               {(() => {
-                const filtered = nameFilter.trim()
-                  ? sorted.filter(a => a.name.toLowerCase().includes(nameFilter.toLowerCase()))
-                  : sorted;
+                let filtered = sorted;
+                if (nameFilter.trim()) filtered = filtered.filter(a => a.name.toLowerCase().includes(nameFilter.toLowerCase()));
+                if (teamFilter) filtered = filtered.filter(a => a.team === teamFilter);
+                if (tierFilter) filtered = filtered.filter(a => a.tier === tierFilter);
                 return <>
               {filtered.length === 0 && (
                 <tr>
@@ -779,13 +855,14 @@ export function KpiLeaderboardView() {
                     padding: '40px 16px', textAlign: 'center',
                     color: C.text3, fontSize: 13, fontWeight: 500,
                   }}>
-                    {nameFilter ? 'No agents match filter' : 'No agent data available'}
+                    {(nameFilter || teamFilter || tierFilter) ? 'No agents match filter' : 'No agent data available'}
                   </td>
                 </tr>
               )}
               {filtered.map((agent, i) => {
-                const rank = nameFilter ? i + 1 : i + 1;
-                const isTop3 = rank <= 3 && !nameFilter;
+                const rank = i + 1;
+                const hasFilter = !!(nameFilter || teamFilter || tierFilter);
+                const isTop3 = rank <= 3 && !hasFilter;
                 const hasNoData = agent.compositeScore === 0 && tab === 'combined';
 
                 return (
@@ -847,6 +924,7 @@ interface GamLeaderEntry {
   achievement_count: number;
   best_streak: number;
   current_streak: number;
+  points: number;
 }
 
 interface GamAchievement {
@@ -869,6 +947,7 @@ interface GamProfile {
   totalAchievements: number;
   currentStreaks: Record<string, number>;
   bestStreaks: Record<string, number>;
+  points: number;
 }
 
 const ACHIEVEMENT_ICONS: Record<string, string> = {
@@ -882,6 +961,8 @@ const ACHIEVEMENT_ICONS: Record<string, string> = {
   qa_star: '⭐',
   zero_inbox: '📭',
   early_bird: '🐦',
+  ten_streak: '🔟',
+  first_of_the_day: '🌅',
 };
 
 function GamificationPanel() {
@@ -911,9 +992,17 @@ function GamificationPanel() {
   return (
     <div style={{ marginTop: 24, borderTop: `1px solid ${C.border}`, paddingTop: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text1, margin: 0 }}>
-          Achievements & Streaks
-        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: C.text1, margin: 0 }}>
+            Achievements & Streaks
+          </h3>
+          {profile && (
+            <span style={{
+              padding: '3px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700,
+              background: `${C.purple}15`, color: C.purple,
+            }}>{profile.points} pts</span>
+          )}
+        </div>
         <button
           onClick={checkAchievements}
           disabled={checking}
@@ -979,6 +1068,7 @@ function GamificationPanel() {
                 <tr style={{ color: C.text3, textAlign: 'left' }}>
                   <th style={{ padding: '2px 8px', fontWeight: 500 }}>#</th>
                   <th style={{ padding: '2px 8px', fontWeight: 500 }}>Agent</th>
+                  <th style={{ padding: '2px 8px', fontWeight: 500 }}>Pts</th>
                   <th style={{ padding: '2px 8px', fontWeight: 500 }}>Achievements</th>
                   <th style={{ padding: '2px 8px', fontWeight: 500 }}>Streak</th>
                   <th style={{ padding: '2px 8px', fontWeight: 500 }}>Best</th>
@@ -991,6 +1081,7 @@ function GamificationPanel() {
                       {i + 1}
                     </td>
                     <td style={{ padding: '3px 8px' }}>{e.display_name}</td>
+                    <td style={{ padding: '3px 8px', textAlign: 'center', fontWeight: 700, color: C.purple }}>{e.points || 0}</td>
                     <td style={{ padding: '3px 8px', textAlign: 'center' }}>{e.achievement_count}</td>
                     <td style={{ padding: '3px 8px', textAlign: 'center', color: e.current_streak >= 5 ? GOLD : C.text2 }}>
                       {e.current_streak > 0 ? `${e.current_streak}🔥` : '—'}

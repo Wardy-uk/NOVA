@@ -68,6 +68,8 @@ AreaKey ViewsBackendService DeskDashboard, Kanban, Calendar, KPIs, Breached, Pro
 - **Lazy loading:** Heavy views use `lazy(() => import(...))` in App.tsx
 - **PWA:** vite-plugin-pwa with workbox. manifest.webmanifest in public/, service worker auto-generated. Network-first for /api/*, cache-first for assets.
 - **KB Article pipeline:** `kb_gap_log` (identified by AI triage) → `kb_article_drafts` (LLM-generated) → Confluence publish via MCP/REST. Settings: `kb_confluence_space`, `kb_confluence_parent_page_id`.
+- **Escalation logging:** `escalation_log` table tracks all escalations (manual SOP-002 gate, AI agent, Jira transitions). `escalation-log-service.ts` handles logging + backfill from Jira changelog. Routes: `/api/escalations` (list, stats, backfill). UI: `EscalationReportView.tsx` in KPIs area.
+- **Gamification:** `gamification.ts` — points-based achievement system for agents. Achievements award points, daily streaks tracked. Leaderboard with composite scoring, team/tier filters, daily/weekly/monthly views. Routes: `/api/gamification`.
 
 ## Subprojects
 
@@ -84,7 +86,7 @@ AreaKey ViewsBackendService DeskDashboard, Kanban, Calendar, KPIs, Breached, Pro
 
 ## Versioning
 
-Bump patch in `package.json` with every commit/deploy. Currently v1.1.159. Status bar shows `v{version} ({gitHash})` via Vite `define`.
+Bump patch in `package.json` with every commit/deploy. Currently v1.1.160. Status bar shows `v{version} ({gitHash})` via Vite `define`.
 
 ## Post-Build Rule
 
