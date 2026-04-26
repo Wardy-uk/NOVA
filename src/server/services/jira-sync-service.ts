@@ -252,6 +252,12 @@ export class JiraSyncService {
     const issueEnvironmentText = extractText(f.customfield_13213);
     const developmentDetailsText = extractText(f.customfield_13215);
     const resolutionType = (f.customfield_14494 as any)?.value ?? null;
+    const organisationName = (() => {
+      const orgs = f.customfield_10002 as any;
+      if (Array.isArray(orgs) && orgs.length > 0) return orgs[0]?.name ?? null;
+      if (orgs?.name) return orgs.name;
+      return null;
+    })();
     const slaBreachTime = extractSlaBreachTime(f.customfield_10010);
     const slaBreached = extractSlaBreached(f.customfield_10010);
     const labels = Array.isArray(f.labels) ? (f.labels as string[]).join(';') : null;
@@ -272,7 +278,7 @@ export class JiraSyncService {
         escalation_reason_text = ?, expected_outcome_text = ?, issue_environment_text = ?,
         development_details_text = ?, resolution_type = ?,
         sla_breach_time = ?, sla_breached = ?, labels = ?,
-        issue_links_json = ?, fields_json = ?, synced_at = GETUTCDATE()
+        issue_links_json = ?, fields_json = ?, organisation_name = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
         issue_key, jira_id, project_key, summary, description_text, description_adf,
         status_name, status_category, priority_name, issuetype_name,
@@ -284,7 +290,7 @@ export class JiraSyncService {
         escalation_reason_text, expected_outcome_text, issue_environment_text,
         development_details_text, resolution_type,
         sla_breach_time, sla_breached, labels,
-        issue_links_json, fields_json
+        issue_links_json, fields_json, organisation_name
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
@@ -296,7 +302,7 @@ export class JiraSyncService {
         ?, ?, ?,
         ?, ?,
         ?, ?, ?,
-        ?, ?
+        ?, ?, ?
       );`,
       [
         // Source key
@@ -317,7 +323,7 @@ export class JiraSyncService {
         escalationReasonText || null, expectedOutcomeText || null, issueEnvironmentText || null,
         developmentDetailsText || null, resolutionType,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, labels,
-        issueLinksJson, fieldsJson,
+        issueLinksJson, fieldsJson, organisationName,
         // INSERT values (same order as columns)
         issue.key, issue.id, issue.key.split('-')[0], f.summary as string ?? null,
         descriptionText || null, descriptionAdf,
@@ -334,7 +340,7 @@ export class JiraSyncService {
         escalationReasonText || null, expectedOutcomeText || null, issueEnvironmentText || null,
         developmentDetailsText || null, resolutionType,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, labels,
-        issueLinksJson, fieldsJson,
+        issueLinksJson, fieldsJson, organisationName,
       ],
     );
   }

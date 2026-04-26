@@ -45,6 +45,17 @@ export function createSettingsRoutes(
     res.json({ ok: true, data: safe });
   });
 
+  // GET /api/settings/feature-flags — boolean flags for UI feature toggles
+  router.get('/feature-flags', (_req, res) => {
+    const all = settingsQueries.getAll();
+    const FLAG_KEYS = ['wallboard_key_accounts_enabled', 'wallboard_cs_enabled'];
+    const flags: Record<string, boolean> = {};
+    for (const key of FLAG_KEYS) {
+      flags[key] = all[key] !== 'false';
+    }
+    res.json({ ok: true, data: flags });
+  });
+
   // GET /api/settings/my/ai-key — User's personal AI key override
   router.get('/my/ai-key', async (req, res) => {
     const userId = req.user?.id as number | undefined;

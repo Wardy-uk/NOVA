@@ -1,0 +1,23 @@
+{
+  "name": "NOVA — Nurtur Operational Virtual Assistant",
+  "short_name": "NOVA",
+  "description": "Internal operations platform for the Nurtur tech support team",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#272C33",
+  "background_color": "#272C33",
+  "icons": [
+    {
+      "src": "/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

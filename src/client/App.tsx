@@ -72,6 +72,7 @@ const AgentCoachingView = lazy(() => import('./components/AgentCoachingView.js')
 const AgentPipelinesView = lazy(() => import('./components/AgentPipelinesView.js').then(m => ({ default: m.AgentPipelinesView })));
 const UatComparisonView = lazy(() => import('./components/UatComparisonView.js').then(m => ({ default: m.UatComparisonView })));
 const AgentProfileView = lazy(() => import('./components/AgentProfileView.js').then(m => ({ default: m.AgentProfileView })));
+const KbGapsView = lazy(() => import('./components/KbGapsView.js').then(m => ({ default: m.KbGapsView })));
 const AgentRosterView = lazy(() => import('./components/AgentRosterView.js').then(m => ({ default: m.AgentRosterView })));
 const BriefingView = lazy(() => import('./components/BriefingView.js').then(m => ({ default: m.BriefingView })));
 import { BriefingPopup } from './components/BriefingPopup.js';
@@ -99,7 +100,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
   | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-tickets' | 'calyx-kb' | 'calyx-improvements' | 'calyx-settings' | 'calyx-problems' | 'calyx-changes' | 'calyx-major-incidents' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
-  | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-pipelines' | 'agent-uat-compare'
+  | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -278,6 +279,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'agent-coaching', label: 'Coaching' },
       { view: 'agent-pipelines', label: 'Pipelines' },
       { view: 'agent-uat-compare', label: 'UAT Compare' },
+      { view: 'agent-kb-gaps', label: 'KB Gaps' },
     ],
   },
 };
@@ -294,7 +296,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue', 'calyx-dashboard', 'calyx-playlist', 'calyx-tickets', 'calyx-kb', 'calyx-improvements', 'calyx-settings', 'calyx-problems', 'calyx-changes', 'calyx-major-incidents', 'calyx-slo-settings', 'calyx-business-hours', 'calyx-organisations', 'agent-dashboard', 'agent-workspace', 'people-roster', 'people-profile']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue', 'calyx-dashboard', 'calyx-playlist', 'calyx-tickets', 'calyx-kb', 'calyx-improvements', 'calyx-settings', 'calyx-problems', 'calyx-changes', 'calyx-major-incidents', 'calyx-slo-settings', 'calyx-business-hours', 'calyx-organisations', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -435,6 +437,18 @@ export function App() {
           setAreaAccess({ ...DEFAULT_AREA_ACCESS, ...json.data.areaAccess });
         }
       })
+      .catch(() => {});
+  }, [auth.isAuthenticated, auth.token]);
+
+  // Feature flags from settings (used to toggle optional tabs like wallboards)
+  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (!auth.isAuthenticated || !auth.token) return;
+    fetch('/api/settings/feature-flags', {
+      headers: { Authorization: `Bearer ${auth.token}` },
+    })
+      .then(r => r.json())
+      .then(json => { if (json.ok) setFeatureFlags(json.data || {}); })
       .catch(() => {});
   }, [auth.isAuthenticated, auth.token]);
 
@@ -713,11 +727,18 @@ export function App() {
     return (areaAccess[area] || 'hidden') !== 'hidden';
   };
 
+  const FEATURE_FLAG_TABS: Partial<Record<View, string>> = {
+    'wb-key-accounts': 'wallboard_key_accounts_enabled',
+    'wb-customer-success': 'wallboard_cs_enabled',
+  };
+
   const getVisibleTabs = (area: Area) => {
     return AREAS[area].tabs.filter(t => {
       const gateArea = TAB_AREA_GATE[t.view];
-      if (!gateArea) return true;
-      return (areaAccess[gateArea] || 'hidden') !== 'hidden';
+      if (gateArea && (areaAccess[gateArea] || 'hidden') === 'hidden') return false;
+      const flag = FEATURE_FLAG_TABS[t.view];
+      if (flag && featureFlags[flag] === false) return false;
+      return true;
     });
   };
 
@@ -1273,6 +1294,9 @@ export function App() {
           )}
           {view === 'agent-uat-compare' && canSeeArea('ai-agent') && (
             <UatComparisonView />
+          )}
+          {view === 'agent-kb-gaps' && canSeeArea('ai-agent') && (
+            <KbGapsView token={auth.token!} />
           )}
 
           {/* Administration */}

@@ -1600,20 +1600,115 @@ ${panelHtml}
     }
   });
 
-  // Key Accounts wallboard
+  // Key Accounts wallboard — per-account ticket breakdown from jira_issue_cache
   app.get('/wallboard/key-accounts', async (_req, res) => {
     const wbStart = Date.now();
     try {
-      const html = await renderStatWallboard(settingsQueries, 'Key Accounts', 'Account health & ticket overview', [
-        { label: 'Key Account Tickets', kpi: 'Number of Key Account Tickets' },
-        { label: 'Key Accounts — No Reply', kpi: 'Number of Key Account Tickets With No Reply' },
-        { label: 'Key Accounts — Over SLA', kpi: 'Key Account Tickets over SLA (actionable)' },
-        { label: 'Enterprise Tickets', kpi: 'Number of Enterprise Tickets' },
-        { label: 'Enterprise — No Reply', kpi: 'Number of Enterprise Tickets With No Reply' },
-        { label: 'Enterprise — Over SLA', kpi: 'Enterprise Tickets over SLA (actionable)' },
-      ], 3, '/wallboard/key-accounts');
-      res.send(html);
-      logWallboard('/wallboard/key-accounts', 'info', 200, Date.now() - wbStart, 'OK');
+      const settings = settingsQueries.getAll();
+      const keyAccountsRaw = settings.key_accounts || '';
+      const accountNames = keyAccountsRaw.split(',').map((s: string) => s.trim()).filter(Boolean);
+      if (accountNames.length === 0) {
+        res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Key Accounts</title>
+${wallboardRefreshScript('/wallboard/key-accounts')}
+<style>body{font-family:system-ui;background:#1a1f26;color:#64748b;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}</style>
+</head><body><div style="text-align:center"><h2 style="color:#e2e8f0">Key Accounts Wallboard</h2><p>No key accounts configured. Add account names to the <code>key_accounts</code> setting (comma-separated).</p></div></body></html>`);
+        logWallboard('/wallboard/key-accounts', 'info', 200, Date.now() - wbStart, 'No key accounts configured');
+        return;
+      }
+      const sql = await import('mssql');
+      const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
+      const mainPool = (srv && db && usr && pwd) ? await new sql.default.ConnectionPool({
+        server: srv, database: db, user: usr, password: pwd,
+        options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
+      }).connect() : null;
+
+      const { getPool } = await import('./services/database.js');
+      const novaPool = getPool();
+      const placeholders = accountNames.map((_: string, i: number) => `@acct${i}`).join(',');
+      const req = novaPool.request();
+      accountNames.forEach((name: string, i: number) => req.input(`acct${i}`, sql.default.NVarChar, name));
+      const ticketResult = await req.query(`
+        SELECT organisation_name, issue_key, summary, status_name, status_category,
+               priority_name, assignee_display, sla_breached, sla_breach_time,
+               jira_created, jira_updated, current_tier, labels
+        FROM jira_issue_cache
+        WHERE organisation_name IN (${placeholders})
+          AND status_category != 'Done'
+        ORDER BY organisation_name, sla_breached DESC, jira_updated ASC
+      `);
+      if (mainPool) await mainPool.close();
+
+      const byAccount = new Map<string, any[]>();
+      for (const name of accountNames) byAccount.set(name, []);
+      for (const row of ticketResult.recordset) {
+        const list = byAccount.get(row.organisation_name) || [];
+        list.push(row);
+        byAccount.set(row.organisation_name, list);
+      }
+
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-GB');
+      const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      const totalOpen = ticketResult.recordset.length;
+      const totalBreached = ticketResult.recordset.filter((r: any) => r.sla_breached).length;
+      const totalFlagged = ticketResult.recordset.filter((r: any) => r.priority_name === 'Highest' || r.priority_name === 'Critical').length;
+
+      function kpiCard(label: string, value: string | number, color: string) {
+        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px 18px"><div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px">${label}</div><div style="font-size:26px;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
+      }
+
+      const accountSections = Array.from(byAccount.entries()).map(([acctName, tickets]) => {
+        const breached = tickets.filter(t => t.sla_breached).length;
+        const flagged = tickets.filter(t => t.priority_name === 'Highest' || t.priority_name === 'Critical').length;
+        const oldest = tickets.length > 0 ? tickets.reduce((o: any, t: any) => (!o || new Date(t.jira_created) < new Date(o.jira_created)) ? t : o, null) : null;
+        const oldestDays = oldest ? Math.floor((Date.now() - new Date(oldest.jira_created).getTime()) / 86400000) : 0;
+
+        const rows = tickets.slice(0, 10).map((t: any) => {
+          const rowBg = t.sla_breached ? 'background:rgba(239,68,68,.04)' : '';
+          const slaCol = t.sla_breached
+            ? '<span style="color:#ef4444;font-weight:700">BREACHED</span>'
+            : '<span style="color:#10b981;font-weight:600">OK</span>';
+          return `<tr style="${rowBg}"><td style="color:#e2e8f0;font-weight:600">${t.issue_key}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.summary || ''}</td><td class="c">${t.status_name || ''}</td><td class="c">${t.assignee_display || '—'}</td><td class="c">${slaCol}</td></tr>`;
+        }).join('');
+
+        const moreRow = tickets.length > 10 ? `<tr><td colspan="5" style="text-align:center;color:#64748b;padding:6px">+ ${tickets.length - 10} more tickets</td></tr>` : '';
+
+        return `<div style="margin-bottom:18px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <h2 style="font-size:16px;font-weight:700;color:#e2e8f0">${acctName}</h2>
+    <div style="display:flex;gap:16px;font-size:11px">
+      <span style="color:#94a3b8">Open: <strong style="color:#e2e8f0">${tickets.length}</strong></span>
+      <span>Breached: <strong style="color:${breached > 0 ? '#ef4444' : '#10b981'}">${breached}</strong></span>
+      <span>Flagged: <strong style="color:${flagged > 0 ? '#f59e0b' : '#94a3b8'}">${flagged}</strong></span>
+      <span>Oldest: <strong style="color:${oldestDays > 7 ? '#ef4444' : oldestDays > 3 ? '#f59e0b' : '#10b981'}">${oldestDays}d</strong>${oldest ? ` (${oldest.issue_key})` : ''}</span>
+    </div>
+  </div>
+  ${tickets.length > 0 ? `<div style="border:1px solid #2f353d;border-radius:10px;overflow:hidden;background:rgba(255,255,255,.02)">
+  <table><thead><tr><th>Key</th><th>Summary</th><th class="c">Status</th><th class="c">Assignee</th><th class="c">SLA</th></tr></thead>
+  <tbody>${rows}${moreRow}</tbody></table></div>` : '<div style="color:#475569;padding:12px;text-align:center;font-size:12px">No open tickets — all clear</div>'}
+</div>`;
+      }).join('');
+
+      res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Key Accounts</title>
+${wallboardRefreshScript('/wallboard/key-accounts')}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:6px 10px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:5px 10px;border-bottom:1px solid #2f353d;font-size:12px}td.c{text-align:center}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">Key Accounts</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Account health & ticket overview</div></div>
+  <div style="font-size:10px;color:#64748b">Auto-refresh 60s &middot; Updated ${timeStr}</div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+  ${kpiCard('Tracked Accounts', accountNames.length, '#5ec1ca')}
+  ${kpiCard('Open Tickets', totalOpen, '#e2e8f0')}
+  ${kpiCard('SLA Breached', totalBreached, totalBreached === 0 ? '#10b981' : '#ef4444')}
+  ${kpiCard('Flagged (Critical)', totalFlagged, totalFlagged === 0 ? '#10b981' : '#f59e0b')}
+</div>
+${accountSections}
+<div style="text-align:center;margin-top:10px;font-size:10px;color:#475569">nurtur.tech &middot; Key Accounts &middot; ${dateStr}</div>
+</div></body></html>`);
+      logWallboard('/wallboard/key-accounts', 'info', 200, Date.now() - wbStart, `OK — ${accountNames.length} accounts, ${totalOpen} tickets`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       logWallboard('/wallboard/key-accounts', 'error', 500, Date.now() - wbStart, msg);
@@ -1621,20 +1716,101 @@ ${panelHtml}
     }
   });
 
-  // Customer Success wallboard
+  // Customer Success wallboard — combined KPI stats + live ticket data
   app.get('/wallboard/customer-success', async (_req, res) => {
     const wbStart = Date.now();
     try {
-      const html = await renderStatWallboard(settingsQueries, 'Customer Success', 'Onboarding & satisfaction metrics', [
-        { label: 'Active Onboardings', kpi: 'Number of Active Onboardings' },
-        { label: 'Onboarding — Overdue', kpi: 'Number of Overdue Onboardings' },
-        { label: 'CSAT Average (7d)', kpi: 'CSAT Average 7 Day' },
-        { label: 'CS Tickets Open', kpi: 'Number of CS Tickets Open' },
-        { label: 'CS Tickets — No Reply', kpi: 'Number of CS Tickets With No Reply' },
-        { label: 'CS — Over SLA', kpi: 'CS Tickets over SLA (actionable)' },
-      ], 3, '/wallboard/customer-success');
-      res.send(html);
-      logWallboard('/wallboard/customer-success', 'info', 200, Date.now() - wbStart, 'OK');
+      const settings = settingsQueries.getAll();
+      const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
+
+      // KPI snapshot data (from KPI DB)
+      let kpiPanels: Array<{ label: string; value: number | string; color: string }> = [];
+      if (srv && db && usr && pwd) {
+        const sql = await import('mssql');
+        const kpiPool = await new sql.default.ConnectionPool({
+          server: srv, database: db, user: usr, password: pwd,
+          options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
+        }).connect();
+        const kpiResult = await kpiPool.request().query(`
+          SELECT KPI, [Count], RAG FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY KPI ORDER BY CreatedAt DESC) AS rn
+            FROM dbo.KpiSnapshot
+          ) t WHERE rn = 1
+        `);
+        await kpiPool.close();
+        const kpis = new Map<string, { count: number; rag: number | null }>();
+        for (const r of kpiResult.recordset) kpis.set(r.KPI.toLowerCase(), { count: r.Count, rag: r.RAG });
+
+        function ragColor(rag: number | null): string {
+          if (rag === 1) return '#10b981'; if (rag === 2) return '#f59e0b'; if (rag === 3) return '#ef4444'; return '#94a3b8';
+        }
+        function lookup(name: string) { return kpis.get(name.toLowerCase()) || { count: 0, rag: null }; }
+
+        const csKpis = [
+          { label: 'Active Onboardings', kpi: 'Number of Active Onboardings' },
+          { label: 'Overdue Onboardings', kpi: 'Number of Overdue Onboardings' },
+          { label: 'CSAT Average (7d)', kpi: 'CSAT Average 7 Day' },
+          { label: 'CS Tickets Open', kpi: 'Number of CS Tickets Open' },
+          { label: 'CS No Reply', kpi: 'Number of CS Tickets With No Reply' },
+          { label: 'CS Over SLA', kpi: 'CS Tickets over SLA (actionable)' },
+        ];
+        kpiPanels = csKpis.map(k => {
+          const d = lookup(k.kpi);
+          return { label: k.label, value: d.count, color: ragColor(d.rag) };
+        });
+      }
+
+      // Escalated tickets from jira_issue_cache (on NOVA DB)
+      const { getPool } = await import('./services/database.js');
+      const novaPool = getPool();
+      const escalations = await novaPool.request().query(`
+        SELECT TOP 15 issue_key, summary, status_name, assignee_display, current_tier,
+               priority_name, sla_breached, jira_created, organisation_name
+        FROM jira_issue_cache
+        WHERE status_category != 'Done'
+          AND (current_tier LIKE '%Tier 2%' OR current_tier LIKE '%Tier 3%'
+               OR priority_name IN ('Highest','Critical')
+               OR sla_breached = 1)
+        ORDER BY sla_breached DESC, jira_created ASC
+      `);
+
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-GB');
+      const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+      const kpiHtml = kpiPanels.map(p =>
+        `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:16px 20px;text-align:center">
+          <div style="font-size:10px;color:#94a3b8;font-weight:600;margin-bottom:8px">${p.label}</div>
+          <div style="font-size:48px;font-weight:800;letter-spacing:-2px;color:${p.color}">${p.value}</div>
+        </div>`
+      ).join('');
+
+      const escRows = escalations.recordset.map((t: any) => {
+        const rowBg = t.sla_breached ? 'background:rgba(239,68,68,.04)' : '';
+        const slaCol = t.sla_breached
+          ? '<span style="color:#ef4444;font-weight:700">BREACHED</span>'
+          : '<span style="color:#10b981">OK</span>';
+        return `<tr style="${rowBg}"><td style="color:#e2e8f0;font-weight:600">${t.issue_key}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.summary || ''}</td><td class="c">${t.status_name || ''}</td><td class="c">${t.current_tier || '—'}</td><td class="c">${t.assignee_display || '—'}</td><td class="c">${slaCol}</td></tr>`;
+      }).join('');
+
+      res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Customer Success</title>
+${wallboardRefreshScript('/wallboard/customer-success')}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:6px 10px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:5px 10px;border-bottom:1px solid #2f353d;font-size:12px}td.c{text-align:center}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03)}50%{background:rgba(239,68,68,.35);box-shadow:0 0 24px rgba(239,68,68,.5)}}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">Customer Success</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Onboarding, satisfaction & escalation overview</div></div>
+  <div style="font-size:10px;color:#64748b">Auto-refresh 60s &middot; Updated ${timeStr}</div>
+</div>
+${kpiPanels.length > 0 ? `<div style="display:grid;grid-template-columns:repeat(${Math.min(kpiPanels.length, 6)},1fr);gap:10px;margin-bottom:18px">${kpiHtml}</div>` : ''}
+<div style="margin-bottom:8px"><h2 style="font-size:14px;font-weight:700;color:#94a3b8">Open Escalations & Breached Tickets</h2></div>
+<div style="border:1px solid #2f353d;border-radius:10px;overflow:hidden;background:rgba(255,255,255,.02)">
+<table><thead><tr><th>Key</th><th>Summary</th><th class="c">Status</th><th class="c">Tier</th><th class="c">Assignee</th><th class="c">SLA</th></tr></thead>
+<tbody>${escRows || '<tr><td colspan="6" style="text-align:center;padding:30px;color:#64748b">No escalations — all clear</td></tr>'}</tbody></table></div>
+<div style="text-align:center;margin-top:10px;font-size:10px;color:#475569">nurtur.tech &middot; Customer Success &middot; ${dateStr}</div>
+</div></body></html>`);
+      logWallboard('/wallboard/customer-success', 'info', 200, Date.now() - wbStart, `OK — ${escalations.recordset.length} escalations`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       logWallboard('/wallboard/customer-success', 'error', 500, Date.now() - wbStart, msg);

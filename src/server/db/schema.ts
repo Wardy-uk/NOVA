@@ -933,6 +933,14 @@ async function runMigrations(): Promise<void> {
     // n8n raw excerpt on ai_comparison_log
     `IF COL_LENGTH('ai_comparison_log', 'n8n_raw_excerpt') IS NULL
      ALTER TABLE ai_comparison_log ADD n8n_raw_excerpt NVARCHAR(MAX) NULL;`,
+
+    // organisation_name on jira_issue_cache — for key accounts wallboard filtering
+    `IF COL_LENGTH('jira_issue_cache', 'organisation_name') IS NULL
+     ALTER TABLE jira_issue_cache ADD organisation_name NVARCHAR(200) NULL;`,
+
+    // KB gap status extensions for article workflow
+    `IF COL_LENGTH('kb_gap_log', 'confluence_url') IS NULL
+     ALTER TABLE kb_gap_log ADD confluence_url NVARCHAR(500) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

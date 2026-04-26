@@ -52,7 +52,7 @@ npm run dev:client # Vite only npm run build # vite build + tsc server
 
 ## Major Feature Areas
 
-AreaKey ViewsBackendService DeskDashboard, Kanban, Calendar, KPIs, Breached, Problem TicketsJira sync, SLA timers, queue monitor, ticket classifierKPI EngineDashboard, Comparison, Leaderboard, Daily History, Trends, QAkpi-pipeline, qa-pipeline, backfill scripts, Azure SQL readsOnboardingDashboard, Delivery, Overdue, Milestones, Config, Matrixmilestone-workflow, setup-orchestrator, template-builderCalyx (Customer Portal)Queue, Dashboard, Playlists, Problems, Changes, KB, SLOcalyx-db, calyx-slo-engine, calyx-email, portal authAI AgentAgent Dashboard, Workspace, Coaching, Pipelines, Profileagent-loop, autonomy-engine, coach, perceiver, reasoner, actorCRM & SalesCRM, Contracts, Sales Hotbox, Adobe Signdynamics365, bc-client, product-cancellationSurveysAdmin, Respondsurvey routesTrainingMatrix, Summarytraining routesPeopleTeam Workload, Agent Roster, Dev Reviewpeople routes, dev-review-queries
+AreaKey ViewsBackendService DeskDashboard, Kanban, Calendar, KPIs, Breached, Problem TicketsJira sync, SLA timers, queue monitor, ticket classifierKPI EngineDashboard, Comparison, Leaderboard, Daily History, Trends, QAkpi-pipeline, qa-pipeline, backfill scripts, Azure SQL readsOnboardingDashboard, Delivery, Overdue, Milestones, Config, Matrixmilestone-workflow, setup-orchestrator, template-builderCalyx (Customer Portal)Queue, Dashboard, Playlists, Problems, Changes, KB, SLOcalyx-db, calyx-slo-engine, calyx-email, portal authAI AgentAgent Dashboard, Workspace, Coaching, Pipelines, Profile, KB Gapsagent-loop, autonomy-engine, coach, perceiver, reasoner, actor, kb-article-serviceCRM & SalesCRM, Contracts, Sales Hotbox, Adobe Signdynamics365, bc-client, product-cancellationWallboardsSLA Breach, KPI Breach, Customer Care, Tech Support, Key Accounts, Customer Successserver-rendered HTML in index.ts, wallboard-logger, renderStatWallboardSurveysAdmin, Respondsurvey routesTrainingMatrix, Summarytraining routesPeopleTeam Workload, Agent Roster, Dev Reviewpeople routes, dev-review-queries
 
 ## Key Patterns
 
@@ -63,8 +63,11 @@ AreaKey ViewsBackendService DeskDashboard, Kanban, Calendar, KPIs, Breached, Pro
 - **Background sync:** Per-source timers (default 5 min), milestone eval every 15 min, problem scan every 15 min, AI improvement scan every 30 min, DB flush every 15s
 - **AI Learning comparison:** Derives n8n's action from `jira_issue_cache.last_n8n_comment` (populated by jira sync matching n8n service account comments). `parseN8nAction()` extracts close/escalate/respond from comment body keywords. Settings: `n8n_comment_author_emails`, `n8n_comment_author_display_names`, `n8n_comment_body_marker`.
 - **Settings:** Flat key-value in settings.json via FileSettingsQueries
+- **Feature flags:** `GET /api/settings/feature-flags` returns boolean toggles (e.g. `wallboard_key_accounts_enabled`, `wallboard_cs_enabled`). Client fetches on login and hides tabs when flags are false.
 - **API response pattern:** `res.json({ ok: true, data })` / `res.json({ ok: false, error })`
 - **Lazy loading:** Heavy views use `lazy(() => import(...))` in App.tsx
+- **PWA:** vite-plugin-pwa with workbox. manifest.webmanifest in public/, service worker auto-generated. Network-first for /api/*, cache-first for assets.
+- **KB Article pipeline:** `kb_gap_log` (identified by AI triage) → `kb_article_drafts` (LLM-generated) → Confluence publish via MCP/REST. Settings: `kb_confluence_space`, `kb_confluence_parent_page_id`.
 
 ## Subprojects
 
@@ -81,7 +84,7 @@ AreaKey ViewsBackendService DeskDashboard, Kanban, Calendar, KPIs, Breached, Pro
 
 ## Versioning
 
-Bump patch in `package.json` with every commit/deploy. Currently v1.1.157. Status bar shows `v{version} ({gitHash})` via Vite `define`.
+Bump patch in `package.json` with every commit/deploy. Currently v1.1.159. Status bar shows `v{version} ({gitHash})` via Vite `define`.
 
 ## Post-Build Rule
 

@@ -155,8 +155,8 @@ Generate:
     if (!draft) throw new Error('Draft not found');
     if (draft.status === 'published') throw new Error('Already published');
 
-    const spaceKey = this.settings.get('agent_kb_confluence_space');
-    const parentPageId = this.settings.get('agent_kb_parent_page_id');
+    const spaceKey = this.settings.get('kb_confluence_space') || this.settings.get('agent_kb_confluence_space');
+    const parentPageId = this.settings.get('kb_confluence_parent_page_id') || this.settings.get('agent_kb_parent_page_id');
     if (!spaceKey) throw new Error('Confluence space key not configured (agent_kb_confluence_space)');
 
     if (!this.mcpManager.isConnected('jira')) {
@@ -195,8 +195,8 @@ Generate:
 
     if (draft.gap_id) {
       await execute(
-        `UPDATE kb_gap_log SET status = 'article_published', resolved_at = GETUTCDATE() WHERE id = ?`,
-        [draft.gap_id],
+        `UPDATE kb_gap_log SET status = 'article_published', resolved_at = GETUTCDATE(), confluence_url = ? WHERE id = ?`,
+        [url, draft.gap_id],
       );
     }
 
