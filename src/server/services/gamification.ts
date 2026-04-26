@@ -86,14 +86,13 @@ export class GamificationService {
     return query<LeaderboardEntry>(
       `SELECT
          a.user_id,
-         ISNULL(r.display_name, CAST(a.user_id AS NVARCHAR)) as display_name,
+         CAST(a.user_id AS NVARCHAR) as display_name,
          COUNT(DISTINCT a.id) as achievement_count,
          ISNULL(MAX(s.best_count), 0) as best_streak,
          ISNULL(MAX(CASE WHEN s.streak_type = 'daily_resolve' THEN s.current_count END), 0) as current_streak
        FROM agent_achievements a
-       LEFT JOIN agent_roster r ON r.user_id = a.user_id
        LEFT JOIN agent_streaks s ON s.user_id = a.user_id
-       GROUP BY a.user_id, r.display_name
+       GROUP BY a.user_id
        ORDER BY COUNT(DISTINCT a.id) DESC, MAX(s.best_count) DESC`,
     );
   }

@@ -1,3 +1,4 @@
+import sql from 'mssql';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { execute, query } from './database.js';
 
@@ -19,7 +20,26 @@ interface PeopleHrAbsence {
 }
 
 export class CalendarSyncService {
+  private kpiPool: sql.ConnectionPool | null = null;
   constructor(private settings: SettingsQueries) {}
+
+  private async getKpiPool(): Promise<sql.ConnectionPool | null> {
+    if (this.kpiPool?.connected) return this.kpiPool;
+    const all = this.settings.getAll();
+    const server = all.kpi_sql_server;
+    const database = all.kpi_sql_database;
+    const user = all.kpi_sql_user;
+    const password = all.kpi_sql_password;
+    if (!server || !database || !user || !password) return null;
+    try {
+      this.kpiPool = await new sql.ConnectionPool({
+        server, database, user, password,
+        options: { encrypt: true, trustServerCertificate: true },
+        requestTimeout: 30000,
+      }).connect();
+      return this.kpiPool;
+    } catch { return null; }
+  }
 
   async sync(): Promise<{ synced: number; created: number; updated: number; removed: number }> {
     const apiKey = this.settings.get('people_hr_api_key');
@@ -112,10 +132,17 @@ export class CalendarSyncService {
 
     const leaveNames = new Set(onLeave.map((r: any) => r.employee_name));
 
-    const allAgents = await query(
-      `SELECT DISTINCT display_name, pool FROM agent_roster WHERE active = 1 ORDER BY display_name`,
-      []
-    );
+    let allAgents: any[] = [];
+    const kpi = await this.getKpiPool();
+    if (kpi) {
+      const result = await kpi.request().query(`
+        SELECT LTRIM(RTRIM(AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(AgentSurname, ''))) AS display_name,
+               LOWER(Team) AS pool
+        FROM dbo.Agent WHERE IsActive = 1 AND Department = 'NT'
+        ORDER BY AgentName
+      `);
+      allAgents = result.recordset;
+    }
 
     const available = (allAgents as any[]).filter(a => !leaveNames.has(a.display_name));
     const unavailable = onLeave;

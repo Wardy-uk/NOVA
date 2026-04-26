@@ -235,12 +235,9 @@ export class CoachingEngine {
     }
   }
 
-  private async resolveAgentUserId(jiraAccountId: string): Promise<number> {
-    const row = await queryOne<any>(
-      `SELECT id FROM agent_roster WHERE jira_account_id = ?`,
-      [jiraAccountId],
-    );
-    return row?.id ?? 0;
+  private async resolveAgentUserId(_jiraAccountId: string): Promise<number> {
+    // TODO: rewire gamification to use dbo.Agent.AgentId when gamification is active
+    return 0;
   }
 
   private isInternal(comment: any): boolean {

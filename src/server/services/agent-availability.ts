@@ -1,4 +1,6 @@
+import sql from 'mssql';
 import { query, queryOne, execute } from './database.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 
 export type AvailabilityStatus = 'available' | 'annual_leave' | 'sick' | 'wfh' | 'training' | 'meeting' | 'offline';
 
@@ -20,7 +22,49 @@ export interface DaySnapshot {
   availableCount: number;
 }
 
+interface KpiAgent {
+  AgentId: number;
+  display_name: string;
+  pool: string;
+}
+
 export class AgentAvailabilityService {
+  private kpiPool: sql.ConnectionPool | null = null;
+
+  constructor(private settings?: SettingsQueries) {}
+
+  private async getKpiPool(): Promise<sql.ConnectionPool | null> {
+    if (this.kpiPool?.connected) return this.kpiPool;
+    if (!this.settings) return null;
+    const all = this.settings.getAll();
+    const server = all.kpi_sql_server;
+    const database = all.kpi_sql_database;
+    const user = all.kpi_sql_user;
+    const password = all.kpi_sql_password;
+    if (!server || !database || !user || !password) return null;
+    try {
+      this.kpiPool = await new sql.ConnectionPool({
+        server, database, user, password,
+        options: { encrypt: true, trustServerCertificate: true },
+        requestTimeout: 30000,
+      }).connect();
+      return this.kpiPool;
+    } catch { return null; }
+  }
+
+  private async getAgentsFromKpi(): Promise<KpiAgent[]> {
+    const p = await this.getKpiPool();
+    if (!p) return [];
+    const result = await p.request().query(`
+      SELECT AgentId,
+             LTRIM(RTRIM(AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(AgentSurname, ''))) AS display_name,
+             LOWER(Team) AS pool
+      FROM dbo.Agent WHERE IsActive = 1 AND Department = 'NT'
+      ORDER BY AgentName
+    `);
+    return result.recordset;
+  }
+
   async setAvailability(rosterId: number, date: string, status: AvailabilityStatus, reason?: string): Promise<void> {
     await execute(`
       MERGE agent_availability AS target
@@ -41,43 +85,54 @@ export class AgentAvailabilityService {
   }
 
   async getAvailability(rosterId: number, startDate: string, endDate: string): Promise<AgentAvailability[]> {
-    return query<AgentAvailability>(`
-      SELECT a.*, r.display_name, r.pool
-      FROM agent_availability a
-      JOIN agent_roster r ON r.id = a.roster_id
-      WHERE a.roster_id = ? AND a.available_date BETWEEN ? AND ?
-      ORDER BY a.available_date
+    const agents = await this.getAgentsFromKpi();
+    const agent = agents.find(a => a.AgentId === rosterId);
+
+    const rows = await query<any>(`
+      SELECT * FROM agent_availability
+      WHERE roster_id = ? AND available_date BETWEEN ? AND ?
+      ORDER BY available_date
     `, [rosterId, startDate, endDate]);
+
+    return rows.map((r: any) => ({
+      ...r,
+      display_name: agent?.display_name ?? `Agent ${rosterId}`,
+      pool: agent?.pool ?? 'cc',
+    }));
   }
 
   async getDaySnapshot(date: string, pool?: string): Promise<DaySnapshot> {
-    const poolFilter = pool ? `AND r.pool = ?` : '';
-    const params: unknown[] = pool ? [date, pool] : [date];
+    const agents = await this.getAgentsFromKpi();
+    const filtered = pool ? agents.filter(a => a.pool === pool) : agents;
+    const agentIds = filtered.map(a => a.AgentId);
 
-    const allAgents = await query<any>(`
-      SELECT r.id, r.display_name, r.pool,
-             a.status, a.reason, a.available_date
-      FROM agent_roster r
-      LEFT JOIN agent_availability a ON a.roster_id = r.id AND a.available_date = ?
-      WHERE r.active = 1 ${poolFilter}
-      ORDER BY r.display_name
-    `, params);
+    let availRows: any[] = [];
+    if (agentIds.length > 0) {
+      availRows = await query<any>(`
+        SELECT roster_id, status, reason
+        FROM agent_availability
+        WHERE available_date = ? AND roster_id IN (${agentIds.map(() => '?').join(',')})
+      `, [date, ...agentIds]);
+    }
+    const availMap = new Map(availRows.map((r: any) => [r.roster_id, r]));
 
     const available: AgentAvailability[] = [];
     const unavailable: AgentAvailability[] = [];
 
-    for (const row of allAgents) {
+    for (const agent of filtered) {
+      const avail = availMap.get(agent.AgentId);
+      const status: AvailabilityStatus = avail?.status ?? 'available';
       const entry: AgentAvailability = {
-        id: row.id,
-        roster_id: row.id,
+        id: agent.AgentId,
+        roster_id: agent.AgentId,
         available_date: date,
-        status: row.status ?? 'available',
-        reason: row.reason,
-        display_name: row.display_name,
-        pool: row.pool,
+        status,
+        reason: avail?.reason ?? null,
+        display_name: agent.display_name,
+        pool: agent.pool,
       };
 
-      if (!row.status || row.status === 'available' || row.status === 'wfh') {
+      if (!avail?.status || avail.status === 'available' || avail.status === 'wfh') {
         available.push(entry);
       } else {
         unavailable.push(entry);
@@ -88,7 +143,7 @@ export class AgentAvailabilityService {
       date,
       available,
       unavailable,
-      totalRoster: allAgents.length,
+      totalRoster: filtered.length,
       availableCount: available.length,
     };
   }
@@ -96,15 +151,24 @@ export class AgentAvailabilityService {
   async getUpcomingAbsences(days: number = 14): Promise<AgentAvailability[]> {
     const today = new Date().toISOString().slice(0, 10);
     const end = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+    const agents = await this.getAgentsFromKpi();
+    const agentMap = new Map(agents.map(a => [a.AgentId, a]));
 
-    return query<AgentAvailability>(`
-      SELECT a.*, r.display_name, r.pool
-      FROM agent_availability a
-      JOIN agent_roster r ON r.id = a.roster_id
-      WHERE a.available_date BETWEEN ? AND ?
-        AND a.status NOT IN ('available', 'wfh')
-      ORDER BY a.available_date, r.display_name
+    const rows = await query<any>(`
+      SELECT * FROM agent_availability
+      WHERE available_date BETWEEN ? AND ?
+        AND status NOT IN ('available', 'wfh')
+      ORDER BY available_date
     `, [today, end]);
+
+    return rows.map((r: any) => {
+      const agent = agentMap.get(r.roster_id);
+      return {
+        ...r,
+        display_name: agent?.display_name ?? `Agent ${r.roster_id}`,
+        pool: agent?.pool ?? 'cc',
+      };
+    });
   }
 
   async clearAvailability(rosterId: number, date: string): Promise<void> {
@@ -123,25 +187,37 @@ export class AgentAvailabilityService {
 
   async getCapacitySummary(pool?: string): Promise<{ pool: string; total: number; available: number; onLeave: number }[]> {
     const today = new Date().toISOString().slice(0, 10);
-    const poolFilter = pool ? `AND r.pool = ?` : '';
-    const params: unknown[] = pool ? [today, pool] : [today];
+    const agents = await this.getAgentsFromKpi();
+    const filtered = pool ? agents.filter(a => a.pool === pool) : agents;
+    const agentIds = filtered.map(a => a.AgentId);
 
-    const rows = await query<any>(`
-      SELECT r.pool,
-             COUNT(*) as total,
-             SUM(CASE WHEN a.status IS NULL OR a.status IN ('available', 'wfh') THEN 1 ELSE 0 END) as available,
-             SUM(CASE WHEN a.status IS NOT NULL AND a.status NOT IN ('available', 'wfh') THEN 1 ELSE 0 END) as on_leave
-      FROM agent_roster r
-      LEFT JOIN agent_availability a ON a.roster_id = r.id AND a.available_date = ?
-      WHERE r.active = 1 ${poolFilter}
-      GROUP BY r.pool
-    `, params);
+    let availRows: any[] = [];
+    if (agentIds.length > 0) {
+      availRows = await query<any>(`
+        SELECT roster_id, status
+        FROM agent_availability
+        WHERE available_date = ? AND roster_id IN (${agentIds.map(() => '?').join(',')})
+      `, [today, ...agentIds]);
+    }
+    const unavailableIds = new Set(
+      availRows
+        .filter((r: any) => r.status && r.status !== 'available' && r.status !== 'wfh')
+        .map((r: any) => r.roster_id),
+    );
 
-    return rows.map((r: any) => ({
-      pool: r.pool,
-      total: r.total,
-      available: r.available,
-      onLeave: r.on_leave,
-    }));
+    const byPool = new Map<string, { total: number; available: number; onLeave: number }>();
+    for (const agent of filtered) {
+      const p = agent.pool;
+      if (!byPool.has(p)) byPool.set(p, { total: 0, available: 0, onLeave: 0 });
+      const entry = byPool.get(p)!;
+      entry.total++;
+      if (unavailableIds.has(agent.AgentId)) {
+        entry.onLeave++;
+      } else {
+        entry.available++;
+      }
+    }
+
+    return [...byPool.entries()].map(([pool, stats]) => ({ pool, ...stats }));
   }
 }

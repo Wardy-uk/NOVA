@@ -869,8 +869,8 @@ async function main() {
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);
 
-    const assignmentEngine = new AssignmentEngine(agentJiraClient, 'NT');
-    const availabilityService = new AgentAvailabilityService();
+    const assignmentEngine = new AssignmentEngine(agentJiraClient, settingsQueries, 'NT');
+    const availabilityService = new AgentAvailabilityService(settingsQueries);
     const ticketClassifier = new TicketClassifier(llmService, agentJiraClient, 'NT');
     const agentKbSearch = new KbSearchService(settingsQueries);
     const briefEngine = new BriefEngine(llmService, agentJiraClient, agentKbSearch, 'NT');

@@ -1536,68 +1536,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
-  router.post('/roster', async (req, res) => {
-    const { jira_account_id, display_name, email, pool, skills, max_capacity, active, is_current_agent } = req.body;
-    if (!jira_account_id || !display_name || !pool) {
-      res.status(400).json({ ok: false, error: 'jira_account_id, display_name, and pool are required' });
-      return;
-    }
-    try {
-      const engine = deps?.assignmentEngine;
-      if (!engine) {
-        res.status(503).json({ ok: false, error: 'Assignment engine not available' });
-        return;
-      }
-      const id = await engine.createAgent({
-        jira_account_id, display_name, email: email ?? null,
-        pool, skills: skills ?? null, max_capacity: max_capacity ?? 10,
-        active: active ?? true, is_current_agent: is_current_agent ?? false,
-      });
-      const agent = await engine.getAgent(id);
-      res.json({ ok: true, data: agent });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create agent' });
-    }
-  });
-
-  router.put('/roster/:id', async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      res.status(400).json({ ok: false, error: 'Invalid agent ID' });
-      return;
-    }
-    try {
-      const engine = deps?.assignmentEngine;
-      if (!engine) {
-        res.status(503).json({ ok: false, error: 'Assignment engine not available' });
-        return;
-      }
-      await engine.updateAgent(id, req.body);
-      const agent = await engine.getAgent(id);
-      res.json({ ok: true, data: agent });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to update agent' });
-    }
-  });
-
-  router.delete('/roster/:id', async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      res.status(400).json({ ok: false, error: 'Invalid agent ID' });
-      return;
-    }
-    try {
-      const engine = deps?.assignmentEngine;
-      if (!engine) {
-        res.status(503).json({ ok: false, error: 'Assignment engine not available' });
-        return;
-      }
-      await engine.deleteAgent(id);
-      res.json({ ok: true });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to delete agent' });
-    }
-  });
+  // Agent CRUD is managed via KPI agent-admin endpoints (kpi-data routes).
+  // POST/PUT/DELETE roster routes removed — dbo.Agent on KPI DB is the source of truth.
 
   router.get('/roster/stats', async (_req, res) => {
     try {

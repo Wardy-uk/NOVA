@@ -1,5 +1,7 @@
+import sql from 'mssql';
 import { query, queryOne, execute, executeAndGetId } from './database.js';
 import type { JiraRestClient } from './jira-client.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 
 export type Pool = 'cc' | 't2' | 'tpj' | 'digital';
 
@@ -28,15 +30,54 @@ interface AgentLoad {
   capacityRatio: number;
 }
 
+const TEAM_TO_POOL: Record<string, Pool> = {
+  cc: 'cc',
+  customercare: 'cc',
+  'customer care': 'cc',
+  t2: 't2',
+  t3: 't2',
+  tpj: 'tpj',
+  digital: 'digital',
+};
+
+function normalizePool(team: string | null): Pool {
+  if (!team) return 'cc';
+  const key = team.toLowerCase().trim();
+  return TEAM_TO_POOL[key] ?? 'cc';
+}
+
 export class AssignmentEngine {
-  constructor(private jiraClient: JiraRestClient, private jiraProject: string = 'NT') {}
+  private kpiPool: sql.ConnectionPool | null = null;
+
+  constructor(
+    private jiraClient: JiraRestClient,
+    private settingsQueries: SettingsQueries,
+    private jiraProject: string = 'NT',
+  ) {}
+
+  private async getKpiPool(): Promise<sql.ConnectionPool> {
+    if (this.kpiPool?.connected) return this.kpiPool;
+    const all = this.settingsQueries.getAll();
+    const server = all.kpi_sql_server;
+    const database = all.kpi_sql_database;
+    const user = all.kpi_sql_user;
+    const password = all.kpi_sql_password;
+    if (!server || !database || !user || !password) {
+      throw new Error('KPI SQL not configured — set kpi_sql_server/database/user/password in Settings');
+    }
+    this.kpiPool = await new sql.ConnectionPool({
+      server, database, user, password,
+      options: { encrypt: true, trustServerCertificate: true },
+      requestTimeout: 30000,
+    }).connect();
+    return this.kpiPool;
+  }
 
   async assign(ticketKey: string, pool: Pool = 'cc', preferredSkills?: string[]): Promise<AssignmentResult | null> {
     const available = await this.getAvailableAgents(pool);
     if (available.length === 0) return null;
 
     const loads = await this.getAgentLoads(available);
-
     let ranked = this.rankByCapacity(loads);
 
     if (preferredSkills?.length) {
@@ -68,69 +109,89 @@ export class AssignmentEngine {
   }
 
   async getAvailableAgents(pool: Pool): Promise<RosterAgent[]> {
-    const today = new Date().toISOString().slice(0, 10);
-    const rows = await query<any>(`
-      SELECT r.*
-      FROM agent_roster r
-      LEFT JOIN agent_availability a ON a.roster_id = r.id AND a.available_date = ?
-      WHERE r.pool = ? AND r.active = 1
-        AND (a.id IS NULL OR a.status = 'available')
-      ORDER BY r.display_name
-    `, [today, pool]);
+    const agents = await this.getAllAgents(pool);
+    const active = agents.filter(a => a.active);
+    if (active.length === 0) return [];
 
-    return rows.map(this.mapRosterRow);
+    const today = new Date().toISOString().slice(0, 10);
+    const availRows = await query<{ roster_id: number; status: string }>(
+      `SELECT roster_id, status FROM agent_availability
+       WHERE available_date = ? AND roster_id IN (${active.map(() => '?').join(',')})`,
+      [today, ...active.map(a => a.id)],
+    );
+
+    const unavailableIds = new Set(
+      availRows
+        .filter(r => r.status !== 'available' && r.status !== 'wfh')
+        .map(r => r.roster_id),
+    );
+
+    return active.filter(a => !unavailableIds.has(a.id));
   }
 
   async getAllAgents(pool?: Pool): Promise<RosterAgent[]> {
-    const sql = pool
-      ? `SELECT * FROM agent_roster WHERE pool = ? ORDER BY active DESC, display_name`
-      : `SELECT * FROM agent_roster ORDER BY pool, active DESC, display_name`;
-    const rows = await query<any>(sql, pool ? [pool] : []);
-    return rows.map(this.mapRosterRow);
+    const p = await this.getKpiPool();
+    const result = await p.request().query(`
+      SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
+             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets
+      FROM dbo.Agent
+      WHERE Department = 'NT'
+      ORDER BY Team, AgentName
+    `);
+
+    const stateRows = await query<{
+      agent_id: number; is_current_agent: number; last_assigned_at: string | null;
+    }>(`SELECT agent_id, is_current_agent, last_assigned_at FROM agent_assignment_state`);
+    const stateMap = new Map(stateRows.map(r => [r.agent_id, r]));
+
+    const agents = result.recordset.map((row: any) => this.mapAgentRow(row, stateMap));
+
+    if (pool) return agents.filter(a => a.pool === pool);
+    return agents;
   }
 
   async getAgent(id: number): Promise<RosterAgent | undefined> {
-    const row = await queryOne<any>(`SELECT * FROM agent_roster WHERE id = ?`, [id]);
-    return row ? this.mapRosterRow(row) : undefined;
+    const p = await this.getKpiPool();
+    const req = p.request();
+    req.input('agentId', sql.Int, id);
+    const result = await req.query(`
+      SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
+             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets
+      FROM dbo.Agent
+      WHERE AgentId = @agentId
+    `);
+    const row = result.recordset[0];
+    if (!row) return undefined;
+
+    const stateRow = await queryOne<{
+      agent_id: number; is_current_agent: number; last_assigned_at: string | null;
+    }>(`SELECT agent_id, is_current_agent, last_assigned_at FROM agent_assignment_state WHERE agent_id = ?`, [id]);
+
+    const stateMap = new Map<number, any>();
+    if (stateRow) stateMap.set(stateRow.agent_id, stateRow);
+    return this.mapAgentRow(row, stateMap);
   }
 
   async getAgentByJiraId(jiraAccountId: string): Promise<RosterAgent | undefined> {
-    const row = await queryOne<any>(`SELECT * FROM agent_roster WHERE jira_account_id = ?`, [jiraAccountId]);
-    return row ? this.mapRosterRow(row) : undefined;
-  }
+    const p = await this.getKpiPool();
+    const req = p.request();
+    req.input('accountId', sql.NVarChar, jiraAccountId);
+    const result = await req.query(`
+      SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
+             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets
+      FROM dbo.Agent
+      WHERE AccountId = @accountId
+    `);
+    const row = result.recordset[0];
+    if (!row) return undefined;
 
-  async createAgent(data: Omit<RosterAgent, 'id' | 'last_assigned_at'>): Promise<number> {
-    return executeAndGetId(`
-      INSERT INTO agent_roster (jira_account_id, display_name, email, pool, skills, max_capacity, active, is_current_agent)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      data.jira_account_id, data.display_name, data.email, data.pool,
-      data.skills ? JSON.stringify(data.skills) : null,
-      data.max_capacity, data.active ? 1 : 0, data.is_current_agent ? 1 : 0,
-    ]);
-  }
+    const stateRow = await queryOne<{
+      agent_id: number; is_current_agent: number; last_assigned_at: string | null;
+    }>(`SELECT agent_id, is_current_agent, last_assigned_at FROM agent_assignment_state WHERE agent_id = ?`, [row.AgentId]);
 
-  async updateAgent(id: number, updates: Partial<RosterAgent>): Promise<void> {
-    const sets: string[] = [];
-    const params: unknown[] = [];
-
-    if (updates.display_name !== undefined) { sets.push('display_name = ?'); params.push(updates.display_name); }
-    if (updates.email !== undefined) { sets.push('email = ?'); params.push(updates.email); }
-    if (updates.pool !== undefined) { sets.push('pool = ?'); params.push(updates.pool); }
-    if (updates.skills !== undefined) { sets.push('skills = ?'); params.push(updates.skills ? JSON.stringify(updates.skills) : null); }
-    if (updates.max_capacity !== undefined) { sets.push('max_capacity = ?'); params.push(updates.max_capacity); }
-    if (updates.active !== undefined) { sets.push('active = ?'); params.push(updates.active ? 1 : 0); }
-    if (updates.is_current_agent !== undefined) { sets.push('is_current_agent = ?'); params.push(updates.is_current_agent ? 1 : 0); }
-
-    if (sets.length === 0) return;
-    sets.push('updated_at = GETUTCDATE()');
-    params.push(id);
-
-    await execute(`UPDATE agent_roster SET ${sets.join(', ')} WHERE id = ?`, params);
-  }
-
-  async deleteAgent(id: number): Promise<void> {
-    await execute(`DELETE FROM agent_roster WHERE id = ?`, [id]);
+    const stateMap = new Map<number, any>();
+    if (stateRow) stateMap.set(stateRow.agent_id, stateRow);
+    return this.mapAgentRow(row, stateMap);
   }
 
   async rotateCurrentAgent(pool: Pool = 'cc'): Promise<RosterAgent | null> {
@@ -141,22 +202,39 @@ export class AssignmentEngine {
     const nextIdx = (currentIdx + 1) % agents.length;
     const next = agents[nextIdx];
 
-    await execute(`UPDATE agent_roster SET is_current_agent = 0 WHERE pool = ?`, [pool]);
-    await execute(`UPDATE agent_roster SET is_current_agent = 1 WHERE id = ?`, [next.id]);
+    const poolAgentIds = agents.map(a => a.id);
+    await execute(
+      `UPDATE agent_assignment_state SET is_current_agent = 0
+       WHERE agent_id IN (${poolAgentIds.map(() => '?').join(',')})`,
+      poolAgentIds,
+    );
+    await execute(
+      `MERGE agent_assignment_state AS target
+       USING (SELECT ? AS agent_id) AS source ON target.agent_id = source.agent_id
+       WHEN MATCHED THEN UPDATE SET is_current_agent = 1, updated_at = GETUTCDATE()
+       WHEN NOT MATCHED THEN INSERT (agent_id, is_current_agent) VALUES (?, 1)`,
+      [next.id, next.id],
+    );
 
-    return next;
+    return { ...next, is_current_agent: true };
   }
 
   async getCurrentAgent(pool: Pool = 'cc'): Promise<RosterAgent | null> {
-    const row = await queryOne<any>(
-      `SELECT * FROM agent_roster WHERE pool = ? AND is_current_agent = 1 AND active = 1`,
-      [pool],
+    const stateRow = await queryOne<{ agent_id: number }>(
+      `SELECT agent_id FROM agent_assignment_state WHERE is_current_agent = 1`,
     );
-    return row ? this.mapRosterRow(row) : null;
+    if (!stateRow) return null;
+
+    const agent = await this.getAgent(stateRow.agent_id);
+    if (!agent || !agent.active || agent.pool !== pool) return null;
+    return agent;
   }
 
   async getAssignmentLog(limit: number = 50): Promise<any[]> {
-    return query(`SELECT * FROM agent_assignment_log ORDER BY created_at DESC OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY`, [limit]);
+    return query(
+      `SELECT * FROM agent_assignment_log ORDER BY created_at DESC OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY`,
+      [limit],
+    );
   }
 
   async getPoolStats(): Promise<Record<Pool, { total: number; available: number; avgLoad: number }>> {
@@ -226,7 +304,13 @@ export class AssignmentEngine {
   }
 
   private async updateLastAssigned(agentId: number): Promise<void> {
-    await execute(`UPDATE agent_roster SET last_assigned_at = GETUTCDATE(), updated_at = GETUTCDATE() WHERE id = ?`, [agentId]);
+    await execute(
+      `MERGE agent_assignment_state AS target
+       USING (SELECT ? AS agent_id) AS source ON target.agent_id = source.agent_id
+       WHEN MATCHED THEN UPDATE SET last_assigned_at = GETUTCDATE(), updated_at = GETUTCDATE()
+       WHEN NOT MATCHED THEN INSERT (agent_id, last_assigned_at) VALUES (?, GETUTCDATE())`,
+      [agentId, agentId],
+    );
   }
 
   private buildReason(chosen: AgentLoad, skills?: string[]): string {
@@ -240,18 +324,23 @@ export class AssignmentEngine {
     return parts.join(' | ');
   }
 
-  private mapRosterRow(row: any): RosterAgent {
+  private mapAgentRow(
+    row: any,
+    stateMap: Map<number, { is_current_agent: number; last_assigned_at: string | null }>,
+  ): RosterAgent {
+    const state = stateMap.get(row.AgentId);
+    const name = [row.AgentName?.trim(), row.AgentSurname?.trim()].filter(Boolean).join(' ');
     return {
-      id: row.id,
-      jira_account_id: row.jira_account_id,
-      display_name: row.display_name,
-      email: row.email,
-      pool: row.pool as Pool,
-      skills: row.skills ? JSON.parse(row.skills) : null,
-      max_capacity: row.max_capacity,
-      active: !!row.active,
-      is_current_agent: !!row.is_current_agent,
-      last_assigned_at: row.last_assigned_at ? new Date(row.last_assigned_at) : null,
+      id: row.AgentId,
+      jira_account_id: row.AccountId ?? '',
+      display_name: name || `Agent ${row.AgentId}`,
+      email: row.AgentKey?.trim() || null,
+      pool: normalizePool(row.Team),
+      skills: null,
+      max_capacity: row.MaxTickets ?? 10,
+      active: !!row.IsActive,
+      is_current_agent: !!(state?.is_current_agent),
+      last_assigned_at: state?.last_assigned_at ? new Date(state.last_assigned_at) : null,
     };
   }
 }
