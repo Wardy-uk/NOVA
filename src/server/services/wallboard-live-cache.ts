@@ -55,7 +55,15 @@ function isKeyAccount(labels: string | null): boolean {
   return KA_LABELS.some(l => labels.includes(l));
 }
 
+function isWorkingHours(): boolean {
+  const now = new Date();
+  const h = now.getHours();
+  const m = now.getMinutes();
+  return (h > 9 || (h === 9 && m >= 0)) && (h < 17 || (h === 17 && m <= 30));
+}
+
 async function refreshAll(): Promise<void> {
+  if (!isWorkingHours()) return;
   try {
     const pool = getPool();
     const result = await pool.request().query(`
