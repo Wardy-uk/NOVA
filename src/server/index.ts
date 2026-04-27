@@ -84,6 +84,7 @@ import { createSetupExecutionRoutes } from './routes/setup-execution.js';
 import { createSetupPortalPublicRoutes, createSetupPortalRoutes } from './routes/setup-portal.js';
 import { createBackfillRoutes } from './routes/backfill.js';
 import { logWallboard, getWallboardLogs, clearWallboardLogs, logWallboardClient } from './services/wallboard-logger.js';
+import { startWallboardLiveCache, getCohortSnapshot, type CohortSnapshot } from './services/wallboard-live-cache.js';
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
@@ -161,6 +162,9 @@ async function main() {
   setInterval(() => processEmailQueue(calyxDb, settingsQueries.getAll()), 60_000);
   setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 30 * 60 * 1000);
   setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 60_000);
+
+  // Wallboard live cache — cohort-scoped stats from jira_issue_cache (5-min refresh)
+  startWallboardLiveCache().catch(err => console.warn('[wallboard-live-cache] startup failed:', err instanceof Error ? err.message : err));
   const ritualQueries = new RitualQueries();
   const deliveryQueries = new DeliveryQueries();
   // Auto-assign onboarding IDs to any entries missing them
@@ -1494,7 +1498,7 @@ ${wallboardRefreshScript('/wallboard/team-kpis')}
     settingsQueries: any,
     title: string,
     subtitle: string,
-    panels: Array<{ label: string; kpi: string; altKpi?: string }>,
+    panels: Array<{ label: string; kpi: string; altKpi?: string; sumKpis?: string[] }>,
     cols: number,
     route: string,
   ): Promise<string> {
@@ -1520,7 +1524,7 @@ ${wallboardRefreshScript('/wallboard/team-kpis')}
     const timeStr = now.toLocaleTimeString('en-GB');
     const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-    function lookup(kpi: string, altKpi?: string): { count: number; rag: number | null } {
+    function lookupOne(kpi: string, altKpi?: string): { count: number; rag: number | null } {
       const k = kpis.get(kpi.toLowerCase());
       if (k) return k;
       if (altKpi) {
@@ -1528,6 +1532,20 @@ ${wallboardRefreshScript('/wallboard/team-kpis')}
         if (a) return a;
       }
       return { count: 0, rag: null };
+    }
+
+    function lookup(p: { kpi: string; altKpi?: string; sumKpis?: string[] }): { count: number; rag: number | null } {
+      if (!p.sumKpis?.length) return lookupOne(p.kpi, p.altKpi);
+      let total = 0;
+      let worstRag: number | null = null;
+      for (const name of p.sumKpis) {
+        const v = kpis.get(name.toLowerCase());
+        if (v) {
+          total += v.count;
+          if (v.rag !== null && (worstRag === null || v.rag > worstRag)) worstRag = v.rag;
+        }
+      }
+      return { count: total, rag: worstRag };
     }
 
     function ragColor(rag: number | null): string {
@@ -1538,7 +1556,7 @@ ${wallboardRefreshScript('/wallboard/team-kpis')}
     }
 
     const panelHtml = panels.map(p => {
-      const data = lookup(p.kpi, p.altKpi);
+      const data = lookup(p);
       const color = ragColor(data.rag);
       const flashClass = data.rag === 3 ? ' flash-red' : '';
       const escaped = p.kpi.replace(/'/g, "\\'");
@@ -1562,6 +1580,83 @@ ${wallboardRefreshScript(route)}
 ${panelHtml}
 </div>
 <div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; ${title} &middot; ${dateStr}</div>
+</div></body></html>`;
+  }
+
+  type LivePanel = { label: string; queueKey: string; stat: 'active' | 'slaBreached' | null };
+
+  const LIVE_PANELS: LivePanel[] = [
+    // CC row — Active
+    { label: 'CC Incidents', queueKey: 'cc_incidents', stat: 'active' },
+    { label: 'CC Service Requests', queueKey: 'cc_service_requests', stat: 'active' },
+    { label: 'Property Jungle', queueKey: 'cc_tpj', stat: 'active' },
+    // TS row — Active (Dev+T3 consolidated)
+    { label: 'Production Active', queueKey: 'production', stat: 'active' },
+    { label: 'Tier 2 Active', queueKey: 'tier2', stat: 'active' },
+    { label: 'Development — Active', queueKey: 'development+tier3', stat: 'active' },
+    // CC row — No Reply (unavailable from live cache)
+    { label: 'CC Incidents — No Update', queueKey: '', stat: null },
+    { label: 'CC SRs — No Update', queueKey: '', stat: null },
+    { label: 'Property Jungle — No Update', queueKey: '', stat: null },
+    // TS row — No Reply (unavailable from live cache)
+    { label: 'Production — No Reply', queueKey: '', stat: null },
+    { label: 'Tier 2 — No Reply', queueKey: '', stat: null },
+    { label: 'Development — No Reply', queueKey: '', stat: null },
+    // CC row — Over SLA
+    { label: 'CC Incidents — Over SLA', queueKey: 'cc_incidents', stat: 'slaBreached' },
+    { label: 'CC SRs — Over SLA', queueKey: 'cc_service_requests', stat: 'slaBreached' },
+    { label: 'Property Jungle — Over SLA', queueKey: 'cc_tpj', stat: 'slaBreached' },
+    // TS row — Over SLA (Dev+T3 consolidated)
+    { label: 'Production — Over SLA', queueKey: 'production', stat: 'slaBreached' },
+    { label: 'Tier 2 — Over SLA', queueKey: 'tier2', stat: 'slaBreached' },
+    { label: 'Development — Over SLA', queueKey: 'development+tier3', stat: 'slaBreached' },
+  ];
+
+  function renderLiveWallboard(title: string, subtitle: string, snap: CohortSnapshot, route: string): string {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-GB');
+    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const staleMs = Date.now() - snap.updatedAt.getTime();
+    const staleBanner = staleMs > 10 * 60 * 1000
+      ? `<div style="background:#78350f;color:#fbbf24;padding:6px 12px;border-radius:8px;font-size:11px;margin-bottom:10px;text-align:center">Data is ${Math.round(staleMs / 60000)}m old — cache may be stale</div>`
+      : '';
+
+    const queues = snap.queues as Record<string, { active: number; slaBreached: number }>;
+
+    function resolve(p: LivePanel): { value: string; color: string; flash: boolean } {
+      if (p.stat === null) return { value: '—', color: '#475569', flash: false };
+      const keys = p.queueKey.split('+');
+      let total = 0;
+      for (const k of keys) total += queues[k]?.[p.stat] ?? 0;
+      const isBreachStat = p.stat === 'slaBreached';
+      const color = isBreachStat ? (total > 0 ? '#ef4444' : '#10b981') : (total > 0 ? '#e2e8f0' : '#10b981');
+      return { value: String(total), color, flash: isBreachStat && total > 0 };
+    }
+
+    const panelHtml = LIVE_PANELS.map(p => {
+      const { value, color, flash } = resolve(p);
+      const flashClass = flash ? ' flash-red' : '';
+      return `<div class="${flashClass}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;align-items:center">
+        <div style="font-size:10px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:6px;letter-spacing:.2px">${p.label}</div>
+        <div style="font-size:48px;font-weight:800;letter-spacing:-2px;line-height:1;color:${color}">${value}</div>
+      </div>`;
+    }).join('');
+
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title>
+${wallboardRefreshScript(route)}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:12px 20px;min-height:100vh;display:flex;flex-direction:column}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+  <div><h1 style="font-size:18px;font-weight:800;letter-spacing:-0.5px">${title}</h1><div style="font-size:9px;color:#64748b;margin-top:1px">${subtitle}</div></div>
+  <div style="font-size:9px;color:#64748b">Live from cache &middot; Updated ${timeStr}</div>
+</div>
+${staleBanner}
+<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;flex:1">
+${panelHtml}
+</div>
+<div style="text-align:center;margin-top:8px;font-size:9px;color:#475569">nurtur.tech &middot; ${title} &middot; ${dateStr}</div>
 </div></body></html>`;
   }
 
@@ -1596,13 +1691,13 @@ ${panelHtml}
       const html = await renderStatWallboard(settingsQueries, 'Technical Support', 'Live queue metrics', [
         { label: 'Production Active Tickets', kpi: 'Number of Tickets in Production' },
         { label: 'Tier 2 Active Tickets', kpi: 'Number of Tickets in Tier 2' },
-        { label: 'Development Active Tickets', kpi: 'Number of Tickets in Development' },
+        { label: 'Development — Active Tickets', kpi: 'Number of Tickets in Development', sumKpis: ['Number of Tickets in Development', 'Number of Tickets in Tier 3'] },
         { label: 'Production — No Reply', kpi: 'Number of Tickets With No Reply in Production' },
         { label: 'Tier 2 — No Reply', kpi: 'Number of Tickets With No Reply in Tier 2' },
-        { label: 'Tier 3 — No Reply', kpi: 'Number of Tickets With No Reply in Tier 3' },
+        { label: 'Development — No Reply', kpi: 'Number of Tickets With No Reply in Tier 3', sumKpis: ['Number of Tickets With No Reply in Development', 'Number of Tickets With No Reply in Tier 3'] },
         { label: 'Production — Over SLA', kpi: 'Production over SLA (actionable)' },
         { label: 'Tier 2 — Over SLA', kpi: 'Tier 2 over SLA (actionable)' },
-        { label: 'Development — Over SLA', kpi: 'Development over SLA (actionable)' },
+        { label: 'Development — Over SLA', kpi: 'Development over SLA (actionable)', sumKpis: ['Development over SLA (actionable)', 'Tier 3 over SLA (actionable)'] },
       ], 3, '/wallboard/tech-support');
       res.send(html);
       logWallboard('/wallboard/tech-support', 'info', 200, Date.now() - wbStart, 'OK', { sqlServer: settingsQueries.getAll().kpi_sql_server });
@@ -1613,92 +1708,14 @@ ${panelHtml}
     }
   });
 
-  // Key Accounts wallboard — tickets with Key_Account label from jira_issue_cache
+  // Key Accounts wallboard — CC+TS panels scoped to Key_Account label
   app.get('/wallboard/key-accounts', async (_req, res) => {
     const wbStart = Date.now();
     try {
-      const { getPool } = await import('./services/database.js');
-      const novaPool = getPool();
-      const ticketResult = await novaPool.request().query(`
-        SELECT organisation_name, issue_key, summary, status_name, status_category,
-               priority_name, assignee_display, sla_breached, sla_breach_time,
-               jira_created, jira_updated, current_tier, labels
-        FROM jira_issue_cache
-        WHERE labels LIKE '%Key_Account%'
-          AND status_category != 'Done'
-        ORDER BY organisation_name, sla_breached DESC, jira_updated ASC
-      `);
-
-      const byAccount = new Map<string, any[]>();
-      for (const row of ticketResult.recordset) {
-        const acct = row.organisation_name || 'Unknown';
-        if (!byAccount.has(acct)) byAccount.set(acct, []);
-        byAccount.get(acct)!.push(row);
-      }
-
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString('en-GB');
-      const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-      const totalOpen = ticketResult.recordset.length;
-      const totalBreached = ticketResult.recordset.filter((r: any) => r.sla_breached).length;
-      const totalFlagged = ticketResult.recordset.filter((r: any) => r.priority_name === 'Highest' || r.priority_name === 'Critical').length;
-
-      function kpiCard(label: string, value: string | number, color: string) {
-        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px 18px"><div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px">${label}</div><div style="font-size:26px;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
-      }
-
-      const accountSections = Array.from(byAccount.entries()).map(([acctName, tickets]) => {
-        const breached = tickets.filter(t => t.sla_breached).length;
-        const flagged = tickets.filter(t => t.priority_name === 'Highest' || t.priority_name === 'Critical').length;
-        const oldest = tickets.length > 0 ? tickets.reduce((o: any, t: any) => (!o || new Date(t.jira_created) < new Date(o.jira_created)) ? t : o, null) : null;
-        const oldestDays = oldest ? Math.floor((Date.now() - new Date(oldest.jira_created).getTime()) / 86400000) : 0;
-
-        const rows = tickets.slice(0, 10).map((t: any) => {
-          const rowBg = t.sla_breached ? 'background:rgba(239,68,68,.04)' : '';
-          const slaCol = t.sla_breached
-            ? '<span style="color:#ef4444;font-weight:700">BREACHED</span>'
-            : '<span style="color:#10b981;font-weight:600">OK</span>';
-          return `<tr style="${rowBg}"><td style="color:#e2e8f0;font-weight:600">${t.issue_key}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.summary || ''}</td><td class="c">${t.status_name || ''}</td><td class="c">${t.assignee_display || '—'}</td><td class="c">${slaCol}</td></tr>`;
-        }).join('');
-
-        const moreRow = tickets.length > 10 ? `<tr><td colspan="5" style="text-align:center;color:#64748b;padding:6px">+ ${tickets.length - 10} more tickets</td></tr>` : '';
-
-        return `<div style="margin-bottom:18px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-    <h2 style="font-size:16px;font-weight:700;color:#e2e8f0">${acctName}</h2>
-    <div style="display:flex;gap:16px;font-size:11px">
-      <span style="color:#94a3b8">Open: <strong style="color:#e2e8f0">${tickets.length}</strong></span>
-      <span>Breached: <strong style="color:${breached > 0 ? '#ef4444' : '#10b981'}">${breached}</strong></span>
-      <span>Flagged: <strong style="color:${flagged > 0 ? '#f59e0b' : '#94a3b8'}">${flagged}</strong></span>
-      <span>Oldest: <strong style="color:${oldestDays > 7 ? '#ef4444' : oldestDays > 3 ? '#f59e0b' : '#10b981'}">${oldestDays}d</strong>${oldest ? ` (${oldest.issue_key})` : ''}</span>
-    </div>
-  </div>
-  ${tickets.length > 0 ? `<div style="border:1px solid #2f353d;border-radius:10px;overflow:hidden;background:rgba(255,255,255,.02)">
-  <table><thead><tr><th>Key</th><th>Summary</th><th class="c">Status</th><th class="c">Assignee</th><th class="c">SLA</th></tr></thead>
-  <tbody>${rows}${moreRow}</tbody></table></div>` : '<div style="color:#475569;padding:12px;text-align:center;font-size:12px">No open tickets — all clear</div>'}
-</div>`;
-      }).join('');
-
-      res.send(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Key Accounts</title>
-${wallboardRefreshScript('/wallboard/key-accounts')}
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:6px 10px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:5px 10px;border-bottom:1px solid #2f353d;font-size:12px}td.c{text-align:center}</style>
-</head><body><div class="wrap">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">Key Accounts</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Account health & ticket overview</div></div>
-  <div style="font-size:10px;color:#64748b">Auto-refresh 60s &middot; Updated ${timeStr}</div>
-</div>
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
-  ${kpiCard('Accounts', byAccount.size, '#5ec1ca')}
-  ${kpiCard('Open Tickets', totalOpen, '#e2e8f0')}
-  ${kpiCard('SLA Breached', totalBreached, totalBreached === 0 ? '#10b981' : '#ef4444')}
-  ${kpiCard('Flagged (Critical)', totalFlagged, totalFlagged === 0 ? '#10b981' : '#f59e0b')}
-</div>
-${accountSections}
-<div style="text-align:center;margin-top:10px;font-size:10px;color:#475569">nurtur.tech &middot; Key Accounts &middot; ${dateStr}</div>
-</div></body></html>`);
-      logWallboard('/wallboard/key-accounts', 'info', 200, Date.now() - wbStart, `OK — ${byAccount.size} accounts, ${totalOpen} tickets`);
+      const snap = getCohortSnapshot('key_accounts');
+      const html = renderLiveWallboard('Key Accounts', 'CC + TS queue metrics — Key Account customers only', snap, '/wallboard/key-accounts');
+      res.send(html);
+      logWallboard('/wallboard/key-accounts', 'info', 200, Date.now() - wbStart, `OK — cache age ${Math.round((Date.now() - snap.updatedAt.getTime()) / 1000)}s`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       logWallboard('/wallboard/key-accounts', 'error', 500, Date.now() - wbStart, msg);
@@ -1706,101 +1723,14 @@ ${accountSections}
     }
   });
 
-  // Customer Success wallboard — combined KPI stats + live ticket data
+  // Customer Success wallboard — CC+TS panels scoped to non-KA customers
   app.get('/wallboard/customer-success', async (_req, res) => {
     const wbStart = Date.now();
     try {
-      const settings = settingsQueries.getAll();
-      const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
-
-      // KPI snapshot data (from KPI DB)
-      let kpiPanels: Array<{ label: string; value: number | string; color: string }> = [];
-      if (srv && db && usr && pwd) {
-        const sql = await import('mssql');
-        const kpiPool = await new sql.default.ConnectionPool({
-          server: srv, database: db, user: usr, password: pwd,
-          options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
-        }).connect();
-        const kpiResult = await kpiPool.request().query(`
-          SELECT KPI, [Count], RAG FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY KPI ORDER BY CreatedAt DESC) AS rn
-            FROM dbo.KpiSnapshot
-          ) t WHERE rn = 1
-        `);
-        await kpiPool.close();
-        const kpis = new Map<string, { count: number; rag: number | null }>();
-        for (const r of kpiResult.recordset) kpis.set(r.KPI.toLowerCase(), { count: r.Count, rag: r.RAG });
-
-        function ragColor(rag: number | null): string {
-          if (rag === 1) return '#10b981'; if (rag === 2) return '#f59e0b'; if (rag === 3) return '#ef4444'; return '#94a3b8';
-        }
-        function lookup(name: string) { return kpis.get(name.toLowerCase()) || { count: 0, rag: null }; }
-
-        const csKpis = [
-          { label: 'Active Onboardings', kpi: 'Number of Active Onboardings' },
-          { label: 'Overdue Onboardings', kpi: 'Number of Overdue Onboardings' },
-          { label: 'CSAT Average (7d)', kpi: 'CSAT Average 7 Day' },
-          { label: 'CS Tickets Open', kpi: 'Number of CS Tickets Open' },
-          { label: 'CS No Reply', kpi: 'Number of CS Tickets With No Reply' },
-          { label: 'CS Over SLA', kpi: 'CS Tickets over SLA (actionable)' },
-        ];
-        kpiPanels = csKpis.map(k => {
-          const d = lookup(k.kpi);
-          return { label: k.label, value: d.count, color: ragColor(d.rag) };
-        });
-      }
-
-      // Escalated tickets from jira_issue_cache (on NOVA DB)
-      const { getPool } = await import('./services/database.js');
-      const novaPool = getPool();
-      const escalations = await novaPool.request().query(`
-        SELECT TOP 15 issue_key, summary, status_name, assignee_display, current_tier,
-               priority_name, sla_breached, jira_created, organisation_name
-        FROM jira_issue_cache
-        WHERE status_category != 'Done'
-          AND (current_tier LIKE '%Tier 2%' OR current_tier LIKE '%Tier 3%'
-               OR priority_name IN ('Highest','Critical')
-               OR sla_breached = 1)
-        ORDER BY sla_breached DESC, jira_created ASC
-      `);
-
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString('en-GB');
-      const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-
-      const kpiHtml = kpiPanels.map(p =>
-        `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:16px 20px;text-align:center">
-          <div style="font-size:10px;color:#94a3b8;font-weight:600;margin-bottom:8px">${p.label}</div>
-          <div style="font-size:48px;font-weight:800;letter-spacing:-2px;color:${p.color}">${p.value}</div>
-        </div>`
-      ).join('');
-
-      const escRows = escalations.recordset.map((t: any) => {
-        const rowBg = t.sla_breached ? 'background:rgba(239,68,68,.04)' : '';
-        const slaCol = t.sla_breached
-          ? '<span style="color:#ef4444;font-weight:700">BREACHED</span>'
-          : '<span style="color:#10b981">OK</span>';
-        return `<tr style="${rowBg}"><td style="color:#e2e8f0;font-weight:600">${t.issue_key}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.summary || ''}</td><td class="c">${t.status_name || ''}</td><td class="c">${t.current_tier || '—'}</td><td class="c">${t.assignee_display || '—'}</td><td class="c">${slaCol}</td></tr>`;
-      }).join('');
-
-      res.send(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Customer Success</title>
-${wallboardRefreshScript('/wallboard/customer-success')}
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:6px 10px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:5px 10px;border-bottom:1px solid #2f353d;font-size:12px}td.c{text-align:center}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03)}50%{background:rgba(239,68,68,.35);box-shadow:0 0 24px rgba(239,68,68,.5)}}</style>
-</head><body><div class="wrap">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">Customer Success</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Onboarding, satisfaction & escalation overview</div></div>
-  <div style="font-size:10px;color:#64748b">Auto-refresh 60s &middot; Updated ${timeStr}</div>
-</div>
-${kpiPanels.length > 0 ? `<div style="display:grid;grid-template-columns:repeat(${Math.min(kpiPanels.length, 6)},1fr);gap:10px;margin-bottom:18px">${kpiHtml}</div>` : ''}
-<div style="margin-bottom:8px"><h2 style="font-size:14px;font-weight:700;color:#94a3b8">Open Escalations & Breached Tickets</h2></div>
-<div style="border:1px solid #2f353d;border-radius:10px;overflow:hidden;background:rgba(255,255,255,.02)">
-<table><thead><tr><th>Key</th><th>Summary</th><th class="c">Status</th><th class="c">Tier</th><th class="c">Assignee</th><th class="c">SLA</th></tr></thead>
-<tbody>${escRows || '<tr><td colspan="6" style="text-align:center;padding:30px;color:#64748b">No escalations — all clear</td></tr>'}</tbody></table></div>
-<div style="text-align:center;margin-top:10px;font-size:10px;color:#475569">nurtur.tech &middot; Customer Success &middot; ${dateStr}</div>
-</div></body></html>`);
-      logWallboard('/wallboard/customer-success', 'info', 200, Date.now() - wbStart, `OK — ${escalations.recordset.length} escalations`);
+      const snap = getCohortSnapshot('customer_success');
+      const html = renderLiveWallboard('Customer Success', 'CC + TS queue metrics — Customer Success cohort (excludes Key Accounts)', snap, '/wallboard/customer-success');
+      res.send(html);
+      logWallboard('/wallboard/customer-success', 'info', 200, Date.now() - wbStart, `OK — cache age ${Math.round((Date.now() - snap.updatedAt.getTime()) / 1000)}s`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       logWallboard('/wallboard/customer-success', 'error', 500, Date.now() - wbStart, msg);
