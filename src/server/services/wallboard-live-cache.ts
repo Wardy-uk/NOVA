@@ -45,6 +45,7 @@ function classifyQueue(tier: string | null, requestType: string | null): QueueKe
   if (tier === 'Tier 2') return 'tier2';
   if (tier === 'Tier 3') return 'tier3';
   if (tier === 'Development') return 'development';
+  if (tier === 'Escalations') return 'tier2';
   return null;
 }
 
@@ -60,6 +61,7 @@ async function refreshAll(): Promise<void> {
       SELECT current_tier, request_type, sla_breached, labels
       FROM jira_issue_cache
       WHERE status_category != 'Done'
+        AND project_key = 'NT'
     `);
 
     const ka = emptySnapshot();
@@ -78,6 +80,10 @@ async function refreshAll(): Promise<void> {
     cs.updatedAt = now;
     cache.set('key_accounts', ka);
     cache.set('customer_success', cs);
+
+    const kaTotal = Object.values(ka.queues).reduce((s, q) => s + q.active, 0);
+    const csTotal = Object.values(cs.queues).reduce((s, q) => s + q.active, 0);
+    console.log(`[wallboard-live-cache] refreshed — KA: ${kaTotal} tickets, CS: ${csTotal} tickets (${result.recordset.length} total rows)`);
   } catch (err) {
     console.error('[wallboard-live-cache] refresh failed:', err instanceof Error ? err.message : err);
   }
