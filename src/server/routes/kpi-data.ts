@@ -960,15 +960,16 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       request.input('isAvailable', sql.Bit, IsAvailable !== false ? 1 : 0);
       request.input('isActive', sql.Bit, IsActive !== false ? 1 : 0);
       request.input('department', sql.NVarChar(10), 'NT');
+      request.input('createdAt', sql.DateTime2, new Date());
 
       const result = await request.query(`
         INSERT INTO dbo.Agent (AgentName, AgentSurname, AgentKey, TierCode, Team,
                                MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3,
-                               IsAvailable, IsActive, Department)
+                               IsAvailable, IsActive, Department, CreatedAt)
         OUTPUT INSERTED.AgentId
         VALUES (@name, @surname, @key, @tierCode, @team,
                 @maxTickets, @maxTicketsCC, @maxTicketsT2T3,
-                @isAvailable, @isActive, @department)
+                @isAvailable, @isActive, @department, @createdAt)
       `);
 
       const newId = result.recordset[0]?.AgentId;
