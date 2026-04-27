@@ -747,6 +747,10 @@ export function createDevReviewRoutes(
       res.status(400).json({ ok: false, error: 'TL;DR is required by the Escalate to Development screen' });
       return;
     }
+    if (!developmentDetails) {
+      res.status(400).json({ ok: false, error: 'Development Details is required by the Escalate to Development screen' });
+      return;
+    }
 
     const threadId = await devQueries.addThreadEntry({
       jira_key: key,
@@ -817,12 +821,16 @@ export function createDevReviewRoutes(
       return;
     }
 
-    // Step 1 — transition with required comment. The transition screen
-    // mandates a Comment field. Post-functions clear the assignee and
-    // some fields, so we restore everything in step 2.
+    // Step 1 — transition with screen fields + comment. The transition
+    // screen mandates TL;DR, Development Details, and Comment. Post-
+    // functions clear the assignee, so we restore it in step 2.
     const transitionComment = note || `Accepted into development backlog by ${display}`;
     try {
       await client.transitionIssue(key, transitionId, {
+        fields: {
+          [CF_TLDR]: adfDoc(tldr),
+          [CF_DEVELOPMENT_DETAILS]: adfDoc(developmentDetails),
+        },
         comment: {
           body: adfDoc(transitionComment),
           internal: true,
@@ -843,26 +851,24 @@ export function createDevReviewRoutes(
     await devQueries.markThreadSynced(threadId, null);
     await devQueries.markAccepted(key);
 
-    // Step 2 — single updateFields call writing TL;DR, Development Details
-    // and restoring the original assignee. Runs AFTER the transition so
-    // any post-functions that clear these fields have already fired.
+    // Step 2 — restore the original assignee (post-functions clear it).
+    // TL;DR + Development Details were already set during the transition.
     // Logged loudly on failure — the accept is already committed in
     // NOVA and the ticket has moved in Jira, so we return ok: true with
     // a warnings list rather than failing the whole request.
-    const postUpdatePayload: Record<string, unknown> = {
-      [CF_TLDR]: adfDoc(tldr),
-    };
-    if (developmentDetails) postUpdatePayload[CF_DEVELOPMENT_DETAILS] = adfDoc(developmentDetails);
+    const postUpdatePayload: Record<string, unknown> = {};
     if (originalAssigneeAccountId) {
       postUpdatePayload.assignee = { accountId: originalAssigneeAccountId };
     }
     const warnings: string[] = [];
-    try {
-      await client.updateFields(key, postUpdatePayload);
-    } catch (postErr) {
-      const msg = postErr instanceof Error ? postErr.message : 'post-transition update failed';
-      console.warn(`[DevReview/accept] Post-transition field update failed for ${key}: ${msg}`);
-      warnings.push(`Field update after transition failed: ${msg}`);
+    if (Object.keys(postUpdatePayload).length > 0) {
+      try {
+        await client.updateFields(key, postUpdatePayload);
+      } catch (postErr) {
+        const msg = postErr instanceof Error ? postErr.message : 'post-transition update failed';
+        console.warn(`[DevReview/accept] Post-transition field update failed for ${key}: ${msg}`);
+        warnings.push(`Field update after transition failed: ${msg}`);
+      }
     }
 
     // Step 3 — internal comment aimed at the T2 agent. Fire-and-forget
