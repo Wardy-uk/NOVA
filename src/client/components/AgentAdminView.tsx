@@ -218,6 +218,157 @@ function DailySnapshotPanel({ onToast }: { onToast: (t: Toast) => void }) {
   );
 }
 
+interface NewAgent {
+  AgentName: string;
+  AgentSurname: string;
+  AgentKey: string;
+  TierCode: string;
+  Team: string;
+  MaxTickets: number;
+  MaxTicketsCustomerCare: number;
+  MaxTicketsT2T3: number;
+  IsAvailable: boolean;
+  IsActive: boolean;
+}
+
+const TEAMS = ['Customer Care', 'T2', 'T3', 'TPJ', 'Digital', 'Production'];
+
+const EMPTY_NEW_AGENT: NewAgent = {
+  AgentName: '', AgentSurname: '', AgentKey: '',
+  TierCode: 'T1', Team: 'Customer Care',
+  MaxTickets: 20, MaxTicketsCustomerCare: 0, MaxTicketsT2T3: 0,
+  IsAvailable: true, IsActive: true,
+};
+
+function AddAgentModal({ onClose, onCreated, existingEmails }: {
+  onClose: () => void;
+  onCreated: () => void;
+  existingEmails: Set<string>;
+}) {
+  const [form, setForm] = useState<NewAgent>({ ...EMPTY_NEW_AGENT });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const set = <K extends keyof NewAgent>(k: K, v: NewAgent[K]) => setForm(f => ({ ...f, [k]: v }));
+
+  const emailNormalized = form.AgentKey.trim().toLowerCase();
+  const dupEmail = emailNormalized && existingEmails.has(emailNormalized);
+  const canSubmit = form.AgentName.trim() && form.AgentSurname.trim() && form.AgentKey.trim() && !dupEmail && !submitting;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/kpi-data/agent-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        onCreated();
+      } else {
+        setError(json.error || 'Create failed');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Create failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-[#2f353d] border border-[#3a424d] rounded-xl shadow-2xl w-full max-w-lg p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-bold text-neutral-100">Add Agent</h3>
+
+        {error && (
+          <div className="px-3 py-2 rounded bg-red-900/20 border border-red-800/30 text-[12px] text-red-300">{error}</div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[10px] uppercase text-neutral-500 font-semibold">First Name *</label>
+            <input value={form.AgentName} onChange={e => set('AgentName', e.target.value)} className={`${INPUT} w-full mt-1`} />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase text-neutral-500 font-semibold">Surname *</label>
+            <input value={form.AgentSurname} onChange={e => set('AgentSurname', e.target.value)} className={`${INPUT} w-full mt-1`} />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[10px] uppercase text-neutral-500 font-semibold">Email (AgentKey) *</label>
+          <input value={form.AgentKey} onChange={e => set('AgentKey', e.target.value)} placeholder="name@nurtur.tech" className={`${INPUT} w-full mt-1`} />
+          {dupEmail && <div className="text-[11px] text-red-400 mt-1">This email already exists in the agent list</div>}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[10px] uppercase text-neutral-500 font-semibold">Tier</label>
+            <select value={form.TierCode} onChange={e => set('TierCode', e.target.value)} className={`${INPUT} w-full mt-1`}>
+              <option value="T1">T1</option>
+              <option value="T2">T2</option>
+              <option value="T3">T3</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase text-neutral-500 font-semibold">Team</label>
+            <select value={form.Team} onChange={e => set('Team', e.target.value)} className={`${INPUT} w-full mt-1`}>
+              {TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="text-[10px] uppercase text-neutral-500 font-semibold">Max Tickets</label>
+            <input type="number" min={0} value={form.MaxTickets} onChange={e => set('MaxTickets', parseInt(e.target.value) || 0)} className={`${INPUT} w-full mt-1`} />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase text-neutral-500 font-semibold">Max CC</label>
+            <input type="number" min={0} value={form.MaxTicketsCustomerCare} onChange={e => set('MaxTicketsCustomerCare', parseInt(e.target.value) || 0)} className={`${INPUT} w-full mt-1`} />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase text-neutral-500 font-semibold">Max T2/T3</label>
+            <input type="number" min={0} value={form.MaxTicketsT2T3} onChange={e => set('MaxTicketsT2T3', parseInt(e.target.value) || 0)} className={`${INPUT} w-full mt-1`} />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <label className="flex items-center gap-2 text-[12px] text-neutral-300">
+            <button type="button" onClick={() => set('IsAvailable', !form.IsAvailable)}
+              className={`w-9 h-5 rounded-full relative transition-colors ${form.IsAvailable ? 'bg-[#5ec1ca]' : 'bg-[#3a424d]'}`}>
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${form.IsAvailable ? 'left-[18px]' : 'left-0.5'}`} />
+            </button>
+            Available
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-neutral-300">
+            <button type="button" onClick={() => set('IsActive', !form.IsActive)}
+              className={`w-9 h-5 rounded-full relative transition-colors ${form.IsActive ? 'bg-[#5ec1ca]' : 'bg-[#3a424d]'}`}>
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${form.IsActive ? 'left-[18px]' : 'left-0.5'}`} />
+            </button>
+            Active
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-4 py-2 text-xs rounded font-semibold text-neutral-400 hover:text-neutral-200 transition-colors">
+            Cancel
+          </button>
+          <button onClick={submit} disabled={!canSubmit}
+            className={`px-4 py-2 text-xs rounded font-semibold transition-colors ${
+              canSubmit ? 'bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9]' : 'bg-[#5ec1ca]/30 text-[#272C33]/50 cursor-not-allowed'
+            }`}>
+            {submitting ? 'Creating...' : 'Create Agent'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AgentAdminView() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [edits, setEdits] = useState<Record<number, EditState>>({});
@@ -226,6 +377,7 @@ export function AgentAdminView() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [search, setSearch] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -336,25 +488,33 @@ export function AgentAdminView() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-neutral-100">Agent Admin</h2>
-        <button
-          onClick={fetchAgents}
-          className="text-neutral-400 hover:text-[#5ec1ca] transition-colors"
-          title="Refresh"
-        >
-          <svg
-            className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="px-3 py-1.5 text-xs rounded font-semibold bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9] transition-colors"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-            />
-          </svg>
-        </button>
+            + Add Agent
+          </button>
+          <button
+            onClick={fetchAgents}
+            className="text-neutral-400 hover:text-[#5ec1ca] transition-colors"
+            title="Refresh"
+          >
+            <svg
+              className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -546,6 +706,19 @@ export function AgentAdminView() {
 
       {/* Daily KPI Snapshot & Backfill */}
       <DailySnapshotPanel onToast={setToast} />
+
+      {/* Add Agent Modal */}
+      {showAddModal && (
+        <AddAgentModal
+          existingEmails={new Set(agents.map(a => (a.AgentKey || '').trim().toLowerCase()))}
+          onClose={() => setShowAddModal(false)}
+          onCreated={() => {
+            setShowAddModal(false);
+            setToast({ message: 'Agent created successfully', type: 'success' });
+            fetchAgents();
+          }}
+        />
+      )}
 
       {/* Toast */}
       {toast && (

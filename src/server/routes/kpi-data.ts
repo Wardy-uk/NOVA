@@ -928,6 +928,56 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
     }
   });
 
+  // POST /api/admin/kpi-data/agent-admin — create a new agent in dbo.Agent
+  router.post('/agent-admin', async (req, res) => {
+    try {
+      const p = await getPool();
+      const { AgentName, AgentSurname, AgentKey, TierCode, Team, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3, IsAvailable, IsActive } = req.body;
+
+      if (!AgentName?.trim() || !AgentSurname?.trim() || !AgentKey?.trim()) {
+        return res.status(400).json({ ok: false, error: 'AgentName, AgentSurname, and AgentKey (email) are required' });
+      }
+      if (!TierCode || !['T1', 'T2', 'T3'].includes(TierCode)) {
+        return res.status(400).json({ ok: false, error: 'TierCode must be T1, T2, or T3' });
+      }
+
+      const dupCheck = await p.request()
+        .input('email', sql.NVarChar(200), AgentKey.trim().toLowerCase())
+        .query(`SELECT AgentId FROM dbo.Agent WHERE LOWER(LTRIM(RTRIM(AgentKey))) = @email`);
+      if (dupCheck.recordset.length > 0) {
+        return res.status(409).json({ ok: false, error: `Agent with email ${AgentKey} already exists (AgentId ${dupCheck.recordset[0].AgentId})` });
+      }
+
+      const request = p.request();
+      request.input('name', sql.NVarChar(100), AgentName.trim());
+      request.input('surname', sql.NVarChar(100), AgentSurname.trim());
+      request.input('key', sql.NVarChar(200), AgentKey.trim());
+      request.input('tierCode', sql.NVarChar(10), TierCode);
+      request.input('team', sql.NVarChar(50), (Team || '').trim());
+      request.input('maxTickets', sql.Int, MaxTickets ?? 20);
+      request.input('maxTicketsCC', sql.Int, MaxTicketsCustomerCare ?? 0);
+      request.input('maxTicketsT2T3', sql.Int, MaxTicketsT2T3 ?? 0);
+      request.input('isAvailable', sql.Bit, IsAvailable !== false ? 1 : 0);
+      request.input('isActive', sql.Bit, IsActive !== false ? 1 : 0);
+      request.input('department', sql.NVarChar(10), 'NT');
+
+      const result = await request.query(`
+        INSERT INTO dbo.Agent (AgentName, AgentSurname, AgentKey, TierCode, Team,
+                               MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3,
+                               IsAvailable, IsActive, Department)
+        OUTPUT INSERTED.AgentId
+        VALUES (@name, @surname, @key, @tierCode, @team,
+                @maxTickets, @maxTicketsCC, @maxTicketsT2T3,
+                @isAvailable, @isActive, @department)
+      `);
+
+      const newId = result.recordset[0]?.AgentId;
+      res.json({ ok: true, data: { AgentId: newId } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Insert failed' });
+    }
+  });
+
   // POST /api/admin/kpi-data/save-agent-daily — snapshot current Agent table → jira_agent_kpi_daily
   router.post('/save-agent-daily', async (req, res) => {
     try {
