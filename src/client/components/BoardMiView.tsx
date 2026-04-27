@@ -304,6 +304,7 @@ export function BoardMiView() {
   const [commentaryDraft, setCommentaryDraft] = useState('');
   const [commentarySaving, setCommentarySaving] = useState(false);
   const [commentaryDirty, setCommentaryDirty] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -343,6 +344,27 @@ export function BoardMiView() {
     } catch { /* ignore */ }
     finally { setCommentarySaving(false); }
   }, [month, commentaryDraft]);
+
+  const generateCommentary = useCallback(async () => {
+    if (!data) return;
+    setGenerating(true);
+    try {
+      const res = await fetch('/api/board-mi/generate-commentary', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}`,
+        },
+        body: JSON.stringify({ miData: data }),
+      });
+      const json = await res.json();
+      if (json.ok && json.data?.summary) {
+        setCommentaryDraft(json.data.summary);
+        setCommentaryDirty(true);
+      }
+    } catch { /* ignore */ }
+    finally { setGenerating(false); }
+  }, [data]);
 
   // ── Derived ──────────────────────────────────────────────────────────
   const avgFrt = useMemo(() => {
@@ -497,12 +519,20 @@ export function BoardMiView() {
               <SectionHeader num="01" title="Service Performance" subtitle="SLA compliance, resolution, customer satisfaction" />
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <GlassCard accent className="p-6 lg:col-span-2">
-                  <div className="grid grid-cols-3 gap-4 mb-6">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                     <KpiTile
                       label="Avg FRT compliance"
                       tooltip="First Response Time — % of tickets where the first agent reply was sent within SLA. Averaged across all tiers."
                       value={fmtPct(avgFrt)}
                       rag={ragForPct(avgFrt)}
+                      delta={null}
+                      target="≥95%"
+                    />
+                    <KpiTile
+                      label="Avg Resolution compliance"
+                      tooltip="Resolution Time — % of tickets resolved within SLA. Averaged across all tiers."
+                      value={fmtPct(avgRes)}
+                      rag={ragForPct(avgRes)}
                       delta={null}
                       target="≥95%"
                     />
@@ -808,6 +838,13 @@ export function BoardMiView() {
                     {!commentaryDirty && !commentarySaving && data.commentary.content && (
                       <span className="text-emerald-400">✓ Saved</span>
                     )}
+                    <button
+                      onClick={generateCommentary}
+                      disabled={generating || !data}
+                      className="px-3 py-1 text-[10px] rounded font-bold text-neutral-200 border border-white/10 hover:bg-white/5 disabled:opacity-40 transition-all"
+                    >
+                      {generating ? 'Generating…' : 'AI Draft'}
+                    </button>
                     <button
                       onClick={saveCommentary}
                       disabled={!commentaryDirty || commentarySaving}

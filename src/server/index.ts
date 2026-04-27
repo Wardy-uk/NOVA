@@ -822,12 +822,14 @@ async function main() {
   });
 
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
+  let boardMiLlm: import('./services/llm-service.js').LlmService | null = null;
   app.use('/api/board-mi', requireAreaAccess('mi', 'view'), createBoardMiRoutes(
     settingsQueries,
     devReviewQueries,
     buildServiceDeskJiraClient,
     jiraCacheQueries,
     jiraSyncService,
+    () => boardMiLlm,
   ));
   app.use('/api/dev-review', createDevReviewRoutes(
     devReviewQueries,
@@ -866,6 +868,7 @@ async function main() {
   // Agent loop — feature-flagged, admin-only
   const agentJiraClient = buildOnboardingJiraClient();
   const llmService = new LlmService(settingsQueries);
+  boardMiLlm = llmService;
   const llmDiag = llmService.getDiagnostics();
   console.log(`[N.O.V.A] LLM config: primary=${llmDiag.primaryProvider} (${llmDiag.primaryKeyPrefix}), failover=${llmDiag.failoverProvider} (${llmDiag.failoverKeyPrefix})`);
   if (!llmDiag.primaryAvailable) console.warn(`[N.O.V.A] WARNING: Primary LLM provider has no API key configured!`);

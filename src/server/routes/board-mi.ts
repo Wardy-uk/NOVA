@@ -1,10 +1,12 @@
 import { Router, type Request, type Response } from 'express';
 import sql from 'mssql';
+import { z } from 'zod';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { DevReviewQueries } from '../db/dev-review-queries.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
 import type { JiraSyncService } from '../services/jira-sync-service.js';
+import type { LlmService } from '../services/llm-service.js';
 import { queryOne, execute, query } from '../services/database.js';
 
 /**
@@ -112,6 +114,7 @@ export function createBoardMiRoutes(
   getJiraClient: () => JiraRestClient | null,
   cache?: JiraCacheQueries,
   syncService?: JiraSyncService | null,
+  getLlm?: () => LlmService | null,
 ): Router {
   const router = Router();
   const holder: PoolHolder = { pool: null };
@@ -465,6 +468,42 @@ export function createBoardMiRoutes(
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'save failed' });
+    }
+  });
+
+  // Generate AI commentary summary
+  const commentarySchema = z.object({ summary: z.string() });
+
+  router.post('/generate-commentary', async (req: Request, res: Response) => {
+    try {
+      if (!req.user) { res.status(401).json({ ok: false }); return; }
+      const llm = getLlm?.();
+      if (!llm) { res.status(400).json({ ok: false, error: 'LLM service not available' }); return; }
+
+      const miData = req.body?.miData;
+      if (!miData) { res.status(400).json({ ok: false, error: 'Missing MI data' }); return; }
+
+      const systemPrompt = `You are the Head of Technical Support at a SaaS company writing a monthly management information (MI) summary for the board.
+Write a concise, professional narrative (3–5 paragraphs) covering:
+1. Service performance — FRT/Resolution SLA compliance, CSAT, FCR trends
+2. Backlog health — opened vs resolved, net change, tier distribution
+3. Key risks or concerns — breaches, aging tickets, any declining metrics
+4. Wins and positives — improvements, AI solves, good CSAT
+5. Actions/focus for next month
+
+Use specific numbers from the data. Be direct and factual. Avoid filler. Write in first person as the HoTS.
+Do not use markdown headers or bullet points — write flowing paragraphs.`;
+
+      const result = await llm.call(
+        systemPrompt,
+        `Here is the MI data for ${miData.label || 'this month'}:\n\n${JSON.stringify(miData, null, 2)}`,
+        commentarySchema,
+        { callType: 'mi_commentary', tier: 'cheap' as const, maxTokens: 1024, temperature: 0.4 },
+      );
+
+      res.json({ ok: true, data: { summary: result.data.summary } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'generation failed' });
     }
   });
 
