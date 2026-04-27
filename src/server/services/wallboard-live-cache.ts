@@ -62,8 +62,8 @@ function isWorkingHours(): boolean {
   return (h > 9 || (h === 9 && m >= 0)) && (h < 17 || (h === 17 && m <= 30));
 }
 
-async function refreshAll(): Promise<void> {
-  if (!isWorkingHours()) return;
+async function refreshAll(force = false): Promise<void> {
+  if (!force && !isWorkingHours()) return;
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -104,8 +104,8 @@ export function getCohortSnapshot(cohortName: string): CohortSnapshot {
 }
 
 export async function startWallboardLiveCache(intervalMs = 5 * 60 * 1000): Promise<void> {
-  await refreshAll();
-  intervalHandle = setInterval(refreshAll, intervalMs);
+  await refreshAll(true);
+  intervalHandle = setInterval(() => refreshAll(), intervalMs);
 }
 
 export function stopWallboardLiveCache(): void {

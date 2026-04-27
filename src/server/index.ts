@@ -1617,9 +1617,12 @@ ${panelHtml}
     const timeStr = now.toLocaleTimeString('en-GB');
     const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const staleMs = Date.now() - snap.updatedAt.getTime();
-    const staleBanner = staleMs > 10 * 60 * 1000
-      ? `<div style="background:#78350f;color:#fbbf24;padding:6px 12px;border-radius:8px;font-size:11px;margin-bottom:10px;text-align:center">Data is ${Math.round(staleMs / 60000)}m old — cache may be stale</div>`
-      : '';
+    const neverLoaded = snap.updatedAt.getTime() === 0;
+    const staleBanner = neverLoaded
+      ? `<div style="background:#78350f;color:#fbbf24;padding:6px 12px;border-radius:8px;font-size:11px;margin-bottom:10px;text-align:center">Cache not yet loaded — waiting for first refresh</div>`
+      : staleMs > 10 * 60 * 1000
+        ? `<div style="background:#78350f;color:#fbbf24;padding:6px 12px;border-radius:8px;font-size:11px;margin-bottom:10px;text-align:center">Data is ${Math.round(staleMs / 60000)}m old — cache may be stale</div>`
+        : '';
 
     const queues = snap.queues as Record<string, { active: number; noReply: number; slaBreached: number }>;
 
