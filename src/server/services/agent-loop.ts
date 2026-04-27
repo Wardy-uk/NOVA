@@ -257,14 +257,14 @@ export class AgentLoop {
     if (this.getWeekendOverrideUntil()) return true;
 
     const tz = this.settings.get('agent_timezone') ?? 'Europe/London';
-    const ukNow = new Date().toLocaleString('en-GB', { timeZone: tz });
-    // en-GB format: "DD/MM/YYYY, HH:MM:SS"
-    const parts = ukNow.split(', ');
-    const [dayPart, timePart] = parts;
-    const [dd, mm, yyyy] = dayPart.split('/').map(Number);
-    const [hh, mi] = timePart.split(':').map(Number);
-    const localDate = new Date(yyyy, mm - 1, dd);
-    const day = localDate.getDay();
+    const fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz, weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false,
+    });
+    const p = Object.fromEntries(fmt.formatToParts(new Date()).map(x => [x.type, x.value]));
+    const dayNames: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    const day = dayNames[p.weekday] ?? new Date().getDay();
+    const hh = parseInt(p.hour, 10);
+    const mi = parseInt(p.minute, 10);
 
     const workingDaysStr = this.settings.get('agent_working_days') ?? '1,2,3,4,5';
     const workingDays = new Set(workingDaysStr.split(',').map(d => parseInt(d.trim(), 10)));
