@@ -10,7 +10,7 @@ interface TierCompliance {
 }
 
 interface Aging { under4h: number; h4to24: number; d1to3: number; d3to7: number; over7d: number }
-interface BacklogSplit { cc: number; incidents: number; serviceReq: number; tpj: number; t2: number; t3: number; production: number; dev: number }
+interface BacklogSplit { cc: number; incidents: number; serviceReq: number; tpj: number; t2: number; t3: number; production: number }
 interface AgedDev { total: number; over30d: number; over90d: number; over180d: number; oldestDays: number | null }
 interface OpenedResolved { opened: number; resolved: number; prevOpened: number; prevResolved: number }
 interface DevReviewMonth {
@@ -42,8 +42,12 @@ interface MiData {
     frtBreachedCC: number | null;
     frtBreachedT2: number | null;
     frtBreachedT3: number | null;
-    frtBreachedDev: number | null;
     prevFrtBreachedAll: number | null;
+    resBreachedAll: number | null;
+    resBreachedCC: number | null;
+    resBreachedT2: number | null;
+    resBreachedT3: number | null;
+    prevResBreachedAll: number | null;
   };
   aging: Aging | null;
   backlogSplit: BacklogSplit | null;
@@ -51,6 +55,7 @@ interface MiData {
   agedDev: AgedDev | null;
   openedResolved: OpenedResolved | null;
   devReview: DevReviewMonth | null;
+  aiSolves: { count: number; pctOfResolved: number | null; prevCount: number } | null;
   commentary: { content: string; updated_at: string | null };
 }
 
@@ -270,7 +275,7 @@ function TierRow({ tier }: { tier: TierCompliance }) {
   );
 }
 
-function BreachTile({ label, value, colour, big }: { label: string; value: number | null; colour: string; big?: boolean }) {
+function BreachTile({ label, value, colour, big, subtitle }: { label: string; value: number | null; colour: string; big?: boolean; subtitle?: string }) {
   return (
     <div
       className="p-4 rounded-xl border border-white/5"
@@ -283,7 +288,7 @@ function BreachTile({ label, value, colour, big }: { label: string; value: numbe
       >
         {fmtNum(value)}
       </div>
-      <div className="text-[10px] text-neutral-500 mt-1">FRT breaches</div>
+      {subtitle && <div className="text-[10px] text-neutral-500 mt-1">{subtitle}</div>}
     </div>
   );
 }
@@ -477,6 +482,11 @@ export function BoardMiView() {
             KPI data source warning: {data.dataError}. Showing partial results.
           </div>
         )}
+        {data && (
+          <div className="text-[10px] text-neutral-500 italic px-1">
+            Excludes tickets currently at Development tier.
+          </div>
+        )}
 
         {loading && !data ? (
           <div className="text-center py-20 text-neutral-500 text-sm">Loading MI…</div>
@@ -515,10 +525,17 @@ export function BoardMiView() {
                   </div>
                   <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold mb-3 flex items-center gap-1.5">
                     <span>FRT Compliance by Tier</span>
-                    <InfoTip text="First Response Time SLA compliance broken down by support tier (CC, Tier 2, Tier 3, Production, Development)." />
+                    <InfoTip text="First Response Time SLA compliance broken down by support tier (CC, Tier 2, Tier 3, Production)." />
                   </div>
                   <div className="space-y-2">
                     {data.service.frtCompliance.map((t) => <TierRow key={t.tier} tier={t} />)}
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold mb-3 mt-6 flex items-center gap-1.5">
+                    <span>Resolution Compliance by Tier</span>
+                    <InfoTip text="Resolution Time SLA compliance — % of tickets resolved within their SLA target, broken down by tier." />
+                  </div>
+                  <div className="space-y-2">
+                    {data.service.resolutionCompliance.map((t) => <TierRow key={`res-${t.tier}`} tier={t} />)}
                   </div>
                 </GlassCard>
 
@@ -527,7 +544,7 @@ export function BoardMiView() {
                   <div className="space-y-3.5">
                     <BigStat
                       label="Tickets opened"
-                      tooltip="Total NT tickets created in this period (live JQL count)"
+                      tooltip="Total NT tickets created in this period (excludes Development)"
                       value={fmtNum(data.openedResolved?.opened ?? data.service.ticketsOpened)}
                       delta={deltaPct(data.openedResolved?.opened ?? null, data.openedResolved?.prevOpened ?? null)}
                       inverseDelta
@@ -551,20 +568,51 @@ export function BoardMiView() {
                       inverseDelta
                     />
                   </div>
+                  {data.aiSolves && (
+                    <div className="mt-5 pt-4 border-t border-white/5">
+                      <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold mb-2 flex items-center gap-1.5">
+                        <span>AI Solves</span>
+                        <InfoTip text="Tickets where an AI-drafted response was approved and the ticket was subsequently resolved." />
+                      </div>
+                      <div className="flex items-baseline gap-3">
+                        <div
+                          className="text-3xl font-black tracking-tight"
+                          style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", color: '#5ec1ca' }}
+                        >
+                          {data.aiSolves.count}
+                        </div>
+                        {data.aiSolves.pctOfResolved !== null && (
+                          <div className="text-[11px] text-neutral-400">
+                            {data.aiSolves.pctOfResolved.toFixed(1)}% of resolved
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-1">
+                        <SentimentArrow delta={deltaPct(data.aiSolves.count, data.aiSolves.prevCount)} />
+                      </div>
+                    </div>
+                  )}
                 </GlassCard>
               </div>
             </section>
 
             {/* ── Section 02: Escalation Health ─────────────────────── */}
             <section className="mi-fade">
-              <SectionHeader num="02" title="Escalation Health" subtitle="Breach distribution by tier" />
+              <SectionHeader num="02" title="Escalation Health" subtitle="SLA breach distribution by tier" />
               <GlassCard accent className="p-6">
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold mb-3">FRT Breaches</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                   <BreachTile label="Customer Care" value={data.escalation.frtBreachedCC} colour="#5ec1ca" />
                   <BreachTile label="Tier 2" value={data.escalation.frtBreachedT2} colour="#9b6aed" />
                   <BreachTile label="Tier 3" value={data.escalation.frtBreachedT3} colour="#f59e0b" />
-                  <BreachTile label="Development" value={data.escalation.frtBreachedDev} colour="#ef4444" />
                   <BreachTile label="All Tiers" value={data.escalation.frtBreachedAll} colour="#f8fafc" big />
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold mb-3">Resolution Breaches</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <BreachTile label="Customer Care" value={data.escalation.resBreachedCC} colour="#5ec1ca" />
+                  <BreachTile label="Tier 2" value={data.escalation.resBreachedT2} colour="#9b6aed" />
+                  <BreachTile label="Tier 3" value={data.escalation.resBreachedT3} colour="#f59e0b" />
+                  <BreachTile label="All Tiers" value={data.escalation.resBreachedAll} colour="#f8fafc" big />
                 </div>
               </GlassCard>
             </section>
@@ -612,7 +660,6 @@ export function BoardMiView() {
                         <SplitRow label="Tier 2" value={data.backlogSplit.t2} colour="#9b6aed" />
                         <SplitRow label="Tier 3" value={data.backlogSplit.t3} colour="#f59e0b" />
                         <SplitRow label="Production" value={data.backlogSplit.production} colour="#10b981" />
-                        <SplitRow label="Development" value={data.backlogSplit.dev} colour="#ef4444" />
                       </div>
                     </div>
                   ) : (

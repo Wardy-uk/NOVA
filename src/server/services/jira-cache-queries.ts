@@ -239,9 +239,13 @@ export class JiraCacheQueries {
 
   // ── Board MI queries ──
 
-  async countOpenByAgeBucket(project: string, minAgeHours: number | null, maxAgeHours: number | null): Promise<number> {
+  async countOpenByAgeBucket(project: string, minAgeHours: number | null, maxAgeHours: number | null, excludeTiers?: string[]): Promise<number> {
     let sql = `SELECT COUNT(*) AS cnt FROM jira_issue_cache WHERE project_key = ? AND status_category != 'done'`;
     const params: unknown[] = [project];
+    if (excludeTiers?.length) {
+      sql += ` AND (current_tier IS NULL OR current_tier NOT IN (${excludeTiers.map(() => '?').join(',')}))`;
+      params.push(...excludeTiers);
+    }
     if (maxAgeHours !== null) {
       sql += ` AND jira_created >= DATEADD(hour, ?, GETUTCDATE())`;
       params.push(-maxAgeHours);
@@ -273,13 +277,16 @@ export class JiraCacheQueries {
     return row?.cnt ?? 0;
   }
 
-  async getTopProducts(project: string, limit = 5): Promise<Array<{ nurtur_product: string; cnt: number }>> {
-    return query(
-      `SELECT TOP (?) nurtur_product, COUNT(*) AS cnt FROM jira_issue_cache
-       WHERE project_key = ? AND nurtur_product IS NOT NULL AND status_category != 'done'
-       GROUP BY nurtur_product ORDER BY cnt DESC`,
-      [limit, project],
-    );
+  async getTopProducts(project: string, limit = 5, excludeTiers?: string[]): Promise<Array<{ nurtur_product: string; cnt: number }>> {
+    let sql = `SELECT TOP (?) nurtur_product, COUNT(*) AS cnt FROM jira_issue_cache
+       WHERE project_key = ? AND nurtur_product IS NOT NULL AND status_category != 'done'`;
+    const params: unknown[] = [limit, project];
+    if (excludeTiers?.length) {
+      sql += ` AND (current_tier IS NULL OR current_tier NOT IN (${excludeTiers.map(() => '?').join(',')}))`;
+      params.push(...excludeTiers);
+    }
+    sql += ` GROUP BY nurtur_product ORDER BY cnt DESC`;
+    return query(sql, params);
   }
 
   async getOldestByTier(project: string, tier: string): Promise<CachedIssue | null> {
@@ -292,21 +299,27 @@ export class JiraCacheQueries {
     return row ?? null;
   }
 
-  async countCreatedInRange(project: string, start: Date, end: Date): Promise<number> {
-    const row = await queryOne<{ cnt: number }>(
-      `SELECT COUNT(*) AS cnt FROM jira_issue_cache
-       WHERE project_key = ? AND jira_created >= ? AND jira_created <= ?`,
-      [project, start, end],
-    );
+  async countCreatedInRange(project: string, start: Date, end: Date, excludeTiers?: string[]): Promise<number> {
+    let sql = `SELECT COUNT(*) AS cnt FROM jira_issue_cache
+       WHERE project_key = ? AND jira_created >= ? AND jira_created <= ?`;
+    const params: unknown[] = [project, start, end];
+    if (excludeTiers?.length) {
+      sql += ` AND (current_tier IS NULL OR current_tier NOT IN (${excludeTiers.map(() => '?').join(',')}))`;
+      params.push(...excludeTiers);
+    }
+    const row = await queryOne<{ cnt: number }>(sql, params);
     return row?.cnt ?? 0;
   }
 
-  async countResolvedInRange(project: string, start: Date, end: Date): Promise<number> {
-    const row = await queryOne<{ cnt: number }>(
-      `SELECT COUNT(*) AS cnt FROM jira_issue_cache
-       WHERE project_key = ? AND status_category = 'done' AND jira_updated >= ? AND jira_updated <= ?`,
-      [project, start, end],
-    );
+  async countResolvedInRange(project: string, start: Date, end: Date, excludeTiers?: string[]): Promise<number> {
+    let sql = `SELECT COUNT(*) AS cnt FROM jira_issue_cache
+       WHERE project_key = ? AND status_category = 'done' AND jira_updated >= ? AND jira_updated <= ?`;
+    const params: unknown[] = [project, start, end];
+    if (excludeTiers?.length) {
+      sql += ` AND (current_tier IS NULL OR current_tier NOT IN (${excludeTiers.map(() => '?').join(',')}))`;
+      params.push(...excludeTiers);
+    }
+    const row = await queryOne<{ cnt: number }>(sql, params);
     return row?.cnt ?? 0;
   }
 

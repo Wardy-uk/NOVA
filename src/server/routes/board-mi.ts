@@ -166,15 +166,15 @@ export function createBoardMiRoutes(
         'FRT Compliance % (Tier 2)',
         'FRT Compliance % (Tier 3)',
         'FRT Compliance % (Production)',
-        'FRT Compliance % (Development)',
       ];
       const resKpis = [
         'Resolution Compliance % (Customer Care)',
         'Resolution Compliance % (Tier 2)',
         'Resolution Compliance % (Tier 3)',
         'Resolution Compliance % (Production)',
-        'Resolution Compliance % (Development)',
       ];
+
+      const EXCLUDE_TIERS = ['Development'];
 
       const uniqueKpis = Array.from(new Set(kpiRows.map((r) => r.kpi))).sort();
 
@@ -185,7 +185,7 @@ export function createBoardMiRoutes(
       } | null;
       let backlogSplit = null as {
         cc: number; incidents: number; serviceReq: number; tpj: number;
-        t2: number; t3: number; production: number; dev: number;
+        t2: number; t3: number; production: number;
       } | null;
       let topProducts: Array<{ product: string; count: number }> = [];
       let agedDev = null as { total: number; over30d: number; over90d: number; over180d: number; oldestDays: number | null } | null;
@@ -195,11 +195,11 @@ export function createBoardMiRoutes(
         // All counts from local MSSQL cache — instant SQL queries, no Jira calls
         try {
           const [u4, h4, d1, d3, o7] = await Promise.all([
-            cache.countOpenByAgeBucket('NT', null, 4),
-            cache.countOpenByAgeBucket('NT', 4, 24),
-            cache.countOpenByAgeBucket('NT', 24, 72),
-            cache.countOpenByAgeBucket('NT', 72, 168),
-            cache.countOpenByAgeBucket('NT', 168, null),
+            cache.countOpenByAgeBucket('NT', null, 4, EXCLUDE_TIERS),
+            cache.countOpenByAgeBucket('NT', 4, 24, EXCLUDE_TIERS),
+            cache.countOpenByAgeBucket('NT', 24, 72, EXCLUDE_TIERS),
+            cache.countOpenByAgeBucket('NT', 72, 168, EXCLUDE_TIERS),
+            cache.countOpenByAgeBucket('NT', 168, null, EXCLUDE_TIERS),
           ]);
           aging = { under4h: u4, h4to24: h4, d1to3: d1, d3to7: d3, over7d: o7 };
         } catch { /* leave null */ }
@@ -210,28 +210,27 @@ export function createBoardMiRoutes(
             'The Property Jungle - Wordpress Website',
             'The Property Jungle - M365',
           ];
-          const [cc, t2, t3, production, dev, inc, sr, tpj] = await Promise.all([
+          const [cc, t2, t3, production, inc, sr, tpj] = await Promise.all([
             cache.countOpenByTier('NT', 'Customer Care'),
             cache.countOpenByTier('NT', 'Tier 2'),
             cache.countOpenByTier('NT', 'Tier 3'),
             cache.countOpenByTier('NT', 'Production'),
-            cache.countOpenByTier('NT', 'Development'),
             cache.countByRequestType('NT', 'Incident'),
             cache.countByRequestType('NT', 'Service Request'),
             cache.countOpenByProduct('NT', tpjProducts),
           ]);
-          backlogSplit = { cc, incidents: inc, serviceReq: sr, tpj, t2, t3, production, dev };
+          backlogSplit = { cc, incidents: inc, serviceReq: sr, tpj, t2, t3, production };
         } catch { /* leave null */ }
 
         try {
-          const rows = await cache.getTopProducts('NT', 5);
+          const rows = await cache.getTopProducts('NT', 5, EXCLUDE_TIERS);
           topProducts = rows.map(r => ({ product: r.nurtur_product, count: r.cnt }));
         } catch { /* leave empty */ }
 
         try {
           const [total, o30, o90, o180] = await Promise.all([
             cache.countOpenByTier('NT', 'Development'),
-            cache.countOpenByAgeBucket('NT', 720, null),   // 30d = 720h
+            cache.countOpenByAgeBucket('NT', 720, null),   // 30d = 720h (dev-specific, no exclusion)
             cache.countOpenByAgeBucket('NT', 2160, null),  // 90d = 2160h
             cache.countOpenByAgeBucket('NT', 4320, null),  // 180d = 4320h
           ]);
@@ -245,22 +244,23 @@ export function createBoardMiRoutes(
 
         try {
           const [opened, resolved, prevOpened, prevResolved] = await Promise.all([
-            cache.countCreatedInRange('NT', new Date(start), new Date(end)),
-            cache.countResolvedInRange('NT', new Date(start), new Date(end)),
-            cache.countCreatedInRange('NT', new Date(prevStart), new Date(prevEnd)),
-            cache.countResolvedInRange('NT', new Date(prevStart), new Date(prevEnd)),
+            cache.countCreatedInRange('NT', new Date(start), new Date(end), EXCLUDE_TIERS),
+            cache.countResolvedInRange('NT', new Date(start), new Date(end), EXCLUDE_TIERS),
+            cache.countCreatedInRange('NT', new Date(prevStart), new Date(prevEnd), EXCLUDE_TIERS),
+            cache.countResolvedInRange('NT', new Date(prevStart), new Date(prevEnd), EXCLUDE_TIERS),
           ]);
           openedResolved = { opened, resolved, prevOpened, prevResolved };
         } catch { /* leave null */ }
       } else if (client) {
-        // Fallback: live Jira API calls
+        // Fallback: live Jira API calls (exclude Development tier)
+        const notDev = `cf[12981] != "Development"`;
         try {
           const [u4, h4, d1, d3, o7] = await Promise.all([
-            jqlCount(client, `project = NT AND statusCategory != Done AND created >= -4h`),
-            jqlCount(client, `project = NT AND statusCategory != Done AND created < -4h AND created >= -1d`),
-            jqlCount(client, `project = NT AND statusCategory != Done AND created < -1d AND created >= -3d`),
-            jqlCount(client, `project = NT AND statusCategory != Done AND created < -3d AND created >= -7d`),
-            jqlCount(client, `project = NT AND statusCategory != Done AND created < -7d`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND ${notDev} AND created >= -4h`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND ${notDev} AND created < -4h AND created >= -1d`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND ${notDev} AND created < -1d AND created >= -3d`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND ${notDev} AND created < -3d AND created >= -7d`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND ${notDev} AND created < -7d`),
           ]);
           aging = { under4h: u4, h4to24: h4, d1to3: d1, d3to7: d3, over7d: o7 };
         } catch { /* leave null */ }
@@ -268,22 +268,21 @@ export function createBoardMiRoutes(
         try {
           const tpjProducts =
             '"The Property Jungle - IOMart Website", "The Property Jungle - Wordpress Website", "The Property Jungle - M365"';
-          const [cc, t2, t3, production, dev, inc, sr, tpj] = await Promise.all([
+          const [cc, t2, t3, production, inc, sr, tpj] = await Promise.all([
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Customer Care"`),
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Tier 2"`),
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Tier 3"`),
             jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Production"`),
-            jqlCount(client, `project = NT AND statusCategory != Done AND cf[12981] = "Development"`),
-            jqlCount(client, `project = NT AND statusCategory != Done AND "Request Type" = "Incident"`),
-            jqlCount(client, `project = NT AND statusCategory != Done AND "Request Type" = "Service Request"`),
-            jqlCount(client, `project = NT AND statusCategory != Done AND cf[13183] in (${tpjProducts})`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND ${notDev} AND "Request Type" = "Incident"`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND ${notDev} AND "Request Type" = "Service Request"`),
+            jqlCount(client, `project = NT AND statusCategory != Done AND ${notDev} AND cf[13183] in (${tpjProducts})`),
           ]);
-          backlogSplit = { cc, incidents: inc, serviceReq: sr, tpj, t2, t3, production, dev };
+          backlogSplit = { cc, incidents: inc, serviceReq: sr, tpj, t2, t3, production };
         } catch { /* leave null */ }
 
         try {
           const r = await client.searchJql(
-            `project = NT AND statusCategory != Done ORDER BY updated DESC`,
+            `project = NT AND statusCategory != Done AND ${notDev} ORDER BY updated DESC`,
             ['customfield_13183'], 200,
           );
           const counts = new Map<string, number>();
@@ -321,10 +320,10 @@ export function createBoardMiRoutes(
 
         try {
           const [opened, resolved, prevOpened, prevResolved] = await Promise.all([
-            jqlCount(client, `project = NT AND created >= "${start}" AND created <= "${end}"`),
-            jqlCount(client, `project = NT AND statusCategory = Done AND statusCategoryChangedDate >= "${start}" AND statusCategoryChangedDate <= "${end}"`),
-            jqlCount(client, `project = NT AND created >= "${prevStart}" AND created <= "${prevEnd}"`),
-            jqlCount(client, `project = NT AND statusCategory = Done AND statusCategoryChangedDate >= "${prevStart}" AND statusCategoryChangedDate <= "${prevEnd}"`),
+            jqlCount(client, `project = NT AND ${notDev} AND created >= "${start}" AND created <= "${end}"`),
+            jqlCount(client, `project = NT AND ${notDev} AND statusCategory = Done AND statusCategoryChangedDate >= "${start}" AND statusCategoryChangedDate <= "${end}"`),
+            jqlCount(client, `project = NT AND ${notDev} AND created >= "${prevStart}" AND created <= "${prevEnd}"`),
+            jqlCount(client, `project = NT AND ${notDev} AND statusCategory = Done AND statusCategoryChangedDate >= "${prevStart}" AND statusCategoryChangedDate <= "${prevEnd}"`),
           ]);
           openedResolved = { opened, resolved, prevOpened, prevResolved };
         } catch { /* leave null */ }
@@ -361,7 +360,37 @@ export function createBoardMiRoutes(
         };
       } catch { /* leave null */ }
 
-      // ── 4. Commentary ───────────────────────────────────────────────────
+      // ── 4. AI Solves ──────────────────────────────────────────────────
+      let aiSolves = null as { count: number; pctOfResolved: number | null; prevCount: number } | null;
+      try {
+        const aiSolvesRow = await queryOne<{ cnt: number }>(
+          `SELECT COUNT(DISTINCT aq.ticket_id) AS cnt
+           FROM approval_queue aq
+           INNER JOIN jira_issue_cache jic ON jic.issue_key = aq.ticket_id
+           WHERE aq.status = 'approved'
+             AND aq.decided_at >= ? AND aq.decided_at <= ?
+             AND jic.status_category = 'done'`,
+          [`${start}T00:00:00`, `${end}T23:59:59`],
+        );
+        const prevAiRow = await queryOne<{ cnt: number }>(
+          `SELECT COUNT(DISTINCT aq.ticket_id) AS cnt
+           FROM approval_queue aq
+           INNER JOIN jira_issue_cache jic ON jic.issue_key = aq.ticket_id
+           WHERE aq.status = 'approved'
+             AND aq.decided_at >= ? AND aq.decided_at <= ?
+             AND jic.status_category = 'done'`,
+          [`${prevStart}T00:00:00`, `${prevEnd}T23:59:59`],
+        );
+        const aiCount = aiSolvesRow?.cnt ?? 0;
+        const totalResolved = openedResolved?.resolved ?? null;
+        aiSolves = {
+          count: aiCount,
+          pctOfResolved: totalResolved && totalResolved > 0 ? (aiCount / totalResolved) * 100 : null,
+          prevCount: prevAiRow?.cnt ?? 0,
+        };
+      } catch { /* leave null */ }
+
+      // ── 5. Commentary ───────────────────────────────────────────────────
       const commentary = await getCommentary(month);
 
       // ── Response ────────────────────────────────────────────────────────
@@ -399,8 +428,12 @@ export function createBoardMiRoutes(
             frtBreachedCC: pickSum(kpiRows, 'FRT Breached (Customer Care)'),
             frtBreachedT2: pickSum(kpiRows, 'FRT Breached (Tier 2)'),
             frtBreachedT3: pickSum(kpiRows, 'FRT Breached (Tier 3)'),
-            frtBreachedDev: pickSum(kpiRows, 'FRT Breached (Development)'),
             prevFrtBreachedAll: pickSum(prevRows, 'FRT Breached (All)'),
+            resBreachedAll: pickSum(kpiRows, 'Resolution Breached (All)'),
+            resBreachedCC: pickSum(kpiRows, 'Resolution Breached (Customer Care)'),
+            resBreachedT2: pickSum(kpiRows, 'Resolution Breached (Tier 2)'),
+            resBreachedT3: pickSum(kpiRows, 'Resolution Breached (Tier 3)'),
+            prevResBreachedAll: pickSum(prevRows, 'Resolution Breached (All)'),
           },
 
           aging,
@@ -409,6 +442,7 @@ export function createBoardMiRoutes(
           agedDev,
           openedResolved,
           devReview: devReviewMonth,
+          aiSolves,
 
           commentary,
         },
