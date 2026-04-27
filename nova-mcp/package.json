@@ -1,7 +1,7 @@
 {
   "name": "nova-mcp",
-  "version": "1.1.0",
-  "description": "MCP server for NOVA KPI dashboard — HTTP client for the NOVA API, surfaces KPI/QA/SLA/admin tools to Claude Desktop",
+  "version": "2.1.0",
+  "description": "MCP server for NOVA — HTTP API client for KPI analysis and AI agent management",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
@@ -14,7 +14,7 @@
   "license": "ISC",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "zod": "^3.23.8"
+    "zod": "^3.24.4"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",

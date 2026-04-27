@@ -16,6 +16,12 @@ Bundled inside the daypilot repo so it stays in sync with the main server.
 - `nova_checkpoint_summary`
 - `nova_raw_kpi_query`
 
+**MI reporting** (board-mi monthly pack):
+- `nova_mi_report` — full monthly MI data (service performance, escalations,
+  backlog, dev review, top products). Pass-through — returns whatever the
+  API returns, so new MI sections appear automatically.
+- `nova_mi_commentary` — read or write the monthly narrative commentary
+
 **Admin config** (reads/writes `../settings.json` directly):
 - `nova_admin_get_config` — masked dump of all settings keys (optional
   regex filter, optional `unmask: true` for raw values)

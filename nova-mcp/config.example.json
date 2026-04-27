@@ -1,8 +1,5 @@
 {
-  "api": {
-    "baseUrl": "https://nova.nurtur.tech",
-    "username": "your.email@nurtur.tech",
-    "password": "",
-    "env": "live"
-  }
+  "nova_api_url": "https://nova.nurtur.tech",
+  "nova_username": "",
+  "nova_password": ""
 }
