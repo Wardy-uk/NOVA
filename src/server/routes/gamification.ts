@@ -17,7 +17,7 @@ export function createGamificationRoutes(service: GamificationService): Router {
   router.get('/profile/:userId', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
     try {
-      const profile = await service.getProfile(parseInt(req.params.userId, 10));
+      const profile = await service.getProfile(parseInt(String(req.params.userId), 10));
       res.json({ ok: true, data: profile });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });

@@ -68,10 +68,23 @@ export class SuggestionEngine {
     this.settings = settings;
   }
 
+  private goLiveDaysCache: number | null = null;
+
   private getGoLiveDays(): number {
+    if (this.goLiveDaysCache !== null) return this.goLiveDaysCache;
     const goLiveStr = this.settings.get('agent_go_live_date') ?? '2026-04-23';
     const goLive = new Date(goLiveStr + 'T00:00:00Z');
-    return Math.max(0, Math.floor((Date.now() - goLive.getTime()) / 86_400_000));
+    this.goLiveDaysCache = Math.max(0, Math.floor((Date.now() - goLive.getTime()) / 86_400_000));
+    return this.goLiveDaysCache;
+  }
+
+  private async getActualDaysActive(): Promise<number> {
+    const rows = await query<{ first_decision: string | null }>(
+      `SELECT MIN(created_at) as first_decision FROM agent_decisions`,
+    );
+    if (!rows[0]?.first_decision) return 0;
+    const first = new Date(rows[0].first_decision);
+    return Math.max(0, Math.floor((Date.now() - first.getTime()) / 86_400_000));
   }
 
   // ── CRUD ──
@@ -160,11 +173,11 @@ export class SuggestionEngine {
   private async analyzeDisableRule(
     insert: (t: 'guardrail', k: string, s: SuggestionPayload, e: Record<string, unknown>) => Promise<void>,
   ): Promise<void> {
-    const daysLive = this.getGoLiveDays();
-    if (daysLive < 30) return; // too early to suggest disabling rules
+    const daysActive = await this.getActualDaysActive();
+    if (daysActive < 30) return; // too early to suggest disabling rules
 
-    const lookbackDays = Math.min(daysLive, 90);
-    const rules = this.guardrails.getRules().filter(r => r.enabled);
+    const lookbackDays = Math.min(daysActive, 90);
+    const rules = this.guardrails.getRules().filter(r => r.enabled && !r.critical);
     for (const rule of rules) {
       const rows = await query<{ cnt: number }>(
         `SELECT COUNT(*) as cnt FROM agent_decisions
@@ -175,7 +188,7 @@ export class SuggestionEngine {
         await insert('guardrail', `disable_${rule.id}`, {
           action: 'disable_rule',
           title: `Disable "${rule.id}"`,
-          description: `This guardrail hasn't triggered in ${lookbackDays} days (agent live since ${this.settings.get('agent_go_live_date') ?? '2026-04-23'}). Consider disabling it to reduce processing overhead.`,
+          description: `This guardrail hasn't triggered in ${lookbackDays} days since the agent's first decision. Consider disabling it to reduce processing overhead.`,
           ruleId: rule.id,
         }, { ruleId: rule.id, triggerCount: 0, days: lookbackDays });
       }
@@ -267,10 +280,11 @@ export class SuggestionEngine {
       const acceptRate = row.total > 0 ? (row.approved / row.total) * 100 : 0;
       if (acceptRate >= 90 && row.avg_conf >= 0.85) {
         const detail = await this.getCategoryDetail(row.category, 90);
+        const riskNote = detail.riskFlag ? ` ⚠️ ${detail.riskFlag}.` : '';
         await insert('autonomy', `enable_${row.category.replace(/\s+/g, '_').toLowerCase()}`, {
           action: 'enable_autonomy',
           title: `Enable autonomy for "${row.category}"`,
-          description: `${row.total} decisions with ${Math.round(acceptRate)}% accept rate and ${row.avg_conf.toFixed(2)} avg confidence over 90 days.`,
+          description: `${detail.proposedRule}. ${detail.approvedCount} approved, ${detail.declinedCount} declined (${detail.approvalRate}% approval). Avg confidence: ${detail.avgConfidence}%, lowest: ${detail.minConfidence}%. Would save ~${detail.estimatedWeeklySavings} approvals/week.${riskNote}`,
           category: row.category,
           suggestedConfidence: 0.85,
           suggestedAcceptRate: 90,
@@ -354,10 +368,11 @@ export class SuggestionEngine {
     for (const row of rows) {
       if (existingCategories.has(row.category)) continue;
       const detail = await this.getCategoryDetail(row.category, 30);
+      const riskNote = detail.riskFlag ? ` ⚠️ ${detail.riskFlag}.` : '';
       await insert('autonomy', `new_category_${row.category.replace(/\s+/g, '_').toLowerCase()}`, {
         action: 'new_category',
         title: `Create rule for "${row.category}"`,
-        description: `${row.cnt} decisions in the last 30 days for this category but no autonomy rule exists. Consider creating one to track performance.`,
+        description: `${detail.proposedRule}. ${detail.approvedCount} approved, ${detail.declinedCount} declined (${detail.approvalRate}% approval). Avg confidence: ${detail.avgConfidence}%, lowest: ${detail.minConfidence}%. Would save ~${detail.estimatedWeeklySavings} approvals/week.${riskNote}`,
         category: row.category,
       }, { category: row.category, decisionCount: row.cnt, days: 30, ...detail });
     }
@@ -370,6 +385,12 @@ export class SuggestionEngine {
     exampleTickets: string[];
     approvedCount: number;
     declinedCount: number;
+    approvalRate: number;
+    avgConfidence: number;
+    minConfidence: number;
+    riskFlag: string | null;
+    estimatedWeeklySavings: number;
+    proposedRule: string;
   }> {
     const actionRows = await query<{ action: string; cnt: number }>(
       `SELECT action, COUNT(*) as cnt
@@ -393,21 +414,47 @@ export class SuggestionEngine {
     );
     const exampleTickets = ticketRows.map(r => r.ticket_id);
 
-    const outcomeRows = await query<{ approved: number; declined: number }>(
+    const statsRows = await query<{ approved: number; declined: number; avg_conf: number; min_conf: number; total: number }>(
       `SELECT
          SUM(CASE WHEN outcome LIKE '%Approved%' OR outcome LIKE '%success%' OR outcome LIKE '%auto%' THEN 1 ELSE 0 END) as approved,
-         SUM(CASE WHEN outcome LIKE '%Declined%' OR outcome LIKE '%rejected%' OR outcome LIKE '%edited%' THEN 1 ELSE 0 END) as declined
+         SUM(CASE WHEN outcome LIKE '%Declined%' OR outcome LIKE '%rejected%' OR outcome LIKE '%edited%' THEN 1 ELSE 0 END) as declined,
+         AVG(confidence) as avg_conf,
+         MIN(confidence) as min_conf,
+         COUNT(*) as total
        FROM agent_decisions
        WHERE JSON_VALUE(inputs, '$.classification.category') = ?
          AND created_at >= DATEADD(day, -?, GETUTCDATE())`,
       [category, days],
     );
 
+    const approved = statsRows[0]?.approved ?? 0;
+    const declined = statsRows[0]?.declined ?? 0;
+    const total = statsRows[0]?.total ?? 0;
+    const avgConf = statsRows[0]?.avg_conf ?? 0;
+    const minConf = statsRows[0]?.min_conf ?? 0;
+    const approvalRate = total > 0 ? Math.round((approved / total) * 100) : 0;
+    const weeklyRate = days > 0 ? Math.round((total / days) * 7) : 0;
+
+    const topAction = Object.entries(actionBreakdown).sort((a, b) => b[1] - a[1])[0];
+    const proposedRule = topAction
+      ? `Auto-approve ${topAction[0]} for ${category} tickets when confidence ≥ ${Math.max(85, Math.round(avgConf * 100))}%`
+      : `Enable autonomy for ${category}`;
+
+    let riskFlag: string | null = null;
+    if (declined > 0) riskFlag = `${declined} decision(s) were declined — review before enabling`;
+    else if (approvalRate < 95 && total > 0) riskFlag = `Approval rate ${approvalRate}% is below 95% — suggest caution`;
+
     return {
       actionBreakdown,
       exampleTickets,
-      approvedCount: outcomeRows[0]?.approved ?? 0,
-      declinedCount: outcomeRows[0]?.declined ?? 0,
+      approvedCount: approved,
+      declinedCount: declined,
+      approvalRate,
+      avgConfidence: Math.round(avgConf * 100),
+      minConfidence: Math.round(minConf * 100),
+      riskFlag,
+      estimatedWeeklySavings: weeklyRate,
+      proposedRule,
     };
   }
 }

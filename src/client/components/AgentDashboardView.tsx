@@ -1205,12 +1205,17 @@ function SuggestionCards({ type, onRulesChanged, onCustomize }: { type: 'guardra
               {ev && Object.keys(ev).length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-1.5">
                   {Object.entries(ev)
-                    .filter(([k]) => !['sampleTickets', 'actionBreakdown', 'exampleTickets'].includes(k))
+                    .filter(([k]) => !['sampleTickets', 'actionBreakdown', 'exampleTickets', 'riskFlag', 'proposedRule'].includes(k))
                     .map(([k, v]) => (
                     <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-[#363d47] text-neutral-400">
                       {k.replace(/([A-Z])/g, ' $1').toLowerCase()}: {String(v)}
                     </span>
                   ))}
+                </div>
+              )}
+              {typeof ev.riskFlag === 'string' && ev.riskFlag && (
+                <div className="text-[10px] text-amber-400 mt-1.5 flex items-center gap-1">
+                  <span>⚠️</span><span>{ev.riskFlag}</span>
                 </div>
               )}
               {hasDetail && (

@@ -167,15 +167,19 @@ export class CoachingEngine {
     const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
 
     return query<any>(`
-      SELECT c.agent_user_id,
+      SELECT COALESCE(NULLIF(c.agent_user_id, 0), -1) as agent_user_id,
+             COALESCE(u.display_name, u.username, j.assignee_display, 'Unknown') as display_name,
              COUNT(*) as assessments,
              AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.ownership') AS FLOAT)) as avg_ownership,
              AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.nextAction') AS FLOAT)) as avg_nextAction,
              AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.timeframe') AS FLOAT)) as avg_timeframe,
              AVG(CAST(JSON_VALUE(c.golden_rule_scores, '$.overall') AS FLOAT)) as avg_overall
       FROM agent_coaching c
+      LEFT JOIN users u ON u.id = c.agent_user_id AND c.agent_user_id <> 0
+      LEFT JOIN jira_issue_cache j ON j.issue_key = c.ticket_id
       WHERE c.created_at >= ? AND c.golden_rule_scores IS NOT NULL
-      GROUP BY c.agent_user_id
+      GROUP BY COALESCE(NULLIF(c.agent_user_id, 0), -1),
+               COALESCE(u.display_name, u.username, j.assignee_display, 'Unknown')
       ORDER BY avg_overall DESC
     `, [since]);
   }
@@ -235,9 +239,12 @@ export class CoachingEngine {
     }
   }
 
-  private async resolveAgentUserId(_jiraAccountId: string): Promise<number> {
-    // TODO: rewire gamification to use dbo.Agent.AgentId when gamification is active
-    return 0;
+  private async resolveAgentUserId(jiraAccountId: string): Promise<number> {
+    if (!jiraAccountId) return 0;
+    const row = await queryOne<{ id: number }>(
+      `SELECT id FROM users WHERE provider_id = ?`, [jiraAccountId],
+    );
+    return row?.id ?? 0;
   }
 
   private isInternal(comment: any): boolean {

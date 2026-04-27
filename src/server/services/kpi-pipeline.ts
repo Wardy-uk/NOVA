@@ -147,11 +147,11 @@ export class KpiPipeline {
       for (const m of metrics) {
         const rag = computeRag(m.count, m.target, m.direction);
         const request = p.request();
-        request.input('kpi', sql.NVarChar, m.kpi);
-        request.input('kpiGroup', sql.NVarChar, m.group);
+        request.input('kpi', sql.NVarChar(100), m.kpi.slice(0, 100));
+        request.input('kpiGroup', sql.NVarChar(100), m.group.slice(0, 100));
         request.input('count', sql.Float, m.count);
         request.input('target', sql.Float, m.target);
-        request.input('direction', sql.NVarChar, m.direction);
+        request.input('direction', sql.NVarChar(50), m.direction.slice(0, 50));
         request.input('rag', sql.Int, rag);
         request.input('date', sql.Date, today);
 
@@ -200,7 +200,7 @@ export class KpiPipeline {
       // Always READ from the live Agent table
       const agents = await p.request().query(`
         SELECT AgentId,
-               RTRIM(ISNULL(AgentName, '') + ' ' + ISNULL(AgentSurname, '')) AS AgentName,
+               RTRIM(LTRIM(ISNULL(AgentName, '') + ' ' + ISNULL(AgentSurname, ''))) AS AgentName,
                ISNULL(TierCode, '') AS TierCode,
                ISNULL(Team, '') AS Team,
                ISNULL(OpenTickets_Total, 0) AS OpenTickets_Total,
@@ -215,12 +215,13 @@ export class KpiPipeline {
 
       const s = this.s;
       for (const a of agents.recordset) {
+        if (!a.AgentName?.trim()) continue;
         const request = p.request();
         request.input('reportDate', sql.Date, today);
-        request.input('agentId', sql.Int, a.AgentId);
-        request.input('agentName', sql.NVarChar, a.AgentName);
-        request.input('tierCode', sql.NVarChar, a.TierCode || '');
-        request.input('team', sql.NVarChar, a.Team || '');
+        request.input('agentId', sql.Int, a.AgentId ?? 0);
+        request.input('agentName', sql.NVarChar(200), (a.AgentName || 'Unknown').slice(0, 200));
+        request.input('tierCode', sql.NVarChar(50), (a.TierCode || '').slice(0, 50));
+        request.input('team', sql.NVarChar(100), (a.Team || '').slice(0, 100));
         request.input('openTotal', sql.Int, a.OpenTickets_Total ?? 0);
         request.input('over2h', sql.Int, a.OpenTickets_Over2Hours ?? 0);
         request.input('noUpdate', sql.Int, a.OpenTickets_NoUpdateToday ?? 0);

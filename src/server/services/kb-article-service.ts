@@ -46,14 +46,14 @@ export class KbArticleService {
     const ticketContext = ticketIds.slice(0, 5);
     let ticketSnippets = '';
     if (ticketContext.length > 0) {
-      const rows = await query<{ ticket_id: string; summary: string; description: string }>(
-        `SELECT TOP 5 ticket_id, summary, LEFT(description, 500) as description
-         FROM jira_ticket_cache
-         WHERE ticket_id IN (${ticketContext.map(() => '?').join(',')})`,
+      const rows = await query<{ issue_key: string; summary: string; description: string }>(
+        `SELECT TOP 5 issue_key, summary, LEFT(description_text, 500) as description
+         FROM jira_issue_cache
+         WHERE issue_key IN (${ticketContext.map(() => '?').join(',')})`,
         ticketContext,
       );
       ticketSnippets = rows.map(r =>
-        `[${r.ticket_id}] ${r.summary}\n${r.description || '(no description)'}`
+        `[${r.issue_key}] ${r.summary}\n${r.description || '(no description)'}`
       ).join('\n\n');
     }
 

@@ -110,10 +110,10 @@ export class GamificationService {
        ORDER BY COUNT(DISTINCT a.id) DESC, MAX(s.best_count) DESC`,
     );
 
-    return rows.map(r => {
-      const achTypes = new Set<string>();
-      return { ...r, points: 0, _types: achTypes };
-    }).map(r => ({ ...r, points: r.achievement_count * 10 }));
+    return rows.map(r => ({
+      ...r,
+      points: r.achievement_count * 10,
+    }));
   }
 
   async getAchievementDefs(): Promise<Record<string, { name: string; icon: string; description: string; points: number }>> {

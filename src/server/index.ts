@@ -198,7 +198,7 @@ async function main() {
     { username: 'zoe.rees@nurtur.tech', display_name: 'Zoe Rees', email: 'zoe.rees@nurtur.tech', role: 'onboader,support,viewer,qa,ai-approver', team: 'Support', auth_provider: 'entra' },
     { username: 'jmtesting', display_name: 'JM Testing', email: 'JMTesting@nurtur.tech', role: 'admin,onboader,support,uat,kpi', team: '', auth_provider: 'entra' },
     { username: 'georginag@nurtur.tech', display_name: 'Georgie', email: 'GeorginaG@nurtur.tech', role: 'viewer,onboader,design,kpi,sales,qa,mi', team: '', auth_provider: 'local' },
-    { username: 'ward.nickj@gmail.com', display_name: 'Nick Test', email: 'ward.nickj@gmail.com', role: 'viewer,onboader,support,uat,design,kpi,briefing,sales,qa', team: 'UAT', auth_provider: 'local' },
+    { username: 'ward.nickj@gmail.com', display_name: 'Nick Test', email: 'ward.nickj@gmail.com', role: 'viewer,onboader,support,uat,design,kpi,sales,qa', team: 'UAT', auth_provider: 'local' },
     { username: 'kayleigh.russell', display_name: 'Kayleigh Russell', email: 'Kayleigh.Russell@nurtur.tech', role: 'onboader,support', team: '', auth_provider: 'entra' },
     { username: 'maria.pappa@nurtur.tech', display_name: 'Maria', email: 'Maria.Pappa@nurtur.tech', role: 'viewer,support,kpi', team: 'Support', auth_provider: 'local' },
     { username: 'adele.norman-swift@nurtur.tech', display_name: 'Adele', email: 'Adele.Norman-Swift@nurtur.tech', role: 'viewer,support,kpi', team: 'Support', auth_provider: 'local' },
@@ -992,7 +992,7 @@ async function main() {
         const ukMinute = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }));
         if (ukHour === targetH && ukMinute >= targetM && ukMinute < targetM + 10) {
           const allUsers = await userQueries.getAll();
-          const eligible = allUsers.filter(u => u.email && u.role);
+          const eligible = allUsers.filter(u => u.email && u.role && u.role.split(',').map(r => r.trim()).includes('briefing'));
           await dailyBriefingService.generateAll(eligible.map(u => ({
             id: u.id, email: u.email!, display_name: u.display_name || u.username, role: u.role,
           })));

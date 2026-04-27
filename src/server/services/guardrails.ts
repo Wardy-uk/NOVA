@@ -17,6 +17,7 @@ interface GuardrailRule {
   description: string;
   severity: 'block' | 'warn';
   enabled: boolean;
+  critical: boolean;
   check: (decision: AgentDecision) => GuardrailViolation | null;
 }
 
@@ -27,6 +28,13 @@ const PROHIBITED_PHRASES = [
   { pattern: /\b(will be fixed by|will be released|timeline for the fix|eta for|expected release)\b/i, rule: 'no_timeline_commitments', desc: 'Never commit to timelines for bug fixes or feature requests' },
 ];
 
+const SAFETY_RULE_IDS = new Set([
+  'no_timeline_commitments', 'no_internal_exposure', 'no_blame',
+  'no_financial_promises', 'no_refunds_credits',
+  'no_close_dev_tier', 'no_close_waiting_partner',
+  'no_priority_change_without_reason',
+]);
+
 function buildDefaultRules(): GuardrailRule[] {
   return [
     {
@@ -34,6 +42,7 @@ function buildDefaultRules(): GuardrailRule[] {
       description: 'Never close a ticket at Development tier',
       severity: 'block',
       enabled: true,
+      critical: true,
       check: (d) => {
         if (d.action !== 'transition') return null;
         const status = (d.inputs.status as string) ?? '';
@@ -49,6 +58,7 @@ function buildDefaultRules(): GuardrailRule[] {
       description: 'Never close a ticket with status "Waiting on Partner"',
       severity: 'block',
       enabled: true,
+      critical: true,
       check: (d) => {
         if (d.action !== 'transition') return null;
         const status = (d.inputs.status as string) ?? '';
@@ -63,6 +73,7 @@ function buildDefaultRules(): GuardrailRule[] {
       description: 'Never change priority without logging the reason',
       severity: 'block',
       enabled: true,
+      critical: true,
       check: (d) => {
         if (d.action !== 'update_fields') return null;
         const fields = d.output.fields as Record<string, unknown> | undefined;
@@ -79,6 +90,7 @@ function buildDefaultRules(): GuardrailRule[] {
       description: 'Customer-facing responses must include ticket reference',
       severity: 'warn',
       enabled: true,
+      critical: false,
       check: (d) => {
         if (d.action !== 'draft_response' && d.action !== 'respond' && d.action !== 'chase') return null;
         const draft = (d.output.draft_response as string) ?? (d.output.response as string) ?? '';
@@ -94,6 +106,7 @@ function buildDefaultRules(): GuardrailRule[] {
       description: p.desc,
       severity: 'block' as const,
       enabled: true,
+      critical: SAFETY_RULE_IDS.has(p.rule),
       check: (d: AgentDecision): GuardrailViolation | null => {
         const draft = (d.output.draft_response as string) ?? (d.output.response as string) ?? '';
         if (!draft) return null;
@@ -144,13 +157,14 @@ export class Guardrails {
     return { allowed: !blocked, violations };
   }
 
-  getRules(): Array<{ id: string; description: string; severity: string; enabled: boolean; builtin: boolean; pattern?: string }> {
+  getRules(): Array<{ id: string; description: string; severity: string; enabled: boolean; builtin: boolean; critical: boolean; pattern?: string }> {
     return this.rules.map(r => ({
       id: r.id,
       description: r.description,
       severity: r.severity,
       enabled: r.enabled,
       builtin: BUILTIN_IDS.has(r.id),
+      critical: r.critical,
       ...(!BUILTIN_IDS.has(r.id) && (r as any)._pattern ? { pattern: (r as any)._pattern } : {}),
     }));
   }
@@ -204,6 +218,7 @@ export class Guardrails {
       description: def.description,
       severity: def.severity,
       enabled: def.enabled,
+      critical: false,
       _pattern: def.pattern,
       check: (d: AgentDecision): GuardrailViolation | null => {
         const draft = (d.output.draft_response as string) ?? (d.output.response as string) ?? '';

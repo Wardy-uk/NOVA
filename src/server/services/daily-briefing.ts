@@ -445,5 +445,6 @@ Produce JSON with:
       text: plainText,
       html,
     });
+    console.log(`[daily-briefing] Briefing sent to: ${to} at ${new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' })}`);
   }
 }

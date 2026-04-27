@@ -143,30 +143,35 @@ export class AiImprovementService {
     }>(
       `SELECT d.ticket_id, d.action, d.confidence, d.output, d.created_at
        FROM agent_decisions d
-       WHERE d.created_at >= DATEADD(day, -1, GETUTCDATE())
+       WHERE d.created_at >= DATEADD(day, -7, GETUTCDATE())
          AND d.action IS NOT NULL
          AND NOT EXISTS (
            SELECT 1 FROM ai_comparison_log c
-           WHERE c.ticket_key = d.ticket_id AND c.created_at >= d.created_at
+           WHERE c.ticket_key = d.ticket_id
          )
        ORDER BY d.created_at DESC`,
     );
 
+    console.log(`[ai-improvement] Scan: ${decisions.length} decisions to check (7-day window)`);
+
     let compared = 0;
+    let withN8n = 0;
+    let parseable = 0;
     for (const d of decisions) {
       const rows = await query<{ body: string; created_at: string }>(
         `SELECT TOP 1 last_n8n_comment AS body, last_n8n_comment_at AS created_at
          FROM jira_issue_cache
          WHERE issue_key = ?
-           AND last_n8n_comment IS NOT NULL
-           AND last_n8n_comment_at >= ?`,
-        [d.ticket_id, d.created_at],
+           AND last_n8n_comment IS NOT NULL`,
+        [d.ticket_id],
       );
 
       if (rows.length === 0) continue;
+      withN8n++;
 
       const parsed = parseN8nAction(rows[0].body);
       if (!parsed) continue;
+      parseable++;
 
       const diffParts: string[] = [];
       if (parsed.priority) diffParts.push(`n8n priority: ${parsed.priority}`);
@@ -187,6 +192,14 @@ export class AiImprovementService {
       compared++;
     }
 
+    if (withN8n === 0 && decisions.length > 0) {
+      const n8nCount = await query<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM jira_issue_cache WHERE last_n8n_comment IS NOT NULL`,
+      );
+      console.log(`[ai-improvement] No n8n comments found on decision tickets. Total issues with n8n comments in cache: ${n8nCount[0]?.cnt ?? 0}. Check n8n_comment_author_emails / n8n_comment_author_display_names / n8n_comment_body_marker settings.`);
+    }
+
+    console.log(`[ai-improvement] Scan results: ${decisions.length} decisions, ${withN8n} had n8n comments, ${parseable} parseable, ${compared} compared`);
     return compared;
   }
 
@@ -258,8 +271,7 @@ export class AiImprovementService {
        JOIN jira_issue_cache j ON j.issue_key = d.ticket_id
        WHERE d.created_at >= DATEADD(day, -7, GETUTCDATE())
          AND d.action IS NOT NULL
-         AND j.last_n8n_comment IS NOT NULL
-         AND j.last_n8n_comment_at >= d.created_at`,
+         AND j.last_n8n_comment IS NOT NULL`,
     );
 
     const total = compRows[0]?.total ?? 0;
