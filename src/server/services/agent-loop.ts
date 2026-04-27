@@ -256,8 +256,16 @@ export class AgentLoop {
     // Weekend override takes priority
     if (this.getWeekendOverrideUntil()) return true;
 
-    const now = new Date();
-    const day = now.getUTCDay();
+    const tz = this.settings.get('agent_timezone') ?? 'Europe/London';
+    const ukNow = new Date().toLocaleString('en-GB', { timeZone: tz });
+    // en-GB format: "DD/MM/YYYY, HH:MM:SS"
+    const parts = ukNow.split(', ');
+    const [dayPart, timePart] = parts;
+    const [dd, mm, yyyy] = dayPart.split('/').map(Number);
+    const [hh, mi] = timePart.split(':').map(Number);
+    const localDate = new Date(yyyy, mm - 1, dd);
+    const day = localDate.getDay();
+
     const workingDaysStr = this.settings.get('agent_working_days') ?? '1,2,3,4,5';
     const workingDays = new Set(workingDaysStr.split(',').map(d => parseInt(d.trim(), 10)));
     if (!workingDays.has(day)) return false;
@@ -270,7 +278,7 @@ export class AgentLoop {
     const endHour = parseInt(match[3], 10);
     const endMin = parseInt(match[4], 10);
 
-    const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const currentMinutes = hh * 60 + mi;
     const startMinutes = startHour * 60 + startMin;
     const endMinutes = endHour * 60 + endMin;
 
@@ -380,8 +388,8 @@ export class AgentLoop {
         return true;
       });
 
-      // Cross-tick dedup: skip tickets processed in the last 5 minutes
-      const DEDUP_WINDOW_MS = 5 * 60_000;
+      // Cross-tick dedup: skip tickets processed in the last 30 minutes
+      const DEDUP_WINDOW_MS = 30 * 60_000;
       const now = Date.now();
       for (const [key, ts] of this.recentlyProcessedTickets) {
         if (now - ts > DEDUP_WINDOW_MS) this.recentlyProcessedTickets.delete(key);
@@ -666,13 +674,23 @@ export class AgentLoop {
     const decisionId = await this.observer.logDecision(decision);
     const ticketState = this.lifecycleManager.getTicketState();
 
-    // Track ticket state for conversation continuity
+    // Idempotency: skip if ticket already triaged (prevents duplicate notes)
+    if (decision.eventType === 'ticket_created') {
+      const existingState = await ticketState.get(decision.ticketKey);
+      if (existingState && existingState.lifecycle !== 'new') {
+        console.log(`[agent] Skipping duplicate triage for ${decision.ticketKey} — already ${existingState.lifecycle}`);
+        return;
+      }
+    }
+
+    // Track ticket state BEFORE posting notes — if this fails, do NOT post
     try {
       await ticketState.updateAfterDecision(
         decision.ticketKey, decisionId, decision.eventType,
       );
     } catch (err) {
-      console.warn(`[agent] Failed to update ticket state for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+      console.error(`[agent] Failed to update ticket state for ${decision.ticketKey} — skipping note to prevent duplicates:`, err instanceof Error ? err.message : err);
+      return;
     }
 
     // Lifecycle: transition to 'triaged' on new ticket triage
