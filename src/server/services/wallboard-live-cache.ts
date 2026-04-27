@@ -55,15 +55,25 @@ function isKeyAccount(labels: string | null): boolean {
   return KA_LABELS.some(l => labels.includes(l));
 }
 
-function isWorkingHours(): boolean {
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+
+function shouldRefresh(): boolean {
   const now = new Date();
+  const day = now.getDay();
+  if (day === 0 || day === 6) return false;
   const h = now.getHours();
   const m = now.getMinutes();
   return (h > 9 || (h === 9 && m >= 0)) && (h < 17 || (h === 17 && m <= 30));
 }
 
+function isCacheStale(): boolean {
+  const snap = cache.get('key_accounts');
+  if (!snap) return true;
+  return Date.now() - snap.updatedAt.getTime() > THREE_DAYS_MS;
+}
+
 async function refreshAll(force = false): Promise<void> {
-  if (!force && !isWorkingHours()) return;
+  if (!force && !shouldRefresh()) return;
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -105,7 +115,10 @@ export function getCohortSnapshot(cohortName: string): CohortSnapshot {
 
 export async function startWallboardLiveCache(intervalMs = 5 * 60 * 1000): Promise<void> {
   await refreshAll(true);
-  intervalHandle = setInterval(() => refreshAll(), intervalMs);
+  intervalHandle = setInterval(() => {
+    if (isCacheStale()) { refreshAll(true); return; }
+    refreshAll();
+  }, intervalMs);
 }
 
 export function stopWallboardLiveCache(): void {
