@@ -12,6 +12,7 @@ type QueueKey =
 
 interface QueueStats {
   active: number;
+  noReply: number;
   slaBreached: number;
 }
 
@@ -24,7 +25,7 @@ const cache = new Map<string, CohortSnapshot>();
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
 function emptySnapshot(): CohortSnapshot {
-  const empty = (): QueueStats => ({ active: 0, slaBreached: 0 });
+  const empty = (): QueueStats => ({ active: 0, noReply: 0, slaBreached: 0 });
   return {
     queues: {
       cc_incidents: empty(), cc_service_requests: empty(), cc_tpj: empty(),
@@ -58,7 +59,7 @@ async function refreshAll(): Promise<void> {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT current_tier, request_type, sla_breached, labels
+      SELECT current_tier, request_type, sla_breached, no_reply, labels
       FROM jira_issue_cache
       WHERE status_category != 'Done'
         AND project_key = 'NT'
@@ -72,6 +73,7 @@ async function refreshAll(): Promise<void> {
       if (!q) continue;
       const snap = isKeyAccount(row.labels) ? ka : cs;
       snap.queues[q].active++;
+      if (row.no_reply) snap.queues[q].noReply++;
       if (row.sla_breached) snap.queues[q].slaBreached++;
     }
 

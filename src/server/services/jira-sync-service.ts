@@ -18,8 +18,8 @@ const ALL_FIELDS = [
   'customfield_13214', // Expected Outcome
   'customfield_13215', // Development Details
   'customfield_14048', // Problem ticket field
-  'customfield_14081', // Problem ticket field
-  'customfield_14185', // Problem ticket field
+  'customfield_14081', // Agent Last Updated
+  'customfield_14185', // Agent Next Update
   'customfield_14494', // Resolution type
   'customfield_14527', // Problem ticket field
 ];
@@ -260,6 +260,12 @@ export class JiraSyncService {
     })();
     const slaBreachTime = extractSlaBreachTime(f.customfield_10010);
     const slaBreached = extractSlaBreached(f.customfield_10010);
+    const noReply = computeNoReply(
+      statusName,
+      f.created as string | null,
+      f.customfield_14081 as string | null,
+      f.customfield_14185 as string | null,
+    );
     const labels = Array.isArray(f.labels) ? (f.labels as string[]).join(';') : null;
     const issueLinksJson = f.issuelinks ? JSON.stringify(f.issuelinks) : null;
     const fieldsJson = JSON.stringify(f);
@@ -277,7 +283,7 @@ export class JiraSyncService {
         tldr_text = ?, agent_summary_text = ?, troubleshooting_text = ?,
         escalation_reason_text = ?, expected_outcome_text = ?, issue_environment_text = ?,
         development_details_text = ?, resolution_type = ?,
-        sla_breach_time = ?, sla_breached = ?, labels = ?,
+        sla_breach_time = ?, sla_breached = ?, no_reply = ?, labels = ?,
         issue_links_json = ?, fields_json = ?, organisation_name = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
         issue_key, jira_id, project_key, summary, description_text, description_adf,
@@ -289,7 +295,7 @@ export class JiraSyncService {
         tldr_text, agent_summary_text, troubleshooting_text,
         escalation_reason_text, expected_outcome_text, issue_environment_text,
         development_details_text, resolution_type,
-        sla_breach_time, sla_breached, labels,
+        sla_breach_time, sla_breached, no_reply, labels,
         issue_links_json, fields_json, organisation_name
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
@@ -301,7 +307,7 @@ export class JiraSyncService {
         ?, ?, ?,
         ?, ?, ?,
         ?, ?,
-        ?, ?, ?,
+        ?, ?, ?, ?,
         ?, ?, ?
       );`,
       [
@@ -322,7 +328,7 @@ export class JiraSyncService {
         tldrText || null, agentSummaryText || null, troubleshootingText || null,
         escalationReasonText || null, expectedOutcomeText || null, issueEnvironmentText || null,
         developmentDetailsText || null, resolutionType,
-        slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, labels,
+        slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
         issueLinksJson, fieldsJson, organisationName,
         // INSERT values (same order as columns)
         issue.key, issue.id, issue.key.split('-')[0], f.summary as string ?? null,
@@ -339,7 +345,7 @@ export class JiraSyncService {
         tldrText || null, agentSummaryText || null, troubleshootingText || null,
         escalationReasonText || null, expectedOutcomeText || null, issueEnvironmentText || null,
         developmentDetailsText || null, resolutionType,
-        slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, labels,
+        slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
         issueLinksJson, fieldsJson, organisationName,
       ],
     );
@@ -484,6 +490,31 @@ function extractSlaBreached(slaField: unknown): boolean {
     }
   } catch { /* ignore */ }
   return false;
+}
+
+function computeNoReply(
+  statusName: string | null,
+  createdStr: string | null,
+  agentLastUpdated: string | null,
+  agentNextUpdate: string | null,
+): boolean {
+  if (!statusName || statusName.toLowerCase() === 'waiting on requestor') return false;
+  if (!createdStr) return false;
+  const now = Date.now();
+  const created = new Date(createdStr).getTime();
+  if (now - created < 4 * 60 * 60 * 1000) return false;
+  if (agentNextUpdate) {
+    const nextUpdate = new Date(agentNextUpdate).getTime();
+    if (nextUpdate > now) return false;
+  }
+  if (!agentLastUpdated) return false;
+  const lastUpdated = new Date(agentLastUpdated).getTime();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  if (lastUpdated >= todayStart.getTime()) return false;
+  const weeksAgo52 = now - 52 * 7 * 24 * 60 * 60 * 1000;
+  if (lastUpdated < weeksAgo52) return false;
+  return true;
 }
 
 function formatJqlDate(date: Date): string {

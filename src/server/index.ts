@@ -1583,7 +1583,7 @@ ${panelHtml}
 </div></body></html>`;
   }
 
-  type LivePanel = { label: string; queueKey: string; stat: 'active' | 'slaBreached' | null };
+  type LivePanel = { label: string; queueKey: string; stat: 'active' | 'slaBreached' | 'noReply' | null };
 
   const LIVE_PANELS: LivePanel[] = [
     // CC row — Active
@@ -1594,14 +1594,14 @@ ${panelHtml}
     { label: 'Production Active', queueKey: 'production', stat: 'active' },
     { label: 'Tier 2 Active', queueKey: 'tier2', stat: 'active' },
     { label: 'Development — Active', queueKey: 'development+tier3', stat: 'active' },
-    // CC row — No Reply (unavailable from live cache)
-    { label: 'CC Incidents — No Update', queueKey: '', stat: null },
-    { label: 'CC SRs — No Update', queueKey: '', stat: null },
-    { label: 'Property Jungle — No Update', queueKey: '', stat: null },
-    // TS row — No Reply (unavailable from live cache)
-    { label: 'Production — No Reply', queueKey: '', stat: null },
-    { label: 'Tier 2 — No Reply', queueKey: '', stat: null },
-    { label: 'Development — No Reply', queueKey: '', stat: null },
+    // CC row — No Reply
+    { label: 'CC Incidents — No Update', queueKey: 'cc_incidents', stat: 'noReply' },
+    { label: 'CC SRs — No Update', queueKey: 'cc_service_requests', stat: 'noReply' },
+    { label: 'Property Jungle — No Update', queueKey: 'cc_tpj', stat: 'noReply' },
+    // TS row — No Reply (Dev+T3 consolidated)
+    { label: 'Production — No Reply', queueKey: 'production', stat: 'noReply' },
+    { label: 'Tier 2 — No Reply', queueKey: 'tier2', stat: 'noReply' },
+    { label: 'Development — No Reply', queueKey: 'development+tier3', stat: 'noReply' },
     // CC row — Over SLA
     { label: 'CC Incidents — Over SLA', queueKey: 'cc_incidents', stat: 'slaBreached' },
     { label: 'CC SRs — Over SLA', queueKey: 'cc_service_requests', stat: 'slaBreached' },
@@ -1621,7 +1621,7 @@ ${panelHtml}
       ? `<div style="background:#78350f;color:#fbbf24;padding:6px 12px;border-radius:8px;font-size:11px;margin-bottom:10px;text-align:center">Data is ${Math.round(staleMs / 60000)}m old — cache may be stale</div>`
       : '';
 
-    const queues = snap.queues as Record<string, { active: number; slaBreached: number }>;
+    const queues = snap.queues as Record<string, { active: number; noReply: number; slaBreached: number }>;
 
     function resolve(p: LivePanel): { value: string; color: string; flash: boolean } {
       if (p.stat === null) return { value: '—', color: '#475569', flash: false };

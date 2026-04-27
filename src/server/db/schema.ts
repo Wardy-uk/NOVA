@@ -938,6 +938,9 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('jira_issue_cache', 'organisation_name') IS NULL
      ALTER TABLE jira_issue_cache ADD organisation_name NVARCHAR(200) NULL;`,
 
+    `IF COL_LENGTH('jira_issue_cache', 'no_reply') IS NULL
+     ALTER TABLE jira_issue_cache ADD no_reply BIT NOT NULL DEFAULT 0;`,
+
     // KB gap status extensions for article workflow
     `IF COL_LENGTH('kb_gap_log', 'confluence_url') IS NULL
      ALTER TABLE kb_gap_log ADD confluence_url NVARCHAR(500) NULL;`,
