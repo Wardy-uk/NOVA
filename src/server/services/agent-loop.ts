@@ -250,6 +250,37 @@ export class AgentLoop {
     this.checkModeTransition();
   }
 
+  getWorkingHoursDebug(): Record<string, unknown> {
+    const tz = this.settings.get('agent_timezone') ?? 'Europe/London';
+    const weekendModeEnabled = this.isWeekendModeEnabled();
+    const overrideUntil = this.getWeekendOverrideUntil();
+
+    try {
+      const fmt = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz, weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false,
+      });
+      const parts = fmt.formatToParts(new Date());
+      const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
+      const dayNames: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+      const day = dayNames[p.weekday] ?? -1;
+      const hh = parseInt(p.hour, 10);
+      const mi = parseInt(p.minute, 10);
+      const workingDaysStr = this.settings.get('agent_working_days') ?? '1,2,3,4,5';
+      const hoursStr = this.settings.get('agent_working_hours') ?? '08:00-18:00';
+
+      return {
+        tz, weekendModeEnabled, overrideUntil,
+        rawParts: parts, parsedWeekday: p.weekday, parsedDay: day,
+        parsedHour: hh, parsedMinute: mi, currentMinutes: hh * 60 + mi,
+        workingDays: workingDaysStr, workingHours: hoursStr,
+        result: this.isWorkingHours(),
+        fallbackDay: new Date().getDay(), utcHour: new Date().getUTCHours(),
+      };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err), tz, weekendModeEnabled, overrideUntil };
+    }
+  }
+
   private isWorkingHours(): boolean {
     if (!this.isWeekendModeEnabled()) return true;
 

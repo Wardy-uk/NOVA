@@ -49,6 +49,10 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: agentLoop.status });
   });
 
+  router.get('/working-hours-debug', (_req, res) => {
+    res.json({ ok: true, data: agentLoop.getWorkingHoursDebug() });
+  });
+
   router.post('/start', requireSuperAdmin(), async (_req, res) => {
     agentLoop.start();
     deps?.settingsQueries?.set('agent_enabled', 'true');
