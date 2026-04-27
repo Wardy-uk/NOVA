@@ -936,22 +936,33 @@ function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decisio
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   const handleDecide = async (action: 'approve' | 'decline', edited?: string) => {
-    if (!approvalId) return;
     if (action === 'decline' && !declineReason.trim()) {
       showToast('A reason is required when declining');
       return;
     }
     setActing(true);
     try {
-      const r = await fetch(`/api/approvals/${approvalId}/decide`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          ...(edited ? { editedResponse: edited } : {}),
-          ...(action === 'decline' ? { declineReason: declineReason.trim() } : {}),
-        }),
-      });
+      let r: Response;
+      if (approvalId) {
+        r = await fetch(`/api/approvals/${approvalId}/decide`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            ...(edited ? { editedResponse: edited } : {}),
+            ...(action === 'decline' ? { declineReason: declineReason.trim() } : {}),
+          }),
+        });
+      } else {
+        r = await fetch(`/api/agent/decisions/${d.id}/decide`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            ...(action === 'decline' ? { declineReason: declineReason.trim() } : {}),
+          }),
+        });
+      }
       const data = await r.json();
       if (!data.ok) throw new Error(data.error || 'Failed');
       showToast(action === 'approve' ? 'Approved — action will execute' : 'Declined — no action taken');
@@ -988,7 +999,7 @@ function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decisio
 
         <div className="p-6 space-y-5">
           {/* Approval Actions */}
-          {isPendingApproval && !approvalLoading && approvalId && (
+          {isPendingApproval && !approvalLoading && (
             <div className="border border-amber-700/40 bg-amber-900/20 rounded-lg p-4 space-y-3">
               <div className="text-xs font-semibold text-amber-300">Approval Required</div>
 

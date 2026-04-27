@@ -1915,6 +1915,55 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // ── Decision-level approve/decline (fallback when no approval_queue record) ──
+
+  router.post('/decisions/:id/decide', requireSuperAdmin(), async (req, res) => {
+    const id = parseInt(req.params.id as string, 10);
+    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid ID' }); return; }
+
+    const { action, declineReason } = req.body;
+    if (!action || !['approve', 'decline'].includes(action)) {
+      res.status(400).json({ ok: false, error: 'action must be "approve" or "decline"' });
+      return;
+    }
+    if (action === 'decline' && (!declineReason || !declineReason.trim())) {
+      res.status(400).json({ ok: false, error: 'A reason is required when declining' });
+      return;
+    }
+
+    const user = (req as any).user;
+    const newStatus = action === 'approve' ? 'approved' : 'declined';
+
+    try {
+      const rows = await query<{ ticket_id: string; approval_status: string | null }>(
+        `SELECT ticket_id, approval_status FROM agent_decisions WHERE id = ?`, [id],
+      );
+      if (!rows.length) { res.status(404).json({ ok: false, error: 'Decision not found' }); return; }
+      if (rows[0].approval_status && rows[0].approval_status !== 'pending') {
+        res.status(409).json({ ok: false, error: `Already ${rows[0].approval_status}` });
+        return;
+      }
+
+      await execute(
+        `UPDATE agent_decisions SET approval_status = ?, resolved_at = GETUTCDATE() WHERE id = ?`,
+        [newStatus, id],
+      );
+
+      // Also update matching approval_queue entry if one exists
+      const ticketId = rows[0].ticket_id;
+      try {
+        await execute(
+          `UPDATE approval_queue SET status = ?, decided_by = ?, decided_at = GETUTCDATE(), decline_reason = ? WHERE ticket_id = ? AND status IN ('pending', 'timed_out')`,
+          [newStatus, user.username, action === 'decline' ? declineReason.trim() : null, ticketId],
+        );
+      } catch { /* approval_queue may not have a matching entry */ }
+
+      res.json({ ok: true, data: { id, status: newStatus } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to decide' });
+    }
+  });
+
   return router;
 }
 
