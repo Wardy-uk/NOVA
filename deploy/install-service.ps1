@@ -20,7 +20,7 @@ param(
     [string]$ServiceName = "NOVA",
     [string]$AppDir = "C:\Nurtur\NOVA",
     [string]$DataDir = "C:\ProgramData\NOVA",
-    [int]$Port = 3001
+    [int]$Port = 3069
 )
 
 $ErrorActionPreference = "Stop"

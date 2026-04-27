@@ -70,6 +70,6 @@ Write-Host "IIS site '$SiteName' created and started." -ForegroundColor Green
 Write-Host ""
 Write-Host "  HTTPS : https://$Hostname"
 Write-Host "  HTTP  : http://$Hostname (configure redirect rule if needed)"
-Write-Host "  Proxy : http://127.0.0.1:3001 (via web.config URL Rewrite)"
+Write-Host "  Proxy : http://127.0.0.1:3069 (via web.config URL Rewrite)"
 Write-Host ""
 Write-Host "Test: open https://$Hostname in a browser."
