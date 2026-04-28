@@ -975,6 +975,50 @@ async function runMigrations(): Promise<void> {
 
     `IF COL_LENGTH('agent_streaks', 'agent_id') IS NULL
      ALTER TABLE agent_streaks ADD agent_id INT NULL;`,
+
+    // ── KB Retrieval: chunks table ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'kb_chunks') AND type = 'U')
+     CREATE TABLE kb_chunks (
+       id              BIGINT IDENTITY(1,1) PRIMARY KEY,
+       source          VARCHAR(32)  NOT NULL,
+       source_doc_id   VARCHAR(512) NOT NULL,
+       doc_path        NVARCHAR(1024) NOT NULL,
+       doc_title       NVARCHAR(512) NOT NULL,
+       doc_url         NVARCHAR(1024) NOT NULL,
+       chunk_index     INT NOT NULL,
+       heading_path    NVARCHAR(1024) NULL,
+       content         NVARCHAR(MAX) NOT NULL,
+       token_count     INT NOT NULL,
+       embedding       VARBINARY(MAX) NOT NULL,
+       embedding_model VARCHAR(64) NOT NULL,
+       content_hash    CHAR(64) NOT NULL,
+       last_seen_at    DATETIME2 NOT NULL,
+       created_at      DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_kb_chunks_source')
+     CREATE INDEX IX_kb_chunks_source ON kb_chunks (source, source_doc_id);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_kb_chunks_last_seen')
+     CREATE INDEX IX_kb_chunks_last_seen ON kb_chunks (last_seen_at);`,
+
+    // ── KB Retrieval: sync runs table ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'kb_sync_runs') AND type = 'U')
+     CREATE TABLE kb_sync_runs (
+       id              BIGINT IDENTITY(1,1) PRIMARY KEY,
+       source          VARCHAR(32) NOT NULL,
+       started_at      DATETIME2 NOT NULL,
+       completed_at    DATETIME2 NULL,
+       status          VARCHAR(16) NOT NULL,
+       docs_seen       INT NOT NULL DEFAULT 0,
+       chunks_added    INT NOT NULL DEFAULT 0,
+       chunks_updated  INT NOT NULL DEFAULT 0,
+       chunks_deleted  INT NOT NULL DEFAULT 0,
+       error_message   NVARCHAR(MAX) NULL
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_kb_sync_runs_source_started')
+     CREATE INDEX IX_kb_sync_runs_source_started ON kb_sync_runs (source, started_at DESC);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

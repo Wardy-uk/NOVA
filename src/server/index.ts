@@ -100,6 +100,13 @@ import { TicketClassifier } from './services/ticket-classifier.js';
 import { BriefEngine } from './services/brief-engine.js';
 import { CoachingEngine } from './services/coach.js';
 import { KbSearchService } from './services/kb-search.js';
+import { KbEmbedder } from './services/kb-embedder.js';
+import { KbChunker } from './services/kb-chunker.js';
+import { KbSyncWorker } from './services/kb-sync-worker.js';
+import { TfsDocsSyncProvider } from './services/kb-tfs-docs-sync.js';
+import { ConfluenceSyncProvider } from './services/kb-confluence-sync.js';
+import type { KbSyncProvider } from './services/kb-sync-provider.js';
+import { createKbAdminRoutes } from './routes/kb-admin.js';
 import { KpiPipeline } from './services/kpi-pipeline.js';
 import { QaPipeline } from './services/qa-pipeline.js';
 import { PipelineMonitor } from './services/pipeline-monitor.js';
@@ -900,8 +907,46 @@ async function main() {
     const assignmentEngine = new AssignmentEngine(agentJiraClient, settingsQueries, 'NT');
     const availabilityService = new AgentAvailabilityService(settingsQueries);
     const ticketClassifier = new TicketClassifier(llmService, agentJiraClient, 'NT');
-    const agentKbSearch = new KbSearchService(settingsQueries);
+    const kbEmbedder = new KbEmbedder(settingsQueries);
+    const kbChunker = new KbChunker(settingsQueries);
+    const kbSyncWorker = new KbSyncWorker(kbEmbedder, kbChunker);
+    const agentKbSearch = new KbSearchService(settingsQueries, kbEmbedder);
     const briefEngine = new BriefEngine(llmService, agentJiraClient, agentKbSearch, 'NT');
+
+    // KB Retrieval — register providers and schedule sync
+    const kbProviders = new Map<string, KbSyncProvider>();
+    const tfsProvider = new TfsDocsSyncProvider(settingsQueries);
+    const confluenceProvider = new ConfluenceSyncProvider(settingsQueries);
+    kbProviders.set('tfs-docs', tfsProvider);
+    kbProviders.set('confluence', confluenceProvider);
+
+    app.use('/api/kb-admin', createKbAdminRoutes({ syncWorker: kbSyncWorker, searchService: agentKbSearch, embedder: kbEmbedder, providers: kbProviders }));
+
+    // Staggered initial sync (30s for TFS, 45s for Confluence)
+    setTimeout(() => {
+      if (tfsProvider.isConfigured()) {
+        kbSyncWorker.sync(tfsProvider).catch(e => console.warn('[kb-sync] TFS initial sync failed:', e.message));
+      } else {
+        console.log('[kb-sync] TFS: skipping (no PAT configured)');
+      }
+    }, 30_000);
+    setTimeout(() => {
+      if (confluenceProvider.isConfigured()) {
+        kbSyncWorker.sync(confluenceProvider).catch(e => console.warn('[kb-sync] Confluence initial sync failed:', e.message));
+      } else {
+        console.log('[kb-sync] Confluence: skipping (no space keys configured)');
+      }
+    }, 45_000);
+
+    // Recurring sync timers
+    const tfsSyncMin = parseInt(settingsQueries.get('tfs_docs_sync_interval_min') || '60', 10);
+    const confSyncMin = parseInt(settingsQueries.get('confluence_sync_interval_min') || '60', 10);
+    setInterval(() => {
+      if (tfsProvider.isConfigured()) kbSyncWorker.sync(tfsProvider).catch(() => {});
+    }, tfsSyncMin * 60_000);
+    setInterval(() => {
+      if (confluenceProvider.isConfigured()) kbSyncWorker.sync(confluenceProvider).catch(() => {});
+    }, confSyncMin * 60_000);
     const coachingEngine = new CoachingEngine(llmService, agentJiraClient, 'NT');
 
     const pipelineMonitor = new PipelineMonitor(settingsQueries);
