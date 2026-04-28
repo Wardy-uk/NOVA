@@ -981,27 +981,41 @@ async function main() {
     app.use('/api/kb-articles', createKbArticleRoutes(kbArticleService));
 
     // AI self-improvement engine
-    const aiImprovementService = new AiImprovementService(llmService, settingsQueries);
+    const aiImprovementService = new AiImprovementService(llmService, settingsQueries, agentJiraClient);
     app.use('/api/ai-improvement', createAiImprovementRoutes(aiImprovementService));
 
-    // AI Improvement scan — every 30 minutes, initial run after 2 minutes
+    // Human edit detection — every 30 minutes, initial run after 2 minutes
     aiScanTimer = setInterval(async () => {
       try {
-        const [compared, signals] = await Promise.all([
-          aiImprovementService.runComparisonScan(),
-          aiImprovementService.detectHumanEdits(),
-        ]);
-        if (compared > 0 || signals > 0) {
-          console.log(`[ai-improvement] scan: ${compared} compared, ${signals} signals`);
-        }
+        const signals = await aiImprovementService.detectHumanEdits();
+        if (signals > 0) console.log(`[ai-improvement] edit scan: ${signals} signals`);
       } catch (err) {
-        console.error('[ai-improvement] scheduled scan failed:', err);
+        console.error('[ai-improvement] edit scan failed:', err);
       }
     }, 30 * 60 * 1000);
-    setTimeout(() => {
-      aiImprovementService.runComparisonScan().catch(() => {});
-      aiImprovementService.detectHumanEdits().catch(() => {});
-    }, 120_000);
+    setTimeout(() => { aiImprovementService.detectHumanEdits().catch(() => {}); }, 120_000);
+
+    // Comparison scan — 4x daily (default 06:00, 11:00, 14:00, 17:00 UK)
+    function parseCronHours(cron: string): number[] {
+      const parts = cron.trim().split(/\s+/);
+      if (parts.length < 2) return [6, 11, 14, 17];
+      return parts[1].split(',').map(h => parseInt(h, 10)).filter(h => !isNaN(h));
+    }
+    const comparisonCron = settingsQueries.get('agent_comparison_scan_cron') || '0 6,11,14,17 * * *';
+    const comparisonHours = parseCronHours(comparisonCron);
+    let lastComparisonHour = -1;
+    void setInterval(() => {
+      const ukHour = new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false });
+      const hour = parseInt(ukHour, 10);
+      if (comparisonHours.includes(hour) && hour !== lastComparisonHour) {
+        lastComparisonHour = hour;
+        aiImprovementService.runComparisonScan().then(n => {
+          if (n > 0) console.log(`[ai-improvement] comparison scan: ${n} compared`);
+        }).catch(err => console.error('[ai-improvement] comparison scan failed:', err));
+      }
+    }, 60_000);
+    // Initial comparison scan after 3 minutes
+    setTimeout(() => { aiImprovementService.runComparisonScan().catch(() => {}); }, 180_000);
 
     // Gamification
     const gamificationService = new GamificationService();

@@ -934,6 +934,16 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('ai_comparison_log', 'n8n_raw_excerpt') IS NULL
      ALTER TABLE ai_comparison_log ADD n8n_raw_excerpt NVARCHAR(MAX) NULL;`,
 
+    // v2 parser columns on ai_comparison_log (multi-signal ground truth)
+    `IF COL_LENGTH('ai_comparison_log', 'n8n_recommended_tier') IS NULL
+     ALTER TABLE ai_comparison_log ADD n8n_recommended_tier NVARCHAR(100) NULL;`,
+    `IF COL_LENGTH('ai_comparison_log', 'n8n_posted_reply') IS NULL
+     ALTER TABLE ai_comparison_log ADD n8n_posted_reply BIT NOT NULL DEFAULT 0;`,
+    `IF COL_LENGTH('ai_comparison_log', 'n8n_assigned') IS NULL
+     ALTER TABLE ai_comparison_log ADD n8n_assigned BIT NOT NULL DEFAULT 0;`,
+    `IF COL_LENGTH('ai_comparison_log', 'parser_version') IS NULL
+     ALTER TABLE ai_comparison_log ADD parser_version INT NOT NULL DEFAULT 1;`,
+
     // organisation_name on jira_issue_cache — for key accounts wallboard filtering
     `IF COL_LENGTH('jira_issue_cache', 'organisation_name') IS NULL
      ALTER TABLE jira_issue_cache ADD organisation_name NVARCHAR(200) NULL;`,

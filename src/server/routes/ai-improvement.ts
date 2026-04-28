@@ -52,5 +52,18 @@ export function createAiImprovementRoutes(service: AiImprovementService): Router
     }
   });
 
+  router.post('/backfill', async (req: Request, res: Response) => {
+    if (req.user?.role !== 'admin' && req.user?.role !== 'super_admin') {
+      res.status(403).json({ ok: false, error: 'Admin only' }); return;
+    }
+    try {
+      const result = await service.runBackfill();
+      const rate = result.compared > 0 ? ((result.agreed / result.compared) * 100).toFixed(1) : 'N/A';
+      res.json({ ok: true, data: { ...result, agreementRate: rate } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Backfill failed' });
+    }
+  });
+
   return router;
 }

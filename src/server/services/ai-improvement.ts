@@ -1,8 +1,17 @@
 import { query, execute, executeAndGetId } from './database.js';
 import type { LlmService } from './llm-service.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import type { JiraRestClient } from './jira-client.js';
 
 // ── Types ──
+
+export interface N8nGroundTruth {
+  recommendedTier: string | null;
+  priority: string | null;
+  postedPublicReply: boolean;
+  roundRobinAssigned: boolean;
+  roundRobinAssignee: string | null;
+}
 
 export interface ComparisonEntry {
   id: number;
@@ -13,6 +22,10 @@ export interface ComparisonEntry {
   agreement: boolean;
   diff_summary: string | null;
   n8n_raw_excerpt: string | null;
+  n8n_recommended_tier: string | null;
+  n8n_posted_reply: boolean;
+  n8n_assigned: boolean;
+  parser_version: number;
   created_at: string;
 }
 
@@ -36,79 +49,168 @@ export interface ImprovementStats {
   comparableTicketsCount7d: number;
 }
 
-// ── Helpers ──
+// ── ADF text extraction ──
 
-interface ParsedN8nAction {
-  action: string;
-  priority: string | null;
-  recommendedTier: string | null;
+function extractTextFromAdf(adf: unknown): string {
+  if (!adf || typeof adf !== 'object') return typeof adf === 'string' ? adf : '';
+  const node = adf as Record<string, unknown>;
+  let text = '';
+  if (typeof node.text === 'string') text += node.text;
+  if (Array.isArray(node.content)) {
+    for (const child of node.content) {
+      text += extractTextFromAdf(child);
+      const type = (child as Record<string, unknown>)?.type;
+      if (['paragraph', 'heading', 'listItem', 'tableRow', 'bulletList', 'orderedList'].includes(type as string)) {
+        text += '\n';
+      }
+    }
+  }
+  if (node.type === 'hardBreak') text += '\n';
+  return text;
 }
 
-export function parseN8nAction(body: string): ParsedN8nAction | null {
-  if (!body) return null;
-  const lower = body.toLowerCase();
+// ── Multi-signal n8n classification (replaces parseN8nAction) ──
 
-  let action: string | null = null;
-  if (/no escalation is needed|no fault|auto[- ]?resolve|\bclose\b/.test(lower)) {
-    action = 'close';
-  } else if (/escalate to|escalation required|recommend escalation/.test(lower)) {
-    action = 'escalate';
-  } else if (/respond to customer|reply to|\*\*reply:\*\*|\*\*suggested reply:\*\*/i.test(body)) {
-    action = 'respond';
+export function classifyN8nComments(
+  comments: Array<{ body: string; jsdPublic: boolean | null; created: string }>,
+): N8nGroundTruth {
+  let recommendedTier: string | null = null;
+  let priority: string | null = null;
+  let postedPublicReply = false;
+  let roundRobinAssigned = false;
+  let roundRobinAssignee: string | null = null;
+
+  for (const c of comments) {
+    const body = c.body || '';
+
+    if (body.includes('AI Summary') || body.includes('AI summary')) {
+      const tierMatch = body.match(/\*\*Recommended Tier:\*\*\s*([^\n*]+)/i);
+      const prioMatch = body.match(/\*\*Priority:\*\*\s*(Low|Medium|High|Critical)/i);
+      if (tierMatch) recommendedTier = tierMatch[1].trim();
+      if (prioMatch) priority = prioMatch[1].trim();
+      continue;
+    }
+
+    if (/auto-assigned by|round robin/i.test(body)) {
+      roundRobinAssigned = true;
+      const assigneeMatch = body.match(/assigned (?:to|by[^.]*?to)\s+([^.(\n]+)/i)
+        || body.match(/Auto-assigned[^:]*:\s*(.+)/i);
+      if (assigneeMatch) roundRobinAssignee = assigneeMatch[1].trim();
+      continue;
+    }
+
+    if (c.jsdPublic === true) {
+      postedPublicReply = true;
+      continue;
+    }
   }
 
-  if (!action) return null;
+  return { recommendedTier, priority, postedPublicReply, roundRobinAssigned, roundRobinAssignee };
+}
 
-  const priorityMatch = body.match(/\*\*Priority:\*\*\s*(Low|Medium|High|Critical)/i);
-  const tierMatch = body.match(/\*\*Recommended Tier:\*\*\s*([^\n*]+)/i);
+/** Map NOVA action + n8n ground truth → agreement boolean + explanation. */
+export function compareActions(novaAction: string, gt: N8nGroundTruth): { agreement: boolean; reason: string } {
+  const a = novaAction.toLowerCase();
 
-  return {
-    action,
-    priority: priorityMatch ? priorityMatch[1].trim() : null,
-    recommendedTier: tierMatch ? tierMatch[1].trim() : null,
-  };
+  if (a === 'escalate' || a === 'escalate_to_t2' || a === 'escalate_to_t3') {
+    const tier = (gt.recommendedTier ?? '').toLowerCase();
+    const isHighTier = tier.includes('3') || tier.includes('development');
+    if (isHighTier) return { agreement: true, reason: 'Both escalated (T3/Dev)' };
+    return { agreement: false, reason: `NOVA escalated but n8n recommended "${gt.recommendedTier || 'unknown'}"` };
+  }
+
+  if (a === 'draft_response' || a === 'respond') {
+    if (gt.postedPublicReply) return { agreement: true, reason: 'Both responded publicly' };
+    if (gt.roundRobinAssigned) return { agreement: true, reason: 'NOVA drafted response; n8n assigned (complementary)' };
+    return { agreement: true, reason: 'NOVA drafted; n8n took no public action (proactive)' };
+  }
+
+  if (a === 'assign' || a === 'round_robin') {
+    if (gt.roundRobinAssigned) return { agreement: true, reason: 'Both assigned' };
+    return { agreement: false, reason: 'NOVA assigned but n8n did not' };
+  }
+
+  if (a === 'close' || a === 'auto_resolve') {
+    if (!gt.postedPublicReply && !gt.roundRobinAssigned) return { agreement: true, reason: 'Both took no action / closed' };
+    return { agreement: false, reason: `NOVA closed but n8n ${gt.postedPublicReply ? 'responded' : 'assigned'}` };
+  }
+
+  if (a === 'no_action' || a === 'observe' || a === 'monitor') {
+    if (!gt.postedPublicReply && !gt.roundRobinAssigned) return { agreement: true, reason: 'Both observed' };
+    return { agreement: false, reason: `NOVA took no action but n8n ${gt.postedPublicReply ? 'responded' : 'assigned'}` };
+  }
+
+  // plugin_to_tpj, abuse_report, transition, comment — no n8n equivalent yet
+  return { agreement: true, reason: `Action "${novaAction}" has no n8n equivalent — skipped` };
 }
 
 // ── Service ──
+
+const PARSER_VERSION = 2;
+const N8N_ACCOUNT_ID = '712020:ac84e46b-ecff-4878-974c-2825b0497d54';
 
 export class AiImprovementService {
   constructor(
     private llm: LlmService,
     private settings: SettingsQueries,
+    private jiraClient?: JiraRestClient,
   ) {}
+
+  /** Fetch n8n (Nurtur) comments for a ticket from Jira and build ground truth tuple. */
+  async buildGroundTruth(ticketKey: string): Promise<{ gt: N8nGroundTruth; rawExcerpt: string | null } | null> {
+    if (!this.jiraClient) return null;
+    try {
+      const allComments = await this.jiraClient.getComments(ticketKey, 50);
+      const n8nComments = allComments.filter(c => c.author?.accountId === N8N_ACCOUNT_ID);
+      if (n8nComments.length === 0) return null;
+
+      const normalised = n8nComments.map(c => ({
+        body: typeof c.body === 'object' ? extractTextFromAdf(c.body) : String(c.body ?? ''),
+        jsdPublic: c.jsdPublic ?? null,
+        created: c.created,
+      }));
+
+      const gt = classifyN8nComments(normalised);
+      const firstBody = normalised[0]?.body ?? '';
+      return { gt, rawExcerpt: firstBody.slice(0, 500) };
+    } catch (err) {
+      console.warn(`[ai-improvement] Failed to fetch comments for ${ticketKey}:`, (err as Error).message);
+      return null;
+    }
+  }
 
   async compareDecision(
     ticketKey: string,
     novaAction: string,
     novaConfidence: number,
-    n8nAction: string,
-    n8nRawBody?: string,
+    gt: N8nGroundTruth,
+    rawExcerpt?: string | null,
   ): Promise<ComparisonEntry> {
-    const agreement = novaAction.toLowerCase() === n8nAction.toLowerCase();
-    let diffSummary: string | null = null;
+    const { agreement, reason } = compareActions(novaAction, gt);
+    const n8nActionSummary = [
+      gt.postedPublicReply ? 'respond' : null,
+      gt.roundRobinAssigned ? `assign(${gt.roundRobinAssignee ?? '?'})` : null,
+      gt.recommendedTier ? `tier=${gt.recommendedTier}` : null,
+    ].filter(Boolean).join('+') || 'none';
 
-    if (!agreement) {
-      diffSummary = `NOVA chose "${novaAction}" (${(novaConfidence * 100).toFixed(0)}% confidence) but n8n chose "${n8nAction}"`;
-    }
-
-    const rawExcerpt = n8nRawBody ? n8nRawBody.slice(0, 500) : null;
+    const diffSummary = agreement ? null : reason;
 
     const id = await executeAndGetId(
-      `INSERT INTO ai_comparison_log (ticket_key, nova_action, n8n_action, nova_confidence, agreement, diff_summary, n8n_raw_excerpt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [ticketKey, novaAction, n8nAction, novaConfidence, agreement ? 1 : 0, diffSummary, rawExcerpt],
+      `INSERT INTO ai_comparison_log
+       (ticket_key, nova_action, n8n_action, nova_confidence, agreement, diff_summary, n8n_raw_excerpt,
+        n8n_recommended_tier, n8n_posted_reply, n8n_assigned, parser_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [ticketKey, novaAction, n8nActionSummary, novaConfidence, agreement ? 1 : 0, diffSummary,
+       rawExcerpt ?? null, gt.recommendedTier, gt.postedPublicReply ? 1 : 0,
+       gt.roundRobinAssigned ? 1 : 0, PARSER_VERSION],
     );
 
     return {
-      id,
-      ticket_key: ticketKey,
-      nova_action: novaAction,
-      n8n_action: n8nAction,
-      nova_confidence: novaConfidence,
-      agreement,
-      diff_summary: diffSummary,
-      n8n_raw_excerpt: rawExcerpt,
-      created_at: new Date().toISOString(),
+      id, ticket_key: ticketKey, nova_action: novaAction, n8n_action: n8nActionSummary,
+      nova_confidence: novaConfidence, agreement, diff_summary: diffSummary,
+      n8n_raw_excerpt: rawExcerpt ?? null, n8n_recommended_tier: gt.recommendedTier,
+      n8n_posted_reply: gt.postedPublicReply, n8n_assigned: gt.roundRobinAssigned,
+      parser_version: PARSER_VERSION, created_at: new Date().toISOString(),
     };
   }
 
@@ -138,69 +240,101 @@ export class AiImprovementService {
       ticket_id: string;
       action: string;
       confidence: number;
-      output: string | null;
-      created_at: string;
     }>(
-      `SELECT d.ticket_id, d.action, d.confidence, d.output, d.created_at
+      `SELECT d.ticket_id, d.action, d.confidence
        FROM agent_decisions d
-       WHERE d.created_at >= DATEADD(day, -7, GETUTCDATE())
-         AND d.action IS NOT NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM ai_comparison_log c
-           WHERE c.ticket_key = d.ticket_id
-         )
+       INNER JOIN (
+         SELECT ticket_id, MAX(id) as max_id
+         FROM agent_decisions
+         WHERE created_at >= DATEADD(day, -7, GETUTCDATE())
+           AND action IS NOT NULL
+         GROUP BY ticket_id
+       ) latest ON d.id = latest.max_id
+       WHERE NOT EXISTS (
+         SELECT 1 FROM ai_comparison_log c
+         WHERE c.ticket_key = d.ticket_id AND c.parser_version = ${PARSER_VERSION}
+       )
        ORDER BY d.created_at DESC`,
     );
 
-    console.log(`[ai-improvement] Scan: ${decisions.length} decisions to check (7-day window)`);
+    console.log(`[ai-improvement] Scan: ${decisions.length} tickets to compare (7-day window, parser v${PARSER_VERSION})`);
+    if (!this.jiraClient) {
+      console.warn('[ai-improvement] No Jira client — cannot fetch comments for comparison');
+      return 0;
+    }
 
     let compared = 0;
     let withN8n = 0;
-    let parseable = 0;
-    for (const d of decisions) {
-      const rows = await query<{ body: string; created_at: string }>(
-        `SELECT TOP 1 last_n8n_comment AS body, last_n8n_comment_at AS created_at
-         FROM jira_issue_cache
-         WHERE issue_key = ?
-           AND last_n8n_comment IS NOT NULL`,
-        [d.ticket_id],
-      );
 
-      if (rows.length === 0) continue;
+    for (const d of decisions) {
+      const result = await this.buildGroundTruth(d.ticket_id);
+      if (!result) continue;
       withN8n++;
 
-      const parsed = parseN8nAction(rows[0].body);
-      if (!parsed) continue;
-      parseable++;
-
-      const diffParts: string[] = [];
-      if (parsed.priority) diffParts.push(`n8n priority: ${parsed.priority}`);
-      if (parsed.recommendedTier) diffParts.push(`n8n tier: ${parsed.recommendedTier}`);
-
-      const entry = await this.compareDecision(
-        d.ticket_id, d.action, d.confidence, parsed.action, rows[0].body,
-      );
-
-      if (!entry.agreement && diffParts.length > 0) {
-        const extraSummary = `${entry.diff_summary}. ${diffParts.join(', ')}`;
-        await execute(
-          `UPDATE ai_comparison_log SET diff_summary = ? WHERE id = ?`,
-          [extraSummary, entry.id],
-        );
-      }
-
+      await this.compareDecision(d.ticket_id, d.action, d.confidence, result.gt, result.rawExcerpt);
       compared++;
     }
 
-    if (withN8n === 0 && decisions.length > 0) {
-      const n8nCount = await query<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM jira_issue_cache WHERE last_n8n_comment IS NOT NULL`,
-      );
-      console.log(`[ai-improvement] No n8n comments found on decision tickets. Total issues with n8n comments in cache: ${n8nCount[0]?.cnt ?? 0}. Check n8n_comment_author_emails / n8n_comment_author_display_names / n8n_comment_body_marker settings.`);
+    console.log(`[ai-improvement] Scan results: ${decisions.length} decisions, ${withN8n} with n8n comments, ${compared} compared`);
+    return compared;
+  }
+
+  /** Backfill all agent_decisions since go-live with v2 ground truth.
+   *  Deletes existing v1 rows first. Returns { compared, agreed }. */
+  async runBackfill(): Promise<{ compared: number; agreed: number; skipped: number }> {
+    if (!this.jiraClient) throw new Error('No Jira client available for backfill');
+
+    // Delete old v1 rows
+    await execute(`DELETE FROM ai_comparison_log WHERE parser_version < ${PARSER_VERSION}`);
+    console.log('[ai-improvement] Deleted old parser v1 rows');
+
+    // Get all decisions since go-live (latest per ticket)
+    const goLiveDate = this.settings.get('agent_go_live_date') || '2026-04-23';
+    const decisions = await query<{
+      ticket_id: string;
+      action: string;
+      confidence: number;
+    }>(
+      `SELECT d.ticket_id, d.action, d.confidence
+       FROM agent_decisions d
+       INNER JOIN (
+         SELECT ticket_id, MAX(id) as max_id
+         FROM agent_decisions
+         WHERE action IS NOT NULL
+         GROUP BY ticket_id
+       ) latest ON d.id = latest.max_id
+       WHERE d.created_at >= ?
+       ORDER BY d.created_at ASC`,
+      [goLiveDate],
+    );
+
+    console.log(`[ai-improvement] Backfill: ${decisions.length} tickets with decisions since ${goLiveDate}`);
+
+    let compared = 0;
+    let agreed = 0;
+    let skipped = 0;
+
+    for (let i = 0; i < decisions.length; i++) {
+      const d = decisions[i];
+      try {
+        const result = await this.buildGroundTruth(d.ticket_id);
+        if (!result) { skipped++; continue; }
+
+        const entry = await this.compareDecision(d.ticket_id, d.action, d.confidence, result.gt, result.rawExcerpt);
+        compared++;
+        if (entry.agreement) agreed++;
+      } catch {
+        skipped++;
+      }
+
+      if ((i + 1) % 50 === 0) {
+        console.log(`[ai-improvement] Backfill progress: ${i + 1}/${decisions.length} (${compared} compared, ${agreed} agreed)`);
+      }
     }
 
-    console.log(`[ai-improvement] Scan results: ${decisions.length} decisions, ${withN8n} had n8n comments, ${parseable} parseable, ${compared} compared`);
-    return compared;
+    const rate = compared > 0 ? ((agreed / compared) * 100).toFixed(1) : 'N/A';
+    console.log(`[ai-improvement] Backfill complete: ${compared} compared, ${agreed} agreed (${rate}%), ${skipped} skipped`);
+    return { compared, agreed, skipped };
   }
 
   async detectHumanEdits(): Promise<number> {
@@ -238,7 +372,7 @@ export class AiImprovementService {
     const [compRows] = await Promise.all([
       query<{ total: number; agreed: number }>(
         `SELECT COUNT(*) as total, SUM(CAST(agreement AS INT)) as agreed
-         FROM ai_comparison_log WHERE created_at >= DATEADD(day, -?, GETUTCDATE())`,
+         FROM ai_comparison_log WHERE created_at >= DATEADD(day, -?, GETUTCDATE()) AND parser_version = ${PARSER_VERSION}`,
         [days],
       ),
     ]);
@@ -253,7 +387,7 @@ export class AiImprovementService {
 
     const recentDisagreements = await query<ComparisonEntry>(
       `SELECT TOP 10 * FROM ai_comparison_log
-       WHERE agreement = 0 AND created_at >= DATEADD(day, -?, GETUTCDATE())
+       WHERE agreement = 0 AND created_at >= DATEADD(day, -?, GETUTCDATE()) AND parser_version = ${PARSER_VERSION}
        ORDER BY created_at DESC`,
       [days],
     );
