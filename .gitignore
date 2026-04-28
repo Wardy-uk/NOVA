@@ -21,5 +21,8 @@ OnboardingMatix.xlsx
 jirajson.txt
 monday-board-debug.json
 
+# KB retrieval cache (cloned repos)
+data/kb-cache/
+
 # Local Netlify folder
 .netlify

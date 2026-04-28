@@ -252,7 +252,7 @@ interface ApprovalHealth {
 
 export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { userRole?: string; onNavigateToWorkspace?: (filter: { aiAction?: string }) => void }) {
   const isSuperAdmin = checkSuperAdmin(userRole);
-  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement'>('overview');
+  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'kb-index' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement'>('overview');
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
@@ -422,6 +422,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
           { key: 'alerts', label: `Alerts${alerts.filter(a => !a.acknowledged).length > 0 ? ` (${alerts.filter(a => !a.acknowledged).length})` : ''}` },
           { key: 'flagged', label: `Flagged${(flaggedSummary?.count ?? 0) > 0 ? ` (${flaggedSummary!.count})` : ''}` },
           { key: 'kb-gaps', label: 'KB Gaps' },
+          { key: 'kb-index', label: 'KB Index' },
           { key: 'ai-improvement', label: 'AI Learning' },
           { key: 'quick-actions', label: 'Quick Actions' },
           { key: 'providers', label: 'Providers' },
@@ -448,6 +449,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       {tab === 'guardrails' && <GuardrailsTab rules={guardrails} onToggle={toggleGuardrail} onRefresh={() => api('/guardrails').then(r => { if (r.ok) setGuardrails(r.data); })} />}
       {tab === 'alerts' && <AlertsTab alerts={alerts} onRefresh={() => api('/alerts?limit=100&includeAcknowledged=true').then(r => { if (r.ok) setAlerts(r.data); })} />}
       {tab === 'kb-gaps' && <KbGapsTab gaps={kbGaps} onRefresh={() => api('/kb-gaps').then(r => { if (r.ok) setKbGaps(r.data); })} />}
+      {tab === 'kb-index' && <KbIndexTab />}
       {tab === 'ai-improvement' && <AiImprovementTab />}
       {tab === 'quick-actions' && <QuickActionsTab />}
       {tab === 'providers' && <ProvidersTab providers={providers} confHistory={confHistory} />}
@@ -3086,6 +3088,106 @@ function CostCard({ label, value, sub }: { label: string; value: string; sub?: s
       <div className="text-[10px] text-neutral-500 uppercase tracking-wider">{label}</div>
       <div className="text-lg font-semibold text-neutral-100 font-mono">{value}</div>
       {sub && <div className="text-[10px] text-neutral-500">{sub}</div>}
+    </div>
+  );
+}
+
+// ── KB Index Tab ──
+
+interface KbStatus {
+  chunks_by_source: Record<string, number>;
+  last_sync_by_source: Record<string, { status: string; started_at: string; completed_at: string | null; docs_seen: number; chunks_added: number; chunks_updated: number; chunks_deleted: number } | null>;
+  embedding_model: string;
+  vector_storage_mode: string;
+  registered_providers: string[];
+}
+
+function KbIndexTab() {
+  const [status, setStatus] = useState<KbStatus | null>(null);
+  const [syncing, setSyncing] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchStatus = async () => {
+    try {
+      const token = localStorage.getItem('nova_token');
+      const res = await fetch('/api/kb-admin/status', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (data.ok) setStatus(data.data);
+      else setError(data.error);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to fetch KB status');
+    }
+  };
+
+  const triggerSync = async (source: string) => {
+    setSyncing(source);
+    try {
+      const token = localStorage.getItem('nova_token');
+      await fetch(`/api/kb-admin/sync/${source}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setTimeout(fetchStatus, 5000);
+    } catch {
+      // ignore
+    } finally {
+      setTimeout(() => setSyncing(null), 3000);
+    }
+  };
+
+  useEffect(() => { fetchStatus(); }, []);
+
+  if (error) return <div className="p-4 text-red-400 text-sm">{error}</div>;
+  if (!status) return <div className="p-4 text-neutral-500 text-sm">Loading...</div>;
+
+  const totalChunks = Object.values(status.chunks_by_source).reduce((a, b) => a + b, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="text-sm text-neutral-300">Knowledge Base Index</span>
+          <span className="ml-2 text-xs text-neutral-500">({totalChunks} chunks, {status.embedding_model})</span>
+        </div>
+        <button onClick={fetchStatus} className="text-xs text-[#5ec1ca] hover:text-[#7dd3d8]">Refresh</button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {status.registered_providers.map(source => {
+          const chunks = status.chunks_by_source[source] ?? 0;
+          const lastSync = status.last_sync_by_source[source];
+          const syncTime = lastSync?.completed_at ? new Date(lastSync.completed_at).toLocaleString() : 'Never';
+          const syncStatus = lastSync?.status ?? 'never';
+
+          return (
+            <div key={source} className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-neutral-200">{source}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                  syncStatus === 'success' ? 'bg-green-900/30 text-green-400' :
+                  syncStatus === 'error' ? 'bg-red-900/30 text-red-400' :
+                  syncStatus === 'running' ? 'bg-blue-900/30 text-blue-400' :
+                  'bg-neutral-700 text-neutral-400'
+                }`}>{syncStatus}</span>
+              </div>
+              <div className="text-xs text-neutral-400 space-y-1">
+                <div>Chunks: <span className="text-neutral-200 font-mono">{chunks}</span></div>
+                <div>Last sync: <span className="text-neutral-200">{syncTime}</span></div>
+                {lastSync && (
+                  <div>Docs: {lastSync.docs_seen} | +{lastSync.chunks_added} ~{lastSync.chunks_updated} -{lastSync.chunks_deleted}</div>
+                )}
+              </div>
+              <button
+                onClick={() => triggerSync(source)}
+                disabled={syncing === source}
+                className="mt-2 text-xs px-2 py-1 rounded bg-[#363d47] text-[#5ec1ca] hover:bg-[#3a424d] disabled:opacity-50"
+              >
+                {syncing === source ? 'Syncing...' : 'Sync Now'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
