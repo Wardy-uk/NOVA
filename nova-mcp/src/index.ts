@@ -1025,6 +1025,179 @@ server.tool(
 );
 
 // ═════════════════════════════════════════════════════════════════════
+// PART 3 — BACKLOG TOOLS (6)
+// ═════════════════════════════════════════════════════════════════════
+
+interface BacklogColumn { id: number; title: string; sort_order: number; color: string | null; item_count?: number }
+interface BacklogItem { id: number; column_id: number; title: string; description: string | null; wp_ref: string | null; effort: string | null; type: string | null; priority: number; created_by: string | null; completed_at: string | null; blocked_reason: string | null }
+
+async function resolveColumnId(input: string | number): Promise<number> {
+  if (typeof input === 'number' || /^\d+$/.test(String(input))) return Number(input);
+  const cols = await api<BacklogColumn[]>('/api/backlog/columns');
+  const col = cols.find(c => c.title.toLowerCase() === String(input).toLowerCase());
+  if (!col) throw new Error(`No column matching "${input}". Available: ${cols.map(c => c.title).join(', ')}`);
+  return col.id;
+}
+
+async function resolveItemId(args: { id?: number; wp_ref?: string; title_match?: string }): Promise<{ id: number; title: string }> {
+  if (args.id !== undefined) {
+    const item = await api<BacklogItem>(`/api/backlog/items/${args.id}`);
+    return { id: item.id, title: item.title };
+  }
+  const items = await api<BacklogItem[]>('/api/backlog/items');
+  let matches: BacklogItem[];
+  if (args.wp_ref) {
+    matches = items.filter(i => i.wp_ref?.toLowerCase() === args.wp_ref!.toLowerCase());
+    if (matches.length === 0) throw new Error(`No item with wp_ref "${args.wp_ref}"`);
+  } else if (args.title_match) {
+    matches = items.filter(i => i.title.toLowerCase() === args.title_match!.toLowerCase());
+    if (matches.length === 0) throw new Error(`No item with exact title "${args.title_match}"`);
+  } else {
+    throw new Error('Provide id, wp_ref, or title_match to identify the item');
+  }
+  if (matches.length > 1) throw new Error(`Multiple items match: ${matches.map(i => `#${i.id} "${i.title}"`).join(', ')}. Use numeric id.`);
+  return { id: matches[0].id, title: matches[0].title };
+}
+
+// 1. List columns
+server.tool(
+  'nova_backlog_columns',
+  'List all backlog columns with their IDs, titles, colours, and item counts.',
+  {},
+  async () => {
+    try {
+      const cols = await api<BacklogColumn[]>('/api/backlog/columns');
+      const lines = cols.map(c => `${c.sort_order + 1}. **${c.title}** (id=${c.id}) — ${c.item_count ?? 0} items${c.color ? ` [${c.color}]` : ''}`).join('\n');
+      return toolResult(`${cols.length} columns`, { columns: cols, summary: lines });
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// 2. List backlog items
+server.tool(
+  'nova_backlog_list',
+  'List backlog items, optionally filtered by column (by title or id) or type. Returns items with column name resolved.',
+  {
+    column: z.string().optional().describe('Filter by column title (e.g. "Backlog", "In Progress") or numeric id'),
+    type: z.string().optional().describe('Filter by item type (e.g. "code", "bugfix", "manual", "workshop")'),
+  },
+  async ({ column, type }) => {
+    try {
+      const params: Record<string, string | number> = {};
+      if (column) params.column_id = await resolveColumnId(column);
+      if (type) params.type = type;
+      const [cols, items] = await Promise.all([
+        api<BacklogColumn[]>('/api/backlog/columns'),
+        api<BacklogItem[]>('/api/backlog/items', Object.keys(params).length ? params : undefined),
+      ]);
+      const colMap = new Map(cols.map(c => [c.id, c.title]));
+      const enriched = items.map(i => ({ ...i, column_name: colMap.get(i.column_id) ?? '?' }));
+
+      const grouped = cols.map(c => ({
+        column: c.title,
+        items: enriched.filter(i => i.column_id === c.id).sort((a, b) => a.priority - b.priority),
+      })).filter(g => g.items.length > 0);
+
+      const lines = grouped.map(g => `## ${g.column} (${g.items.length})\n${g.items.map(i =>
+        `  - #${i.id} ${i.wp_ref ? `[${i.wp_ref}] ` : ''}${i.title}${i.effort ? ` (${i.effort})` : ''}${i.type ? ` [${i.type}]` : ''}${i.blocked_reason ? ` ⚠ BLOCKED: ${i.blocked_reason}` : ''}`
+      ).join('\n')}`).join('\n\n');
+
+      return toolResult(`${items.length} backlog items across ${grouped.length} columns`, { summary: lines, total: items.length, items: enriched });
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// 3. Add backlog item
+server.tool(
+  'nova_backlog_add',
+  'Add a new backlog item. Accepts column by title (e.g. "Backlog") or id.',
+  {
+    column: z.string().describe('Column title (e.g. "Backlog", "This Sprint") or numeric id'),
+    title: z.string().describe('Item title'),
+    description: z.string().optional().describe('Markdown description'),
+    wp_ref: z.string().optional().describe('Work package reference (e.g. "WP-53")'),
+    effort: z.string().optional().describe('Effort estimate (e.g. "1-2 days", "30min")'),
+    type: z.string().optional().describe('Type: code, bugfix, manual, workshop, process, research, infrastructure, monitoring'),
+    priority: z.number().optional().describe('Sort priority within column (lower = higher)'),
+  },
+  async ({ column, title, description, wp_ref, effort, type, priority }) => {
+    try {
+      const column_id = await resolveColumnId(column);
+      const item = await apiPost<BacklogItem>('/api/backlog/items', { column_id, title, description, wp_ref, effort, type, priority });
+      return toolResult(`Created #${item.id} "${title}"`, { item });
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// 4. Update backlog item
+server.tool(
+  'nova_backlog_update',
+  'Update fields on an existing backlog item. Accepts item by numeric id, by wp_ref (e.g. "WP-53"), or by exact title match.',
+  {
+    id: z.number().optional().describe('Numeric item id'),
+    wp_ref: z.string().optional().describe('Work package reference to match (e.g. "WP-53")'),
+    title_match: z.string().optional().describe('Exact title to match (case-insensitive)'),
+    fields: z.object({
+      title: z.string().optional().describe('New title'),
+      description: z.string().optional().describe('New description'),
+      wp_ref: z.string().optional().describe('New work package reference'),
+      effort: z.string().optional().describe('New effort estimate'),
+      type: z.string().optional().describe('New type'),
+      blocked_reason: z.string().optional().describe('Blocked reason (empty string to clear)'),
+    }).describe('Fields to update (at least one required)'),
+  },
+  async ({ id, wp_ref, title_match, fields }) => {
+    try {
+      const resolved = await resolveItemId({ id, wp_ref, title_match });
+      const updates: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(fields)) { if (v !== undefined) updates[k] = v; }
+      if (Object.keys(updates).length === 0) return toolError('No fields to update — provide at least one field');
+      const updated = await apiPut<BacklogItem>(`/api/backlog/items/${resolved.id}`, updates);
+      return toolResult(`Updated #${resolved.id} "${resolved.title}"`, { item: updated });
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// 5. Move backlog item
+server.tool(
+  'nova_backlog_move',
+  'Move an item to a different column. Auto-completes when moved to Done.',
+  {
+    id: z.number().optional().describe('Numeric item id'),
+    wp_ref: z.string().optional().describe('Work package reference to match'),
+    title_match: z.string().optional().describe('Exact title to match (case-insensitive)'),
+    to_column: z.string().describe('Target column title (e.g. "In Progress", "Done") or numeric id'),
+    priority: z.number().optional().describe('Position within target column (0 = top)'),
+  },
+  async ({ id, wp_ref, title_match, to_column, priority }) => {
+    try {
+      const resolved = await resolveItemId({ id, wp_ref, title_match });
+      const column_id = await resolveColumnId(to_column);
+      const moved = await apiPut<BacklogItem>(`/api/backlog/items/${resolved.id}/move`, { column_id, priority });
+      return toolResult(`Moved #${resolved.id} "${resolved.title}" → column ${to_column}`, { item: moved });
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// 6. Remove backlog item
+server.tool(
+  'nova_backlog_remove',
+  'Delete a backlog item. Returns the deleted item\'s title for confirmation.',
+  {
+    id: z.number().optional().describe('Numeric item id'),
+    wp_ref: z.string().optional().describe('Work package reference to match'),
+    title_match: z.string().optional().describe('Exact title to match (case-insensitive)'),
+  },
+  async ({ id, wp_ref, title_match }) => {
+    try {
+      const resolved = await resolveItemId({ id, wp_ref, title_match });
+      await apiDelete(`/api/backlog/items/${resolved.id}`);
+      return toolResult(`Deleted #${resolved.id} "${resolved.title}"`, { deleted: { id: resolved.id, title: resolved.title } });
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ═════════════════════════════════════════════════════════════════════
 // Server startup
 // ═════════════════════════════════════════════════════════════════════
 
