@@ -57,6 +57,7 @@ import { generateMorningBriefing } from './services/ai-standup.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
 import { OneDriveWatcher } from './services/onedrive-watcher.js';
 import { SharePointSync } from './services/sharepoint-sync.js';
+import { MsGraphClient } from './services/msgraph-client.js';
 import { Dynamics365Service } from './services/dynamics365.js';
 import { createDynamics365Routes } from './routes/dynamics365.js';
 import { EntraSsoService } from './services/entra-sso.js';
@@ -631,6 +632,23 @@ async function main() {
   }
   buildD365Service();
 
+  // Microsoft Graph — direct API with client credentials (SharePoint sync)
+  let msGraphClient: MsGraphClient | null = null;
+  function buildMsGraphClient() {
+    const s = settingsQueries.getAll();
+    if (s.sp_client_id && s.sp_client_secret && s.sp_tenant_id) {
+      msGraphClient = new MsGraphClient({
+        clientId: s.sp_client_id,
+        clientSecret: s.sp_client_secret,
+        tenantId: s.sp_tenant_id,
+      });
+      console.log('[N.O.V.A] Microsoft Graph: Client configured (client credentials)');
+    } else {
+      msGraphClient = null;
+    }
+  }
+  buildMsGraphClient();
+
   // Azure DevOps — direct REST with PAT
   let azdoClient: AzDoClient | null = null;
   function buildAzDoService() {
@@ -756,6 +774,7 @@ async function main() {
     if (key.includes('interval_minutes')) restartSyncTimers();
     // Rebuild D365 service when credentials change
     if (key.startsWith('d365_')) buildD365Service();
+    if (key.startsWith('sp_')) buildMsGraphClient();
     // Rebuild AzDO / BYM services
     if (key.startsWith('azdo_')) buildAzDoService();
     if (key.startsWith('bym_')) buildBymService();
@@ -763,6 +782,7 @@ async function main() {
   }));
   app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, userSettingsQueries, uvxCommand, () => d365Service, (key) => {
     if (key.startsWith('d365_')) buildD365Service();
+    if (key.startsWith('sp_')) buildMsGraphClient();
     if (key.startsWith('azdo_')) buildAzDoService();
     if (key.startsWith('bym_')) buildBymService();
     if (key.startsWith('adobe_sign_')) buildAdobeSignService();
@@ -771,7 +791,7 @@ async function main() {
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
   app.use('/api/jira', createJiraRoutes(taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries));
   app.use('/api/standups', requireAreaAccess('nova_features', 'view'), createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
-  const spSync = new SharePointSync(mcpManager, deliveryQueries, () => settingsQueries.getAll());
+  const spSync = msGraphClient ? new SharePointSync(msGraphClient, deliveryQueries, () => settingsQueries.getAll()) : undefined;
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess, auditQueries, onboardingRunQueries, settingsQueries));
   // Milestone routes — wired with workflow engine after buildOrchestrator is defined (see below)
   // app.use('/api/milestones', ...) is registered after buildOrchestrator

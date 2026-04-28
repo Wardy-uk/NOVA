@@ -110,6 +110,22 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
     ],
   },
   {
+    id: 'sharepoint',
+    name: 'SharePoint Online',
+    description: 'Direct Microsoft Graph API for SharePoint file sync (delivery sheet). Uses app-level credentials — no interactive login needed.',
+    enabledKey: 'sp_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'sp_tenant_id', label: 'Tenant ID', type: 'text', placeholder: 'Azure AD directory (tenant) ID', required: true },
+      { key: 'sp_client_id', label: 'Client ID', type: 'text', placeholder: 'Azure AD app registration client ID', required: true },
+      { key: 'sp_client_secret', label: 'Client Secret', type: 'password', placeholder: 'Azure AD app registration client secret', required: true },
+      { key: 'sp_site_url', label: 'Site ID', type: 'text', placeholder: 'nurturcloud.sharepoint.com:/sites/Nurtur', required: false },
+      { key: 'sp_drive_hint', label: 'Drive Name', type: 'text', placeholder: 'Documents', required: false },
+      { key: 'sp_folder_path', label: 'Folder Path', type: 'text', placeholder: 'Clients/Tech/!Overview Documents', required: false },
+      { key: 'sp_file_name', label: 'File Name', type: 'text', placeholder: 'Delivery sheet Master.xlsx', required: false },
+    ],
+  },
+  {
     id: 'smtp',
     name: 'Email',
     description: 'Built-in email for invites and notifications. Only a From address is needed — sends directly. Optionally add an SMTP relay.',
