@@ -254,8 +254,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   router.get('/costs/by-mode', requireSuperAdmin(), async (req, res) => {
     const days = Math.min(parseInt(req.query.days as string, 10) || 30, 365);
     try {
-      const workingHours = deps?.settingsQueries?.get('agent_working_hours') ?? '08:00-18:00';
-      const workingDays = deps?.settingsQueries?.get('agent_working_days') ?? '1,2,3,4,5';
+      const workingHours = deps?.settingsQueries?.get('agent_working_hours') || '08:00-18:00';
+      const workingDays = deps?.settingsQueries?.get('agent_working_days') || '1,2,3,4,5';
       const data = await agentLoop.getObserver().getCostsByMode(days, workingHours, workingDays);
       res.json({ ok: true, data });
     } catch (err) {

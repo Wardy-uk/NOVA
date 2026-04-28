@@ -253,7 +253,7 @@ export class AgentLoop {
   }
 
   getWorkingHoursDebug(): Record<string, unknown> {
-    const tz = this.settings.get('agent_timezone') ?? 'Europe/London';
+    const tz = this.settings.get('agent_timezone') || 'Europe/London';
     const weekendModeEnabled = this.isWeekendModeEnabled();
     const overrideUntil = this.getWeekendOverrideUntil();
 
@@ -267,8 +267,8 @@ export class AgentLoop {
       const day = dayNames[p.weekday] ?? -1;
       const hh = parseInt(p.hour, 10);
       const mi = parseInt(p.minute, 10);
-      const workingDaysStr = this.settings.get('agent_working_days') ?? '1,2,3,4,5';
-      const hoursStr = this.settings.get('agent_working_hours') ?? '08:00-18:00';
+      const workingDaysStr = this.settings.get('agent_working_days') || '1,2,3,4,5';
+      const hoursStr = this.settings.get('agent_working_hours') || '08:00-18:00';
 
       return {
         tz, weekendModeEnabled, overrideUntil,
@@ -289,7 +289,7 @@ export class AgentLoop {
     if (this.getWeekendOverrideUntil()) return true;
 
     try {
-      const tz = this.settings.get('agent_timezone') ?? 'Europe/London';
+      const tz = this.settings.get('agent_timezone') || 'Europe/London';
       const fmt = new Intl.DateTimeFormat('en-GB', {
         timeZone: tz, weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false,
       });
@@ -299,7 +299,7 @@ export class AgentLoop {
       const hh = parseInt(p.hour, 10);
       const mi = parseInt(p.minute, 10);
 
-      const workingDaysStr = (this.settings.get('agent_working_days') ?? '1,2,3,4,5').trim();
+      const workingDaysStr = (this.settings.get('agent_working_days') || '1,2,3,4,5').trim();
       const workingDays = new Set(workingDaysStr.split(',').map(d => parseInt(d.trim(), 10)));
       if (!workingDays.has(day)) {
         if (this.currentMode === 'full') {
@@ -308,7 +308,7 @@ export class AgentLoop {
         return false;
       }
 
-      const hoursStr = (this.settings.get('agent_working_hours') ?? '08:00-18:00').trim();
+      const hoursStr = (this.settings.get('agent_working_hours') || '08:00-18:00').trim();
       const match = hoursStr.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
       if (!match) {
         console.warn(`[agent] isWorkingHours: invalid hours format "${hoursStr}", defaulting to working hours`);
