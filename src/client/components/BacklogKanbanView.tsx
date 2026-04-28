@@ -60,7 +60,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('nova_auth_token') ?? sessionStorage.getItem('nova_auth_token');
   return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
 }
 
