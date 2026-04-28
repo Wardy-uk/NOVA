@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { isAdmin } from '../utils/role-helpers.js';
 import type { AiImprovementService } from '../services/ai-improvement.js';
 
 export function createAiImprovementRoutes(service: AiImprovementService): Router {
@@ -53,7 +54,7 @@ export function createAiImprovementRoutes(service: AiImprovementService): Router
   });
 
   router.post('/backfill', async (req: Request, res: Response) => {
-    if (req.user?.role !== 'admin' && req.user?.role !== 'super_admin') {
+    if (!req.user || !isAdmin(req.user.role)) {
       res.status(403).json({ ok: false, error: 'Admin only' }); return;
     }
     try {
