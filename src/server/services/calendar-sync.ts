@@ -19,11 +19,22 @@ interface PeopleHrAbsence {
   AbsenceId: { DisplayValue: string };
 }
 
+interface PeopleHrEmployee {
+  EmployeeId: { DisplayValue: string };
+  FirstName: { DisplayValue: string };
+  LastName: { DisplayValue: string };
+  Department: { DisplayValue: string };
+  EmploymentType?: { DisplayValue: string };
+}
+
 export class CalendarSyncService {
   private kpiPool: sql.ConnectionPool | null = null;
   private consecutiveAuthFailures = 0;
   private lastFailedApiKey: string | null = null;
+  private cachedEmployeeIds: string[] = [];
+  private employeeCacheTime = 0;
   private static readonly AUTH_BACKOFF_THRESHOLD = 3;
+  private static readonly EMPLOYEE_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
   constructor(private settings: SettingsQueries) {}
 
   private async getKpiPool(): Promise<sql.ConnectionPool | null> {
@@ -181,33 +192,97 @@ export class CalendarSyncService {
     };
   }
 
-  private async fetchAbsences(apiKey: string): Promise<PeopleHrAbsence[]> {
-    const startDate = new Date().toISOString().slice(0, 10);
-    const endDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  private async fetchEmployeeIds(apiKey: string): Promise<string[]> {
+    if (this.cachedEmployeeIds.length > 0 && Date.now() - this.employeeCacheTime < CalendarSyncService.EMPLOYEE_CACHE_TTL) {
+      return this.cachedEmployeeIds;
+    }
 
+    const response = await fetch(`${PEOPLE_HR_BASE}Employee`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        APIKey: apiKey,
+        Action: 'GetAllEmployeeDetail',
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`People HR Employee API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (data.isError) throw new Error(`People HR error: ${data.Message}`);
+
+    if (!Array.isArray(data.Result)) return [];
+
+    const ids = (data.Result as PeopleHrEmployee[])
+      .map(e => e.EmployeeId?.DisplayValue)
+      .filter((id): id is string => !!id);
+
+    this.cachedEmployeeIds = ids;
+    this.employeeCacheTime = Date.now();
+    console.log(`[calendar-sync] Cached ${ids.length} employee IDs from People HR`);
+    return ids;
+  }
+
+  private async fetchAbsencesForEmployee(apiKey: string, employeeId: string, startDate: string, endDate: string): Promise<PeopleHrAbsence[]> {
     const response = await fetch(`${PEOPLE_HR_BASE}Absence`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         APIKey: apiKey,
-        Action: 'GetAbsencesForDateRange',
+        Action: 'GetAbsenceDetail',
+        EmployeeId: employeeId,
         StartDate: startDate,
         EndDate: endDate,
       }),
     });
 
     if (!response.ok) {
-      throw new Error(`People HR API error: ${response.status} ${response.statusText}`);
+      throw new Error(`People HR Absence API error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
-    if (!data.isError && Array.isArray(data.Result)) {
-      return data.Result.filter((a: any) =>
-        a.Status?.DisplayValue !== 'Cancelled' && a.Status?.DisplayValue !== 'Declined'
-      );
-    }
     if (data.isError) throw new Error(`People HR error: ${data.Message}`);
-    return [];
+
+    if (!Array.isArray(data.Result)) return [];
+
+    return data.Result.filter((a: any) =>
+      a.Status?.DisplayValue !== 'Cancelled' && a.Status?.DisplayValue !== 'Declined'
+    );
+  }
+
+  private async fetchAbsences(apiKey: string): Promise<PeopleHrAbsence[]> {
+    const startDate = new Date().toISOString().slice(0, 10);
+    const endDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
+    const employeeIds = await this.fetchEmployeeIds(apiKey);
+    if (employeeIds.length === 0) {
+      console.warn('[calendar-sync] No employees found in People HR');
+      return [];
+    }
+
+    const allAbsences: PeopleHrAbsence[] = [];
+    let errors = 0;
+
+    for (const empId of employeeIds) {
+      try {
+        const absences = await this.fetchAbsencesForEmployee(apiKey, empId, startDate, endDate);
+        allAbsences.push(...absences);
+      } catch (err) {
+        errors++;
+        if (errors >= 5) {
+          console.error(`[calendar-sync] Too many per-employee errors (${errors}), aborting`);
+          throw err;
+        }
+      }
+    }
+
+    if (errors > 0) {
+      console.warn(`[calendar-sync] ${errors} employee(s) had fetch errors`);
+    }
+
+    return allAbsences;
   }
 
   private mapAbsenceType(type: string): string {
