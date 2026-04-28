@@ -2018,10 +2018,22 @@ ${panelHtml}
             const fields: Record<string, unknown> = {};
             if (tldr) fields.customfield_13184 = adf(tldr);
             if (developmentDetails) fields.customfield_13215 = adf(developmentDetails);
-            await client.transitionIssue(entry.jira_key, transitionId, {
-              fields: Object.keys(fields).length > 0 ? fields : undefined,
-              comment: { body: adf(text) },
-            });
+            try {
+              await client.transitionIssue(entry.jira_key, transitionId, {
+                fields: Object.keys(fields).length > 0 ? fields : undefined,
+                comment: { body: adf(text) },
+              });
+            } catch (fieldErr: unknown) {
+              const msg = fieldErr instanceof Error ? fieldErr.message : String(fieldErr);
+              if (msg.includes('cannot be set') || msg.includes('not on the appropriate screen')) {
+                console.warn(`[DevReviewOutbox] ${entry.jira_key}: transition fields rejected, retrying without custom fields`);
+                await client.transitionIssue(entry.jira_key, transitionId, {
+                  comment: { body: adf(text) },
+                });
+              } else {
+                throw fieldErr;
+              }
+            }
             await devReviewQueries.markAccepted(entry.jira_key);
           } else if (entry.op === 'return') {
             const transitionId = String(payload.returnTransitionId || '');

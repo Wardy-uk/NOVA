@@ -21,6 +21,9 @@ interface PeopleHrAbsence {
 
 export class CalendarSyncService {
   private kpiPool: sql.ConnectionPool | null = null;
+  private consecutiveAuthFailures = 0;
+  private lastFailedApiKey: string | null = null;
+  private static readonly AUTH_BACKOFF_THRESHOLD = 3;
   constructor(private settings: SettingsQueries) {}
 
   private async getKpiPool(): Promise<sql.ConnectionPool | null> {
@@ -47,10 +50,18 @@ export class CalendarSyncService {
       console.log('[calendar-sync] Skipping — people_hr_api_key not configured');
       return { synced: 0, created: 0, updated: 0, removed: 0 };
     }
+    if (this.consecutiveAuthFailures >= CalendarSyncService.AUTH_BACKOFF_THRESHOLD && this.lastFailedApiKey === apiKey) {
+      console.log(`[calendar-sync] Skipping — People HR auth failed ${this.consecutiveAuthFailures} times, update people_hr_api_key to retry`);
+      return { synced: 0, created: 0, updated: 0, removed: 0 };
+    }
+    if (this.lastFailedApiKey !== apiKey) {
+      this.consecutiveAuthFailures = 0;
+    }
     console.log(`[calendar-sync] Using API key: ${apiKey.slice(0, 8)}...`);
 
     try {
       const absences = await this.fetchAbsences(apiKey);
+      this.consecutiveAuthFailures = 0;
       console.log(`[calendar-sync] Fetched ${absences.length} absences from People HR`);
 
       let created = 0;
@@ -115,7 +126,14 @@ export class CalendarSyncService {
       console.log(`[calendar-sync] Synced: ${created} created, ${updated} updated, ${removed} removed`);
       return { synced: absences.length, created, updated, removed };
     } catch (err) {
-      console.error('[calendar-sync] Sync failed:', err instanceof Error ? err.message : err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('Access Denied') || msg.includes('Unauthorized') || msg.includes('Invalid API')) {
+        this.consecutiveAuthFailures++;
+        this.lastFailedApiKey = apiKey;
+        console.error(`[calendar-sync] sync failed: ${msg} (auth failure ${this.consecutiveAuthFailures}/${CalendarSyncService.AUTH_BACKOFF_THRESHOLD})`);
+      } else {
+        console.error('[calendar-sync] Sync failed:', msg);
+      }
       throw err;
     }
   }

@@ -826,16 +826,31 @@ export function createDevReviewRoutes(
     // functions clear the assignee, so we restore it in step 2.
     const transitionComment = note || `Accepted into development backlog by ${display}`;
     try {
-      await client.transitionIssue(key, transitionId, {
-        fields: {
-          [CF_TLDR]: adfDoc(tldr),
-          [CF_DEVELOPMENT_DETAILS]: adfDoc(developmentDetails),
-        },
-        comment: {
-          body: adfDoc(transitionComment),
-          internal: true,
-        },
-      });
+      try {
+        await client.transitionIssue(key, transitionId, {
+          fields: {
+            [CF_TLDR]: adfDoc(tldr),
+            [CF_DEVELOPMENT_DETAILS]: adfDoc(developmentDetails),
+          },
+          comment: {
+            body: adfDoc(transitionComment),
+            internal: true,
+          },
+        });
+      } catch (fieldErr: unknown) {
+        const fieldMsg = fieldErr instanceof Error ? fieldErr.message : String(fieldErr);
+        if (fieldMsg.includes('cannot be set') || fieldMsg.includes('not on the appropriate screen')) {
+          console.warn(`[dev-review] ${key}: transition fields rejected, retrying without custom fields`);
+          await client.transitionIssue(key, transitionId, {
+            comment: {
+              body: adfDoc(transitionComment),
+              internal: true,
+            },
+          });
+        } else {
+          throw fieldErr;
+        }
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Transition failed';
       await devQueries.markThreadSyncFailed(threadId, msg);
