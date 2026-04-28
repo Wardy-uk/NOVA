@@ -60,7 +60,7 @@ const AREA_DEFAULTS: Record<string, string> = {
 function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string, string> {
   const userRoles = parseRoles(roleStr);
   if (isAdmin(roleStr)) {
-    return { command: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', azdo_push: 'edit', ai_approvals: 'edit', training: 'edit', admin: 'edit', mi: 'edit', devreview: 'edit', calyx: 'edit', 'ai-agent': 'edit' };
+    return { command: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', azdo_push: 'edit', ai_approvals: 'edit', training: 'edit', admin: 'edit', mi: 'edit', devreview: 'edit', calyx: 'edit', 'ai-agent': 'edit', backlog: 'edit', nova_features: 'edit' };
   }
   const matched = roles.filter(r => userRoles.includes(r.id));
   if (matched.length === 0) {
