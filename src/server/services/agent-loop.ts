@@ -76,7 +76,7 @@ export class AgentLoop {
     this.autonomyEngine = new AutonomyEngine();
     this.perceiver = new Perceiver(jiraClient, settings, cache);
     this.reasoner = new Reasoner(llmService, kbSearch, this.autonomyEngine);
-    this.actor = new Actor(jiraClient, new EscalationLogService());
+    this.actor = new Actor(jiraClient, new EscalationLogService(), settings);
     this.observer = new Observer();
     this.alertService = new AlertService(settings);
     this.lifecycleManager = new LifecycleManager(
@@ -93,7 +93,7 @@ export class AgentLoop {
     this.coachingEngine = new CoachingEngine(llmService, jiraClient, primaryProject);
     this.riskScorer = new RiskScorer(settings);
     this.hybridDetector = new HybridActionDetector(settings);
-    this.pluginExecutor = new PluginToTpjExecutor(jiraClient);
+    this.pluginExecutor = new PluginToTpjExecutor(jiraClient, settings);
     this.externalDb = new ExternalDbService(settings);
     if (approvalQueries) {
       this.abuseExecutor = new AbuseReportExecutor(jiraClient, settings, approvalQueries, this.externalDb);

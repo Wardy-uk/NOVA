@@ -1,18 +1,39 @@
 import type { JiraRestClient } from './jira-client.js';
 import type { AgentDecision, ActionResult } from './agent-types.js';
 import type { EscalationLogService } from './escalation-log-service.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 
 export class Actor {
   private jiraClient: JiraRestClient;
   private escalationLog?: EscalationLogService;
+  private settings: SettingsQueries;
 
-  constructor(jiraClient: JiraRestClient, escalationLog?: EscalationLogService) {
+  constructor(jiraClient: JiraRestClient, escalationLog: EscalationLogService | undefined, settings: SettingsQueries) {
     this.jiraClient = jiraClient;
     this.escalationLog = escalationLog;
+    this.settings = settings;
+  }
+
+  private async assignToNovaServiceAccount(ticketKey: string): Promise<void> {
+    const accountId = this.settings.get('nova_ai_jira_account_id');
+    if (!accountId) {
+      console.warn('[actor] nova_ai_jira_account_id not configured — skipping service account assignment');
+      return;
+    }
+    try {
+      await this.jiraClient.updateFields(ticketKey, { assignee: { accountId } });
+    } catch (err) {
+      console.warn(`[actor] Failed to assign ${ticketKey} to NOVA service account:`, err instanceof Error ? err.message : err);
+    }
   }
 
   async execute(decision: AgentDecision): Promise<ActionResult> {
     try {
+      // Assign to NOVA service account before any ticket-modifying action
+      if (decision.action !== 'no_action' && decision.action !== 'assign') {
+        await this.assignToNovaServiceAccount(decision.ticketKey);
+      }
+
       switch (decision.action) {
         case 'no_action':
           return { success: true, action: 'no_action', ticketKey: decision.ticketKey, detail: 'No action required.' };

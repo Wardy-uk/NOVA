@@ -834,15 +834,5 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
     }
   });
 
-  // ── Plaud integration stubs ──
-
-  router.post('/agent/:agentName/import-plaud', async (req: Request, res: Response) => {
-    res.status(501).json({ ok: false, error: 'Plaud import not yet implemented. See NOVA-Plaud-Integration-Notes.md for service design.' });
-  });
-
-  router.get('/agent/:agentName/plaud-recordings', async (req: Request, res: Response) => {
-    res.status(501).json({ ok: false, error: 'Plaud recordings endpoint not yet implemented. See NOVA-Plaud-Integration-Notes.md for API details.' });
-  });
-
   return router;
 }

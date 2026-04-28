@@ -35,7 +35,6 @@ const BackfillStatusView = lazy(() => import('./components/BackfillStatusView.js
 const SalesHotboxView = lazy(() => import('./components/SalesHotboxView.js').then(m => ({ default: m.SalesHotboxView })));
 import { TeamWorkloadView } from './components/TeamWorkloadView.js';
 import { NotificationBell } from './components/NotificationBell.js';
-import { ChatView } from './components/ChatView.js';
 import { NextActions } from './components/NextActions.js';
 import { StatusBar } from './components/StatusBar.js';
 import { FeedbackModal } from './components/FeedbackModal.js';
@@ -89,7 +88,7 @@ declare const __APP_VERSION__: string;
 
 type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'calyx' | 'ai-agent';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova' | 'briefing'
-  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload' | 'chat'
+  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
@@ -128,7 +127,6 @@ const TAB_AREA_GATE: Partial<Record<View, string>> = {
   briefing: 'nova_features',
   standup: 'nova_features',
   'team-workload': 'nova_features',
-  chat: 'nova_features',
   'people-roster': 'admin',
 };
 
@@ -1028,10 +1026,6 @@ export function App() {
           {view === 'team-workload' && (
             <TeamWorkloadView />
           )}
-          {view === 'chat' && (
-            <ChatView />
-          )}
-
           {/* Service Desk — right pill overrides left tab content */}
           {currentArea === 'servicedesk' && sdFilter === 'all-breached' && (
             <NeedsAttentionView onUpdateTask={updateTask} scope="all" />

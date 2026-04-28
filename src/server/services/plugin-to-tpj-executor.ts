@@ -1,5 +1,6 @@
 import type { JiraRestClient } from './jira-client.js';
 import type { HybridActionMatch, HybridActionResult } from './agent-types.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import { executeAndGetId } from './database.js';
 
 const TPJ_PROJECT_ID = '11808';
@@ -7,9 +8,11 @@ const QUICK_RESOLVE_TRANSITION_ID = '17';
 
 export class PluginToTpjExecutor {
   private jiraClient: JiraRestClient;
+  private settings: SettingsQueries;
 
-  constructor(jiraClient: JiraRestClient) {
+  constructor(jiraClient: JiraRestClient, settings: SettingsQueries) {
     this.jiraClient = jiraClient;
+    this.settings = settings;
   }
 
   async execute(match: HybridActionMatch): Promise<HybridActionResult> {
@@ -62,8 +65,12 @@ export class PluginToTpjExecutor {
         { internal: false },
       );
 
-      // 5. Transition original to Resolved
+      // 5. Assign to NOVA service account, then transition original to Resolved
       try {
+        const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+        if (novaAccountId) {
+          await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
+        }
         await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID);
         console.log(`[plugin-to-tpj] Resolved original ${ticketKey}`);
       } catch (err) {

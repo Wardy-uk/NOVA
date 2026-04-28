@@ -64,7 +64,6 @@ import { MilestoneWorkflowEngine } from './services/milestone-workflow.js';
 import { AuditQueries } from './db/audit.js';
 import { createAuditRoutes } from './routes/audit.js';
 import { createTeamRoutes } from './routes/team.js';
-// import { createChatRoutes } from './routes/chat.js'; // Chat disabled — needs redesign
 import { JiraOAuthService } from './services/jira-oauth.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
@@ -855,8 +854,6 @@ async function main() {
   app.use('/api/audit', createAuditRoutes(auditQueries));
   app.use('/api/team', requireAreaAccess('nova_features', 'view'), createTeamRoutes(deliveryQueries, milestoneQueries, taskQueries, userQueries));
   app.use('/api/notifications', createNotificationRoutes(notificationQueries, notificationEngine));
-  // Chat disabled — feature needs redesign (was direct OpenAI, needs consolidating with AI Agent)
-  // app.use('/api/chat', requireAreaAccess('nova_features', 'view'), createChatRoutes(taskQueries, deliveryQueries, milestoneQueries, settingsQueries, userSettingsQueries));
   app.use('/api/people', createPeopleRoutes({ userQueries, settingsQueries, mcpManager, notificationQueries }));
 
   // Start Jira sync (service was created earlier so routes can reference it)
@@ -965,6 +962,41 @@ async function main() {
       riskScorer: agentLoop.getRiskScorer(),
       escalationLog,
     }));
+
+    // Ensure NOVA AI synthetic agent exists in dbo.Agent (idempotent)
+    (async () => {
+      try {
+        const all = settingsQueries.getAll();
+        const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = all;
+        if (!srv || !db || !usr || !pwd) return;
+        const sqlMod = await import('mssql');
+        const p = await new sqlMod.default.ConnectionPool({
+          server: srv, database: db, user: usr, password: pwd,
+          options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
+        }).connect();
+        const exists = await p.request()
+          .input('key', sqlMod.default.NVarChar(200), 'nova-ai@system.local')
+          .query(`SELECT AgentId FROM dbo.Agent WHERE AgentKey = @key`);
+        if (exists.recordset.length === 0) {
+          await p.request()
+            .input('name', sqlMod.default.NVarChar(100), 'NOVA')
+            .input('surname', sqlMod.default.NVarChar(100), 'AI')
+            .input('key', sqlMod.default.NVarChar(200), 'nova-ai@system.local')
+            .input('tierCode', sqlMod.default.NVarChar(10), 'AI')
+            .input('team', sqlMod.default.NVarChar(50), 'NOVA AI')
+            .input('dept', sqlMod.default.NVarChar(10), 'NOVA_AI')
+            .input('now', sqlMod.default.DateTime2, new Date())
+            .query(`INSERT INTO dbo.Agent (AgentName, AgentSurname, AgentKey, TierCode, Team,
+                     MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3,
+                     IsAvailable, IsActive, Department, CreatedAt, UpdatedAt)
+                    VALUES (@name, @surname, @key, @tierCode, @team, 0, 0, 0, 0, 1, @dept, @now, @now)`);
+          console.log('[kpi] NOVA AI synthetic agent created in dbo.Agent');
+        }
+        await p.close();
+      } catch (err) {
+        console.warn('[kpi] Failed to seed NOVA AI agent:', err instanceof Error ? err.message : err);
+      }
+    })();
 
     // KPI pipeline timers (initial kicks staggered to avoid startup storm)
     setInterval(() => kpiPipeline.collectJiraSnapshot().catch(e => console.warn('[kpi-pipeline] snapshot failed:', e.message)), 10 * 60 * 1000);
@@ -1902,23 +1934,31 @@ ${panelHtml}
     }
   }, 15 * 60 * 1000);
 
-  // Problem Ticket Scanner: every 15 minutes + initial scan after 90s (staggered)
-  const ptScanTimer = setInterval(async () => {
-    try {
-      problemTicketScanner.setJiraClient(buildOnboardingJiraClient());
-      await problemTicketScanner.scan();
-    } catch (err) {
-      console.error('[ProblemTicketScanner] Scheduled scan failed:', err instanceof Error ? err.message : err);
-    }
-  }, 15 * 60 * 1000);
-  setTimeout(async () => {
-    try {
-      problemTicketScanner.setJiraClient(buildOnboardingJiraClient());
-      await problemTicketScanner.scan();
-    } catch (err) {
-      console.error('[ProblemTicketScanner] Initial scan failed:', err instanceof Error ? err.message : err);
-    }
-  }, 90_000);
+  // Problem Ticket Scanner: configurable interval (default 15 min), 0 disables
+  const ptScanMinutes = Number(settingsQueries.get('problem_scanner_interval_minutes')) || 15;
+  let ptScanTimer: ReturnType<typeof setInterval> | null = null;
+  if (ptScanMinutes > 0) {
+    const ptScanMs = ptScanMinutes * 60 * 1000;
+    console.log(`[ProblemTicketScanner] Scheduled every ${ptScanMinutes} minutes`);
+    ptScanTimer = setInterval(async () => {
+      try {
+        problemTicketScanner.setJiraClient(buildOnboardingJiraClient());
+        await problemTicketScanner.scan();
+      } catch (err) {
+        console.error('[ProblemTicketScanner] Scheduled scan failed:', err instanceof Error ? err.message : err);
+      }
+    }, ptScanMs);
+    setTimeout(async () => {
+      try {
+        problemTicketScanner.setJiraClient(buildOnboardingJiraClient());
+        await problemTicketScanner.scan();
+      } catch (err) {
+        console.error('[ProblemTicketScanner] Initial scan failed:', err instanceof Error ? err.message : err);
+      }
+    }, 90_000);
+  } else {
+    console.log('[ProblemTicketScanner] Disabled (problem_scanner_interval_minutes = 0)');
+  }
 
   // Adobe Sign agreement sync — every 5 minutes
   setInterval(async () => {
@@ -2421,7 +2461,7 @@ ${panelHtml}
   const shutdown = async () => {
     console.log('[N.O.V.A] Shutting down...');
     clearInterval(workflowTimer);
-    clearInterval(ptScanTimer);
+    if (ptScanTimer) clearInterval(ptScanTimer);
     clearInterval(portalCleanupTimer);
     clearInterval(surveyTimer);
     clearInterval(trainingReminderTimer);

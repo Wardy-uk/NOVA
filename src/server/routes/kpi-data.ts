@@ -282,9 +282,9 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const oldestKeySelect = hasOldestKey.recordset.length > 0 ? ', a.OldestTicketKey' : '';
       const deptSelect = hasDept.recordset.length > 0 ? ', a.Department' : '';
       const deptWhere = hasDept.recordset.length > 0
-        ? "AND a.Department = 'NT'"
+        ? "AND a.Department IN ('NT', 'NOVA_AI')"
         : hasDeptLive.recordset.length > 0 && s
-          ? `AND a.AgentName IN (SELECT AgentName FROM dbo.Agent WHERE Department = 'NT')`
+          ? `AND a.AgentName IN (SELECT AgentName FROM dbo.Agent WHERE Department IN ('NT', 'NOVA_AI'))`
           : '';
       const result = await p.request().query(`
         SELECT a.AgentId, a.AgentKey, a.AgentName, a.AgentSurname, a.TierCode, a.Team,
@@ -355,10 +355,10 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       let deptWhere: string;
       if (hasDept.recordset.length > 0) {
         deptJoin = `INNER JOIN dbo.Agent${s} a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
-        deptWhere = "AND a.Department = 'NT'";
+        deptWhere = "AND a.Department IN ('NT', 'NOVA_AI')";
       } else if (hasDeptLive.recordset.length > 0) {
         deptJoin = `INNER JOIN dbo.Agent a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
-        deptWhere = "AND a.Department = 'NT'";
+        deptWhere = "AND a.Department IN ('NT', 'NOVA_AI')";
       } else {
         deptJoin = '';
         deptWhere = '';
@@ -490,10 +490,10 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       let deptWhere: string;
       if (hasDept.recordset.length > 0) {
         deptJoin = `INNER JOIN dbo.Agent${s} a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
-        deptWhere = "AND a.Department = 'NT'";
+        deptWhere = "AND a.Department IN ('NT', 'NOVA_AI')";
       } else if (hasDeptLive.recordset.length > 0) {
         deptJoin = `INNER JOIN dbo.Agent a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
-        deptWhere = "AND a.Department = 'NT'";
+        deptWhere = "AND a.Department IN ('NT', 'NOVA_AI')";
       } else {
         deptJoin = '';
         deptWhere = '';
