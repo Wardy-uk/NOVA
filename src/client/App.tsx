@@ -75,6 +75,7 @@ const AgentProfileView = lazy(() => import('./components/AgentProfileView.js').t
 const KbGapsView = lazy(() => import('./components/KbGapsView.js').then(m => ({ default: m.KbGapsView })));
 const AgentRosterView = lazy(() => import('./components/AgentRosterView.js').then(m => ({ default: m.AgentRosterView })));
 const BriefingView = lazy(() => import('./components/BriefingView.js').then(m => ({ default: m.BriefingView })));
+const BacklogKanbanView = lazy(() => import('./components/BacklogKanbanView.js').then(m => ({ default: m.BacklogKanbanView })));
 import { BriefingPopup } from './components/BriefingPopup.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
@@ -86,7 +87,7 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'calyx' | 'ai-agent';
+type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'calyx' | 'ai-agent' | 'backlog';
 type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
@@ -101,6 +102,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'dev-review' | 'dev-review-dashboard'
   | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-tickets' | 'calyx-kb' | 'calyx-improvements' | 'calyx-settings' | 'calyx-problems' | 'calyx-changes' | 'calyx-major-incidents' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
   | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps'
+  | 'backlog-board'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -119,7 +121,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', calyx: 'hidden', 'ai-agent': 'hidden',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', calyx: 'hidden', 'ai-agent': 'hidden', backlog: 'view',
 };
 
 // Map certain command sub-tabs to their own permission area
@@ -282,9 +284,16 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'agent-kb-gaps', label: 'KB Gaps' },
     ],
   },
+  backlog: {
+    label: 'Backlog',
+    defaultView: 'backlog-board',
+    tabs: [
+      { view: 'backlog-board', label: 'Kanban' },
+    ],
+  },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'calyx', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'ai-agent'];
+const AREA_ORDER: Area[] = ['command', 'servicedesk', 'calyx', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'ai-agent', 'backlog'];
 
 // Derive area from view (standalone views fall back to 'command')
 function getArea(view: View): Area {
@@ -296,7 +305,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue', 'calyx-dashboard', 'calyx-playlist', 'calyx-tickets', 'calyx-kb', 'calyx-improvements', 'calyx-settings', 'calyx-problems', 'calyx-changes', 'calyx-major-incidents', 'calyx-slo-settings', 'calyx-business-hours', 'calyx-organisations', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue', 'calyx-dashboard', 'calyx-playlist', 'calyx-tickets', 'calyx-kb', 'calyx-improvements', 'calyx-settings', 'calyx-problems', 'calyx-changes', 'calyx-major-incidents', 'calyx-slo-settings', 'calyx-business-hours', 'calyx-organisations', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1224,6 +1233,13 @@ export function App() {
           {/* Board MI — gated by 'mi' permission area */}
           {view === 'board-mi' && canSeeArea('board') && (
             <BoardMiView />
+          )}
+
+          {/* Backlog Kanban */}
+          {view === 'backlog-board' && (
+            <Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400" /></div>}>
+              <BacklogKanbanView canWrite={areaAccess.backlog === 'edit'} />
+            </Suspense>
           )}
 
           {/* Dev Review Queue — developer + admin */}

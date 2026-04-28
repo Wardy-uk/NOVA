@@ -975,6 +975,43 @@ async function runMigrations(): Promise<void> {
 
     `IF COL_LENGTH('agent_streaks', 'agent_id') IS NULL
      ALTER TABLE agent_streaks ADD agent_id INT NULL;`,
+
+    // ── Backlog Kanban ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'backlog_columns') AND type = 'U')
+     CREATE TABLE backlog_columns (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       title NVARCHAR(100) NOT NULL,
+       sort_order INT NOT NULL DEFAULT 0,
+       color NVARCHAR(7) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'backlog_items') AND type = 'U')
+     CREATE TABLE backlog_items (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       column_id INT NOT NULL,
+       title NVARCHAR(200) NOT NULL,
+       description NVARCHAR(MAX) NULL,
+       wp_ref NVARCHAR(20) NULL,
+       effort NVARCHAR(50) NULL,
+       type NVARCHAR(30) NULL,
+       priority INT NOT NULL DEFAULT 0,
+       created_by NVARCHAR(100) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       completed_at DATETIME2 NULL,
+       blocked_reason NVARCHAR(500) NULL,
+       CONSTRAINT FK_backlog_items_column FOREIGN KEY (column_id) REFERENCES backlog_columns(id)
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM backlog_columns)
+     BEGIN
+       INSERT INTO backlog_columns (title, sort_order, color) VALUES ('Backlog', 0, '#6366f1');
+       INSERT INTO backlog_columns (title, sort_order, color) VALUES ('This Sprint', 1, '#f59e0b');
+       INSERT INTO backlog_columns (title, sort_order, color) VALUES ('In Progress', 2, '#3b82f6');
+       INSERT INTO backlog_columns (title, sort_order, color) VALUES ('Done', 3, '#22c55e');
+       INSERT INTO backlog_columns (title, sort_order, color) VALUES ('Parked', 4, '#6b7280');
+     END;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

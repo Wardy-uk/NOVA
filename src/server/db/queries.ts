@@ -2784,3 +2784,167 @@ export class TrainingQueries {
     return { categories: catCount, items: itemCount, scores: scoreCount };
   }
 }
+
+// ─── Backlog Kanban ─────────────────────────────────────────────────────────
+
+export interface BacklogColumn {
+  id: number;
+  title: string;
+  sort_order: number;
+  color: string | null;
+  created_at: string;
+  item_count?: number;
+}
+
+export interface BacklogItem {
+  id: number;
+  column_id: number;
+  title: string;
+  description: string | null;
+  wp_ref: string | null;
+  effort: string | null;
+  type: string | null;
+  priority: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  blocked_reason: string | null;
+}
+
+export class BacklogQueries {
+  // ── Columns ──
+
+  async getColumns(): Promise<BacklogColumn[]> {
+    return query<BacklogColumn>(
+      `SELECT c.*, (SELECT COUNT(*) FROM backlog_items WHERE column_id = c.id) AS item_count
+       FROM backlog_columns c ORDER BY c.sort_order`
+    );
+  }
+
+  async getColumnById(id: number): Promise<BacklogColumn | undefined> {
+    return queryOne<BacklogColumn>(`SELECT * FROM backlog_columns WHERE id = ?`, [id]);
+  }
+
+  async getColumnByTitle(title: string): Promise<BacklogColumn | undefined> {
+    return queryOne<BacklogColumn>(`SELECT * FROM backlog_columns WHERE LOWER(title) = LOWER(?)`, [title]);
+  }
+
+  async createColumn(title: string, color?: string): Promise<number> {
+    const maxOrder = await queryOne<{ m: number }>(`SELECT ISNULL(MAX(sort_order), -1) AS m FROM backlog_columns`);
+    return executeAndGetId(
+      `INSERT INTO backlog_columns (title, sort_order, color) VALUES (?, ?, ?)`,
+      [title, (maxOrder?.m ?? -1) + 1, color ?? null]
+    );
+  }
+
+  async updateColumn(id: number, fields: { title?: string; color?: string; sort_order?: number }): Promise<void> {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (fields.title !== undefined) { sets.push('title = ?'); params.push(fields.title); }
+    if (fields.color !== undefined) { sets.push('color = ?'); params.push(fields.color); }
+    if (fields.sort_order !== undefined) { sets.push('sort_order = ?'); params.push(fields.sort_order); }
+    if (sets.length === 0) return;
+    params.push(id);
+    await execute(`UPDATE backlog_columns SET ${sets.join(', ')} WHERE id = ?`, params);
+  }
+
+  async deleteColumn(id: number): Promise<void> {
+    await execute(`DELETE FROM backlog_columns WHERE id = ?`, [id]);
+  }
+
+  async reorderColumns(columnIds: number[]): Promise<void> {
+    for (let i = 0; i < columnIds.length; i++) {
+      await execute(`UPDATE backlog_columns SET sort_order = ? WHERE id = ?`, [i, columnIds[i]]);
+    }
+  }
+
+  async columnItemCount(id: number): Promise<number> {
+    const row = await queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM backlog_items WHERE column_id = ?`, [id]);
+    return row?.c ?? 0;
+  }
+
+  // ── Items ──
+
+  async getItems(filters?: { column_id?: number; type?: string }): Promise<BacklogItem[]> {
+    let sql = `SELECT * FROM backlog_items WHERE 1=1`;
+    const params: unknown[] = [];
+    if (filters?.column_id) { sql += ` AND column_id = ?`; params.push(filters.column_id); }
+    if (filters?.type) { sql += ` AND type = ?`; params.push(filters.type); }
+    sql += ` ORDER BY column_id, priority`;
+    return query<BacklogItem>(sql, params);
+  }
+
+  async getItemById(id: number): Promise<BacklogItem | undefined> {
+    return queryOne<BacklogItem>(`SELECT * FROM backlog_items WHERE id = ?`, [id]);
+  }
+
+  async findItemByRef(wpRef: string): Promise<BacklogItem | undefined> {
+    return queryOne<BacklogItem>(`SELECT * FROM backlog_items WHERE LOWER(wp_ref) = LOWER(?)`, [wpRef]);
+  }
+
+  async findItemsByTitle(title: string): Promise<BacklogItem[]> {
+    return query<BacklogItem>(`SELECT * FROM backlog_items WHERE LOWER(title) LIKE LOWER(?)`, [`%${title}%`]);
+  }
+
+  async createItem(item: {
+    column_id: number; title: string; description?: string; wp_ref?: string;
+    effort?: string; type?: string; priority?: number; created_by?: string;
+  }): Promise<number> {
+    const maxPri = await queryOne<{ m: number }>(
+      `SELECT ISNULL(MAX(priority), -1) AS m FROM backlog_items WHERE column_id = ?`, [item.column_id]
+    );
+    const priority = item.priority ?? ((maxPri?.m ?? -1) + 1);
+    return executeAndGetId(
+      `INSERT INTO backlog_items (column_id, title, description, wp_ref, effort, type, priority, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [item.column_id, item.title, item.description ?? null, item.wp_ref ?? null,
+       item.effort ?? null, item.type ?? null, priority, item.created_by ?? null]
+    );
+  }
+
+  async updateItem(id: number, fields: Partial<Omit<BacklogItem, 'id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const allowed = ['column_id', 'title', 'description', 'wp_ref', 'effort', 'type', 'priority', 'created_by', 'completed_at', 'blocked_reason'] as const;
+    for (const key of allowed) {
+      if ((fields as Record<string, unknown>)[key] !== undefined) {
+        sets.push(`${key} = ?`);
+        params.push((fields as Record<string, unknown>)[key]);
+      }
+    }
+    if (sets.length === 0) return;
+    sets.push('updated_at = GETUTCDATE()');
+    params.push(id);
+    await execute(`UPDATE backlog_items SET ${sets.join(', ')} WHERE id = ?`, params);
+  }
+
+  async deleteItem(id: number): Promise<void> {
+    await execute(`DELETE FROM backlog_items WHERE id = ?`, [id]);
+  }
+
+  async moveItem(id: number, columnId: number, priority?: number): Promise<void> {
+    const col = await this.getColumnById(columnId);
+    const completedAt = col && col.title.toLowerCase() === 'done' ? 'GETUTCDATE()' : 'NULL';
+    if (priority !== undefined) {
+      await execute(
+        `UPDATE backlog_items SET column_id = ?, priority = ?, completed_at = ${completedAt}, updated_at = GETUTCDATE() WHERE id = ?`,
+        [columnId, priority, id]
+      );
+    } else {
+      const maxPri = await queryOne<{ m: number }>(
+        `SELECT ISNULL(MAX(priority), -1) AS m FROM backlog_items WHERE column_id = ?`, [columnId]
+      );
+      await execute(
+        `UPDATE backlog_items SET column_id = ?, priority = ?, completed_at = ${completedAt}, updated_at = GETUTCDATE() WHERE id = ?`,
+        [columnId, (maxPri?.m ?? -1) + 1, id]
+      );
+    }
+  }
+
+  async reorderItems(columnId: number, itemIds: number[]): Promise<void> {
+    for (let i = 0; i < itemIds.length; i++) {
+      await execute(`UPDATE backlog_items SET priority = ? WHERE id = ? AND column_id = ?`, [i, itemIds[i], columnId]);
+    }
+  }
+}

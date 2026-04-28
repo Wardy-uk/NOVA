@@ -69,7 +69,7 @@ import { JiraOAuthService } from './services/jira-oauth.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
 import { createNotificationRoutes } from './routes/notifications.js';
-import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries, PortalAccountQueries, BranchDistrictQueries, WelcomePackQueries, ApprovalQueries } from './db/queries.js';
+import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries, PortalAccountQueries, BranchDistrictQueries, WelcomePackQueries, ApprovalQueries, BacklogQueries } from './db/queries.js';
 import { createInstanceSetupRoutes } from './routes/instance-setup.js';
 import { createBranchRoutes } from './routes/branches.js';
 import { createBrandSettingsRoutes } from './routes/brand-settings.js';
@@ -83,6 +83,7 @@ import { createAzDoRoutes } from './routes/azdo.js';
 import { createSetupExecutionRoutes } from './routes/setup-execution.js';
 import { createSetupPortalPublicRoutes, createSetupPortalRoutes } from './routes/setup-portal.js';
 import { createBackfillRoutes } from './routes/backfill.js';
+import { createBacklogRoutes } from './routes/backlog.js';
 import { logWallboard, getWallboardLogs, clearWallboardLogs, logWallboardClient } from './services/wallboard-logger.js';
 import { startWallboardLiveCache, getCohortSnapshot, type CohortSnapshot } from './services/wallboard-live-cache.js';
 import { createContractsRoutes } from './routes/contracts.js';
@@ -296,6 +297,7 @@ async function main() {
   const approvalQueries = new ApprovalQueries();
   const trainingQueries = new TrainingQueries();
   const devReviewQueries = new DevReviewQueries();
+  const backlogQueries = new BacklogQueries();
 
   // Purge transient MS365 data from previous session
   const purgedCount = await taskQueries.deleteTransientTasks();
@@ -868,6 +870,7 @@ async function main() {
   ));
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries));
   app.use('/api/backfill', requireAreaAccess('qa', 'view'), createBackfillRoutes(settingsQueries));
+  app.use('/api/backlog', createBacklogRoutes(backlogQueries));
   app.use('/api/sales', requireAreaAccess('sales', 'view'), createSalesHotboxRoutes(salesQueries, requireAreaAccess));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries, userQueries, notificationQueries));
