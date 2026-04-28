@@ -6,7 +6,7 @@ import { executeAndGetId, query } from './database.js';
 const MAX_RETRY_COUNT = 3;
 const PLUGIN_REPORTER_EMAIL = 'smart.plugin.manager@wpengine.com';
 const PLUGIN_SUMMARY_PATTERNS = [
-  /plugins were not updated/i,
+  /\d+\s+plugins?\s+(?:were|was)\s+not\s+updated/i,
   /Smart Plugin Manager could not connect/i,
 ];
 
@@ -60,9 +60,15 @@ export class HybridActionDetector {
   }
 
   private detectPluginToTpj(event: TicketEvent): HybridActionMatch | null {
-    const reporterEmail = (event.fields?.reporter as { emailAddress?: string })?.emailAddress;
+    const reporterEmail = event.reporterEmail
+      ?? (event.fields?.reporter as { emailAddress?: string })?.emailAddress
+      ?? null;
     const summaryMatch = PLUGIN_SUMMARY_PATTERNS.some(p => p.test(event.summary));
-    const emailMatch = reporterEmail === PLUGIN_REPORTER_EMAIL;
+    const emailMatch = reporterEmail?.toLowerCase() === PLUGIN_REPORTER_EMAIL;
+
+    if (emailMatch && !summaryMatch) {
+      console.warn(`[hybrid-detector] Plugin email but summary didn't match: ${event.ticketKey} — "${event.summary}"`);
+    }
 
     if (!summaryMatch && !emailMatch) return null;
 

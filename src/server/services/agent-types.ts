@@ -94,6 +94,7 @@ export interface TicketEvent {
   requestType: string;
   assignee: string | null;
   reporter: string | null;
+  reporterEmail: string | null;
   organisation: string | null;
   created: string;
   updated: string;

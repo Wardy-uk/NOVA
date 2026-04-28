@@ -62,6 +62,19 @@ export class KpiPipeline {
     return tableSuffix(this.target);
   }
 
+  async ensureNovaAiAgent(): Promise<void> {
+    try {
+      const p = await getKpiPool(this.settings);
+      await p.request().query(`
+        IF NOT EXISTS (SELECT 1 FROM dbo.Agent WHERE AgentName = 'NOVA' AND AgentSurname = 'AI')
+        INSERT INTO dbo.Agent (AgentName, AgentSurname, Team, TierCode, IsActive)
+        VALUES ('NOVA', 'AI', 'NOVA AI', 'AI', 1)
+      `);
+    } catch (err) {
+      console.warn('[kpi-pipeline] Failed to ensure NOVA AI agent row:', err instanceof Error ? err.message : err);
+    }
+  }
+
   async collectJiraSnapshot(): Promise<void> {
     const started = new Date();
     let rowsAffected = 0;

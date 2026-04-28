@@ -20,7 +20,6 @@ const SECTIONS: Section[] = [
     content: [
       'Your home dashboard showing at-a-glance KPIs: total tasks, overdue count, due today/this week, completion rate, and average task age. Breakdowns by source, status, and category are also shown.',
       'NOVA Insights — type a question or request and the AI assistant will analyse your tasks and provide suggestions. Use the source selector to choose which integrations to include in the analysis.',
-      'Chat — a conversational AI tab for natural-language questions about your workload. Ask things like "what\'s overdue?" or "summarise my week". Conversations persist until you reset them.',
       'Team Load — a workload overview showing active deliveries, pending milestones, overdue milestones, and open tickets per team member. Colour-coded cells highlight where the team is stretched.',
       'The morning standup triggers automatically on your first visit each day. It analyses your tasks and prepares a prioritised briefing.',
       'Quick links let you jump to My Focus, Tasks, or Standup directly from the dashboard.',
@@ -175,16 +174,6 @@ const SECTIONS: Section[] = [
       'Each notification shows the type, title, message, and timestamp. Click a notification to mark it as read. Use "Mark all read" to clear all unread items.',
       'Notifications are de-duplicated — the same alert won\'t fire again for the same entity within 24 hours.',
       'The notification check runs automatically on login and can be triggered manually via the API.',
-    ],
-  },
-  {
-    title: 'Chat to NOVA',
-    content: [
-      'The Chat tab in My NOVA provides a conversational AI interface for asking questions about your work.',
-      'Type a question like "what\'s overdue?", "summarise my deliveries", or "what should I focus on today?" and NOVA will respond with context-aware insights based on your tasks and deliveries.',
-      'Conversations persist across messages — NOVA remembers the context of your chat until you click "New Conversation" to reset.',
-      'Suggested prompts are shown when the chat is empty to help you get started.',
-      'Chat uses the same AI provider configured in your AI Preferences (OpenAI GPT-4o-mini by default). Your personal API key override applies here too.',
     ],
   },
   {

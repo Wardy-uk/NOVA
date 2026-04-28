@@ -1144,7 +1144,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
                   <textarea
                     value={transcriptText}
                     onChange={e => setTranscriptText(e.target.value)}
-                    placeholder="Paste Plaud transcription or meeting summary here..."
+                    placeholder="Paste transcription or meeting summary here..."
                     style={{
                       width: '100%', minHeight: 60, padding: 10, borderRadius: 8,
                       background: C.bg2, color: C.text1, border: `1px solid ${C.border}`,

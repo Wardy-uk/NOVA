@@ -998,6 +998,9 @@ async function main() {
       }
     })();
 
+    // Ensure NOVA AI synthetic agent exists in KPI database
+    kpiPipeline.ensureNovaAiAgent().catch(() => {});
+
     // KPI pipeline timers (initial kicks staggered to avoid startup storm)
     setInterval(() => kpiPipeline.collectJiraSnapshot().catch(e => console.warn('[kpi-pipeline] snapshot failed:', e.message)), 10 * 60 * 1000);
     setInterval(() => kpiPipeline.snapshotAgentKpis().catch(e => console.warn('[kpi-pipeline] agent snapshot failed:', e.message)), 30 * 60 * 1000);

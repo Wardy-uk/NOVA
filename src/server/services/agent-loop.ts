@@ -171,11 +171,13 @@ export class AgentLoop {
 
   start(): void {
     if (this.state === 'running') return;
-    this.currentMode = this.isWorkingHours() ? 'full' : 'reduced';
+    const working = this.isWorkingHours();
+    this.currentMode = working ? 'full' : 'reduced';
     this.modeChangedAt = new Date();
     const intervalMs = this.getIntervalMs();
     this.state = 'running';
-    console.log(`[agent] Starting agent loop (interval: ${intervalMs}ms, mode: ${this.currentMode})`);
+    const debug = this.getWorkingHoursDebug();
+    console.log(`[agent] Starting agent loop (interval: ${intervalMs}ms, mode: ${this.currentMode}, isWorkingHours=${working}, tz=${debug.tz}, day=${debug.parsedWeekday}/${debug.parsedDay}, time=${debug.parsedHour}:${String(debug.parsedMinute ?? '').padStart(2, '0')}, days=${debug.workingDays}, hours=${debug.workingHours})`);
 
     this.tick();
     this.timer = setInterval(() => this.tick(), intervalMs);
@@ -284,36 +286,47 @@ export class AgentLoop {
   private isWorkingHours(): boolean {
     if (!this.isWeekendModeEnabled()) return true;
 
-    // Weekend override takes priority
     if (this.getWeekendOverrideUntil()) return true;
 
-    const tz = this.settings.get('agent_timezone') ?? 'Europe/London';
-    const fmt = new Intl.DateTimeFormat('en-GB', {
-      timeZone: tz, weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false,
-    });
-    const p = Object.fromEntries(fmt.formatToParts(new Date()).map(x => [x.type, x.value]));
-    const dayNames: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-    const day = dayNames[p.weekday] ?? new Date().getDay();
-    const hh = parseInt(p.hour, 10);
-    const mi = parseInt(p.minute, 10);
+    try {
+      const tz = this.settings.get('agent_timezone') ?? 'Europe/London';
+      const fmt = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz, weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false,
+      });
+      const p = Object.fromEntries(fmt.formatToParts(new Date()).map(x => [x.type, x.value]));
+      const dayNames: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+      const day = dayNames[p.weekday] ?? new Date().getDay();
+      const hh = parseInt(p.hour, 10);
+      const mi = parseInt(p.minute, 10);
 
-    const workingDaysStr = this.settings.get('agent_working_days') ?? '1,2,3,4,5';
-    const workingDays = new Set(workingDaysStr.split(',').map(d => parseInt(d.trim(), 10)));
-    if (!workingDays.has(day)) return false;
+      const workingDaysStr = (this.settings.get('agent_working_days') ?? '1,2,3,4,5').trim();
+      const workingDays = new Set(workingDaysStr.split(',').map(d => parseInt(d.trim(), 10)));
+      if (!workingDays.has(day)) {
+        if (this.currentMode === 'full') {
+          console.log(`[agent] isWorkingHours=false: day=${day} (${p.weekday}) not in workingDays=[${workingDaysStr}] tz=${tz}`);
+        }
+        return false;
+      }
 
-    const hoursStr = this.settings.get('agent_working_hours') ?? '08:00-18:00';
-    const match = hoursStr.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
-    if (!match) return true;
-    const startHour = parseInt(match[1], 10);
-    const startMin = parseInt(match[2], 10);
-    const endHour = parseInt(match[3], 10);
-    const endMin = parseInt(match[4], 10);
+      const hoursStr = (this.settings.get('agent_working_hours') ?? '08:00-18:00').trim();
+      const match = hoursStr.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+      if (!match) {
+        console.warn(`[agent] isWorkingHours: invalid hours format "${hoursStr}", defaulting to working hours`);
+        return true;
+      }
+      const startMinutes = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+      const endMinutes = parseInt(match[3], 10) * 60 + parseInt(match[4], 10);
+      const currentMinutes = hh * 60 + mi;
 
-    const currentMinutes = hh * 60 + mi;
-    const startMinutes = startHour * 60 + startMin;
-    const endMinutes = endHour * 60 + endMin;
-
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+      const result = currentMinutes >= startMinutes && currentMinutes < endMinutes;
+      if (!result && this.currentMode === 'full') {
+        console.log(`[agent] isWorkingHours=false: ${hh}:${String(mi).padStart(2, '0')} outside ${hoursStr} tz=${tz}`);
+      }
+      return result;
+    } catch (err) {
+      console.error(`[agent] isWorkingHours threw, fail-open to working hours:`, err instanceof Error ? err.message : err);
+      return true;
+    }
   }
 
   private restartTimer(): void {

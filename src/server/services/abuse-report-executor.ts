@@ -78,7 +78,17 @@ export class AbuseReportExecutor {
       // 3. Update log: SqlProcessed=1
       await this.updateExternalLog(logId, 'sql_ok', null);
 
-      // 4. Post internal note on Jira ticket
+      // 4. Assign to NOVA service account
+      const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+      if (novaAccountId) {
+        try {
+          await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
+        } catch (err) {
+          console.warn(`[abuse-report] Failed to assign ${ticketKey} to NOVA service account:`, err instanceof Error ? err.message : err);
+        }
+      }
+
+      // 5. Post internal note on Jira ticket
       const noteText = `Abuse report processed. Contact ${contactId} on instance ${instanceId} (${instanceUrl}) has been actioned. Email: ${abuseEmail}. Awaiting human review before closing.`;
       try {
         await this.jiraClient.addComment(ticketKey, noteText, { internal: true });
@@ -86,7 +96,7 @@ export class AbuseReportExecutor {
         console.warn(`[abuse-report] Failed to post internal note on ${ticketKey}:`, err);
       }
 
-      // 5. Submit to approval queue for human review
+      // 6. Submit to approval queue for human review
       const conversationJson = JSON.stringify({
         action_type: 'abuse_report',
         ticketKey,
@@ -110,7 +120,7 @@ export class AbuseReportExecutor {
         action_type: 'abuse_report',
       });
 
-      // 6. Log to hybrid_action_log
+      // 7. Log to hybrid_action_log
       await executeAndGetId(
         `INSERT INTO hybrid_action_log (action_id, source_ticket_key, status, detail, approval_id)
          VALUES ('abuse_report', ?, 'awaiting_approval', ?, ?)`,
