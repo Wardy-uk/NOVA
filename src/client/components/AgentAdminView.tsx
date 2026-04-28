@@ -12,6 +12,7 @@ interface Agent {
   MaxTickets: number;
   MaxTicketsCustomerCare: number;
   MaxTicketsT2T3: number;
+  PeopleHrId: string | null;
 }
 
 interface EditState {
@@ -22,6 +23,7 @@ interface EditState {
   MaxTickets: number;
   MaxTicketsCustomerCare: number;
   MaxTicketsT2T3: number;
+  PeopleHrId: string;
 }
 
 type Toast = { message: string; type: 'success' | 'error' };
@@ -42,6 +44,7 @@ function editStateFromAgent(a: Agent): EditState {
     MaxTickets: a.MaxTickets ?? 0,
     MaxTicketsCustomerCare: a.MaxTicketsCustomerCare ?? 0,
     MaxTicketsT2T3: a.MaxTicketsT2T3 ?? 0,
+    PeopleHrId: a.PeopleHrId || '',
   };
 }
 
@@ -53,7 +56,8 @@ function hasChanges(original: Agent, edit: EditState): boolean {
     original.IsAvailable !== edit.IsAvailable ||
     (original.MaxTickets ?? 0) !== edit.MaxTickets ||
     (original.MaxTicketsCustomerCare ?? 0) !== edit.MaxTicketsCustomerCare ||
-    (original.MaxTicketsT2T3 ?? 0) !== edit.MaxTicketsT2T3
+    (original.MaxTicketsT2T3 ?? 0) !== edit.MaxTicketsT2T3 ||
+    (original.PeopleHrId || '') !== edit.PeopleHrId
   );
 }
 
@@ -451,6 +455,7 @@ export function AgentAdminView() {
           MaxTickets: edit.MaxTickets,
           MaxTicketsCustomerCare: edit.MaxTicketsCustomerCare,
           MaxTicketsT2T3: edit.MaxTicketsT2T3,
+          PeopleHrId: edit.PeopleHrId,
         }),
       });
       const json = await res.json();
@@ -468,6 +473,7 @@ export function AgentAdminView() {
                   MaxTickets: edit.MaxTickets,
                   MaxTicketsCustomerCare: edit.MaxTicketsCustomerCare,
                   MaxTicketsT2T3: edit.MaxTicketsT2T3,
+                  PeopleHrId: edit.PeopleHrId || null,
                 }
               : a
           )
@@ -552,6 +558,7 @@ export function AgentAdminView() {
               <tr>
                 <th className={TH}>Agent Name</th>
                 <th className={TH}>Email</th>
+                <th className={TH}>People HR ID</th>
                 <th className={TH}>Tier</th>
                 <th className={TH}>Team</th>
                 <th className={`${TH} text-center`}>Max</th>
@@ -584,6 +591,17 @@ export function AgentAdminView() {
 
                     {/* Email / AgentKey (read-only) */}
                     <td className={`${TD} text-neutral-500 text-[11px]`}>{agent.AgentKey}</td>
+
+                    {/* PeopleHrId */}
+                    <td className={TD}>
+                      <input
+                        type="text"
+                        value={edit.PeopleHrId}
+                        onChange={e => updateEdit(agent.AgentId, 'PeopleHrId', e.target.value)}
+                        placeholder="—"
+                        className={`${INPUT} w-24`}
+                      />
+                    </td>
 
                     {/* TierCode */}
                     <td className={TD}>
@@ -694,7 +712,7 @@ export function AgentAdminView() {
               })}
               {filtered.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={10} className="text-center py-8 text-neutral-500 text-[13px]">
+                  <td colSpan={11} className="text-center py-8 text-neutral-500 text-[13px]">
                     No agents found
                   </td>
                 </tr>

@@ -883,7 +883,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
                IsActive, IsAvailable,
                ISNULL(MaxTickets, 0) AS MaxTickets,
                ISNULL(MaxTicketsCustomerCare, 0) AS MaxTicketsCustomerCare,
-               ISNULL(MaxTicketsT2T3, 0) AS MaxTicketsT2T3
+               ISNULL(MaxTicketsT2T3, 0) AS MaxTicketsT2T3,
+               PeopleHrId
         FROM dbo.Agent
         ORDER BY Team, AgentName
       `);
@@ -898,7 +899,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
     try {
       const p = await getPool();
       const { agentId } = req.params;
-      const { Team, TierCode, IsActive, IsAvailable, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3 } = req.body;
+      const { Team, TierCode, IsActive, IsAvailable, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3, PeopleHrId } = req.body;
 
       const request = p.request();
       request.input('agentId', sql.Int, parseInt(agentId));
@@ -909,6 +910,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       request.input('maxTickets', sql.Int, MaxTickets ?? 0);
       request.input('maxTicketsCC', sql.Int, MaxTicketsCustomerCare ?? 0);
       request.input('maxTicketsT2T3', sql.Int, MaxTicketsT2T3 ?? 0);
+      request.input('peopleHrId', sql.NVarChar(50), PeopleHrId || null);
 
       await request.query(`
         UPDATE dbo.Agent SET
@@ -918,7 +920,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
           IsAvailable = @isAvailable,
           MaxTickets = @maxTickets,
           MaxTicketsCustomerCare = @maxTicketsCC,
-          MaxTicketsT2T3 = @maxTicketsT2T3
+          MaxTicketsT2T3 = @maxTicketsT2T3,
+          PeopleHrId = @peopleHrId
         WHERE AgentId = @agentId
       `);
 
