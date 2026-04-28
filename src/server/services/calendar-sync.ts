@@ -19,14 +19,6 @@ interface PeopleHrAbsence {
   AbsenceId: { DisplayValue: string };
 }
 
-interface PeopleHrEmployee {
-  EmployeeId: { DisplayValue: string };
-  FirstName: { DisplayValue: string };
-  LastName: { DisplayValue: string };
-  Department: { DisplayValue: string };
-  EmploymentType?: { DisplayValue: string };
-}
-
 export class CalendarSyncService {
   private kpiPool: sql.ConnectionPool | null = null;
   private consecutiveAuthFailures = 0;
@@ -192,82 +184,100 @@ export class CalendarSyncService {
     };
   }
 
-  private async fetchEmployeeIds(apiKey: string): Promise<string[]> {
+  private async fetchEmployeeIds(): Promise<string[]> {
     if (this.cachedEmployeeIds.length > 0 && Date.now() - this.employeeCacheTime < CalendarSyncService.EMPLOYEE_CACHE_TTL) {
       return this.cachedEmployeeIds;
     }
 
-    const response = await fetch(`${PEOPLE_HR_BASE}Employee`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        APIKey: apiKey,
-        Action: 'GetAllEmployeeDetail',
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`People HR Employee API error: ${response.status} ${response.statusText}`);
+    const kpi = await this.getKpiPool();
+    if (!kpi) {
+      console.warn('[calendar-sync] No KPI pool — cannot read PeopleHrId from Agent table');
+      return [];
     }
 
-    const data = await response.json();
-    if (data.isError) throw new Error(`People HR error: ${data.Message}`);
+    const result = await kpi.request().query(`
+      SELECT PeopleHrId FROM dbo.Agent
+      WHERE IsActive = 1 AND PeopleHrId IS NOT NULL AND PeopleHrId != ''
+    `);
 
-    if (!Array.isArray(data.Result)) return [];
-
-    const ids = (data.Result as PeopleHrEmployee[])
-      .map(e => e.EmployeeId?.DisplayValue)
-      .filter((id): id is string => !!id);
+    const ids = result.recordset
+      .map((r: any) => r.PeopleHrId as string)
+      .filter(Boolean);
 
     this.cachedEmployeeIds = ids;
     this.employeeCacheTime = Date.now();
-    console.log(`[calendar-sync] Cached ${ids.length} employee IDs from People HR`);
+    console.log(`[calendar-sync] Loaded ${ids.length} People HR IDs from Agent table`);
     return ids;
   }
 
-  private async fetchAbsencesForEmployee(apiKey: string, employeeId: string, startDate: string, endDate: string): Promise<PeopleHrAbsence[]> {
-    const response = await fetch(`${PEOPLE_HR_BASE}Absence`, {
+  private async callPeopleHrEndpoint(apiKey: string, endpoint: string, body: Record<string, string>): Promise<any[]> {
+    const response = await fetch(`${PEOPLE_HR_BASE}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        APIKey: apiKey,
-        Action: 'GetAbsenceDetail',
-        EmployeeId: employeeId,
-        StartDate: startDate,
-        EndDate: endDate,
-      }),
+      body: JSON.stringify({ APIKey: apiKey, ...body }),
     });
 
     if (!response.ok) {
-      throw new Error(`People HR Absence API error: ${response.status} ${response.statusText}`);
+      throw new Error(`People HR ${endpoint} API error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
-    if (data.isError) throw new Error(`People HR error: ${data.Message}`);
+    if (data.isError) throw new Error(`People HR ${endpoint} error: ${data.Message}`);
 
-    if (!Array.isArray(data.Result)) return [];
+    return Array.isArray(data.Result) ? data.Result : [];
+  }
 
-    return data.Result.filter((a: any) =>
-      a.Status?.DisplayValue !== 'Cancelled' && a.Status?.DisplayValue !== 'Declined'
-    );
+  private async fetchAllForEmployee(apiKey: string, employeeId: string, startDate: string, endDate: string): Promise<PeopleHrAbsence[]> {
+    const endpoints: { endpoint: string; action: string; absenceTypeOverride?: string }[] = [
+      { endpoint: 'Absence', action: 'GetAbsenceDetail' },
+      { endpoint: 'Employee Holiday', action: 'GetHolidayDetail', absenceTypeOverride: 'Employee Holiday' },
+      { endpoint: 'MaternityPaternity', action: 'GetMaternityPaternityDetail', absenceTypeOverride: 'Maternity/Paternity' },
+    ];
+
+    const results: PeopleHrAbsence[] = [];
+
+    for (const ep of endpoints) {
+      try {
+        const records = await this.callPeopleHrEndpoint(apiKey, ep.endpoint, {
+          Action: ep.action,
+          EmployeeId: employeeId,
+          StartDate: startDate,
+          EndDate: endDate,
+        });
+
+        for (const r of records) {
+          if (r.Status?.DisplayValue === 'Cancelled' || r.Status?.DisplayValue === 'Declined') continue;
+          if (ep.absenceTypeOverride && (!r.AbsenceType || !r.AbsenceType.DisplayValue)) {
+            r.AbsenceType = { DisplayValue: ep.absenceTypeOverride };
+          }
+          results.push(r);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[calendar-sync] ${ep.endpoint} failed for employee ${employeeId}: ${msg}`);
+      }
+    }
+
+    return results;
   }
 
   private async fetchAbsences(apiKey: string): Promise<PeopleHrAbsence[]> {
     const startDate = new Date().toISOString().slice(0, 10);
     const endDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 
-    const employeeIds = await this.fetchEmployeeIds(apiKey);
+    const employeeIds = await this.fetchEmployeeIds();
     if (employeeIds.length === 0) {
       console.warn('[calendar-sync] No employees found in People HR');
       return [];
     }
 
+    console.log(`[calendar-sync] Fetching absences for ${employeeIds.length} employees across 3 endpoints`);
     const allAbsences: PeopleHrAbsence[] = [];
     let errors = 0;
 
     for (const empId of employeeIds) {
       try {
-        const absences = await this.fetchAbsencesForEmployee(apiKey, empId, startDate, endDate);
+        const absences = await this.fetchAllForEmployee(apiKey, empId, startDate, endDate);
         allAbsences.push(...absences);
       } catch (err) {
         errors++;
@@ -287,8 +297,12 @@ export class CalendarSyncService {
 
   private mapAbsenceType(type: string): string {
     const lower = type.toLowerCase();
-    if (lower.includes('annual') || lower.includes('holiday')) return 'annual_leave';
+    if (lower.includes('employee holiday') || lower.includes('annual') || lower.includes('holiday')) return 'annual_leave';
     if (lower.includes('sick')) return 'sick';
+    if (lower.includes('maternity') || lower.includes('paternity')) return 'maternity_paternity';
+    if (lower.includes('birthday')) return 'birthday';
+    if (lower.includes('unpaid')) return 'unpaid';
+    if (lower.includes('other event')) return 'other_event';
     if (lower.includes('wfh') || lower.includes('work from home') || lower.includes('remote')) return 'wfh';
     if (lower.includes('training')) return 'training';
     return 'other';

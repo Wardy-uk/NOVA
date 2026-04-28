@@ -70,6 +70,10 @@ export class KpiPipeline {
         INSERT INTO dbo.Agent (AgentName, AgentSurname, Team, TierCode, IsActive)
         VALUES ('NOVA', 'AI', 'NOVA AI', 'AI', 1)
       `);
+      await p.request().query(`
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'PeopleHrId')
+        ALTER TABLE dbo.Agent ADD PeopleHrId NVARCHAR(50) NULL
+      `);
     } catch (err) {
       console.warn('[kpi-pipeline] Failed to ensure NOVA AI agent row:', err instanceof Error ? err.message : err);
     }
