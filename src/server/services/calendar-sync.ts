@@ -71,8 +71,18 @@ export class CalendarSyncService {
       let updated = 0;
 
       for (const a of absences) {
-        const sourceId = a.AbsenceId?.DisplayValue;
-        if (!sourceId) continue;
+        const sourceId = a.AbsenceId?.DisplayValue
+          || (a as any).HolidayId?.DisplayValue
+          || (a as any).OtherEventId?.DisplayValue
+          || (a as any).MaternityPaternityId?.DisplayValue
+          || (a as any).Id?.DisplayValue;
+        if (!sourceId) {
+          const name = `${a.FirstName?.DisplayValue ?? ''} ${a.LastName?.DisplayValue ?? ''}`.trim();
+          const type = a.AbsenceType?.DisplayValue ?? 'unknown';
+          console.warn(`[calendar-sync] Skipping ${type} for ${name} — no ID field. Keys: ${Object.keys(a).join(', ')}`);
+          continue;
+        }
+        console.log(`[calendar-sync] Processing: ${a.FirstName?.DisplayValue} ${a.LastName?.DisplayValue} — ${a.AbsenceType?.DisplayValue ?? 'unknown'} (${a.StartDate?.DisplayValue} to ${a.EndDate?.DisplayValue}) [${sourceId}]`);
 
         const name = `${a.FirstName?.DisplayValue ?? ''} ${a.LastName?.DisplayValue ?? ''}`.trim();
         const absenceType = this.mapAbsenceType(a.AbsenceType?.DisplayValue ?? '');
@@ -239,6 +249,7 @@ export class CalendarSyncService {
 
     for (const ep of endpoints) {
       try {
+        await new Promise(r => setTimeout(r, 1500));
         const [startKey, endKey] = ep.dateFields ?? ['StartDate', 'EndDate'];
         const records = await this.callPeopleHrEndpoint(apiKey, ep.endpoint, {
           Action: ep.action,
