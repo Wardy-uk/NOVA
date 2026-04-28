@@ -142,11 +142,13 @@ export class DevReviewQueries {
   async upsertFromPoll(jiraKey: string, submittedBy: string | null): Promise<void> {
     const existing = await this.getState(jiraKey);
     if (existing) {
-      // If ticket is archived but back in T3 → reopen
-      if (existing.status === 'archived') {
+      // If ticket was terminal but reappeared in T3 → reopen
+      if (existing.status === 'archived' || existing.status === 'returned' || existing.status === 'accepted') {
         await execute(
           `UPDATE dev_review_state
-           SET status='pending', archived_at=NULL, last_action_at=GETUTCDATE()
+           SET status = CASE WHEN claimed_by_user_id IS NOT NULL THEN 'in_review' ELSE 'pending' END,
+               archived_at = NULL,
+               last_action_at = GETUTCDATE()
            WHERE jira_key=?`,
           [jiraKey],
         );
