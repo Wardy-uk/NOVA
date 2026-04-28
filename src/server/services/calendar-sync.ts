@@ -228,21 +228,23 @@ export class CalendarSyncService {
   }
 
   private async fetchAllForEmployee(apiKey: string, employeeId: string, startDate: string, endDate: string): Promise<PeopleHrAbsence[]> {
-    const endpoints: { endpoint: string; action: string; absenceTypeOverride?: string }[] = [
+    const endpoints: { endpoint: string; action: string; absenceTypeOverride?: string; dateFields?: [string, string] }[] = [
       { endpoint: 'Absence', action: 'GetAbsenceDetail' },
-      { endpoint: 'Employee Holiday', action: 'GetHolidayDetail', absenceTypeOverride: 'Employee Holiday' },
-      { endpoint: 'MaternityPaternity', action: 'GetMaternityPaternityDetail', absenceTypeOverride: 'Maternity/Paternity' },
+      { endpoint: 'Holiday', action: 'GetHolidayDetail', absenceTypeOverride: 'Employee Holiday' },
+      { endpoint: 'OtherEvent', action: 'getothereventdetail', absenceTypeOverride: 'Other Event' },
+      { endpoint: 'MaternityPaternity', action: 'GetMaternityPaternityByEmployeeId', absenceTypeOverride: 'Maternity/Paternity', dateFields: ['ActualStartDate', 'ActualEndDate'] },
     ];
 
     const results: PeopleHrAbsence[] = [];
 
     for (const ep of endpoints) {
       try {
+        const [startKey, endKey] = ep.dateFields ?? ['StartDate', 'EndDate'];
         const records = await this.callPeopleHrEndpoint(apiKey, ep.endpoint, {
           Action: ep.action,
           EmployeeId: employeeId,
-          StartDate: startDate,
-          EndDate: endDate,
+          [startKey]: startDate,
+          [endKey]: endDate,
         });
 
         for (const r of records) {
@@ -271,7 +273,7 @@ export class CalendarSyncService {
       return [];
     }
 
-    console.log(`[calendar-sync] Fetching absences for ${employeeIds.length} employees across 3 endpoints`);
+    console.log(`[calendar-sync] Fetching absences for ${employeeIds.length} employees across 4 endpoints`);
     const allAbsences: PeopleHrAbsence[] = [];
     let errors = 0;
 
