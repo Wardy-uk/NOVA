@@ -23,7 +23,7 @@ export class CalendarSyncService {
   private kpiPool: sql.ConnectionPool | null = null;
   private consecutiveAuthFailures = 0;
   private lastFailedApiKey: string | null = null;
-  private cachedEmployeeIds: string[] = [];
+  private cachedEmployees: { id: string; name: string }[] = [];
   private employeeCacheTime = 0;
   private static readonly AUTH_BACKOFF_THRESHOLD = 3;
   private static readonly EMPLOYEE_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
@@ -71,28 +71,27 @@ export class CalendarSyncService {
       let updated = 0;
 
       for (const a of absences) {
-        const sourceId = a.AbsenceId?.DisplayValue
-          || (a as any).HolidayId?.DisplayValue
-          || (a as any).OtherEventId?.DisplayValue
-          || (a as any).MaternityPaternityId?.DisplayValue
-          || (a as any).Id?.DisplayValue;
+        const r = a as any;
+        const v = (key: string) => r[key]?.DisplayValue ?? r[key] ?? '';
+
+        const sourceId = v('AbsenceLeaveTxnId') || v('AnnualLeaveTxnId') || v('OtherLeaveTxnId')
+          || v('ReferenceId') || v('AbsenceId') || v('Id');
         if (!sourceId) {
-          const name = `${a.FirstName?.DisplayValue ?? ''} ${a.LastName?.DisplayValue ?? ''}`.trim();
-          const type = a.AbsenceType?.DisplayValue ?? 'unknown';
-          console.warn(`[calendar-sync] Skipping ${type} for ${name} — no ID field. Keys: ${Object.keys(a).join(', ')}`);
+          console.warn(`[calendar-sync] Skipping record — no ID field. Keys: ${Object.keys(r).join(', ')}`);
           continue;
         }
-        console.log(`[calendar-sync] Processing: ${a.FirstName?.DisplayValue} ${a.LastName?.DisplayValue} — ${a.AbsenceType?.DisplayValue ?? 'unknown'} (${a.StartDate?.DisplayValue} to ${a.EndDate?.DisplayValue}) [${sourceId}]`);
 
-        const name = `${a.FirstName?.DisplayValue ?? ''} ${a.LastName?.DisplayValue ?? ''}`.trim();
-        const absenceType = this.mapAbsenceType(a.AbsenceType?.DisplayValue ?? '');
-        const startDate = a.StartDate?.DisplayValue ?? '';
-        const endDate = a.EndDate?.DisplayValue ?? '';
-        const durationType = a.DurationType?.DisplayValue ?? '';
+        const name = (v('FullName') || `${v('FirstName')} ${v('LastName')}`.trim() || r._agentName || '').trim();
+        const absenceType = this.mapAbsenceType(v('AbsenceType') || v('Reason') || r._absenceTypeOverride || '');
+        const startDate = v('StartDate') || v('ActualStartDate') || '';
+        const endDate = v('EndDate') || v('ActualEndDate') || '';
+        const durationType = v('DurationType') || v('PartOfDay') || '';
         const isHalfDay = durationType.toLowerCase().includes('half');
         const halfDayPeriod = durationType.toLowerCase().includes('am') ? 'AM'
           : durationType.toLowerCase().includes('pm') ? 'PM' : null;
-        const team = a.Department?.DisplayValue ?? '';
+        const team = v('Department');
+
+        console.log(`[calendar-sync] Processing: ${name} — ${absenceType} (${startDate} to ${endDate}) [${sourceId}]`);
 
         const existing = await query<{ id: number }>(
           `SELECT id FROM agent_team_calendar WHERE source_id = ?`, [sourceId]
@@ -194,9 +193,9 @@ export class CalendarSyncService {
     };
   }
 
-  private async fetchEmployeeIds(): Promise<string[]> {
-    if (this.cachedEmployeeIds.length > 0 && Date.now() - this.employeeCacheTime < CalendarSyncService.EMPLOYEE_CACHE_TTL) {
-      return this.cachedEmployeeIds;
+  private async fetchEmployees(): Promise<{ id: string; name: string }[]> {
+    if (this.cachedEmployees.length > 0 && Date.now() - this.employeeCacheTime < CalendarSyncService.EMPLOYEE_CACHE_TTL) {
+      return this.cachedEmployees;
     }
 
     const kpi = await this.getKpiPool();
@@ -206,18 +205,20 @@ export class CalendarSyncService {
     }
 
     const result = await kpi.request().query(`
-      SELECT PeopleHrId FROM dbo.Agent
+      SELECT PeopleHrId,
+             LTRIM(RTRIM(AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(AgentSurname, ''))) AS DisplayName
+      FROM dbo.Agent
       WHERE IsActive = 1 AND PeopleHrId IS NOT NULL AND PeopleHrId != ''
     `);
 
-    const ids = result.recordset
-      .map((r: any) => r.PeopleHrId as string)
-      .filter(Boolean);
+    const employees = result.recordset
+      .filter((r: any) => r.PeopleHrId)
+      .map((r: any) => ({ id: r.PeopleHrId as string, name: (r.DisplayName as string).trim() }));
 
-    this.cachedEmployeeIds = ids;
+    this.cachedEmployees = employees;
     this.employeeCacheTime = Date.now();
-    console.log(`[calendar-sync] Loaded ${ids.length} People HR IDs from Agent table`);
-    return ids;
+    console.log(`[calendar-sync] Loaded ${employees.length} People HR IDs from Agent table`);
+    return employees;
   }
 
   private async callPeopleHrEndpoint(apiKey: string, endpoint: string, body: Record<string, string>): Promise<any[]> {
@@ -259,9 +260,10 @@ export class CalendarSyncService {
         });
 
         for (const r of records) {
-          if (r.Status?.DisplayValue === 'Cancelled' || r.Status?.DisplayValue === 'Declined') continue;
-          if (ep.absenceTypeOverride && (!r.AbsenceType || !r.AbsenceType.DisplayValue)) {
-            r.AbsenceType = { DisplayValue: ep.absenceTypeOverride };
+          const status = (r.Status?.DisplayValue ?? r.Status ?? '').toString().toLowerCase();
+          if (status === 'cancelled' || status === 'declined') continue;
+          if (ep.absenceTypeOverride) {
+            (r as any)._absenceTypeOverride = ep.absenceTypeOverride;
           }
           results.push(r);
         }
@@ -278,19 +280,22 @@ export class CalendarSyncService {
     const startDate = new Date().toISOString().slice(0, 10);
     const endDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 
-    const employeeIds = await this.fetchEmployeeIds();
-    if (employeeIds.length === 0) {
+    const employees = await this.fetchEmployees();
+    if (employees.length === 0) {
       console.warn('[calendar-sync] No employees found in People HR');
       return [];
     }
 
-    console.log(`[calendar-sync] Fetching absences for ${employeeIds.length} employees across 4 endpoints`);
+    console.log(`[calendar-sync] Fetching absences for ${employees.length} employees across 4 endpoints`);
     const allAbsences: PeopleHrAbsence[] = [];
     let errors = 0;
 
-    for (const empId of employeeIds) {
+    for (const emp of employees) {
       try {
-        const absences = await this.fetchAllForEmployee(apiKey, empId, startDate, endDate);
+        const absences = await this.fetchAllForEmployee(apiKey, emp.id, startDate, endDate);
+        for (const a of absences) {
+          (a as any)._agentName = emp.name;
+        }
         allAbsences.push(...absences);
       } catch (err) {
         errors++;
