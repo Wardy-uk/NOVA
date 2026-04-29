@@ -281,7 +281,7 @@ export function AdminView() {
       const res = await fetch('/api/integrations');
       const json = await res.json();
       if (json.ok) {
-        const ADMIN_ONLY = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign', 'llm', 'ai-agent', 'people-hr', 'teams-webhook', 'whisper', 'sharepoint']);
+        const ADMIN_ONLY = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign', 'llm', 'ai-agent', 'people-hr', 'teams-webhook', 'whisper', 'sharepoint', 'kb-retrieval']);
         const withFields = (json.data as IntegrationConfig[]).filter(i => ADMIN_ONLY.has(i.id));
         setIntegrations(withFields);
         const vals: Record<string, Record<string, string>> = {};

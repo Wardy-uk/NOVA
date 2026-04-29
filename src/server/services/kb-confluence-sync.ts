@@ -25,18 +25,20 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
 
   isConfigured(): boolean {
     const spaceKeys = this.settings.get('kb_confluence_space_keys')?.trim();
-    const baseUrl = this.settings.get('confluence_base_url')?.trim();
-    const email = this.settings.get('confluence_api_email')?.trim();
-    const token = this.settings.get('confluence_api_token')?.trim();
-    return !!(spaceKeys && baseUrl && email && token);
+    const siteUrl = this.settings.get('confluence_site_url')?.trim();
+    const email = this.settings.get('jira_ob_email')?.trim();
+    const token = this.settings.get('jira_ob_token')?.trim();
+    return !!(spaceKeys && siteUrl && email && token);
   }
 
   private getAuth(): { baseUrl: string; email: string; token: string } {
-    const baseUrl = this.settings.get('confluence_base_url')?.trim();
-    const email = this.settings.get('confluence_api_email')?.trim();
-    const token = this.settings.get('confluence_api_token')?.trim();
-    if (!baseUrl || !email || !token) throw new Error('Confluence credentials not configured');
-    return { baseUrl: baseUrl.replace(/\/$/, ''), email, token };
+    const siteUrl = this.settings.get('confluence_site_url')?.trim();
+    const email = this.settings.get('jira_ob_email')?.trim();
+    const token = this.settings.get('jira_ob_token')?.trim();
+    if (!siteUrl || !email || !token) {
+      throw new Error('Confluence sync needs confluence_site_url plus Jira (Global) email/token');
+    }
+    return { baseUrl: siteUrl.replace(/\/$/, ''), email, token };
   }
 
   private getSpaceKeys(): string[] {
