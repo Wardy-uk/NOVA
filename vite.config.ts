@@ -20,6 +20,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       manifest: false,
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/wallboard\//],
         runtimeCaching: [
@@ -30,8 +32,8 @@ export default defineConfig({
           },
           {
             urlPattern: /\.(?:js|css|woff2?|svg|png|jpg|ico)$/,
-            handler: 'CacheFirst',
-            options: { cacheName: 'nova-assets', expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 } },
+            handler: 'StaleWhileRevalidate',
+            options: { cacheName: 'nova-assets', expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 7 } },
           },
         ],
       },
