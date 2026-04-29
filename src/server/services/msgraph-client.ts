@@ -141,8 +141,10 @@ export class MsGraphClient {
   // --- SharePoint-specific helpers ---
 
   async listSiteDrives(siteId: string): Promise<Array<{ id: string; name: string }>> {
+    // hostname:/path format needs trailing colon before /drives
+    const normalized = siteId.includes(':') && !siteId.endsWith(':') ? `${siteId}:` : siteId;
     const data = await this.graphGet<{ value: Array<{ id: string; name: string }> }>(
-      `/sites/${siteId}/drives`
+      `/sites/${normalized}/drives`
     );
     return data.value;
   }
