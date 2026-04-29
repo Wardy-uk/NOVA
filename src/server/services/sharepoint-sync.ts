@@ -27,6 +27,7 @@ export interface SyncResult {
 export class SharePointSync {
   private _lastResult: SyncResult | null = null;
   private _lastAttempt: string | null = null;
+  private _running: 'pull' | 'push' | false = false;
 
   constructor(
     private graph: MsGraphClient,
@@ -43,6 +44,8 @@ export class SharePointSync {
     return { siteId, driveHint, folderPath, fileName };
   }
 
+  get running() { return this._running; }
+
   getDebugInfo() {
     const graphStatus = this.graph.getStatus();
     return {
@@ -51,6 +54,7 @@ export class SharePointSync {
       available: true,
       graphStatus: graphStatus.status,
       graphError: graphStatus.lastError,
+      running: this._running,
       ...this.getSpConfig(),
       folderPath: this.getSpConfig().folderPath.join('/'),
       productSheets: PRODUCT_SHEETS,
@@ -93,6 +97,7 @@ export class SharePointSync {
   }
 
   async pull(): Promise<SyncResult> {
+    this._running = 'pull';
     this._lastAttempt = new Date().toISOString();
     const result: SyncResult = {
       direction: 'pull',
@@ -115,6 +120,7 @@ export class SharePointSync {
       if (!driveId) {
         result.errors.push(`No drives found on site "${siteId}"`);
         this._lastResult = result;
+        this._running = false;
         return result;
       }
       log(`Using drive: ${driveId}`);
@@ -128,6 +134,7 @@ export class SharePointSync {
         const names = children.filter(c => !c.folder).map(c => c.name).join(', ');
         result.errors.push(`File "${fileName}" not found. Available files: ${names}`);
         this._lastResult = result;
+        this._running = false;
         return result;
       }
       log(`Found file: ${file.name} (${file.id})`);
@@ -196,10 +203,12 @@ export class SharePointSync {
     }
 
     this._lastResult = result;
+    this._running = false;
     return result;
   }
 
   async push(): Promise<SyncResult> {
+    this._running = 'push';
     this._lastAttempt = new Date().toISOString();
     const result: SyncResult = {
       direction: 'push',
@@ -222,6 +231,7 @@ export class SharePointSync {
       if (!driveId) {
         result.errors.push(`No drives found on site "${siteId}"`);
         this._lastResult = result;
+        this._running = false;
         return result;
       }
       log(`Using drive: ${driveId}`);
@@ -270,6 +280,7 @@ export class SharePointSync {
       if (result.sheetsProcessed === 0) {
         result.errors.push('No DB entries to push — all product sheets are empty');
         this._lastResult = result;
+        this._running = false;
         return result;
       }
 
@@ -286,6 +297,7 @@ export class SharePointSync {
     }
 
     this._lastResult = result;
+    this._running = false;
     return result;
   }
 

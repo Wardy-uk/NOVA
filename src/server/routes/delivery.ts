@@ -645,27 +645,23 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
     });
 
     router.post('/sync/pull', syncWriteGuard, async (_req, res) => {
-      try {
-        const result = await spSync.pull();
-        res.json({ ok: result.errors.length === 0, data: result });
-      } catch (err) {
-        res.status(500).json({
-          ok: false,
-          error: err instanceof Error ? err.message : 'SharePoint pull failed',
-        });
+      if (spSync.running) {
+        return res.status(409).json({ ok: false, error: `Sync already running (${spSync.running})` });
       }
+      spSync.pull().catch(() => {});
+      res.json({ ok: true, data: { started: true } });
     });
 
     router.post('/sync/push', syncWriteGuard, async (_req, res) => {
-      try {
-        const result = await spSync.push();
-        res.json({ ok: result.errors.length === 0, data: result });
-      } catch (err) {
-        res.status(500).json({
-          ok: false,
-          error: err instanceof Error ? err.message : 'SharePoint push failed',
-        });
+      if (spSync.running) {
+        return res.status(409).json({ ok: false, error: `Sync already running (${spSync.running})` });
       }
+      spSync.push().catch(() => {});
+      res.json({ ok: true, data: { started: true } });
+    });
+
+    router.get('/sync/status', (_req, res) => {
+      res.json({ ok: true, data: { running: spSync.running, lastResult: spSync.getDebugInfo().lastResult } });
     });
   }
 

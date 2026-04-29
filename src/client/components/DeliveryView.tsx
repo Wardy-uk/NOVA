@@ -452,23 +452,50 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
     }
   };
 
+  const pollSyncStatus = async (direction: 'pull' | 'push') => {
+    for (let i = 0; i < 120; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const resp = await fetch('/api/delivery/sync/status');
+        const json = await resp.json();
+        if (!json.ok) continue;
+        if (json.data.running) continue;
+        const d = json.data.lastResult;
+        if (!d) return;
+        if (d.errors?.length > 0) {
+          setSyncResult({ ok: false, message: d.errors.join(', '), logs: d.logs });
+        } else if (direction === 'pull') {
+          setSyncResult({
+            ok: true,
+            message: `Pulled ${d.entriesCreated} new entries from ${d.sheetsProcessed} sheets (${d.entriesSkipped} already tracked)`,
+            logs: d.logs,
+          });
+          refreshDbEntries();
+        } else {
+          setSyncResult({
+            ok: true,
+            message: `Pushed ${d.entriesUpdated} entries across ${d.sheetsProcessed} sheets to SharePoint`,
+            logs: d.logs,
+          });
+        }
+        return;
+      } catch { /* retry */ }
+    }
+    setSyncResult({ ok: false, message: 'Sync timed out — check server logs' });
+  };
+
   const handleSyncPull = async () => {
     setSyncing('pull');
     setSyncResult(null);
     try {
       const resp = await fetch('/api/delivery/sync/pull', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const json = await resp.json();
-      if (json.ok) {
-        const d = json.data;
-        setSyncResult({
-          ok: true,
-          message: `Pulled ${d.entriesCreated} new entries from ${d.sheetsProcessed} sheets (${d.entriesSkipped} already tracked)`,
-          logs: d.logs,
-        });
-        refreshDbEntries();
-      } else {
-        setSyncResult({ ok: false, message: json.data?.errors?.join(', ') || json.error || 'Sync failed', logs: json.data?.logs });
+      if (!json.ok) {
+        setSyncResult({ ok: false, message: json.error || 'Failed to start pull' });
+        setSyncing(false);
+        return;
       }
+      await pollSyncStatus('pull');
     } catch (err) {
       setSyncResult({ ok: false, message: err instanceof Error ? err.message : 'Network error' });
     } finally {
@@ -482,16 +509,12 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
     try {
       const resp = await fetch('/api/delivery/sync/push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const json = await resp.json();
-      if (json.ok) {
-        const d = json.data;
-        setSyncResult({
-          ok: true,
-          message: `Pushed ${d.entriesUpdated} entries across ${d.sheetsProcessed} sheets to SharePoint`,
-          logs: d.logs,
-        });
-      } else {
-        setSyncResult({ ok: false, message: json.data?.errors?.join(', ') || json.error || 'Push failed', logs: json.data?.logs });
+      if (!json.ok) {
+        setSyncResult({ ok: false, message: json.error || 'Failed to start push' });
+        setSyncing(false);
+        return;
       }
+      await pollSyncStatus('push');
     } catch (err) {
       setSyncResult({ ok: false, message: err instanceof Error ? err.message : 'Network error' });
     } finally {
