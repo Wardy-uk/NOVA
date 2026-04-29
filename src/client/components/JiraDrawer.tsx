@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Task } from '../../shared/types.js';
+import { TicketBriefCard, type BriefFields } from './TicketBriefCard.js';
+import { AINextActionCard } from './AINextActionCard.js';
 
 interface Transition {
   id?: number | string;
@@ -290,6 +292,16 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
           {error && (
             <div className="text-sm text-red-400">{error}</div>
           )}
+
+          {issue && (
+            <TicketBriefCard
+              ticketKey={issueKey}
+              fields={issue as BriefFields}
+              tier={fields.tier}
+              compact
+            />
+          )}
+          <AINextActionCard ticketKey={issueKey} compact />
 
           <div className="grid grid-cols-2 gap-3 text-xs text-neutral-400">
             <div>

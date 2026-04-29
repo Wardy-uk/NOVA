@@ -151,11 +151,9 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'sd-dashboard',
     tabs: [
       { view: 'sd-dashboard', label: 'Dashboard' },
-      { view: 'tickets', label: 'My Tickets' },
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
       { view: 'attention', label: 'My Breached' },
-      { view: 'ai-approvals', label: 'AI Ticket Approvals' },
     ],
   },
   sales: {
@@ -273,9 +271,11 @@ const AREAS: Record<Area, AreaDef> = {
     ],
   },
   'ai-agent': {
-    label: 'AI Agent',
+    label: 'NOVA AI Agent',
     defaultView: 'agent-workspace',
     tabs: [
+      { view: 'tickets', label: 'My Tickets' },
+      { view: 'ai-approvals', label: 'AI Approvals' },
       { view: 'agent-workspace', label: 'Workspace' },
       { view: 'agent-dashboard', label: 'Dashboard' },
       { view: 'agent-coaching', label: 'Coaching' },
@@ -1055,16 +1055,7 @@ export function App() {
               <TaskList tasks={filteredSdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
             </div>
           )}
-          {view === 'tickets' && !sdFilter && (
-            <div className="max-w-5xl mx-auto">
-              {error && (
-                <div className="mb-4 p-3 bg-red-950/50 border border-red-900 rounded text-red-400 text-sm">
-                  {error}
-                </div>
-              )}
-              <TaskList tasks={filteredSdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
-            </div>
-          )}
+          {/* My Tickets + AI Approvals moved to NOVA AI Agent area */}
           {view === 'kanban' && !sdFilter && (
             <ServiceDeskKanban tasks={filteredSdTasks} onUpdateTask={updateTask} onRefresh={refreshSdTasks} />
           )}
@@ -1077,12 +1068,7 @@ export function App() {
           {view === 'sd-dashboard' && !sdFilter && (
             <ServiceDeskDashboard />
           )}
-          {view === 'ai-approvals' && !sdFilter && (
-            <AIApprovalQueue canInteract={(areaAccess['ai_approvals'] || 'hidden') === 'edit'} onNavigateToAgent={(ticketId) => {
-              sessionStorage.setItem('agent_pending_ticket', ticketId);
-              setView('agent-dashboard');
-            }} />
-          )}
+          {/* ai-approvals moved to NOVA AI Agent area */}
           {/* KPIs */}
           {view === 'kpi-dashboard' && (
             <KpiDashboardView />
@@ -1291,7 +1277,23 @@ export function App() {
             <CalyxOrganisationsView />
           )}
 
-          {/* AI Agent */}
+          {/* NOVA AI Agent */}
+          {view === 'tickets' && canSeeArea('ai-agent') && (
+            <div className="max-w-5xl mx-auto">
+              {error && (
+                <div className="mb-4 p-3 bg-red-950/50 border border-red-900 rounded text-red-400 text-sm">
+                  {error}
+                </div>
+              )}
+              <TaskList tasks={filteredSdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
+            </div>
+          )}
+          {view === 'ai-approvals' && canSeeArea('ai-agent') && (
+            <AIApprovalQueue canInteract={(areaAccess['ai_approvals'] || 'hidden') === 'edit'} onNavigateToAgent={(ticketId) => {
+              sessionStorage.setItem('agent_pending_ticket', ticketId);
+              setView('agent-dashboard');
+            }} />
+          )}
           {view === 'agent-workspace' && canSeeArea('ai-agent') && (
             <AgentWorkspaceView />
           )}

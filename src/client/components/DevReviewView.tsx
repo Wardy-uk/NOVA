@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { TicketBriefCard } from './TicketBriefCard.js';
+import { AINextActionCard } from './AINextActionCard.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -1026,13 +1028,6 @@ function TicketDetailPane({
   claimedByDisplay: string | null;
 }) {
   const { fields, state, thread } = detail;
-  const tldr = adfToText(fields.customfield_13184);
-  const agentSummary = adfToText(fields.customfield_13185);
-  const troubleshooting = adfToText(fields.customfield_13212);
-  const expectedOutcome = adfToText(fields.customfield_13214);
-  const environment = adfToText(fields.customfield_13213);
-  const escalationReason = fields.customfield_13186?.value;
-  const description = adfToText(fields.description);
   const product = fields.customfield_13183?.value;
   const isMine = state?.claimed_by_user_id === currentUserId;
   const terminal = state?.status === 'accepted' || state?.status === 'returned';
@@ -1171,24 +1166,15 @@ function TicketDetailPane({
 
       {/* Body grid: brief | thread */}
       <div className="grid gap-4 flex-1" style={{ gridTemplateColumns: '1.3fr 1fr' }}>
-        {/* Brief */}
-        <GlassCard className="p-5 overflow-y-auto dr-scroll" >
-          <div className="text-[11px] uppercase tracking-wider text-[#c4b5fd] font-bold mb-4">
-            ⌘ The Brief
-          </div>
-          <BriefField label="TL;DR" value={tldr} />
-          <BriefField label="Escalation Reason" value={escalationReason || null} />
-          <BriefField label="Agent Summary" value={agentSummary} />
-          <BriefField label="Troubleshooting Performed" value={troubleshooting} mono />
-          <BriefField label="Expected Outcome" value={expectedOutcome} />
-          <BriefField label="Environment" value={environment} mono />
-          {description && !agentSummary && <BriefField label="Description" value={description} />}
-          {!tldr && !agentSummary && !troubleshooting && !expectedOutcome && (
-            <div className="text-[11px] text-neutral-500 italic p-4 text-center">
-              No escalation brief captured — this ticket may have been transitioned to T3 without using the escalation screen.
-            </div>
-          )}
-        </GlassCard>
+        {/* Brief — shared component */}
+        <div className="overflow-y-auto dr-scroll space-y-4">
+          <TicketBriefCard
+            ticketKey={detail.key}
+            fields={fields}
+            tier={fields.customfield_12981?.value}
+          />
+          <AINextActionCard ticketKey={detail.key} />
+        </div>
 
         {/* Thread + comment composer */}
         <GlassCard className="p-5 flex flex-col" >

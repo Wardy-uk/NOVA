@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '../../shared/types.js';
+import { TicketBriefCard, briefPropsFromTask } from './TicketBriefCard.js';
+import { AINextActionCard } from './AINextActionCard.js';
 
 const SOURCE_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   jira: { bg: 'bg-badge-info-muted', text: 'text-on-badge-info-muted', label: 'Jira' },
@@ -632,6 +634,13 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
           {/* ---- JIRA LAYOUT ---- */}
           {isJira && (
             <>
+              {(() => {
+                const bp = briefPropsFromTask(task);
+                return bp ? <TicketBriefCard {...bp} compact /> : null;
+              })()}
+              {task.source === 'jira' && task.source_id && (
+                <AINextActionCard ticketKey={task.source_id} compact />
+              )}
               <div className="grid grid-cols-2 gap-3 text-xs text-neutral-400">
                 <div>
                   <div className="text-[10px] uppercase tracking-widest mb-1">Status</div>

@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { TicketBriefCard, type BriefFields } from './TicketBriefCard.js';
+import { AINextActionCard } from './AINextActionCard.js';
 
 interface ApprovalItem {
   id: number;
@@ -169,6 +171,21 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
     return () => clearInterval(interval);
   }, [item.expires_at]);
 
+  const [briefFields, setBriefFields] = useState<BriefFields | null>(null);
+  useEffect(() => {
+    if (!item.ticket_id) return;
+    const token = localStorage.getItem('nova_auth_token') || '';
+    fetch(`/api/jira/issues/${item.ticket_id}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(json => {
+        if (json.ok && json.data) {
+          const f = json.data.fields ?? json.data;
+          setBriefFields(f as BriefFields);
+        }
+      })
+      .catch(() => {});
+  }, [item.ticket_id]);
+
   const conversation = parseConversation(item.conversation_json);
   const kbSources = parseKbSources(item.kb_sources);
   const originalText = extractAdfText(item.ai_response_adf);
@@ -259,6 +276,16 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* Brief card */}
+          {briefFields && (
+            <TicketBriefCard
+              ticketKey={item.ticket_id}
+              fields={briefFields}
+              tier={(briefFields.customfield_12981 as any)?.value ?? null}
+              compact
+            />
+          )}
+          {item.ticket_id && <AINextActionCard ticketKey={item.ticket_id} compact />}
           {/* Ticket Info */}
           <div className="border border-[#3a424d] rounded-lg bg-[#272C33] p-4">
             <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-3">Ticket Details</div>

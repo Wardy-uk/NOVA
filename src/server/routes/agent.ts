@@ -8,6 +8,7 @@ import { resolveStatusName, resolveStatusFromCache } from '../utils/jira-status.
 import { RespondResultSchema, type RespondResult } from '../services/respond-schema.js';
 import { ResolveSummarySchema, type ResolveSummaryResult } from '../services/resolve-schema.js';
 import { loadPrompt } from '../services/prompt-loader.js';
+import { z } from 'zod';
 import type { AssignmentEngine, Pool } from '../services/assignment-engine.js';
 import type { AgentAvailabilityService, AvailabilityStatus } from '../services/agent-availability.js';
 import type { TicketClassifier } from '../services/ticket-classifier.js';
@@ -2098,6 +2099,141 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data: { id, status: newStatus } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to decide' });
+    }
+  });
+
+  // ── AI Next Action recommendation ──
+
+  const nextActionCache = new Map<string, { data: unknown; expiresAt: number; issueUpdated: string | null }>();
+  const NEXT_ACTION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  let nextActionMissingCount = 0;
+
+  router.get('/next-action/missing-count', requireRole('admin'), (_req, res) => {
+    res.json({ ok: true, data: { count: nextActionMissingCount } });
+  });
+
+  router.get('/next-action/:ticketKey', requireRole('admin'), async (req, res) => {
+    const ticketKey = String(req.params.ticketKey);
+    try {
+      const jira = agentLoop.getJiraClient();
+      const llm = agentLoop.getLlmService();
+
+      const issue = await jira.getIssue(ticketKey, [
+        'summary', 'description', 'status', 'priority', 'reporter',
+        'assignee', 'created', 'updated', 'comment', 'issuetype',
+        'customfield_12981',
+      ]);
+      if (!issue) {
+        res.status(404).json({ ok: false, error: `Ticket ${ticketKey} not found` });
+        return;
+      }
+
+      const f = issue.fields;
+      const issueUpdated = (f.updated as string) ?? null;
+
+      // Check cache — bust on ticket update
+      const cached = nextActionCache.get(ticketKey);
+      if (cached && Date.now() < cached.expiresAt && cached.issueUpdated === issueUpdated) {
+        res.json({ ok: true, data: cached.data });
+        return;
+      }
+
+      // Check if agent has any decision on this ticket
+      const decisions = await query(
+        `SELECT TOP 1 id, action, confidence FROM agent_decisions WHERE ticket_id = ? ORDER BY decided_at DESC`,
+        [ticketKey],
+      );
+
+      if (!decisions || decisions.length === 0) {
+        nextActionMissingCount++;
+        const fallback = {
+          state: 'no_context' as const,
+          headline: 'No agent context yet — this ticket hasn\'t been processed by the AI agent.',
+          body: 'Tickets reach this state only when assignment beat AI processing, or processing failed silently.',
+          primaryAction: { label: 'Run agent on this ticket', jiraTransition: null },
+          generatedAt: new Date().toISOString(),
+        };
+        res.json({ ok: true, data: fallback });
+        return;
+      }
+
+      // Build activity from last 5 comments
+      const comments = ((f.comment as any)?.comments as Array<{
+        author?: { displayName?: string };
+        body?: string;
+        created?: string;
+        properties?: Array<{ key: string; value?: { internal?: boolean } }>;
+      }>) ?? [];
+
+      const last5 = comments.slice(-5).map(c => {
+        const isInternal = c.properties?.some(p => p.key === 'sd.public.comment' && p.value?.internal) ?? false;
+        const body = typeof c.body === 'string' ? c.body.slice(0, 300) : '(complex body)';
+        return `[${c.created ?? ''}] ${c.author?.displayName ?? 'Unknown'}${isInternal ? ' (internal)' : ''}: ${body}`;
+      }).join('\n');
+
+      // Determine SLA state
+      const statusName = (f.status as any)?.name ?? 'Unknown';
+      const updated = f.updated as string | undefined;
+      const created = f.created as string | undefined;
+      const timeInStatusMs = updated ? Date.now() - new Date(updated as string).getTime() : 0;
+      const timeInStatusHrs = Math.round(timeInStatusMs / 3600000);
+
+      const tierRaw = f.customfield_12981;
+      const tier = typeof tierRaw === 'string' ? tierRaw : (tierRaw as any)?.value ?? 'Unknown';
+
+      // Check if last comment was from the team asking the customer
+      const lastComment = comments.length > 0 ? comments[comments.length - 1] : null;
+      const awaitingCustomer = statusName.toLowerCase().includes('waiting on requestor')
+        || statusName.toLowerCase().includes('waiting for customer');
+
+      const prompt = loadPrompt('ticket-next-action', {
+        ticketKey,
+        summary: (f.summary as string) ?? '',
+        status: statusName,
+        tier,
+        timeInStatus: `${timeInStatusHrs}h`,
+        activity: last5 || 'No comments recorded.',
+        slaState: timeInStatusHrs > 24 ? 'Approaching breach' : 'Within SLA',
+        awaitingCustomer: awaitingCustomer ? 'Yes' : 'No',
+      });
+
+      const NextActionSchema = z.object({
+        state: z.enum(['action_ready', 'waiting', 'stalled']),
+        headline: z.string(),
+        body: z.string(),
+        primaryAction: z.object({
+          label: z.string(),
+          jiraTransition: z.string().nullable(),
+        }),
+      });
+
+      const result = await llm.call(
+        prompt,
+        `Ticket ${ticketKey}: ${(f.summary as string) ?? ''}\nStatus: ${statusName}\nTier: ${tier}`,
+        NextActionSchema,
+        { callType: 'next_action', ticketId: ticketKey, maxTokens: 512 },
+      );
+
+      const responseData = {
+        ...result.data,
+        generatedAt: new Date().toISOString(),
+        inputs: {
+          ticketKey,
+          summary: (f.summary as string) ?? '',
+          status: statusName,
+          tier,
+          timeInStatus: `${timeInStatusHrs}h`,
+          activityCount: comments.length,
+          awaitingCustomer,
+        },
+      };
+
+      nextActionCache.set(ticketKey, { data: responseData, expiresAt: Date.now() + NEXT_ACTION_CACHE_TTL, issueUpdated });
+
+      res.json({ ok: true, data: responseData });
+    } catch (err) {
+      console.error(`[agent/next-action] Error for ${ticketKey}:`, err);
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to generate next action' });
     }
   });
 

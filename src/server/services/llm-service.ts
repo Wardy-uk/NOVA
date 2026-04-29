@@ -98,6 +98,7 @@ const CALL_TYPE_TIER_MAP: Record<string, LlmTier> = {
   ticket_analysis: 'cheap',
   ticket_classification: 'cheap',
   classification: 'cheap',
+  next_action: 'cheap',
   kpi_daily_digest: 'cheap',
   kpi_weekly_digest: 'cheap',
 };
