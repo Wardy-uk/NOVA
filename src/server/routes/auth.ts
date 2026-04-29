@@ -55,6 +55,7 @@ const AREA_DEFAULTS: Record<string, string> = {
   wallboards: 'view', // everyone can see wallboards
   mi: 'hidden',       // Board MI hidden by default
   devreview: 'hidden', // Dev Review hidden by default
+  'ai-agent': 'view', // NOVA AI Agent visible to all (My Tickets + AI Approvals moved here)
 };
 
 function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string, string> {
@@ -64,7 +65,7 @@ function resolveAreaAccess(roleStr: string, roles: CustomRole[]): Record<string,
   }
   const matched = roles.filter(r => userRoles.includes(r.id));
   if (matched.length === 0) {
-    return { command: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', ...AREA_DEFAULTS };
+    return { command: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', 'ai-agent': 'view', ...AREA_DEFAULTS };
   }
   // Merge: take highest access per area across all assigned roles
   const RANK: Record<string, number> = { hidden: 0, view: 1, edit: 2 };

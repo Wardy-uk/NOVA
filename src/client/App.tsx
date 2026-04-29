@@ -121,7 +121,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', calyx: 'hidden', 'ai-agent': 'hidden', backlog: 'view',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', calyx: 'hidden', 'ai-agent': 'view', backlog: 'view',
 };
 
 // Map certain command sub-tabs to their own permission area
