@@ -317,6 +317,14 @@ export class RiskScorer {
       flagged++;
     }
 
+    // Auto-dismiss flagged tickets whose Jira status is now resolved
+    await execute(
+      `UPDATE agent_flagged_tickets SET status = 'dismissed', reviewed_at = GETUTCDATE()
+       WHERE status = 'pending' AND ticket_key IN (
+         SELECT issue_key FROM jira_issue_cache WHERE status_category = 'done'
+       )`,
+    );
+
     // Auto-dismiss flagged tickets that dropped below threshold
     await execute(
       `UPDATE agent_flagged_tickets SET status = 'dismissed', reviewed_at = GETUTCDATE()
@@ -491,30 +499,41 @@ export class RiskScorer {
   // ── Query methods for API ──
 
   async getFlagged(status?: string): Promise<FlaggedTicket[]> {
-    const where = status ? `WHERE status = ?` : `WHERE status != 'dismissed'`;
+    const where = status
+      ? `WHERE f.status = ? AND j.status_category != 'done'`
+      : `WHERE f.status != 'dismissed' AND j.status_category != 'done'`;
     const params = status ? [status] : [];
     const rows = await query<Record<string, unknown>>(
-      `SELECT * FROM agent_flagged_tickets ${where} ORDER BY risk_score DESC`, params,
+      `SELECT f.* FROM agent_flagged_tickets f
+       JOIN jira_issue_cache j ON j.issue_key = f.ticket_key
+       ${where} ORDER BY f.risk_score DESC`, params,
     );
     return rows.map(this.rowToFlagged);
   }
 
   async getFlaggedCount(): Promise<number> {
-    const row = await queryOne<{ cnt: number }>(`SELECT COUNT(*) as cnt FROM agent_flagged_tickets WHERE status = 'pending'`);
+    const row = await queryOne<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM agent_flagged_tickets f
+       JOIN jira_issue_cache j ON j.issue_key = f.ticket_key
+       WHERE f.status = 'pending' AND j.status_category != 'done'`,
+    );
     return row?.cnt ?? 0;
   }
 
   async getFlaggedSummary(): Promise<{ count: number; highestRisk: FlaggedTicket | null; avgScore: number }> {
+    const joinClause = `FROM agent_flagged_tickets f
+       JOIN jira_issue_cache j ON j.issue_key = f.ticket_key
+       WHERE f.status = 'pending' AND j.status_category != 'done'`;
     const [countRow, avgRow] = await Promise.all([
-      queryOne<{ cnt: number }>(`SELECT COUNT(*) as cnt FROM agent_flagged_tickets WHERE status = 'pending'`),
-      queryOne<{ avg_score: number }>(`SELECT ISNULL(AVG(CAST(risk_score AS FLOAT)), 0) as avg_score FROM agent_flagged_tickets WHERE status = 'pending'`),
+      queryOne<{ cnt: number }>(`SELECT COUNT(*) as cnt ${joinClause}`),
+      queryOne<{ avg_score: number }>(`SELECT ISNULL(AVG(CAST(f.risk_score AS FLOAT)), 0) as avg_score ${joinClause}`),
     ]);
     const count = countRow?.cnt ?? 0;
     const avgScore = avgRow?.avg_score ?? 0;
     let highestRisk: FlaggedTicket | null = null;
     if (count > 0) {
       const row = await queryOne<Record<string, unknown>>(
-        `SELECT TOP(1) * FROM agent_flagged_tickets WHERE status = 'pending' ORDER BY risk_score DESC`,
+        `SELECT TOP(1) f.* ${joinClause} ORDER BY f.risk_score DESC`,
       );
       if (row) highestRisk = this.rowToFlagged(row);
     }
