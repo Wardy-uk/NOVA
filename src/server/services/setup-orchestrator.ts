@@ -292,6 +292,7 @@ export class SetupOrchestrator {
 
           // Get BYM branch IDs by name lookup
           const bymBranches = await bym.getBranches(subdomain);
+          await this.log(runId, 'setupDistricts', 'info', `BYM returned ${bymBranches.length} branch(es): ${bymBranches.map(b => `"${b.value}" (id=${b.id})`).join(', ')}`);
           const bymBranchByName = new Map(bymBranches.filter(b => b.value && b.id).map(b => [normalizeName(b.value), b]));
 
           // Group districts by branch
@@ -308,9 +309,10 @@ export class SetupOrchestrator {
             if (!branch) continue;
 
             // Look up BYM's internal branch ID by name
-            const bymBranch = bymBranchByName.get(normalizeName(branch.name));
+            const normalizedLocal = normalizeName(branch.name);
+            const bymBranch = bymBranchByName.get(normalizedLocal);
             if (!bymBranch || !bymBranch.id) {
-              await this.log(runId, 'setupDistricts', 'warn', `Branch "${branch.name}" not found in BYM — skipping`);
+              await this.log(runId, 'setupDistricts', 'warn', `Branch "${branch.name}" (normalized: "${normalizedLocal}") not found in BYM — available keys: ${[...bymBranchByName.keys()].join(', ')}`);
               continue;
             }
 
