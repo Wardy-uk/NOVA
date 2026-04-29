@@ -286,7 +286,7 @@ function aggregateAgent(rows: AgentDailyRow[]): AgentSummary | null {
     agentName: latest.AgentName,
     tierCode: latest.TierCode ?? '',
     team: latest.Team ?? '',
-    daysInRange: sorted.length,
+    daysInRange: new Set(sorted.map(r => r.ReportDate.slice(0, 10))).size,
     solvedTotal,
     solvedAvgPerDay: sorted.length > 0 ? solvedTotal / sorted.length : 0,
     ticketsPerHourAvg: tphValues.length > 0 ? tphValues.reduce((a, b) => a + b, 0) / tphValues.length : null,
@@ -784,7 +784,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
             )}
           </h1>
           <p style={{ fontSize: 11, color: C.text3, margin: 0 }}>
-            {planData?.plan.plan_period ? `Plan period: ${planData.plan.plan_period}` : 'Agent performance & development'}
+            {`Last ${dateRange} days`}{planData?.plan.plan_period ? ` · Plan: ${planData.plan.plan_period}` : ''}
           </p>
         </div>
 

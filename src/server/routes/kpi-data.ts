@@ -322,6 +322,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
 
       // Resolve agent scope — scope=self forces scoping even for admins
       const forceSelf = req.query.scope === 'self';
+      const queryAgent = req.query.agent ? String(req.query.agent).trim() : null;
       let scopedAgent: string | null;
       if (forceSelf && req.user && isAdmin(req.user.role)) {
         // Admin requesting their own data — resolve like a non-admin
@@ -339,6 +340,9 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         } else {
           scopedAgent = null;
         }
+      } else if (queryAgent && req.user && isAdmin(req.user.role)) {
+        // Admin viewing a specific agent via ?agent= param
+        scopedAgent = queryAgent;
       } else {
         scopedAgent = await resolveAgentScope(req);
       }
