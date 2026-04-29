@@ -1099,6 +1099,17 @@ async function main() {
       }
     }, 10 * 60 * 1000);
 
+    // SharePoint delivery sheet — auto-pull daily at 02:00
+    if (spSync) {
+      setInterval(() => {
+        const now = new Date();
+        if (now.getHours() === 2 && now.getMinutes() < 10 && !spSync.running) {
+          console.log('[SP-Sync] Starting scheduled overnight pull');
+          spSync.pull().catch(e => console.warn('[SP-Sync] scheduled pull failed:', e.message));
+        }
+      }, 10 * 60 * 1000);
+    }
+
     // QA pipeline — score resolved tickets every 2 hours
     setInterval(() => qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] scoring failed:', e.message)), 2 * 60 * 60 * 1000);
     setTimeout(() => qaPipeline.scoreRecentlyResolved(24).catch(() => {}), 120_000);
