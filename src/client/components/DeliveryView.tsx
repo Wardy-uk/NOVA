@@ -357,7 +357,7 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
   };
 
   const handleDelete = async (id: number) => {
-    await fetch(`/api/delivery/entries/${id}`, { method: 'DELETE' });
+    await fetch(`/api/delivery/entries/${id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     setDbEntries((prev) => prev.filter((e) => e.id !== id));
   };
 
@@ -456,7 +456,7 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
     setSyncing('pull');
     setSyncResult(null);
     try {
-      const resp = await fetch('/api/delivery/sync/pull', { method: 'POST' });
+      const resp = await fetch('/api/delivery/sync/pull', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const json = await resp.json();
       if (json.ok) {
         const d = json.data;
@@ -480,7 +480,7 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
     setSyncing('push');
     setSyncResult(null);
     try {
-      const resp = await fetch('/api/delivery/sync/push', { method: 'POST' });
+      const resp = await fetch('/api/delivery/sync/push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const json = await resp.json();
       if (json.ok) {
         const d = json.data;
@@ -503,7 +503,7 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
     setSyncing('pull');
     setSyncResult(null);
     try {
-      const resp = await fetch('/api/delivery/entries/import-xlsx', { method: 'POST' });
+      const resp = await fetch('/api/delivery/entries/import-xlsx', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const json = await resp.json();
       if (json.ok) {
         const { created, skipped, sheetsProcessed } = json.data;
