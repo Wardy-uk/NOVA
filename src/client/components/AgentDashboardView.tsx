@@ -1353,9 +1353,24 @@ function SuggestionCards({ type, onRulesChanged, onCustomize }: { type: 'guardra
         <div className="text-[10px] text-neutral-500 py-2">Loading suggestions...</div>
       ) : items.length === 0 ? (
         <div className="text-[10px] text-neutral-500 py-2">No suggestions — click Refresh to analyse decision history.</div>
-      ) : items.map(s => (
-        <VerdictCard key={s.id} s={s} onApply={apply} onDismiss={dismiss} onSnooze={snooze} onCustomize={onCustomize} />
-      ))}
+      ) : (() => {
+        const actionable = items.filter(s => s.verdict?.verdict !== 'wait');
+        const waitCount = items.length - actionable.length;
+        return <>
+          {actionable.length === 0 && waitCount > 0 ? (
+            <div className="text-[10px] text-neutral-500 py-2">{waitCount} {waitCount === 1 ? 'category' : 'categories'} gathering data — nothing to action yet.</div>
+          ) : (
+            <>
+              {actionable.map(s => (
+                <VerdictCard key={s.id} s={s} onApply={apply} onDismiss={dismiss} onSnooze={snooze} onCustomize={onCustomize} />
+              ))}
+              {waitCount > 0 && (
+                <div className="text-[10px] text-neutral-500 py-1">{waitCount} more {waitCount === 1 ? 'category' : 'categories'} gathering data</div>
+              )}
+            </>
+          )}
+        </>;
+      })()}
     </div>
   );
 }
