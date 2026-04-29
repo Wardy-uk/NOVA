@@ -1,0 +1,58 @@
+[
+  {
+    "context": "Fallen Through",
+    "emailSubject": "<p>Test</p>",
+    "emailCopy": "<p>Test</p>",
+    "letterCopy": "<p>Dear homeowner,&nbsp;</p>\n<p>We believe that there has been an issue with you achieving a successful sale of your property.&nbsp;</p>\n<p>If your property has recently fallen through, we wanted to take the opportunity to provide you with some insights into why this happens and make you aware that we can help you with your sale moving forward.&nbsp;</p>\n<p>Mortgage problems can be rectified by your agent thoroughly vetting prospective buyers and qualifying that they can proceed financially from the outset. If the property chain has broken down, it is the role of your agent to ensure that your chain is regularly chased and moved forward.&nbsp;</p>\n<p>Problems that arise due to a home survey can be rectified by your agent encouraging you to have a survey done in advance.&nbsp;</p>\n<p>If you have suffered from conveyancing delays, again it is the responsibility of your agent to encourage you to instruct a trusted conveyancer as early as possible.&nbsp;</p>\n<p>Right now, if you are still committed to selling, we would sincerely appreciate the opportunity to talk to you about your experience, and objectively offer you advice on what we can do to get your property back on the market quickly and in front of qualified buyers.&nbsp;</p>\n<p>To talk to a member of our team, please call us on $!{BuildYourMarket.TrackablePhone}.</p>",
+    "smsCopy": "<p>Test</p>"
+  },
+  {
+    "context": "Price Movement",
+    "emailSubject": "<p>Test</p>",
+    "emailCopy": "<p>Test</p>",
+    "letterCopy": "<p>Dear homeowner,</p><p>We noticed that your property has recently had a reduction in asking price. We wanted to offer you an insight into how you can make the most of this situation and explain why this can happen when selling.</p><p>You may feel that your property has not received the attention you expected. Often, this is the fault of the agent conducting your sale.</p><p>In most cases, this indicates that your agency may have exhausted their capabilities of effectively marketing your property, lost motivation in selling for you, and become less confident in their own initial pricing.</p><p>It is true that –for some properties –reducing the asking price can generate new interest from buyers. Also, the speed and need for sale often informs the decision to reduce the price.</p><p>However, for a quality property, the decision from your agent to ask you to reduce your price can damage your potential to sell and could cost you £1,000s upon completion.</p><p>If you have felt pressure from your agent to reduce your price and you would like to know how your marketing plan could be improved right now, we would be delighted to provide you with a free and impartial property consultation.</p><p>Please contact your local property advisor on $!{BuildYourMarket.TrackablePhone}</p></p>",
+    "smsCopy": "<p>Test</p>"
+  },
+  {
+    "context": "Properties at 4 Weeks",
+    "emailSubject": "<p>Test</p>",
+    "emailCopy": "<p>Test</p>",
+    "letterCopy": "<p>Dear homeowner,&nbsp;</p>\n<p>It has been four weeks since you brought your property to market. We would expect that your property would have had plenty of viewings by this stage. You may have even received offers on your property.&nbsp;</p>\n<p>If not, you might be starting to feel that something is not quite right. If your property is not receiving the level of interest that you feel is appropriate, there are several key factors that you need to consider right now.&nbsp;</p>\n<p><strong>Is your property priced correctly? Is your property getting the exposure it needs to sell?&nbsp;</strong></p>\n<p>Remember, your choice of estate agent directly impacts the marketing price, the stress you experience and the time it takes to sell. &nbsp;</p>\n<p>Our advice if you are feeling uneasy about the way things are going is to re-establish what matters to you and the way your property is being handled. As ever, we would be delighted to talk through your current experience and provide you with some helpful and impartial advice on how to make sure you are getting the service you deserve.&nbsp;</p>\n<p>Your local property advisor is available on $!{BuildYourMarket.TrackablePhone}.</p>",
+    "smsCopy": "<p>Test</p>"
+  },
+  {
+    "context": "Properties at 6 Weeks",
+    "emailSubject": "<p>Test</p>",
+    "emailCopy": "<p>Test</p>",
+    "letterCopy": "<p>Dear homeowner,&nbsp;</p>\n<p>As your property has been on the market for six weeks now, we thought that you might take some comfort from knowing that most properties that struggle to sell at this stage are directly related to the agency responsible for selling them.&nbsp;</p>\n<p>We are working with several sellers in the local area that have made the unfortunate mistake of selecting their agent based on overinflated market values, empty promises of high service levels, and ill-advised market advice.&nbsp;</p>\n<p><strong>If your property is not the issue, your agent might be.&nbsp;</strong></p>\n<p>We would be delighted to assist you with your sale moving forward.&nbsp;</p>\n<p>We believe that accurate pricing leads to immediate interest, pre-qualification of buyers speeds up the process for you, and that you should be expertly guided towards a quick and totally hassle-free sale from the moment you instruct your estate agent.&nbsp;</p>\n<p>To speak with your local property advisor, please call [trackable number].</p>",
+    "smsCopy": "<p>Test</p>"
+  },
+  {
+    "context": "Properties at 8 Weeks",
+    "emailSubject": "<p>Test</p>",
+    "emailCopy": "<p>Test</p>",
+    "letterCopy": "<p>Dear homeowner,</p>\n<p>Most people selling their property would reasonably expect to receive an offer within eight weeks.</p>\n<p>Market conditions obviously play a major part in the speed of a sale, but a &nbsp;failure from your agent to secure an offer within a 60-day period is a &nbsp;strong indication that your property may have been overvalued or that your agent is not matching your property with suitable buyers.</p>\n<p>Working with an agent that has experience in selling properties like yours plays a substantial role in achieving a successful sale. It is a fact that some agents are simply less well suited to generating appropriate buyers for certain properties.</p>\n<p>Right now, the best advice we can give you is to research who is the most effective agent in the local area for selling properties that share the same characteristics as your own.</p>\n<p>You may also need to start seriously considering the possibility of switching agents before you make a hasty decision to reduce or tweak your asking price, as pricing may not be the only fundamental issue.</p>\n<p>We would be happy to discuss assisting you with your property. For more information regarding how we can help, please contact your local property advisor on $!{BuildYourMarket.TrackablePhone}</p>",
+    "smsCopy": "<p>Test</p>"
+  },
+  {
+    "context": "Properties at 12 Weeks",
+    "emailSubject": "<p>Test</p>",
+    "emailCopy": "<p>Test</p>",
+    "letterCopy": "<p>Dear homeowner,&nbsp;</p>\n<p>As your property has reached twelve weeks on the market, we thought it might be interesting for you to understand a little more about why your property may not be currently receiving interest that is progressing to the under offer stage. &nbsp;</p>\n<p>Accurate market knowledge, correct pricing, and the ability to connect your property with qualified buyers are three fundamental things that need to be in place to sell fast and achieve the best possible price.&nbsp;</p>\n<p>We are now extremely concerned that these fundamentals are missing from your marketing strategy and would seriously recommend that you consider switching estate agents to ensure your sale progresses.&nbsp;</p>\n<p>Due to the amount of properties and buyers that we deal with daily, we &nbsp;have an unrivalled understanding of demand and affordability levels within the local market. &nbsp;</p>\n<p>We believe that we are the only agent in the area that can offer you and your property a greater potential to secure a sale at a premium price. &nbsp;</p>\n<p>For more information, please contact your local property advisor on &nbsp;$!{BuildYourMarket.TrackablePhone}.</p>",
+    "smsCopy": "<p>Test</p>"
+  },
+  {
+    "context": "Properties at 16 Weeks",
+    "emailSubject": "<p>Test</p>",
+    "emailCopy": "<p>Test</p>",
+    "letterCopy": "<p>Dear homeowner,&nbsp;</p>\n<p>As your property has reached sixteen weeks on the market, we thought it might be interesting for you to understand a little more about why your property may not be currently receiving interest that is progressing to the under offer stage.&nbsp;</p>\n<p>Sometimes it just does not work with an agency and you need a fresh approach from a proactive independent estate agent with a proven history in turning sale boards to sold boards.&nbsp;</p>\n<p>With experienced staff, knowledgeable in all aspects of the property market, we believe that we are the only agent in the area that can offer you and your property a greater potential to secure a sale at a premium price.&nbsp;</p>\n<p>For more information, please contact your local property advisor on &nbsp;$!{BuildYourMarket.TrackablePhone}.</p>",
+    "smsCopy": "<p>Test</p>"
+  },
+  {
+    "context": "Withdrawn",
+    "emailSubject": "<p>Test</p>",
+    "emailCopy": "<p>Test</p>",
+    "letterCopy": "<p>Dear homeowner,&nbsp;</p>\n<p>We recently noticed that your property has had a change in status.&nbsp;</p>\n<p>As your circumstances change, your estate agent should be supporting every property-related decision you make. &nbsp;</p>\n<p>You may have decided that it is not the right time to sell your property, or that you are unhappy with the number of viewings and subsequent offers you have received so far.&nbsp;</p>\n<p>Maybe you are concerned that your agent overpriced your property from the outset, and it has been sat on the market for too long. You might even have made the decision to temporarily withdraw it from the market and re-launch it in the future to generate new interest. &nbsp;</p>\n<p>You may just be looking for some helpful advice on how to add more value to your property to increase its asking price, or maybe you just need a break from everything property-related right now.&nbsp;</p>\n<p>We understand that selling your property can seem overwhelming at times. So, if you need assistance from an agency that can offer you more support when things are not going to plan, we would be delighted to help.&nbsp;</p>\n<p>To discuss your next move, call your local property advisor on $!{BuildYourMarket.TrackablePhone}.</p>",
+    "smsCopy": "<p>Test</p>"
+  }
+]

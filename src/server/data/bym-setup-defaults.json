@@ -1,0 +1,142 @@
+{
+  "rssFeeds": [
+    {
+      "isBymFeed": false,
+      "description": "Property Reporter News - Top Stories",
+      "imageTitle": "",
+      "imageDescription": "",
+      "imageUrl": "",
+      "instance": null,
+      "contentChannel": null,
+      "automaticallyCreateArticles": false,
+      "feedUrl": "https://www.propertyreporter.co.uk/rss.asp?v=1",
+      "categoryAssignType": "AutoAssignCategories",
+      "isBookMarked": false,
+      "type": 0,
+      "timeToLive": 60,
+      "active": true
+    },
+    {
+      "isBymFeed": false,
+      "description": "Latest news, breaking news and current affairs coverage from across the UK from theguardian.com",
+      "imageTitle": "",
+      "imageDescription": "",
+      "imageUrl": "",
+      "instance": null,
+      "contentChannel": null,
+      "automaticallyCreateArticles": false,
+      "feedUrl": "https://www.theguardian.com/uk-news/rss",
+      "categoryAssignType": "AutoAssignCategories",
+      "isBookMarked": false,
+      "type": 1,
+      "timeToLive": 60,
+      "active": true
+    },
+    {
+      "isBymFeed": false,
+      "description": "BBC News - UK",
+      "imageTitle": "BBC News",
+      "imageDescription": "",
+      "imageUrl": "https://news.bbcimg.co.uk/nol/shared/img/bbc_news_120x60.gif",
+      "instance": null,
+      "contentChannel": null,
+      "automaticallyCreateArticles": false,
+      "feedUrl": "http://feeds.bbci.co.uk/news/uk/rss.xml",
+      "categoryAssignType": "AutoAssignCategories",
+      "isBookMarked": false,
+      "type": 0,
+      "timeToLive": 15,
+      "active": true
+    },
+    {
+      "isBymFeed": false,
+      "description": "BBC News - News Front Page",
+      "imageTitle": "BBC News",
+      "imageDescription": "",
+      "imageUrl": "https://news.bbcimg.co.uk/nol/shared/img/bbc_news_120x60.gif",
+      "instance": null,
+      "contentChannel": null,
+      "automaticallyCreateArticles": false,
+      "feedUrl": "http://feeds.bbci.co.uk/news/rss.xml",
+      "categoryAssignType": "AutoAssignCategories",
+      "isBookMarked": false,
+      "type": 0,
+      "timeToLive": 15,
+      "active": true
+    },
+    {
+      "isBymFeed": false,
+      "description": "News and articles on worldwide property and real estate investment in United Kingdom",
+      "imageTitle": "Propertyshowrooms.com News",
+      "imageDescription": "",
+      "imageUrl": "https://www.propertyshowrooms.com/images/psr-news-logo.gif",
+      "instance": null,
+      "contentChannel": null,
+      "automaticallyCreateArticles": false,
+      "feedUrl": "https://www.propertyshowrooms.com/united-kingdom/property/news/rss/",
+      "categoryAssignType": "AutoAssignCategories",
+      "isBookMarked": false,
+      "type": 0,
+      "timeToLive": 15,
+      "active": true
+    },
+    {
+      "isBymFeed": false,
+      "description": "",
+      "imageTitle": "",
+      "imageDescription": "",
+      "imageUrl": "",
+      "instance": null,
+      "contentChannel": null,
+      "automaticallyCreateArticles": false,
+      "feedUrl": "https://www.propertyindustryeye.com/feed/",
+      "categoryAssignType": "AutoAssignCategories",
+      "isBookMarked": false,
+      "type": 0,
+      "timeToLive": 60,
+      "active": true
+    },
+    {
+      "isBymFeed": true,
+      "description": "BriefYourMarket RSS Feed for content.briefyourmarket.com",
+      "imageTitle": "",
+      "imageDescription": "",
+      "imageUrl": "",
+      "instance": "content",
+      "contentChannel": "Communications Managed Lite",
+      "automaticallyCreateArticles": false,
+      "feedUrl": "https://content.briefyourmarket.com/rss.ashx?channel=Communications Managed Lite&key=4h%2fWCSGBV3eLYbzY6GH%2fBOYK1a7auGhoqFGs2446JnICrewzqOpOuNt27P6iUEkOOzZES3%2bKgqmxVkZiTZrhn1lZWVktMDUtMDY%3d",
+      "categoryAssignType": "AutoAssignCategories",
+      "isBookMarked": false,
+      "type": 0,
+      "timeToLive": 5,
+      "active": true
+    }
+  ],
+  "configSettings": [
+    { "name": "BuildYourMarketEnabled", "value": "True" },
+    { "name": "BuildYourMarketLettingsEnabled", "value": "True" },
+    { "name": "Setting.Build.MaxPostSectors", "value": "10000" },
+    { "name": "ScheduledReportsEnabled", "value": "True" },
+    { "name": "EmailEditor.DataloftEnabled", "value": "True" }
+  ],
+  "scheduledReports": [
+    { "definitionId": 212 },
+    { "definitionId": 215 },
+    { "definitionId": 218 }
+  ],
+  "emailComponentLibraryIds": [44, 46, 102, 101, 103, 105, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210],
+  "defaultPrintLibraryIds": [71, 72, 76],
+  "milestones": {
+    "saleWeeks": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
+    "lettingMonths": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
+    "lettingDays": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30]
+  },
+  "userRoles": [
+    "Administrator", "MessageSender", "Editor", "Author", "SubEditor",
+    "SurveyAuthor", "MasterCreditController", "LetterSender", "ReportViewer",
+    "ContactAdministrator", "SmsSender", "DirectMailSender", "DirectMailAuthor",
+    "DirectMailMaster", "DigitalMediaAuthor", "MessageAuthor", "MessageApprover",
+    "CreditGroupController", "ContactFormsAuthor"
+  ]
+}

@@ -687,6 +687,7 @@ async function main() {
         urlTemplate: s.bym_url_template,
         buildApiUrl: s.bym_build_api_url,
         imageServiceUrl: s.bym_image_url,
+        configApiUrl: s.bym_config_api_url || undefined,
       });
       console.log('[N.O.V.A] BriefYourMarket Setup: Service configured');
     } else {

@@ -175,6 +175,7 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'bym_url_template', label: 'Instance URL Template', type: 'url', placeholder: 'https://{0}.briefyourmarket.services/', required: true },
       { key: 'bym_build_api_url', label: 'BuildYourMarket API URL', type: 'url', placeholder: 'https://buildyourmarketapi-live.azurewebsites.net/', required: true },
       { key: 'bym_image_url', label: 'Image Service URL', type: 'url', placeholder: 'https://bymmedia-dev.azurewebsites.net', required: true },
+      { key: 'bym_config_api_url', label: 'Config API URL (Robocop)', type: 'url', placeholder: 'https://configapi.briefyourmarket.com', required: false },
     ],
   },
   {
