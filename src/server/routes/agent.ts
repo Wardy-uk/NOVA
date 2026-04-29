@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import sql from 'mssql';
 import { requireRole, requireSuperAdmin } from '../middleware/auth.js';
 import type { AgentLoop } from '../services/agent-loop.js';
 import { query, execute } from '../services/database.js';
@@ -11,7 +12,6 @@ import type { AssignmentEngine, Pool } from '../services/assignment-engine.js';
 import type { AgentAvailabilityService, AvailabilityStatus } from '../services/agent-availability.js';
 import type { TicketClassifier } from '../services/ticket-classifier.js';
 import type { BriefEngine } from '../services/brief-engine.js';
-import type { CoachingEngine } from '../services/coach.js';
 import type { KpiPipeline } from '../services/kpi-pipeline.js';
 import type { QaPipeline } from '../services/qa-pipeline.js';
 import type { PipelineMonitor } from '../services/pipeline-monitor.js';
@@ -28,7 +28,6 @@ interface AgentRouteDeps {
   availabilityService: AgentAvailabilityService;
   ticketClassifier: TicketClassifier;
   briefEngine: BriefEngine;
-  coachingEngine: CoachingEngine;
   kpiPipeline: KpiPipeline;
   qaPipeline: QaPipeline;
   pipelineMonitor: PipelineMonitor;
@@ -42,6 +41,22 @@ interface AgentRouteDeps {
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
   const router = Router();
+
+  let kpiPool: sql.ConnectionPool | null = null;
+  async function getKpiPool(): Promise<sql.ConnectionPool> {
+    if (kpiPool?.connected) return kpiPool;
+    const s = deps?.settingsQueries?.getAll();
+    if (!s?.kpi_sql_server || !s?.kpi_sql_database || !s?.kpi_sql_user || !s?.kpi_sql_password) {
+      throw new Error('KPI SQL Server not configured');
+    }
+    kpiPool = await new sql.ConnectionPool({
+      server: s.kpi_sql_server, database: s.kpi_sql_database,
+      user: s.kpi_sql_user, password: s.kpi_sql_password,
+      options: { encrypt: true, trustServerCertificate: true },
+      requestTimeout: 30000,
+    }).connect();
+    return kpiPool;
+  }
 
   router.use(requireRole('admin', 'super_admin'));
 
@@ -1466,37 +1481,166 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
-  // ── Coaching (WP-14) ──
+  // ── Coaching (WP-14) — sourced from KPI SQL jira_qa_results + Jira_QA_GoldenRules ──
 
   router.get('/coaching/team', async (req, res) => {
     const days = Math.min(parseInt(req.query.days as string, 10) || 30, 90);
     try {
-      const coach = deps?.coachingEngine;
-      if (!coach) {
-        res.json({ ok: true, data: [] });
-        return;
-      }
-      const data = await coach.getTeamScores(days);
+      const p = await getKpiPool();
+      const result = await p.request().query(`
+        DECLARE @since DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+
+        SELECT
+          q.assigneeName AS agent_name,
+          COUNT(*) AS assessments,
+          AVG(CAST(q.overallScore AS FLOAT)) AS avg_qa_overall,
+          SUM(CASE WHEN q.grade = 'GREEN' THEN 1 ELSE 0 END) AS green_count,
+          SUM(CASE WHEN q.grade = 'AMBER' THEN 1 ELSE 0 END) AS amber_count,
+          SUM(CASE WHEN q.grade = 'RED' THEN 1 ELSE 0 END) AS red_count,
+          SUM(CAST(q.isConcerning AS INT)) AS concerning_count
+        FROM dbo.jira_qa_results q
+        WHERE CAST(q.CreatedAt AS DATE) >= @since
+          AND ISNULL(q.qaType, '') <> 'excluded'
+          AND q.assigneeName IS NOT NULL AND q.assigneeName <> ''
+        GROUP BY q.assigneeName
+        ORDER BY AVG(CAST(q.overallScore AS FLOAT)) DESC
+      `);
+
+      const grResult = await p.request().query(`
+        DECLARE @since DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+
+        SELECT
+          g.Assignee AS agent_name,
+          AVG(CAST(g.OverallScore AS FLOAT)) AS avg_gr_overall,
+          AVG(CAST(g.Rule1Score AS FLOAT)) AS avg_ownership,
+          AVG(CAST(g.Rule2Score AS FLOAT)) AS avg_next_action,
+          AVG(CAST(g.Rule3Score AS FLOAT)) AS avg_timeframe
+        FROM dbo.Jira_QA_GoldenRules g
+        WHERE CAST(g.CreatedAt AS DATE) >= @since
+          AND g.Assignee IS NOT NULL AND g.Assignee <> ''
+        GROUP BY g.Assignee
+      `);
+
+      const grMap: Record<string, any> = {};
+      for (const r of grResult.recordset) grMap[r.agent_name] = r;
+
+      const data = result.recordset.map((row: any) => {
+        const gr = grMap[row.agent_name];
+        return {
+          agent_name: row.agent_name,
+          assessments: row.assessments,
+          avg_qa_overall: row.avg_qa_overall != null ? Math.round(row.avg_qa_overall * 10) / 10 : null,
+          avg_ownership: gr?.avg_ownership != null ? Math.round(gr.avg_ownership * 10) / 10 : null,
+          avg_next_action: gr?.avg_next_action != null ? Math.round(gr.avg_next_action * 10) / 10 : null,
+          avg_timeframe: gr?.avg_timeframe != null ? Math.round(gr.avg_timeframe * 10) / 10 : null,
+          avg_gr_overall: gr?.avg_gr_overall != null ? Math.round(gr.avg_gr_overall * 10) / 10 : null,
+          green_count: row.green_count,
+          amber_count: row.amber_count,
+          red_count: row.red_count,
+          concerning_count: row.concerning_count,
+        };
+      });
+
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get team scores' });
     }
   });
 
-  router.get('/coaching/agent/:agentUserId', async (req, res) => {
-    const agentUserId = parseInt(req.params.agentUserId, 10);
+  router.get('/coaching/agent/:agentName', async (req, res) => {
+    const agentName = decodeURIComponent(req.params.agentName);
     const days = Math.min(parseInt(req.query.days as string, 10) || 30, 90);
-    if (isNaN(agentUserId)) {
-      res.status(400).json({ ok: false, error: 'Invalid agent user ID' });
+    if (!agentName) {
+      res.status(400).json({ ok: false, error: 'Agent name required' });
       return;
     }
     try {
-      const coach = deps?.coachingEngine;
-      if (!coach) {
-        res.json({ ok: true, data: null });
-        return;
-      }
-      const data = await coach.getAgentScores(agentUserId, days);
+      const p = await getKpiPool();
+      const safeName = agentName.replace(/'/g, "''");
+
+      const [qaAvg, grAvg, trend, concerns] = await Promise.all([
+        p.request().query(`
+          DECLARE @since DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+          SELECT
+            COUNT(*) AS total,
+            AVG(CAST(overallScore AS FLOAT)) AS avg_overall,
+            AVG(CAST(clarityScore AS FLOAT)) AS avg_clarity,
+            AVG(CAST(toneScore AS FLOAT)) AS avg_tone,
+            SUM(CASE WHEN grade = 'GREEN' THEN 1 ELSE 0 END) AS green_count,
+            SUM(CASE WHEN grade = 'AMBER' THEN 1 ELSE 0 END) AS amber_count,
+            SUM(CASE WHEN grade = 'RED' THEN 1 ELSE 0 END) AS red_count,
+            SUM(CAST(isConcerning AS INT)) AS concerning_count
+          FROM dbo.jira_qa_results
+          WHERE assigneeName = '${safeName}'
+            AND CAST(CreatedAt AS DATE) >= @since
+            AND ISNULL(qaType, '') <> 'excluded'
+        `),
+        p.request().query(`
+          DECLARE @since DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+          SELECT
+            AVG(CAST(OverallScore AS FLOAT)) AS avg_gr_overall,
+            AVG(CAST(Rule1Score AS FLOAT)) AS avg_ownership,
+            AVG(CAST(Rule2Score AS FLOAT)) AS avg_next_action,
+            AVG(CAST(Rule3Score AS FLOAT)) AS avg_timeframe
+          FROM dbo.Jira_QA_GoldenRules
+          WHERE Assignee = '${safeName}'
+            AND CAST(CreatedAt AS DATE) >= @since
+        `),
+        p.request().query(`
+          DECLARE @since DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+          SELECT CAST(CreatedAt AS DATE) AS day,
+                 AVG(CAST(overallScore AS FLOAT)) AS avg_score,
+                 COUNT(*) AS count
+          FROM dbo.jira_qa_results
+          WHERE assigneeName = '${safeName}'
+            AND CAST(CreatedAt AS DATE) >= @since
+            AND ISNULL(qaType, '') <> 'excluded'
+          GROUP BY CAST(CreatedAt AS DATE)
+          ORDER BY day
+        `),
+        p.request().query(`
+          DECLARE @since DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
+          SELECT TOP 20
+            issueKey AS issue_key, grade,
+            CAST(overallScore AS FLOAT) AS overall_score,
+            category, coachingPoints AS coaching_points,
+            CONVERT(VARCHAR(23), CreatedAt, 126) AS processed_at
+          FROM dbo.jira_qa_results
+          WHERE assigneeName = '${safeName}'
+            AND CAST(CreatedAt AS DATE) >= @since
+            AND (grade = 'RED' OR isConcerning = 1)
+            AND ISNULL(qaType, '') <> 'excluded'
+          ORDER BY CreatedAt DESC
+        `),
+      ]);
+
+      const qa = qaAvg.recordset[0];
+      const gr = grAvg.recordset[0];
+
+      const data = {
+        averages: qa?.total > 0 ? {
+          qa_overall: qa.avg_overall != null ? Math.round(qa.avg_overall * 10) / 10 : null,
+          clarity: qa.avg_clarity != null ? Math.round(qa.avg_clarity * 10) / 10 : null,
+          tone: qa.avg_tone != null ? Math.round(qa.avg_tone * 10) / 10 : null,
+          ownership: gr?.avg_ownership != null ? Math.round(gr.avg_ownership * 10) / 10 : null,
+          next_action: gr?.avg_next_action != null ? Math.round(gr.avg_next_action * 10) / 10 : null,
+          timeframe: gr?.avg_timeframe != null ? Math.round(gr.avg_timeframe * 10) / 10 : null,
+          gr_overall: gr?.avg_gr_overall != null ? Math.round(gr.avg_gr_overall * 10) / 10 : null,
+        } : null,
+        trend: trend.recordset.map((r: any) => ({
+          day: r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day).slice(0, 10),
+          avg_score: Math.round((r.avg_score ?? 0) * 10) / 10,
+          count: r.count,
+        })),
+        totalAssessments: qa?.total ?? 0,
+        gradeBreakdown: {
+          green: qa?.green_count ?? 0,
+          amber: qa?.amber_count ?? 0,
+          red: qa?.red_count ?? 0,
+        },
+        concerningTickets: concerns.recordset,
+      };
+
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get agent scores' });
@@ -1505,53 +1649,29 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
   router.get('/coaching/nudges', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
-    const agentUserId = req.query.agentUserId ? parseInt(req.query.agentUserId as string, 10) : undefined;
+    const agent = req.query.agent as string | undefined;
     try {
-      const coach = deps?.coachingEngine;
-      if (!coach) {
-        res.json({ ok: true, data: [] });
-        return;
-      }
-      const data = await coach.getNudgeHistory(limit, agentUserId);
-      res.json({ ok: true, data });
+      const p = await getKpiPool();
+      const agentFilter = agent ? `AND r.assigneeName = '${agent.replace(/'/g, "''")}'` : '';
+      const result = await p.request().query(`
+        SELECT TOP ${limit}
+          r.issueKey AS issue_key,
+          r.assigneeName AS agent_name,
+          r.grade,
+          CAST(r.overallScore AS FLOAT) AS overall_score,
+          r.coachingPoints AS coaching_points,
+          r.category,
+          CONVERT(VARCHAR(23), r.CreatedAt, 126) AS processed_at
+        FROM dbo.jira_qa_results r
+        WHERE (r.grade = 'RED' OR r.isConcerning = 1)
+          AND ISNULL(r.qaType, '') <> 'excluded'
+          ${agentFilter}
+        ORDER BY r.CreatedAt DESC
+      `);
+      res.json({ ok: true, data: result.recordset });
     } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get nudge history' });
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get coaching concerns' });
     }
-  });
-
-  router.post('/coaching/assess', async (req, res) => {
-    const { ticketKey, agentAccountId, responseText } = req.body;
-    if (!ticketKey || !agentAccountId || !responseText) {
-      res.status(400).json({ ok: false, error: 'ticketKey, agentAccountId, and responseText are required' });
-      return;
-    }
-    try {
-      const coach = deps?.coachingEngine;
-      if (!coach) {
-        res.status(503).json({ ok: false, error: 'Coaching engine not available' });
-        return;
-      }
-      const result = await coach.assessResponse(ticketKey, agentAccountId, responseText);
-      res.json({ ok: true, data: result });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Assessment failed' });
-    }
-  });
-
-  router.put('/coaching/visibility', (req, res) => {
-    const { visibility } = req.body;
-    const valid = ['off', 'agent', 'manager'];
-    if (!valid.includes(visibility)) {
-      res.status(400).json({ ok: false, error: `visibility must be one of: ${valid.join(', ')}` });
-      return;
-    }
-    const coach = deps?.coachingEngine;
-    if (!coach) {
-      res.status(503).json({ ok: false, error: 'Coaching engine not available' });
-      return;
-    }
-    coach.setVisibility(visibility);
-    res.json({ ok: true, data: { visibility } });
   });
 
   // ── Roster & Assignment (WP-19) ──

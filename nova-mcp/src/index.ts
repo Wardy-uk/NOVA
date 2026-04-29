@@ -706,20 +706,20 @@ server.tool(
 
 server.tool(
   'nova_agent_coaching',
-  'Get coaching scores and nudge history — team-wide or per-agent QA coaching metrics.',
+  'Get QA coaching data from the Golden Rules pipeline — team-wide or per-agent. Sources from jira_qa_results and Jira_QA_GoldenRules.',
   {
-    agent_id: z.string().optional().describe('Agent user ID for individual coaching (omit for team)'),
+    agent_name: z.string().optional().describe('Agent display name for individual coaching (omit for team overview)'),
     days: z.number().default(30).describe('Lookback days (default 30, max 90)'),
   },
-  async ({ agent_id, days }) => {
+  async ({ agent_name, days }) => {
     try {
       const d = Math.min(days, 90);
-      if (agent_id) {
+      if (agent_name) {
         const [agentCoaching, nudges] = await Promise.all([
-          api<any>(`/api/agent/coaching/agent/${encodeURIComponent(agent_id)}`, { days: d }),
-          api<any>('/api/agent/coaching/nudges', { agentUserId: agent_id, limit: 50 }),
+          api<any>(`/api/agent/coaching/agent/${encodeURIComponent(agent_name)}`, { days: d }),
+          api<any>('/api/agent/coaching/nudges', { agent: agent_name, limit: 50 }),
         ]);
-        return toolResult(`Coaching for agent ${agent_id} over ${d} days`, { coaching: agentCoaching, nudges });
+        return toolResult(`Coaching for ${agent_name} over ${d} days`, { coaching: agentCoaching, nudges });
       }
       const [team, nudges] = await Promise.all([
         api<any>('/api/agent/coaching/team', { days: d }),

@@ -6,7 +6,7 @@ import { QaTicketResultSchema, type QaTicketResult } from './qa-schemas.js';
 import { loadPrompt } from './prompt-loader.js';
 import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
 import { tableSuffix } from './pipeline-monitor.js';
-import { executeAndGetId } from './database.js';
+
 
 let pool: sql.ConnectionPool | null = null;
 
@@ -238,26 +238,7 @@ export class QaPipeline {
          @rule1Pass, @rule2Pass, @rule3Pass, @summary, @assignee, GETUTCDATE())
     `);
 
-    try {
-      const goldenRuleScores = JSON.stringify({
-        ownership: gr.ownership,
-        nextAction: gr.nextAction,
-        timeframe: gr.timeframe,
-        overall: qa.overallScore,
-        feedback: qa.summary.slice(0, 500),
-        strengths: [],
-        improvements: [],
-      });
-      const nudgeType = qa.isConcerning ? 'golden_rules' : null;
-      const message = qa.isConcerning ? `QA concern on ${issue.key}: ${qa.summary.slice(0, 200)}` : null;
-
-      await executeAndGetId(`
-        INSERT INTO agent_coaching (ticket_id, agent_user_id, nudge_type, golden_rule_scores, message, delivered, delivery_method)
-        VALUES (?, 0, ?, ?, ?, 0, 'qa_pipeline')
-      `, [issue.key, nudgeType, goldenRuleScores, message]);
-    } catch (err) {
-      console.warn(`[qa-pipeline] Coaching bridge failed for ${issue.key}:`, err instanceof Error ? err.message : err);
-    }
+    // agent_coaching bridge removed — coaching dashboard now reads from jira_qa_results directly
   }
 
   private extractText(adf: any): string {

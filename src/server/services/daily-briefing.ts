@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import sql from 'mssql';
 import { query, executeAndGetId } from './database.js';
 import type { LlmService } from './llm-service.js';
 import type { JiraCacheQueries } from './jira-cache-queries.js';
@@ -48,6 +49,8 @@ type BriefingLlmResult = z.infer<typeof BriefingLlmSchema>;
 // ── Service ──
 
 export class DailyBriefingService {
+  private kpiPool: sql.ConnectionPool | null = null;
+
   constructor(
     private llm: LlmService,
     private cache: JiraCacheQueries,
@@ -55,6 +58,23 @@ export class DailyBriefingService {
     private calendar: CalendarSyncService,
     private email: EmailService | null,
   ) {}
+
+  private async getKpiPool(): Promise<sql.ConnectionPool | null> {
+    if (this.kpiPool?.connected) return this.kpiPool;
+    const s = this.settings.getAll();
+    if (!s.kpi_sql_server || !s.kpi_sql_database || !s.kpi_sql_user || !s.kpi_sql_password) return null;
+    try {
+      this.kpiPool = await new sql.ConnectionPool({
+        server: s.kpi_sql_server, database: s.kpi_sql_database,
+        user: s.kpi_sql_user, password: s.kpi_sql_password,
+        options: { encrypt: true, trustServerCertificate: true },
+        requestTimeout: 15000,
+      }).connect();
+      return this.kpiPool;
+    } catch {
+      return null;
+    }
+  }
 
   // ── Generate for a specific agent ──
 
@@ -71,12 +91,25 @@ export class DailyBriefingService {
          FROM agent_decisions WHERE created_at >= DATEADD(day, -1, GETUTCDATE())
          ORDER BY created_at DESC`
       ),
-      query<{ nudge_type: string; message: string; ticket_id: string }>(
-        `SELECT TOP 5 nudge_type, message, ticket_id
-         FROM agent_coaching WHERE agent_user_id = ? AND created_at >= DATEADD(day, -1, GETUTCDATE())
-         ORDER BY created_at DESC`,
-        [userId]
-      ),
+      this.getKpiPool().then(async (p): Promise<Array<{ nudge_type: string; message: string; ticket_id: string }>> => {
+        if (!p) return [];
+        try {
+          const safeName = agentName.replace(/'/g, "''");
+          const r = await p.request().query(`
+            SELECT TOP 5 issueKey, grade, coachingPoints, category
+            FROM dbo.jira_qa_results
+            WHERE assigneeName = '${safeName}'
+              AND (grade = 'RED' OR isConcerning = 1)
+              AND CreatedAt >= DATEADD(day, -1, GETUTCDATE())
+            ORDER BY CreatedAt DESC
+          `);
+          return r.recordset.map((row: any) => ({
+            nudge_type: `qa_${(row.grade ?? 'RED').toLowerCase()}`,
+            message: row.coachingPoints ?? `${row.grade} grade on ${row.category ?? 'ticket'}`,
+            ticket_id: row.issueKey,
+          }));
+        } catch { return []; }
+      }),
       this.calendar.getTeamAvailability(today).catch(() => null),
     ]);
 

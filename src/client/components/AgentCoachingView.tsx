@@ -1,125 +1,136 @@
 import { useState, useEffect, useCallback } from 'react';
 
 interface TeamScore {
-  agent_user_id: number;
+  agent_name: string;
   assessments: number;
-  avg_clarity: number;
-  avg_empathy: number;
-  avg_action: number;
-  avg_ownership: number;
-  avg_overall: number;
+  avg_qa_overall: number | null;
+  avg_ownership: number | null;
+  avg_next_action: number | null;
+  avg_timeframe: number | null;
+  avg_gr_overall: number | null;
+  green_count: number;
+  amber_count: number;
+  red_count: number;
+  concerning_count: number;
 }
 
-interface AgentScores {
+interface AgentDetail {
   averages: {
-    clarity: number;
-    empathy: number;
-    action: number;
-    ownership: number;
-    overall: number;
+    qa_overall: number | null;
+    clarity: number | null;
+    tone: number | null;
+    ownership: number | null;
+    next_action: number | null;
+    timeframe: number | null;
+    gr_overall: number | null;
   } | null;
   trend: Array<{ day: string; avg_score: number; count: number }>;
   totalAssessments: number;
-  nudgeBreakdown: Record<string, number>;
+  gradeBreakdown: { green: number; amber: number; red: number };
+  concerningTickets: Array<{
+    issue_key: string;
+    grade: string;
+    overall_score: number;
+    coaching_points: string;
+    category: string;
+    processed_at: string;
+  }>;
 }
 
-interface NudgeEntry {
-  id: number;
-  ticket_id: string;
-  agent_user_id: number;
-  nudge_type: string;
-  golden_rule_scores: string | null;
-  message: string | null;
-  delivered: boolean;
-  created_at: string;
-}
-
-interface RosterAgent {
-  id: number;
-  display_name: string;
-  pool: string;
-  active: boolean;
+interface ConcernEntry {
+  issue_key: string;
+  agent_name: string;
+  grade: string;
+  overall_score: number;
+  coaching_points: string;
+  category: string;
+  processed_at: string;
 }
 
 function api(path: string) {
   return fetch(`/api/agent${path}`).then(r => r.json());
 }
 
-function apiJson(path: string, method: string, body: unknown) {
-  return fetch(`/api/agent${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }).then(r => r.json());
-}
-
-function scoreColor(score: number): string {
-  if (score >= 4) return 'text-green-400';
-  if (score >= 3) return 'text-amber-400';
+function gradeColor(grade: string): string {
+  if (grade === 'GREEN') return 'text-green-400';
+  if (grade === 'AMBER') return 'text-amber-400';
   return 'text-red-400';
 }
 
-function scoreBg(score: number): string {
-  if (score >= 4) return 'bg-green-900/30 border-green-800/40';
-  if (score >= 3) return 'bg-amber-900/30 border-amber-800/40';
+function gradeBg(grade: string): string {
+  if (grade === 'GREEN') return 'bg-green-900/30 border-green-800/40';
+  if (grade === 'AMBER') return 'bg-amber-900/30 border-amber-800/40';
   return 'bg-red-900/30 border-red-800/40';
 }
 
-function ScoreBar({ label, value, max = 5 }: { label: string; value: number; max?: number }) {
+function scoreColor(score: number | null, max: number): string {
+  if (score == null) return 'text-neutral-500';
+  const pct = score / max;
+  if (pct >= 0.75) return 'text-green-400';
+  if (pct >= 0.5) return 'text-amber-400';
+  return 'text-red-400';
+}
+
+function ScoreBar({ label, value, max }: { label: string; value: number | null; max: number }) {
+  if (value == null) return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="w-24 text-neutral-400">{label}</span>
+      <div className="flex-1 h-2 bg-[#23272e] rounded-full" />
+      <span className="w-8 text-right font-mono text-neutral-500">—</span>
+    </div>
+  );
   const pct = Math.round((value / max) * 100);
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span className="w-20 text-neutral-400">{label}</span>
+      <span className="w-24 text-neutral-400">{label}</span>
       <div className="flex-1 h-2 bg-[#23272e] rounded-full overflow-hidden">
         <div
-          className={`h-full rounded-full ${value >= 4 ? 'bg-green-500' : value >= 3 ? 'bg-amber-500' : 'bg-red-500'}`}
+          className={`h-full rounded-full ${pct >= 75 ? 'bg-green-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className={`w-8 text-right font-mono ${scoreColor(value)}`}>{value.toFixed(1)}</span>
+      <span className={`w-8 text-right font-mono ${scoreColor(value, max)}`}>{value.toFixed(1)}</span>
     </div>
   );
 }
 
-function NudgeTypeBadge({ type }: { type: string }) {
-  const colors: Record<string, string> = {
-    missing_next_update: 'bg-amber-900/40 text-amber-300',
-    weak_reply: 'bg-red-900/40 text-red-300',
-    unaddressed_question: 'bg-orange-900/40 text-orange-300',
-    no_troubleshooting: 'bg-purple-900/40 text-purple-300',
-    idle_ticket: 'bg-blue-900/40 text-blue-300',
-    golden_rules: 'bg-pink-900/40 text-pink-300',
-    escalation_without_docs: 'bg-rose-900/40 text-rose-300',
-  };
-  const label = type.replace(/_/g, ' ');
+function GradePill({ grade }: { grade: string }) {
   return (
-    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${colors[type] ?? 'bg-neutral-800 text-neutral-400'}`}>
-      {label}
+    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${gradeBg(grade)} ${gradeColor(grade)}`}>
+      {grade}
     </span>
+  );
+}
+
+function GradeBar({ green, amber, red }: { green: number; amber: number; red: number }) {
+  const total = green + amber + red;
+  if (total === 0) return <span className="text-[10px] text-neutral-500">—</span>;
+  return (
+    <div className="flex h-3 rounded-full overflow-hidden w-20" title={`G:${green} A:${amber} R:${red}`}>
+      {green > 0 && <div className="bg-green-500/70" style={{ width: `${(green / total) * 100}%` }} />}
+      {amber > 0 && <div className="bg-amber-500/70" style={{ width: `${(amber / total) * 100}%` }} />}
+      {red > 0 && <div className="bg-red-500/70" style={{ width: `${(red / total) * 100}%` }} />}
+    </div>
   );
 }
 
 export function AgentCoachingView() {
   const [days, setDays] = useState(30);
   const [teamScores, setTeamScores] = useState<TeamScore[]>([]);
-  const [roster, setRoster] = useState<RosterAgent[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<number | null>(null);
-  const [agentScores, setAgentScores] = useState<AgentScores | null>(null);
-  const [nudges, setNudges] = useState<NudgeEntry[]>([]);
-  const [visibility, setVisibility] = useState<string>('manager');
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [agentDetail, setAgentDetail] = useState<AgentDetail | null>(null);
+  const [concerns, setConcerns] = useState<ConcernEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadTeamData = useCallback(async () => {
     setLoading(true);
     try {
-      const [teamRes, rosterRes, nudgeRes] = await Promise.all([
+      const [teamRes, concernRes] = await Promise.all([
         api(`/coaching/team?days=${days}`),
-        api('/roster'),
         api('/coaching/nudges?limit=100'),
       ]);
       if (teamRes.ok) setTeamScores(teamRes.data ?? []);
-      if (rosterRes.ok) setRoster(rosterRes.data ?? []);
-      if (nudgeRes.ok) setNudges(nudgeRes.data ?? []);
+      if (concernRes.ok) setConcerns(concernRes.data ?? []);
     } finally {
       setLoading(false);
     }
@@ -127,54 +138,35 @@ export function AgentCoachingView() {
 
   useEffect(() => { loadTeamData(); }, [loadTeamData]);
 
-  const loadAgentDetail = useCallback(async (agentId: number) => {
-    setSelectedAgent(agentId);
-    const res = await api(`/coaching/agent/${agentId}?days=${days}`);
-    if (res.ok) setAgentScores(res.data);
+  const loadAgentDetail = useCallback(async (agentName: string) => {
+    setSelectedAgent(agentName);
+    const res = await api(`/coaching/agent/${encodeURIComponent(agentName)}?days=${days}`);
+    if (res.ok) setAgentDetail(res.data);
   }, [days]);
 
-  const agentName = (id: number) => {
-    const match = roster.find(r => r.id === id);
-    return match?.display_name ?? `Agent #${id}`;
-  };
-
-  const handleVisibilityChange = async (v: string) => {
-    const res = await apiJson('/coaching/visibility', 'PUT', { visibility: v });
-    if (res.ok) setVisibility(v);
-  };
-
   const teamAvgOverall = teamScores.length > 0
-    ? teamScores.reduce((s, t) => s + (t.avg_overall ?? 0), 0) / teamScores.length
+    ? teamScores.reduce((s, t) => s + (t.avg_qa_overall ?? 0), 0) / teamScores.length
     : 0;
+  const totalAssessments = teamScores.reduce((s, t) => s + t.assessments, 0);
+  const totalConcerning = teamScores.reduce((s, t) => s + t.concerning_count, 0);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 border-b border-[#2f353d] bg-[#1a1d23]">
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-semibold text-neutral-200">Coaching Dashboard</h2>
-          <span className="text-[10px] text-neutral-500">Golden Rules QA</span>
+          <span className="text-[10px] text-neutral-500">Sourced from QA Pipeline</span>
         </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={days}
-            onChange={e => setDays(Number(e.target.value))}
-            className="text-xs bg-[#23272e] border border-[#3a424d] rounded px-2 py-1 text-neutral-300"
-          >
-            <option value={7}>7 days</option>
-            <option value={14}>14 days</option>
-            <option value={30}>30 days</option>
-            <option value={60}>60 days</option>
-          </select>
-          <select
-            value={visibility}
-            onChange={e => handleVisibilityChange(e.target.value)}
-            className="text-xs bg-[#23272e] border border-[#3a424d] rounded px-2 py-1 text-neutral-300"
-          >
-            <option value="off">Nudges: Off</option>
-            <option value="agent">Nudges: Agent</option>
-            <option value="manager">Nudges: Manager</option>
-          </select>
-        </div>
+        <select
+          value={days}
+          onChange={e => setDays(Number(e.target.value))}
+          className="text-xs bg-[#23272e] border border-[#3a424d] rounded px-2 py-1 text-neutral-300"
+        >
+          <option value={7}>7 days</option>
+          <option value={14}>14 days</option>
+          <option value={30}>30 days</option>
+          <option value={60}>60 days</option>
+        </select>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -185,11 +177,11 @@ export function AgentCoachingView() {
             {/* Summary Cards */}
             <div className="grid grid-cols-4 gap-3">
               <div className="bg-[#1e2228] border border-[#2f353d] rounded-lg p-3">
-                <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Team Avg</div>
-                <div className={`text-2xl font-bold ${scoreColor(teamAvgOverall)}`}>
+                <div className="text-[10px] text-neutral-500 uppercase tracking-wide">QA Avg Score</div>
+                <div className={`text-2xl font-bold ${scoreColor(teamAvgOverall, 100)}`}>
                   {teamAvgOverall > 0 ? teamAvgOverall.toFixed(1) : '—'}
                 </div>
-                <div className="text-[10px] text-neutral-500">/ 5.0</div>
+                <div className="text-[10px] text-neutral-500">team average</div>
               </div>
               <div className="bg-[#1e2228] border border-[#2f353d] rounded-lg p-3">
                 <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Agents Scored</div>
@@ -198,15 +190,13 @@ export function AgentCoachingView() {
               </div>
               <div className="bg-[#1e2228] border border-[#2f353d] rounded-lg p-3">
                 <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Total Assessments</div>
-                <div className="text-2xl font-bold text-neutral-200">
-                  {teamScores.reduce((s, t) => s + t.assessments, 0)}
-                </div>
+                <div className="text-2xl font-bold text-neutral-200">{totalAssessments}</div>
                 <div className="text-[10px] text-neutral-500">{days}d period</div>
               </div>
               <div className="bg-[#1e2228] border border-[#2f353d] rounded-lg p-3">
-                <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Total Nudges</div>
-                <div className="text-2xl font-bold text-amber-400">{nudges.length}</div>
-                <div className="text-[10px] text-neutral-500">coaching tips</div>
+                <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Concerning</div>
+                <div className="text-2xl font-bold text-red-400">{totalConcerning}</div>
+                <div className="text-[10px] text-neutral-500">tickets flagged</div>
               </div>
             </div>
 
@@ -218,42 +208,32 @@ export function AgentCoachingView() {
                 </div>
                 <div className="divide-y divide-[#2f353d]">
                   {teamScores.length === 0 ? (
-                    <div className="px-3 py-4 text-xs text-neutral-500 text-center">No coaching data yet</div>
+                    <div className="px-3 py-4 text-xs text-neutral-500 text-center">No QA data in this period</div>
                   ) : teamScores.map((agent, i) => (
                     <button
-                      key={agent.agent_user_id}
-                      onClick={() => loadAgentDetail(agent.agent_user_id)}
+                      key={agent.agent_name}
+                      onClick={() => loadAgentDetail(agent.agent_name)}
                       className={`w-full text-left px-3 py-2 hover:bg-[#23272e] transition-colors flex items-center gap-3
-                        ${selectedAgent === agent.agent_user_id ? 'bg-[#23272e] ring-1 ring-inset ring-blue-800/50' : ''}`}
+                        ${selectedAgent === agent.agent_name ? 'bg-[#23272e] ring-1 ring-inset ring-blue-800/50' : ''}`}
                     >
                       <span className="text-[10px] text-neutral-500 w-4">{i + 1}</span>
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs font-medium text-neutral-200 truncate">
-                          {agentName(agent.agent_user_id)}
-                        </div>
-                        <div className="text-[10px] text-neutral-500">{agent.assessments} assessments</div>
+                        <div className="text-xs font-medium text-neutral-200 truncate">{agent.agent_name}</div>
+                        <div className="text-[10px] text-neutral-500">{agent.assessments} reviews</div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {['avg_clarity', 'avg_empathy', 'avg_action', 'avg_ownership'].map(key => {
-                          const val = agent[key as keyof TeamScore] as number;
-                          return (
-                            <div key={key} className={`text-[10px] font-mono ${scoreColor(val)}`}>
-                              {val?.toFixed(1) ?? '—'}
-                            </div>
-                          );
-                        })}
-                        <div className={`text-xs font-bold px-1.5 py-0.5 rounded border ${scoreBg(agent.avg_overall)} ${scoreColor(agent.avg_overall)}`}>
-                          {agent.avg_overall?.toFixed(1) ?? '—'}
-                        </div>
+                      <GradeBar green={agent.green_count} amber={agent.amber_count} red={agent.red_count} />
+                      <div className={`text-xs font-bold px-1.5 py-0.5 rounded border
+                        ${(agent.avg_qa_overall ?? 0) >= 75 ? 'bg-green-900/30 border-green-800/40 text-green-400'
+                          : (agent.avg_qa_overall ?? 0) >= 50 ? 'bg-amber-900/30 border-amber-800/40 text-amber-400'
+                          : 'bg-red-900/30 border-red-800/40 text-red-400'}`}>
+                        {agent.avg_qa_overall?.toFixed(1) ?? '—'}
                       </div>
                     </button>
                   ))}
                 </div>
                 <div className="px-3 py-1.5 bg-[#1a1d23] text-[10px] text-neutral-500 flex gap-4 justify-end">
-                  <span>C = Clarity</span>
-                  <span>E = Empathy</span>
-                  <span>A = Action</span>
-                  <span>O = Ownership</span>
+                  <span>Grade bar: G/A/R distribution</span>
+                  <span>Score: QA overall avg</span>
                 </div>
               </div>
 
@@ -261,40 +241,66 @@ export function AgentCoachingView() {
               <div className="bg-[#1e2228] border border-[#2f353d] rounded-lg overflow-hidden">
                 <div className="px-3 py-2 border-b border-[#2f353d]">
                   <span className="text-xs font-semibold text-neutral-300">
-                    {selectedAgent ? agentName(selectedAgent) : 'Select an agent'}
+                    {selectedAgent ?? 'Select an agent'}
                   </span>
                 </div>
-                {!selectedAgent || !agentScores ? (
+                {!selectedAgent || !agentDetail ? (
                   <div className="px-3 py-8 text-xs text-neutral-500 text-center">
-                    Click an agent to view their Golden Rules breakdown
+                    Click an agent to view their QA & Golden Rules breakdown
                   </div>
                 ) : (
                   <div className="p-3 space-y-3">
-                    {agentScores.averages ? (
-                      <div className="space-y-2">
-                        <ScoreBar label="Clarity" value={agentScores.averages.clarity} />
-                        <ScoreBar label="Empathy" value={agentScores.averages.empathy} />
-                        <ScoreBar label="Action" value={agentScores.averages.action} />
-                        <ScoreBar label="Ownership" value={agentScores.averages.ownership} />
+                    {agentDetail.averages ? (
+                      <div className="space-y-3">
+                        <div>
+                          <div className="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Golden Rules (0–3)</div>
+                          <div className="space-y-1">
+                            <ScoreBar label="Ownership" value={agentDetail.averages.ownership} max={3} />
+                            <ScoreBar label="Next Action" value={agentDetail.averages.next_action} max={3} />
+                            <ScoreBar label="Timeframe" value={agentDetail.averages.timeframe} max={3} />
+                          </div>
+                        </div>
                         <div className="pt-1 border-t border-[#2f353d]">
-                          <ScoreBar label="Overall" value={agentScores.averages.overall} />
+                          <div className="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">QA Scores</div>
+                          <div className="space-y-1">
+                            <ScoreBar label="Overall" value={agentDetail.averages.qa_overall} max={100} />
+                            <ScoreBar label="Clarity" value={agentDetail.averages.clarity} max={100} />
+                            <ScoreBar label="Tone" value={agentDetail.averages.tone} max={100} />
+                          </div>
+                        </div>
+                        <div className="pt-1 border-t border-[#2f353d] flex gap-3 text-xs">
+                          <div className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-green-500" />
+                            <span className="text-neutral-400">{agentDetail.gradeBreakdown.green}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-amber-500" />
+                            <span className="text-neutral-400">{agentDetail.gradeBreakdown.amber}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-red-500" />
+                            <span className="text-neutral-400">{agentDetail.gradeBreakdown.red}</span>
+                          </div>
+                          <span className="text-[10px] text-neutral-500 ml-auto">
+                            {agentDetail.totalAssessments} total
+                          </span>
                         </div>
                       </div>
                     ) : (
-                      <div className="text-xs text-neutral-500">No scored assessments</div>
+                      <div className="text-xs text-neutral-500">No QA assessments in this period</div>
                     )}
 
-                    {agentScores.trend.length > 0 && (
+                    {agentDetail.trend.length > 0 && (
                       <div>
                         <div className="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Daily Trend</div>
                         <div className="flex items-end gap-px h-16">
-                          {agentScores.trend.slice(-30).map((d, i) => {
-                            const pct = (d.avg_score / 5) * 100;
+                          {agentDetail.trend.slice(-30).map((d, i) => {
+                            const pct = (d.avg_score / 100) * 100;
                             return (
                               <div
                                 key={i}
-                                className={`flex-1 min-w-[3px] rounded-t ${d.avg_score >= 4 ? 'bg-green-500/60' : d.avg_score >= 3 ? 'bg-amber-500/60' : 'bg-red-500/60'}`}
-                                style={{ height: `${pct}%` }}
+                                className={`flex-1 min-w-[3px] rounded-t ${pct >= 75 ? 'bg-green-500/60' : pct >= 50 ? 'bg-amber-500/60' : 'bg-red-500/60'}`}
+                                style={{ height: `${Math.max(pct, 3)}%` }}
                                 title={`${d.day}: ${d.avg_score.toFixed(1)} (${d.count} reviews)`}
                               />
                             );
@@ -303,15 +309,21 @@ export function AgentCoachingView() {
                       </div>
                     )}
 
-                    {Object.keys(agentScores.nudgeBreakdown).length > 0 && (
+                    {agentDetail.concerningTickets.length > 0 && (
                       <div>
-                        <div className="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Nudge Types</div>
-                        <div className="flex flex-wrap gap-1">
-                          {Object.entries(agentScores.nudgeBreakdown).map(([type, count]) => (
-                            <span key={type} className="flex items-center gap-1">
-                              <NudgeTypeBadge type={type} />
-                              <span className="text-[10px] text-neutral-500">{count}</span>
-                            </span>
+                        <div className="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Concerning Tickets</div>
+                        <div className="space-y-1 max-h-32 overflow-y-auto">
+                          {agentDetail.concerningTickets.map(t => (
+                            <div key={t.issue_key} className="flex items-start gap-2 text-xs">
+                              <GradePill grade={t.grade} />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-neutral-300 font-mono">{t.issue_key}</span>
+                                {t.coaching_points && (
+                                  <div className="text-[10px] text-neutral-500 truncate">{t.coaching_points}</div>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-neutral-500">{new Date(t.processed_at).toLocaleDateString()}</span>
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -321,26 +333,29 @@ export function AgentCoachingView() {
               </div>
             </div>
 
-            {/* Recent Nudges */}
+            {/* Recent Concerns */}
             <div className="bg-[#1e2228] border border-[#2f353d] rounded-lg overflow-hidden">
               <div className="px-3 py-2 border-b border-[#2f353d]">
-                <span className="text-xs font-semibold text-neutral-300">Recent Coaching Nudges</span>
+                <span className="text-xs font-semibold text-neutral-300">Recent QA Concerns</span>
               </div>
               <div className="max-h-64 overflow-y-auto divide-y divide-[#2f353d]">
-                {nudges.length === 0 ? (
-                  <div className="px-3 py-4 text-xs text-neutral-500 text-center">No nudges recorded yet</div>
-                ) : nudges.slice(0, 50).map(n => (
-                  <div key={n.id} className="px-3 py-2 flex items-start gap-2">
-                    <NudgeTypeBadge type={n.nudge_type} />
+                {concerns.length === 0 ? (
+                  <div className="px-3 py-4 text-xs text-neutral-500 text-center">No concerning tickets found</div>
+                ) : concerns.slice(0, 50).map((c, i) => (
+                  <div key={`${c.issue_key}-${i}`} className="px-3 py-2 flex items-start gap-2">
+                    <GradePill grade={c.grade} />
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs text-neutral-300 truncate">{n.message ?? n.nudge_type}</div>
+                      <div className="text-xs text-neutral-300">
+                        <span className="font-mono">{c.issue_key}</span>
+                        {c.coaching_points && <span className="text-neutral-500"> — {c.coaching_points}</span>}
+                      </div>
                       <div className="text-[10px] text-neutral-500">
-                        {n.ticket_id} · {agentName(n.agent_user_id)} · {new Date(n.created_at).toLocaleDateString()}
+                        {c.agent_name} · {c.category ?? 'Uncategorised'} · {new Date(c.processed_at).toLocaleDateString()}
                       </div>
                     </div>
-                    {n.delivered && (
-                      <span className="text-[10px] text-green-500">delivered</span>
-                    )}
+                    <span className={`text-[10px] font-mono ${scoreColor(c.overall_score, 100)}`}>
+                      {c.overall_score?.toFixed(0) ?? '—'}
+                    </span>
                   </div>
                 ))}
               </div>

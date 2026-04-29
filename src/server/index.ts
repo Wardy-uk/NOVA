@@ -99,7 +99,7 @@ import { AssignmentEngine } from './services/assignment-engine.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
 import { TicketClassifier } from './services/ticket-classifier.js';
 import { BriefEngine } from './services/brief-engine.js';
-import { CoachingEngine } from './services/coach.js';
+
 import { KbSearchService } from './services/kb-search.js';
 import { KbEmbedder } from './services/kb-embedder.js';
 import { KbChunker } from './services/kb-chunker.js';
@@ -950,8 +950,6 @@ async function main() {
     setInterval(() => {
       if (confluenceProvider.isConfigured()) kbSyncWorker.sync(confluenceProvider).catch(() => {});
     }, confSyncMin * 60_000);
-    const coachingEngine = new CoachingEngine(llmService, agentJiraClient, 'NT');
-
     const pipelineMonitor = new PipelineMonitor(settingsQueries);
     pipelineMonitor.ensureRunsTable().catch(e => console.warn('[pipeline-monitor] ensureRunsTable failed:', e.message));
     pipelineMonitor.ensureUatTables().then(() =>
@@ -1033,7 +1031,6 @@ async function main() {
       availabilityService,
       ticketClassifier,
       briefEngine,
-      coachingEngine,
       kpiPipeline,
       qaPipeline,
       pipelineMonitor,
