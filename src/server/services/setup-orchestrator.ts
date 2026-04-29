@@ -56,6 +56,20 @@ function extractSubdomain(raw: string): string {
 export class SetupOrchestrator {
   constructor(private deps: OrchestratorDeps) {}
 
+  private static readonly REQUIRED_TEMPLATES: Array<{ step_key: string; step_label: string; sort_order: number; required: number }> = [
+    { step_key: 'setupDistricts', step_label: 'Configure Branch Districts', sort_order: 6, required: 0 },
+  ];
+
+  private async ensureTemplates(product: string): Promise<void> {
+    const existing = await this.deps.setupQueries.getTemplatesByProduct(product);
+    const existingKeys = new Set(existing.map(t => t.step_key));
+    for (const tmpl of SetupOrchestrator.REQUIRED_TEMPLATES) {
+      if (!existingKeys.has(tmpl.step_key)) {
+        await this.deps.setupQueries.createTemplate({ product, ...tmpl });
+      }
+    }
+  }
+
   private async log(runId: number, stepKey: string, level: string, message: string): Promise<void> {
     await this.deps.execQueries.addLog(runId, stepKey, level, message);
     const prefix = `[Setup:${stepKey}]`;
@@ -73,6 +87,9 @@ export class SetupOrchestrator {
     let stepsFailed = 0;
 
     try {
+      // ── Ensure step templates exist ──
+      await this.ensureTemplates('BYM');
+
       // ── Load delivery data ──
       const entries = await this.deps.deliveryQueries.getAll();
       const delivery = entries.find(e => e.id === deliveryId);
