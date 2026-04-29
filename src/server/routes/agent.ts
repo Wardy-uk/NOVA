@@ -22,6 +22,7 @@ import type { JiraSyncService } from '../services/jira-sync-service.js';
 import type { SuggestionEngine } from '../services/suggestion-engine.js';
 import type { RiskScorer } from '../services/risk-scorer.js';
 import type { EscalationLogService } from '../services/escalation-log-service.js';
+import type { UserQueries, UserTeamQueries, TeamQueries } from '../db/queries.js';
 
 interface AgentRouteDeps {
   agentLoop: AgentLoop;
@@ -38,6 +39,9 @@ interface AgentRouteDeps {
   suggestionEngine: SuggestionEngine | null;
   riskScorer: RiskScorer | null;
   escalationLog: EscalationLogService | null;
+  userQueries: UserQueries | null;
+  userTeamQueries: UserTeamQueries | null;
+  teamQueries: TeamQueries | null;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
@@ -1487,6 +1491,29 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   router.get('/coaching/team', async (req, res) => {
     const days = Math.min(parseInt(req.query.days as string, 10) || 30, 90);
     try {
+      // Resolve team member display names for filtering
+      let teamMemberNames: Set<string> | null = null;
+      const userId = (req as any).user?.id as number | undefined;
+      const userRole = (req as any).user?.role as string | undefined;
+      const isAdmin = userRole?.split(',').some(r => r.trim() === 'admin' || r.trim() === 'super_admin');
+
+      if (!isAdmin && userId && deps?.userTeamQueries && deps?.userQueries && deps?.teamQueries) {
+        const teamIds = await deps.userTeamQueries.getTeamIdsForUser(userId);
+        if (teamIds.length > 0) {
+          const memberIds = new Set<number>();
+          for (const tid of teamIds) {
+            const uids = await deps.userTeamQueries.getUserIdsForTeam(tid);
+            for (const uid of uids) memberIds.add(uid);
+          }
+          const allUsers = await deps.userQueries.getAll();
+          teamMemberNames = new Set(
+            allUsers
+              .filter(u => memberIds.has(u.id) && u.display_name)
+              .map(u => u.display_name!.toLowerCase()),
+          );
+        }
+      }
+
       const p = await getKpiPool();
       const result = await p.request().query(`
         DECLARE @since DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
@@ -1525,7 +1552,12 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       const grMap: Record<string, any> = {};
       for (const r of grResult.recordset) grMap[r.agent_name] = r;
 
-      const data = result.recordset.map((row: any) => {
+      let rows: any[] = result.recordset;
+      if (teamMemberNames) {
+        rows = rows.filter((row: any) => teamMemberNames!.has((row.agent_name as string).toLowerCase()));
+      }
+
+      const data = rows.map((row: any) => {
         const gr = grMap[row.agent_name];
         return {
           agent_name: row.agent_name,
@@ -1652,6 +1684,29 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
     const agent = req.query.agent as string | undefined;
     try {
+      // Resolve team member display names for filtering (same as /coaching/team)
+      let teamMemberNames: Set<string> | null = null;
+      const userId = (req as any).user?.id as number | undefined;
+      const userRole = (req as any).user?.role as string | undefined;
+      const isAdmin = userRole?.split(',').some(r => r.trim() === 'admin' || r.trim() === 'super_admin');
+
+      if (!isAdmin && userId && deps?.userTeamQueries && deps?.userQueries && deps?.teamQueries) {
+        const teamIds = await deps.userTeamQueries.getTeamIdsForUser(userId);
+        if (teamIds.length > 0) {
+          const memberIds = new Set<number>();
+          for (const tid of teamIds) {
+            const uids = await deps.userTeamQueries.getUserIdsForTeam(tid);
+            for (const uid of uids) memberIds.add(uid);
+          }
+          const allUsers = await deps.userQueries.getAll();
+          teamMemberNames = new Set(
+            allUsers
+              .filter(u => memberIds.has(u.id) && u.display_name)
+              .map(u => u.display_name!.toLowerCase()),
+          );
+        }
+      }
+
       const p = await getKpiPool();
       const agentFilter = agent ? `AND r.assigneeName = '${agent.replace(/'/g, "''")}'` : '';
       const result = await p.request().query(`
@@ -1669,7 +1724,13 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
           ${agentFilter}
         ORDER BY r.CreatedAt DESC
       `);
-      res.json({ ok: true, data: result.recordset });
+
+      let rows: any[] = result.recordset;
+      if (teamMemberNames) {
+        rows = rows.filter((row: any) => teamMemberNames!.has((row.agent_name as string).toLowerCase()));
+      }
+
+      res.json({ ok: true, data: rows });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get coaching concerns' });
     }

@@ -1040,6 +1040,9 @@ async function main() {
       suggestionEngine,
       riskScorer: agentLoop.getRiskScorer(),
       escalationLog,
+      userQueries,
+      userTeamQueries,
+      teamQueries,
     }));
 
     // Ensure NOVA AI synthetic agent exists in dbo.Agent (idempotent)
