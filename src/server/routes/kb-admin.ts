@@ -46,9 +46,12 @@ export function createKbAdminRoutes(deps: KbAdminDeps): Router {
       return;
     }
 
-    // Fire and don't await — return the run ID asynchronously
-    syncWorker.sync(provider).catch(() => {});
-    res.json({ ok: true, data: { message: `Sync triggered for ${source}` } });
+    try {
+      const chunksStored = await syncWorker.sync(provider);
+      res.json({ ok: true, data: { chunksStored, message: `Sync complete: ${chunksStored} chunks` } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Sync failed' });
+    }
   });
 
   router.get('/sync-runs', async (req, res) => {
