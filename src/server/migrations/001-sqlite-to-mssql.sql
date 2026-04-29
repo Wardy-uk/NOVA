@@ -1397,6 +1397,7 @@ USING (VALUES
     ('BYM', 'setupDirectMail',       'Confirm Direct Mail',       3, 1),
     ('BYM', 'setupLetterhead',       'Confirm Letterhead',        4, 1),
     ('BYM', 'setupBranches',         'Create Branches',           5, 1),
+    ('BYM', 'setupDistricts',        'Configure Branch Districts', 6, 0),
     ('BYM', 'setupDeliveryAddresses','Create Delivery Addresses', 6, 1),
     ('BYM', 'setupUsers',            'Create Users',              7, 1),
     ('BYM', 'setupRss',              'Add RSS Feeds',             8, 1),

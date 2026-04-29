@@ -13,6 +13,11 @@ import type {
 } from '../db/queries.js';
 import { LOGO_TYPE_DEFS } from '../../shared/brand-settings-defs.js';
 
+/** Normalize a name for comparison — lowercases and flattens all apostrophe variants to a standard one. */
+function normalizeName(s: string): string {
+  return s.toLowerCase().replace(/[‘’′`´]/g, "'").trim();
+}
+
 export interface ExecutionResult {
   runId: number;
   status: 'complete' | 'failed' | 'partial';
@@ -136,45 +141,45 @@ export class SetupOrchestrator {
       // ── Step 2: Push Brands ──
       stepsRun++;
       try {
-        await this.log(runId, 'push_brands', 'info', 'Pushing brand lookup values...');
-        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_brands', 'in_progress', undefined, userId);
+        await this.log(runId, 'setupBrands', 'info', 'Pushing brand lookup values...');
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupBrands', 'in_progress', undefined, userId);
 
         // Get existing to deduplicate
         const existing = await bym.getBrands(subdomain);
-        const existingNames = new Set(existing.filter(b => b.value).map(b => b.value.toLowerCase()));
+        const existingNames = new Set(existing.filter(b => b.value).map(b => normalizeName(b.value)));
 
         // Brand name from settings
         const companyName = brandSettings['companyName'];
         const newBrands: LookupValue[] = [];
-        if (companyName && !existingNames.has(companyName.toLowerCase())) {
+        if (companyName && !existingNames.has(normalizeName(companyName))) {
           newBrands.push({ value: companyName, classification: 'Brands', isSecured: true, isDefault: true });
         }
 
         if (newBrands.length > 0) {
           await bym.createBrands(subdomain, newBrands);
-          await this.log(runId, 'push_brands', 'success', `Created ${newBrands.length} brand(s)`);
+          await this.log(runId, 'setupBrands', 'success', `Created ${newBrands.length} brand(s)`);
         } else {
-          await this.log(runId, 'push_brands', 'success', 'All brands already exist — skipped');
+          await this.log(runId, 'setupBrands', 'success', 'All brands already exist — skipped');
         }
-        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_brands', 'complete', `${newBrands.length} created`, userId);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupBrands', 'complete', `${newBrands.length} created`, userId);
       } catch (err) {
         stepsFailed++;
         const msg = err instanceof Error ? err.message : String(err);
-        await this.log(runId, 'push_brands', 'error', `Failed: ${msg}`);
-        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_brands', 'failed', msg, userId);
+        await this.log(runId, 'setupBrands', 'error', `Failed: ${msg}`);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupBrands', 'failed', msg, userId);
       }
 
       // ── Step 3: Push Branches ──
       stepsRun++;
       try {
-        await this.log(runId, 'push_branches', 'info', `Pushing ${branches.length} branch(es)...`);
-        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_branches', 'in_progress', undefined, userId);
+        await this.log(runId, 'setupBranches', 'info', `Pushing ${branches.length} branch(es)...`);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupBranches', 'in_progress', undefined, userId);
 
         const existing = await bym.getBranches(subdomain);
-        const existingNames = new Set(existing.filter(b => b.value).map(b => b.value.toLowerCase()));
+        const existingNames = new Set(existing.filter(b => b.value).map(b => normalizeName(b.value)));
 
         const newBranches: LookupValue[] = branches
-          .filter(b => !existingNames.has(b.name.toLowerCase()))
+          .filter(b => !existingNames.has(normalizeName(b.name)))
           .map(b => ({
             value: b.name,
             classification: 'Branches',
@@ -184,16 +189,16 @@ export class SetupOrchestrator {
 
         if (newBranches.length > 0) {
           await bym.createBranches(subdomain, newBranches);
-          await this.log(runId, 'push_branches', 'success', `Created ${newBranches.length} branch(es)`);
+          await this.log(runId, 'setupBranches', 'success', `Created ${newBranches.length} branch(es)`);
         } else {
-          await this.log(runId, 'push_branches', 'success', 'All branches already exist — skipped');
+          await this.log(runId, 'setupBranches', 'success', 'All branches already exist — skipped');
         }
-        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_branches', 'complete', `${newBranches.length} created`, userId);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupBranches', 'complete', `${newBranches.length} created`, userId);
       } catch (err) {
         stepsFailed++;
         const msg = err instanceof Error ? err.message : String(err);
-        await this.log(runId, 'push_branches', 'error', `Failed: ${msg}`);
-        await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_branches', 'failed', msg, userId);
+        await this.log(runId, 'setupBranches', 'error', `Failed: ${msg}`);
+        await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupBranches', 'failed', msg, userId);
       }
 
       // ── Step 4: Upload Logos ──
@@ -237,12 +242,12 @@ export class SetupOrchestrator {
       }
 
       // ── Step 5: Push Portal Accounts ──
-      await this.log(runId, 'push_portals', 'info', `Portal accounts: ${portalAccounts.length}, bearerToken: ${bearerToken ? 'yes' : 'no'}`);
+      await this.log(runId, 'setupBuildPortals', 'info', `Portal accounts: ${portalAccounts.length}, bearerToken: ${bearerToken ? 'yes' : 'no'}`);
       if (portalAccounts.length > 0 && bearerToken) {
         stepsRun++;
         try {
-          await this.log(runId, 'push_portals', 'info', `Creating ${portalAccounts.length} portal account(s)...`);
-          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_portals', 'in_progress', undefined, userId);
+          await this.log(runId, 'setupBuildPortals', 'info', `Creating ${portalAccounts.length} portal account(s)...`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupBuildPortals', 'in_progress', undefined, userId);
 
           let created = 0;
           for (const pa of portalAccounts) {
@@ -250,27 +255,27 @@ export class SetupOrchestrator {
             created++;
           }
 
-          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_portals', 'complete', `${created} created`, userId);
-          await this.log(runId, 'push_portals', 'success', `${created} portal account(s) created`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupBuildPortals', 'complete', `${created} created`, userId);
+          await this.log(runId, 'setupBuildPortals', 'success', `${created} portal account(s) created`);
         } catch (err) {
           stepsFailed++;
           const msg = err instanceof Error ? err.message : String(err);
-          await this.log(runId, 'push_portals', 'error', `Failed: ${msg}`);
-          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_portals', 'failed', msg, userId);
+          await this.log(runId, 'setupBuildPortals', 'error', `Failed: ${msg}`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupBuildPortals', 'failed', msg, userId);
         }
       }
 
       // ── Step 6: Push Branch Districts ──
-      await this.log(runId, 'push_districts', 'info', `Districts: ${districts.length}, bearerToken: ${bearerToken ? 'yes' : 'no'}`);
+      await this.log(runId, 'setupDistricts', 'info', `Districts: ${districts.length}, bearerToken: ${bearerToken ? 'yes' : 'no'}`);
       if (districts.length > 0 && bearerToken) {
         stepsRun++;
         try {
-          await this.log(runId, 'push_districts', 'info', `Configuring districts for branches...`);
-          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_districts', 'in_progress', undefined, userId);
+          await this.log(runId, 'setupDistricts', 'info', `Configuring districts for branches...`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupDistricts', 'in_progress', undefined, userId);
 
           // Get BYM branch IDs by name lookup
           const bymBranches = await bym.getBranches(subdomain);
-          const bymBranchByName = new Map(bymBranches.filter(b => b.value && b.id).map(b => [b.value.toLowerCase(), b]));
+          const bymBranchByName = new Map(bymBranches.filter(b => b.value && b.id).map(b => [normalizeName(b.value), b]));
 
           // Group districts by branch
           const districtsByBranch = new Map<number, typeof districts>();
@@ -286,9 +291,9 @@ export class SetupOrchestrator {
             if (!branch) continue;
 
             // Look up BYM's internal branch ID by name
-            const bymBranch = bymBranchByName.get(branch.name.toLowerCase());
+            const bymBranch = bymBranchByName.get(normalizeName(branch.name));
             if (!bymBranch || !bymBranch.id) {
-              await this.log(runId, 'push_districts', 'warn', `Branch "${branch.name}" not found in BYM — skipping`);
+              await this.log(runId, 'setupDistricts', 'warn', `Branch "${branch.name}" not found in BYM — skipping`);
               continue;
             }
 
@@ -314,16 +319,16 @@ export class SetupOrchestrator {
 
             await bym.setupBranch(bearerToken, payload);
             branchesConfigured++;
-            await this.log(runId, 'push_districts', 'info', `Configured ${branch.name} with ${postCodeDistricts.length} district(s)`);
+            await this.log(runId, 'setupDistricts', 'info', `Configured ${branch.name} with ${postCodeDistricts.length} district(s)`);
           }
 
-          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_districts', 'complete', `${branchesConfigured} branches configured`, userId);
-          await this.log(runId, 'push_districts', 'success', `${branchesConfigured} branch(es) configured with districts`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupDistricts', 'complete', `${branchesConfigured} branches configured`, userId);
+          await this.log(runId, 'setupDistricts', 'success', `${branchesConfigured} branch(es) configured with districts`);
         } catch (err) {
           stepsFailed++;
           const msg = err instanceof Error ? err.message : String(err);
-          await this.log(runId, 'push_districts', 'error', `Failed: ${msg}`);
-          await this.deps.setupQueries.updateStepStatus(deliveryId, 'push_districts', 'failed', msg, userId);
+          await this.log(runId, 'setupDistricts', 'error', `Failed: ${msg}`);
+          await this.deps.setupQueries.updateStepStatus(deliveryId, 'setupDistricts', 'failed', msg, userId);
         }
       }
 
