@@ -1808,7 +1808,7 @@ export function AdminView() {
                         setKbSyncing('tfs');
                         setKbSyncResult(null);
                         try {
-                          const res = await fetch('/api/kb-admin/sync/tfs', { method: 'POST' });
+                          const res = await fetch('/api/kb-admin/sync/tfs-docs', { method: 'POST' });
                           const json = await res.json();
                           setKbSyncResult({ source: 'tfs', ok: json.ok, message: json.ok ? `Synced ${json.data?.chunksStored ?? 0} chunks` : (json.error || 'Sync failed') });
                         } catch (e) {
