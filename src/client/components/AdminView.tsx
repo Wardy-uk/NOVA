@@ -193,6 +193,8 @@ export function AdminView() {
   const [integSaved, setIntegSaved] = useState<Set<string>>(new Set());
   const [integLogModal, setIntegLogModal] = useState<{ id: string; logs: string[] } | null>(null);
   const [integShowPasswords, setIntegShowPasswords] = useState<Set<string>>(new Set());
+  const [kbSyncing, setKbSyncing] = useState<string | null>(null);
+  const [kbSyncResult, setKbSyncResult] = useState<{ source: string; ok: boolean; message: string } | null>(null);
 
   // Milestone template state
   const [milestoneTemplates, setMilestoneTemplates] = useState<MilestoneTemplate[]>([]);
@@ -1782,7 +1784,50 @@ export function AdminView() {
                     {integTesting === integ.id ? 'Testing...' : 'Test Connection'}
                   </button>
                 )}
+                {integ.id === 'kb-retrieval' && integ.enabled && (
+                  <>
+                    <button
+                      onClick={async () => {
+                        setKbSyncing('confluence');
+                        setKbSyncResult(null);
+                        try {
+                          const res = await fetch('/api/kb-admin/sync/confluence', { method: 'POST' });
+                          const json = await res.json();
+                          setKbSyncResult({ source: 'confluence', ok: json.ok, message: json.ok ? `Synced ${json.data?.chunksStored ?? 0} chunks` : (json.error || 'Sync failed') });
+                        } catch (e) {
+                          setKbSyncResult({ source: 'confluence', ok: false, message: e instanceof Error ? e.message : 'Sync failed' });
+                        } finally { setKbSyncing(null); }
+                      }}
+                      disabled={kbSyncing !== null}
+                      className="px-4 py-2 bg-neutral-700 text-neutral-200 font-medium rounded text-sm hover:bg-neutral-600 transition-colors disabled:opacity-40"
+                    >
+                      {kbSyncing === 'confluence' ? 'Syncing…' : 'Sync Confluence'}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setKbSyncing('tfs');
+                        setKbSyncResult(null);
+                        try {
+                          const res = await fetch('/api/kb-admin/sync/tfs', { method: 'POST' });
+                          const json = await res.json();
+                          setKbSyncResult({ source: 'tfs', ok: json.ok, message: json.ok ? `Synced ${json.data?.chunksStored ?? 0} chunks` : (json.error || 'Sync failed') });
+                        } catch (e) {
+                          setKbSyncResult({ source: 'tfs', ok: false, message: e instanceof Error ? e.message : 'Sync failed' });
+                        } finally { setKbSyncing(null); }
+                      }}
+                      disabled={kbSyncing !== null}
+                      className="px-4 py-2 bg-neutral-700 text-neutral-200 font-medium rounded text-sm hover:bg-neutral-600 transition-colors disabled:opacity-40"
+                    >
+                      {kbSyncing === 'tfs' ? 'Syncing…' : 'Sync TFS'}
+                    </button>
+                  </>
+                )}
               </div>
+              {integ.id === 'kb-retrieval' && kbSyncResult && (
+                <div className={`mt-2 text-xs px-3 py-2 rounded ${kbSyncResult.ok ? 'bg-emerald-900/30 text-emerald-400' : 'bg-red-900/30 text-red-400'}`}>
+                  {kbSyncResult.source}: {kbSyncResult.message}
+                </div>
+              )}
               {integTestResult[integ.id] && integTestResult[integ.id].status !== 'testing' && (
                 <div className={`mt-2 text-xs px-3 py-2 rounded ${
                   integTestResult[integ.id].status === 'connected'
