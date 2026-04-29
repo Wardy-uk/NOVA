@@ -56,20 +56,26 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
       'Accept': 'application/json',
     };
 
+    console.log(`[kb-confluence] Starting sync — site: ${auth.baseUrl}, email: ${auth.email}, spaces: ${spaceKeys.join(',')}`);
+
     for (const spaceKey of spaceKeys) {
       try {
         // Resolve space ID via v2 API
-        const spaceRes = await fetch(`${auth.baseUrl}/wiki/api/v2/spaces?keys=${spaceKey}`, { headers });
+        const spaceUrl = `${auth.baseUrl}/wiki/api/v2/spaces?keys=${spaceKey}`;
+        console.log(`[kb-confluence] Resolving space ${spaceKey} via ${spaceUrl}`);
+        const spaceRes = await fetch(spaceUrl, { headers });
         if (!spaceRes.ok) {
-          console.warn(`[kb-confluence] Failed to resolve space ${spaceKey}: ${spaceRes.status}`);
+          const body = await spaceRes.text();
+          console.warn(`[kb-confluence] Failed to resolve space ${spaceKey}: ${spaceRes.status} — ${body.slice(0, 300)}`);
           continue;
         }
         const spaceData = await spaceRes.json() as { results: Array<{ id: string }> };
         if (!spaceData.results?.length) {
-          console.warn(`[kb-confluence] Space ${spaceKey} not found`);
+          console.warn(`[kb-confluence] Space ${spaceKey} not found (API returned empty results)`);
           continue;
         }
         const spaceId = spaceData.results[0].id;
+        console.log(`[kb-confluence] Space ${spaceKey} resolved to ID ${spaceId}`);
 
         // Paginate through all pages in the space
         let pageUrl: string | null = `${auth.baseUrl}/wiki/api/v2/pages?space-id=${spaceId}&body-format=storage&limit=50&status=current`;
