@@ -4,6 +4,7 @@ import type { KbSearchService } from '../services/kb-search.js';
 import type { KbEmbedder } from '../services/kb-embedder.js';
 import type { KbSyncProvider } from '../services/kb-sync-provider.js';
 import { requireRole } from '../middleware/auth.js';
+import { execute } from '../services/database.js';
 
 interface KbAdminDeps {
   syncWorker: KbSyncWorker;
@@ -62,6 +63,18 @@ export function createKbAdminRoutes(deps: KbAdminDeps): Router {
       res.json({ ok: true, data: runs });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch sync runs' });
+    }
+  });
+
+  router.delete('/chunks/:source', requireRole('admin', 'super_admin'), async (req, res) => {
+    const source = String(req.params.source);
+    try {
+      const result = await execute(`DELETE FROM kb_chunks WHERE source = ?`, [source]);
+      const deleted = result?.rowsAffected ?? 0;
+      console.log(`[kb-admin] Purged ${deleted} chunks for source: ${source}`);
+      res.json({ ok: true, data: { deleted, message: `Purged ${deleted} chunks from ${source}` } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Purge failed' });
     }
   });
 
