@@ -79,27 +79,29 @@ export function computeVerdict(evidence: Record<string, unknown>): VerdictResult
   const total = Number(evidence.decisionCount ?? evidence.total ?? 0);
   const avgConfidence = Number(evidence.avgConfidence ?? 0) / 100;
   const minConfidence = Number(evidence.minConfidence ?? 0) / 100;
+  const weeklySavings = Number(evidence.estimatedWeeklySavings ?? 0);
+  const category = String(evidence.category ?? 'this category');
 
   // 🔴 Skip: any decline in data, OR confidence < 0.75, OR fewer than 15 decisions
   if (declinedCount > 0) {
     return {
       verdict: 'skip',
-      headline: 'Don’t auto-approve this yet',
-      reason: `${declinedCount} decision${declinedCount > 1 ? 's were' : ' was'} declined — the agent isn't reliable enough here yet.`,
+      headline: "Don't auto-approve this yet",
+      reason: `You've turned down ${declinedCount} of the agent's ${category} decisions. Until that stops happening, auto-approve would just create more work to undo.`,
     };
   }
   if (avgConfidence < 0.75) {
     return {
       verdict: 'skip',
-      headline: 'Don’t auto-approve this yet',
-      reason: `Average confidence is ${Math.round(avgConfidence * 100)}%, well below the 75% floor.`,
+      headline: "Don't auto-approve this yet",
+      reason: `The agent is only ${Math.round(avgConfidence * 100)}% confident on ${category} tickets on average. That's not high enough to trust without review — wait until it improves.`,
     };
   }
   if (total < 15) {
     return {
       verdict: 'skip',
-      headline: 'Don’t auto-approve this yet',
-      reason: `Only ${total} decisions so far — need at least 15 before a pattern is meaningful.`,
+      headline: "Don't auto-approve this yet",
+      reason: `Only ${total} ${category} decisions so far. That's too few to know whether the agent is genuinely good at these or just got lucky.`,
     };
   }
 
@@ -108,22 +110,22 @@ export function computeVerdict(evidence: Record<string, unknown>): VerdictResult
     return {
       verdict: 'apply',
       headline: 'Safe to switch on',
-      reason: `${approvalRate}% approval across ${total} decisions with strong confidence.`,
+      reason: `You've approved ${approvalRate}% of ${total} ${category} decisions and the agent's confidence is strong. Switching this on would save you ~${weeklySavings} reviews a week.`,
     };
   }
 
   // 🟡 Wait: everything else in between
-  const waitReasons: string[] = [];
-  if (approvalRate < 95) waitReasons.push(`approval rate is ${approvalRate}% (need 95%)`);
-  if (total < 50) waitReasons.push(`only ${total} decisions (need 50)`);
-  if (avgConfidence < 0.85) waitReasons.push(`avg confidence is ${Math.round(avgConfidence * 100)}% (need 85%)`);
+  const gaps: string[] = [];
+  if (total < 50) gaps.push(`you've only seen ${total} of these (want 50+)`);
+  if (approvalRate < 95) gaps.push(`the approval rate is ${approvalRate}% (want 95%+)`);
+  if (avgConfidence < 0.85) gaps.push(`the agent's confidence is ${Math.round(avgConfidence * 100)}% (want 85%+)`);
+
+  const gapText = gaps.length > 0 ? gaps.join(', and ') : 'the numbers are almost there';
 
   return {
     verdict: 'wait',
     headline: 'Probably right, not enough data',
-    reason: waitReasons.length > 0
-      ? `Close, but ${waitReasons.join(' and ')}.`
-      : 'Getting there — give it another couple of weeks.',
+    reason: `The agent handles ~${weeklySavings} ${category} tickets a week and you've never declined one — but ${gapText}. Give it another couple of weeks and this should become a clear "Apply".`,
   };
 }
 
@@ -212,7 +214,17 @@ export class SuggestionEngine {
     return Promise.all(suggestions.map(async (s) => {
       if (s.type !== 'autonomy') return s;
       const verdict = computeVerdict(s.evidence);
-      const bodyText = await this.generateBodyText(s.evidence, verdict);
+
+      // Try cached body text first; generate in background if not cached
+      const evHash = hashEvidence(s.evidence);
+      const cached = this.bodyTextCache.get(evHash);
+      let bodyText = cached?.text ?? '';
+
+      if (!bodyText && this.llm) {
+        // Fire and forget — next load will pick up the cached result
+        this.generateBodyText(s.evidence, verdict).catch(() => {});
+      }
+
       return { ...s, verdict, bodyText };
     }));
   }

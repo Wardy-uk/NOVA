@@ -12,7 +12,7 @@ Inputs:
 - Estimated weekly savings: {{weeklySavings}} fewer approvals to review
 - Manager's comfort threshold: 95% approval rate with at least 50 decisions
 
-Output: exactly two short paragraphs of plain English, no bullet points, no markdown, no headers.
+Output: a JSON object with a single key "text" containing exactly two short paragraphs separated by a blank line. No bullet points, no markdown, no headers inside the text.
 
 Paragraph 1: What the rule would do, in one sentence. Then one sentence on the data behind it — how many decisions, what the approval rate looks like, whether anything was declined.
 
