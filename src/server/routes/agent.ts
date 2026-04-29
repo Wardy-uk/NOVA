@@ -1179,7 +1179,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     try {
       const type = req.query.type as 'guardrail' | 'autonomy' | undefined;
       const status = (req.query.status as string) ?? 'pending';
-      const data = await suggestionEngine.getSuggestions(type, status);
+      const raw = await suggestionEngine.getSuggestions(type, status);
+      const data = await suggestionEngine.enrichSuggestions(raw);
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get suggestions' });
@@ -1245,6 +1246,18 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to dismiss suggestion' });
+    }
+  });
+
+  router.post('/suggestions/:id/snooze', async (req, res) => {
+    if (!suggestionEngine) { res.status(404).json({ ok: false, error: 'Suggestions not available' }); return; }
+    try {
+      const days = parseInt(req.body?.days) || 14;
+      const ok = await suggestionEngine.snoozeSuggestion(parseInt(req.params.id), days);
+      if (!ok) { res.status(404).json({ ok: false, error: 'Suggestion not found or already processed' }); return; }
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to snooze suggestion' });
     }
   });
 

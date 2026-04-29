@@ -1141,12 +1141,168 @@ interface SuggestionItem {
   evidence: Record<string, unknown>;
   status: string;
   createdAt: string;
+  verdict?: { verdict: 'apply' | 'wait' | 'skip'; headline: string; reason: string };
+  bodyText?: string;
 }
 
-const ACTION_ICONS: Record<string, string> = {
-  disable_rule: '\u{1F6AB}', loosen_rule: '\u{1F527}', amend_rule: '\u{270F}\u{FE0F}', new_rule: '\u{1F6E1}\u{FE0F}',
-  enable_autonomy: '\u{26A1}', raise_threshold: '\u{2B06}\u{FE0F}', lower_threshold: '\u{2B07}\u{FE0F}', new_category: '\u{1F4C2}',
-};
+const VERDICT_CONFIG = {
+  apply: { emoji: '\u{1F7E2}', label: 'Apply', border: 'border-green-700/50', bg: 'bg-green-950/30', text: 'text-green-400' },
+  wait:  { emoji: '\u{1F7E1}', label: 'Wait',  border: 'border-amber-700/50', bg: 'bg-amber-950/30', text: 'text-amber-400' },
+  skip:  { emoji: '\u{1F534}', label: 'Skip',  border: 'border-red-700/50',   bg: 'bg-red-950/30',   text: 'text-red-400' },
+} as const;
+
+function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
+  s: SuggestionItem;
+  onApply: (id: number) => void;
+  onDismiss: (id: number) => void;
+  onSnooze: (id: number) => void;
+  onCustomize?: (s: SuggestionItem) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const v = s.verdict;
+  const ev = s.evidence || {};
+  const cfg = v ? VERDICT_CONFIG[v.verdict] : null;
+  const category = String(s.suggestion.category ?? s.evidence.category ?? 'Unknown');
+
+  const actionBreakdown = ev.actionBreakdown as Record<string, number> | undefined;
+  const exampleTickets = [...new Set(ev.exampleTickets as string[] | undefined ?? [])];
+  const hasDetail = (actionBreakdown && Object.keys(actionBreakdown).length > 0) || exampleTickets.length > 0 || Object.keys(ev).length > 0;
+
+  return (
+    <div className={`rounded-lg bg-[#272C33] overflow-hidden border ${cfg ? cfg.border : 'border-[#3a424d]'}`}>
+      {cfg && v && (
+        <div className={`px-3 py-2 ${cfg.bg} flex items-center gap-2`}>
+          <span className="text-sm">{cfg.emoji}</span>
+          <span className={`text-xs font-semibold ${cfg.text}`}>{v.headline}</span>
+          <span className="text-[10px] text-neutral-500 ml-auto">{category}</span>
+        </div>
+      )}
+      {!cfg && (
+        <div className="px-3 py-2 bg-[#2a3040] flex items-center gap-2">
+          <span className="text-xs text-neutral-300 font-medium">{s.suggestion.title}</span>
+        </div>
+      )}
+
+      <div className="px-3 py-3">
+        {s.bodyText ? (
+          <div className="text-[11px] text-neutral-300 leading-relaxed whitespace-pre-line">{s.bodyText}</div>
+        ) : (
+          <div className="text-[11px] text-neutral-400 leading-relaxed">
+            {v ? v.reason : s.suggestion.description}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 mt-3">
+          {v?.verdict === 'apply' && (
+            <>
+              <button onClick={() => onApply(s.id)}
+                className="px-3 py-1.5 text-[10px] font-semibold rounded bg-green-700/60 text-green-300 hover:bg-green-600/60 border border-green-600/40 transition-colors">
+                Apply
+              </button>
+              {onCustomize && typeof s.suggestion.category === 'string' && (
+                <button onClick={() => onCustomize(s)}
+                  className="px-3 py-1.5 text-[10px] font-medium rounded bg-neutral-800/50 text-neutral-400 hover:bg-neutral-700/50 border border-neutral-700/40 transition-colors">
+                  Customise
+                </button>
+              )}
+              <button onClick={() => onDismiss(s.id)}
+                className="px-3 py-1.5 text-[10px] font-medium rounded text-neutral-500 hover:text-neutral-400 transition-colors">
+                Dismiss
+              </button>
+            </>
+          )}
+          {v?.verdict === 'wait' && (
+            <>
+              <button onClick={() => onSnooze(s.id)}
+                className="px-3 py-1.5 text-[10px] font-semibold rounded bg-amber-700/40 text-amber-300 hover:bg-amber-600/40 border border-amber-600/30 transition-colors">
+                Re-check in 2 weeks
+              </button>
+              <button onClick={() => onApply(s.id)}
+                className="px-3 py-1.5 text-[10px] font-medium rounded bg-neutral-800/50 text-neutral-400 hover:bg-neutral-700/50 border border-neutral-700/40 transition-colors">
+                Apply anyway
+              </button>
+              <button onClick={() => onDismiss(s.id)}
+                className="px-3 py-1.5 text-[10px] font-medium rounded text-neutral-500 hover:text-neutral-400 transition-colors">
+                Dismiss
+              </button>
+            </>
+          )}
+          {v?.verdict === 'skip' && (
+            <>
+              <button onClick={() => onDismiss(s.id)}
+                className="px-3 py-1.5 text-[10px] font-semibold rounded bg-red-800/40 text-red-300 hover:bg-red-700/40 border border-red-700/30 transition-colors">
+                Dismiss
+              </button>
+              <button onClick={() => onApply(s.id)}
+                className="px-3 py-1.5 text-[10px] font-medium rounded bg-neutral-800/50 text-neutral-400 hover:bg-neutral-700/50 border border-neutral-700/40 transition-colors">
+                Apply anyway — I know best
+              </button>
+              <button onClick={() => onSnooze(s.id)}
+                className="px-3 py-1.5 text-[10px] font-medium rounded text-neutral-500 hover:text-neutral-400 transition-colors">
+                Re-check later
+              </button>
+            </>
+          )}
+          {!v && (
+            <>
+              <button onClick={() => onApply(s.id)}
+                className="px-3 py-1.5 text-[10px] font-semibold rounded bg-green-700/60 text-green-300 hover:bg-green-600/60 border border-green-600/40 transition-colors">
+                Apply
+              </button>
+              <button onClick={() => onDismiss(s.id)}
+                className="px-3 py-1.5 text-[10px] font-medium rounded bg-neutral-800/50 text-neutral-400 hover:bg-neutral-700/50 border border-neutral-700/40 transition-colors">
+                Dismiss
+              </button>
+            </>
+          )}
+        </div>
+
+        {hasDetail && (
+          <button onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 mt-3 text-[10px] text-neutral-500 hover:text-neutral-400 transition-colors">
+            <span className={`transform transition-transform ${expanded ? 'rotate-90' : ''}`}>{'▸'}</span>
+            <span>See the data behind this recommendation</span>
+          </button>
+        )}
+
+        {expanded && hasDetail && (
+          <div className="mt-2.5 pt-2.5 border-t border-[#3a424d] space-y-2">
+            {Object.keys(ev).length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+                {Object.entries(ev)
+                  .filter(([k]) => !['sampleTickets', 'actionBreakdown', 'exampleTickets', 'riskFlag', 'proposedRule', 'category'].includes(k))
+                  .map(([k, v]) => (
+                  <div key={k} className="flex justify-between text-[9px]">
+                    <span className="text-neutral-500">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</span>
+                    <span className="text-neutral-400 font-mono">{String(v)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {actionBreakdown && Object.keys(actionBreakdown).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                <span className="text-[9px] text-neutral-500">Actions:</span>
+                {Object.entries(actionBreakdown).map(([action, cnt]) => (
+                  <span key={action} className="text-[9px] px-1.5 py-0.5 rounded bg-blue-950/40 text-blue-400 border border-blue-900/30">
+                    {action} ({cnt})
+                  </span>
+                ))}
+              </div>
+            )}
+            {exampleTickets.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className="text-[9px] text-neutral-500">Recent:</span>
+                {exampleTickets.map(t => (
+                  <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-[#363d47] text-neutral-300 font-mono">{t}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function SuggestionCards({ type, onRulesChanged, onCustomize }: { type: 'guardrail' | 'autonomy'; onRulesChanged: () => void; onCustomize?: (suggestion: SuggestionItem) => void }) {
   const [items, setItems] = useState<SuggestionItem[]>([]);
@@ -1179,6 +1335,11 @@ function SuggestionCards({ type, onRulesChanged, onCustomize }: { type: 'guardra
     setItems(prev => prev.filter(s => s.id !== id));
   };
 
+  const snooze = async (id: number) => {
+    await api(`/suggestions/${id}/snooze`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: 14 }) });
+    setItems(prev => prev.filter(s => s.id !== id));
+  };
+
   if (loading && items.length === 0) return null;
 
   return (
@@ -1192,77 +1353,13 @@ function SuggestionCards({ type, onRulesChanged, onCustomize }: { type: 'guardra
       </div>
       {items.length === 0 ? (
         <div className="text-[10px] text-neutral-600 py-2">No suggestions — click Refresh to analyse decision history.</div>
-      ) : items.map(s => {
-        const ev = s.evidence || {};
-        const actionBreakdown = ev.actionBreakdown as Record<string, number> | undefined;
-        const exampleTickets = ev.exampleTickets as string[] | undefined;
-        const hasDetail = actionBreakdown || exampleTickets;
-        return (
-        <div key={s.id} className="border border-[#3a424d] rounded-lg bg-[#272C33] p-3">
-          <div className="flex items-start gap-2">
-            <span className="text-sm mt-0.5">{ACTION_ICONS[s.suggestion.action] ?? '\u{1F4A1}'}</span>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-neutral-200 font-medium">{s.suggestion.title}</div>
-              <div className="text-[10px] text-neutral-400 mt-0.5">{s.suggestion.description}</div>
-              {ev && Object.keys(ev).length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-1.5">
-                  {Object.entries(ev)
-                    .filter(([k]) => !['sampleTickets', 'actionBreakdown', 'exampleTickets', 'riskFlag', 'proposedRule'].includes(k))
-                    .map(([k, v]) => (
-                    <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-[#363d47] text-neutral-400">
-                      {k.replace(/([A-Z])/g, ' $1').toLowerCase()}: {String(v)}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {typeof ev.riskFlag === 'string' && ev.riskFlag && (
-                <div className="text-[10px] text-amber-400 mt-1.5 flex items-center gap-1">
-                  <span>⚠️</span><span>{ev.riskFlag}</span>
-                </div>
-              )}
-              {hasDetail && (
-                <div className="mt-2 space-y-1.5">
-                  {actionBreakdown && Object.keys(actionBreakdown).length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      <span className="text-[9px] text-neutral-500">Actions:</span>
-                      {Object.entries(actionBreakdown).map(([action, cnt]) => (
-                        <span key={action} className="text-[9px] px-1.5 py-0.5 rounded bg-blue-950/40 text-blue-400 border border-blue-900/30">
-                          {action} ({cnt})
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {exampleTickets && exampleTickets.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 items-center">
-                      <span className="text-[9px] text-neutral-500">Recent:</span>
-                      {exampleTickets.map(t => (
-                        <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-[#363d47] text-neutral-300 font-mono">{t}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="flex flex-col gap-1 shrink-0">
-              <button onClick={() => apply(s.id)}
-                className="px-2 py-1 text-[10px] font-medium rounded bg-green-800/50 text-green-400 hover:bg-green-700/50 border border-green-800/40 transition-colors">
-                Apply
-              </button>
-              {onCustomize && s.type === 'autonomy' && typeof s.suggestion.category === 'string' && (
-                <button onClick={() => onCustomize(s)}
-                  className="px-2 py-1 text-[10px] font-medium rounded bg-[#5ec1ca]/20 text-[#5ec1ca] hover:bg-[#5ec1ca]/30 border border-[#5ec1ca]/30 transition-colors">
-                  Customise
-                </button>
-              )}
-              <button onClick={() => dismiss(s.id)}
-                className="px-2 py-1 text-[10px] font-medium rounded bg-neutral-800/50 text-neutral-400 hover:bg-neutral-700/50 border border-neutral-700/40 transition-colors">
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-        );
-      })}
+      ) : items.map(s => (
+        s.verdict ? (
+          <VerdictCard key={s.id} s={s} onApply={apply} onDismiss={dismiss} onSnooze={snooze} onCustomize={onCustomize} />
+        ) : (
+          <VerdictCard key={s.id} s={s} onApply={apply} onDismiss={dismiss} onSnooze={snooze} onCustomize={onCustomize} />
+        )
+      ))}
     </div>
   );
 }

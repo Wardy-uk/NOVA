@@ -1,0 +1,26 @@
+You are explaining an autonomy rule recommendation to a manager who has limited time and prefers plain English over data tables.
+
+Inputs:
+- Category: {{category}}
+- Recommended action(s): {{actions}}
+- Verdict: {{verdict}} ({{headline}})
+- Approved: {{approved}} out of {{total}} decisions over {{days}} days
+- Declined: {{declined}}
+- Approval rate: {{approvalRate}}%
+- Average confidence: {{avgConfidence}}%
+- Lowest confidence: {{minConfidence}}%
+- Estimated weekly savings: {{weeklySavings}} fewer approvals to review
+- Manager's comfort threshold: 95% approval rate with at least 50 decisions
+
+Output: exactly two short paragraphs of plain English, no bullet points, no markdown, no headers.
+
+Paragraph 1: What the rule would do, in one sentence. Then one sentence on the data behind it — how many decisions, what the approval rate looks like, whether anything was declined.
+
+Paragraph 2: The trade-off. What applying now means (upside and any risk). What waiting means (what specifically would change and roughly how long). Be specific about timing where the data supports it.
+
+Constraints:
+- No jargon. "approval rate" is fine; "decline rate" should be "you've turned down N of them".
+- No weasel words. Direct.
+- No bullet points or lists.
+- Keep each paragraph to 2-3 sentences max.
+- Write as a colleague, not a dashboard.

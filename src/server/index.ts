@@ -969,7 +969,7 @@ async function main() {
     const abuseReportProcessor = new AbuseReportProcessor(settingsQueries, agentJiraClient);
     const callReviewService = new CallReviewService(settingsQueries, llmService);
 
-    const suggestionEngine = new SuggestionEngine(agentLoop.getGuardrails(), agentLoop.getAutonomyEngine(), settingsQueries);
+    const suggestionEngine = new SuggestionEngine(agentLoop.getGuardrails(), agentLoop.getAutonomyEngine(), settingsQueries, llmService);
 
     // Daily briefing service
     const briefingEmailService = new EmailService(() => settingsQueries.getAll());

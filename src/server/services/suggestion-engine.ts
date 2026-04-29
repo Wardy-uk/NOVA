@@ -3,8 +3,19 @@ import { createHash } from 'crypto';
 import type { Guardrails } from './guardrails.js';
 import type { AutonomyEngine } from './autonomy-engine.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import type { LlmService } from './llm-service.js';
+import { loadPrompt } from './prompt-loader.js';
+import { z } from 'zod';
 
 // ── Types ──
+
+export type Verdict = 'apply' | 'wait' | 'skip';
+
+export interface VerdictResult {
+  verdict: Verdict;
+  headline: string;
+  reason: string;
+}
 
 export interface Suggestion {
   id: number;
@@ -12,9 +23,12 @@ export interface Suggestion {
   suggestionKey: string;
   suggestion: SuggestionPayload;
   evidence: Record<string, unknown>;
-  status: 'pending' | 'applied' | 'dismissed';
+  status: 'pending' | 'applied' | 'dismissed' | 'snoozed';
+  snoozedUntil: string | null;
   createdAt: string;
   updatedAt: string;
+  verdict?: VerdictResult;
+  bodyText?: string;
 }
 
 export interface SuggestionPayload {
@@ -32,6 +46,7 @@ interface RawSuggestionRow {
   evidence_json: string | null;
   status: string;
   dismissed_hash: string | null;
+  snoozed_until: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -49,9 +64,66 @@ function mapRow(row: RawSuggestionRow): Suggestion {
     suggestionKey: row.suggestion_key,
     suggestion: JSON.parse(row.suggestion_json),
     evidence: row.evidence_json ? JSON.parse(row.evidence_json) : {},
-    status: row.status as 'pending' | 'applied' | 'dismissed',
+    status: row.status as Suggestion['status'],
+    snoozedUntil: row.snoozed_until ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+// ── Verdict Logic ──
+
+export function computeVerdict(evidence: Record<string, unknown>): VerdictResult {
+  const approvalRate = Number(evidence.approvalRate ?? 0);
+  const declinedCount = Number(evidence.declinedCount ?? 0);
+  const total = Number(evidence.decisionCount ?? evidence.total ?? 0);
+  const avgConfidence = Number(evidence.avgConfidence ?? 0) / 100;
+  const minConfidence = Number(evidence.minConfidence ?? 0) / 100;
+
+  // 🔴 Skip: any decline in data, OR confidence < 0.75, OR fewer than 15 decisions
+  if (declinedCount > 0) {
+    return {
+      verdict: 'skip',
+      headline: 'Don’t auto-approve this yet',
+      reason: `${declinedCount} decision${declinedCount > 1 ? 's were' : ' was'} declined — the agent isn't reliable enough here yet.`,
+    };
+  }
+  if (avgConfidence < 0.75) {
+    return {
+      verdict: 'skip',
+      headline: 'Don’t auto-approve this yet',
+      reason: `Average confidence is ${Math.round(avgConfidence * 100)}%, well below the 75% floor.`,
+    };
+  }
+  if (total < 15) {
+    return {
+      verdict: 'skip',
+      headline: 'Don’t auto-approve this yet',
+      reason: `Only ${total} decisions so far — need at least 15 before a pattern is meaningful.`,
+    };
+  }
+
+  // 🟢 Apply: approval rate ≥95%, decisions ≥50, confidence ≥0.85
+  if (approvalRate >= 95 && total >= 50 && avgConfidence >= 0.85) {
+    return {
+      verdict: 'apply',
+      headline: 'Safe to switch on',
+      reason: `${approvalRate}% approval across ${total} decisions with strong confidence.`,
+    };
+  }
+
+  // 🟡 Wait: everything else in between
+  const waitReasons: string[] = [];
+  if (approvalRate < 95) waitReasons.push(`approval rate is ${approvalRate}% (need 95%)`);
+  if (total < 50) waitReasons.push(`only ${total} decisions (need 50)`);
+  if (avgConfidence < 0.85) waitReasons.push(`avg confidence is ${Math.round(avgConfidence * 100)}% (need 85%)`);
+
+  return {
+    verdict: 'wait',
+    headline: 'Probably right, not enough data',
+    reason: waitReasons.length > 0
+      ? `Close, but ${waitReasons.join(' and ')}.`
+      : 'Getting there — give it another couple of weeks.',
   };
 }
 
@@ -61,11 +133,14 @@ export class SuggestionEngine {
   private guardrails: Guardrails;
   private autonomy: AutonomyEngine;
   private settings: SettingsQueries;
+  private llm: LlmService | null;
+  private bodyTextCache = new Map<string, { text: string; hash: string }>();
 
-  constructor(guardrails: Guardrails, autonomy: AutonomyEngine, settings: SettingsQueries) {
+  constructor(guardrails: Guardrails, autonomy: AutonomyEngine, settings: SettingsQueries, llm?: LlmService) {
     this.guardrails = guardrails;
     this.autonomy = autonomy;
     this.settings = settings;
+    this.llm = llm ?? null;
   }
 
   private goLiveDaysCache: number | null = null;
@@ -87,12 +162,70 @@ export class SuggestionEngine {
     return Math.max(0, Math.floor((Date.now() - first.getTime()) / 86_400_000));
   }
 
+  // ── Body text generation ──
+
+  private async generateBodyText(
+    evidence: Record<string, unknown>,
+    verdict: VerdictResult,
+  ): Promise<string> {
+    if (!this.llm) return '';
+
+    const evHash = hashEvidence(evidence);
+    const cached = this.bodyTextCache.get(evHash);
+    if (cached && cached.hash === evHash) return cached.text;
+
+    const actionBreakdown = evidence.actionBreakdown as Record<string, number> | undefined;
+    const actions = actionBreakdown ? Object.entries(actionBreakdown).sort((a, b) => b[1] - a[1]).map(([a, c]) => `${a} (${c})`).join(', ') : 'unknown';
+
+    try {
+      const systemPrompt = loadPrompt('autonomy-recommendation', {
+        category: String(evidence.category ?? 'unknown'),
+        actions,
+        verdict: verdict.verdict,
+        headline: verdict.headline,
+        approved: String(evidence.approvedCount ?? 0),
+        declined: String(evidence.declinedCount ?? 0),
+        total: String(evidence.decisionCount ?? evidence.total ?? 0),
+        days: String(evidence.days ?? 30),
+        approvalRate: String(evidence.approvalRate ?? 0),
+        avgConfidence: String(evidence.avgConfidence ?? 0),
+        minConfidence: String(evidence.minConfidence ?? 0),
+        weeklySavings: String(evidence.estimatedWeeklySavings ?? 0),
+      });
+
+      const result = await this.llm.call(
+        systemPrompt,
+        'Generate the two-paragraph recommendation.',
+        z.object({ text: z.string() }),
+        { tier: 'cheap', callType: 'autonomy_recommendation', maxTokens: 300, temperature: 0.4 },
+      );
+      const text = result.data.text;
+      this.bodyTextCache.set(evHash, { text, hash: evHash });
+      return text;
+    } catch (err) {
+      console.warn('[suggestion-engine] Body text generation failed, using fallback:', err instanceof Error ? err.message : err);
+      return '';
+    }
+  }
+
+  async enrichSuggestions(suggestions: Suggestion[]): Promise<Suggestion[]> {
+    return Promise.all(suggestions.map(async (s) => {
+      if (s.type !== 'autonomy') return s;
+      const verdict = computeVerdict(s.evidence);
+      const bodyText = await this.generateBodyText(s.evidence, verdict);
+      return { ...s, verdict, bodyText };
+    }));
+  }
+
   // ── CRUD ──
 
   async getSuggestions(type?: 'guardrail' | 'autonomy', status = 'pending'): Promise<Suggestion[]> {
-    const conditions = ['status = ?'];
-    const params: unknown[] = [status];
+    const conditions: string[] = [];
+    const params: unknown[] = [];
     if (type) { conditions.push('type = ?'); params.push(type); }
+    // Show pending items + snoozed items whose re-check date has passed
+    conditions.push("(status = ? OR (status = 'snoozed' AND snoozed_until IS NOT NULL AND snoozed_until <= GETUTCDATE()))");
+    params.push(status);
     const rows = await query<RawSuggestionRow>(
       `SELECT * FROM agent_suggestions WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC`,
       params,
@@ -100,9 +233,21 @@ export class SuggestionEngine {
     return rows.map(mapRow);
   }
 
+  async snoozeSuggestion(id: number, days = 14): Promise<boolean> {
+    const rows = await query<RawSuggestionRow>(
+      `SELECT * FROM agent_suggestions WHERE id = ? AND status IN ('pending', 'snoozed')`, [id],
+    );
+    if (rows.length === 0) return false;
+    await execute(
+      `UPDATE agent_suggestions SET status = 'snoozed', snoozed_until = DATEADD(day, ?, GETUTCDATE()), updated_at = GETUTCDATE() WHERE id = ?`,
+      [days, id],
+    );
+    return true;
+  }
+
   async dismissSuggestion(id: number): Promise<boolean> {
     const rows = await query<RawSuggestionRow>(
-      `SELECT * FROM agent_suggestions WHERE id = ? AND status = 'pending'`, [id],
+      `SELECT * FROM agent_suggestions WHERE id = ? AND status IN ('pending', 'snoozed')`, [id],
     );
     if (rows.length === 0) return false;
     const row = rows[0];
@@ -293,7 +438,6 @@ export class SuggestionEngine {
           category: row.category,
           total: row.total,
           acceptRate: Math.round(acceptRate),
-          avgConfidence: parseFloat(row.avg_conf.toFixed(2)),
           ...detail,
         });
       }
