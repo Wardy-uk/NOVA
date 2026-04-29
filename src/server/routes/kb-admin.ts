@@ -34,7 +34,7 @@ export function createKbAdminRoutes(deps: KbAdminDeps): Router {
     }
   });
 
-  router.post('/sync/:source', requireRole('admin'), async (req, res) => {
+  router.post('/sync/:source', requireRole('admin', 'super_admin'), async (req, res) => {
     const source = String(req.params.source);
     const provider = providers.get(source);
     if (!provider) {
@@ -62,7 +62,7 @@ export function createKbAdminRoutes(deps: KbAdminDeps): Router {
     }
   });
 
-  router.post('/search', requireRole('admin'), async (req, res) => {
+  router.post('/search', requireRole('admin', 'super_admin'), async (req, res) => {
     const q = req.body?.q || (typeof req.query?.q === 'string' ? req.query.q : undefined);
     if (!q) {
       res.status(400).json({ ok: false, error: 'q parameter required' });
