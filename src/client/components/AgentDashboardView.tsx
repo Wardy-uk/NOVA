@@ -1340,8 +1340,6 @@ function SuggestionCards({ type, onRulesChanged, onCustomize }: { type: 'guardra
     setItems(prev => prev.filter(s => s.id !== id));
   };
 
-  if (loading && items.length === 0) return null;
-
   return (
     <div className="space-y-2 mt-4">
       <div className="flex items-center justify-between">
@@ -1351,14 +1349,12 @@ function SuggestionCards({ type, onRulesChanged, onCustomize }: { type: 'guardra
           {refreshing ? 'Analysing...' : 'Refresh'}
         </button>
       </div>
-      {items.length === 0 ? (
-        <div className="text-[10px] text-neutral-600 py-2">No suggestions — click Refresh to analyse decision history.</div>
+      {loading ? (
+        <div className="text-[10px] text-neutral-500 py-2">Loading suggestions...</div>
+      ) : items.length === 0 ? (
+        <div className="text-[10px] text-neutral-500 py-2">No suggestions — click Refresh to analyse decision history.</div>
       ) : items.map(s => (
-        s.verdict ? (
-          <VerdictCard key={s.id} s={s} onApply={apply} onDismiss={dismiss} onSnooze={snooze} onCustomize={onCustomize} />
-        ) : (
-          <VerdictCard key={s.id} s={s} onApply={apply} onDismiss={dismiss} onSnooze={snooze} onCustomize={onCustomize} />
-        )
+        <VerdictCard key={s.id} s={s} onApply={apply} onDismiss={dismiss} onSnooze={snooze} onCustomize={onCustomize} />
       ))}
     </div>
   );
