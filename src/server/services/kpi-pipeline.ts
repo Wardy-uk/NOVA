@@ -224,13 +224,20 @@ export class KpiPipeline {
                ISNULL(OpenTickets_Over2Hours, 0) AS OpenTickets_Over2Hours,
                ISNULL(OpenTickets_NoUpdateToday, 0) AS OpenTickets_NoUpdateToday,
                ISNULL(SolvedTickets_Today, 0) AS SolvedTickets_Today,
-               ISNULL(SolvedTickets_ThisWeek, 0) AS SolvedTickets_ThisWeek
+               ISNULL(SolvedTickets_ThisWeek, 0) AS SolvedTickets_ThisWeek,
+               ISNULL(OldestTicketDays, 0) AS OldestTicketDays
         FROM dbo.Agent WHERE IsActive = 1 AND AgentId IS NOT NULL
       `);
 
       if (agents.recordset.length === 0) return;
 
       const s = this.s;
+      // Ensure OldestTicketDays column exists on the daily table
+      await p.request().query(`
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_agent_kpi_daily${s}') AND name = 'OldestTicketDays')
+          ALTER TABLE dbo.jira_agent_kpi_daily${s} ADD OldestTicketDays INT NULL;
+      `).catch(() => {});
+
       for (const a of agents.recordset) {
         if (!a.AgentName?.trim()) continue;
         const request = p.request();
@@ -244,6 +251,7 @@ export class KpiPipeline {
         request.input('noUpdate', sql.Int, a.OpenTickets_NoUpdateToday ?? 0);
         request.input('solvedToday', sql.Int, a.SolvedTickets_Today ?? 0);
         request.input('solvedWeek', sql.Int, a.SolvedTickets_ThisWeek ?? 0);
+        request.input('oldestDays', sql.Int, a.OldestTicketDays ?? 0);
 
         await request.query(`
           MERGE dbo.jira_agent_kpi_daily${s} AS t
@@ -253,13 +261,14 @@ export class KpiPipeline {
             AgentId = @agentId, TierCode = @tierCode, Team = @team,
             OpenTickets_Total = @openTotal, OpenTickets_Over2Hours = @over2h,
             OpenTickets_NoUpdateToday = @noUpdate,
-            SolvedTickets_Today = @solvedToday, SolvedTickets_ThisWeek = @solvedWeek
+            SolvedTickets_Today = @solvedToday, SolvedTickets_ThisWeek = @solvedWeek,
+            OldestTicketDays = @oldestDays
           WHEN NOT MATCHED THEN INSERT
             (ReportDate, AgentId, AgentName, TierCode, Team,
              OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
-             SolvedTickets_Today, SolvedTickets_ThisWeek)
+             SolvedTickets_Today, SolvedTickets_ThisWeek, OldestTicketDays)
           VALUES (@reportDate, @agentId, @agentName, @tierCode, @team,
-                  @openTotal, @over2h, @noUpdate, @solvedToday, @solvedWeek);
+                  @openTotal, @over2h, @noUpdate, @solvedToday, @solvedWeek, @oldestDays);
         `);
         rowsAffected++;
       }
