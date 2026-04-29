@@ -45,15 +45,26 @@ export class TfsDocsSyncProvider implements KbSyncProvider {
 
     let git: SimpleGit;
     if (fs.existsSync(path.join(CACHE_DIR, '.git'))) {
+      console.log(`[kb-tfs] Fetching updates from ${repoUrl} (branch: ${branch})`);
       git = simpleGit(CACHE_DIR);
       await git.remote(['set-url', 'origin', authUrl]);
       await git.fetch('origin');
       await git.reset(['--hard', `origin/${branch}`]);
     } else {
+      // Clean up stale empty cache dir before cloning
+      const existing = fs.readdirSync(CACHE_DIR);
+      if (existing.length > 0) {
+        console.log(`[kb-tfs] Removing stale cache dir (${existing.length} entries, no .git)`);
+        fs.rmSync(CACHE_DIR, { recursive: true, force: true });
+        fs.mkdirSync(CACHE_DIR, { recursive: true });
+      }
+      console.log(`[kb-tfs] Cloning ${repoUrl} (branch: ${branch}) into ${CACHE_DIR}`);
       git = simpleGit();
       await git.clone(authUrl, CACHE_DIR, ['--branch', branch, '--single-branch']);
       git = simpleGit(CACHE_DIR);
     }
+
+    console.log(`[kb-tfs] Clone/fetch complete, scanning for markdown files...`);
 
     const files = await this.walkMarkdownFiles(CACHE_DIR);
     for (const filePath of files) {
