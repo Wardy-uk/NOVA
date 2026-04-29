@@ -324,7 +324,7 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal }: Props) {
                     <Fragment key={task.id}>
                       <tr
                         className="bg-[#2f353d] hover:bg-[#363d47] transition-colors cursor-pointer"
-                        onClick={() => toggleExpandedRow(task.id)}
+                        onClick={() => openDrawer(task.id)}
                       >
                         <td className="px-2 py-2 text-center">
                           <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${SOURCE_COLORS[task.source] ?? 'bg-neutral-700'} text-white`}>
