@@ -571,7 +571,8 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
       const res = await fetch(`/api/people/agent/${encodeURIComponent(name)}/aged-tickets`);
       const json = await res.json();
       if (json.ok) setAgedTickets(json.data);
-    } catch { /* ignore */ }
+      else console.warn('[aged-tickets] API error:', json.error);
+    } catch (err) { console.warn('[aged-tickets] fetch failed:', err); }
   }, []);
 
   useEffect(() => {
@@ -950,7 +951,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
               </div>
 
               {/* Aged Tickets */}
-              {agedTickets && (agedTickets.incidents.count > 0 || agedTickets.serviceRequests.count > 0 || agedTickets.onboarding.count > 0) && (
+              {agedTickets && (
                 <div>
                   <SectionTitle title="Aged Tickets" subtitle="Open tickets exceeding age thresholds" />
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
