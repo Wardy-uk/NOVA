@@ -875,11 +875,11 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
                DATEDIFF(day, jira_created, GETUTCDATE()) AS age_days,
                issue_key, summary, priority_name
         FROM jira_issue_cache
-        WHERE assignee_display = ?
+        WHERE (assignee_display = ? OR assignee_display LIKE ? + '%' OR ? LIKE assignee_display + '%')
           AND status_category NOT IN ('Done', 'done')
           AND resolution_name IS NULL
         ORDER BY jira_created ASC
-      `, [agentName]);
+      `, [agentName, agentName, agentName]);
 
       const incidents = rows.filter(r =>
         r.issuetype_name?.toLowerCase().includes('incident') && r.age_days > 5
@@ -901,6 +901,7 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
           incidents: { count: incidents.length, tickets: incidents.slice(0, 10) },
           serviceRequests: { count: serviceRequests.length, tickets: serviceRequests.slice(0, 10) },
           onboarding: { count: onboarding.length, tickets: onboarding.slice(0, 10) },
+          _debug: { agentName, totalOpen: rows.length, issueTypes: [...new Set(rows.map(r => r.issuetype_name))] },
         },
       });
     } catch (err: any) {
