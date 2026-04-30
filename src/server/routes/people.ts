@@ -65,15 +65,16 @@ export async function generatePrepForAgent(
   qaReq.input('agent', sql.NVarChar, agentName);
   qaReq.input('since', sql.NVarChar, sinceDate);
   const qaResult = await qaReq.query(`
-    SELECT TOP 20 TicketKey, OverallScore, TrafficLight, QADate, Comments
+    SELECT TOP 20 issueKey, overallScore, grade, isConcerning, CreatedAt
     FROM dbo.jira_qa_results
-    WHERE AgentName = @agent AND QADate >= @since
-    ORDER BY QADate DESC
+    WHERE assigneeName = @agent AND CAST(CreatedAt AS DATE) >= @since
+      AND ISNULL(qaType, '') <> 'excluded'
+    ORDER BY CreatedAt DESC
   `);
   const qaRows = qaResult.recordset;
 
   const concerningQa = qaRows.filter((r: any) =>
-    r.TrafficLight === 'RED' || (r.OverallScore != null && r.OverallScore < 6.5)
+    r.grade === 'RED' || r.isConcerning === true || r.isConcerning === 1 || (r.overallScore != null && r.overallScore < 6.5)
   );
 
   const plan = await queryOne<any>(`
@@ -130,9 +131,9 @@ ${JSON.stringify(kpiRows.slice(0, 5).map((r: any) => ({
   qa: r.QAOverallAvg, gr: r.GoldenRulesAvg, frt: r.FrtCompliancePercent
 })), null, 2)}
 
-## QA Concerns (RED / low-scoring)
+## QA Concerns (RED / low-scoring / concerning)
 ${concerningQa.length > 0
-  ? concerningQa.map((r: any) => `- ${r.TicketKey}: score ${r.OverallScore}, ${r.TrafficLight}${r.Comments ? ' — ' + r.Comments : ''}`).join('\n')
+  ? concerningQa.map((r: any) => `- ${r.issueKey}: score ${r.overallScore}, grade ${r.grade}${r.isConcerning ? ' [CONCERNING]' : ''}`).join('\n')
   : 'None — all QA results acceptable'}
 
 ## Development Goals
