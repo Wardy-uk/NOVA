@@ -116,7 +116,19 @@ export async function generatePrepForAgent(
 
   const systemPrompt = `You are an assistant helping a support team manager prepare for a 1-2-1 meeting with a team member.
 Generate a structured prep document. Be specific, reference actual numbers and tickets. Keep it concise and actionable.
-Focus on: what's improved, what needs attention, goal progress, and suggested talking points.`;
+Focus on: what's improved, what needs attention, goal progress, and suggested talking points.
+
+You MUST respond with a single flat JSON object with exactly these keys:
+{
+  "summary": "string — brief overall assessment",
+  "whats_improved": ["string array of improvements"],
+  "needs_attention": ["string array of concerns"],
+  "goal_progress": [{"goal": "string", "status": "string", "notes": "string"}],
+  "qa_highlights": ["string array of QA observations"],
+  "suggested_talking_points": ["string array"],
+  "suggested_actions": ["string array"]
+}
+Do NOT nest the response inside another object. Return the flat JSON object directly.`;
 
   const userMessage = `Agent: ${agentName}
 Period: ${sinceDate} to today
@@ -151,19 +163,25 @@ ${plan?.role_clarity ?? 'No role clarity statement set'}
 ## Important Context
 ${plan?.important_context ?? 'None'}`;
 
-  const prepSchema = z.object({
-    summary: z.string(),
-    whats_improved: z.array(z.string()),
-    needs_attention: z.array(z.string()),
+  const prepSchema = z.preprocess((val: any) => {
+    if (val && typeof val === 'object' && !val.whats_improved && !val.needs_attention) {
+      const keys = Object.keys(val);
+      if (keys.length === 1 && typeof val[keys[0]] === 'object') return val[keys[0]];
+    }
+    return val;
+  }, z.object({
+    summary: z.preprocess((v) => typeof v === 'object' && v !== null ? JSON.stringify(v) : v, z.string()),
+    whats_improved: z.array(z.string()).default([]),
+    needs_attention: z.array(z.string()).default([]),
     goal_progress: z.array(z.object({
       goal: z.string(),
       status: z.string(),
-      notes: z.string(),
-    })),
-    qa_highlights: z.array(z.string()),
-    suggested_talking_points: z.array(z.string()),
-    suggested_actions: z.array(z.string()),
-  });
+      notes: z.string().default(''),
+    })).default([]),
+    qa_highlights: z.array(z.string()).default([]),
+    suggested_talking_points: z.array(z.string()).default([]),
+    suggested_actions: z.array(z.string()).default([]),
+  }));
 
   const llmService = new LlmService(settingsQueries);
   const llmResult = await llmService.call(systemPrompt, userMessage, prepSchema, {
