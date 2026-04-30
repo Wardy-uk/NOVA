@@ -144,16 +144,23 @@ export function authMiddleware(secret: string, getUserRole?: (id: number) => Pro
       return;
     }
 
+    let payload: AuthPayload;
     try {
-      const payload = jwt.verify(token, secret) as AuthPayload;
-      req.user = payload;
-      if (getUserRole) {
-        const freshRole = await getUserRole(payload.id);
-        if (freshRole !== undefined) req.user = { ...payload, role: freshRole };
-      }
-      next();
+      payload = jwt.verify(token, secret) as AuthPayload;
     } catch {
       res.status(401).json({ ok: false, error: 'Invalid or expired token' });
+      return;
     }
+
+    req.user = payload;
+    if (getUserRole) {
+      try {
+        const freshRole = await getUserRole(payload.id);
+        if (freshRole !== undefined) req.user = { ...payload, role: freshRole };
+      } catch (err) {
+        console.warn('[auth] Failed to refresh user role from DB, using JWT role:', err instanceof Error ? err.message : err);
+      }
+    }
+    next();
   };
 }
