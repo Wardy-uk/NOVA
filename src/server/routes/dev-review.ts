@@ -1052,6 +1052,7 @@ export function createDevReviewRoutes(
         type: 'doc', version: 1,
         content: [{ type: 'paragraph', content: [{ type: 'text', text: commentText }] }],
       },
+      internal: true,
     };
 
     // Look up original assignee to reassign
@@ -1064,7 +1065,7 @@ export function createDevReviewRoutes(
       } else {
         // No configured transition → update CurrentTier field directly + post comment
         await client.updateFields(String(req.params.key), { [CF_CURRENT_TIER]: { id: TIER_ID_T2 } });
-        await client.addComment(String(req.params.key), commentText);
+        await client.addComment(String(req.params.key), commentText, { internal: true });
       }
 
       // Best-effort reassign
