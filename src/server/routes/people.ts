@@ -56,8 +56,8 @@ export async function generatePrepForAgent(
   kpiReq.input('since', sql.NVarChar, sinceDate);
   const kpiResult = await kpiReq.query(`
     SELECT * FROM dbo.jira_agent_kpi_daily
-    WHERE AgentName = @agent AND KpiDate >= @since
-    ORDER BY KpiDate DESC
+    WHERE AgentName = @agent AND ReportDate >= @since
+    ORDER BY ReportDate DESC
   `);
   const kpiRows = kpiResult.recordset;
 
@@ -126,7 +126,7 @@ ${JSON.stringify(kpiSummary, null, 2)}
 
 ## Recent KPI Trend (last 5 days)
 ${JSON.stringify(kpiRows.slice(0, 5).map((r: any) => ({
-  date: r.KpiDate, resolved: r.TicketsResolved, tph: r.TicketsPerHour,
+  date: r.ReportDate, resolved: r.SolvedTickets_Today, tph: r.TicketsPerHour,
   qa: r.QAOverallAvg, gr: r.GoldenRulesAvg, frt: r.FrtCompliancePercent
 })), null, 2)}
 
@@ -174,7 +174,7 @@ ${plan?.important_context ?? 'None'}`;
   const latestKpi = kpiRows[0] ?? {};
   const metricsJson = {
     ...kpiSummary,
-    latestDate: latestKpi.KpiDate ?? null,
+    latestDate: latestKpi.ReportDate ?? null,
     periodDays: kpiRows.length,
   };
 
@@ -715,11 +715,11 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
       // Auto-freeze latest KPI row
       const latestKpi = await queryOne<any>(`
         SELECT TOP 1 * FROM jira_agent_kpi_daily
-        WHERE AgentName = ? ORDER BY KpiDate DESC
+        WHERE AgentName = ? ORDER BY ReportDate DESC
       `, [agentName]);
 
       const metricsJson = latestKpi ? {
-        KpiDate: latestKpi.KpiDate,
+        ReportDate: latestKpi.ReportDate,
         TicketsResolved: latestKpi.TicketsResolved,
         TicketsPerHour: latestKpi.TicketsPerHour,
         AvgOpenTickets: latestKpi.AvgOpenTickets,
@@ -831,6 +831,61 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
     } catch (err: any) {
       console.error('[people] calendar lookup error:', err);
       res.json({ ok: true, data: null, reason: err.message });
+    }
+  });
+
+  // ── Aged Tickets ──
+
+  router.get('/agent/:agentName/aged-tickets', async (req: Request, res: Response) => {
+    try {
+      const agentName = decodeURIComponent(String(req.params.agentName));
+      const scope = await resolveAgentScope(req);
+      if (scope && scope !== agentName) {
+        res.status(403).json({ ok: false, error: 'Access denied' });
+        return;
+      }
+
+      const rows = await query<{
+        issuetype_name: string;
+        age_days: number;
+        issue_key: string;
+        summary: string;
+        priority_name: string;
+      }>(`
+        SELECT issuetype_name,
+               DATEDIFF(day, jira_created, GETUTCDATE()) AS age_days,
+               issue_key, summary, priority_name
+        FROM jira_issue_cache
+        WHERE assignee_display = ?
+          AND status_category NOT IN ('Done', 'done')
+          AND resolution_name IS NULL
+        ORDER BY jira_created ASC
+      `, [agentName]);
+
+      const incidents = rows.filter(r =>
+        r.issuetype_name?.toLowerCase().includes('incident') && r.age_days > 5
+      );
+      const serviceRequests = rows.filter(r =>
+        (r.issuetype_name?.toLowerCase().includes('service request') ||
+         r.issuetype_name?.toLowerCase().includes('request')) &&
+        !r.issuetype_name?.toLowerCase().includes('incident') &&
+        !r.issuetype_name?.toLowerCase().includes('onboarding') &&
+        r.age_days > 10
+      );
+      const onboarding = rows.filter(r =>
+        r.issuetype_name?.toLowerCase().includes('onboarding') && r.age_days > 15
+      );
+
+      res.json({
+        ok: true,
+        data: {
+          incidents: { count: incidents.length, tickets: incidents.slice(0, 10) },
+          serviceRequests: { count: serviceRequests.length, tickets: serviceRequests.slice(0, 10) },
+          onboarding: { count: onboarding.length, tickets: onboarding.slice(0, 10) },
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
     }
   });
 

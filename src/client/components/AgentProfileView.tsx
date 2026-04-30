@@ -278,9 +278,7 @@ function aggregateAgent(rows: AgentDailyRow[]): AgentSummary | null {
   const latest = sorted[sorted.length - 1];
   const solvedTotal = sum(sorted.map(r => r.SolvedTickets_Today));
   const tphValues = sorted.map(r => r.TicketsPerHour).filter((v): v is number => v !== null && v > 0);
-  const slaResolved = sum(sorted.map(r => r.SLAResolvedCount));
   const slaBreached = sum(sorted.map(r => r.SLABreachedCount));
-  const slaTotal = slaResolved + slaBreached;
 
   return {
     agentName: latest.AgentName,
@@ -308,9 +306,9 @@ function aggregateAgent(rows: AgentDailyRow[]): AgentSummary | null {
     ownershipAvg: avg(sorted.map(r => r.OwnershipAvg)),
     nextActionAvg: avg(sorted.map(r => r.NextActionAvg)),
     timeframeAvg: avg(sorted.map(r => r.TimeframeAvg)),
-    slaResolved,
+    slaResolved: solvedTotal,
     slaBreached,
-    slaCompliancePct: slaTotal === 0 ? null : ((slaResolved - slaBreached) / slaResolved) * 100,
+    slaCompliancePct: solvedTotal === 0 ? null : ((solvedTotal - slaBreached) / solvedTotal) * 100,
     csatCount: sum(sorted.map(r => r.CSATCount)),
     csatAvg: avg(sorted.map(r => r.CSATAverage)),
     resolvedTrendPct: (() => {
@@ -511,6 +509,11 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
   const [newActionOwner, setNewActionOwner] = useState('');
   const [transcriptText, setTranscriptText] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const [agedTickets, setAgedTickets] = useState<{
+    incidents: { count: number; tickets: { issue_key: string; summary: string; age_days: number; priority_name: string }[] };
+    serviceRequests: { count: number; tickets: { issue_key: string; summary: string; age_days: number; priority_name: string }[] };
+    onboarding: { count: number; tickets: { issue_key: string; summary: string; age_days: number; priority_name: string }[] };
+  } | null>(null);
 
   const isAdmin = userRole === 'admin' || userRole === 'super_admin';
 
@@ -563,6 +566,14 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
     } catch { /* ignore */ }
   }, []);
 
+  const fetchAgedTickets = useCallback(async (name: string) => {
+    try {
+      const res = await fetch(`/api/people/agent/${encodeURIComponent(name)}/aged-tickets`);
+      const json = await res.json();
+      if (json.ok) setAgedTickets(json.data);
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     setLoading(true);
     setError(null);
@@ -571,7 +582,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
       try {
         if (agentName) {
           setResolvedAgent(agentName);
-          await Promise.all([fetchKpis(agentName), fetchPlan(agentName), fetchSnapshots(agentName), fetchActions(agentName), fetchCalendar(agentName)]);
+          await Promise.all([fetchKpis(agentName), fetchPlan(agentName), fetchSnapshots(agentName), fetchActions(agentName), fetchCalendar(agentName), fetchAgedTickets(agentName)]);
         } else {
           // Self-scoped: first fetch KPIs to discover the agent name
           const url = `/api/kpi-data/agent-kpis?env=live&days=${dateRange}&scope=self`;
@@ -582,7 +593,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
             const name = json.scopedAgent;
             if (name) {
               setResolvedAgent(name);
-              await Promise.all([fetchPlan(name), fetchSnapshots(name), fetchActions(name), fetchCalendar(name)]);
+              await Promise.all([fetchPlan(name), fetchSnapshots(name), fetchActions(name), fetchCalendar(name), fetchAgedTickets(name)]);
             }
           }
         }
@@ -593,7 +604,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
       }
     };
     load();
-  }, [agentName, dateRange, fetchKpis, fetchPlan, fetchSnapshots, fetchActions, fetchCalendar]);
+  }, [agentName, dateRange, fetchKpis, fetchPlan, fetchSnapshots, fetchActions, fetchCalendar, fetchAgedTickets]);
 
   const summary = useMemo(() => aggregateAgent(kpiRows), [kpiRows]);
 
@@ -929,7 +940,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
                 <SectionTitle title="SLA Compliance" subtitle="Target: ≥95%" />
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
                   <MetricCard label="SLA Compliance" value={fmtPct(s.slaCompliancePct)} subtitle="Target: ≥95%" color={slaColor(s.slaCompliancePct)} target={goalTarget('ResolutionSlaPercent')} />
-                  <MetricCard label="Resolved" value={fmtInt(s.slaResolved)} subtitle="Within SLA" color={C.green} />
+                  <MetricCard label="Resolved" value={fmtInt(s.slaResolved)} subtitle={`${fmtInt(s.slaResolved - s.slaBreached)} within SLA`} color={C.green} />
                   <MetricCard label="Breached" value={fmtInt(s.slaBreached)} subtitle="Target: 0" color={s.slaBreached > 0 ? C.red : C.green} />
                   <MetricCard label="Avg First Response" value={s.frtCompliancePct !== null ? fmtPct(s.frtCompliancePct) : '—'}
                     subtitle={s.frtCompliancePct !== null ? 'Target: ≥95%' : 'Data not yet available'}
@@ -937,6 +948,21 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
                     target={goalTarget('FrtCompliancePercent')} />
                 </div>
               </div>
+
+              {/* Aged Tickets */}
+              {agedTickets && (agedTickets.incidents.count > 0 || agedTickets.serviceRequests.count > 0 || agedTickets.onboarding.count > 0) && (
+                <div>
+                  <SectionTitle title="Aged Tickets" subtitle="Open tickets exceeding age thresholds" />
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
+                    <MetricCard label="Incidents" value={String(agedTickets.incidents.count)} subtitle="> 5 days old"
+                      color={agedTickets.incidents.count > 0 ? C.red : C.green} />
+                    <MetricCard label="Service Requests" value={String(agedTickets.serviceRequests.count)} subtitle="> 10 days old"
+                      color={agedTickets.serviceRequests.count > 0 ? C.amber : C.green} />
+                    <MetricCard label="Onboarding" value={String(agedTickets.onboarding.count)} subtitle="> 15 days old"
+                      color={agedTickets.onboarding.count > 0 ? C.amber : C.green} />
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div style={{

@@ -253,15 +253,9 @@ function aggregateAgents(rows: AgentDailyRow[]): AgentSummary[] {
       nextActionAvg: avg(sorted.map(r => r.NextActionAvg)),
       timeframeAvg: avg(sorted.map(r => r.TimeframeAvg)),
       // SLA
-      slaResolved: sum(sorted.map(r => r.SLAResolvedCount)),
+      slaResolved: solvedTotal,
       slaBreached: sum(sorted.map(r => r.SLABreachedCount)),
-      slaCompliancePct: (() => {
-        const resolved = sum(sorted.map(r => r.SLAResolvedCount));
-        const breached = sum(sorted.map(r => r.SLABreachedCount));
-        const total = resolved + breached;
-        if (total === 0) return null;
-        return ((resolved - breached) / resolved) * 100;
-      })(),
+      slaCompliancePct: solvedTotal === 0 ? null : ((solvedTotal - sum(sorted.map(r => r.SLABreachedCount))) / solvedTotal) * 100,
       // CSAT
       csatCount: sum(sorted.map(r => r.CSATCount)),
       csatAvg: avg(sorted.map(r => r.CSATAverage)),

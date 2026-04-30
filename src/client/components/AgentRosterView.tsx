@@ -231,11 +231,10 @@ export function AgentRosterView({ onSelectAgent }: {
     }
     const result = new Map<string, { sla: number | null; qa: number | null; gr: number | null; tph: number | null; tier: string; team: string }>();
     for (const [name, rows] of map) {
-      const slaResolved = rows.reduce((s, r) => s + (r.SLAResolvedCount ?? 0), 0);
+      const solvedTotal = rows.reduce((s, r) => s + (r.SolvedTickets_Today ?? 0), 0);
       const slaBreached = rows.reduce((s, r) => s + (r.SLABreachedCount ?? 0), 0);
-      const slaTotal = slaResolved + slaBreached;
       result.set(name, {
-        sla: slaTotal === 0 ? null : ((slaResolved - slaBreached) / slaResolved) * 100,
+        sla: solvedTotal === 0 ? null : ((solvedTotal - slaBreached) / solvedTotal) * 100,
         qa: avg(rows.map(r => r.QAOverallAvg)),
         gr: avg(rows.map(r => r.GoldenRulesAvg)),
         tph: avg(rows.map(r => r.TicketsPerHour).filter((v): v is number => v !== null && v > 0)),
