@@ -64,12 +64,20 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
         const spaceUrl = `${auth.baseUrl}/wiki/api/v2/spaces?keys=${spaceKey}`;
         console.log(`[kb-confluence] Resolving space ${spaceKey} via ${spaceUrl}`);
         const spaceRes = await fetch(spaceUrl, { headers });
+        const spaceBody = await spaceRes.text();
         if (!spaceRes.ok) {
-          const body = await spaceRes.text();
-          console.warn(`[kb-confluence] Failed to resolve space ${spaceKey}: ${spaceRes.status} — ${body.slice(0, 300)}`);
+          console.warn(`[kb-confluence] Failed to resolve space ${spaceKey}: ${spaceRes.status} — ${spaceBody.slice(0, 300)}`);
           continue;
         }
-        const spaceData = await spaceRes.json() as { results: Array<{ id: string }> };
+        if (!spaceBody.trim()) {
+          console.warn(`[kb-confluence] Empty response resolving space ${spaceKey} (status ${spaceRes.status}) — auth may have failed. Email: ${auth.email}`);
+          continue;
+        }
+        let spaceData: { results: Array<{ id: string }> };
+        try { spaceData = JSON.parse(spaceBody); } catch {
+          console.warn(`[kb-confluence] Invalid JSON resolving space ${spaceKey}: ${spaceBody.slice(0, 200)}`);
+          continue;
+        }
         if (!spaceData.results?.length) {
           console.warn(`[kb-confluence] Space ${spaceKey} not found (API returned empty results)`);
           continue;
@@ -82,12 +90,16 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
 
         while (pageUrl) {
           const pageRes = await fetch(pageUrl, { headers });
+          const pageBody = await pageRes.text();
           if (!pageRes.ok) {
-            console.warn(`[kb-confluence] Page fetch failed: ${pageRes.status}`);
+            console.warn(`[kb-confluence] Page fetch failed: ${pageRes.status} — ${pageBody.slice(0, 300)}`);
             break;
           }
-
-          const pageData = await pageRes.json() as {
+          if (!pageBody.trim()) {
+            console.warn(`[kb-confluence] Empty response fetching pages — check auth`);
+            break;
+          }
+          let pageData: {
             results: Array<{
               id: string;
               title: string;
@@ -97,6 +109,10 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
             }>;
             _links?: { next?: string };
           };
+          try { pageData = JSON.parse(pageBody); } catch {
+            console.warn(`[kb-confluence] Invalid JSON fetching pages: ${pageBody.slice(0, 200)}`);
+            break;
+          }
 
           // Process pages with concurrency limit
           const pages = pageData.results || [];
