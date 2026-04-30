@@ -94,6 +94,7 @@ import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-cli
 import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
 import { createAgentRoutes } from './routes/agent.js';
 import { createMyTicketsRoutes } from './routes/my-tickets.js';
+import { QueueRanker } from './services/queue-ranker.js';
 import { AgentLoop } from './services/agent-loop.js';
 import { JiraSyncService } from './services/jira-sync-service.js';
 import { JiraCacheQueries } from './services/jira-cache-queries.js';
@@ -1062,8 +1063,11 @@ async function main() {
       bankHolidays = bhData.holidays ?? [];
     } catch { /* bank holidays file optional */ }
 
+    const queueRanker = new QueueRanker(jiraCacheQueries, settingsQueries, bankHolidays);
     app.use('/api/my-tickets', createMyTicketsRoutes({
       jiraClient: agentLoop.getJiraClient(),
+      queueRanker,
+      userQueries,
       bankHolidays,
     }));
 

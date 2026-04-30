@@ -7,17 +7,21 @@ import {
   type AgentEventType,
 } from '../services/agent-events.js';
 import type { JiraRestClient } from '../services/jira-client.js';
+import type { QueueRanker } from '../services/queue-ranker.js';
+import type { UserQueries } from '../db/queries.js';
 import { JIRA_FIELDS } from '../../shared/jira-fields.js';
 import { createWorkingDayClock } from '../../shared/utils/workingDayClock.js';
 
 interface MyTicketsRouteDeps {
   jiraClient: JiraRestClient | null;
+  queueRanker: QueueRanker;
+  userQueries: UserQueries;
   bankHolidays?: string[];
 }
 
 export function createMyTicketsRoutes(deps: MyTicketsRouteDeps): Router {
   const router = Router();
-  const { jiraClient } = deps;
+  const { jiraClient, queueRanker, userQueries } = deps;
   const clock = createWorkingDayClock({}, deps.bankHolidays ?? []);
 
   // ── Events ──
@@ -62,6 +66,23 @@ export function createMyTicketsRoutes(deps: MyTicketsRouteDeps): Router {
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // ── Queue ──
+
+  router.get('/queue/:agentId', async (req: Request, res: Response) => {
+    try {
+      const agentId = req.params.agentId as string;
+      const user = await userQueries.getByUsername(agentId);
+      if (!user?.email) {
+        res.status(404).json({ ok: false, error: `Agent ${agentId} not found or has no email` });
+        return;
+      }
+      const data = await queueRanker.computeQueue(agentId, user.email);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to compute queue' });
     }
   });
 

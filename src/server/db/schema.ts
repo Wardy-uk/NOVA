@@ -1111,6 +1111,22 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'jira_issue_cache') AND name = 'agent_last_updated')
      ALTER TABLE jira_issue_cache ADD agent_last_updated DATETIME2 NULL;`,
+
+    // ── Ticket defers (My Tickets defer system) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ticket_defers') AND type = 'U')
+     CREATE TABLE ticket_defers (
+       id BIGINT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key VARCHAR(32) NOT NULL,
+       agent_id VARCHAR(64) NOT NULL,
+       reason VARCHAR(64) NOT NULL,
+       deferred_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+       resurface_at DATETIME2 NOT NULL,
+       note NVARCHAR(500) NULL,
+       resolved_at DATETIME2 NULL,
+       resolved_by VARCHAR(64) NULL,
+       INDEX ix_ticket_defers_agent_active (agent_id, resolved_at),
+       INDEX ix_ticket_defers_resurface (resurface_at, resolved_at)
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
