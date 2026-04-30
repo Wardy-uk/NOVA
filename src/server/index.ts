@@ -35,6 +35,8 @@ import { createKbArticleRoutes } from './routes/kb-articles.js';
 import { KbArticleService } from './services/kb-article-service.js';
 import { createAiImprovementRoutes } from './routes/ai-improvement.js';
 import { AiImprovementService } from './services/ai-improvement.js';
+import { createAiLearningRoutes } from './routes/ai-learnings.js';
+import { AiLearningService } from './services/ai-learning-service.js';
 import { createGamificationRoutes } from './routes/gamification.js';
 import { GamificationService } from './services/gamification.js';
 import { createEscalationRoutes } from './routes/escalation.js';
@@ -91,6 +93,7 @@ import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
 import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
 import { createAgentRoutes } from './routes/agent.js';
+import { createMyTicketsRoutes } from './routes/my-tickets.js';
 import { AgentLoop } from './services/agent-loop.js';
 import { JiraSyncService } from './services/jira-sync-service.js';
 import { JiraCacheQueries } from './services/jira-cache-queries.js';
@@ -984,6 +987,11 @@ async function main() {
     const aiImprovementService = new AiImprovementService(llmService, settingsQueries, agentJiraClient);
     app.use('/api/ai-improvement', createAiImprovementRoutes(aiImprovementService));
 
+    // AI learnings (human-directed feedback)
+    const aiLearningService = new AiLearningService();
+    app.use('/api/ai-learnings', createAiLearningRoutes(aiLearningService));
+    agentLoop.getReasoner().setLearningService(aiLearningService);
+
     // Human edit detection — every 30 minutes, initial run after 2 minutes
     aiScanTimer = setInterval(async () => {
       try {
@@ -1046,6 +1054,8 @@ async function main() {
       userTeamQueries,
       teamQueries,
     }));
+
+    app.use('/api/my-tickets', createMyTicketsRoutes());
 
     // Ensure NOVA AI synthetic agent exists in dbo.Agent (idempotent)
     (async () => {

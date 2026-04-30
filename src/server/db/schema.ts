@@ -1069,6 +1069,41 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_kb_sync_runs_source_started')
      CREATE INDEX IX_kb_sync_runs_source_started ON kb_sync_runs (source, started_at DESC);`,
+
+    // ── AI Learnings (human-directed feedback for AI agent) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ai_learnings') AND type = 'U')
+     CREATE TABLE ai_learnings (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key NVARCHAR(30) NOT NULL,
+       category NVARCHAR(100) NULL,
+       organisation NVARCHAR(200) NULL,
+       ai_draft NVARCHAR(MAX) NULL,
+       learning NVARCHAR(MAX) NOT NULL,
+       tags NVARCHAR(500) NULL,
+       submitted_by NVARCHAR(100) NOT NULL,
+       active BIT NOT NULL DEFAULT 1,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ai_learnings_active')
+     CREATE INDEX IX_ai_learnings_active ON ai_learnings (active, category, created_at DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ai_learnings_org')
+     CREATE INDEX IX_ai_learnings_org ON ai_learnings (organisation, active);`,
+
+    // ── Agent events spine (My Tickets foundation) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_events') AND type = 'U')
+     CREATE TABLE agent_events (
+       id BIGINT IDENTITY(1,1) PRIMARY KEY,
+       event_type VARCHAR(64) NOT NULL,
+       ticket_key VARCHAR(32) NULL,
+       agent_id VARCHAR(64) NULL,
+       payload NVARCHAR(MAX) NOT NULL,
+       created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+       INDEX ix_agent_events_type_created (event_type, created_at DESC),
+       INDEX ix_agent_events_ticket_created (ticket_key, created_at DESC),
+       INDEX ix_agent_events_agent_created (agent_id, created_at DESC)
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
