@@ -252,6 +252,8 @@ export class JiraSyncService {
     const issueEnvironmentText = extractText(f.customfield_13213);
     const developmentDetailsText = extractText(f.customfield_13215);
     const resolutionType = (f.customfield_14494 as any)?.value ?? null;
+    const agentNextUpdate = f.customfield_14185 ? new Date(f.customfield_14185 as string) : null;
+    const agentLastUpdated = f.customfield_14081 ? new Date(f.customfield_14081 as string) : null;
     const organisationName = (() => {
       const orgs = f.customfield_10002 as any;
       if (Array.isArray(orgs) && orgs.length > 0) return orgs[0]?.name ?? null;
@@ -283,6 +285,7 @@ export class JiraSyncService {
         tldr_text = ?, agent_summary_text = ?, troubleshooting_text = ?,
         escalation_reason_text = ?, expected_outcome_text = ?, issue_environment_text = ?,
         development_details_text = ?, resolution_type = ?,
+        agent_next_update = ?, agent_last_updated = ?,
         sla_breach_time = ?, sla_breached = ?, no_reply = ?, labels = ?,
         issue_links_json = ?, fields_json = ?, organisation_name = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
@@ -295,6 +298,7 @@ export class JiraSyncService {
         tldr_text, agent_summary_text, troubleshooting_text,
         escalation_reason_text, expected_outcome_text, issue_environment_text,
         development_details_text, resolution_type,
+        agent_next_update, agent_last_updated,
         sla_breach_time, sla_breached, no_reply, labels,
         issue_links_json, fields_json, organisation_name
       ) VALUES (
@@ -306,6 +310,7 @@ export class JiraSyncService {
         ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?,
+        ?, ?,
         ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?
@@ -328,6 +333,7 @@ export class JiraSyncService {
         tldrText || null, agentSummaryText || null, troubleshootingText || null,
         escalationReasonText || null, expectedOutcomeText || null, issueEnvironmentText || null,
         developmentDetailsText || null, resolutionType,
+        agentNextUpdate, agentLastUpdated,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
         issueLinksJson, fieldsJson, organisationName,
         // INSERT values (same order as columns)
@@ -345,6 +351,7 @@ export class JiraSyncService {
         tldrText || null, agentSummaryText || null, troubleshootingText || null,
         escalationReasonText || null, expectedOutcomeText || null, issueEnvironmentText || null,
         developmentDetailsText || null, resolutionType,
+        agentNextUpdate, agentLastUpdated,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
         issueLinksJson, fieldsJson, organisationName,
       ],

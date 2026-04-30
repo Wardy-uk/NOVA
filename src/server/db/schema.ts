@@ -1104,6 +1104,13 @@ async function runMigrations(): Promise<void> {
        INDEX ix_agent_events_ticket_created (ticket_key, created_at DESC),
        INDEX ix_agent_events_agent_created (agent_id, created_at DESC)
      );`,
+
+    // ── Agent Next Update + Agent Last Updated columns on jira_issue_cache ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'jira_issue_cache') AND name = 'agent_next_update')
+     ALTER TABLE jira_issue_cache ADD agent_next_update DATETIME2 NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'jira_issue_cache') AND name = 'agent_last_updated')
+     ALTER TABLE jira_issue_cache ADD agent_last_updated DATETIME2 NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

@@ -1055,7 +1055,17 @@ async function main() {
       teamQueries,
     }));
 
-    app.use('/api/my-tickets', createMyTicketsRoutes());
+    const bankHolidaysPath = path.join(__dirname, '../../config/bank-holidays.json');
+    let bankHolidays: string[] = [];
+    try {
+      const bhData = JSON.parse(fs.readFileSync(bankHolidaysPath, 'utf-8'));
+      bankHolidays = bhData.holidays ?? [];
+    } catch { /* bank holidays file optional */ }
+
+    app.use('/api/my-tickets', createMyTicketsRoutes({
+      jiraClient: agentLoop.getJiraClient(),
+      bankHolidays,
+    }));
 
     // Ensure NOVA AI synthetic agent exists in dbo.Agent (idempotent)
     (async () => {

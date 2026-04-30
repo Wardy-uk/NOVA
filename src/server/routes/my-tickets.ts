@@ -6,9 +6,21 @@ import {
   getAgentEventsToday,
   type AgentEventType,
 } from '../services/agent-events.js';
+import type { JiraRestClient } from '../services/jira-client.js';
+import { JIRA_FIELDS } from '../../shared/jira-fields.js';
+import { createWorkingDayClock } from '../../shared/utils/workingDayClock.js';
 
-export function createMyTicketsRoutes(): Router {
+interface MyTicketsRouteDeps {
+  jiraClient: JiraRestClient | null;
+  bankHolidays?: string[];
+}
+
+export function createMyTicketsRoutes(deps: MyTicketsRouteDeps): Router {
   const router = Router();
+  const { jiraClient } = deps;
+  const clock = createWorkingDayClock({}, deps.bankHolidays ?? []);
+
+  // ── Events ──
 
   router.post('/events', async (req: Request, res: Response) => {
     try {
@@ -50,6 +62,49 @@ export function createMyTicketsRoutes(): Router {
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // ── Agent Next Update ──
+
+  router.patch('/jira/:ticketKey/agent-next-update', async (req: Request, res: Response) => {
+    if (!jiraClient) {
+      res.status(503).json({ ok: false, error: 'Jira client not available' });
+      return;
+    }
+    try {
+      const ticketKey = req.params.ticketKey as string;
+      const { at } = req.body as { at: string | null };
+
+      if (at !== null) {
+        const target = new Date(at);
+        if (isNaN(target.getTime())) {
+          res.status(400).json({ ok: false, error: 'Invalid date format' });
+          return;
+        }
+        if (target.getTime() <= Date.now()) {
+          res.status(400).json({ ok: false, error: 'Agent Next Update must be in the future' });
+          return;
+        }
+        if (!clock.isWorkingTime(target)) {
+          res.status(400).json({ ok: false, error: 'Agent Next Update must fall within working hours' });
+          return;
+        }
+      }
+
+      await jiraClient.updateFields(ticketKey, {
+        [JIRA_FIELDS.AGENT_NEXT_UPDATE]: at,
+      });
+
+      const agentId = req.user?.username ?? null;
+      await recordEvent('next_update_commitment_set', agentId, ticketKey, {
+        at,
+        set_by: agentId,
+      });
+
+      res.json({ ok: true, data: { ticketKey, agentNextUpdate: at } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to update field' });
     }
   });
 

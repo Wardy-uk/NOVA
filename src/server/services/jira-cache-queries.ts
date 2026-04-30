@@ -32,6 +32,8 @@ export interface CachedIssue {
   issue_environment_text: string | null;
   development_details_text: string | null;
   resolution_type: string | null;
+  agent_next_update: Date | null;
+  agent_last_updated: Date | null;
   sla_breach_time: Date | null;
   sla_breached: boolean;
   labels: string | null;
