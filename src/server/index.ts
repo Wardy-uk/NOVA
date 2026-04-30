@@ -912,6 +912,7 @@ async function main() {
     const availabilityService = new AgentAvailabilityService(settingsQueries);
     const ticketClassifier = new TicketClassifier(llmService, agentJiraClient, 'NT');
     const kbEmbedder = new KbEmbedder(settingsQueries);
+    agentLoop.setKbEmbedder(kbEmbedder);
     const kbChunker = new KbChunker(settingsQueries);
     const kbSyncWorker = new KbSyncWorker(kbEmbedder, kbChunker);
     const agentKbSearch = new KbSearchService(settingsQueries, kbEmbedder);

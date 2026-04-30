@@ -3,6 +3,7 @@ import type { JiraRestClient } from './jira-client.js';
 import type { LlmService } from './llm-service.js';
 import type { ApprovalQueries } from '../db/queries.js';
 import type { AgentState, AgentStatus, AgentDecision, AgentMode, AgentShadowMode, HybridActionId, HybridActionMatch, AssignedTicketMode } from './agent-types.js';
+import type { KbEmbedder } from './kb-embedder.js';
 import { Perceiver } from './perceiver.js';
 import { Reasoner } from './reasoner.js';
 import { Actor } from './actor.js';
@@ -59,6 +60,7 @@ export class AgentLoop {
   private pluginExecutor: PluginToTpjExecutor;
   private abuseExecutor: AbuseReportExecutor | null = null;
   private externalDb: ExternalDbService;
+  private kbSearch: KbSearchService;
   private jiraClient: JiraRestClient;
   private llmService: LlmService;
   private settings: SettingsQueries;
@@ -72,10 +74,10 @@ export class AgentLoop {
     approvalQueries?: ApprovalQueries,
     cache?: JiraCacheQueries,
   ) {
-    const kbSearch = new KbSearchService(settings);
+    this.kbSearch = new KbSearchService(settings);
     this.autonomyEngine = new AutonomyEngine();
     this.perceiver = new Perceiver(jiraClient, settings, cache);
-    this.reasoner = new Reasoner(llmService, kbSearch, this.autonomyEngine);
+    this.reasoner = new Reasoner(llmService, this.kbSearch, this.autonomyEngine);
     this.actor = new Actor(jiraClient, new EscalationLogService(), settings);
     this.observer = new Observer();
     this.alertService = new AlertService(settings);
@@ -103,6 +105,10 @@ export class AgentLoop {
     this.settings = settings;
     this.approvalQueries = approvalQueries ?? null;
     this.baseUrl = settings.get('sso_base_url') ?? process.env.FRONTEND_URL ?? 'http://localhost:3001';
+  }
+
+  setKbEmbedder(embedder: KbEmbedder): void {
+    this.kbSearch.setEmbedder(embedder);
   }
 
   getSettings(): SettingsQueries { return this.settings; }
