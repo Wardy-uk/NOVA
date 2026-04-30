@@ -1080,6 +1080,7 @@ export function createDevReviewRoutes(
 
       await devQueries.markThreadSynced(threadId, null);
       await devQueries.markReturned(String(req.params.key));
+      await devQueries.unclaim(String(req.params.key));
 
       // Notify the original submitter in NOVA (best-effort; never blocks response)
       try {

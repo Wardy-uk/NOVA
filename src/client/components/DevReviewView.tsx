@@ -1078,6 +1078,15 @@ function TicketDetailPane({
                 <span className="text-[11px] text-neutral-500 italic">
                   {state?.status === 'accepted' ? 'Accepted to development' : 'Returned to CC — no further action'}
                 </span>
+                {state?.status === 'returned' && state.claimed_by_user_id && (
+                  <button
+                    onClick={onUnclaim}
+                    disabled={busy}
+                    className="px-3 py-1.5 text-[10px] rounded-lg font-semibold text-neutral-400 border border-white/10 hover:bg-white/5 disabled:opacity-40"
+                  >
+                    Release
+                  </button>
+                )}
                 {state?.status === 'accepted' && state.work_item_key && (
                   <>
                     <span className="text-[11px] text-neutral-600">·</span>
