@@ -9,19 +9,21 @@ import {
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { QueueRanker } from '../services/queue-ranker.js';
 import type { UserQueries } from '../db/queries.js';
+import { DeferService, isValidDeferReason, DEFER_REASONS, type DeferReason } from '../services/defer-service.js';
 import { JIRA_FIELDS } from '../../shared/jira-fields.js';
 import { createWorkingDayClock } from '../../shared/utils/workingDayClock.js';
 
 interface MyTicketsRouteDeps {
   jiraClient: JiraRestClient | null;
   queueRanker: QueueRanker;
+  deferService: DeferService;
   userQueries: UserQueries;
   bankHolidays?: string[];
 }
 
 export function createMyTicketsRoutes(deps: MyTicketsRouteDeps): Router {
   const router = Router();
-  const { jiraClient, queueRanker, userQueries } = deps;
+  const { jiraClient, queueRanker, deferService, userQueries } = deps;
   const clock = createWorkingDayClock({}, deps.bankHolidays ?? []);
 
   // ── Events ──
@@ -83,6 +85,44 @@ export function createMyTicketsRoutes(deps: MyTicketsRouteDeps): Router {
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to compute queue' });
+    }
+  });
+
+  // ── Defers ──
+
+  router.get('/defer-reasons', (_req: Request, res: Response) => {
+    const reasons = Object.entries(DEFER_REASONS).map(([key, config]) => ({
+      key,
+      label: config.label,
+    }));
+    res.json({ ok: true, data: reasons });
+  });
+
+  router.post('/defer', async (req: Request, res: Response) => {
+    try {
+      const { ticket_key, reason, resurface_at, note } = req.body;
+      if (!ticket_key || !reason) {
+        res.status(400).json({ ok: false, error: 'ticket_key and reason are required' });
+        return;
+      }
+      if (!isValidDeferReason(reason)) {
+        res.status(400).json({ ok: false, error: `Invalid defer reason: ${reason}` });
+        return;
+      }
+      const agentId = req.user?.username ?? 'unknown';
+      const data = await deferService.deferTicket(ticket_key, agentId, reason as DeferReason, resurface_at, note);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to defer ticket' });
+    }
+  });
+
+  router.get('/defers/:agentId', async (req: Request, res: Response) => {
+    try {
+      const data = await deferService.getActiveDefers(req.params.agentId as string);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
     }
   });
 

@@ -95,6 +95,7 @@ import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from
 import { createAgentRoutes } from './routes/agent.js';
 import { createMyTicketsRoutes } from './routes/my-tickets.js';
 import { QueueRanker } from './services/queue-ranker.js';
+import { DeferService } from './services/defer-service.js';
 import { AgentLoop } from './services/agent-loop.js';
 import { JiraSyncService } from './services/jira-sync-service.js';
 import { JiraCacheQueries } from './services/jira-cache-queries.js';
@@ -1064,12 +1065,20 @@ async function main() {
     } catch { /* bank holidays file optional */ }
 
     const queueRanker = new QueueRanker(jiraCacheQueries, settingsQueries, bankHolidays);
+    const deferService = new DeferService(bankHolidays);
     app.use('/api/my-tickets', createMyTicketsRoutes({
       jiraClient: agentLoop.getJiraClient(),
       queueRanker,
+      deferService,
       userQueries,
       bankHolidays,
     }));
+
+    // Defer sweeper — check every 60s for overdue/elapsed defers
+    setInterval(() => {
+      deferService.sweepOverdueDefers().catch(e =>
+        console.warn('[defer-sweeper] sweep failed:', e.message));
+    }, 60_000);
 
     // Ensure NOVA AI synthetic agent exists in dbo.Agent (idempotent)
     (async () => {
