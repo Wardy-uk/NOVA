@@ -697,7 +697,7 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
       res.json({ ok: true, data: result });
     } catch (err: any) {
       console.error('[people] generate-prep error:', err);
-      res.status(500).json({ ok: false, error: err.message });
+      res.status(500).json({ ok: false, error: err.message, stack: err.stack });
     }
   });
 

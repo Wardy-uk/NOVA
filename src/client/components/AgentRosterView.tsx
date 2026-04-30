@@ -561,6 +561,7 @@ export function AgentRosterView({ onSelectAgent }: {
                   fontSize: 10, fontWeight: 600, cursor: generatingPrepFor === card.name ? 'wait' : 'pointer',
                   transition: 'all 0.2s',
                 }}
+                title={prepResult?.agent === card.name && !prepResult.ok ? prepResult.error : undefined}
               >{generatingPrepFor === card.name ? 'Generating...' : prepResult?.agent === card.name && prepResult.ok ? '✓ Prep Ready' : prepResult?.agent === card.name && !prepResult.ok ? 'Failed' : 'Generate 1-2-1 Prep'}</button>
               <button
                 onClick={e => { e.stopPropagation(); createSnapshot(card.name); }}
