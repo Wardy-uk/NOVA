@@ -24,6 +24,7 @@ import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
 import { ServiceDeskDashboard } from './components/ServiceDeskDashboard.js';
 import { AIApprovalQueue } from './components/AIApprovalQueue.js';
+const MyTicketsView = lazy(() => import('./components/MyTicketsView.js').then(m => ({ default: m.MyTicketsView })));
 const KpiDashboardView = lazy(() => import('./components/KpiDashboardView.js').then(m => ({ default: m.KpiDashboardView })));
 const KpiDataView = lazy(() => import('./components/KpiDataView.js').then(m => ({ default: m.KpiDataView })));
 const KpiComparisonView = lazy(() => import('./components/KpiComparisonView.js').then(m => ({ default: m.KpiComparisonView })));
@@ -73,6 +74,7 @@ const AgentPipelinesView = lazy(() => import('./components/AgentPipelinesView.js
 const UatComparisonView = lazy(() => import('./components/UatComparisonView.js').then(m => ({ default: m.UatComparisonView })));
 const AgentProfileView = lazy(() => import('./components/AgentProfileView.js').then(m => ({ default: m.AgentProfileView })));
 const KbGapsView = lazy(() => import('./components/KbGapsView.js').then(m => ({ default: m.KbGapsView })));
+const AgentLearningsView = lazy(() => import('./components/AgentLearningsView.js').then(m => ({ default: m.AgentLearningsView })));
 const AgentRosterView = lazy(() => import('./components/AgentRosterView.js').then(m => ({ default: m.AgentRosterView })));
 const BriefingView = lazy(() => import('./components/BriefingView.js').then(m => ({ default: m.BriefingView })));
 const BacklogKanbanView = lazy(() => import('./components/BacklogKanbanView.js').then(m => ({ default: m.BacklogKanbanView })));
@@ -101,7 +103,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
   | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-tickets' | 'calyx-kb' | 'calyx-improvements' | 'calyx-settings' | 'calyx-problems' | 'calyx-changes' | 'calyx-major-incidents' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
-  | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps'
+  | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
   | 'backlog-board'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
@@ -282,6 +284,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'agent-pipelines', label: 'Pipelines' },
       { view: 'agent-uat-compare', label: 'UAT Compare' },
       { view: 'agent-kb-gaps', label: 'KB Gaps' },
+      { view: 'agent-learnings', label: 'Learnings' },
     ],
   },
   backlog: {
@@ -1278,15 +1281,15 @@ export function App() {
           )}
 
           {/* NOVA AI Agent */}
-          {view === 'tickets' && canSeeArea('ai-agent') && (
-            <div className="max-w-5xl mx-auto">
-              {error && (
-                <div className="mb-4 p-3 bg-red-950/50 border border-red-900 rounded text-red-400 text-sm">
-                  {error}
-                </div>
-              )}
-              <TaskList tasks={filteredSdTasks} loading={sdLoading} onUpdateTask={updateTask} minimal />
-            </div>
+          {view === 'tickets' && canSeeArea('ai-agent') && auth.user && (
+            <MyTicketsView
+              tasks={filteredSdTasks}
+              loading={sdLoading}
+              onUpdateTask={updateTask}
+              agentUsername={auth.user.username}
+              agentDisplayName={auth.user.display_name ?? auth.user.username}
+              teamName={undefined}
+            />
           )}
           {view === 'ai-approvals' && canSeeArea('ai-agent') && (
             <AIApprovalQueue canInteract={(areaAccess['ai_approvals'] || 'hidden') === 'edit'} onNavigateToAgent={(ticketId) => {
@@ -1314,6 +1317,9 @@ export function App() {
           )}
           {view === 'agent-kb-gaps' && canSeeArea('ai-agent') && (
             <KbGapsView token={auth.token!} />
+          )}
+          {view === 'agent-learnings' && canSeeArea('ai-agent') && (
+            <AgentLearningsView token={auth.token!} />
           )}
 
           {/* Administration */}

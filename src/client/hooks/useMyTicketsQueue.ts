@@ -1,0 +1,64 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+
+export type TicketBand = 'NOW' | 'NEXT' | 'DEFERRED' | 'HYGIENE' | 'WAITING';
+
+export interface RankedTicket {
+  ticketKey: string;
+  score: number;
+  band: TicketBand;
+  rankReason: string;
+  nextAction?: {
+    state: 'action_ready' | 'waiting' | 'stalled' | 'no_context';
+    headline: string;
+    body: string;
+    primaryAction: { label: string; jiraTransition: string | null };
+    generatedAt: string;
+  };
+}
+
+export interface QueueResult {
+  agentId: string;
+  computedAt: string;
+  tickets: RankedTicket[];
+}
+
+function authHeaders(): Record<string, string> {
+  return { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` };
+}
+
+export function useMyTicketsQueue(agentId: string | null) {
+  const [queue, setQueue] = useState<QueueResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchQueue = useCallback(async () => {
+    if (!agentId) return;
+    try {
+      const res = await fetch(`/api/my-tickets/queue/${encodeURIComponent(agentId)}`, {
+        headers: authHeaders(),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setQueue(json.data);
+        setError(null);
+      } else {
+        setError(json.error ?? 'Failed to fetch queue');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error');
+    } finally {
+      setLoading(false);
+    }
+  }, [agentId]);
+
+  useEffect(() => {
+    fetchQueue();
+    intervalRef.current = setInterval(fetchQueue, 60_000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [fetchQueue]);
+
+  return { queue, loading, error, refresh: fetchQueue };
+}
