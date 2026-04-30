@@ -41,7 +41,7 @@ const ms365Env = {
 const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign', 'llm', 'ai-agent', 'people-hr', 'teams-webhook', 'whisper', 'kb-retrieval']);
 
 // Super-admin-only: contain API keys/secrets — hidden from regular admins entirely
-const SUPER_ADMIN_ONLY_IDS = new Set(['llm', 'ai-agent', 'people-hr', 'teams-webhook', 'whisper', 'sso', 'adobe-sign']);
+const SUPER_ADMIN_ONLY_IDS = new Set(['llm', 'ai-agent', 'people-hr', 'teams-webhook', 'whisper']);
 
 const execFileAsync = promisify(execFile);
 
