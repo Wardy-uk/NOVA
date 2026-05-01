@@ -54,6 +54,73 @@ function timeAgo(dateStr: string | null): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+interface DriftSnapshot {
+  id: number;
+  snapshotDate: string;
+  periodDays: number;
+  callType: string;
+  promptVersion: string | null;
+  provider: string | null;
+  acceptRate: number | null;
+  latencyP95Ms: number | null;
+  costPerDecision: number | null;
+  baselineAcceptRate: number | null;
+  baselineLatencyP95Ms: number | null;
+  baselineCostPerDecision: number | null;
+  severity: string;
+  createdAt: string;
+}
+
+function SeverityPill({ severity }: { severity: string }) {
+  const styles: Record<string, string> = {
+    alert: 'bg-red-500/20 text-red-400 border-red-500/30',
+    warn: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    none: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  };
+  return (
+    <span className={`px-2 py-0.5 text-xs font-medium border rounded ${styles[severity] ?? styles.none}`}>
+      {severity.toUpperCase()}
+    </span>
+  );
+}
+
+function DeltaCell({ current, baseline, unit, inverted }: {
+  current: number | null;
+  baseline: number | null;
+  unit: string;
+  inverted?: boolean;
+}) {
+  if (current == null || baseline == null) return <span className="text-neutral-600">—</span>;
+  const pct = baseline !== 0 ? ((current - baseline) / baseline) * 100 : 0;
+  const isWorse = inverted ? pct < 0 : pct > 0;
+  const color = Math.abs(pct) < 5 ? 'text-neutral-400' : isWorse ? 'text-red-400' : 'text-emerald-400';
+  const arrow = pct > 0 ? '↑' : pct < 0 ? '↓' : '→';
+  const fmt = unit === '%' ? `${(current * 100).toFixed(1)}%` : unit === 'ms' ? `${current}ms` : current.toFixed(4);
+  const baseFmt = unit === '%' ? `${(baseline * 100).toFixed(1)}%` : unit === 'ms' ? `${baseline}ms` : baseline.toFixed(4);
+  return (
+    <span className={`font-mono ${color}`} title={`Baseline: ${baseFmt}`}>
+      {fmt} <span className="text-[10px]">{arrow}{Math.abs(pct).toFixed(0)}%</span>
+    </span>
+  );
+}
+
+function Sparkline({ data, width = 120, height = 24 }: { data: number[]; width?: number; height?: number }) {
+  if (data.length < 2) return null;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const points = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * width;
+    const y = height - ((v - min) / range) * (height - 4) - 2;
+    return `${x},${y}`;
+  }).join(' ');
+  return (
+    <svg width={width} height={height} className="inline-block">
+      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-blue-400" />
+    </svg>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const colors = status === 'success'
     ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
@@ -80,15 +147,30 @@ export function AgentPipelinesView() {
   const [compareLoading, setCompareLoading] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [truncating, setTruncating] = useState(false);
+  const [driftSnapshots, setDriftSnapshots] = useState<DriftSnapshot[]>([]);
+  const [driftTrends, setDriftTrends] = useState<Record<string, DriftSnapshot[]>>({});
+  const [driftRunning, setDriftRunning] = useState(false);
+  const [showStable, setShowStable] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
-      const [statsRes, runsRes] = await Promise.all([
+      const [statsRes, runsRes, driftRes] = await Promise.all([
         apiJson('/pipeline/stats', 'GET'),
         apiJson(`/pipeline/runs${selectedPipeline ? `?pipeline=${selectedPipeline}` : ''}`, 'GET'),
+        apiJson('/pipeline/drift', 'GET'),
       ]);
       if (statsRes.ok) setStats(statsRes.data);
       if (runsRes.ok) setRuns(runsRes.data);
+      if (driftRes.ok) {
+        setDriftSnapshots(driftRes.data);
+        const callTypes = [...new Set((driftRes.data as DriftSnapshot[]).map(s => s.callType))];
+        const trendResults: Record<string, DriftSnapshot[]> = {};
+        await Promise.all(callTypes.map(async ct => {
+          const res = await apiJson(`/pipeline/drift/trend/${encodeURIComponent(ct)}`, 'GET');
+          if (res.ok) trendResults[ct] = res.data;
+        }));
+        setDriftTrends(trendResults);
+      }
     } catch { /* ignore */ }
     setLoading(false);
   }, [selectedPipeline]);
@@ -120,6 +202,15 @@ export function AgentPipelinesView() {
     setTruncating(false);
   };
 
+  const runDriftCheck = async () => {
+    setDriftRunning(true);
+    try {
+      const res = await apiJson('/pipeline/drift/run', 'POST');
+      if (res.ok) await loadData();
+    } catch { /* ignore */ }
+    setDriftRunning(false);
+  };
+
   const COMPARE_PIPELINES = ['kpi-daily', 'kpi-agent', 'qa-results'];
 
   if (loading) {
@@ -142,6 +233,16 @@ export function AgentPipelinesView() {
           {truncating ? 'Truncating...' : 'Truncate UAT Tables'}
         </button>
       </div>
+
+      {/* Drift Detection */}
+      <DriftSection
+        snapshots={driftSnapshots}
+        trends={driftTrends}
+        showStable={showStable}
+        onToggleStable={() => setShowStable(s => !s)}
+        onRunCheck={runDriftCheck}
+        running={driftRunning}
+      />
 
       {/* Pipeline Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -272,6 +373,132 @@ export function AgentPipelinesView() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DriftSection({ snapshots, trends, showStable, onToggleStable, onRunCheck, running }: {
+  snapshots: DriftSnapshot[];
+  trends: Record<string, DriftSnapshot[]>;
+  showStable: boolean;
+  onToggleStable: () => void;
+  onRunCheck: () => void;
+  running: boolean;
+}) {
+  if (snapshots.length === 0 && !running) {
+    return (
+      <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-medium text-white text-sm">Drift Detection</h3>
+          <button
+            onClick={onRunCheck}
+            disabled={running}
+            className="px-3 py-1.5 text-xs font-medium bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded hover:bg-blue-500/30 disabled:opacity-50"
+          >
+            Run drift check now
+          </button>
+        </div>
+        <p className="text-sm text-neutral-500">
+          No drift snapshots yet. Run a drift check or wait for the weekly scheduled run.
+        </p>
+      </div>
+    );
+  }
+
+  const latestDate = snapshots.length > 0 ? snapshots[0].snapshotDate : null;
+  const latest = latestDate ? snapshots.filter(s => s.snapshotDate === latestDate) : [];
+  const filtered = showStable ? latest : latest.filter(s => s.severity !== 'none');
+  const stableCount = latest.filter(s => s.severity === 'none').length;
+
+  const byCallType: Record<string, DriftSnapshot[]> = {};
+  for (const s of filtered) {
+    (byCallType[s.callType] ??= []).push(s);
+  }
+
+  return (
+    <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="font-medium text-white text-sm">Drift Detection</h3>
+          <p className="text-xs text-neutral-500 mt-0.5">
+            {latestDate ? `Latest snapshot: ${latestDate}` : 'No snapshots'} · {latest.length} segment{latest.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {stableCount > 0 && !showStable && (
+            <button
+              onClick={onToggleStable}
+              className="text-xs text-neutral-500 hover:text-neutral-300"
+            >
+              Show {stableCount} stable
+            </button>
+          )}
+          {showStable && (
+            <button
+              onClick={onToggleStable}
+              className="text-xs text-neutral-500 hover:text-neutral-300"
+            >
+              Hide stable
+            </button>
+          )}
+          <button
+            onClick={onRunCheck}
+            disabled={running}
+            className="px-3 py-1.5 text-xs font-medium bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded hover:bg-blue-500/30 disabled:opacity-50"
+          >
+            {running ? 'Running...' : 'Run drift check now'}
+          </button>
+        </div>
+      </div>
+
+      {filtered.length === 0 && latest.length > 0 && (
+        <p className="text-sm text-emerald-400/80 py-2">All {stableCount} segments are stable — no drift detected.</p>
+      )}
+
+      {Object.entries(byCallType).map(([callType, segs]) => (
+        <div key={callType} className="mb-4 last:mb-0">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-sm font-medium text-white">{callType}</span>
+            {trends[callType] && trends[callType].length >= 2 && (
+              <Sparkline
+                data={[...trends[callType]].reverse().map(s => s.acceptRate ?? 0)}
+              />
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-neutral-500 border-b border-neutral-700/50">
+                  <th className="text-left py-1.5 pr-3">Status</th>
+                  <th className="text-left py-1.5 pr-3">Prompt</th>
+                  <th className="text-left py-1.5 pr-3">Provider</th>
+                  <th className="text-right py-1.5 pr-3">Accept Rate</th>
+                  <th className="text-right py-1.5 pr-3">P95 Latency</th>
+                  <th className="text-right py-1.5">Cost/Decision</th>
+                </tr>
+              </thead>
+              <tbody>
+                {segs.map(s => (
+                  <tr key={s.id} className="border-b border-neutral-800/30 hover:bg-neutral-700/20">
+                    <td className="py-1.5 pr-3"><SeverityPill severity={s.severity} /></td>
+                    <td className="py-1.5 pr-3 text-neutral-400 font-mono">{s.promptVersion ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-neutral-400">{s.provider ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-right">
+                      <DeltaCell current={s.acceptRate} baseline={s.baselineAcceptRate} unit="%" inverted />
+                    </td>
+                    <td className="py-1.5 pr-3 text-right">
+                      <DeltaCell current={s.latencyP95Ms} baseline={s.baselineLatencyP95Ms} unit="ms" />
+                    </td>
+                    <td className="py-1.5 text-right">
+                      <DeltaCell current={s.costPerDecision} baseline={s.baselineCostPerDecision} unit="" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
