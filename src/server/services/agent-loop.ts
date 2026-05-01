@@ -81,6 +81,7 @@ export class AgentLoop {
     this.actor = new Actor(jiraClient, new EscalationLogService(), settings);
     this.observer = new Observer();
     this.alertService = new AlertService(settings);
+    llmService.setAlertService(this.alertService);
     this.lifecycleManager = new LifecycleManager(
       settings, jiraClient, this.alertService, this.observer,
       approvalQueries, cache, llmService,
@@ -145,6 +146,10 @@ export class AgentLoop {
 
   getAutonomyEngine(): AutonomyEngine {
     return this.autonomyEngine;
+  }
+
+  getReasoner(): Reasoner {
+    return this.reasoner;
   }
 
   getRiskScorer(): RiskScorer {

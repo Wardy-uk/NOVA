@@ -204,6 +204,7 @@ export type AlertType =
   | 'autonomy_execution'
   | 'approval_timeout'
   | 'approval_abandoned'
+  | 'token_budget_exceeded'
   | 'error';
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';

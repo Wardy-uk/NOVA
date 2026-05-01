@@ -2,8 +2,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { createHash } from 'crypto';
-import { executeAndGetId } from './database.js';
+import { executeAndGetId, query } from './database.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import type { AlertService } from './alert-service.js';
 
 // ── Types ──
 
@@ -122,6 +123,38 @@ export function estimateCost(model: string, inputTokens: number, outputTokens: n
   const pricing = MODEL_PRICING[model];
   if (!pricing) return 0;
   return (inputTokens * pricing.inputPerM + outputTokens * pricing.outputPerM) / 1_000_000;
+}
+
+// ── Token budget defaults (per call_type, daily) ──
+
+const DEFAULT_TOKEN_BUDGETS: Record<string, number> = {
+  triage: 100_000,
+  respond: 200_000,
+  chase: 50_000,
+  classification: 50_000,
+  coaching: 100_000,
+  qa_scoring: 75_000,
+  kpi_daily_digest: 25_000,
+};
+
+// ── Budget suppression (in-memory, resets at UTC midnight) ──
+
+const budgetSuppressed = new Map<string, boolean>();
+let lastBudgetResetDate = new Date().toISOString().slice(0, 10);
+
+function checkBudgetReset(): void {
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  if (todayUtc !== lastBudgetResetDate) {
+    budgetSuppressed.clear();
+    lastBudgetResetDate = todayUtc;
+  }
+}
+
+export class TokenBudgetExceededError extends Error {
+  constructor(public callType: string, public used: number, public budget: number) {
+    super(`Token budget exceeded for ${callType}: ${used}/${budget} tokens used today`);
+    this.name = 'TokenBudgetExceededError';
+  }
 }
 
 // ── Circuit breakers (per-provider) ──
@@ -290,9 +323,57 @@ function extractJson(raw: string): string {
 
 export class LlmService {
   private settings: SettingsQueries;
+  private alertService: AlertService | null = null;
 
   constructor(settings: SettingsQueries) {
     this.settings = settings;
+  }
+
+  setAlertService(alertService: AlertService): void {
+    this.alertService = alertService;
+  }
+
+  private async checkTokenBudget(callType: string): Promise<void> {
+    checkBudgetReset();
+
+    if (budgetSuppressed.get(callType)) {
+      const budget = this.getTokenBudget(callType);
+      throw new TokenBudgetExceededError(callType, budget, budget);
+    }
+
+    const budget = this.getTokenBudget(callType);
+    if (budget <= 0) return;
+
+    const rows = await query<{ total: number }>(
+      `SELECT ISNULL(SUM(ISNULL(input_tokens, 0) + ISNULL(output_tokens, 0)), 0) as total
+       FROM agent_llm_calls
+       WHERE call_type = ? AND created_at >= CAST(GETUTCDATE() AS DATE)`,
+      [callType],
+    );
+    const used = rows[0]?.total ?? 0;
+
+    if (used >= budget) {
+      budgetSuppressed.set(callType, true);
+      console.warn(`[llm-service] Token budget exceeded for ${callType}: ${used}/${budget}`);
+
+      if (this.alertService) {
+        await this.alertService.createAlert({
+          alertType: 'token_budget_exceeded',
+          severity: 'critical',
+          title: `Token budget exceeded: ${callType} used ${used.toLocaleString()} of ${budget.toLocaleString()} daily tokens`,
+          detail: `Call type "${callType}" has been suppressed until UTC midnight. Adjust agent_token_budget_daily_${callType} in Settings to change the limit.`,
+        });
+      }
+
+      throw new TokenBudgetExceededError(callType, used, budget);
+    }
+  }
+
+  private getTokenBudget(callType: string): number {
+    const settingKey = `agent_token_budget_daily_${callType}`;
+    const val = this.settings.get(settingKey)?.trim();
+    if (val) return parseInt(val, 10) || 0;
+    return DEFAULT_TOKEN_BUDGETS[callType] ?? 0;
   }
 
   private getApiKey(provider: LlmProvider): string {
@@ -347,6 +428,8 @@ export class LlmService {
     schema: z.ZodType<T, z.ZodTypeDef, unknown>,
     options: LlmCallOptions,
   ): Promise<LlmResult<T>> {
+    await this.checkTokenBudget(options.callType);
+
     const tier = options.tier ?? CALL_TYPE_TIER_MAP[options.callType] ?? 'standard';
     const maxTokens = options.maxTokens ?? parseInt(this.settings.get('llm_max_tokens')?.trim() || '4096', 10);
     const temperature = options.temperature ?? parseFloat(this.settings.get('llm_temperature')?.trim() || '0.3');
