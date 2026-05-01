@@ -133,6 +133,7 @@ export class Perceiver {
   private knownAgentNames = new Set<string>();
   private excludedAccountsLoaded = false;
   private dbLoaded = false;
+  private catchUpIssues: CachedIssue[] = [];
 
   constructor(jiraClient: JiraRestClient, settings: SettingsQueries, cache?: JiraCacheQueries) {
     this.jiraClient = jiraClient;
@@ -226,6 +227,11 @@ export class Perceiver {
     return this.lastOpenIssues;
   }
 
+  queueCatchUpIssues(issues: CachedIssue[]): void {
+    this.catchUpIssues.push(...issues);
+    console.log(`[perceiver] ${issues.length} restart catch-up ticket(s) queued for next tick`);
+  }
+
   private getProjects(): string[] {
     const raw = this.settings.get('agent_jira_project') || 'NT';
     return raw.split(',').map(p => p.trim()).filter(Boolean);
@@ -304,6 +310,18 @@ export class Perceiver {
         allNewCandidates.push(ci);
         seenKeys.add(ci.issue_key);
       }
+    }
+    if (this.catchUpIssues.length > 0) {
+      const catchUp = this.catchUpIssues.splice(0);
+      let added = 0;
+      for (const ci of catchUp) {
+        if (!seenKeys.has(ci.issue_key)) {
+          allNewCandidates.push(ci);
+          seenKeys.add(ci.issue_key);
+          added++;
+        }
+      }
+      if (added > 0) console.log(`[perceiver] Drained ${added} restart catch-up ticket(s)`);
     }
     const newEvents = allNewCandidates.map(ci => cachedToTicketEvent(ci, 'ticket_created'));
 

@@ -368,6 +368,19 @@ export class JiraCacheQueries {
     );
   }
 
+  async getRestartGapTickets(projects: string[], since: Date): Promise<CachedIssue[]> {
+    const placeholders = projects.map(() => '?').join(',');
+    return query<CachedIssue>(
+      `SELECT c.* FROM jira_issue_cache c
+       LEFT JOIN agent_ticket_state ts ON ts.ticket_id = c.issue_key
+       WHERE c.project_key IN (${placeholders})
+         AND c.jira_created >= ?
+         AND ts.ticket_id IS NULL
+       ORDER BY c.jira_created DESC`,
+      [...projects, since],
+    );
+  }
+
   // ── Comment queries ──
 
   async getComments(issueKey: string, limit = 20): Promise<CachedComment[]> {

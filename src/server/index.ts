@@ -894,8 +894,9 @@ async function main() {
   app.use('/api/people', createPeopleRoutes({ userQueries, settingsQueries, mcpManager, notificationQueries }));
 
   // Start Jira sync (service was created earlier so routes can reference it)
+  let fullSyncPromise: Promise<void> | null = null;
   if (jiraSyncService) {
-    jiraSyncService.fullSync().catch(err =>
+    fullSyncPromise = jiraSyncService.fullSync().catch(err =>
       console.error('[jira-sync] Initial full sync failed:', err instanceof Error ? err.message : err)
     );
     jiraSyncService.start(45_000);
@@ -1295,6 +1296,22 @@ async function main() {
       setTimeout(() => {
         agentLoop!.start();
         console.log('[N.O.V.A] Agent loop auto-started (agent_enabled=true, delayed 60s for startup stagger)');
+
+        if (fullSyncPromise) {
+          fullSyncPromise.then(async () => {
+            try {
+              const projects = (settingsQueries.get('agent_jira_project') || 'NT').split(',').map((p: string) => p.trim()).filter(Boolean);
+              const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+              const gapTickets = await jiraCacheQueries.getRestartGapTickets(projects, oneHourAgo);
+              if (gapTickets.length > 0) {
+                console.log(`[Startup] Restart catch-up: ${gapTickets.length} ticket(s) created in last hour with no agent state — queuing`);
+                agentLoop!.getPerceiver().queueCatchUpIssues(gapTickets);
+              }
+            } catch (err) {
+              console.warn('[Startup] Restart catch-up failed:', err instanceof Error ? err.message : err);
+            }
+          });
+        }
       }, 60_000);
     }
   } else {

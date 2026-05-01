@@ -27,13 +27,8 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api\//, /^\/wallboard\//],
         runtimeCaching: [
           {
-            urlPattern: /^\/api\/auth\/.*/,
-            handler: 'NetworkOnly',
-          },
-          {
             urlPattern: /^\/api\/.*/,
-            handler: 'NetworkFirst',
-            options: { cacheName: 'nova-api', expiration: { maxEntries: 100, maxAgeSeconds: 300 } },
+            handler: 'NetworkOnly',
           },
           {
             urlPattern: /\.(?:woff2?|svg|png|jpg|ico)$/,

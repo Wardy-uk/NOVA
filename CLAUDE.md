@@ -80,29 +80,16 @@ AreaKey ViewsBackendService DeskDashboard, Kanban, Calendar, KPIs, Breached, Pro
 
 - `.env` — credentials
 - `users.json` — password hashes
-- `settings.json` — API tokens, feature flags
-- `daypilot.db` / `calyx.db` — binary databases
-- `.d365-token-cache.json` — MSAL cache
 
-## Versioning
+## Git Remotes — Push to ALL
 
-Bump patch in `package.json` with every commit/deploy. Currently v1.1.160. Status bar shows `v{version} ({gitHash})` via Vite `define`.
+This repo has two remotes. **Always push to both** after every commit:
 
-## Post-Build Rule
+```bash
+git push origin && git push azdo
+```
 
-**After every successful build or significant feature completion, update this [CLAUDE.md](http://CLAUDE.md) to reflect any new routes, services, views, patterns, or architectural changes. Keep it accurate to the codebase — this file IS the project brain.**
+- `origin` → GitHub (https://github.com/Wardy-uk/NOVA.git)
+- `azdo` → Azure DevOps (https://nickw@tfs.briefyourmarket.com/BYM2020/Core/_git/N.O.V.A)
 
-## Session Start Ritual
-
-At the start of every session, before writing any code:
-
-1. Read `.claude/memory/handoff.md` — pick up where the last session left off
-2. Read `.claude/memory/mistakes.md` — avoid repeating past errors
-3. Read `.claude/memory/patterns.md` — follow established conventions
-4. When working in `src/server/db/`, `src/server/services/`, `src/server/routes/`, `src/client/components/`, or `docs/` — read the local `CLAUDE.md` in that directory for precision context
-
-## Session End Rule
-
-When context is getting long (~60%+), or Nick says "write a handoff", or a task is complete — write a handoff summary to `.claude/memory/handoff.md` following the skill in `.claude/skills/handoff.md`.
-md`.
-`.
+Never push to only one. If one push fails, flag it — don't silently skip.

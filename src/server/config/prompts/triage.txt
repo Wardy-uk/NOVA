@@ -23,6 +23,12 @@ Created: {{created}}
 
 {{kb_matches}}
 
+## Prior Learnings (human-submitted corrections)
+
+These are lessons from human reviewers correcting previous AI responses. Apply these when relevant — they represent institutional knowledge about customers, products, and communication standards.
+
+{{learnings}}
+
 ## Your Task
 
 Produce a JSON object with the following structure:

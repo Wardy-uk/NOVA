@@ -73,7 +73,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       if (consecutive401s >= LOGOUT_THRESHOLD && onUnauthorized) {
         onUnauthorized();
       }
-    } else if (response.ok) {
+    } else {
       consecutive401s = 0;
     }
   }

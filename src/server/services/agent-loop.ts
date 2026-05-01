@@ -488,6 +488,12 @@ export class AgentLoop {
           if (handled) {
             autoRuleHandledKeys.add(event.ticketKey);
             this.ticketsProcessed++;
+            const ticketState = this.lifecycleManager.getTicketState();
+            try {
+              await ticketState.transition(event.ticketKey, 'triaged');
+            } catch (tsErr) {
+              console.warn(`[agent] Failed to write ticket state for auto-rule on ${event.ticketKey}:`, tsErr instanceof Error ? tsErr.message : tsErr);
+            }
           }
         } catch (err) {
           console.error(`[agent] Auto-rule evaluation failed for ${event.ticketKey}:`, err instanceof Error ? err.message : err);
