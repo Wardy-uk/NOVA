@@ -1122,6 +1122,10 @@ async function runMigrations(): Promise<void> {
     `UPDATE agent_llm_calls SET prompt_version = 'pre-versioning' WHERE prompt_version IS NULL;`,
     `UPDATE agent_decisions SET prompt_version = 'pre-versioning' WHERE prompt_version IS NULL;`,
 
+    // WP-55: PII redaction logging
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_llm_calls') AND name = 'redactions')
+     ALTER TABLE agent_llm_calls ADD redactions NVARCHAR(MAX) NULL;`,
+
     // ── Ticket defers (My Tickets defer system) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ticket_defers') AND type = 'U')
      CREATE TABLE ticket_defers (

@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import { executeAndGetId, query } from './database.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { AlertService } from './alert-service.js';
+import { sanitise, type RedactionEntry } from './pii-sanitiser.js';
 
 // ── Types ──
 
@@ -292,13 +293,15 @@ async function logCall(
   success: boolean,
   error: string | null,
   promptVersion: string,
+  redactions: RedactionEntry[] | null,
 ): Promise<void> {
   try {
     const cost = estimateCost(model, inputTokens, outputTokens);
+    const redactionsJson = redactions && redactions.length > 0 ? JSON.stringify(redactions) : null;
     await executeAndGetId(
-      `INSERT INTO agent_llm_calls (ticket_id, call_type, provider, model, input_tokens, output_tokens, latency_ms, success, error, estimated_cost, prompt_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [ticketId, callType, provider, model, inputTokens, outputTokens, latencyMs, success ? 1 : 0, error, cost, promptVersion],
+      `INSERT INTO agent_llm_calls (ticket_id, call_type, provider, model, input_tokens, output_tokens, latency_ms, success, error, estimated_cost, prompt_version, redactions)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [ticketId, callType, provider, model, inputTokens, outputTokens, latencyMs, success ? 1 : 0, error, cost, promptVersion, redactionsJson],
     );
   } catch (e) {
     console.warn('[llm-service] Failed to log call:', e);
@@ -471,7 +474,15 @@ export class LlmService {
     console.log(`[llm] ${options.callType} → tier=${tier} → ${selectedProvider.provider}/${selectedProvider.model} | circuits: ${circuitStates}${tripped.length > 0 ? ' (FAILOVER)' : ''}`);
 
     const jsonInstruction = '\n\nRespond with valid JSON only. No markdown fencing, no commentary.';
-    const fullSystem = systemPrompt + jsonInstruction;
+    const sysResult = sanitise(systemPrompt);
+    const userResult = sanitise(userMessage);
+    const allRedactions = [...sysResult.redactions, ...userResult.redactions];
+    const redactionsForLog = allRedactions.length > 0 ? allRedactions : null;
+    if (allRedactions.length > 0) {
+      console.log(`[llm] PII redacted in ${options.callType}: ${allRedactions.map(r => `${r.count}× ${r.type}`).join(', ')}`);
+    }
+    const fullSystem = sysResult.sanitised + jsonInstruction;
+    const sanitisedUser = userResult.sanitised;
 
     let lastError: Error | null = null;
 
@@ -484,7 +495,7 @@ export class LlmService {
 
         try {
           const result = await callProvider(
-            config.provider, fullSystem, userMessage, config.model, config.apiKey, maxTokens, temperature,
+            config.provider, fullSystem, sanitisedUser, config.model, config.apiKey, maxTokens, temperature,
           );
           rawContent = result.content;
           inputTokens = result.inputTokens;
@@ -496,7 +507,7 @@ export class LlmService {
 
           if (parsed.success) {
             recordSuccess(config.provider);
-            await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, true, null, promptVersion);
+            await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, true, null, promptVersion, redactionsForLog);
             return {
               data: parsed.data,
               provider: config.provider,
@@ -509,14 +520,14 @@ export class LlmService {
           }
 
           const validationErr = `Validation failed: ${parsed.error.message}`;
-          await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, validationErr, promptVersion);
+          await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, validationErr, promptVersion, redactionsForLog);
           recordFailure(config.provider);
           lastError = new Error(validationErr);
 
         } catch (err) {
           const latencyMs = Date.now() - start;
           const errMsg = err instanceof Error ? err.message : String(err);
-          await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, errMsg, promptVersion);
+          await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, errMsg, promptVersion, redactionsForLog);
           lastError = err instanceof Error ? err : new Error(errMsg);
 
           if (isRetryableError(err)) {
