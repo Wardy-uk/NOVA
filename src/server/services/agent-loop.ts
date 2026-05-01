@@ -22,6 +22,7 @@ import { RiskScorer } from './risk-scorer.js';
 import { HybridActionDetector } from './hybrid-action-detector.js';
 import { PluginToTpjExecutor } from './plugin-to-tpj-executor.js';
 import { AbuseReportExecutor } from './abuse-report-executor.js';
+import { AutoRulesEngine } from './auto-rules-engine.js';
 import { ExternalDbService } from './external-db.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
@@ -59,6 +60,7 @@ export class AgentLoop {
   private hybridDetector: HybridActionDetector;
   private pluginExecutor: PluginToTpjExecutor;
   private abuseExecutor: AbuseReportExecutor | null = null;
+  private autoRulesEngine: AutoRulesEngine;
   private externalDb: ExternalDbService;
   private kbSearch: KbSearchService;
   private jiraClient: JiraRestClient;
@@ -97,6 +99,7 @@ export class AgentLoop {
     this.riskScorer = new RiskScorer(settings);
     this.hybridDetector = new HybridActionDetector(settings);
     this.pluginExecutor = new PluginToTpjExecutor(jiraClient, settings);
+    this.autoRulesEngine = new AutoRulesEngine(jiraClient, this.pluginExecutor, this.observer, settings);
     this.externalDb = new ExternalDbService(settings);
     if (approvalQueries) {
       this.abuseExecutor = new AbuseReportExecutor(jiraClient, settings, approvalQueries, this.externalDb);
@@ -158,6 +161,10 @@ export class AgentLoop {
 
   getAlertService(): AlertService {
     return this.alertService;
+  }
+
+  getAutoRulesEngine(): AutoRulesEngine {
+    return this.autoRulesEngine;
   }
 
   getActor(): Actor {
@@ -471,7 +478,23 @@ export class AgentLoop {
           hybridHandledKeys.add(event.ticketKey);
         }
       }
-      const llmEvents = deduped.filter(e => !hybridHandledKeys.has(e.ticketKey));
+      // 1.6 AUTO-RULES EVALUATION (config-driven, deterministic)
+      const autoRuleHandledKeys = new Set<string>();
+      const shadowModeForRules = this.getShadowMode();
+      for (const event of deduped) {
+        if (hybridHandledKeys.has(event.ticketKey)) continue;
+        try {
+          const handled = await this.autoRulesEngine.evaluateAndExecute(event, shadowModeForRules);
+          if (handled) {
+            autoRuleHandledKeys.add(event.ticketKey);
+            this.ticketsProcessed++;
+          }
+        } catch (err) {
+          console.error(`[agent] Auto-rule evaluation failed for ${event.ticketKey}:`, err instanceof Error ? err.message : err);
+        }
+      }
+
+      const llmEvents = deduped.filter(e => !hybridHandledKeys.has(e.ticketKey) && !autoRuleHandledKeys.has(e.ticketKey));
 
       // 2. REASON
       const shadowMode = this.getShadowMode();
@@ -499,6 +522,9 @@ export class AgentLoop {
         this.recentlyProcessedTickets.set(`${d.ticketKey}:${d.eventType}`, Date.now());
       }
       for (const key of hybridHandledKeys) {
+        this.recentlyProcessedTickets.set(`${key}:ticket_created`, Date.now());
+      }
+      for (const key of autoRuleHandledKeys) {
         this.recentlyProcessedTickets.set(`${key}:ticket_created`, Date.now());
       }
 
