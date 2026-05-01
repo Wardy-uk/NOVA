@@ -22,6 +22,7 @@ import type { JiraSyncService } from '../services/jira-sync-service.js';
 import type { SuggestionEngine } from '../services/suggestion-engine.js';
 import type { RiskScorer } from '../services/risk-scorer.js';
 import type { EscalationLogService } from '../services/escalation-log-service.js';
+import type { DriftDetector } from '../services/drift-detector.js';
 import type { UserQueries, UserTeamQueries, TeamQueries } from '../db/queries.js';
 
 interface AgentRouteDeps {
@@ -39,6 +40,7 @@ interface AgentRouteDeps {
   suggestionEngine: SuggestionEngine | null;
   riskScorer: RiskScorer | null;
   escalationLog: EscalationLogService | null;
+  driftDetector: DriftDetector | null;
   userQueries: UserQueries | null;
   userTeamQueries: UserTeamQueries | null;
   teamQueries: TeamQueries | null;
@@ -2024,6 +2026,41 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data: result });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Truncate failed' });
+    }
+  });
+
+  // ── WP-62: Drift Detection ──
+
+  router.get('/pipeline/drift', async (_req, res) => {
+    try {
+      const dd = deps?.driftDetector;
+      if (!dd) { res.status(503).json({ ok: false, error: 'Drift detector not available' }); return; }
+      const snapshots = await dd.getSnapshots(100);
+      res.json({ ok: true, data: snapshots });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get drift snapshots' });
+    }
+  });
+
+  router.get('/pipeline/drift/trend/:callType', async (req, res) => {
+    try {
+      const dd = deps?.driftDetector;
+      if (!dd) { res.status(503).json({ ok: false, error: 'Drift detector not available' }); return; }
+      const trend = await dd.getTrend(req.params.callType, 12);
+      res.json({ ok: true, data: trend });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get drift trend' });
+    }
+  });
+
+  router.post('/pipeline/drift/run', requireRole('admin'), async (_req, res) => {
+    try {
+      const dd = deps?.driftDetector;
+      if (!dd) { res.status(503).json({ ok: false, error: 'Drift detector not available' }); return; }
+      const segments = await dd.snapshotDrift();
+      res.json({ ok: true, data: segments });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Drift snapshot failed' });
     }
   });
 

@@ -1126,6 +1126,28 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_llm_calls') AND name = 'redactions')
      ALTER TABLE agent_llm_calls ADD redactions NVARCHAR(MAX) NULL;`,
 
+    // WP-62: Drift detection snapshots
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_drift_snapshots') AND type = 'U')
+     CREATE TABLE agent_drift_snapshots (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       snapshot_date DATE NOT NULL,
+       period_days INT NOT NULL DEFAULT 7,
+       call_type NVARCHAR(50) NOT NULL,
+       prompt_version VARCHAR(64) NULL,
+       provider NVARCHAR(20) NULL,
+       accept_rate FLOAT NULL,
+       latency_p95_ms INT NULL,
+       cost_per_decision FLOAT NULL,
+       baseline_accept_rate FLOAT NULL,
+       baseline_latency_p95_ms INT NULL,
+       baseline_cost_per_decision FLOAT NULL,
+       severity NVARCHAR(16) NOT NULL DEFAULT 'none',
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_drift_snapshots_date')
+     CREATE INDEX IX_agent_drift_snapshots_date ON agent_drift_snapshots (snapshot_date DESC, call_type);`,
+
     // ── Ticket defers (My Tickets defer system) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ticket_defers') AND type = 'U')
      CREATE TABLE ticket_defers (

@@ -205,6 +205,7 @@ export type AlertType =
   | 'approval_timeout'
   | 'approval_abandoned'
   | 'token_budget_exceeded'
+  | 'drift_detected'
   | 'error';
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';

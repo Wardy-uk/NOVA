@@ -116,6 +116,7 @@ import { createKbAdminRoutes } from './routes/kb-admin.js';
 import { KpiPipeline } from './services/kpi-pipeline.js';
 import { QaPipeline } from './services/qa-pipeline.js';
 import { PipelineMonitor } from './services/pipeline-monitor.js';
+import { DriftDetector } from './services/drift-detector.js';
 import { ConfigService } from './services/config-service.js';
 import { SuggestionEngine } from './services/suggestion-engine.js';
 import { CalendarSyncService } from './services/calendar-sync.js';
@@ -965,6 +966,7 @@ async function main() {
 
     const kpiPipeline = new KpiPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor, jiraCacheQueries);
     const qaPipeline = new QaPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
+    const driftDetector = new DriftDetector(settingsQueries, agentLoop.getAlertService());
 
     // Calendar sync (WP-12)
     const calendarSync = new CalendarSyncService(settingsQueries);
@@ -1052,6 +1054,7 @@ async function main() {
       suggestionEngine,
       riskScorer: agentLoop.getRiskScorer(),
       escalationLog,
+      driftDetector,
       userQueries,
       userTeamQueries,
       teamQueries,
@@ -1151,6 +1154,35 @@ async function main() {
 
     // Pipeline health check — every 15 min
     setInterval(() => pipelineMonitor.checkStaleRuns().catch(() => {}), 15 * 60 * 1000);
+
+    // WP-62: Drift detection — Monday 06:00 UK, with startup catch-up
+    let driftFiredThisWindow = false;
+    (async () => {
+      try {
+        const latest = await driftDetector.getLatestSnapshotDate();
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        if (!latest || latest < sevenDaysAgo) {
+          console.log('[drift-detector] No recent snapshot — running startup catch-up');
+          await driftDetector.snapshotDrift();
+          driftFiredThisWindow = true;
+        }
+      } catch (e) {
+        console.warn('[drift-detector] Startup catch-up failed:', e instanceof Error ? e.message : e);
+      }
+    })();
+    setInterval(() => {
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
+      const ukMinute = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }));
+      if (now.getDay() === 1 && ukHour === 6 && ukMinute < 10) {
+        if (!driftFiredThisWindow) {
+          driftFiredThisWindow = true;
+          driftDetector.snapshotDrift().catch(e => console.warn('[drift-detector] Weekly snapshot failed:', e.message));
+        }
+      } else {
+        driftFiredThisWindow = false;
+      }
+    }, 10 * 60 * 1000);
 
     // Daily briefing generation — check every 10 min, generate at configured time (default 07:00)
     setInterval(async () => {
