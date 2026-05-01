@@ -34,7 +34,7 @@ export class PluginToTpjExecutor {
             version: 1,
             content: [{ type: 'paragraph', content: [{ type: 'text', text: truncatedDesc || 'No description provided.' }] }],
           },
-          issuetype: { name: 'Service Request' },
+          issuetype: { name: 'Support' },
           ...(labels.length > 0 ? { labels } : {}),
         },
       });
