@@ -126,6 +126,7 @@ export interface AgentDecision {
   provider?: string;
   model?: string;
   promptVersion?: string;
+  callType?: string;
 }
 
 export interface ActionResult {

@@ -1148,6 +1148,11 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_drift_snapshots_date')
      CREATE INDEX IX_agent_drift_snapshots_date ON agent_drift_snapshots (snapshot_date DESC, call_type);`,
 
+    // call_type on agent_decisions — needed by drift detector to segment metrics
+    `IF COL_LENGTH('agent_decisions', 'call_type') IS NULL
+     ALTER TABLE agent_decisions ADD call_type NVARCHAR(50) NULL;`,
+    `UPDATE agent_decisions SET call_type = action WHERE call_type IS NULL;`,
+
     // ── Ticket defers (My Tickets defer system) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ticket_defers') AND type = 'U')
      CREATE TABLE ticket_defers (
