@@ -129,12 +129,12 @@ export function estimateCost(model: string, inputTokens: number, outputTokens: n
 // ── Token budget defaults (per call_type, daily) ──
 
 const DEFAULT_TOKEN_BUDGETS: Record<string, number> = {
-  triage: 100_000,
-  respond: 200_000,
+  triage: 500_000,
+  respond: 3_000_000,
   chase: 50_000,
   classification: 50_000,
-  coaching: 100_000,
-  qa_scoring: 75_000,
+  coaching: 500_000,
+  qa_scoring: 300_000,
   kpi_daily_digest: 25_000,
 };
 
