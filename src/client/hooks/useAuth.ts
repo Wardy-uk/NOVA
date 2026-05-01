@@ -21,10 +21,6 @@ interface AuthState {
 const TOKEN_KEY = 'nova_auth_token';
 const REMEMBER_KEY = 'nova_remember_me';
 
-function getTokenStorage(): Storage {
-  return localStorage.getItem(REMEMBER_KEY) === 'false' ? sessionStorage : localStorage;
-}
-
 function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY);
 }
@@ -81,22 +77,37 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   return response;
 };
 
+// Only one useAuth instance should manage token lifecycle (SSO extraction,
+// validation, clearing). Secondary instances in child components just read
+// the shared module-level state without destructive side effects.
+let primaryInitDone = false;
+let sharedAuthState: AuthState | null = null;
+
 export function useAuth() {
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    token: getStoredToken(),
-    initializing: true,
-    busy: false,
-    error: null,
+  const [state, setState] = useState<AuthState>(() => {
+    if (sharedAuthState?.user) return { ...sharedAuthState };
+    return {
+      user: null,
+      token: getStoredToken(),
+      initializing: true,
+      busy: false,
+      error: null,
+    };
   });
+
+  // Publish auth state for secondary instances
+  useEffect(() => {
+    sharedAuthState = state;
+  }, [state]);
 
   // Sync token to interceptor
   useEffect(() => {
     currentToken = state.token;
   }, [state.token]);
 
-  // Register unauthorized handler
+  // Register unauthorized handler (only from primary instance)
   useEffect(() => {
+    if (!primaryInitDone) return;
     onUnauthorized = () => {
       clearToken();
       currentToken = null;
@@ -105,15 +116,40 @@ export function useAuth() {
     return () => { onUnauthorized = null; };
   }, []);
 
-  // Validate token on mount — SSO token in hash takes priority
+  // Validate token on mount
   useEffect(() => {
+    // Secondary instances: sync from storage, never clear on failure
+    if (primaryInitDone) {
+      const token = getStoredToken();
+      if (token) {
+        originalFetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+          .then(r => r.json())
+          .then(json => {
+            if (json.ok && json.data?.user) {
+              setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
+            } else {
+              setState(s => ({ ...s, token: null, initializing: false }));
+            }
+          })
+          .catch(() => {
+            setState(s => ({ ...s, initializing: false }));
+          });
+      } else {
+        setState(s => ({ ...s, initializing: false }));
+      }
+      return;
+    }
+    primaryInitDone = true;
+
     // 1. Check for SSO token in URL hash (from callback redirect)
     const hash = window.location.hash;
     const ssoTokenMatch = hash.match(/sso_token=([^&]+)/);
     if (ssoTokenMatch) {
       const token = ssoTokenMatch[1];
       window.history.replaceState(null, '', window.location.pathname);
-      storeToken(token, true); // always remember SSO sessions
+      storeToken(token, true);
       currentToken = token;
 
       originalFetch('/api/auth/me', {
@@ -182,7 +218,7 @@ export function useAuth() {
       const json = await res.json();
       if (json.ok && json.data) {
         storeToken(json.data.token, rememberMe);
-        currentToken = json.data.token; // sync immediately — useEffect runs too late
+        currentToken = json.data.token;
         setState({ user: json.data.user, token: json.data.token, initializing: false, busy: false, error: null });
         return true;
       }
@@ -200,7 +236,6 @@ export function useAuth() {
       const res = await originalFetch('/api/auth/sso/login');
       const json = await res.json();
       if (json.ok && json.data?.url) {
-        // Full redirect to Microsoft — we leave the SPA entirely
         window.location.href = json.data.url;
       } else {
         setState(s => ({ ...s, busy: false, error: json.error || 'SSO not available' }));
@@ -220,8 +255,8 @@ export function useAuth() {
       });
       const json = await res.json();
       if (json.ok && json.data) {
-        storeToken(json.data.token, true); // always remember on register
-        currentToken = json.data.token; // sync immediately — useEffect runs too late
+        storeToken(json.data.token, true);
+        currentToken = json.data.token;
         setState({ user: json.data.user, token: json.data.token, initializing: false, busy: false, error: null });
         return true;
       }
