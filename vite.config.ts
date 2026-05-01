@@ -35,9 +35,9 @@ export default defineConfig({
             options: { cacheName: 'nova-api', expiration: { maxEntries: 100, maxAgeSeconds: 300 } },
           },
           {
-            urlPattern: /\.(?:js|css|woff2?|svg|png|jpg|ico)$/,
-            handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'nova-assets', expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 7 } },
+            urlPattern: /\.(?:woff2?|svg|png|jpg|ico)$/,
+            handler: 'CacheFirst',
+            options: { cacheName: 'nova-static', expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 30 } },
           },
         ],
       },
