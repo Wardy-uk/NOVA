@@ -1146,10 +1146,19 @@ interface SuggestionItem {
 }
 
 const VERDICT_CONFIG = {
-  apply: { emoji: '\u{1F7E2}', label: 'Apply', border: 'border-green-700/50', bg: 'bg-green-950/30', text: 'text-green-400' },
-  wait:  { emoji: '\u{1F7E1}', label: 'Wait',  border: 'border-amber-700/50', bg: 'bg-amber-950/30', text: 'text-amber-400' },
-  skip:  { emoji: '\u{1F534}', label: 'Skip',  border: 'border-red-700/50',   bg: 'bg-red-950/30',   text: 'text-red-400' },
+  apply: { label: 'Apply', border: 'border-green-700/50', bg: 'bg-green-950/30', text: 'text-green-400', badgeBg: 'bg-green-700/60', badgeBorder: 'border-green-600/40' },
+  wait:  { label: 'Wait',  border: 'border-amber-700/50', bg: 'bg-amber-950/30', text: 'text-amber-400', badgeBg: 'bg-amber-700/50', badgeBorder: 'border-amber-600/40' },
+  skip:  { label: 'Skip',  border: 'border-red-700/50',   bg: 'bg-red-950/30',   text: 'text-red-400',   badgeBg: 'bg-red-800/50',   badgeBorder: 'border-red-700/40' },
 } as const;
+
+function RiskPill({ riskFlag }: { riskFlag: unknown }) {
+  if (!riskFlag || typeof riskFlag !== 'string') return null;
+  const lower = riskFlag.toLowerCase();
+  if (lower.includes('declined')) {
+    return <span className="px-2 py-0.5 text-[9px] font-semibold rounded-full bg-red-900/50 text-red-300 border border-red-800/40">{riskFlag}</span>;
+  }
+  return <span className="px-2 py-0.5 text-[9px] font-semibold rounded-full bg-amber-900/50 text-amber-300 border border-amber-800/40">{riskFlag}</span>;
+}
 
 function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
   s: SuggestionItem;
@@ -1163,46 +1172,55 @@ function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
   const ev = s.evidence || {};
   const cfg = v ? VERDICT_CONFIG[v.verdict] : null;
   const category = String(s.suggestion.category ?? s.evidence.category ?? 'Unknown');
+  const riskFlag = ev.riskFlag;
 
   const actionBreakdown = ev.actionBreakdown as Record<string, number> | undefined;
   const exampleTickets = [...new Set(ev.exampleTickets as string[] | undefined ?? [])];
-  const hasDetail = (actionBreakdown && Object.keys(actionBreakdown).length > 0) || exampleTickets.length > 0 || Object.keys(ev).length > 0;
+  const statKeys = Object.entries(ev).filter(([k]) => !['sampleTickets', 'actionBreakdown', 'exampleTickets', 'riskFlag', 'proposedRule', 'category'].includes(k));
+  const hasDetail = (actionBreakdown && Object.keys(actionBreakdown).length > 0) || exampleTickets.length > 0 || statKeys.length > 0;
 
   return (
     <div className={`rounded-lg bg-[#272C33] overflow-hidden border ${cfg ? cfg.border : 'border-[#3a424d]'}`}>
-      {cfg && v && (
-        <div className={`px-3 py-2 ${cfg.bg} flex items-center gap-2`}>
-          <span className="text-sm">{cfg.emoji}</span>
-          <span className={`text-xs font-semibold ${cfg.text}`}>{v.headline}</span>
-          <span className="text-[10px] text-neutral-500 ml-auto">{category}</span>
-        </div>
-      )}
-      {!cfg && (
-        <div className="px-3 py-2 bg-[#2a3040] flex items-center gap-2">
-          <span className="text-xs text-neutral-300 font-medium">{s.suggestion.title}</span>
-        </div>
-      )}
-
-      <div className="px-3 py-3">
-        {s.bodyText ? (
-          <div className="text-[11px] text-neutral-300 leading-relaxed whitespace-pre-line">{s.bodyText}</div>
+      <div className={`px-4 py-3 ${cfg ? cfg.bg : 'bg-[#2a3040]'} flex items-start gap-3`}>
+        {cfg && v ? (
+          <>
+            <span className={`shrink-0 mt-0.5 px-3 py-1 text-xs font-bold rounded ${cfg.badgeBg} ${cfg.text} border ${cfg.badgeBorder}`}>
+              {cfg.label}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className={`text-sm font-semibold ${cfg.text}`}>{v.headline}</span>
+                <span className="text-[10px] text-neutral-500">{category}</span>
+              </div>
+              <div className="text-[11px] text-neutral-300 leading-relaxed mt-1">
+                {v.reason}
+              </div>
+            </div>
+          </>
         ) : (
-          <div className="text-[11px] text-neutral-400 leading-relaxed">
-            {v ? v.reason : s.suggestion.description}
-          </div>
+          <span className="text-xs text-neutral-300 font-medium">{s.suggestion.title}</span>
+        )}
+      </div>
+
+      <div className="px-4 py-3 space-y-3">
+        {s.bodyText && (
+          <div className="text-[11px] text-neutral-400 leading-relaxed whitespace-pre-line">{s.bodyText}</div>
         )}
 
-        <div className="flex items-center gap-2 mt-3">
+        <RiskPill riskFlag={riskFlag} />
+
+        <div className="flex items-center gap-2">
           {v?.verdict === 'apply' && (
             <>
-              <button onClick={() => onApply(s.id)}
-                className="px-3 py-1.5 text-[10px] font-semibold rounded bg-green-700/60 text-green-300 hover:bg-green-600/60 border border-green-600/40 transition-colors">
-                Apply
-              </button>
-              {onCustomize && typeof s.suggestion.category === 'string' && (
+              {onCustomize && typeof s.suggestion.category === 'string' ? (
                 <button onClick={() => onCustomize(s)}
-                  className="px-3 py-1.5 text-[10px] font-medium rounded bg-neutral-800/50 text-neutral-400 hover:bg-neutral-700/50 border border-neutral-700/40 transition-colors">
-                  Customise
+                  className="px-3 py-1.5 text-[10px] font-semibold rounded bg-green-700/60 text-green-300 hover:bg-green-600/60 border border-green-600/40 transition-colors">
+                  Apply suggestion…
+                </button>
+              ) : (
+                <button onClick={() => onApply(s.id)}
+                  className="px-3 py-1.5 text-[10px] font-semibold rounded bg-green-700/60 text-green-300 hover:bg-green-600/60 border border-green-600/40 transition-colors">
+                  Apply
                 </button>
               )}
               <button onClick={() => onDismiss(s.id)}
@@ -1235,7 +1253,7 @@ function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
               </button>
               <button onClick={() => onApply(s.id)}
                 className="px-3 py-1.5 text-[10px] font-medium rounded bg-neutral-800/50 text-neutral-400 hover:bg-neutral-700/50 border border-neutral-700/40 transition-colors">
-                Apply anyway — I know best
+                Apply anyway
               </button>
               <button onClick={() => onSnooze(s.id)}
                 className="px-3 py-1.5 text-[10px] font-medium rounded text-neutral-500 hover:text-neutral-400 transition-colors">
@@ -1259,22 +1277,20 @@ function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
 
         {hasDetail && (
           <button onClick={() => setExpanded(!expanded)}
-            className="flex items-center gap-1 mt-3 text-[10px] text-neutral-500 hover:text-neutral-400 transition-colors">
+            className="flex items-center gap-1 text-[10px] text-neutral-500 hover:text-neutral-400 transition-colors">
             <span className={`transform transition-transform ${expanded ? 'rotate-90' : ''}`}>{'▸'}</span>
-            <span>See the data behind this recommendation</span>
+            <span>Stats &amp; evidence</span>
           </button>
         )}
 
         {expanded && hasDetail && (
-          <div className="mt-2.5 pt-2.5 border-t border-[#3a424d] space-y-2">
-            {Object.keys(ev).length > 0 && (
+          <div className="pt-2.5 border-t border-[#3a424d] space-y-2">
+            {statKeys.length > 0 && (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
-                {Object.entries(ev)
-                  .filter(([k]) => !['sampleTickets', 'actionBreakdown', 'exampleTickets', 'riskFlag', 'proposedRule', 'category'].includes(k))
-                  .map(([k, v]) => (
+                {statKeys.map(([k, val]) => (
                   <div key={k} className="flex justify-between text-[9px]">
                     <span className="text-neutral-500">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</span>
-                    <span className="text-neutral-400 font-mono">{String(v)}</span>
+                    <span className="text-neutral-400 font-mono">{String(val)}</span>
                   </div>
                 ))}
               </div>
@@ -1304,9 +1320,32 @@ function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
   );
 }
 
-function SuggestionCards({ type, onRulesChanged, onCustomize }: { type: 'guardrail' | 'autonomy'; onRulesChanged: () => void; onCustomize?: (suggestion: SuggestionItem) => void }) {
+function SuggestionSkeleton() {
+  return (
+    <div className="rounded-lg bg-[#272C33] border border-[#3a424d] overflow-hidden animate-pulse">
+      <div className="px-4 py-3 bg-[#2a3040] flex items-start gap-3">
+        <div className="w-14 h-6 rounded bg-[#363d47]" />
+        <div className="flex-1 space-y-2">
+          <div className="h-3.5 w-2/5 rounded bg-[#363d47]" />
+          <div className="h-2.5 w-4/5 rounded bg-[#363d47]" />
+        </div>
+      </div>
+      <div className="px-4 py-3 space-y-2">
+        <div className="h-2.5 w-3/4 rounded bg-[#363d47]" />
+        <div className="h-6 w-28 rounded bg-[#363d47]" />
+      </div>
+    </div>
+  );
+}
+
+function SuggestionCards({ type, onRulesChanged, onCustomize, emptyMessage }: {
+  type: 'guardrail' | 'autonomy';
+  onRulesChanged: () => void;
+  onCustomize?: (suggestion: SuggestionItem) => void;
+  emptyMessage?: string;
+}) {
   const [items, setItems] = useState<SuggestionItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
@@ -1346,19 +1385,24 @@ function SuggestionCards({ type, onRulesChanged, onCustomize }: { type: 'guardra
         <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-medium">AI Suggestions</div>
         <button onClick={refresh} disabled={refreshing}
           className="text-[10px] text-blue-400 hover:text-blue-300 disabled:opacity-50">
-          {refreshing ? 'Analysing...' : 'Refresh'}
+          {refreshing ? 'Analysing…' : 'Refresh'}
         </button>
       </div>
       {loading ? (
-        <div className="text-[10px] text-neutral-500 py-2">Loading suggestions...</div>
+        <div className="space-y-2">
+          <SuggestionSkeleton />
+          <SuggestionSkeleton />
+        </div>
       ) : items.length === 0 ? (
-        <div className="text-[10px] text-neutral-500 py-2">No suggestions — click Refresh to analyse decision history.</div>
+        <div className="text-[11px] text-neutral-500 py-4 text-center">
+          {emptyMessage ?? 'No suggestions yet.'}
+        </div>
       ) : (() => {
         const actionable = items.filter(s => s.verdict?.verdict !== 'wait');
         const waitCount = items.length - actionable.length;
         return <>
           {actionable.length === 0 && waitCount > 0 ? (
-            <div className="text-[10px] text-neutral-500 py-2">{waitCount} {waitCount === 1 ? 'category' : 'categories'} gathering data — nothing to action yet.</div>
+            <div className="text-[11px] text-neutral-500 py-3 text-center">{waitCount} {waitCount === 1 ? 'category' : 'categories'} gathering data — nothing to action yet.</div>
           ) : (
             <>
               {actionable.map(s => (
@@ -1555,7 +1599,7 @@ function GuardrailsTab({ rules, onToggle, onRefresh }: { rules: GuardrailRule[];
         )}
       </div>
 
-      <SuggestionCards type="guardrail" onRulesChanged={onRefresh} />
+      <SuggestionCards type="guardrail" onRulesChanged={onRefresh} emptyMessage="No guardrail suggestions yet — the engine analyses decision patterns over time." />
     </div>
   );
 }
@@ -1779,7 +1823,7 @@ function AutonomyTab({ rules, onRefresh, isSuperAdmin = false }: { rules: Autono
         )}
       </div>
 
-      <SuggestionCards type="autonomy" onRulesChanged={onRefresh} onCustomize={(s) => {
+      <SuggestionCards type="autonomy" onRulesChanged={onRefresh} emptyMessage="No suggestions yet — the engine needs at least 50 decisions per category before suggesting rules." onCustomize={(s) => {
         const sug = s.suggestion;
         setForm({
           category: String(sug.category ?? ''),
