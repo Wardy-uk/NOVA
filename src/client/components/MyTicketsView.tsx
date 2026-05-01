@@ -208,9 +208,13 @@ export function MyTicketsView({ tasks, loading, onUpdateTask, agentUsername, age
       )}
 
       {/* DEFERRED band */}
-      {bands.deferred.length > 0 && (
-        <BandHeader label="Deferred" count={bands.deferred.length}>
-          {bands.deferred.map(ticket => (
+      <BandHeader label="Deferred" count={bands.deferred.length}>
+        {bands.deferred.length === 0 ? (
+          <p className="text-xs text-neutral-600 px-3 py-2">
+            No deferred tickets
+          </p>
+        ) : (
+          bands.deferred.map(ticket => (
             <TicketRow
               key={ticket.ticketKey}
               ticket={ticket}
@@ -220,9 +224,9 @@ export function MyTicketsView({ tasks, loading, onUpdateTask, agentUsername, age
                 if (task) setDrawerTaskId(task.id);
               }}
             />
-          ))}
-        </BandHeader>
-      )}
+          ))
+        )}
+      </BandHeader>
 
       {/* HYGIENE QUEUE band */}
       <BandHeader label="Hygiene Queue" count={bands.hygiene.length}>

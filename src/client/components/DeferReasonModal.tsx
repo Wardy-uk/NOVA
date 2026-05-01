@@ -1,9 +1,18 @@
 import { useState, useEffect } from 'react';
 
-interface DeferReason {
+interface DeferReasonItem {
   key: string;
   label: string;
 }
+
+const FALLBACK_REASONS: DeferReasonItem[] = [
+  { key: 'waiting_on_customer', label: 'Waiting on customer' },
+  { key: 'waiting_on_t2', label: 'Waiting on T2' },
+  { key: 'waiting_on_dev', label: 'Waiting on dev' },
+  { key: 'on_a_call', label: 'On a call / phone follow-up' },
+  { key: 'coffee_break', label: 'Need to grab a coffee' },
+  { key: 'disagree_with_ranking', label: 'I disagree with the ranking' },
+];
 
 interface Props {
   ticketKey: string;
@@ -19,7 +28,7 @@ function authHeaders(): Record<string, string> {
 }
 
 export function DeferReasonModal({ ticketKey, onClose, onDeferred }: Props) {
-  const [reasons, setReasons] = useState<DeferReason[]>([]);
+  const [reasons, setReasons] = useState<DeferReasonItem[]>(FALLBACK_REASONS);
   const [selected, setSelected] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [customTime, setCustomTime] = useState('');
@@ -29,7 +38,7 @@ export function DeferReasonModal({ ticketKey, onClose, onDeferred }: Props) {
   useEffect(() => {
     fetch('/api/my-tickets/defer-reasons', { headers: authHeaders() })
       .then(r => r.json())
-      .then(j => { if (j.ok) setReasons(j.data); })
+      .then(j => { if (j.ok && j.data?.length) setReasons(j.data); })
       .catch(() => {});
   }, []);
 
