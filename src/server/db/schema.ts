@@ -1112,6 +1112,16 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'jira_issue_cache') AND name = 'agent_last_updated')
      ALTER TABLE jira_issue_cache ADD agent_last_updated DATETIME2 NULL;`,
 
+    // WP-56: Prompt versioning — stamp which prompt version produced each decision/call
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_llm_calls') AND name = 'prompt_version')
+     ALTER TABLE agent_llm_calls ADD prompt_version VARCHAR(64) NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_decisions') AND name = 'prompt_version')
+     ALTER TABLE agent_decisions ADD prompt_version VARCHAR(64) NULL;`,
+
+    `UPDATE agent_llm_calls SET prompt_version = 'pre-versioning' WHERE prompt_version IS NULL;`,
+    `UPDATE agent_decisions SET prompt_version = 'pre-versioning' WHERE prompt_version IS NULL;`,
+
     // ── Ticket defers (My Tickets defer system) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ticket_defers') AND type = 'U')
      CREATE TABLE ticket_defers (

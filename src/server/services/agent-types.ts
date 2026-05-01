@@ -125,6 +125,7 @@ export interface AgentDecision {
   output: Record<string, unknown>;
   provider?: string;
   model?: string;
+  promptVersion?: string;
 }
 
 export interface ActionResult {

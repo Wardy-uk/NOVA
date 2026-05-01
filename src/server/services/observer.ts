@@ -6,8 +6,8 @@ export class Observer {
     return executeAndGetId(
       `INSERT INTO agent_decisions
          (ticket_id, event_type, inputs, reasoning, output, action, confidence,
-          provider, model, approval_required, shadow_mode, latency_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          provider, model, approval_required, shadow_mode, latency_ms, prompt_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         decision.ticketKey,
         decision.eventType,
@@ -21,6 +21,7 @@ export class Observer {
         decision.approvalRequired ? 1 : 0,
         decision.shadowMode ? 1 : 0,
         0,
+        decision.promptVersion ?? null,
       ],
     );
   }

@@ -3,6 +3,7 @@ import type { LlmService } from './llm-service.js';
 import type { KbSearchService } from './kb-search.js';
 import type { AutonomyEngine } from './autonomy-engine.js';
 import type { LifecycleManager } from './lifecycle-manager.js';
+import type { AiLearningService } from './ai-learning-service.js';
 import { TriageResultSchema, type TriageResult } from './triage-schema.js';
 import { RespondResultSchema, type RespondResult } from './respond-schema.js';
 import { loadPrompt } from './prompt-loader.js';
@@ -17,11 +18,16 @@ export class Reasoner {
   private autonomyEngine: AutonomyEngine | null;
   private lifecycleManager: LifecycleManager | null = null;
   private lastAutonomyCheck: AutonomyCheck | null = null;
+  private learningService: AiLearningService | null = null;
 
   constructor(llmService: LlmService, kbSearch: KbSearchService, autonomyEngine?: AutonomyEngine) {
     this.llmService = llmService;
     this.kbSearch = kbSearch;
     this.autonomyEngine = autonomyEngine ?? null;
+  }
+
+  setLearningService(service: AiLearningService): void {
+    this.learningService = service;
   }
 
   setLifecycleManager(manager: LifecycleManager): void {
@@ -61,6 +67,7 @@ export class Reasoner {
     const kbText = this.kbSearch.formatForPrompt(kbMatches);
 
     const customerContext = this.buildCustomerContext(event);
+    const learningsText = await this.buildLearningsContext(event);
 
     const systemPrompt = loadPrompt('triage', {
       ticket_key: event.ticketKey,
@@ -73,6 +80,7 @@ export class Reasoner {
       created: event.created,
       customer_context: customerContext,
       kb_matches: kbText,
+      learnings: learningsText,
     });
 
     const userMessage = `Analyse this ticket and produce the structured JSON assessment.`;
@@ -138,6 +146,7 @@ export class Reasoner {
       },
       provider: result.provider,
       model: result.model,
+      promptVersion: result.promptVersion,
     };
 
     decision.approvalRequired = await this.needsApproval(triage, decision);
@@ -148,6 +157,7 @@ export class Reasoner {
     const kbMatches = await this.kbSearch.search(`${event.summary} ${(event.comments?.[0]?.body ?? '').slice(0, 200)}`);
     const kbText = this.kbSearch.formatForPrompt(kbMatches);
     const customerContext = this.buildCustomerContext(event);
+    const learningsText = await this.buildLearningsContext(event);
 
     const conversationThread = (event.comments ?? [])
       .map(c => `[${c.created}] ${c.author}${c.isPublic ? '' : ' (internal)'}:\n${c.body}`)
@@ -179,6 +189,7 @@ export class Reasoner {
       conversation_thread: conversationThread || '(no comments)',
       customer_context: customerContext,
       kb_matches: kbText,
+      learnings: learningsText,
     });
 
     const result = await this.llmService.call<RespondResult>(
@@ -228,6 +239,7 @@ export class Reasoner {
       },
       provider: result.provider,
       model: result.model,
+      promptVersion: result.promptVersion,
     };
 
     decision.approvalRequired = await this.needsRespondApproval(respond, decision);
@@ -296,6 +308,18 @@ export class Reasoner {
     }
 
     return true;
+  }
+
+  private async buildLearningsContext(event: TicketEvent): Promise<string> {
+    if (!this.learningService) return 'No prior learnings available.';
+    try {
+      const category = (event as any).classification?.category;
+      const learnings = await this.learningService.getRelevantLearnings(category, event.organisation ?? undefined);
+      return this.learningService.formatForPrompt(learnings);
+    } catch (err) {
+      console.warn('[reasoner] Failed to load learnings:', err instanceof Error ? err.message : err);
+      return 'No prior learnings available.';
+    }
   }
 
   private buildCustomerContext(event: TicketEvent): string {

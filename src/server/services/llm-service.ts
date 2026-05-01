@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { executeAndGetId } from './database.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 
@@ -24,6 +25,7 @@ export interface LlmResult<T = unknown> {
   inputTokens: number;
   outputTokens: number;
   latencyMs: number;
+  promptVersion: string;
 }
 
 interface ProviderConfig {
@@ -256,13 +258,14 @@ async function logCall(
   latencyMs: number,
   success: boolean,
   error: string | null,
+  promptVersion: string,
 ): Promise<void> {
   try {
     const cost = estimateCost(model, inputTokens, outputTokens);
     await executeAndGetId(
-      `INSERT INTO agent_llm_calls (ticket_id, call_type, provider, model, input_tokens, output_tokens, latency_ms, success, error, estimated_cost)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [ticketId, callType, provider, model, inputTokens, outputTokens, latencyMs, success ? 1 : 0, error, cost],
+      `INSERT INTO agent_llm_calls (ticket_id, call_type, provider, model, input_tokens, output_tokens, latency_ms, success, error, estimated_cost, prompt_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [ticketId, callType, provider, model, inputTokens, outputTokens, latencyMs, success ? 1 : 0, error, cost, promptVersion],
     );
   } catch (e) {
     console.warn('[llm-service] Failed to log call:', e);
@@ -349,6 +352,9 @@ export class LlmService {
     const temperature = options.temperature ?? parseFloat(this.settings.get('llm_temperature')?.trim() || '0.3');
     const ticketId = options.ticketId ?? null;
 
+    const hash8 = createHash('sha256').update(systemPrompt).digest('hex').slice(0, 8);
+    const promptVersion = `${options.callType}:${hash8}`;
+
     // Build provider chain: tier configs, then fall-up chain (cheap → standard → reasoning)
     const tiers: LlmTier[] = tier === 'cheap' ? ['cheap', 'standard', 'reasoning']
       : tier === 'standard' ? ['standard', 'reasoning'] : ['reasoning'];
@@ -407,7 +413,7 @@ export class LlmService {
 
           if (parsed.success) {
             recordSuccess(config.provider);
-            await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, true, null);
+            await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, true, null, promptVersion);
             return {
               data: parsed.data,
               provider: config.provider,
@@ -415,18 +421,19 @@ export class LlmService {
               inputTokens,
               outputTokens,
               latencyMs,
+              promptVersion,
             };
           }
 
           const validationErr = `Validation failed: ${parsed.error.message}`;
-          await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, validationErr);
+          await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, validationErr, promptVersion);
           recordFailure(config.provider);
           lastError = new Error(validationErr);
 
         } catch (err) {
           const latencyMs = Date.now() - start;
           const errMsg = err instanceof Error ? err.message : String(err);
-          await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, errMsg);
+          await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, errMsg, promptVersion);
           lastError = err instanceof Error ? err : new Error(errMsg);
 
           if (isRetryableError(err)) {
