@@ -15,6 +15,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet" />
 </head>
 <body class="bg-[#272C33] text-neutral-100">
+  <script>
+    // One-time cleanup of stale SW runtime caches (safe to remove after 2026-06-01)
+    if ('caches' in window) caches.delete('nova-assets');
+  </script>
   <div id="root"></div>
   <script type="module" src="./main.tsx"></script>
 </body>
