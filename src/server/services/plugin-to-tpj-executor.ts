@@ -67,6 +67,7 @@ export class PluginToTpjExecutor {
       );
 
       // 5. Set resolution type, assign to NOVA service account, then transition original to Resolved
+      let resolveError: string | null = null;
       try {
         await this.jiraClient.updateFields(ticketKey, {
           [CF_RESOLUTION_TYPE]: { value: 'No Fault Found' },
@@ -80,21 +81,35 @@ export class PluginToTpjExecutor {
       } catch (err) {
         const statusCode = (err as any)?.statusCode ?? (err as any)?.status ?? 'N/A';
         const body = (err as any)?.body ? JSON.stringify((err as any).body).slice(0, 300) : '';
-        console.warn(`[plugin-to-tpj] Failed to transition ${ticketKey} to resolved: HTTP ${statusCode} — ${err instanceof Error ? err.message : err}${body ? ` | ${body}` : ''}`);
+        resolveError = `HTTP ${statusCode}: ${err instanceof Error ? err.message : err}${body ? ` | ${body}` : ''}`;
+        console.error(`[plugin-to-tpj] Failed to resolve ${ticketKey}: ${resolveError}`);
+
+        // Log available transitions for diagnosis
+        try {
+          const t = await this.jiraClient.getTransitionsWithFields(ticketKey);
+          const names = ((t as any)?.transitions ?? []).map((tr: any) => `${tr.id}:${tr.name}`).join(', ');
+          console.error(`[plugin-to-tpj] Available transitions for ${ticketKey}: [${names}]`);
+        } catch { /* best effort */ }
       }
 
       // 6. Log to hybrid_action_log
+      const resolved = !resolveError;
+      const detail = resolved
+        ? `Cloned to ${newKey}, comments copied, original resolved`
+        : `Cloned to ${newKey}, comments copied, but failed to resolve original: ${resolveError}`;
       await executeAndGetId(
         `INSERT INTO hybrid_action_log (action_id, source_ticket_key, created_ticket_key, status, detail)
-         VALUES ('plugin_to_tpj', ?, ?, 'completed', ?)`,
-        [ticketKey, newKey, `Cloned to ${newKey}, comments copied, original resolved`],
+         VALUES ('plugin_to_tpj', ?, ?, ?, ?)`,
+        [ticketKey, newKey, resolved ? 'completed' : 'partial', detail],
       );
 
       return {
-        success: true,
+        success: resolved,
         actionId: 'plugin_to_tpj',
         ticketKey,
-        detail: `Cloned to ${newKey}, comments copied, original resolved via Quick Resolve`,
+        detail: resolved
+          ? `Cloned to ${newKey}, comments copied, original resolved via Quick Resolve`
+          : `Cloned to ${newKey} but failed to resolve original: ${resolveError}`,
         createdTicketKey: newKey,
       };
     } catch (err) {
