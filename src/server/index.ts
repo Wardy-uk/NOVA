@@ -1391,6 +1391,85 @@ async function main() {
     }
   });
 
+  app.get('/api/debug/jira-locale', (req, res, next) => {
+    if (!isAdmin(req.user?.role ?? '')) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    next();
+  }, async (_req, res) => {
+    const client = buildOnboardingJiraClient();
+    if (!client) { res.json({ ok: false, error: 'Jira client not configured' }); return; }
+
+    const results: Record<string, unknown> = {};
+    const testKey = 'NT-17800';
+
+    // 1. Issue fields — check localised field values
+    try {
+      const raw = await client.rawGet(`issue/${testKey}?fields=summary,status,priority,resolution,issuetype`);
+      const f = (raw as any)?.fields ?? {};
+      results.issue = {
+        key: testKey,
+        status_name: f.status?.name,
+        status_category_key: f.status?.statusCategory?.key,
+        status_category_name: f.status?.statusCategory?.name,
+        priority_name: f.priority?.name,
+        resolution_name: f.resolution?.name ?? null,
+        issuetype_name: f.issuetype?.name,
+        _raw_status: f.status,
+        _raw_priority: f.priority,
+        _raw_resolution: f.resolution,
+        _raw_issuetype: f.issuetype,
+      };
+    } catch (err: any) {
+      results.issue = { error: err.message, statusCode: err.statusCode, body: err.body };
+    }
+
+    // 2. Transitions — check localised transition names
+    try {
+      const raw = await client.rawGet(`issue/${testKey}/transitions`);
+      const transitions = ((raw as any)?.transitions ?? []) as any[];
+      results.transitions = transitions.map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        to_name: t.to?.name,
+        to_status_category: t.to?.statusCategory?.name,
+      }));
+    } catch (err: any) {
+      results.transitions = { error: err.message, statusCode: err.statusCode, body: err.body };
+    }
+
+    // 3. Project statuses — all status names for NT
+    try {
+      const raw = await client.rawGet('project/NT/statuses');
+      const issueTypes = (Array.isArray(raw) ? raw : []) as any[];
+      results.project_statuses = issueTypes.map((it: any) => ({
+        issuetype: it.name,
+        statuses: (it.statuses ?? []).map((s: any) => ({ id: s.id, name: s.name, category: s.statusCategory?.name })),
+      }));
+    } catch (err: any) {
+      results.project_statuses = { error: err.message, statusCode: err.statusCode, body: err.body };
+    }
+
+    // 4. Force a 403 — attempt to create in NTPJ
+    try {
+      await client.createIssue({
+        fields: {
+          project: { key: 'NTPJ' },
+          summary: '[LOCALE TEST — delete if created]',
+          issuetype: { name: 'Support' },
+        },
+      });
+      results.ntpj_403_test = { unexpected: 'Issue was created — expected 403' };
+    } catch (err: any) {
+      results.ntpj_403_test = {
+        statusCode: err.statusCode,
+        statusText: err.statusText,
+        message: err.message,
+        body: err.body,
+      };
+    }
+
+    res.json({ ok: true, data: results });
+  });
+
   // Onboarding ticket orchestrator — uses Admin > Jira (Global) credentials
   function buildOrchestrator(): OnboardingOrchestrator | null {
     const client = buildOnboardingJiraClient();

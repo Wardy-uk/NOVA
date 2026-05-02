@@ -395,6 +395,10 @@ export class JiraRestClient {
     }
   }
 
+  async rawGet<T = unknown>(path: string): Promise<T> {
+    return this.request<T>('GET', path);
+  }
+
   /** Get available transitions with their field screens (allowedValues for each transition) */
   async getTransitionsWithFields(issueKey: string): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>(
