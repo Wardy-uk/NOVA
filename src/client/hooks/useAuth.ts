@@ -88,6 +88,11 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       'pre-existing-auth-header:', existingAuth ? `"${existingAuth.substring(0, 15)}..."` : 'none');
   }
 
+  if (currentToken && !localStorage.getItem('nova_auth_token') && !sessionStorage.getItem('nova_auth_token')) {
+    localStorage.setItem('nova_auth_token', currentToken);
+    console.error('[AUTH SELF-HEAL] Re-persisted token to localStorage');
+  }
+
   if (currentToken && url.startsWith('/api/') && !url.startsWith('/api/auth/')) {
     const headers = new Headers(init?.headers);
     if (!headers.has('Authorization')) {
