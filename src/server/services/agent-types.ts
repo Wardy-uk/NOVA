@@ -203,6 +203,7 @@ export type AlertType =
   | 'capacity_low'
   | 'agent_loop_unhealthy'
   | 'autonomy_execution'
+  | 'approval_sla_warning'
   | 'approval_timeout'
   | 'approval_abandoned'
   | 'token_budget_exceeded'

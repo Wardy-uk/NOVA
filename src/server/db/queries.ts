@@ -2531,6 +2531,7 @@ export interface ApprovalItem {
   priority: string | null; created_at: string; expires_at: string;
   action_type: string | null; source: string | null;
   confidence: number | null; reasoning: string | null;
+  warned_at: string | null;
 }
 
 // NOVA agent_decisions use negative IDs (-id) to distinguish from approval_queue items.
@@ -2577,6 +2578,7 @@ function agentDecisionToApproval(row: Record<string, unknown>): ApprovalItem {
     source: 'nova_ai',
     confidence: row.confidence != null ? Number(row.confidence) : null,
     reasoning: (row.reasoning as string) ?? null,
+    warned_at: null,
   };
 }
 
@@ -2717,6 +2719,13 @@ export class ApprovalQueries {
       [action, decidedBy, editedResponseAdf || null, declineReason || null, id]
     );
     return true;
+  }
+
+  async markWarned(id: number): Promise<void> {
+    await execute(
+      `UPDATE approval_queue SET warned_at = GETUTCDATE() WHERE id = ?`,
+      [id],
+    );
   }
 
   async cleanupExpiredAndSupersededApprovals(expiryHours: number, _jiraClient?: any): Promise<{ expired: number; superseded: number }> {

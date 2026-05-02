@@ -926,6 +926,10 @@ async function runMigrations(): Promise<void> {
     `UPDATE approval_queue SET source = 'n8n_ai'
      WHERE source IS NULL;`,
 
+    // WP-60: SLA warning tracking on approval_queue
+    `IF COL_LENGTH('approval_queue', 'warned_at') IS NULL
+     ALTER TABLE approval_queue ADD warned_at DATETIME2 NULL;`,
+
     // n8n comment tracking on jira_issue_cache — populated by jira sync from comment cache
     `IF COL_LENGTH('jira_issue_cache', 'last_n8n_comment') IS NULL
      ALTER TABLE jira_issue_cache ADD last_n8n_comment NVARCHAR(MAX) NULL;`,

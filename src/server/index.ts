@@ -2601,19 +2601,69 @@ ${panelHtml}
   }, 6 * 60 * 60 * 1000);
 
   // Auto-expire approval queue items and check Jira status every minute
+  const LOW_RISK_ACTION_PREFIXES = ['auto_rule_', 'plugin_to_tpj'];
+  const SLA_WARNING_MINUTES = 30;
+
   setInterval(async () => {
     try {
       const pending = await approvalQueries.getAll('pending');
+      const now = new Date();
 
-      // 1. Expire items past their business-hours deadline
-      const expired = pending.filter((item) => new Date(item.expires_at) <= new Date());
+      // 1a. SLA warning — alert when ≤30 min remaining and not yet warned
+      for (const item of pending) {
+        const expiresAt = new Date(item.expires_at);
+        if (expiresAt <= now) continue; // will be handled by expiry below
+        const minsRemaining = (expiresAt.getTime() - now.getTime()) / 60_000;
+        if (minsRemaining <= SLA_WARNING_MINUTES && !item.warned_at && item.id > 0) {
+          console.log(`[Approvals] SLA warning: approval ${item.id} (${item.ticket_id}) expires in ${Math.round(minsRemaining)} minutes`);
+          await approvalQueries.markWarned(item.id);
+          try {
+            await agentLoop?.getAlertService().createAlert({
+              alertType: 'approval_sla_warning',
+              severity: 'warning',
+              title: `Approval SLA: ${item.ticket_id} expires in ${Math.round(minsRemaining)}m`,
+              detail: `Approval ${item.id} for "${item.ticket_summary}" is approaching its SLA deadline.`,
+              ticketKey: item.ticket_id,
+            });
+          } catch { /* alert creation is best-effort */ }
+        }
+      }
+
+      // 1b. Expire items past their business-hours deadline (with smart auto-approve for low-risk NOVA actions)
+      const expired = pending.filter((item) => new Date(item.expires_at) <= now);
       for (const item of expired) {
+        const isLowRisk = item.action_type && LOW_RISK_ACTION_PREFIXES.some(p => item.action_type!.startsWith(p));
+        const isNova = item.source === 'nova_ai';
+
+        if (isNova && isLowRisk) {
+          await approvalQueries.decide(item.id, 'approved', 'system-sla');
+          try {
+            await fetch(`${item.resume_url}?action=approve`, { method: 'GET' });
+            console.log(`[Approvals] SLA auto-approved low-risk approval ${item.id} (${item.ticket_id}, action: ${item.action_type})`);
+          } catch (err) {
+            console.error(`[Approvals] Failed to hit resume URL for auto-approved ${item.id}:`, err instanceof Error ? err.message : err);
+          }
+          continue;
+        }
+
         await approvalQueries.decide(item.id, 'timed_out', 'system');
         try {
           await fetch(`${item.resume_url}?action=timeout`, { method: 'GET' });
           console.log(`[Approvals] Auto-expired approval ${item.id} (${item.ticket_id}), triggered n8n resume`);
         } catch (err) {
           console.error(`[Approvals] Failed to hit resume URL for expired approval ${item.id}:`, err instanceof Error ? err.message : err);
+        }
+
+        if (isNova && !isLowRisk) {
+          try {
+            await agentLoop?.getAlertService().createAlert({
+              alertType: 'approval_timeout',
+              severity: 'critical',
+              title: `High-risk approval timed out: ${item.ticket_id}`,
+              detail: `Approval ${item.id} (action: ${item.action_type || 'unknown'}) expired without review.`,
+              ticketKey: item.ticket_id,
+            });
+          } catch { /* best-effort */ }
         }
       }
 
