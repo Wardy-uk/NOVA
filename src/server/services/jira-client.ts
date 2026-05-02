@@ -4,6 +4,8 @@
  * (issue linking, custom fields on create).
  */
 
+import { normalizeStatusFields } from '../utils/jira-locale.js';
+
 export interface JiraClientConfig {
   baseUrl: string;   // e.g. https://yourorg.atlassian.net
   email: string;     // Jira account email
@@ -247,7 +249,9 @@ export class JiraRestClient {
     };
     if (options?.nextPageToken) body.nextPageToken = options.nextPageToken;
     if (options?.expand?.length) body.expand = options.expand.join(',');
-    return this.request<JiraSearchResult>('POST', 'search/jql', body);
+    const result = await this.request<JiraSearchResult>('POST', 'search/jql', body);
+    if (result?.issues) result.issues.forEach(normalizeStatusFields);
+    return result;
   }
 
   /** Approximate count of tickets matching a JQL query.
@@ -287,7 +291,9 @@ export class JiraRestClient {
   async getIssue(issueKey: string, fields?: string[], options?: { expand?: string[] }): Promise<JiraIssue | null> {
     const fieldStr = (fields ?? ['summary', 'status', 'issuetype', 'issuelinks', 'priority', 'duedate']).join(',');
     const expand = options?.expand?.length ? `&expand=${options.expand.join(',')}` : '';
-    return this.request<JiraIssue | null>('GET', `issue/${issueKey}?fields=${fieldStr}${expand}`);
+    const issue = await this.request<JiraIssue | null>('GET', `issue/${issueKey}?fields=${fieldStr}${expand}`);
+    if (issue) normalizeStatusFields(issue);
+    return issue;
   }
 
   async createIssue(payload: { fields: Record<string, unknown> }): Promise<JiraCreatedIssue> {
