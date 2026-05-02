@@ -36,17 +36,17 @@ function storeToken(token: string, rememberMe: boolean) {
   }
 }
 
-function clearToken() {
+function clearToken(reason: string) {
+  console.warn('[useAuth] clearToken called:', reason, new Error().stack);
   localStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_KEY);
 }
 
 // Install fetch interceptor that injects Authorization header for /api/ calls
-// and triggers logout on 401 responses (with resilience against transient failures)
+// and verifies token with /api/auth/me before triggering logout on 401s
 let currentToken: string | null = getStoredToken();
 let onUnauthorized: (() => void) | null = null;
-let consecutive401s = 0;
-const LOGOUT_THRESHOLD = 3;
+let verifyingToken = false;
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -63,14 +63,23 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
 
   const response = await originalFetch(input, init);
 
-  if (!url.startsWith('/api/auth/')) {
-    if (response.status === 401) {
-      consecutive401s++;
-      if (consecutive401s >= LOGOUT_THRESHOLD && onUnauthorized) {
+  // On 401 from a non-auth endpoint, verify the NOVA token is actually dead
+  // before clearing — external service 401s (Jira, Confluence, etc.) must not
+  // wipe a valid session.
+  if (response.status === 401 && !url.startsWith('/api/auth/') && currentToken && onUnauthorized && !verifyingToken) {
+    verifyingToken = true;
+    try {
+      const verify = await originalFetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${currentToken}` },
+      });
+      if (verify.status === 401) {
+        console.warn('[useAuth] Token confirmed invalid by /api/auth/me — logging out');
         onUnauthorized();
       }
-    } else {
-      consecutive401s = 0;
+    } catch {
+      // Network error during verify — don't clear, could be transient
+    } finally {
+      verifyingToken = false;
     }
   }
 
@@ -109,7 +118,7 @@ export function useAuth() {
   useEffect(() => {
     if (!primaryInitDone) return;
     onUnauthorized = () => {
-      clearToken();
+      clearToken('401 verified by /api/auth/me');
       currentToken = null;
       setState({ user: null, token: null, initializing: false, busy: false, error: null });
     };
@@ -160,15 +169,14 @@ export function useAuth() {
           if (json.ok && json.data?.user) {
             setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
           } else {
-            clearToken();
+            clearToken('SSO token rejected by /api/auth/me');
             currentToken = null;
             setState({ user: null, token: null, initializing: false, busy: false, error: 'SSO login failed. Please try again.' });
           }
         })
         .catch(() => {
-          clearToken();
-          currentToken = null;
-          setState({ user: null, token: null, initializing: false, busy: false, error: 'Network error during SSO login.' });
+          // Network error — keep the token, it might be valid once connectivity returns
+          setState(s => ({ ...s, initializing: false, error: 'Network error during SSO login — retrying on next navigation.' }));
         });
       return;
     }
@@ -192,18 +200,26 @@ export function useAuth() {
     originalFetch('/api/auth/me', {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then(r => r.json())
+      .then(r => {
+        if (r.status === 401) {
+          clearToken('stored token rejected 401 by /api/auth/me');
+          setState({ user: null, token: null, initializing: false, busy: false, error: null });
+          return null;
+        }
+        return r.json();
+      })
       .then(json => {
+        if (!json) return;
         if (json.ok && json.data?.user) {
           setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
         } else {
-          clearToken();
+          clearToken('stored token invalid (non-ok response from /api/auth/me)');
           setState({ user: null, token: null, initializing: false, busy: false, error: null });
         }
       })
       .catch(() => {
-        clearToken();
-        setState({ user: null, token: null, initializing: false, busy: false, error: null });
+        // Network error — keep the token, don't destroy a valid session over a transient blip
+        setState(s => ({ ...s, initializing: false }));
       });
   }, []);
 
@@ -269,7 +285,7 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(() => {
-    clearToken();
+    clearToken('user logout');
     currentToken = null;
     setState({ user: null, token: null, initializing: false, busy: false, error: null });
   }, []);
