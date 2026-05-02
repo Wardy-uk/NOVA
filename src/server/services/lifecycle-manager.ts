@@ -14,6 +14,8 @@ import { loadPrompt } from './prompt-loader.js';
 interface LifecycleSweepResult {
   approvalTimeouts: number;
   approvalAlerts: number;
+  approvalExpired: number;
+  approvalSuperseded: number;
   staleTransitions: number;
   customerReplies: number;
   chaseSent: number;
@@ -71,6 +73,8 @@ export class LifecycleManager {
     const result: LifecycleSweepResult = {
       approvalTimeouts: 0,
       approvalAlerts: 0,
+      approvalExpired: 0,
+      approvalSuperseded: 0,
       staleTransitions: 0,
       customerReplies: 0,
       chaseSent: 0,
@@ -82,6 +86,8 @@ export class LifecycleManager {
       const timeoutResult = await this.checkApprovalTimeouts(shadow);
       result.approvalTimeouts = timeoutResult.timedOut;
       result.approvalAlerts = timeoutResult.alerted;
+      result.approvalExpired = timeoutResult.expired;
+      result.approvalSuperseded = timeoutResult.superseded;
     } catch (err) {
       console.warn('[lifecycle] Approval timeout check failed:', err instanceof Error ? err.message : err);
     }
@@ -105,12 +111,22 @@ export class LifecycleManager {
     return result;
   }
 
-  private async checkApprovalTimeouts(shadow: boolean): Promise<{ timedOut: number; alerted: number }> {
-    if (!this.approvalQueries) return { timedOut: 0, alerted: 0 };
+  private async checkApprovalTimeouts(shadow: boolean): Promise<{ timedOut: number; alerted: number; expired: number; superseded: number }> {
+    if (!this.approvalQueries) return { timedOut: 0, alerted: 0, expired: 0, superseded: 0 };
 
     const timeoutMins = this.getNumber('agent_approval_timeout_mins', 30);
     const autoApproveThreshold = this.getNumber('agent_auto_approve_threshold', 0.85);
     const alertMins = this.getNumber('agent_abandoned_approval_alert_mins', 15);
+    const expiryHours = this.getNumber('approval_expiry_hours', 8);
+
+    // Clean up expired and superseded approvals first
+    const cleanupResult = await this.approvalQueries.cleanupExpiredAndSupersededApprovals(expiryHours, this.jiraClient);
+    if (cleanupResult.expired > 0) {
+      console.log(`[lifecycle] Cleaned up ${cleanupResult.expired} expired approvals`);
+    }
+    if (cleanupResult.superseded > 0) {
+      console.log(`[lifecycle] Cleaned up ${cleanupResult.superseded} superseded approvals (resolved tickets)`);
+    }
 
     const pendingApprovals = await this.approvalQueries.getPending();
     let timedOut = 0;
@@ -201,7 +217,7 @@ export class LifecycleManager {
       }
     }
 
-    return { timedOut, alerted };
+    return { timedOut, alerted, expired: cleanupResult.expired, superseded: cleanupResult.superseded };
   }
 
   private async detectCustomerReplies(): Promise<number> {

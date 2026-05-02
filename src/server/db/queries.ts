@@ -2696,7 +2696,7 @@ export class ApprovalQueries {
     );
   }
 
-  async decide(id: number, action: 'approved' | 'declined' | 'timed_out' | 'cancelled', decidedBy: string, editedResponseAdf?: string, declineReason?: string): Promise<boolean> {
+  async decide(id: number, action: 'approved' | 'declined' | 'timed_out' | 'expired' | 'superseded' | 'cancelled', decidedBy: string, editedResponseAdf?: string, declineReason?: string): Promise<boolean> {
     if (id < 0) {
       const realId = Math.abs(id);
       const row = await queryOne<{ approval_status: string | null }>(
@@ -2717,6 +2717,59 @@ export class ApprovalQueries {
       [action, decidedBy, editedResponseAdf || null, declineReason || null, id]
     );
     return true;
+  }
+
+  async cleanupExpiredAndSupersededApprovals(expiryHours: number, jiraClient?: any): Promise<{ expired: number; superseded: number }> {
+    let expired = 0;
+    let superseded = 0;
+
+    // Mark approvals as expired if they exceed the TTL
+    try {
+      const expiredApprovals = await query<{ id: number }>(`
+        SELECT id FROM approval_queue
+        WHERE status = 'pending' AND created_at <= DATEADD(hour, -?, GETUTCDATE())
+      `, [expiryHours]);
+
+      for (const approval of expiredApprovals) {
+        const ok = await this.decide(approval.id, 'expired', 'NOVA-lifecycle');
+        if (ok) expired++;
+      }
+    } catch (err) {
+      console.warn('[approvals] Expired approval cleanup failed:', err instanceof Error ? err.message : err);
+    }
+
+    // Mark approvals as superseded if the associated Jira ticket is resolved/closed
+    if (jiraClient) {
+      try {
+        const pending = await this.getPending();
+        for (const approval of pending) {
+          if (approval.status !== 'pending') continue;
+          try {
+            const issue = await jiraClient.getIssue(approval.ticket_id, ['status']);
+            if (issue && issue.fields?.status?.name) {
+              const statusName = (issue.fields.status.name as string).toLowerCase();
+              // Mark as superseded if ticket is resolved, closed, or done
+              if (statusName.includes('resolved') || statusName.includes('closed') || statusName.includes('done')) {
+                const ok = await this.decide(
+                  approval.id,
+                  'superseded',
+                  'NOVA-lifecycle',
+                  undefined,
+                  `Ticket ${approval.ticket_id} is ${statusName}. Approval superseded.`
+                );
+                if (ok) superseded++;
+              }
+            }
+          } catch (err) {
+            console.warn(`[approvals] Failed to check ticket status for ${approval.ticket_id}:`, err instanceof Error ? err.message : err);
+          }
+        }
+      } catch (err) {
+        console.warn('[approvals] Superseded approval cleanup failed:', err instanceof Error ? err.message : err);
+      }
+    }
+
+    return { expired, superseded };
   }
 
   async getDailyStats(days: number = 90): Promise<Array<{ date: string; approved: number; declined: number; timed_out: number; total_decisions: number }>> {
