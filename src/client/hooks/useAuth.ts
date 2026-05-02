@@ -42,17 +42,15 @@ function clearToken(reason: string) {
   sessionStorage.removeItem(TOKEN_KEY);
 }
 
-// Install fetch interceptor that injects Authorization header for /api/ calls
-// and verifies token with /api/auth/me before triggering logout on 401s
+// Fetch interceptor: injects Authorization header for /api/ calls.
+// NEVER reacts to 401s — only /api/auth/me validation in the useEffect
+// is allowed to clear the token.
 let currentToken: string | null = getStoredToken();
-let onUnauthorized: (() => void) | null = null;
-let verifyingToken = false;
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 
-  // Only intercept /api/ calls (but not /api/auth/ to avoid loops)
   if (currentToken && url.startsWith('/api/') && !url.startsWith('/api/auth/')) {
     const headers = new Headers(init?.headers);
     if (!headers.has('Authorization')) {
@@ -61,29 +59,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     init = { ...init, headers };
   }
 
-  const response = await originalFetch(input, init);
-
-  // On 401 from a non-auth endpoint, verify the NOVA token is actually dead
-  // before clearing — external service 401s (Jira, Confluence, etc.) must not
-  // wipe a valid session.
-  if (response.status === 401 && !url.startsWith('/api/auth/') && currentToken && onUnauthorized && !verifyingToken) {
-    verifyingToken = true;
-    try {
-      const verify = await originalFetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${currentToken}` },
-      });
-      if (verify.status === 401) {
-        console.warn('[useAuth] Token confirmed invalid by /api/auth/me — logging out');
-        onUnauthorized();
-      }
-    } catch {
-      // Network error during verify — don't clear, could be transient
-    } finally {
-      verifyingToken = false;
-    }
-  }
-
-  return response;
+  return originalFetch(input, init);
 };
 
 // Only one useAuth instance should manage token lifecycle (SSO extraction,
@@ -114,39 +90,36 @@ export function useAuth() {
     currentToken = state.token;
   }, [state.token]);
 
-  // Register unauthorized handler (only from primary instance)
-  useEffect(() => {
-    if (!primaryInitDone) return;
-    onUnauthorized = () => {
-      clearToken('401 verified by /api/auth/me');
-      currentToken = null;
-      setState({ user: null, token: null, initializing: false, busy: false, error: null });
-    };
-    return () => { onUnauthorized = null; };
-  }, []);
-
   // Validate token on mount
   useEffect(() => {
-    // Secondary instances: sync from storage, never clear on failure
+    // Secondary instances: read shared state, never touch the token.
+    // The primary instance owns the token lifecycle.
     if (primaryInitDone) {
-      const token = getStoredToken();
-      if (token) {
-        originalFetch('/api/auth/me', {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-          .then(r => r.json())
-          .then(json => {
-            if (json.ok && json.data?.user) {
-              setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
-            } else {
-              setState(s => ({ ...s, token: null, initializing: false }));
-            }
-          })
-          .catch(() => {
-            setState(s => ({ ...s, initializing: false }));
-          });
+      if (sharedAuthState?.user) {
+        setState({ ...sharedAuthState, initializing: false });
       } else {
-        setState(s => ({ ...s, initializing: false }));
+        // Primary hasn't finished validating yet — try reading token ourselves
+        const token = getStoredToken();
+        if (token) {
+          originalFetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+            .then(r => r.ok ? r.json() : null)
+            .then(json => {
+              if (json?.ok && json.data?.user) {
+                setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
+              } else {
+                // DON'T clear the token — just mark as not initializing.
+                // The primary instance is the only one that can clear.
+                setState(s => ({ ...s, initializing: false }));
+              }
+            })
+            .catch(() => {
+              setState(s => ({ ...s, initializing: false }));
+            });
+        } else {
+          setState(s => ({ ...s, initializing: false }));
+        }
       }
       return;
     }
