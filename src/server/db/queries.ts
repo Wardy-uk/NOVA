@@ -2719,54 +2719,72 @@ export class ApprovalQueries {
     return true;
   }
 
-  async cleanupExpiredAndSupersededApprovals(expiryHours: number, jiraClient?: any): Promise<{ expired: number; superseded: number }> {
+  async cleanupExpiredAndSupersededApprovals(expiryHours: number, _jiraClient?: any): Promise<{ expired: number; superseded: number }> {
     let expired = 0;
     let superseded = 0;
 
-    // Mark approvals as expired if they exceed the TTL
+    // 1. Expire stale approval_queue entries
     try {
-      const expiredApprovals = await query<{ id: number }>(`
+      const aqExpired = await query<{ id: number }>(`
         SELECT id FROM approval_queue
         WHERE status = 'pending' AND created_at <= DATEADD(hour, -?, GETUTCDATE())
       `, [expiryHours]);
 
-      for (const approval of expiredApprovals) {
-        const ok = await this.decide(approval.id, 'expired', 'NOVA-lifecycle');
+      for (const row of aqExpired) {
+        const ok = await this.decide(row.id, 'expired', 'NOVA-lifecycle');
         if (ok) expired++;
       }
     } catch (err) {
-      console.warn('[approvals] Expired approval cleanup failed:', err instanceof Error ? err.message : err);
+      console.warn('[approvals] approval_queue expiry failed:', err instanceof Error ? err.message : err);
     }
 
-    // Mark approvals as superseded if the associated Jira ticket is resolved/closed
-    if (jiraClient) {
-      try {
-        const pending = await this.getPending();
-        for (const approval of pending) {
-          if (approval.status !== 'pending') continue;
-          try {
-            const issue = await jiraClient.getIssue(approval.ticket_id, ['status']);
-            if (issue && issue.fields?.status?.name) {
-              const statusName = (issue.fields.status.name as string).toLowerCase();
-              // Mark as superseded if ticket is resolved, closed, or done
-              if (statusName.includes('resolved') || statusName.includes('closed') || statusName.includes('done')) {
-                const ok = await this.decide(
-                  approval.id,
-                  'superseded',
-                  'NOVA-lifecycle',
-                  undefined,
-                  `Ticket ${approval.ticket_id} is ${statusName}. Approval superseded.`
-                );
-                if (ok) superseded++;
-              }
-            }
-          } catch (err) {
-            console.warn(`[approvals] Failed to check ticket status for ${approval.ticket_id}:`, err instanceof Error ? err.message : err);
-          }
-        }
-      } catch (err) {
-        console.warn('[approvals] Superseded approval cleanup failed:', err instanceof Error ? err.message : err);
-      }
+    // 2. Expire stale agent_decisions entries (bulk UPDATE)
+    try {
+      const result = await execute(`
+        UPDATE agent_decisions
+        SET approval_status = 'expired', resolved_at = GETUTCDATE()
+        WHERE approval_required = 1
+          AND (approval_status IS NULL OR approval_status = 'pending')
+          AND created_at <= DATEADD(hour, -?, GETUTCDATE())
+      `, [expiryHours]);
+      expired += result.rowsAffected;
+    } catch (err) {
+      console.warn('[approvals] agent_decisions expiry failed:', err instanceof Error ? err.message : err);
+    }
+
+    // 3. Supersede approval_queue where Jira ticket is resolved/closed/done (via cache, no API calls)
+    try {
+      const result = await execute(`
+        UPDATE aq
+        SET aq.status = 'superseded',
+            aq.decided_by = 'NOVA-lifecycle',
+            aq.decided_at = GETUTCDATE(),
+            aq.decline_reason = CONCAT('Ticket ', aq.ticket_id, ' is ', jc.status_name, '. Approval superseded.')
+        FROM approval_queue aq
+        JOIN jira_issue_cache jc ON jc.issue_key = aq.ticket_id
+        WHERE aq.status = 'pending'
+          AND LOWER(jc.status_name) IN ('resolved', 'closed', 'done', 'cancelled')
+      `);
+      superseded += result.rowsAffected;
+    } catch (err) {
+      console.warn('[approvals] approval_queue superseded cleanup failed:', err instanceof Error ? err.message : err);
+    }
+
+    // 4. Supersede agent_decisions where Jira ticket is resolved/closed/done (via cache)
+    try {
+      const result = await execute(`
+        UPDATE ad
+        SET ad.approval_status = 'superseded',
+            ad.resolved_at = GETUTCDATE()
+        FROM agent_decisions ad
+        JOIN jira_issue_cache jc ON jc.issue_key = ad.ticket_id
+        WHERE ad.approval_required = 1
+          AND (ad.approval_status IS NULL OR ad.approval_status = 'pending')
+          AND LOWER(jc.status_name) IN ('resolved', 'closed', 'done', 'cancelled')
+      `);
+      superseded += result.rowsAffected;
+    } catch (err) {
+      console.warn('[approvals] agent_decisions superseded cleanup failed:', err instanceof Error ? err.message : err);
     }
 
     return { expired, superseded };

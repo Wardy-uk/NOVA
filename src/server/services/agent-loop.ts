@@ -539,7 +539,8 @@ export class AgentLoop {
 
       // 6. LIFECYCLE SWEEP + RESOLUTION REVIEW + CLASSIFICATION + COACHING (every Nth tick)
       const sweepInterval = this.getNumber('agent_sweep_interval_ticks', DEFAULT_SWEEP_INTERVAL_TICKS);
-      if (this.tickCount % sweepInterval === 0) {
+      const isFirstSweep = this.tickCount === 1;
+      if (isFirstSweep || this.tickCount % sweepInterval === 0) {
         // Lifecycle manager runs in all modes (approval timeouts + SLA breaches matter out of hours)
         await this.runLifecycleSweep(shadowMode === 'full_shadow');
 
