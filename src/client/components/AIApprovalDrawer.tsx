@@ -38,6 +38,15 @@ function extractAdfText(adfJson: string | null): string {
   if (!adfJson) return '';
   try {
     const doc = JSON.parse(adfJson);
+    // NOVA agent_decisions output — extract the useful text fields
+    if (doc.draft_response || doc.reasoning_trace || doc.reasoning || doc.internal_note) {
+      const parts: string[] = [];
+      if (doc.draft_response) parts.push(doc.draft_response);
+      else if (doc.internal_note) parts.push(doc.internal_note);
+      if (doc.reasoning_trace) parts.push(`\nReasoning: ${doc.reasoning_trace}`);
+      else if (doc.reasoning) parts.push(`\nReasoning: ${doc.reasoning}`);
+      return parts.join('\n');
+    }
     if (!doc.content) return adfJson;
     return doc.content.map((block: any) => {
       if (block.type === 'paragraph' || block.type === 'heading') {
@@ -69,9 +78,30 @@ function extractAdfText(adfJson: string | null): string {
 function parseConversation(json: string | null): Array<{ role: string; text: string; author?: string }> {
   if (!json) return [];
   try {
-    const arr = JSON.parse(json);
-    if (!Array.isArray(arr)) return [];
-    return arr.map((msg: any) => ({
+    const parsed = JSON.parse(json);
+    // NOVA agent_decisions inputs — flat object with ticket context
+    if (parsed && !Array.isArray(parsed) && typeof parsed === 'object') {
+      const msgs: Array<{ role: string; text: string; author?: string }> = [];
+      if (parsed.summary || parsed.description) {
+        msgs.push({
+          role: 'customer',
+          text: [parsed.summary, parsed.description].filter(Boolean).join('\n\n'),
+          author: parsed.reporter ?? parsed.reporter_name ?? undefined,
+        });
+      }
+      if (parsed.comments && Array.isArray(parsed.comments)) {
+        for (const c of parsed.comments) {
+          msgs.push({
+            role: c.isInternal ? 'agent' : 'customer',
+            text: c.body || c.text || '',
+            author: c.author || c.authorName || undefined,
+          });
+        }
+      }
+      if (msgs.length > 0) return msgs;
+    }
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((msg: any) => ({
       role: msg.role || msg.actorType || 'unknown',
       text: msg.body || msg.text || msg.content || '',
       author: msg.authorName || msg.author || undefined,
@@ -114,8 +144,9 @@ function timeAgo(dateStr: string): string {
 }
 
 function timeRemaining(expiresAt: string): { text: string; urgency: 'normal' | 'warning' | 'critical' | 'expired' } {
+  if (!expiresAt) return { text: 'No expiry', urgency: 'normal' };
   const diff = new Date(expiresAt).getTime() - Date.now();
-  if (diff <= 0) return { text: 'Expired', urgency: 'expired' };
+  if (isNaN(diff) || diff <= 0) return { text: 'Expired', urgency: 'expired' };
   const mins = Math.floor(diff / 60000);
   if (mins < 10) return { text: `${mins}m`, urgency: 'critical' };
   if (mins < 30) return { text: `${mins}m`, urgency: 'warning' };

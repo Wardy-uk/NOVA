@@ -2532,35 +2532,128 @@ export interface ApprovalItem {
   action_type: string | null; source: string | null;
 }
 
+// NOVA agent_decisions use negative IDs (-id) to distinguish from approval_queue items.
+// The decide() method routes writes to the correct table based on ID sign.
+
+function agentDecisionToApproval(row: Record<string, unknown>): ApprovalItem {
+  const id = row.id as number;
+  let summary = '';
+  let reporter: string | null = null;
+  let reporterEmail: string | null = null;
+  let priority: string | null = null;
+  try {
+    const inputs = typeof row.inputs === 'string' ? JSON.parse(row.inputs) : row.inputs;
+    summary = inputs?.summary ?? inputs?.ticket_summary ?? inputs?.ticketSummary ?? '';
+    reporter = inputs?.reporter ?? inputs?.reporter_name ?? null;
+    reporterEmail = inputs?.reporterEmail ?? inputs?.reporter_email ?? null;
+    priority = inputs?.priority ?? null;
+  } catch { /* inputs not parseable */ }
+
+  const approvalStatus = row.approval_status as string | null;
+  const status = !approvalStatus || approvalStatus === 'pending' ? 'pending'
+    : approvalStatus === 'approved' ? 'approved'
+    : approvalStatus === 'declined' ? 'declined' : approvalStatus;
+
+  return {
+    id: -id,
+    ticket_id: row.ticket_id as string,
+    ticket_summary: summary || `${row.action} — ${row.event_type}`,
+    reporter_name: reporter,
+    reporter_email: reporterEmail,
+    ai_response_adf: row.output as string | null,
+    conversation_json: row.inputs as string | null,
+    kb_sources: null,
+    resume_url: '',
+    status,
+    decided_by: null,
+    decided_at: (row.resolved_at as string) ?? null,
+    edited_response_adf: null,
+    decline_reason: null,
+    priority,
+    created_at: row.created_at as string,
+    expires_at: '',
+    action_type: row.action as string | null,
+    source: 'nova_ai',
+  };
+}
+
 export class ApprovalQueries {
+  private async getNovaDecisions(status?: string): Promise<ApprovalItem[]> {
+    let where = 'WHERE d.approval_required = 1';
+    if (status === 'pending') where += ` AND (d.approval_status IS NULL OR d.approval_status = 'pending')`;
+    else if (status === 'approved') where += ` AND d.approval_status = 'approved'`;
+    else if (status === 'declined') where += ` AND d.approval_status = 'declined'`;
+    else if (status === 'timed_out' || status === 'cancelled') return [];
+    const rows = await query<Record<string, unknown>>(
+      `SELECT d.id, d.ticket_id, d.event_type, d.inputs, d.output, d.action,
+              d.confidence, d.approval_required, d.approval_status,
+              d.created_at, d.resolved_at
+       FROM agent_decisions d ${where}
+       ORDER BY d.created_at DESC`,
+    );
+    return rows.map(agentDecisionToApproval);
+  }
+
   async getAll(status?: string): Promise<ApprovalItem[]> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
     let sql = `SELECT * FROM approval_queue`;
     const params: string[] = [];
     if (status) { sql += ` WHERE status = ?`; params.push(status); }
     sql += ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`;
-    return query<ApprovalItem>(sql, params);
+    const queueItems = await query<ApprovalItem>(sql, params);
+    const novaItems = await this.getNovaDecisions(status);
+    const merged = [...queueItems, ...novaItems];
+    merged.sort((a, b) => {
+      const aPending = a.status === 'pending' ? 0 : 1;
+      const bPending = b.status === 'pending' ? 0 : 1;
+      if (aPending !== bPending) return aPending - bPending;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+    return merged;
   }
 
   async getById(id: number): Promise<ApprovalItem | undefined> {
+    if (id < 0) {
+      const rows = await query<Record<string, unknown>>(
+        `SELECT id, ticket_id, event_type, inputs, output, action,
+                confidence, approval_required, approval_status,
+                created_at, resolved_at
+         FROM agent_decisions WHERE id = ?`, [Math.abs(id)],
+      );
+      return rows.length ? agentDecisionToApproval(rows[0]) : undefined;
+    }
     return queryOne<ApprovalItem>(`SELECT * FROM approval_queue WHERE id = ?`, [id]);
   }
 
   async getPending(): Promise<ApprovalItem[]> { return this.getAll('pending'); }
 
   async getPendingByTicket(ticketId: string): Promise<ApprovalItem | undefined> {
-    return queryOne<ApprovalItem>(`SELECT * FROM approval_queue WHERE ticket_id = ? AND status = 'pending' ORDER BY created_at DESC`, [ticketId]);
+    const queueItem = await queryOne<ApprovalItem>(`SELECT * FROM approval_queue WHERE ticket_id = ? AND status = 'pending' ORDER BY created_at DESC`, [ticketId]);
+    if (queueItem) return queueItem;
+    const novaRows = await query<Record<string, unknown>>(
+      `SELECT id, ticket_id, event_type, inputs, output, action,
+              confidence, approval_required, approval_status,
+              created_at, resolved_at
+       FROM agent_decisions
+       WHERE ticket_id = ? AND approval_required = 1
+         AND (approval_status IS NULL OR approval_status = 'pending')
+       ORDER BY created_at DESC`, [ticketId],
+    );
+    return novaRows.length ? agentDecisionToApproval(novaRows[0]) : undefined;
   }
 
   async getPendingCount(): Promise<number> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
-    const row = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
-    return row?.count ?? 0;
+    const queueRow = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
+    const novaRow = await queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count FROM agent_decisions WHERE approval_required = 1 AND (approval_status IS NULL OR approval_status = 'pending')`,
+    );
+    return (queueRow?.count ?? 0) + (novaRow?.count ?? 0);
   }
 
   async getStats(): Promise<{ pending: number; approved: number; declined: number; timed_out: number; today_decided: number }> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
-    const row = await queryOne<Record<string, unknown>>(`
+    const qRow = await queryOne<Record<string, unknown>>(`
       SELECT
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
@@ -2569,11 +2662,20 @@ export class ApprovalQueries {
         SUM(CASE WHEN decided_at >= CAST(GETUTCDATE() AS DATE) AND status IN ('approved', 'declined') THEN 1 ELSE 0 END) as today_decided
       FROM approval_queue
     `);
-    if (!row) return { pending: 0, approved: 0, declined: 0, timed_out: 0, today_decided: 0 };
+    const nRow = await queryOne<Record<string, unknown>>(`
+      SELECT
+        SUM(CASE WHEN approval_status IS NULL OR approval_status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN approval_status = 'declined' THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN approval_status IN ('approved', 'declined') AND resolved_at >= CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as today_decided
+      FROM agent_decisions WHERE approval_required = 1
+    `);
     return {
-      pending: (row.pending as number) || 0, approved: (row.approved as number) || 0,
-      declined: (row.declined as number) || 0, timed_out: (row.timed_out as number) || 0,
-      today_decided: (row.today_decided as number) || 0,
+      pending: ((qRow?.pending as number) || 0) + ((nRow?.pending as number) || 0),
+      approved: ((qRow?.approved as number) || 0) + ((nRow?.approved as number) || 0),
+      declined: ((qRow?.declined as number) || 0) + ((nRow?.declined as number) || 0),
+      timed_out: (qRow?.timed_out as number) || 0,
+      today_decided: ((qRow?.today_decided as number) || 0) + ((nRow?.today_decided as number) || 0),
     };
   }
 
@@ -2592,6 +2694,19 @@ export class ApprovalQueries {
   }
 
   async decide(id: number, action: 'approved' | 'declined' | 'timed_out' | 'cancelled', decidedBy: string, editedResponseAdf?: string, declineReason?: string): Promise<boolean> {
+    if (id < 0) {
+      const realId = Math.abs(id);
+      const row = await queryOne<{ approval_status: string | null }>(
+        `SELECT approval_status FROM agent_decisions WHERE id = ? AND approval_required = 1`, [realId],
+      );
+      if (!row) return false;
+      if (row.approval_status && row.approval_status !== 'pending') return false;
+      await execute(
+        `UPDATE agent_decisions SET approval_status = ?, resolved_at = GETUTCDATE() WHERE id = ?`,
+        [action, realId],
+      );
+      return true;
+    }
     const item = await this.getById(id);
     if (!item || item.status !== 'pending') return false;
     await execute(
@@ -2603,23 +2718,36 @@ export class ApprovalQueries {
 
   async getDailyStats(days: number = 90): Promise<Array<{ date: string; approved: number; declined: number; timed_out: number; total_decisions: number }>> {
     return query<{ date: string; approved: number; declined: number; timed_out: number; total_decisions: number }>(`
-      SELECT
-        CAST(decided_at AS DATE) as date,
-        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-        SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
-        SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END) as timed_out,
-        COUNT(*) as total_decisions
-      FROM approval_queue
-      WHERE status IN ('approved', 'declined', 'timed_out')
-        AND decided_at >= DATEADD(day, -?, GETUTCDATE())
-      GROUP BY CAST(decided_at AS DATE)
-      ORDER BY date ASC
-    `, [days]);
+      SELECT date, SUM(approved) as approved, SUM(declined) as declined, SUM(timed_out) as timed_out, SUM(total_decisions) as total_decisions
+      FROM (
+        SELECT CAST(decided_at AS DATE) as date,
+          SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+          SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
+          SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END) as timed_out,
+          COUNT(*) as total_decisions
+        FROM approval_queue
+        WHERE status IN ('approved', 'declined', 'timed_out')
+          AND decided_at >= DATEADD(day, -?, GETUTCDATE())
+        GROUP BY CAST(decided_at AS DATE)
+        UNION ALL
+        SELECT CAST(resolved_at AS DATE) as date,
+          SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as approved,
+          SUM(CASE WHEN approval_status = 'declined' THEN 1 ELSE 0 END) as declined,
+          0 as timed_out,
+          COUNT(*) as total_decisions
+        FROM agent_decisions
+        WHERE approval_required = 1
+          AND approval_status IN ('approved', 'declined')
+          AND resolved_at >= DATEADD(day, -?, GETUTCDATE())
+        GROUP BY CAST(resolved_at AS DATE)
+      ) combined
+      GROUP BY date ORDER BY date ASC
+    `, [days, days]);
   }
 
   async getTodayStats(): Promise<{ approved: number; declined: number; timed_out: number; pending: number; resolution_rate: number }> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
-    const row = await queryOne<Record<string, unknown>>(`
+    const qRow = await queryOne<Record<string, unknown>>(`
       SELECT
         SUM(CASE WHEN status = 'approved' AND CAST(decided_at AS DATE) = CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN status = 'declined' AND CAST(decided_at AS DATE) = CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as declined,
@@ -2629,12 +2757,22 @@ export class ApprovalQueries {
         SUM(CASE WHEN status IN ('approved', 'declined', 'timed_out') THEN 1 ELSE 0 END) as total_decisions
       FROM approval_queue
     `);
-    if (!row) return { approved: 0, declined: 0, timed_out: 0, pending: 0, resolution_rate: 0 };
-    const totalApproved = (row.total_approved as number) || 0;
-    const totalDecisions = (row.total_decisions as number) || 0;
+    const nRow = await queryOne<Record<string, unknown>>(`
+      SELECT
+        SUM(CASE WHEN approval_status = 'approved' AND CAST(resolved_at AS DATE) = CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN approval_status = 'declined' AND CAST(resolved_at AS DATE) = CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN approval_status IS NULL OR approval_status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as total_approved,
+        SUM(CASE WHEN approval_status IN ('approved', 'declined') THEN 1 ELSE 0 END) as total_decisions
+      FROM agent_decisions WHERE approval_required = 1
+    `);
+    const totalApproved = ((qRow?.total_approved as number) || 0) + ((nRow?.total_approved as number) || 0);
+    const totalDecisions = ((qRow?.total_decisions as number) || 0) + ((nRow?.total_decisions as number) || 0);
     return {
-      approved: (row.approved as number) || 0, declined: (row.declined as number) || 0,
-      timed_out: (row.timed_out as number) || 0, pending: (row.pending as number) || 0,
+      approved: ((qRow?.approved as number) || 0) + ((nRow?.approved as number) || 0),
+      declined: ((qRow?.declined as number) || 0) + ((nRow?.declined as number) || 0),
+      timed_out: (qRow?.timed_out as number) || 0,
+      pending: ((qRow?.pending as number) || 0) + ((nRow?.pending as number) || 0),
       resolution_rate: totalDecisions > 0 ? Math.round((totalApproved / totalDecisions) * 100 * 10) / 10 : 0,
     };
   }

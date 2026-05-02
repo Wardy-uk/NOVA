@@ -483,6 +483,8 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
                       <td className="px-3 py-3">
                         {item.status === 'timed_out' ? (
                           <span className="text-[13px] text-neutral-600">Expired</span>
+                        ) : !item.expires_at ? (
+                          <span className="text-[13px] text-neutral-600">&mdash;</span>
                         ) : (
                           <span className={`text-[13px] font-medium ${URGENCY_COLORS[expiry.urgency]}`}>
                             {expiry.text}

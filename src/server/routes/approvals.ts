@@ -126,8 +126,9 @@ export function createApprovalRoutes(
       return;
     }
 
-    // Hit the n8n resume URL to continue the workflow (skip for cancel — ticket resolved externally)
-    if (action !== 'cancel') {
+    // Hit the n8n resume URL to continue the workflow
+    // Skip for: cancel (ticket resolved externally), NOVA AI decisions (no resume URL)
+    if (action !== 'cancel' && item.resume_url) {
       try {
         const resumeUrl = `${item.resume_url}${item.resume_url.includes('?') ? '&' : '?'}action=${action}&approvalId=${id}&decidedBy=${encodeURIComponent(user.username)}`;
         const response = await fetch(resumeUrl, { method: 'GET' });
@@ -136,7 +137,6 @@ export function createApprovalRoutes(
         }
       } catch (err) {
         console.error(`[Approvals] Failed to hit n8n resume URL for approval ${id}:`, err instanceof Error ? err.message : err);
-        // Don't fail the request — the decision is recorded locally even if n8n resume fails
       }
     }
 
