@@ -20,6 +20,9 @@ interface ApprovalItem {
   created_at: string;
   expires_at: string;
   source: string | null;
+  action_type: string | null;
+  confidence: number | null;
+  reasoning: string | null;
 }
 
 interface ApprovalStats {

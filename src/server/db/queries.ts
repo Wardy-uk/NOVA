@@ -2530,6 +2530,7 @@ export interface ApprovalItem {
   edited_response_adf: string | null; decline_reason: string | null;
   priority: string | null; created_at: string; expires_at: string;
   action_type: string | null; source: string | null;
+  confidence: number | null; reasoning: string | null;
 }
 
 // NOVA agent_decisions use negative IDs (-id) to distinguish from approval_queue items.
@@ -2574,6 +2575,8 @@ function agentDecisionToApproval(row: Record<string, unknown>): ApprovalItem {
     expires_at: '',
     action_type: row.action as string | null,
     source: 'nova_ai',
+    confidence: row.confidence != null ? Number(row.confidence) : null,
+    reasoning: (row.reasoning as string) ?? null,
   };
 }
 
@@ -2586,7 +2589,7 @@ export class ApprovalQueries {
     else if (status === 'timed_out' || status === 'cancelled') return [];
     const rows = await query<Record<string, unknown>>(
       `SELECT d.id, d.ticket_id, d.event_type, d.inputs, d.output, d.action,
-              d.confidence, d.approval_required, d.approval_status,
+              d.confidence, d.reasoning, d.approval_required, d.approval_status,
               d.created_at, d.resolved_at
        FROM agent_decisions d ${where}
        ORDER BY d.created_at DESC`,
@@ -2616,7 +2619,7 @@ export class ApprovalQueries {
     if (id < 0) {
       const rows = await query<Record<string, unknown>>(
         `SELECT id, ticket_id, event_type, inputs, output, action,
-                confidence, approval_required, approval_status,
+                confidence, reasoning, approval_required, approval_status,
                 created_at, resolved_at
          FROM agent_decisions WHERE id = ?`, [Math.abs(id)],
       );
@@ -2632,7 +2635,7 @@ export class ApprovalQueries {
     if (queueItem) return queueItem;
     const novaRows = await query<Record<string, unknown>>(
       `SELECT id, ticket_id, event_type, inputs, output, action,
-              confidence, approval_required, approval_status,
+              confidence, reasoning, approval_required, approval_status,
               created_at, resolved_at
        FROM agent_decisions
        WHERE ticket_id = ? AND approval_required = 1

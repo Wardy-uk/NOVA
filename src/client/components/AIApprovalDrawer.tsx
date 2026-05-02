@@ -21,6 +21,9 @@ interface ApprovalItem {
   created_at: string;
   expires_at: string;
   source: string | null;
+  action_type: string | null;
+  confidence: number | null;
+  reasoning: string | null;
 }
 
 interface AIApprovalDrawerProps {
@@ -174,6 +177,50 @@ const URGENCY_COLORS: Record<string, string> = {
   expired: 'text-neutral-600',
 };
 
+const ACTION_LABELS: Record<string, { label: string; icon: string; color: string }> = {
+  draft_response: { label: 'Draft Response', icon: 'fa-reply', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  plugin_to_tpj: { label: 'Route to TPJ', icon: 'fa-share', color: 'bg-violet-500/20 text-violet-400 border-violet-500/30' },
+  escalate: { label: 'Escalate', icon: 'fa-arrow-up', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+  abuse_report: { label: 'Abuse Report', icon: 'fa-shield-halved', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
+  auto_close: { label: 'Auto-close', icon: 'fa-check-circle', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  close: { label: 'Close', icon: 'fa-check-circle', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  respond: { label: 'Respond', icon: 'fa-reply', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  request_info: { label: 'Request Info', icon: 'fa-question-circle', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+  no_action: { label: 'No Action', icon: 'fa-minus-circle', color: 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30' },
+};
+
+function getActionInfo(action: string | null) {
+  if (!action) return null;
+  return ACTION_LABELS[action] || { label: action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), icon: 'fa-bolt', color: 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30' };
+}
+
+function confidenceStyle(c: number): { color: string; bg: string; label: string } {
+  const pct = Math.round(c * 100);
+  if (c >= 0.9) return { color: 'text-green-400', bg: 'bg-green-500', label: `${pct}%` };
+  if (c >= 0.7) return { color: 'text-amber-400', bg: 'bg-amber-500', label: `${pct}%` };
+  return { color: 'text-red-400', bg: 'bg-red-500', label: `${pct}%` };
+}
+
+function parseDraftResponse(outputJson: string | null): string | null {
+  if (!outputJson) return null;
+  try {
+    const parsed = JSON.parse(outputJson);
+    return parsed.draft_response || null;
+  } catch {
+    return null;
+  }
+}
+
+function parseAbuseClassification(outputJson: string | null): string | null {
+  if (!outputJson) return null;
+  try {
+    const parsed = JSON.parse(outputJson);
+    return parsed.abuse_type || parsed.abuse_classification || parsed.classification || null;
+  } catch {
+    return null;
+  }
+}
+
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-amber-500/20 text-amber-400',
   approved: 'bg-green-500/20 text-green-400',
@@ -317,6 +364,89 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
             />
           )}
           {item.ticket_id && <AINextActionCard ticketKey={item.ticket_id} compact />}
+
+          {/* NOVA AI Decision Context */}
+          {item.source === 'nova_ai' && (
+            <div className="border border-[#5ec1ca]/30 rounded-lg bg-[#5ec1ca]/5 p-4 space-y-3">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[#5ec1ca] mb-1">AI Decision</div>
+
+              {/* Action + Confidence row */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {item.action_type && (() => {
+                  const info = getActionInfo(item.action_type);
+                  if (!info) return null;
+                  return (
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-semibold rounded border ${info.color}`}>
+                      <i className={`fas ${info.icon} text-[10px]`} />
+                      {info.label}
+                    </span>
+                  );
+                })()}
+
+                {item.confidence != null && (() => {
+                  const cs = confidenceStyle(item.confidence);
+                  return (
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-1 text-[12px] font-semibold rounded ${cs.color}`}>
+                      <span className="relative w-12 h-1.5 bg-neutral-700 rounded-full overflow-hidden">
+                        <span className={`absolute inset-y-0 left-0 rounded-full ${cs.bg}`} style={{ width: `${Math.round(item.confidence! * 100)}%` }} />
+                      </span>
+                      {cs.label}
+                    </span>
+                  );
+                })()}
+
+                {item.confidence === 1.0 && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded bg-neutral-500/20 text-neutral-300 border border-neutral-500/30">
+                    <i className="fas fa-microchip text-[9px]" />
+                    Deterministic Rule
+                  </span>
+                )}
+              </div>
+
+              {/* Action-specific context */}
+              {item.action_type === 'plugin_to_tpj' && (
+                <div className="text-[12px] text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded px-3 py-2">
+                  <i className="fas fa-share mr-1.5" />
+                  Routing ticket to <span className="font-semibold">TPJ project</span> (third-party Jira)
+                </div>
+              )}
+
+              {item.action_type === 'abuse_report' && (() => {
+                const classification = parseAbuseClassification(item.ai_response_adf);
+                return (
+                  <div className="text-[12px] text-red-300 bg-red-500/10 border border-red-500/20 rounded px-3 py-2">
+                    <i className="fas fa-shield-halved mr-1.5" />
+                    Abuse detected{classification ? `: ${classification}` : ''}
+                  </div>
+                );
+              })()}
+
+              {/* Reasoning */}
+              {item.reasoning && (
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">Reasoning</div>
+                  <div className="text-[13px] text-neutral-300 whitespace-pre-wrap bg-[#1f242b] rounded px-3 py-2 border border-[#3a424d]">
+                    {item.reasoning}
+                  </div>
+                </div>
+              )}
+
+              {/* Draft response preview */}
+              {item.action_type === 'draft_response' && (() => {
+                const draft = parseDraftResponse(item.ai_response_adf);
+                if (!draft) return null;
+                return (
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">Draft Response (will be sent to customer)</div>
+                    <div className="text-[13px] text-neutral-200 whitespace-pre-wrap bg-[#272C33] rounded-lg px-4 py-3 border-2 border-blue-500/30">
+                      {draft}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
           {/* Ticket Info */}
           <div className="border border-[#3a424d] rounded-lg bg-[#272C33] p-4">
             <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-3">Ticket Details</div>
