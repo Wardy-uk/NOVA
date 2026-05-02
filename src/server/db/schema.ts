@@ -1173,6 +1173,10 @@ async function runMigrations(): Promise<void> {
        INDEX ix_ticket_defers_agent_active (agent_id, resolved_at),
        INDEX ix_ticket_defers_resurface (resurface_at, resolved_at)
      );`,
+
+    // resolved_by on agent_decisions — track human vs system for stats filtering
+    `IF COL_LENGTH('agent_decisions', 'resolved_by') IS NULL
+     ALTER TABLE agent_decisions ADD resolved_by NVARCHAR(100) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

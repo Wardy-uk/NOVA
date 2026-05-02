@@ -2656,7 +2656,10 @@ export class ApprovalQueries {
     return (queueRow?.count ?? 0) + (novaRow?.count ?? 0);
   }
 
-  async getStats(): Promise<{ pending: number; approved: number; declined: number; timed_out: number; today_decided: number }> {
+  async getStats(): Promise<{
+    pending: number; approved: number; declined: number; timed_out: number;
+    today_decided: number; system_approved_today: number; system_expired_today: number;
+  }> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
     const qRow = await queryOne<Record<string, unknown>>(`
       SELECT
@@ -2664,7 +2667,12 @@ export class ApprovalQueries {
         SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
         SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END) as timed_out,
-        SUM(CASE WHEN decided_at >= CAST(GETUTCDATE() AS DATE) AND status IN ('approved', 'declined') THEN 1 ELSE 0 END) as today_decided
+        SUM(CASE WHEN decided_at >= CAST(GETUTCDATE() AS DATE) AND status IN ('approved', 'declined')
+            AND decided_by NOT IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as today_decided,
+        SUM(CASE WHEN decided_at >= CAST(GETUTCDATE() AS DATE) AND status = 'approved'
+            AND decided_by IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as system_approved_today,
+        SUM(CASE WHEN decided_at >= CAST(GETUTCDATE() AS DATE) AND status IN ('timed_out', 'expired')
+            AND decided_by IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as system_expired_today
       FROM approval_queue
     `);
     const nRow = await queryOne<Record<string, unknown>>(`
@@ -2672,7 +2680,12 @@ export class ApprovalQueries {
         SUM(CASE WHEN approval_status IS NULL OR approval_status = 'pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN approval_status = 'declined' THEN 1 ELSE 0 END) as declined,
-        SUM(CASE WHEN approval_status IN ('approved', 'declined') AND resolved_at >= CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as today_decided
+        SUM(CASE WHEN approval_status IN ('approved', 'declined') AND resolved_at >= CAST(GETUTCDATE() AS DATE)
+            AND (resolved_by IS NULL OR resolved_by NOT IN ('system', 'system-sla', 'system-cleanup')) THEN 1 ELSE 0 END) as today_decided,
+        SUM(CASE WHEN approval_status = 'approved' AND resolved_at >= CAST(GETUTCDATE() AS DATE)
+            AND resolved_by IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as system_approved_today,
+        SUM(CASE WHEN approval_status = 'timed_out' AND resolved_at >= CAST(GETUTCDATE() AS DATE)
+            AND resolved_by IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as system_expired_today
       FROM agent_decisions WHERE approval_required = 1
     `);
     return {
@@ -2681,6 +2694,8 @@ export class ApprovalQueries {
       declined: ((qRow?.declined as number) || 0) + ((nRow?.declined as number) || 0),
       timed_out: (qRow?.timed_out as number) || 0,
       today_decided: ((qRow?.today_decided as number) || 0) + ((nRow?.today_decided as number) || 0),
+      system_approved_today: ((qRow?.system_approved_today as number) || 0) + ((nRow?.system_approved_today as number) || 0),
+      system_expired_today: ((qRow?.system_expired_today as number) || 0) + ((nRow?.system_expired_today as number) || 0),
     };
   }
 
@@ -2707,8 +2722,8 @@ export class ApprovalQueries {
       if (!row) return false;
       if (row.approval_status && row.approval_status !== 'pending') return false;
       await execute(
-        `UPDATE agent_decisions SET approval_status = ?, resolved_at = GETUTCDATE() WHERE id = ?`,
-        [action, realId],
+        `UPDATE agent_decisions SET approval_status = ?, resolved_at = GETUTCDATE(), resolved_by = ? WHERE id = ?`,
+        [action, decidedBy, realId],
       );
       return true;
     }

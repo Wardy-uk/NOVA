@@ -319,7 +319,7 @@ async function main() {
   // Expire stale NOVA AI decisions that have been pending > 24 hours
   try {
     const { rowsAffected } = await execute(
-      `UPDATE agent_decisions SET approval_status = 'timed_out', resolved_at = GETUTCDATE()
+      `UPDATE agent_decisions SET approval_status = 'timed_out', resolved_at = created_at, resolved_by = 'system-cleanup'
        WHERE approval_required = 1 AND (approval_status IS NULL OR approval_status = 'pending')
        AND created_at < DATEADD(hour, -24, GETUTCDATE())`
     );

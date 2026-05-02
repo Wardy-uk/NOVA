@@ -31,6 +31,8 @@ interface ApprovalStats {
   declined: number;
   timed_out: number;
   today_decided: number;
+  system_approved_today: number;
+  system_expired_today: number;
 }
 
 interface AIApprovalQueueProps {
@@ -93,7 +95,7 @@ let toastIdCounter = 0;
 
 export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQueueProps) {
   const [items, setItems] = useState<ApprovalItem[]>([]);
-  const [stats, setStats] = useState<ApprovalStats>({ pending: 0, approved: 0, declined: 0, timed_out: 0, today_decided: 0 });
+  const [stats, setStats] = useState<ApprovalStats>({ pending: 0, approved: 0, declined: 0, timed_out: 0, today_decided: 0, system_approved_today: 0, system_expired_today: 0 });
   const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -329,9 +331,11 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
       {/* Stats Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KpiCard value={stats.pending} label="Pending" color="#f59e0b" />
-        <KpiCard value={stats.approved} label="Approved Today" color="#22c55e" />
+        <KpiCard value={stats.today_decided} label="Approved Today" color="#22c55e"
+          subtitle={stats.system_approved_today > 0 ? `+${stats.system_approved_today} auto` : undefined} />
         <KpiCard value={stats.declined} label="Declined Today" color="#ef4444" />
-        <KpiCard value={stats.timed_out} label="Timed Out" color="#6b7280" />
+        <KpiCard value={stats.timed_out} label="Timed Out" color="#6b7280"
+          subtitle={stats.system_expired_today > 0 ? `${stats.system_expired_today} auto` : undefined} />
       </div>
 
       {/* Toolbar */}
@@ -581,11 +585,12 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
 
 // ---- KPI Card ----
 
-function KpiCard({ value, label, color }: { value: number; label: string; color: string }) {
+function KpiCard({ value, label, color, subtitle }: { value: number; label: string; color: string; subtitle?: string }) {
   return (
     <div className="border border-[#3a424d] rounded-lg px-4 py-4 bg-[#272C33]">
-      <div className="text-3xl font-bold" style={{ color }}>
-        {value}
+      <div className="flex items-baseline gap-2">
+        <div className="text-3xl font-bold" style={{ color }}>{value}</div>
+        {subtitle && <div className="text-xs text-neutral-500">{subtitle}</div>}
       </div>
       <div className="text-[11px] text-neutral-500 uppercase tracking-wider mt-1">{label}</div>
     </div>
