@@ -8,7 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { initializeDatabase, shutdownDatabase } from './db/schema.js';
-import { query, queryOne } from './services/database.js';
+import { query, queryOne, execute } from './services/database.js';
 import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries, TrainingQueries } from './db/queries.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
@@ -315,6 +315,18 @@ async function main() {
   // Purge transient MS365 data from previous session
   const purgedCount = await taskQueries.deleteTransientTasks();
   if (purgedCount > 0) console.log(`[Startup] Purged ${purgedCount} transient tasks from previous session`);
+
+  // Expire stale NOVA AI decisions that have been pending > 24 hours
+  try {
+    const { rowsAffected } = await execute(
+      `UPDATE agent_decisions SET approval_status = 'timed_out', resolved_at = GETUTCDATE()
+       WHERE approval_required = 1 AND (approval_status IS NULL OR approval_status = 'pending')
+       AND created_at < DATEADD(hour, -24, GETUTCDATE())`
+    );
+    if (rowsAffected > 0) console.log(`[Approvals] Startup cleanup: expired ${rowsAffected} stale NOVA decisions`);
+  } catch (err) {
+    console.error('[Approvals] Startup cleanup failed:', err instanceof Error ? err.message : err);
+  }
 
   // Build onboarder name → user ID lookup for milestone ownership
   const onboarderToUserId = new Map<string, number>();
@@ -2604,17 +2616,21 @@ ${panelHtml}
   const LOW_RISK_ACTION_PREFIXES = ['auto_rule_', 'plugin_to_tpj'];
   const SLA_WARNING_MINUTES = 30;
 
+  const NOVA_TIMEOUT_HOURS = Number(settingsQueries.get('approval_nova_timeout_hours')) || 4;
+
   setInterval(async () => {
     try {
       const pending = await approvalQueries.getAll('pending');
       const now = new Date();
+      const queueItems = pending.filter(item => item.id > 0);
+      const novaItems = pending.filter(item => item.id < 0);
 
-      // 1a. SLA warning — alert when ≤30 min remaining and not yet warned
-      for (const item of pending) {
+      // 1a. SLA warning — alert when ≤30 min remaining (queue items only, NOVA has no expires_at)
+      for (const item of queueItems) {
         const expiresAt = new Date(item.expires_at);
-        if (expiresAt <= now) continue; // will be handled by expiry below
+        if (isNaN(expiresAt.getTime()) || expiresAt <= now) continue;
         const minsRemaining = (expiresAt.getTime() - now.getTime()) / 60_000;
-        if (minsRemaining <= SLA_WARNING_MINUTES && !item.warned_at && item.id > 0) {
+        if (minsRemaining <= SLA_WARNING_MINUTES && !item.warned_at) {
           console.log(`[Approvals] SLA warning: approval ${item.id} (${item.ticket_id}) expires in ${Math.round(minsRemaining)} minutes`);
           await approvalQueries.markWarned(item.id);
           try {
@@ -2629,9 +2645,11 @@ ${panelHtml}
         }
       }
 
-      // 1b. Expire items past their business-hours deadline (with smart auto-approve for low-risk NOVA actions)
-      const expired = pending.filter((item) => new Date(item.expires_at) <= now);
-      for (const item of expired) {
+      // 1b. Expire queue items past their expires_at deadline
+      for (const item of queueItems) {
+        const expiresAt = new Date(item.expires_at);
+        if (isNaN(expiresAt.getTime()) || expiresAt > now) continue;
+
         const isLowRisk = item.action_type && LOW_RISK_ACTION_PREFIXES.some(p => item.action_type!.startsWith(p));
         const isNova = item.source === 'nova_ai';
 
@@ -2667,10 +2685,40 @@ ${panelHtml}
         }
       }
 
-      // 2. Check Jira status for remaining pending items — auto-cancel if resolved/closed
+      // 1c. Expire NOVA AI decisions by age (no expires_at — use created_at + timeout hours)
+      for (const item of novaItems) {
+        const createdAt = new Date(item.created_at);
+        if (isNaN(createdAt.getTime())) continue;
+        const ageHours = (now.getTime() - createdAt.getTime()) / 3_600_000;
+        if (ageHours < NOVA_TIMEOUT_HOURS) continue;
+
+        const isLowRisk = item.action_type && LOW_RISK_ACTION_PREFIXES.some(p => item.action_type!.startsWith(p));
+        if (isLowRisk) {
+          await approvalQueries.decide(item.id, 'approved', 'system-sla');
+          console.log(`[Approvals] Auto-approved stale low-risk NOVA decision ${item.id} (${item.ticket_id}, action: ${item.action_type}, age: ${Math.round(ageHours)}h)`);
+        } else {
+          await approvalQueries.decide(item.id, 'timed_out', 'system');
+          console.log(`[Approvals] Timed out NOVA decision ${item.id} (${item.ticket_id}, action: ${item.action_type || 'unknown'}, age: ${Math.round(ageHours)}h)`);
+          try {
+            await agentLoop?.getAlertService().createAlert({
+              alertType: 'approval_timeout',
+              severity: 'critical',
+              title: `High-risk approval timed out: ${item.ticket_id}`,
+              detail: `NOVA decision ${item.id} (action: ${item.action_type || 'unknown'}) expired after ${Math.round(ageHours)}h without review.`,
+              ticketKey: item.ticket_id,
+            });
+          } catch { /* best-effort */ }
+        }
+      }
+
+      // 2. Check Jira status for all remaining pending items — auto-cancel if resolved/closed
       const s = settingsQueries.getAll();
       if (s.jira_enabled === 'true' && s.jira_username && s.jira_token) {
-        const stillPending = pending.filter((item) => new Date(item.expires_at) > new Date());
+        const stillPending = pending.filter(item => {
+          if (item.id < 0) return true; // NOVA items always eligible
+          const expiresAt = new Date(item.expires_at);
+          return !isNaN(expiresAt.getTime()) && expiresAt > now;
+        });
         const auth = 'Basic ' + Buffer.from(`${s.jira_username}:${s.jira_token}`).toString('base64');
         const cloudId = '9357a1ba-0ad9-4ff0-964d-fad84dd30f96';
         for (const item of stillPending) {
@@ -2683,7 +2731,9 @@ ${panelHtml}
             const data = await resp.json() as { fields?: { status?: { statusCategory?: { key?: string } } } };
             if (data.fields?.status?.statusCategory?.key === 'done') {
               await approvalQueries.decide(item.id, 'cancelled', 'system');
-              try { await fetch(`${item.resume_url}?action=decline`, { method: 'GET' }); } catch { /* ignore */ }
+              if (item.resume_url) {
+                try { await fetch(`${item.resume_url}?action=decline`, { method: 'GET' }); } catch { /* ignore */ }
+              }
               console.log(`[Approvals] Auto-cancelled approval ${item.id} (${item.ticket_id}) — already resolved in Jira`);
             }
           } catch { /* skip, try next */ }
