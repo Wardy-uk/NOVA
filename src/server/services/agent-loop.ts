@@ -23,6 +23,7 @@ import { PluginToTpjExecutor } from './plugin-to-tpj-executor.js';
 import { AbuseReportExecutor } from './abuse-report-executor.js';
 import { AutoRulesEngine } from './auto-rules-engine.js';
 import { ExternalDbService } from './external-db.js';
+import { query } from './database.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 
@@ -195,8 +196,63 @@ export class AgentLoop {
     const debug = this.getWorkingHoursDebug();
     console.log(`[agent] Starting agent loop (interval: ${intervalMs}ms, mode: ${this.currentMode}, isWorkingHours=${working}, tz=${debug.tz}, day=${debug.parsedWeekday}/${debug.parsedDay}, time=${debug.parsedHour}:${String(debug.parsedMinute ?? '').padStart(2, '0')}, days=${debug.workingDays}, hours=${debug.workingHours})`);
 
+    this.checkAutonomyReadiness().catch(() => {});
+
     this.tick();
     this.timer = setInterval(() => this.tick(), intervalMs);
+  }
+
+  private async checkAutonomyReadiness(): Promise<void> {
+    try {
+      const existingRules = await this.autonomyEngine.getRules();
+
+      const qualifying = await query<{ category: string; total: number; approved: number; avg_conf: number }>(
+        `SELECT
+           JSON_VALUE(inputs, '$.classification.category') as category,
+           COUNT(*) as total,
+           SUM(CASE WHEN outcome LIKE '%Approved%' OR outcome LIKE '%success%' OR outcome LIKE '%auto%' THEN 1 ELSE 0 END) as approved,
+           AVG(confidence) as avg_conf
+         FROM agent_decisions
+         WHERE created_at >= DATEADD(day, -90, GETUTCDATE())
+           AND JSON_VALUE(inputs, '$.classification.category') IS NOT NULL
+         GROUP BY JSON_VALUE(inputs, '$.classification.category')
+         HAVING COUNT(*) >= 50`,
+      );
+
+      const existingCategories = new Set(existingRules.map(r => r.category));
+      const candidates = qualifying.filter(r => {
+        const acceptRate = r.total > 0 ? (r.approved / r.total) * 100 : 0;
+        return acceptRate >= 85 && r.avg_conf >= 0.85 && !existingCategories.has(r.category);
+      });
+
+      if (existingRules.length === 0 && candidates.length > 0) {
+        console.log(`[Autonomy] No rules configured. ${candidates.length} categories qualify for autonomy. Run POST /api/agent/suggestions/refresh to generate suggestions.`);
+
+        // Seed conservative disabled rules for categories with >95% accept rate (draft_response only)
+        for (const cat of candidates) {
+          const acceptRate = cat.total > 0 ? (cat.approved / cat.total) * 100 : 0;
+          if (acceptRate >= 95 && cat.avg_conf >= 0.92) {
+            const id = await this.autonomyEngine.createRule({
+              category: cat.category,
+              subCategory: null,
+              enabled: false,
+              minConfidence: 0.92,
+              minAcceptRate: 95,
+              minQaScore: 0,
+              minDecisions: 50,
+              autonomousActions: ['draft_response'],
+              updatedBy: 'system-seed',
+            });
+            console.log(`[Autonomy] Seeded disabled rule ${id} for "${cat.category}" (${cat.total} decisions, ${acceptRate.toFixed(0)}% accept, ${cat.avg_conf.toFixed(2)} avg conf) — enable from Autonomy tab`);
+          }
+        }
+      } else if (existingRules.length > 0) {
+        const enabled = existingRules.filter(r => r.enabled).length;
+        console.log(`[Autonomy] ${existingRules.length} rules configured (${enabled} enabled).`);
+      }
+    } catch (err) {
+      console.warn('[Autonomy] Readiness check failed:', err instanceof Error ? err.message : err);
+    }
   }
 
   stop(): void {
