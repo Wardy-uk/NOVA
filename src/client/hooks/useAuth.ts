@@ -28,11 +28,13 @@ function getStoredToken(): string | null {
 }
 
 function storeToken(token: string, rememberMe: boolean) {
+  console.error('[AUTH DEBUG] storeToken called', { token: token?.substring(0, 20), rememberMe, stack: new Error().stack });
   localStorage.setItem(REMEMBER_KEY, rememberMe ? 'true' : 'false');
   if (rememberMe) {
     localStorage.setItem(TOKEN_KEY, token);
     sessionStorage.removeItem(TOKEN_KEY);
   } else {
+    console.error('[AUTH DEBUG] storeToken REMOVING from localStorage (rememberMe=false)', new Error().stack);
     sessionStorage.setItem(TOKEN_KEY, token);
     localStorage.removeItem(TOKEN_KEY);
   }
