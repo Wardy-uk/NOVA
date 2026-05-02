@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+const flexString = z.any().transform((val): string => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') return val.description ?? val.summary ?? val.value ?? val.text ?? JSON.stringify(val);
+  return String(val ?? '');
+});
+
 const flexStringArray = z.any().transform((val): string[] => {
   if (Array.isArray(val)) return val.map(v => typeof v === 'string' ? v : JSON.stringify(v));
   if (typeof val === 'string') return val.split('\n').map(s => s.replace(/^[-•*]\s*/, '').trim()).filter(Boolean);
@@ -7,7 +13,7 @@ const flexStringArray = z.any().transform((val): string[] => {
 });
 
 export const DailyDigestSchema = z.object({
-  headline: z.string(),
+  headline: flexString,
   kpi_summary: flexStringArray,
   agent_highlights: z.any().transform((val): string => {
     if (typeof val === 'string') return val;
@@ -17,7 +23,7 @@ export const DailyDigestSchema = z.object({
   }),
   concerns: flexStringArray,
   actions: flexStringArray,
-  narrative: z.string(),
+  narrative: flexString,
 });
 export type DailyDigest = z.infer<typeof DailyDigestSchema>;
 
@@ -35,7 +41,7 @@ const flexDirection = z.any().transform((val): 'up' | 'down' | 'flat' => {
 });
 
 export const WeeklyDigestSchema = z.object({
-  headline: z.string(),
+  headline: flexString,
   week_over_week: z.any().transform((val): Array<{ kpi: string; this_week: number; last_week: number; change_pct: number; direction: 'up' | 'down' | 'flat' }> => {
     if (!Array.isArray(val)) return [];
     return val.map(item => ({
@@ -61,6 +67,6 @@ export const WeeklyDigestSchema = z.object({
     return '';
   }),
   recommendations: flexStringArray,
-  narrative: z.string(),
+  narrative: flexString,
 });
 export type WeeklyDigest = z.infer<typeof WeeklyDigestSchema>;

@@ -21,10 +21,16 @@ export interface KbArticleDraft {
   published_at: string | null;
 }
 
+const flexStr = z.any().transform((val): string => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') return val.description ?? val.summary ?? val.value ?? val.text ?? JSON.stringify(val);
+  return String(val ?? '');
+});
+
 const ArticleLlmSchema = z.object({
-  title: z.string(),
-  body: z.string(),
-  labels: z.array(z.string()),
+  title: flexStr,
+  body: flexStr,
+  labels: z.array(flexStr),
 });
 
 // ── Service ──

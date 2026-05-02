@@ -34,13 +34,19 @@ interface StoredBriefing {
   dismissed_at: string | null;
 }
 
+const flexStr = z.any().transform((val): string => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') return val.description ?? val.summary ?? val.value ?? val.text ?? JSON.stringify(val);
+  return String(val ?? '');
+});
+
 const BriefingLlmSchema = z.object({
-  headline: z.string(),
-  narrative: z.string(),
+  headline: flexStr,
+  narrative: flexStr,
   priority_actions: z.array(z.object({
-    ticket_key: z.string(),
-    summary: z.string(),
-    reason: z.string(),
+    ticket_key: flexStr,
+    summary: flexStr,
+    reason: flexStr,
   })),
 });
 

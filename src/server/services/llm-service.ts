@@ -53,6 +53,22 @@ const CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const RETRY_VALIDATION_ATTEMPTS = 1;
 
+const MODEL_ALIASES: Record<string, string> = {
+  'claude-sonnet-4-6-20250627': 'claude-sonnet-4-6',
+  'claude-sonnet-4-6-20250514': 'claude-sonnet-4-6',
+  'claude-sonnet-4-20250514': 'claude-sonnet-4-6',
+  'claude-3-5-sonnet-20241022': 'claude-sonnet-4-6',
+  'claude-3-haiku-20240307': 'claude-haiku-4-5-20251001',
+};
+
+function normalizeModelId(model: string): string {
+  const normalized = MODEL_ALIASES[model];
+  if (normalized) {
+    console.warn(`[llm] Model alias applied: "${model}" → "${normalized}"`);
+  }
+  return normalized ?? model;
+}
+
 const DEFAULT_MODELS: Record<LlmProvider, Record<LlmTier, string>> = {
   anthropic: {
     reasoning: 'claude-sonnet-4-6',
@@ -408,14 +424,14 @@ export class LlmService {
     if (primaryKey) {
       configs.push({
         provider: tierCfg.primary.provider,
-        model: tierCfg.primary.model || DEFAULT_MODELS[tierCfg.primary.provider]?.[tier] || DEFAULT_MODELS.anthropic[tier],
+        model: normalizeModelId(tierCfg.primary.model || DEFAULT_MODELS[tierCfg.primary.provider]?.[tier] || DEFAULT_MODELS.anthropic[tier]),
         apiKey: primaryKey,
       });
     }
 
     const failoverKey = this.getApiKey(tierCfg.failover.provider);
     if (failoverKey) {
-      const failoverModel = tierCfg.failover.model || DEFAULT_MODELS[tierCfg.failover.provider]?.[tier] || DEFAULT_MODELS.openai[tier];
+      const failoverModel = normalizeModelId(tierCfg.failover.model || DEFAULT_MODELS[tierCfg.failover.provider]?.[tier] || DEFAULT_MODELS.openai[tier]);
       const failoverConfig: ProviderConfig = { provider: tierCfg.failover.provider, model: failoverModel, apiKey: failoverKey };
       if (failoverConfig.provider !== configs[0]?.provider || failoverConfig.model !== configs[0]?.model) {
         configs.push(failoverConfig);
@@ -473,7 +489,7 @@ export class LlmService {
       .join(' ');
     console.log(`[llm] ${options.callType} → tier=${tier} → ${selectedProvider.provider}/${selectedProvider.model} | circuits: ${circuitStates}${tripped.length > 0 ? ' (FAILOVER)' : ''}`);
 
-    const jsonInstruction = '\n\nRespond with valid JSON only. No markdown fencing, no commentary.';
+    const jsonInstruction = '\n\nRespond with valid JSON only. No markdown fencing, no commentary. Every string field must be a plain string value, never an object or array. For example: "summary": "text here" NOT "summary": {"description": "text here"}';
     const sysResult = sanitise(systemPrompt);
     const userResult = sanitise(userMessage);
     const allRedactions = [...sysResult.redactions, ...userResult.redactions];

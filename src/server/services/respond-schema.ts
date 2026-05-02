@@ -14,6 +14,29 @@ const flexEnum = <T extends string>(values: readonly [T, ...T[]]) =>
     return values[values.length - 1];
   });
 
+const flexNullableString = z.any().transform((val): string | null => {
+  if (val === null || val === undefined || val === 'null' || val === 'none' || val === 'N/A' || val === '') return null;
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') return val.description ?? val.summary ?? val.value ?? val.text ?? JSON.stringify(val);
+  return String(val ?? '');
+});
+
+const flexConfidence = z.any().transform((val): number => {
+  if (typeof val === 'number') return Math.max(0, Math.min(1, val));
+  if (typeof val === 'string') { const n = parseFloat(val); return isNaN(n) ? 0.5 : Math.max(0, Math.min(1, n)); }
+  if (val && typeof val === 'object') {
+    const c = val.confidence ?? val.score ?? val.value;
+    if (typeof c === 'number') return Math.max(0, Math.min(1, c));
+  }
+  return 0.5;
+});
+
+const flexString = z.any().transform((val): string => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') return val.description ?? val.summary ?? val.value ?? val.text ?? JSON.stringify(val);
+  return String(val ?? '');
+});
+
 export const RespondResultSchema = z.object({
   intent: z.any().transform((val) => {
     if (typeof val === 'string') return { type: val, confidence: 0.5 };
@@ -23,12 +46,12 @@ export const RespondResultSchema = z.object({
     }
     return { type: 'unknown', confidence: 0.5 };
   }),
-  confidence: z.number().min(0).max(1),
+  confidence: flexConfidence,
   sentiment: flexEnum(['positive', 'neutral', 'frustrated', 'angry', 'urgent'] as const),
   recommended_action: flexEnum(['respond', 'escalate', 'close', 'gather_context', 'assign', 'no_action'] as const),
-  draft_response: z.string().nullable(),
-  internal_note: z.string(),
-  reasoning_trace: z.string(),
+  draft_response: flexNullableString,
+  internal_note: flexString,
+  reasoning_trace: flexString,
 });
 
 export type RespondResult = z.infer<typeof RespondResultSchema>;

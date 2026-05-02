@@ -198,7 +198,7 @@ export class SuggestionEngine {
       const result = await this.llm.call(
         systemPrompt,
         'Generate the two-paragraph recommendation.',
-        z.object({ text: z.string() }),
+        z.object({ text: z.any().transform((v): string => typeof v === 'string' ? v : (v && typeof v === 'object' ? (v.description ?? v.value ?? v.text ?? JSON.stringify(v)) : String(v ?? ''))) }),
         { tier: 'cheap', callType: 'autonomy_recommendation', maxTokens: 300, temperature: 0.4 },
       );
       const text = result.data.text;
