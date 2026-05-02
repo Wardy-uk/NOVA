@@ -7,8 +7,9 @@ const ContainsOp = z.object({ contains: z.string() });
 const StartsWithOp = z.object({ startsWith: z.string() });
 const StartsWithAnyOp = z.object({ startsWithAny: z.array(z.string()).min(1) });
 const ContainsAllOp = z.object({ containsAll: z.array(z.string()).min(1) });
+const RegexOp = z.object({ regex: z.string() });
 
-const MatchOperator = z.union([EqualsOp, ContainsOp, StartsWithOp, StartsWithAnyOp, ContainsAllOp]);
+const MatchOperator = z.union([EqualsOp, ContainsOp, StartsWithOp, StartsWithAnyOp, ContainsAllOp, RegexOp]);
 
 const MatchBlock = z.object({
   subject: MatchOperator.optional(),
@@ -20,10 +21,20 @@ const MatchBlock = z.object({
 
 // ── Conditional ──
 
-const Conditional = z.object({
+const DuplicateConditional = z.object({
   type: z.literal('duplicate_open_ticket'),
   sameSubject: z.literal(true),
 });
+
+const PreEmptionConditional = z.object({
+  type: z.literal('pre_emption'),
+  /** Max failed attempts before permanently skipping this ticket */
+  maxRetries: z.number().int().positive().optional().default(3),
+  /** Comment body substrings that indicate a human or automation already actioned this */
+  actionedIndicators: z.array(z.string()).optional(),
+});
+
+const Conditional = z.discriminatedUnion('type', [DuplicateConditional, PreEmptionConditional]);
 
 // ── Actions ──
 
@@ -43,17 +54,25 @@ const PluginToTpjAction = z.object({
   type: z.literal('plugin_to_tpj'),
 });
 
-const RuleAction = z.discriminatedUnion('type', [CloseAction, SetTierAction, PluginToTpjAction]);
+const AbuseReportAction = z.object({
+  type: z.literal('abuse_report'),
+});
+
+const RuleAction = z.discriminatedUnion('type', [CloseAction, SetTierAction, PluginToTpjAction, AbuseReportAction]);
 
 // ── Rule Schema ──
 
 export const AutoRuleSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/, 'Rule ID must be lowercase alphanumeric with hyphens'),
   match: MatchBlock,
+  /** 'all' = every field must match (default). 'any' = at least one field must match. */
+  matchMode: z.enum(['all', 'any']).optional().default('all'),
   conditional: Conditional.optional(),
   action: RuleAction,
   dailyCap: z.number().int().positive().optional(),
   caseInsensitive: z.boolean().optional().default(true),
+  /** If true, this rule requires human approval before executing (e.g. abuse_report phase A) */
+  requiresApproval: z.boolean().optional().default(false),
 });
 
 export type AutoRule = z.infer<typeof AutoRuleSchema>;
@@ -62,6 +81,40 @@ export type AutoRuleAction = z.infer<typeof RuleAction>;
 // ── Initial Rules ──
 
 const RULES_RAW: unknown[] = [
+  // ── Hybrid detector replacements (WP-69) ──
+  // These replace HybridActionDetector — all plugin/abuse detection now lives here.
+
+  {
+    id: 'smart-plugin-tpj',
+    match: {
+      subject: { regex: '\\d+\\s+plugins?\\s+(?:were|was)\\s+not\\s+updated' },
+      reporter_email: { equals: 'smart.plugin.manager@wpengine.com' },
+    },
+    matchMode: 'any',
+    conditional: { type: 'pre_emption', maxRetries: 3, actionedIndicators: ['moved your request into'] },
+    action: { type: 'plugin_to_tpj' },
+  },
+  {
+    id: 'smart-plugin-connect-fail',
+    match: {
+      subject: { contains: 'Smart Plugin Manager could not connect' },
+    },
+    conditional: { type: 'pre_emption', maxRetries: 3, actionedIndicators: ['moved your request into'] },
+    action: { type: 'plugin_to_tpj' },
+  },
+  {
+    id: 'abuse-report',
+    match: {
+      subject: { equals: 'Received Abuse Report' },
+      description: { containsAll: ['Instance ID:', 'Contact ID:', 'Instance URL:'] },
+    },
+    conditional: { type: 'pre_emption', maxRetries: 3, actionedIndicators: ['Abuse report processed', 'n8n Automations'] },
+    action: { type: 'abuse_report' },
+    requiresApproval: true,
+  },
+
+  // ── Existing auto-close rules ──
+
   {
     id: 'freedom-leisure-integration',
     match: {
@@ -109,13 +162,6 @@ const RULES_RAW: unknown[] = [
       subject: { equals: 'MWU Live Morning Report' },
     },
     action: { type: 'set_tier', tier: 'Tier 2', note: 'MWU morning report routed to Tier 2.' },
-  },
-  {
-    id: 'smart-plugin-tpj',
-    match: {
-      subject: { startsWith: 'Smart Plugin Manager could not connect to' },
-    },
-    action: { type: 'plugin_to_tpj' },
   },
   {
     id: 'cia-letter-dedup',

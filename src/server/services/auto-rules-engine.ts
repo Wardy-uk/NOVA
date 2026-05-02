@@ -2,8 +2,10 @@ import { AUTO_RULES, type AutoRule } from '../config/auto-rules.js';
 import type { TicketEvent, AgentShadowMode } from './agent-types.js';
 import type { JiraRestClient } from './jira-client.js';
 import type { PluginToTpjExecutor } from './plugin-to-tpj-executor.js';
+import type { AbuseReportExecutor } from './abuse-report-executor.js';
 import type { Observer } from './observer.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import { executeAndGetId, query } from './database.js';
 
 const QUICK_RESOLVE_TRANSITION_ID = '17';
 const CF_RESOLUTION_TYPE = 'customfield_14494';
@@ -18,6 +20,15 @@ const TIER_IDS: Record<string, string> = {
 };
 
 const DEFAULT_DAILY_CAP = 50;
+const MAX_PRE_EMPTION_RETRIES = 3;
+
+// Abuse report field extraction patterns (moved from hybrid-action-detector.ts)
+const ABUSE_FIELD_PATTERNS = {
+  abuseEmail: /(?:abuse\s*email|from|email)\s*[:=]\s*([^\r\n]+)/i,
+  instanceId: /instance\s*id\s*[:=]\s*(\d+)/i,
+  contactId: /contact\s*id\s*[:=]\s*(\d+)/i,
+  instanceUrl: /instance\s*url\s*[:=]\s*(https?:\/\/[^\s\r\n]+)/i,
+};
 
 export interface AutoRuleMatch {
   rule: AutoRule;
@@ -28,13 +39,21 @@ export interface AutoRuleMatch {
 
 export class AutoRulesEngine {
   private dailyCounts = new Map<string, { date: string; count: number }>();
+  private regexCache = new Map<string, RegExp>();
+  private abuseExecutor: AbuseReportExecutor | null = null;
 
   constructor(
     private jiraClient: JiraRestClient,
     private pluginExecutor: PluginToTpjExecutor,
     private observer: Observer,
     private settings: SettingsQueries,
-  ) {}
+  ) {
+    console.log(`[auto-rules] Engine loaded with ${AUTO_RULES.length} rules: ${AUTO_RULES.map(r => r.id).join(', ')}`);
+  }
+
+  setAbuseExecutor(executor: AbuseReportExecutor): void {
+    this.abuseExecutor = executor;
+  }
 
   async evaluateAndExecute(
     event: TicketEvent,
@@ -46,6 +65,10 @@ export class AutoRulesEngine {
     if (!match) return false;
 
     const { rule } = match;
+
+    // In full_shadow mode, all auto-rules are shadowed.
+    // In hybrid or live mode, deterministic auto-rules always execute —
+    // they are safe by definition and don't need the hybrid_allowed_actions gate.
     const isShadow = shadowMode === 'full_shadow';
 
     // Daily cap check
@@ -101,6 +124,7 @@ export class AutoRulesEngine {
 
   private matchRule(rule: AutoRule, event: TicketEvent): { matched: boolean; nearMiss: boolean; fields: Record<string, boolean> } {
     const ci = rule.caseInsensitive !== false;
+    const mode = rule.matchMode ?? 'all';
     const fields: Record<string, boolean> = {};
     let checkedCount = 0;
     let passedCount = 0;
@@ -121,13 +145,22 @@ export class AutoRulesEngine {
 
     if (rule.match.reporter_email) {
       checkedCount++;
-      const email = event.reporterEmail ?? '';
+      // Resolve reporter email from multiple possible sources (WP-49 fix)
+      const email = event.reporterEmail
+        ?? (event.fields?.reporter as { emailAddress?: string } | undefined)?.emailAddress
+        ?? '';
       const pass = this.matchOperator(rule.match.reporter_email, email, ci);
       fields.reporter_email = pass;
       if (pass) passedCount++;
     }
 
-    const matched = checkedCount > 0 && passedCount === checkedCount;
+    let matched: boolean;
+    if (mode === 'any') {
+      matched = checkedCount > 0 && passedCount > 0;
+    } else {
+      matched = checkedCount > 0 && passedCount === checkedCount;
+    }
+
     const nearMiss = !matched && passedCount > 0 && passedCount < checkedCount;
     return { matched, nearMiss, fields };
   }
@@ -155,6 +188,16 @@ export class AutoRulesEngine {
       const targets = (op.containsAll as string[]).map(s => ci ? s.toLowerCase() : s);
       return targets.every(t => v.includes(t));
     }
+    if ('regex' in op) {
+      const pattern = String(op.regex);
+      const cacheKey = `${pattern}:${ci}`;
+      let re = this.regexCache.get(cacheKey);
+      if (!re) {
+        re = new RegExp(pattern, ci ? 'i' : '');
+        this.regexCache.set(cacheKey, re);
+      }
+      return re.test(value); // test against original value — regex has its own flags
+    }
     return false;
   }
 
@@ -162,15 +205,86 @@ export class AutoRulesEngine {
     if (!rule.conditional) return true;
 
     if (rule.conditional.type === 'duplicate_open_ticket' && rule.conditional.sameSubject) {
-      const escapedSummary = event.summary.replace(/"/g, '\\"');
-      const jql = `project = NT AND statusCategory IN ("To Do", "In Progress") AND summary = "${escapedSummary}" AND key != ${event.ticketKey}`;
+      // Use JQL ~  (contains) instead of = (exact) for more reliable matching
+      const summary = event.summary.replace(/[\\"\[\](){}]/g, ' ').trim();
+      const jql = `project = NT AND statusCategory IN ("To Do", "In Progress") AND summary ~ "${summary}" AND key != ${event.ticketKey} ORDER BY created DESC`;
       try {
         const result = await this.jiraClient.searchJql(jql, ['summary'], 5);
-        return result.issues.length > 0;
+        // Verify at least one result has the exact same summary (contains match may be broad)
+        const exactMatch = result.issues.some((issue: { fields?: { summary?: string } }) => {
+          const issueSummary = issue.fields?.summary ?? '';
+          return issueSummary.toLowerCase().trim() === event.summary.toLowerCase().trim();
+        });
+        if (exactMatch) {
+          console.log(`[auto-rules] Conditional '${rule.id}': found ${result.issues.length} sibling(s) for "${event.summary}" — condition met`);
+        } else {
+          console.log(`[auto-rules] Conditional '${rule.id}': JQL returned ${result.issues.length} result(s) but no exact summary match for "${event.summary}"`);
+        }
+        return exactMatch;
       } catch (err) {
-        console.warn(`[auto-rules] Conditional JQL failed for '${rule.id}' on ${event.ticketKey}:`, err instanceof Error ? err.message : err);
+        console.error(`[auto-rules] Conditional JQL FAILED for '${rule.id}' on ${event.ticketKey}: ${err instanceof Error ? err.message : err}`);
         return false;
       }
+    }
+
+    if (rule.conditional.type === 'pre_emption') {
+      const maxRetries = rule.conditional.maxRetries ?? MAX_PRE_EMPTION_RETRIES;
+      const indicators = rule.conditional.actionedIndicators ?? [];
+
+      // Check retry exhaustion
+      try {
+        const rows = await query<{ cnt: number }>(
+          `SELECT COUNT(*) AS cnt FROM hybrid_action_log
+           WHERE source_ticket_key = ? AND action_id = ? AND status = 'failed'`,
+          [event.ticketKey, rule.action.type],
+        );
+        const failCount = rows[0]?.cnt ?? 0;
+        if (failCount >= maxRetries) {
+          console.warn(`[auto-rules] Pre-emption: '${rule.id}' on ${event.ticketKey} exhausted ${maxRetries} retries — skipping`);
+          await executeAndGetId(
+            `INSERT INTO hybrid_action_log (action_id, source_ticket_key, status, detail)
+             VALUES (?, ?, 'failed_permanent', ?)`,
+            [rule.action.type, event.ticketKey, `Exhausted ${maxRetries} retries — manual intervention needed`],
+          );
+          return false;
+        }
+      } catch (err) {
+        console.warn(`[auto-rules] Pre-emption retry check failed for ${event.ticketKey}:`, err);
+        // Continue — don't block on DB failure
+      }
+
+      // Check if already actioned (status resolved, or indicator comments found)
+      try {
+        const issue = await this.jiraClient.getIssue(event.ticketKey, ['status']);
+        if (!issue) {
+          console.log(`[auto-rules] Pre-emption: ${event.ticketKey} no longer exists — skipping`);
+          return false;
+        }
+        const statusCat = (issue.fields?.status as { statusCategory?: { key?: string } })?.statusCategory?.key;
+        if (statusCat === 'done') {
+          console.log(`[auto-rules] Pre-emption: ${event.ticketKey} already resolved — skipping`);
+          return false;
+        }
+
+        if (indicators.length > 0) {
+          const comments = await this.jiraClient.getComments(event.ticketKey, 20);
+          for (const c of comments) {
+            const bodyText = typeof c.body === 'string' ? c.body : JSON.stringify(c.body);
+            const authorName = c.author?.displayName ?? '';
+            for (const indicator of indicators) {
+              if (bodyText.includes(indicator) || authorName.includes(indicator)) {
+                console.log(`[auto-rules] Pre-emption: ${event.ticketKey} already actioned (found "${indicator}") — skipping`);
+                return false;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[auto-rules] Pre-emption status check failed for ${event.ticketKey}:`, err instanceof Error ? err.message : err);
+        // Continue — don't block on check failure
+      }
+
+      return true; // Not pre-empted, not exhausted — proceed
     }
 
     return false;
@@ -187,7 +301,7 @@ export class AutoRulesEngine {
       action: `auto_rule_${rule.id}` as any,
       confidence: 1.0,
       reasoning: `Auto-rule '${rule.id}' matched (deterministic, no LLM)`,
-      approvalRequired: false,
+      approvalRequired: rule.requiresApproval ?? false,
       shadowMode: false,
       inputs: { summary: event.summary, matchedFields: match.matchedFields, ruleId: rule.id },
       output: { action_type: action.type, ...('resolution' in action ? { resolution: action.resolution } : {}), ...('tier' in action ? { tier: action.tier } : {}) },
@@ -200,6 +314,8 @@ export class AutoRulesEngine {
         await this.handleSetTier(ticketKey, action as { type: 'set_tier'; tier: string; note: string }, rule);
       } else if (action.type === 'plugin_to_tpj') {
         await this.handlePluginToTpj(match, event);
+      } else if (action.type === 'abuse_report') {
+        await this.handleAbuseReport(match, event);
       }
 
       await this.observer.logOutcome(decisionId, {
@@ -219,6 +335,15 @@ export class AutoRulesEngine {
         error: msg,
       });
       console.error(`[auto-rules] Failed '${rule.id}' on ${ticketKey}:`, msg);
+
+      // Log failure to hybrid_action_log for retry tracking
+      try {
+        await executeAndGetId(
+          `INSERT INTO hybrid_action_log (action_id, source_ticket_key, status, detail)
+           VALUES (?, ?, 'failed', ?)`,
+          [action.type, ticketKey, msg],
+        );
+      } catch { /* best effort */ }
     }
   }
 
@@ -282,6 +407,36 @@ export class AutoRulesEngine {
     if (!result.success) throw new Error(result.detail);
   }
 
+  private async handleAbuseReport(match: AutoRuleMatch, event: TicketEvent): Promise<void> {
+    if (!this.abuseExecutor) {
+      throw new Error('Abuse executor not available — cannot process abuse report');
+    }
+
+    // Parse fields from description
+    const desc = event.description || '';
+    const parsed: Record<string, unknown> = {};
+    for (const [key, pattern] of Object.entries(ABUSE_FIELD_PATTERNS)) {
+      const m = desc.match(pattern);
+      if (m) parsed[key] = m[1].trim();
+    }
+
+    if (!parsed.contactId || !parsed.instanceId) {
+      throw new Error(`Abuse report missing required fields (contactId=${parsed.contactId}, instanceId=${parsed.instanceId})`);
+    }
+
+    const hybridMatch = {
+      actionId: 'abuse_report' as const,
+      ticketKey: match.ticketKey,
+      ticketId: match.ticketId,
+      summary: event.summary,
+      description: event.description,
+      parsedData: parsed,
+      requiresApproval: true,
+    };
+    const result = await this.abuseExecutor.executePhaseA(hybridMatch);
+    if (!result.success) throw new Error(result.detail);
+  }
+
   private async logShadowDecision(match: AutoRuleMatch, event: TicketEvent, reason: string): Promise<void> {
     const { rule, ticketKey } = match;
     const decisionId = await this.observer.logDecision({
@@ -291,7 +446,7 @@ export class AutoRulesEngine {
       action: `auto_rule_${rule.id}` as any,
       confidence: 1.0,
       reasoning: `Auto-rule '${rule.id}' matched — ${reason}`,
-      approvalRequired: false,
+      approvalRequired: rule.requiresApproval ?? false,
       shadowMode: true,
       inputs: { summary: event.summary, matchedFields: match.matchedFields, ruleId: rule.id },
       output: { action_type: rule.action.type, shadow: true, reason },
@@ -311,7 +466,9 @@ export class AutoRulesEngine {
       ? `close with resolution '${(a as { resolution: string }).resolution}'`
       : a.type === 'set_tier'
         ? `set tier to '${(a as { tier: string }).tier}'`
-        : `route via plugin_to_tpj`;
+        : a.type === 'plugin_to_tpj'
+          ? `route via plugin_to_tpj`
+          : `process abuse report`;
     try {
       await this.jiraClient.addComment(
         event.ticketKey,

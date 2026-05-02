@@ -2,7 +2,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { JiraRestClient } from './jira-client.js';
 import type { LlmService } from './llm-service.js';
 import type { ApprovalQueries } from '../db/queries.js';
-import type { AgentState, AgentStatus, AgentDecision, AgentMode, AgentShadowMode, HybridActionId, HybridActionMatch, AssignedTicketMode } from './agent-types.js';
+import type { AgentState, AgentStatus, AgentDecision, AgentMode, AgentShadowMode, AssignedTicketMode } from './agent-types.js';
 import type { KbEmbedder } from './kb-embedder.js';
 import { Perceiver } from './perceiver.js';
 import { Reasoner } from './reasoner.js';
@@ -19,7 +19,6 @@ import { AlertService } from './alert-service.js';
 import { TicketClassifier } from './ticket-classifier.js';
 import { CoachingEngine } from './coach.js';
 import { RiskScorer } from './risk-scorer.js';
-import { HybridActionDetector } from './hybrid-action-detector.js';
 import { PluginToTpjExecutor } from './plugin-to-tpj-executor.js';
 import { AbuseReportExecutor } from './abuse-report-executor.js';
 import { AutoRulesEngine } from './auto-rules-engine.js';
@@ -57,7 +56,6 @@ export class AgentLoop {
   private ticketClassifier: TicketClassifier;
   private coachingEngine: CoachingEngine;
   private riskScorer: RiskScorer;
-  private hybridDetector: HybridActionDetector;
   private pluginExecutor: PluginToTpjExecutor;
   private abuseExecutor: AbuseReportExecutor | null = null;
   private autoRulesEngine: AutoRulesEngine;
@@ -97,12 +95,12 @@ export class AgentLoop {
     this.ticketClassifier = new TicketClassifier(llmService, jiraClient, primaryProject);
     this.coachingEngine = new CoachingEngine(llmService, jiraClient, primaryProject);
     this.riskScorer = new RiskScorer(settings);
-    this.hybridDetector = new HybridActionDetector(settings);
     this.pluginExecutor = new PluginToTpjExecutor(jiraClient, settings);
     this.autoRulesEngine = new AutoRulesEngine(jiraClient, this.pluginExecutor, this.observer, settings);
     this.externalDb = new ExternalDbService(settings);
     if (approvalQueries) {
       this.abuseExecutor = new AbuseReportExecutor(jiraClient, settings, approvalQueries, this.externalDb);
+      this.autoRulesEngine.setAbuseExecutor(this.abuseExecutor);
     }
     this.jiraClient = jiraClient;
     this.llmService = llmService;
@@ -395,25 +393,6 @@ export class AgentLoop {
     return this.getShadowMode() === 'full_shadow';
   }
 
-  private isActionAllowedInHybrid(actionId: HybridActionId): boolean {
-    const mode = this.getShadowMode();
-    if (mode === 'live') return true;
-    if (mode === 'full_shadow') return false;
-    const raw = this.settings.get('agent_hybrid_allowed_actions') ?? '[]';
-    try {
-      const allowed: string[] = JSON.parse(raw);
-      return allowed.includes(actionId);
-    } catch { return false; }
-  }
-
-  private isWeekendExempt(actionId: HybridActionId): boolean {
-    const raw = this.settings.get('agent_weekend_exempt_actions') ?? '["plugin_to_tpj","abuse_report"]';
-    try {
-      const exempt: string[] = JSON.parse(raw);
-      return exempt.includes(actionId);
-    } catch { return false; }
-  }
-
   private async tick(): Promise<void> {
     if (this.processing) return;
     if (this.state !== 'running') return;
@@ -465,24 +444,14 @@ export class AgentLoop {
         return true;
       });
 
-      // 1.5 HYBRID ACTION DETECTION (before LLM reasoning)
-      const hybridHandledKeys = new Set<string>();
-      for (const event of deduped) {
-        const match = await this.hybridDetector.detect(event, this.jiraClient);
-        if (match && this.isActionAllowedInHybrid(match.actionId)) {
-          if (this.currentMode === 'reduced' && !this.isWeekendExempt(match.actionId)) {
-            console.log(`[agent] Skipping hybrid action ${match.actionId} on ${match.ticketKey} — not weekend-exempt`);
-            continue;
-          }
-          await this.executeHybridAction(match);
-          hybridHandledKeys.add(event.ticketKey);
-        }
-      }
-      // 1.6 AUTO-RULES EVALUATION (config-driven, deterministic)
+      // 1.5 AUTO-RULES EVALUATION (config-driven, deterministic — replaces hybrid detector)
+      // All deterministic actions (plugin_to_tpj, abuse_report, auto-close, tier routing)
+      // are now handled by the unified auto-rules engine. They execute in hybrid + live mode
+      // and are shadowed only in full_shadow mode. No weekend exemption check needed —
+      // deterministic rules are safe by definition.
       const autoRuleHandledKeys = new Set<string>();
       const shadowModeForRules = this.getShadowMode();
       for (const event of deduped) {
-        if (hybridHandledKeys.has(event.ticketKey)) continue;
         try {
           const handled = await this.autoRulesEngine.evaluateAndExecute(event, shadowModeForRules);
           if (handled) {
@@ -500,7 +469,7 @@ export class AgentLoop {
         }
       }
 
-      const llmEvents = deduped.filter(e => !hybridHandledKeys.has(e.ticketKey) && !autoRuleHandledKeys.has(e.ticketKey));
+      const llmEvents = deduped.filter(e => !autoRuleHandledKeys.has(e.ticketKey));
 
       // 2. REASON
       const shadowMode = this.getShadowMode();
@@ -526,9 +495,6 @@ export class AgentLoop {
       // Mark processed for cross-tick dedup
       for (const d of decisions) {
         this.recentlyProcessedTickets.set(`${d.ticketKey}:${d.eventType}`, Date.now());
-      }
-      for (const key of hybridHandledKeys) {
-        this.recentlyProcessedTickets.set(`${key}:ticket_created`, Date.now());
       }
       for (const key of autoRuleHandledKeys) {
         this.recentlyProcessedTickets.set(`${key}:ticket_created`, Date.now());
@@ -672,90 +638,6 @@ export class AgentLoop {
     } catch (err) {
       console.warn(`[agent] Risk sweep failed:`, err instanceof Error ? err.message : err);
     }
-  }
-
-  private async executeHybridAction(match: HybridActionMatch): Promise<void> {
-    const shadowMode = this.getShadowMode();
-
-    // In full_shadow mode, log as shadow note instead of executing
-    if (shadowMode === 'full_shadow') {
-      const decisionId = await this.observer.logDecision({
-        ticketId: match.ticketId,
-        ticketKey: match.ticketKey,
-        eventType: 'ticket_created',
-        action: match.actionId,
-        confidence: 1.0,
-        reasoning: `Hybrid action detected: ${match.actionId}`,
-        approvalRequired: match.requiresApproval,
-        shadowMode: true,
-        inputs: { summary: match.summary, ...match.parsedData },
-        output: { action_type: match.actionId },
-      });
-      await this.observer.logOutcome(decisionId, {
-        success: true,
-        action: match.actionId,
-        ticketKey: match.ticketKey,
-        detail: `[SHADOW] Would execute hybrid action: ${match.actionId}`,
-      });
-      try {
-        await this.jiraClient.addComment(match.ticketKey,
-          `[SHADOW MODE — observe only]\n\nHybrid action detected: ${match.actionId}\nThis action would execute automatically in hybrid/live mode.`,
-          { internal: true });
-      } catch { /* best effort */ }
-      this.ticketsProcessed++;
-      return;
-    }
-
-    // Execute for real
-    const decisionId = await this.observer.logDecision({
-      ticketId: match.ticketId,
-      ticketKey: match.ticketKey,
-      eventType: 'ticket_created',
-      action: match.actionId,
-      confidence: 1.0,
-      reasoning: `Hybrid action: ${match.actionId} (pattern match, no LLM)`,
-      approvalRequired: match.requiresApproval,
-      shadowMode: false,
-      inputs: { summary: match.summary, ...match.parsedData },
-      output: { action_type: match.actionId, parsedData: match.parsedData },
-    });
-
-    try {
-      if (match.actionId === 'plugin_to_tpj') {
-        const result = await this.pluginExecutor.execute(match);
-        await this.observer.logOutcome(decisionId, {
-          success: result.success,
-          action: 'plugin_to_tpj',
-          ticketKey: match.ticketKey,
-          detail: result.detail,
-          error: result.error,
-        });
-      } else if (match.actionId === 'abuse_report') {
-        if (!this.abuseExecutor) {
-          console.warn(`[agent] Abuse executor not available (no approval queries)`);
-          return;
-        }
-        const result = await this.abuseExecutor.executePhaseA(match);
-        await this.observer.logOutcome(decisionId, {
-          success: result.success,
-          action: 'abuse_report',
-          ticketKey: match.ticketKey,
-          detail: result.detail,
-          error: result.error,
-        });
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await this.observer.logOutcome(decisionId, {
-        success: false,
-        action: match.actionId,
-        ticketKey: match.ticketKey,
-        detail: `Hybrid action failed: ${msg}`,
-        error: msg,
-      });
-      this.errorCount++;
-    }
-    this.ticketsProcessed++;
   }
 
   private async executeDecision(decision: AgentDecision): Promise<void> {
