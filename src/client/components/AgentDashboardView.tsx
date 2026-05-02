@@ -1676,6 +1676,97 @@ function ProvidersTab({ providers, confHistory }: { providers: ProviderStat[]; c
   );
 }
 
+// ── Auto-Rules Panel (read-only, deterministic rules) ──
+
+interface AutoRuleStatus {
+  id: string;
+  match: object;
+  matchMode: 'all' | 'any';
+  action: { type: string; resolution?: string; tier?: string };
+  conditional?: { type: string };
+  dailyCap: number;
+  requiresApproval: boolean;
+  todayCount: number;
+  lastFired: string | null;
+  enabled: boolean;
+  matchSummary: string;
+}
+
+function AutoRulesPanel() {
+  const [rules, setRules] = useState<AutoRuleStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api('/auto-rules').then(r => {
+      if (r.ok) setRules(r.data.rules);
+      setLoading(false);
+    });
+  }, []);
+
+  const actionBadge = (type: string) => {
+    const colors: Record<string, string> = {
+      close: 'bg-red-900/40 text-red-400 border-red-800/40',
+      set_tier: 'bg-blue-900/40 text-blue-400 border-blue-800/40',
+      plugin_to_tpj: 'bg-purple-900/40 text-purple-400 border-purple-800/40',
+      abuse_report: 'bg-amber-900/40 text-amber-400 border-amber-800/40',
+    };
+    return colors[type] || 'bg-neutral-800 text-neutral-400 border-neutral-700';
+  };
+
+  const timeAgo = (iso: string) => {
+    const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.round(hrs / 24)}d ago`;
+  };
+
+  if (loading) return null;
+
+  return (
+    <div className="space-y-2">
+      <div>
+        <h3 className="text-sm font-medium text-neutral-200">Deterministic Rules</h3>
+        <p className="text-[10px] text-neutral-500 mt-0.5">Pattern-match rules that run before AI triage. Config-driven — edit auto-rules.ts to modify.</p>
+      </div>
+      <div className="grid gap-2">
+        {rules.map(rule => (
+          <div key={rule.id} className="border border-[#3a424d] rounded-lg bg-[#2f353d] px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-xs font-medium text-neutral-200 shrink-0">{rule.id}</span>
+                <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${actionBadge(rule.action.type)}`}>
+                  {rule.action.type.replace(/_/g, ' ')}
+                </span>
+                {rule.requiresApproval && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-medium rounded border bg-amber-900/30 text-amber-400 border-amber-800/40">
+                    Requires Approval
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 shrink-0 text-[10px]">
+                <span className="text-neutral-400">{rule.todayCount} today</span>
+                {rule.dailyCap && (
+                  <span className={`font-mono ${rule.todayCount >= rule.dailyCap ? 'text-red-400' : 'text-neutral-500'}`}>
+                    {rule.todayCount}/{rule.dailyCap} cap
+                  </span>
+                )}
+                {rule.lastFired ? (
+                  <span className="text-neutral-500">{timeAgo(rule.lastFired)}</span>
+                ) : (
+                  <span className="text-neutral-600">never fired</span>
+                )}
+              </div>
+            </div>
+            <p className="text-[10px] text-neutral-500 mt-1.5 truncate" title={rule.matchSummary}>{rule.matchSummary}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Autonomy Tab ──
 
 function AutonomyTab({ rules, onRefresh, isSuperAdmin = false }: { rules: AutonomyRule[]; onRefresh: () => void; isSuperAdmin?: boolean }) {
@@ -1718,6 +1809,8 @@ function AutonomyTab({ rules, onRefresh, isSuperAdmin = false }: { rules: Autono
 
   return (
     <div className="space-y-3">
+      <AutoRulesPanel />
+
       <div className="flex items-center justify-between">
         <p className="text-xs text-neutral-500">
           Categories where the agent can resolve tickets autonomously (no approval step). Each rule requires minimum confidence, accept rate, and decision history.

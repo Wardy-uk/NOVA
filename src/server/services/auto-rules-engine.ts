@@ -498,4 +498,76 @@ export class AutoRulesEngine {
       };
     });
   }
+
+  getRules(): AutoRule[] {
+    return AUTO_RULES;
+  }
+
+  async getRulesWithStats(): Promise<AutoRuleStatus[]> {
+    const today = new Date().toISOString().slice(0, 10);
+
+    const rows = await query<{ action: string; cnt: number; last_fired: string }>(
+      `SELECT action, COUNT(*) as cnt, MAX(created_at) as last_fired
+       FROM agent_decisions
+       WHERE created_at >= CAST(? AS DATE)
+         AND action LIKE 'auto_rule_%'
+       GROUP BY action`,
+      [today],
+    );
+    const statsMap = new Map(rows.map(r => [r.action, { count: r.cnt, lastFired: r.last_fired }]));
+
+    return AUTO_RULES.map(rule => {
+      const actionKey = `auto_rule_${rule.id}`;
+      const stats = statsMap.get(actionKey);
+      return {
+        id: rule.id,
+        match: rule.match,
+        matchMode: rule.matchMode,
+        action: rule.action,
+        conditional: rule.conditional,
+        dailyCap: this.getDailyCap(rule),
+        requiresApproval: rule.requiresApproval,
+        todayCount: stats?.count ?? 0,
+        lastFired: stats?.lastFired ?? null,
+        enabled: true,
+        matchSummary: this.summarizeMatch(rule),
+      };
+    });
+  }
+
+  private summarizeMatch(rule: AutoRule): string {
+    const parts: string[] = [];
+    const m = rule.match;
+    if (m.subject) {
+      const op = Object.keys(m.subject)[0];
+      const val = Object.values(m.subject)[0];
+      parts.push(`Subject ${op}: ${Array.isArray(val) ? val.join(', ') : val}`);
+    }
+    if (m.description) {
+      const op = Object.keys(m.description)[0];
+      const val = Object.values(m.description)[0];
+      parts.push(`Description ${op}: ${Array.isArray(val) ? val.join(', ') : val}`);
+    }
+    if (m.reporter_email) {
+      const op = Object.keys(m.reporter_email)[0];
+      const val = Object.values(m.reporter_email)[0];
+      parts.push(`Reporter ${op}: ${Array.isArray(val) ? val.join(', ') : val}`);
+    }
+    const joiner = rule.matchMode === 'any' ? ' OR ' : ' AND ';
+    return parts.join(joiner);
+  }
+}
+
+export interface AutoRuleStatus {
+  id: string;
+  match: object;
+  matchMode: 'all' | 'any';
+  action: object;
+  conditional?: object;
+  dailyCap: number;
+  requiresApproval: boolean;
+  todayCount: number;
+  lastFired: string | null;
+  enabled: boolean;
+  matchSummary: string;
 }

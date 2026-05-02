@@ -376,6 +376,17 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // ── Auto-Rules (deterministic) ──
+
+  router.get('/auto-rules', async (_req, res) => {
+    try {
+      const rules = await agentLoop.getAutoRulesEngine().getRulesWithStats();
+      res.json({ ok: true, data: { rules } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get auto-rules' });
+    }
+  });
+
   // ── Autonomy Engine ──
 
   router.get('/autonomy', async (_req, res) => {
