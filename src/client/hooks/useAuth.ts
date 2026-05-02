@@ -20,6 +20,24 @@ interface AuthState {
 
 console.log('[AUTH DEBUG BUILD] useAuth module loaded — instrumented build for token-wipe diagnosis');
 
+// Watchdog: polls localStorage every 500ms for 30s after module load.
+// If the token vanishes, logs the exact moment.
+let _watchdogToken = localStorage.getItem('nova_auth_token');
+const _watchdog = setInterval(() => {
+  const now = localStorage.getItem('nova_auth_token');
+  if (_watchdogToken && !now) {
+    console.error('[AUTH WATCHDOG] Token VANISHED from localStorage!',
+      '\n  sessionStorage:', !!sessionStorage.getItem('nova_auth_token'),
+      '\n  interceptor currentToken:', !!currentToken,
+      '\n  timestamp:', new Date().toISOString());
+    // Don't clear interval — keep watching in case it comes back or vanishes again
+  } else if (!_watchdogToken && now) {
+    console.log('[AUTH WATCHDOG] Token APPEARED in localStorage. length:', now.length);
+  }
+  _watchdogToken = now;
+}, 500);
+setTimeout(() => clearInterval(_watchdog), 30000);
+
 const TOKEN_KEY = 'nova_auth_token';
 const REMEMBER_KEY = 'nova_remember_me';
 
@@ -32,6 +50,7 @@ function storeToken(token: string, rememberMe: boolean) {
   localStorage.setItem(REMEMBER_KEY, rememberMe ? 'true' : 'false');
   if (rememberMe) {
     localStorage.setItem(TOKEN_KEY, token);
+    console.log('[STORE] wrote to localStorage, verify:', localStorage.getItem(TOKEN_KEY)?.substring(0, 20));
     sessionStorage.removeItem(TOKEN_KEY);
   } else {
     console.error('[AUTH DEBUG] storeToken REMOVING from localStorage (rememberMe=false)', new Error().stack);
@@ -97,16 +116,29 @@ let primaryInitDone = false;
 let sharedAuthState: AuthState | null = null;
 
 export function useAuth() {
-  const [state, setState] = useState<AuthState>(() => {
-    if (sharedAuthState?.user) return { ...sharedAuthState };
-    return {
-      user: null,
-      token: getStoredToken(),
-      initializing: true,
-      busy: false,
-      error: null,
-    };
+  const [state, _setStateRaw] = useState<AuthState>(() => {
+    const init = sharedAuthState?.user
+      ? { ...sharedAuthState }
+      : { user: null, token: getStoredToken(), initializing: true, busy: false, error: null };
+    console.log('[AUTH DEBUG] useState initializer:', { hasUser: !!init.user, hasToken: !!init.token, sharedHasUser: !!sharedAuthState?.user });
+    return init;
   });
+
+  // Wrapped setState that logs when token becomes null
+  const setState = useCallback((update: AuthState | ((prev: AuthState) => AuthState)) => {
+    _setStateRaw(prev => {
+      const next = typeof update === 'function' ? update(prev) : update;
+      if (prev.token && !next.token) {
+        console.error('[AUTH DEBUG] setState NULLING token!',
+          '\n  prev.token:', prev.token?.substring(0, 20),
+          '\n  next.token:', next.token,
+          '\n  next.user:', next.user?.username ?? 'null',
+          '\n  localStorage:', !!localStorage.getItem(TOKEN_KEY),
+          '\n  stack:', new Error().stack);
+      }
+      return next;
+    });
+  }, []);
 
   // Publish auth state for secondary instances
   useEffect(() => {
@@ -115,7 +147,17 @@ export function useAuth() {
 
   // Sync token to interceptor
   useEffect(() => {
+    const prev = currentToken;
     currentToken = state.token;
+    if (prev && !state.token) {
+      console.error('[AUTH DEBUG] SYNC EFFECT nulled currentToken! prev existed, state.token is now null.',
+        '\n  localStorage:', !!localStorage.getItem(TOKEN_KEY),
+        '\n  sessionStorage:', !!sessionStorage.getItem(TOKEN_KEY),
+        '\n  stack:', new Error().stack);
+    } else if (prev !== state.token) {
+      console.log('[AUTH DEBUG] Sync effect: currentToken changed.',
+        'prev:', !!prev, '→ state.token:', !!state.token);
+    }
   }, [state.token]);
 
   // Validate token on mount
@@ -160,8 +202,10 @@ export function useAuth() {
     const ssoTokenMatch = hash.match(/sso_token=([^&]+)/);
     if (ssoTokenMatch) {
       const token = ssoTokenMatch[1];
+      console.log('[AUTH DEBUG] SSO hash found. Token length:', token.length);
       window.history.replaceState(null, '', window.location.pathname);
       storeToken(token, true);
+      console.log('[AUTH DEBUG] After storeToken(true): localStorage has token:', !!localStorage.getItem(TOKEN_KEY), 'sessionStorage:', !!sessionStorage.getItem(TOKEN_KEY));
       currentToken = token;
 
       originalFetch('/api/auth/me', {
@@ -169,6 +213,7 @@ export function useAuth() {
       })
         .then(r => r.json())
         .then(json => {
+          console.log('[AUTH DEBUG] SSO /api/auth/me responded. ok:', json.ok, 'has user:', !!json.data?.user, 'localStorage still has token:', !!localStorage.getItem(TOKEN_KEY));
           if (json.ok && json.data?.user) {
             setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
           } else {
