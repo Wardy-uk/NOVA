@@ -721,7 +721,8 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_suggestions') AND name = 'snoozed_until')
      ALTER TABLE agent_suggestions ADD snoozed_until DATETIME2 NULL;`,
 
-    `ALTER TABLE problem_ticket_alerts ADD last_analysed_at DATETIME2 NULL;`,
+    `IF COL_LENGTH('problem_ticket_alerts', 'last_analysed_at') IS NULL
+     ALTER TABLE problem_ticket_alerts ADD last_analysed_at DATETIME2 NULL;`,
 
     `IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'sso_pending_states')
      CREATE TABLE sso_pending_states (

@@ -79,6 +79,24 @@ export class KpiPipeline {
     }
   }
 
+  async ensureDigestColumns(): Promise<void> {
+    try {
+      const p = await getKpiPool(this.settings);
+      for (const tbl of ['jira_kpi_digest', 'jira_kpi_digestUAT']) {
+        await p.request().query(`
+          IF OBJECT_ID('dbo.${tbl}') IS NOT NULL BEGIN
+            IF COL_LENGTH('${tbl}', 'summary') IS NOT NULL
+              ALTER TABLE dbo.${tbl} ALTER COLUMN summary NVARCHAR(4000) NULL;
+            IF COL_LENGTH('${tbl}', 'html') IS NOT NULL
+              ALTER TABLE dbo.${tbl} ALTER COLUMN html NVARCHAR(MAX) NULL;
+          END
+        `);
+      }
+    } catch (err) {
+      console.warn('[kpi-pipeline] Failed to widen digest columns:', err instanceof Error ? err.message : err);
+    }
+  }
+
   async collectJiraSnapshot(): Promise<void> {
     const started = new Date();
     let rowsAffected = 0;

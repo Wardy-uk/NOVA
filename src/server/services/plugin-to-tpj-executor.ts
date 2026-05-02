@@ -5,6 +5,7 @@ import { executeAndGetId } from './database.js';
 
 const TPJ_PROJECT_ID = '11808';
 const QUICK_RESOLVE_TRANSITION_ID = '17';
+const CF_RESOLUTION_TYPE = 'customfield_14494';
 
 export class PluginToTpjExecutor {
   private jiraClient: JiraRestClient;
@@ -65,8 +66,11 @@ export class PluginToTpjExecutor {
         { internal: false },
       );
 
-      // 5. Assign to NOVA service account, then transition original to Resolved
+      // 5. Set resolution type, assign to NOVA service account, then transition original to Resolved
       try {
+        await this.jiraClient.updateFields(ticketKey, {
+          [CF_RESOLUTION_TYPE]: { value: 'No Fault Found' },
+        });
         const novaAccountId = this.settings.get('nova_ai_jira_account_id');
         if (novaAccountId) {
           await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
@@ -74,7 +78,9 @@ export class PluginToTpjExecutor {
         await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID);
         console.log(`[plugin-to-tpj] Resolved original ${ticketKey}`);
       } catch (err) {
-        console.warn(`[plugin-to-tpj] Failed to transition ${ticketKey} to resolved:`, err);
+        const statusCode = (err as any)?.statusCode ?? (err as any)?.status ?? 'N/A';
+        const body = (err as any)?.body ? JSON.stringify((err as any).body).slice(0, 300) : '';
+        console.warn(`[plugin-to-tpj] Failed to transition ${ticketKey} to resolved: HTTP ${statusCode} — ${err instanceof Error ? err.message : err}${body ? ` | ${body}` : ''}`);
       }
 
       // 6. Log to hybrid_action_log
@@ -93,13 +99,17 @@ export class PluginToTpjExecutor {
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[plugin-to-tpj] Failed for ${ticketKey}:`, msg);
+      const statusCode = (err as any)?.statusCode ?? (err as any)?.status ?? 'N/A';
+      const responseBody = (err as any)?.body ? JSON.stringify((err as any).body).slice(0, 500) : 'N/A';
+      console.error(`[plugin-to-tpj] Failed for ${ticketKey}: HTTP ${statusCode} — ${msg}`);
+      console.error(`[plugin-to-tpj] Response body: ${responseBody}`);
 
+      const detail = `HTTP ${statusCode}: ${msg} | body: ${responseBody}`.slice(0, 4000);
       try {
         await executeAndGetId(
           `INSERT INTO hybrid_action_log (action_id, source_ticket_key, status, detail)
            VALUES ('plugin_to_tpj', ?, 'failed', ?)`,
-          [ticketKey, msg],
+          [ticketKey, detail],
         );
       } catch { /* best effort */ }
 

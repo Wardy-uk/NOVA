@@ -1,14 +1,14 @@
 import { query, execute } from './database.js';
 import { recordEvent } from './agent-events.js';
-import { createWorkingDayClock, type WorkingDayClock } from '../../shared/utils/workingDayClock.js';
+import { addBusinessHours, addBusinessMinutes } from '../utils/business-hours.js';
 
 export const DEFER_REASONS = {
-  'waiting_on_customer': { label: 'Waiting on customer', defaultHours: null },
-  'waiting_on_t2': { label: 'Waiting on T2', defaultHours: 8 },
-  'waiting_on_dev': { label: 'Waiting on dev', defaultHours: 40 },
-  'on_a_call': { label: 'On a call / phone follow-up', defaultHours: 2, maxHours: 2 },
-  'coffee_break': { label: 'Need to grab a coffee', defaultMinutes: 10 },
-  'disagree_with_ranking': { label: 'I disagree with the ranking', defaultMinutes: 30 },
+  'coffee_break': { label: 'Coffee break', defaultMinutes: 10 },
+  'in_meeting': { label: 'In a meeting', defaultMinutes: 30 },
+  'end_of_day': { label: 'End of day', nextWorkingDay: true },
+  'awaiting_customer': { label: 'Awaiting customer', businessHours: 4 },
+  'blocked_by_third_party': { label: 'Blocked by third party', businessHours: 24 },
+  'need_more_info': { label: 'Need more info', businessHours: 2 },
 } as const;
 
 export type DeferReason = keyof typeof DEFER_REASONS;
@@ -30,33 +30,25 @@ export function isValidDeferReason(reason: string): reason is DeferReason {
 }
 
 export class DeferService {
-  private clock: WorkingDayClock;
-
-  constructor(bankHolidays: string[] = []) {
-    this.clock = createWorkingDayClock({}, bankHolidays);
-  }
+  constructor() {}
 
   computeResurfaceAt(reason: DeferReason, customResurfaceAt?: string): Date {
     const config = DEFER_REASONS[reason];
     if (customResurfaceAt) {
       const custom = new Date(customResurfaceAt);
-      if (!isNaN(custom.getTime())) {
-        if ('maxHours' in config && config.maxHours) {
-          const maxAt = new Date(Date.now() + config.maxHours * 3600_000);
-          return custom.getTime() > maxAt.getTime() ? maxAt : custom;
-        }
-        return custom;
-      }
+      if (!isNaN(custom.getTime())) return custom;
     }
 
     if ('defaultMinutes' in config) {
-      return new Date(Date.now() + (config as { defaultMinutes: number }).defaultMinutes * 60_000);
+      return new Date(Date.now() + config.defaultMinutes * 60_000);
     }
-    const hours = (config as { defaultHours: number | null }).defaultHours;
-    if (hours === null) {
-      return this.clock.addWorkingDays(new Date(), 10);
+    if ('nextWorkingDay' in config) {
+      return addBusinessMinutes(new Date(Date.now() + 8 * 3600_000), 0);
     }
-    return this.clock.addWorkingHours(new Date(), hours);
+    if ('businessHours' in config) {
+      return addBusinessHours(new Date(), config.businessHours);
+    }
+    return new Date(Date.now() + 10 * 60_000);
   }
 
   async deferTicket(
@@ -86,13 +78,6 @@ export class DeferService {
       deferred_until: resurfaceAt.toISOString(),
       note: note ?? null,
     });
-
-    if (reason === 'disagree_with_ranking') {
-      await recordEvent('rank_override', agentId, ticketKey, {
-        override_reason: 'Agent disagreed with ranking',
-        note: note ?? null,
-      });
-    }
 
     const row = await query<TicketDefer>(
       `SELECT TOP 1 * FROM ticket_defers
@@ -147,8 +132,8 @@ export class DeferService {
         emitted++;
       }
 
-      // Auto-resolve time-based defers that have resurfaced
-      if (row.reason !== 'waiting_on_customer' && row.reason !== 'waiting_on_t2' && row.reason !== 'waiting_on_dev') {
+      // Auto-resolve time-based defers that have resurfaced (keep awaiting_customer and blocked_by_third_party active until manual resolve)
+      if (row.reason !== 'awaiting_customer' && row.reason !== 'blocked_by_third_party') {
         await this.resolveDefer(row.ticket_key, row.agent_id, 'timer_elapsed');
       }
     }

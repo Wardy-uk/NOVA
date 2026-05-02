@@ -115,12 +115,12 @@ const CALL_TYPE_TIER_MAP: Record<string, LlmTier> = {
   quick_resolve: 'standard',
   call_review: 'standard',
   '121-prep': 'standard',
-  ticket_analysis: 'cheap',
+  ticket_analysis: 'standard',
   ticket_classification: 'cheap',
   classification: 'cheap',
   next_action: 'cheap',
-  kpi_daily_digest: 'cheap',
-  kpi_weekly_digest: 'cheap',
+  kpi_daily_digest: 'standard',
+  kpi_weekly_digest: 'standard',
 };
 
 // Per-million-token pricing (USD).
@@ -421,6 +421,9 @@ export class LlmService {
     const configs: ProviderConfig[] = [];
 
     const primaryKey = this.getApiKey(tierCfg.primary.provider);
+    if (primaryKey && primaryKey.length < 10) {
+      console.warn(`[llm] ${tierCfg.primary.provider} API key looks invalid (${primaryKey.length} chars)`);
+    }
     if (primaryKey) {
       configs.push({
         provider: tierCfg.primary.provider,

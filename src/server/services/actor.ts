@@ -83,6 +83,19 @@ export class Actor {
     if (!transitionId) {
       return { success: false, action: 'transition', ticketKey: decision.ticketKey, detail: 'No transitionId in decision output.' };
     }
+    // Quick Resolve (17) requires resolution type — set default if not in fields
+    if (transitionId === '17') {
+      const fields = (decision.output.fields as Record<string, unknown>) ?? {};
+      if (!fields['customfield_14494']) {
+        try {
+          await this.jiraClient.updateFields(decision.ticketKey, {
+            customfield_14494: { value: 'No Fault Found' },
+          });
+        } catch (err) {
+          console.warn(`[actor] Failed to set resolution type on ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+        }
+      }
+    }
     await this.jiraClient.transitionIssue(decision.ticketKey, transitionId, {
       fields: (decision.output.fields as Record<string, unknown>) ?? undefined,
     });

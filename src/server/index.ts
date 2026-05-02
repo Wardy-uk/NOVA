@@ -1069,7 +1069,7 @@ async function main() {
     } catch { /* bank holidays file optional */ }
 
     const queueRanker = new QueueRanker(jiraCacheQueries, settingsQueries, bankHolidays);
-    const deferService = new DeferService(bankHolidays);
+    const deferService = new DeferService();
     app.use('/api/my-tickets', createMyTicketsRoutes({
       jiraClient: agentLoop.getJiraClient(),
       queueRanker,
@@ -1121,6 +1121,7 @@ async function main() {
 
     // Ensure NOVA AI synthetic agent exists in KPI database
     kpiPipeline.ensureNovaAiAgent().catch(() => {});
+    kpiPipeline.ensureDigestColumns().catch(() => {});
 
     // KPI pipeline timers (initial kicks staggered to avoid startup storm)
     setInterval(() => kpiPipeline.collectJiraSnapshot().catch(e => console.warn('[kpi-pipeline] snapshot failed:', e.message)), 10 * 60 * 1000);

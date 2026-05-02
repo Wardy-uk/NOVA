@@ -373,6 +373,17 @@ export class LifecycleManager {
           { internal: true },
         ).catch(() => { /* best effort */ });
 
+        if (!shadow) {
+          try {
+            await this.jiraClient.updateFields(ticket.ticketId, {
+              customfield_14494: { value: 'No Fault Found' },
+            });
+            await this.jiraClient.transitionIssue(ticket.ticketId, '17');
+          } catch (err) {
+            console.warn(`[lifecycle] Failed to resolve ${ticket.ticketId} in Jira:`, err instanceof Error ? err.message : err);
+          }
+        }
+
         await this.ticketState.transition(ticket.ticketId, 'closed');
         autoClosed++;
       }

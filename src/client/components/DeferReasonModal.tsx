@@ -6,12 +6,12 @@ interface DeferReasonItem {
 }
 
 const FALLBACK_REASONS: DeferReasonItem[] = [
-  { key: 'waiting_on_customer', label: 'Waiting on customer' },
-  { key: 'waiting_on_t2', label: 'Waiting on T2' },
-  { key: 'waiting_on_dev', label: 'Waiting on dev' },
-  { key: 'on_a_call', label: 'On a call / phone follow-up' },
-  { key: 'coffee_break', label: 'Need to grab a coffee' },
-  { key: 'disagree_with_ranking', label: 'I disagree with the ranking' },
+  { key: 'coffee_break', label: 'Coffee break' },
+  { key: 'in_meeting', label: 'In a meeting' },
+  { key: 'end_of_day', label: 'End of day' },
+  { key: 'awaiting_customer', label: 'Awaiting customer' },
+  { key: 'blocked_by_third_party', label: 'Blocked by third party' },
+  { key: 'need_more_info', label: 'Need more info' },
 ];
 
 interface Props {
@@ -42,7 +42,7 @@ export function DeferReasonModal({ ticketKey, onClose, onDeferred }: Props) {
       .catch(() => {});
   }, []);
 
-  const needsCustomTime = selected === 'on_a_call';
+  const needsCustomTime = false;
 
   const handleSubmit = async () => {
     if (!selected) return;
