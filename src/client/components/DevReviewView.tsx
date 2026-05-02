@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { TicketBriefCard } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
+import { useAuth } from '../hooks/useAuth.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -78,20 +79,11 @@ interface TicketDetail {
 
 // ── API helpers ────────────────────────────────────────────────────────────
 
-function authHeaders(): Record<string, string> {
-  const lsToken = localStorage.getItem('nova_auth_token');
-  const ssToken = sessionStorage.getItem('nova_auth_token');
-  console.log('[DEV-REVIEW authHeaders]', 'localStorage:', !!lsToken, 'sessionStorage:', !!ssToken, 'using:', lsToken ? 'localStorage' : ssToken ? 'sessionStorage' : 'NONE');
-  const token = lsToken || ssToken || '';
-  return { Authorization: `Bearer ${token}` };
-}
-
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/dev-review${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...authHeaders(),
       ...(init?.headers || {}),
     },
   });
@@ -228,6 +220,7 @@ function BriefField({ label, value, mono }: { label: string; value: string | und
 // ── Main component ───────────────────────────────────────────────────────
 
 export function DevReviewView() {
+  const { user } = useAuth();
   const [items, setItems] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -254,14 +247,7 @@ export function DevReviewView() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
 
-  const currentUserId = useMemo(() => {
-    // Pulled from JWT — decode payload section
-    try {
-      const tok = localStorage.getItem('nova_auth_token') || '';
-      const payload = JSON.parse(atob(tok.split('.')[1] || ''));
-      return Number(payload?.id ?? 0);
-    } catch { return 0; }
-  }, []);
+  const currentUserId = user?.id ?? 0;
 
   const fireToast = (kind: 'ok' | 'err', msg: string) => {
     setToast({ kind, msg });
@@ -273,11 +259,7 @@ export function DevReviewView() {
     setError(null);
     try {
       const qs = showAll ? '?showAll=1' : '';
-      const directToken = localStorage.getItem('nova_auth_token');
-      console.log('[DEV-REVIEW loadQueue] direct localStorage token:', !!directToken, 'sessionStorage:', !!sessionStorage.getItem('nova_auth_token'));
-      const res = await fetch(`/api/dev-review/queue${qs}`, {
-        headers: { Authorization: `Bearer ${directToken || ''}` },
-      });
+      const res = await fetch(`/api/dev-review/queue${qs}`);
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Failed to load queue');
       const data = json.data as QueueItem[];
@@ -395,10 +377,7 @@ export function DevReviewView() {
       // fallback flag on a transition failure.
       const res = await fetch(`/api/dev-review/ticket/${selectedKey}/comment`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ body: commentDraft }),
       });
       const json = await res.json();
@@ -439,10 +418,7 @@ export function DevReviewView() {
     try {
       const res = await fetch(`/api/dev-review/ticket/${selectedKey}/accept`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           note: acceptNote,
           tldr: acceptTldr,

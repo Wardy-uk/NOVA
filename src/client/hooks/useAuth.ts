@@ -95,9 +95,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
 
   if (currentToken && url.startsWith('/api/') && !url.startsWith('/api/auth/')) {
     const headers = new Headers(init?.headers);
-    if (!headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${currentToken}`);
-    }
+    headers.set('Authorization', `Bearer ${currentToken}`);
     init = { ...init, headers };
   }
 
