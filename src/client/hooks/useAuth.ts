@@ -18,6 +18,8 @@ interface AuthState {
   error: string | null;
 }
 
+console.log('[AUTH DEBUG BUILD] useAuth module loaded — instrumented build for token-wipe diagnosis');
+
 const TOKEN_KEY = 'nova_auth_token';
 const REMEMBER_KEY = 'nova_remember_me';
 
@@ -37,7 +39,11 @@ function storeToken(token: string, rememberMe: boolean) {
 }
 
 function clearToken(reason: string) {
-  console.warn('[useAuth] clearToken called:', reason, new Error().stack);
+  console.error('[AUTH DEBUG] clearToken called:', reason,
+    '\n  localStorage had token:', !!localStorage.getItem(TOKEN_KEY),
+    '\n  sessionStorage had token:', !!sessionStorage.getItem(TOKEN_KEY),
+    '\n  interceptor currentToken:', !!currentToken,
+    '\n  stack:', new Error().stack);
   localStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_KEY);
 }
@@ -51,6 +57,16 @@ const originalFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 
+  // DEBUG: log every fetch to /api/
+  if (url.startsWith('/api/')) {
+    const existingAuth = new Headers(init?.headers).get('Authorization');
+    console.log('[FETCH]', url,
+      'interceptor-token:', !!currentToken,
+      'localStorage-token:', !!localStorage.getItem('nova_auth_token'),
+      'sessionStorage-token:', !!sessionStorage.getItem('nova_auth_token'),
+      'pre-existing-auth-header:', existingAuth ? `"${existingAuth.substring(0, 15)}..."` : 'none');
+  }
+
   if (currentToken && url.startsWith('/api/') && !url.startsWith('/api/auth/')) {
     const headers = new Headers(init?.headers);
     if (!headers.has('Authorization')) {
@@ -59,7 +75,17 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     init = { ...init, headers };
   }
 
-  return originalFetch(input, init);
+  const response = await originalFetch(input, init);
+
+  // DEBUG: log 401 responses
+  if (url.startsWith('/api/') && response.status === 401) {
+    console.error('[FETCH 401]', url,
+      'interceptor-token:', !!currentToken,
+      'localStorage-token:', !!localStorage.getItem('nova_auth_token'),
+      'sessionStorage-token:', !!sessionStorage.getItem('nova_auth_token'));
+  }
+
+  return response;
 };
 
 // Only one useAuth instance should manage token lifecycle (SSO extraction,
@@ -95,6 +121,7 @@ export function useAuth() {
     // Secondary instances: read shared state, never touch the token.
     // The primary instance owns the token lifecycle.
     if (primaryInitDone) {
+      console.log('[AUTH DEBUG] Secondary useAuth instance mounted. sharedAuthState user:', sharedAuthState?.user?.username ?? 'null');
       if (sharedAuthState?.user) {
         setState({ ...sharedAuthState, initializing: false });
       } else {
@@ -124,6 +151,7 @@ export function useAuth() {
       return;
     }
     primaryInitDone = true;
+    console.log('[AUTH DEBUG] Primary useAuth instance initializing. Token in localStorage:', !!localStorage.getItem(TOKEN_KEY), 'sessionStorage:', !!sessionStorage.getItem(TOKEN_KEY));
 
     // 1. Check for SSO token in URL hash (from callback redirect)
     const hash = window.location.hash;
@@ -143,6 +171,7 @@ export function useAuth() {
             setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
           } else {
             clearToken('SSO token rejected by /api/auth/me');
+            console.error('[AUTH DEBUG] Nulling currentToken (SSO rejected)');
             currentToken = null;
             setState({ user: null, token: null, initializing: false, busy: false, error: 'SSO login failed. Please try again.' });
           }
@@ -158,6 +187,7 @@ export function useAuth() {
     const params = new URLSearchParams(window.location.search);
     const ssoError = params.get('sso_error');
     if (ssoError) {
+      console.error('[AUTH DEBUG] SSO error in query params:', ssoError);
       window.history.replaceState(null, '', window.location.pathname);
       setState({ user: null, token: null, initializing: false, busy: false, error: `Microsoft sign-in failed: ${ssoError}` });
       return;
@@ -166,15 +196,18 @@ export function useAuth() {
     // 3. Normal stored token validation
     const token = getStoredToken();
     if (!token) {
+      console.error('[AUTH DEBUG] No stored token found during primary init. localStorage:', !!localStorage.getItem(TOKEN_KEY), 'sessionStorage:', !!sessionStorage.getItem(TOKEN_KEY));
       setState({ user: null, token: null, initializing: false, busy: false, error: null });
       return;
     }
+    console.log('[AUTH DEBUG] Found stored token, validating with /api/auth/me. Token length:', token.length);
 
     originalFetch('/api/auth/me', {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => {
         if (r.status === 401) {
+          console.error('[AUTH DEBUG] /api/auth/me returned 401. Response status:', r.status);
           clearToken('stored token rejected 401 by /api/auth/me');
           setState({ user: null, token: null, initializing: false, busy: false, error: null });
           return null;
@@ -186,6 +219,7 @@ export function useAuth() {
         if (json.ok && json.data?.user) {
           setState({ user: json.data.user, token, initializing: false, busy: false, error: null });
         } else {
+          console.error('[AUTH DEBUG] /api/auth/me returned non-ok JSON:', JSON.stringify(json).substring(0, 200));
           clearToken('stored token invalid (non-ok response from /api/auth/me)');
           setState({ user: null, token: null, initializing: false, busy: false, error: null });
         }
@@ -258,6 +292,7 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(() => {
+    console.error('[AUTH DEBUG] logout() called', new Error().stack);
     clearToken('user logout');
     currentToken = null;
     setState({ user: null, token: null, initializing: false, busy: false, error: null });

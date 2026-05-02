@@ -79,7 +79,11 @@ interface TicketDetail {
 // ── API helpers ────────────────────────────────────────────────────────────
 
 function authHeaders(): Record<string, string> {
-  return { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` };
+  const lsToken = localStorage.getItem('nova_auth_token');
+  const ssToken = sessionStorage.getItem('nova_auth_token');
+  console.log('[DEV-REVIEW authHeaders]', 'localStorage:', !!lsToken, 'sessionStorage:', !!ssToken, 'using:', lsToken ? 'localStorage' : ssToken ? 'sessionStorage' : 'NONE');
+  const token = lsToken || ssToken || '';
+  return { Authorization: `Bearer ${token}` };
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -269,8 +273,10 @@ export function DevReviewView() {
     setError(null);
     try {
       const qs = showAll ? '?showAll=1' : '';
+      const directToken = localStorage.getItem('nova_auth_token');
+      console.log('[DEV-REVIEW loadQueue] direct localStorage token:', !!directToken, 'sessionStorage:', !!sessionStorage.getItem('nova_auth_token'));
       const res = await fetch(`/api/dev-review/queue${qs}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` },
+        headers: { Authorization: `Bearer ${directToken || ''}` },
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Failed to load queue');
