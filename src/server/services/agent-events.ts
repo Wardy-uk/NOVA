@@ -7,6 +7,9 @@ const ALLOWED_EVENT_TYPES = [
   'rank_override',
   'defer_overrun',
   'next_update_commitment_set',
+  'hygiene_flagged',
+  'hygiene_pass_completed',
+  'auto_close_backstop_fired',
 ] as const;
 
 export type AgentEventType = typeof ALLOWED_EVENT_TYPES[number];
