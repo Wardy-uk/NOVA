@@ -2657,7 +2657,7 @@ export class ApprovalQueries {
   }
 
   async getStats(): Promise<{
-    pending: number; approved: number; declined: number; timed_out: number;
+    pending: number; approved: number; declined: number; declined_today: number; timed_out: number;
     today_decided: number; system_approved_today: number; system_expired_today: number;
   }> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
@@ -2666,6 +2666,8 @@ export class ApprovalQueries {
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN status = 'declined' AND decided_at >= CAST(GETUTCDATE() AS DATE)
+            AND decided_by NOT IN ('system', 'system-sla', 'system-cleanup', 'NOVA-lifecycle') THEN 1 ELSE 0 END) as declined_today,
         SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END) as timed_out,
         SUM(CASE WHEN decided_at >= CAST(GETUTCDATE() AS DATE) AND status IN ('approved', 'declined')
             AND decided_by NOT IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as today_decided,
@@ -2680,6 +2682,8 @@ export class ApprovalQueries {
         SUM(CASE WHEN approval_status IS NULL OR approval_status = 'pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN approval_status = 'declined' THEN 1 ELSE 0 END) as declined,
+        SUM(CASE WHEN approval_status = 'declined' AND resolved_at >= CAST(GETUTCDATE() AS DATE)
+            AND (resolved_by IS NULL OR resolved_by NOT IN ('system', 'system-sla', 'system-cleanup', 'NOVA-lifecycle')) THEN 1 ELSE 0 END) as declined_today,
         SUM(CASE WHEN approval_status IN ('approved', 'declined') AND resolved_at >= CAST(GETUTCDATE() AS DATE)
             AND (resolved_by IS NULL OR resolved_by NOT IN ('system', 'system-sla', 'system-cleanup')) THEN 1 ELSE 0 END) as today_decided,
         SUM(CASE WHEN approval_status = 'approved' AND resolved_at >= CAST(GETUTCDATE() AS DATE)
@@ -2692,6 +2696,7 @@ export class ApprovalQueries {
       pending: ((qRow?.pending as number) || 0) + ((nRow?.pending as number) || 0),
       approved: ((qRow?.approved as number) || 0) + ((nRow?.approved as number) || 0),
       declined: ((qRow?.declined as number) || 0) + ((nRow?.declined as number) || 0),
+      declined_today: ((qRow?.declined_today as number) || 0) + ((nRow?.declined_today as number) || 0),
       timed_out: (qRow?.timed_out as number) || 0,
       today_decided: ((qRow?.today_decided as number) || 0) + ((nRow?.today_decided as number) || 0),
       system_approved_today: ((qRow?.system_approved_today as number) || 0) + ((nRow?.system_approved_today as number) || 0),

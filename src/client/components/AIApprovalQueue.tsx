@@ -29,6 +29,7 @@ interface ApprovalStats {
   pending: number;
   approved: number;
   declined: number;
+  declined_today: number;
   timed_out: number;
   today_decided: number;
   system_approved_today: number;
@@ -95,7 +96,7 @@ let toastIdCounter = 0;
 
 export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQueueProps) {
   const [items, setItems] = useState<ApprovalItem[]>([]);
-  const [stats, setStats] = useState<ApprovalStats>({ pending: 0, approved: 0, declined: 0, timed_out: 0, today_decided: 0, system_approved_today: 0, system_expired_today: 0 });
+  const [stats, setStats] = useState<ApprovalStats>({ pending: 0, approved: 0, declined: 0, declined_today: 0, timed_out: 0, today_decided: 0, system_approved_today: 0, system_expired_today: 0 });
   const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -333,7 +334,7 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
         <KpiCard value={stats.pending} label="Pending" color="#f59e0b" />
         <KpiCard value={stats.today_decided} label="Approved Today" color="#22c55e"
           subtitle={stats.system_approved_today > 0 ? `+${stats.system_approved_today} auto` : undefined} />
-        <KpiCard value={stats.declined} label="Declined Today" color="#ef4444" />
+        <KpiCard value={stats.declined_today} label="Declined Today" color="#ef4444" />
         <KpiCard value={stats.timed_out} label="Timed Out" color="#6b7280"
           subtitle={stats.system_expired_today > 0 ? `${stats.system_expired_today} auto` : undefined} />
       </div>

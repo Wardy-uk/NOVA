@@ -22,7 +22,7 @@ const TIER_IDS: Record<string, string> = {
 const DEFAULT_DAILY_CAP = 50;
 const MAX_PRE_EMPTION_RETRIES = 3;
 
-// Abuse report field extraction patterns (moved from hybrid-action-detector.ts)
+// Abuse report field extraction patterns
 const ABUSE_FIELD_PATTERNS = {
   abuseEmail: /(?:abuse\s*email|from|email)\s*[:=]\s*([^\r\n]+)/i,
   instanceId: /instance\s*id\s*[:=]\s*(\d+)/i,

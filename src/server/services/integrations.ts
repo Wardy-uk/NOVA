@@ -244,7 +244,6 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
     fields: [
       { key: 'agent_shadow_mode', label: 'Agent Mode', type: 'select', options: ['full_shadow', 'hybrid', 'live'], placeholder: 'full_shadow', required: false },
       { key: 'agent_hybrid_allowed_actions', label: 'Hybrid Allowed Actions (JSON)', type: 'text', placeholder: '["plugin_to_tpj","abuse_report"]', required: false },
-      { key: 'agent_weekend_exempt_actions', label: 'Weekend Exempt Actions (JSON)', type: 'text', placeholder: '["plugin_to_tpj","abuse_report"]', required: false },
       { key: 'agent_jira_project', label: 'Jira Projects', type: 'text', placeholder: 'NT,NTPJ', required: false },
       { key: 'agent_sweep_interval_ticks', label: 'Sweep Interval (ticks)', type: 'text', placeholder: '30', required: false },
       { key: 'agent_sweep_ai_request_hours', label: 'AI Request Stale (hours)', type: 'text', placeholder: '2', required: false },
