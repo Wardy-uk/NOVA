@@ -1482,6 +1482,46 @@ async function main() {
     res.json({ ok: true, data: results });
   });
 
+  app.get('/api/debug/jira-transitions/:ticketKey', (req, res, next) => {
+    if (!isAdmin(req.user?.role ?? '')) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    next();
+  }, async (req, res) => {
+    const client = buildOnboardingJiraClient();
+    if (!client) { res.json({ ok: false, error: 'Jira client not configured' }); return; }
+    const { ticketKey } = req.params;
+    try {
+      const raw = await client.getTransitionsWithFields(ticketKey);
+      const transitions = ((raw as any)?.transitions ?? []) as any[];
+      const summary = transitions.map((t: any) => {
+        const fields = t.fields ?? {};
+        const fieldSummary: Record<string, any> = {};
+        for (const [fid, meta] of Object.entries(fields)) {
+          const m = meta as any;
+          fieldSummary[fid] = {
+            name: m.name,
+            required: m.required,
+            schema: m.schema,
+            allowedValues: m.allowedValues?.map((v: any) => ({ id: v.id, value: v.value, name: v.name })),
+            hasDefaultValue: m.hasDefaultValue,
+            defaultValue: m.defaultValue,
+          };
+        }
+        return {
+          id: t.id,
+          name: t.name,
+          to: { name: t.to?.name, id: t.to?.id, statusCategory: t.to?.statusCategory?.name },
+          fields: fieldSummary,
+          requiredFields: Object.entries(fieldSummary)
+            .filter(([, v]: [string, any]) => v.required)
+            .map(([k, v]: [string, any]) => `${k} (${v.name})`),
+        };
+      });
+      res.json({ ok: true, issueKey: ticketKey, transitions: summary, _raw: raw });
+    } catch (err: any) {
+      res.json({ ok: false, error: err.message, statusCode: err.statusCode, body: err.body });
+    }
+  });
+
   // Onboarding ticket orchestrator — uses Admin > Jira (Global) credentials
   function buildOrchestrator(): OnboardingOrchestrator | null {
     const client = buildOnboardingJiraClient();
