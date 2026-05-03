@@ -74,6 +74,7 @@ const UatComparisonView = lazy(() => import('./components/UatComparisonView.js')
 const AgentProfileView = lazy(() => import('./components/AgentProfileView.js').then(m => ({ default: m.AgentProfileView })));
 const KbGapsView = lazy(() => import('./components/KbGapsView.js').then(m => ({ default: m.KbGapsView })));
 const AgentLearningsView = lazy(() => import('./components/AgentLearningsView.js').then(m => ({ default: m.AgentLearningsView })));
+const ManagerDashboardView = lazy(() => import('./components/ManagerDashboardView.js').then(m => ({ default: m.ManagerDashboardView })));
 const AgentRosterView = lazy(() => import('./components/AgentRosterView.js').then(m => ({ default: m.AgentRosterView })));
 const BriefingView = lazy(() => import('./components/BriefingView.js').then(m => ({ default: m.BriefingView })));
 const BacklogKanbanView = lazy(() => import('./components/BacklogKanbanView.js').then(m => ({ default: m.BacklogKanbanView })));
@@ -102,7 +103,7 @@ type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
   | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-tickets' | 'calyx-kb' | 'calyx-improvements' | 'calyx-settings' | 'calyx-problems' | 'calyx-changes' | 'calyx-major-incidents' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
-  | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
+  | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
   | 'backlog-board'
   | 'settings' | 'admin-panel' | 'my-feedback'
   | 'help' | 'debug';
@@ -131,6 +132,7 @@ const TAB_AREA_GATE: Partial<Record<View, string>> = {
   standup: 'nova_features',
   'team-workload': 'nova_features',
   'people-roster': 'admin',
+  'agent-manager': 'admin',
 };
 
 const AREAS: Record<Area, AreaDef> = {
@@ -280,6 +282,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'agent-workspace', label: 'Workspace' },
       { view: 'agent-dashboard', label: 'Dashboard' },
       { view: 'agent-coaching', label: 'Coaching' },
+      { view: 'agent-manager', label: 'Manager' },
       { view: 'agent-pipelines', label: 'Pipelines' },
       { view: 'agent-uat-compare', label: 'UAT Compare' },
       { view: 'agent-kb-gaps', label: 'KB Gaps' },
@@ -1306,6 +1309,9 @@ export function App() {
           )}
           {view === 'agent-coaching' && canSeeArea('ai-agent') && (
             <AgentCoachingView />
+          )}
+          {view === 'agent-manager' && canSeeArea('ai-agent') && (
+            <ManagerDashboardView />
           )}
           {view === 'agent-pipelines' && canSeeArea('ai-agent') && (
             <AgentPipelinesView />

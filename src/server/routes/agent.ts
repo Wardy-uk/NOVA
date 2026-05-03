@@ -3,7 +3,7 @@ import sql from 'mssql';
 import { requireRole, requireSuperAdmin } from '../middleware/auth.js';
 import type { AgentLoop } from '../services/agent-loop.js';
 import { query, execute } from '../services/database.js';
-import { recordEvent } from '../services/agent-events.js';
+import { recordEvent, type AgentEvent } from '../services/agent-events.js';
 import { MODEL_PRICING } from '../services/llm-service.js';
 import { resolveStatusName, resolveStatusFromCache } from '../utils/jira-status.js';
 import { RespondResultSchema, type RespondResult } from '../services/respond-schema.js';
@@ -1492,6 +1492,345 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
     } else {
       res.status(400).json({ ok: false, error: 'model must be "A" or "B"' });
+    }
+  });
+
+  // ── Manager Dashboard endpoints ──
+
+  function periodToDateFilter(period: string): string {
+    if (period === 'week') return `AND created_at >= DATEADD(DAY, -7, SYSUTCDATETIME())`;
+    if (period === 'month') return `AND created_at >= DATEADD(DAY, -30, SYSUTCDATETIME())`;
+    return `AND created_at >= CAST(SYSUTCDATETIME() AS DATE)`;
+  }
+
+  function workingHoursInPeriod(period: string): number {
+    const now = new Date();
+    let start: Date;
+    if (period === 'month') { start = new Date(now); start.setDate(start.getDate() - 30); }
+    else if (period === 'week') { start = new Date(now); start.setDate(start.getDate() - 7); }
+    else { start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0); }
+    const clock = createWorkingDayClock();
+    return Math.max(0, clock.workingHoursBetween(start, now));
+  }
+
+  router.get('/manager/overview', async (req, res) => {
+    const period = (req.query.period as string) || 'today';
+    const pool = (req.query.pool as string) || 'all';
+    const dateFilter = periodToDateFilter(period);
+    const poolFilter = pool !== 'all' ? `AND ar.pool = '${pool.replace(/'/g, '')}'` : '';
+
+    try {
+      const actionRows = await query<{ agent_id: string; action_type: string; time_to_action_ms: number | null }>(
+        `SELECT e.agent_id, JSON_VALUE(e.payload, '$.action_type') AS action_type,
+                CAST(JSON_VALUE(e.payload, '$.time_to_action_ms') AS FLOAT) AS time_to_action_ms
+         FROM agent_events e
+         LEFT JOIN agent_roster ar ON e.agent_id = ar.display_name
+         WHERE e.event_type = 'action_taken' ${dateFilter} ${poolFilter}`,
+        [],
+      );
+
+      const deferRows = await query<{ agent_id: string; reason: string }>(
+        `SELECT e.agent_id, JSON_VALUE(e.payload, '$.reason') AS reason
+         FROM agent_events e
+         LEFT JOIN agent_roster ar ON e.agent_id = ar.display_name
+         WHERE e.event_type = 'action_deferred' ${dateFilter} ${poolFilter}`,
+        [],
+      );
+
+      const hygieneRows = await query<{ agent_id: string; hour_block: string; fails: number; ticket_count: number; duration_ms: number }>(
+        `SELECT e.agent_id,
+                JSON_VALUE(e.payload, '$.hour_block') AS hour_block,
+                CAST(JSON_VALUE(e.payload, '$.fails') AS INT) AS fails,
+                CAST(JSON_VALUE(e.payload, '$.ticket_count') AS INT) AS ticket_count,
+                CAST(JSON_VALUE(e.payload, '$.duration_ms') AS FLOAT) AS duration_ms
+         FROM agent_events e
+         LEFT JOIN agent_roster ar ON e.agent_id = ar.display_name
+         WHERE e.event_type = 'hygiene_pass_completed' ${dateFilter} ${poolFilter}`,
+        [],
+      );
+
+      const backstopRows = await query<{ agent_id: string; ticket_key: string; days_in_state: number; created_at: string }>(
+        `SELECT e.agent_id, e.ticket_key,
+                CAST(JSON_VALUE(e.payload, '$.days_in_state') AS INT) AS days_in_state,
+                e.created_at
+         FROM agent_events e
+         LEFT JOIN agent_roster ar ON e.agent_id = ar.display_name
+         WHERE e.event_type = 'auto_close_backstop_fired' ${dateFilter} ${poolFilter}`,
+        [],
+      );
+
+      const commitmentRows = await query<{ agent_id: string; ticket_key: string; committed_at: string; due_at: string; working_days_out: number }>(
+        `SELECT e.agent_id, e.ticket_key,
+                JSON_VALUE(e.payload, '$.committed_at') AS committed_at,
+                JSON_VALUE(e.payload, '$.due_at') AS due_at,
+                CAST(JSON_VALUE(e.payload, '$.working_days_out') AS INT) AS working_days_out
+         FROM agent_events e
+         LEFT JOIN agent_roster ar ON e.agent_id = ar.display_name
+         WHERE e.event_type = 'next_update_commitment_set' ${dateFilter} ${poolFilter}`,
+        [],
+      );
+
+      const commitmentMetKeys = new Set(
+        (await query<{ ticket_key: string }>(
+          `SELECT DISTINCT e.ticket_key FROM agent_events e WHERE e.event_type = 'action_taken' AND JSON_VALUE(e.payload, '$.action_type') = 'commitment_met' ${dateFilter}`, [],
+        )).map(r => r.ticket_key),
+      );
+
+      const overrideRows = await query<{ agent_id: string }>(
+        `SELECT e.agent_id FROM agent_events e
+         LEFT JOIN agent_roster ar ON e.agent_id = ar.display_name
+         WHERE e.event_type = 'rank_override' ${dateFilter} ${poolFilter}`,
+        [],
+      );
+
+      const kbGapCount = (await query<{ cnt: number }>(
+        `SELECT COUNT(*) AS cnt FROM agent_events e
+         WHERE e.event_type = 'action_taken' AND JSON_VALUE(e.payload, '$.action_type') = 'kb_gap_logged' ${dateFilter}`,
+        [],
+      ))[0]?.cnt ?? 0;
+
+      // Overdue customers — live check
+      let customersOverdue = 0;
+      try {
+        const perceiver = agentLoop.getPerceiver();
+        if (perceiver) {
+          const openIssues = perceiver.getLastOpenIssues();
+          const clock = createWorkingDayClock();
+          const now = new Date();
+          for (const issue of openIssues) {
+            const f = issue.fields as Record<string, any>;
+            const nextUpdate = f?.[JIRA_FIELDS.AGENT_NEXT_UPDATE];
+            if (nextUpdate && new Date(nextUpdate) < now) { customersOverdue++; continue; }
+            const comments = (f?.comment as any)?.comments ?? [];
+            const lastPublic = [...comments].reverse().find((c: any) => !c.properties?.find((p: any) => p.key === 'sd.public.comment' && p.value?.internal));
+            if (lastPublic) {
+              const hours = clock.workingHoursBetween(new Date(lastPublic.created), now);
+              if (hours > 16) customersOverdue++;
+            }
+          }
+        }
+      } catch { /* best-effort */ }
+
+      // Hourly activity heatmap
+      const hourlyRows = await query<{ hour: number; day: string; eventCount: number }>(
+        `SELECT DATEPART(HOUR, created_at) AS hour,
+                CONVERT(VARCHAR(10), created_at, 23) AS day,
+                COUNT(*) AS eventCount
+         FROM agent_events
+         WHERE event_type IN ('action_taken', 'action_deferred', 'hygiene_pass_completed') ${dateFilter}
+         GROUP BY DATEPART(HOUR, created_at), CONVERT(VARCHAR(10), created_at, 23)
+         ORDER BY day, hour`,
+        [],
+      );
+
+      // Build agent roster map
+      const rosterRows = await query<{ display_name: string; pool: string }>(
+        `SELECT display_name, pool FROM agent_roster WHERE active = 1 ${pool !== 'all' ? `AND pool = '${pool.replace(/'/g, '')}'` : ''}`,
+        [],
+      );
+      const agentNames = new Map(rosterRows.map(r => [r.display_name, r.pool]));
+
+      // Aggregate all unique agent IDs from events
+      const allAgentIds = new Set([
+        ...actionRows.map(r => r.agent_id),
+        ...deferRows.map(r => r.agent_id),
+        ...hygieneRows.map(r => r.agent_id),
+        ...backstopRows.map(r => r.agent_id),
+        ...commitmentRows.map(r => r.agent_id),
+        ...overrideRows.map(r => r.agent_id),
+      ].filter(Boolean));
+
+      // Per-agent stats
+      const ttaValues = actionRows.filter(r => r.time_to_action_ms != null).map(r => r.time_to_action_ms!);
+      const avgTimeToAction = ttaValues.length > 0 ? ttaValues.reduce((a, b) => a + b, 0) / ttaValues.length : null;
+
+      const expectedHours = workingHoursInPeriod(period);
+      const totalHygieneExpected = Math.floor(expectedHours) * rosterRows.length;
+      const totalHygienePasses = hygieneRows.length;
+      const hygieneCompliance = totalHygieneExpected > 0 ? Math.round((totalHygienePasses / totalHygieneExpected) * 100) : 100;
+
+      const totalCommitments = commitmentRows.length;
+      const metCount = commitmentRows.filter(r => commitmentMetKeys.has(r.ticket_key)).length;
+      const now = new Date();
+      const missedCount = commitmentRows.filter(r => !commitmentMetKeys.has(r.ticket_key) && r.due_at && new Date(r.due_at) < now).length;
+      const commitmentsMet = totalCommitments > 0 ? Math.round((metCount / totalCommitments) * 100) : 100;
+
+      const agents = [...allAgentIds].map(agentId => {
+        const agentActions = actionRows.filter(r => r.agent_id === agentId);
+        const agentTta = agentActions.filter(r => r.time_to_action_ms != null).map(r => r.time_to_action_ms!);
+        const agentDefers = deferRows.filter(r => r.agent_id === agentId);
+        const agentHygiene = hygieneRows.filter(r => r.agent_id === agentId);
+        const agentBackstops = backstopRows.filter(r => r.agent_id === agentId);
+        const agentCommitments = commitmentRows.filter(r => r.agent_id === agentId);
+        const agentOverrides = overrideRows.filter(r => r.agent_id === agentId);
+        const agentCommitmentsMet = agentCommitments.filter(r => commitmentMetKeys.has(r.ticket_key)).length;
+        const agentCommitmentsMissed = agentCommitments.filter(r => !commitmentMetKeys.has(r.ticket_key) && r.due_at && new Date(r.due_at) < now).length;
+
+        return {
+          agentId,
+          agentName: agentId,
+          pool: agentNames.get(agentId) ?? 'unknown',
+          actionsTaken: agentActions.length,
+          avgTimeToAction: agentTta.length > 0 ? agentTta.reduce((a, b) => a + b, 0) / agentTta.length : null,
+          deferrals: agentDefers.length,
+          hygienePassCount: agentHygiene.length,
+          hygieneExpected: Math.floor(expectedHours),
+          hygieneCompliance: Math.floor(expectedHours) > 0 ? Math.round((agentHygiene.length / Math.floor(expectedHours)) * 100) : 100,
+          autoCloseBackstops: agentBackstops.length,
+          commitmentsSet: agentCommitments.length,
+          commitmentsMet: agentCommitmentsMet,
+          commitmentsMissed: agentCommitmentsMissed,
+          stretchCommitments: agentCommitments.filter(r => (r.working_days_out ?? 0) >= 5).length,
+          rankOverrides: agentOverrides.length,
+        };
+      });
+
+      // Action breakdown
+      const actionCounts = new Map<string, number>();
+      for (const r of actionRows) {
+        const t = r.action_type ?? 'unknown';
+        actionCounts.set(t, (actionCounts.get(t) ?? 0) + 1);
+      }
+      const actionBreakdown = [...actionCounts.entries()].map(([actionType, count]) => ({ actionType, count })).sort((a, b) => b.count - a.count);
+
+      // Defer breakdown
+      const deferCounts = new Map<string, number>();
+      for (const r of deferRows) {
+        const reason = r.reason ?? 'unknown';
+        deferCounts.set(reason, (deferCounts.get(reason) ?? 0) + 1);
+      }
+      const deferBreakdown = [...deferCounts.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
+
+      res.json({
+        ok: true,
+        data: {
+          period,
+          pool,
+          kpis: {
+            avgTimeToAction,
+            hygieneCompliance,
+            autoCloseBackstops: backstopRows.length,
+            commitmentsMet,
+            kbGapsLogged: kbGapCount,
+            customersOverdue,
+          },
+          agents,
+          actionBreakdown,
+          deferBreakdown,
+          hourlyActivity: hourlyRows,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Manager overview failed' });
+    }
+  });
+
+  router.get('/manager/agent/:agentId', async (req, res) => {
+    const { agentId } = req.params;
+    const period = (req.query.period as string) || 'today';
+    const dateFilter = periodToDateFilter(period);
+
+    try {
+      const recentEvents = (await query<AgentEvent>(
+        `SELECT TOP(50) id, event_type, ticket_key, agent_id, payload, created_at
+         FROM agent_events
+         WHERE agent_id = ? ${dateFilter}
+         ORDER BY created_at DESC`,
+        [agentId],
+      )).map(r => {
+        if (typeof r.payload === 'string') try { r.payload = JSON.parse(r.payload as any); } catch { r.payload = {}; }
+        return { eventType: r.event_type, ticketKey: r.ticket_key, payload: r.payload, createdAt: r.created_at };
+      });
+
+      const commitmentRows = await query<{ ticket_key: string; committed_at: string; due_at: string; working_days_out: number; created_at: string }>(
+        `SELECT e.ticket_key,
+                JSON_VALUE(e.payload, '$.committed_at') AS committed_at,
+                JSON_VALUE(e.payload, '$.due_at') AS due_at,
+                CAST(JSON_VALUE(e.payload, '$.working_days_out') AS INT) AS working_days_out,
+                e.created_at
+         FROM agent_events e
+         WHERE e.agent_id = ? AND e.event_type = 'next_update_commitment_set' ${dateFilter}
+         ORDER BY e.created_at DESC`,
+        [agentId],
+      );
+
+      const metKeys = new Set(
+        (await query<{ ticket_key: string; created_at: string }>(
+          `SELECT e.ticket_key, e.created_at FROM agent_events e
+           WHERE e.agent_id = ? AND e.event_type = 'action_taken' AND JSON_VALUE(e.payload, '$.action_type') = 'commitment_met' ${dateFilter}`,
+          [agentId],
+        )).map(r => r.ticket_key),
+      );
+
+      const now = new Date();
+      const commitments = commitmentRows.map(r => {
+        const isPast = r.due_at && new Date(r.due_at) < now;
+        const met = metKeys.has(r.ticket_key);
+        return {
+          ticketKey: r.ticket_key,
+          committedAt: r.committed_at ?? r.created_at,
+          dueAt: r.due_at,
+          workingDaysOut: r.working_days_out ?? 0,
+          status: met ? 'met' as const : (isPast ? 'missed' as const : 'pending' as const),
+          isStretch: (r.working_days_out ?? 0) >= 5,
+        };
+      });
+
+      const hygienePasses = (await query<{ hour_block: string; ticket_count: number; fails: number; duration_ms: number; created_at: string }>(
+        `SELECT JSON_VALUE(e.payload, '$.hour_block') AS hour_block,
+                CAST(JSON_VALUE(e.payload, '$.ticket_count') AS INT) AS ticket_count,
+                CAST(JSON_VALUE(e.payload, '$.fails') AS INT) AS fails,
+                CAST(JSON_VALUE(e.payload, '$.duration_ms') AS FLOAT) AS duration_ms,
+                e.created_at
+         FROM agent_events e
+         WHERE e.agent_id = ? AND e.event_type = 'hygiene_pass_completed' ${dateFilter}
+         ORDER BY e.created_at DESC`,
+        [agentId],
+      )).map(r => ({
+        hourBlock: r.hour_block,
+        ticketCount: r.ticket_count,
+        fails: r.fails,
+        durationMs: r.duration_ms,
+        createdAt: r.created_at,
+      }));
+
+      const backstops = (await query<{ ticket_key: string; days_in_state: number; created_at: string }>(
+        `SELECT e.ticket_key,
+                CAST(JSON_VALUE(e.payload, '$.days_in_state') AS INT) AS days_in_state,
+                e.created_at
+         FROM agent_events e
+         WHERE e.agent_id = ? AND e.event_type = 'auto_close_backstop_fired' ${dateFilter}`,
+        [agentId],
+      )).map(r => ({ ticketKey: r.ticket_key, daysInState: r.days_in_state, createdAt: r.created_at }));
+
+      const rankOverrides = (await query<{ cnt: number }>(
+        `SELECT COUNT(*) AS cnt FROM agent_events WHERE agent_id = ? AND event_type = 'rank_override' ${dateFilter}`,
+        [agentId],
+      ))[0]?.cnt ?? 0;
+
+      const rosterRow = await query<{ display_name: string }>(
+        `SELECT TOP(1) display_name FROM agent_roster WHERE display_name = ?`,
+        [agentId],
+      );
+
+      res.json({
+        ok: true,
+        data: {
+          agentId,
+          agentName: rosterRow[0]?.display_name ?? agentId,
+          period,
+          recentEvents,
+          commitments,
+          hygienePasses,
+          qualitySignals: {
+            autoCloseBackstops: backstops,
+            declinedEscalations: 0,
+            rankOverrides,
+          },
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Agent detail failed' });
     }
   });
 
