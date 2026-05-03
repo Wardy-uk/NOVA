@@ -69,26 +69,60 @@ export function TaskListHeader({ agentName, teamName, ticketCount }: Props) {
   }
 
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-[#1A1F26] border border-[#2A2F38] rounded-lg mb-4">
-      <div className="flex items-center gap-3">
-        <h2 className="text-sm font-semibold text-neutral-100 uppercase tracking-wide">
-          My Tickets
-        </h2>
-        <span className="text-xs text-neutral-400">
-          {agentName}{teamName ? ` · ${teamName}` : ''}
-        </span>
-        <span className="text-xs bg-[#272C33] text-neutral-300 px-2 py-0.5 rounded">
-          {ticketCount} ticket{ticketCount !== 1 ? 's' : ''}
-        </span>
+    <div className="flex items-center justify-between px-4 py-3 mb-5 rounded-xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+      <div className="flex items-center gap-4">
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-black"
+          style={{
+            background: 'linear-gradient(135deg, #10b981, #5ec1ca)',
+            boxShadow: '0 6px 24px rgba(16,185,129,0.3), inset 0 1px 0 rgba(255,255,255,0.3)',
+            color: '#0f172a',
+          }}
+        >
+          ◈
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.15em] text-neutral-500 font-semibold">
+            {agentName}{teamName ? ` · ${teamName}` : ''}
+          </div>
+          <h1
+            className="text-lg font-black tracking-tight"
+            style={{
+              fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+              background: 'linear-gradient(135deg, #f8fafc 0%, #94a3b8 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }}
+          >
+            My Tickets
+          </h1>
+        </div>
       </div>
-      <div className="flex items-center gap-3 text-xs text-neutral-400">
-        <span>{timeStr}</span>
-        <span className={hygieneColor}>{hygieneText}</span>
+      <div className="flex items-center gap-5">
+        <div className="flex flex-col items-end">
+          <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-semibold">Queue</div>
+          <div className="text-xl font-black tracking-tight text-neutral-200" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+            {ticketCount}
+          </div>
+        </div>
+        <div className="flex flex-col items-end">
+          <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-semibold">Time</div>
+          <div className="text-sm font-bold text-neutral-300">{timeStr}</div>
+        </div>
+        <div className="flex flex-col items-end">
+          <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-semibold">Hygiene</div>
+          <div className={`text-sm font-bold ${hygieneColor}`}>
+            {hygiene ? (hygiene.hygieneDue ? 'Due' : `${hygiene.passesTodayCount}/${workingHoursElapsed}`) : '—'}
+          </div>
+        </div>
         {jiraConnected !== null && (
-          <span className={jiraConnected ? 'text-emerald-400' : 'text-red-400'}>
-            <span className="inline-block w-1.5 h-1.5 rounded-full mr-1" style={{ background: jiraConnected ? '#10b981' : '#ef4444' }} />
-            Jira: {jiraConnected ? 'connected' : 'not connected'}
-          </span>
+          <div className="flex flex-col items-end">
+            <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-semibold">Jira</div>
+            <div className={`text-sm font-bold ${jiraConnected ? 'text-emerald-400' : 'text-red-400'}`}>
+              <span className="inline-block w-1.5 h-1.5 rounded-full mr-1" style={{ background: jiraConnected ? '#10b981' : '#ef4444' }} />
+              {jiraConnected ? 'OK' : 'Off'}
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -100,26 +100,115 @@ const SOURCE_COLORS: Record<string, string> = {
   milestone: 'bg-emerald-600',
 };
 
+// --- ADF text helper ---
+
+function adfToText(adf: unknown): string {
+  if (!adf) return '';
+  if (typeof adf === 'string') return adf;
+  try {
+    const walk = (node: any): string => {
+      if (!node) return '';
+      if (typeof node === 'string') return node;
+      if (node.text) return node.text;
+      if (Array.isArray(node.content)) return node.content.map(walk).join('');
+      return '';
+    };
+    return walk(adf);
+  } catch { return ''; }
+}
+
+function timeAgo(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return 'now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  return `${Math.floor(hr / 24)}d`;
+}
+
+function getTicketMeta(task: Task | undefined) {
+  if (!task) return { status: '', tier: '', tldr: '' };
+  const rd = (task.raw_data && typeof task.raw_data === 'object') ? task.raw_data as Record<string, unknown> : null;
+  const statusRaw = rd?.status;
+  const status = typeof statusRaw === 'string' ? statusRaw : (statusRaw as any)?.name ?? task.status ?? '';
+  const tierRaw = rd?.customfield_12981;
+  const tier = typeof tierRaw === 'string' ? tierRaw : (tierRaw as any)?.value ?? '';
+  const tldr = adfToText(rd?.customfield_13184);
+  return { status, tier, tldr };
+}
+
+function StatusPill({ status }: { status: string }) {
+  if (!status) return null;
+  const s = status.toLowerCase();
+  let bg = 'rgba(100,116,139,0.15)';
+  let fg = '#94a3b8';
+  if (s.includes('progress') || s.includes('working')) { bg = 'rgba(59,130,246,0.15)'; fg = '#60a5fa'; }
+  else if (s.includes('waiting') || s.includes('hold')) { bg = 'rgba(245,158,11,0.15)'; fg = '#f59e0b'; }
+  else if (s.includes('done') || s.includes('closed') || s.includes('resolved')) { bg = 'rgba(16,185,129,0.15)'; fg = '#10b981'; }
+  return (
+    <span
+      className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full whitespace-nowrap"
+      style={{ background: bg, color: fg, border: `1px solid ${fg}40` }}
+    >
+      {status}
+    </span>
+  );
+}
+
+function TierBadge({ tier }: { tier: string }) {
+  if (!tier) return null;
+  return (
+    <span
+      className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
+      style={{ background: 'rgba(155,106,237,0.15)', color: '#c4b5fd', border: '1px solid rgba(155,106,237,0.3)' }}
+    >
+      {tier}
+    </span>
+  );
+}
+
 // --- Banded view sub-components ---
 
-function BandAccordion({ label, count, defaultOpen, children }: {
+const BAND_ACCENTS: Record<string, string> = {
+  now: '#10b981',
+  next: '#94a3b8',
+  deferred: '#f59e0b',
+  hygiene: '#ef4444',
+  waiting: '#9b6aed',
+};
+
+function BandAccordion({ label, count, defaultOpen, accentKey, children }: {
   label: string;
   count: number;
   defaultOpen?: boolean;
+  accentKey?: string;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen ?? false);
+  const accent = BAND_ACCENTS[accentKey ?? ''] ?? '#94a3b8';
   return (
     <div className="mb-3">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full text-left px-3 py-2 bg-[#1A1F26] border border-[#2A2F38] rounded-lg hover:bg-[#1E232B] transition-colors"
+        className="group flex items-center gap-2.5 w-full text-left px-4 py-2.5 rounded-xl transition-all hover:scale-[1.005]"
+        style={{
+          background: 'linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)',
+          border: '1px solid rgba(255,255,255,0.06)',
+        }}
       >
-        <span className="text-[10px] text-neutral-500">{open ? '▼' : '▶'}</span>
-        <span className="text-xs font-semibold text-neutral-300 uppercase tracking-wide">{label}</span>
-        <span className="text-[10px] text-neutral-500">({count})</span>
+        <span className="text-[10px] text-neutral-500 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+        <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: accent }}>{label}</span>
+        <span
+          className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+          style={{ background: `${accent}20`, color: accent }}
+        >
+          {count}
+        </span>
       </button>
-      {open && <div className="mt-2 space-y-2 pl-2">{children}</div>}
+      {open && <div className="mt-2 space-y-1.5 pl-1">{children}</div>}
     </div>
   );
 }
@@ -129,55 +218,77 @@ function NextTicketRow({ ticket, task, onClick }: {
   task: Task | undefined;
   onClick: () => void;
 }) {
-  const statusColor = task?.status?.toLowerCase().includes('progress')
-    ? 'text-blue-400'
-    : task?.status?.toLowerCase().includes('waiting')
-    ? 'text-amber-400'
-    : 'text-neutral-400';
-
-  const age = task?.created_at ? daysOpen(task.created_at) : '-';
+  const { status, tier, tldr } = getTicketMeta(task);
+  const age = task?.created_at ? daysOpen(task.created_at) : '';
 
   return (
-    <button
+    <div
       onClick={onClick}
-      className="w-full text-left px-3 py-2 rounded-lg border border-[#2A2F38] bg-[#141820]/60 opacity-60 hover:opacity-80 hover:bg-[#1A1F26] transition-all"
+      className="group cursor-pointer p-3 rounded-xl transition-all duration-200"
+      style={{
+        background: 'rgba(255,255,255,0.02)',
+        border: '1px solid rgba(255,255,255,0.06)',
+      }}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-xs font-mono text-blue-400 shrink-0">{ticket.ticketKey}</span>
-          <span className="text-sm text-neutral-200 truncate">{task?.title ?? ticket.ticketKey}</span>
-        </div>
-        <div className="flex items-center gap-3 shrink-0 ml-3">
-          {task?.status && (
-            <span className={`text-[10px] ${statusColor}`}>{task.status}</span>
-          )}
-          <span className="text-[10px] text-neutral-500">{ticket.rankReason}</span>
-          <span className="text-[10px] text-neutral-600 font-mono">{ticket.score}</span>
-          <span className="text-[10px] text-neutral-600">{age}</span>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <span className="text-[10px] font-mono font-bold text-[#5ec1ca]">{ticket.ticketKey}</span>
+          <StatusPill status={status} />
+          <TierBadge tier={tier} />
         </div>
       </div>
-    </button>
+      <div className="text-[12px] text-neutral-50 font-semibold truncate mb-1">
+        {task?.title ?? ticket.ticketKey}
+      </div>
+      {tldr && (
+        <div className="text-[11px] text-neutral-300 line-clamp-2 mb-2 leading-snug">{tldr}</div>
+      )}
+      <div className="flex items-center justify-between text-[10px] text-neutral-400">
+        <span>{ticket.rankReason}</span>
+        <div className="flex items-center gap-2">
+          {age && <span>{age} old</span>}
+          {task?.updated_at && <span>{timeAgo(task.updated_at)}</span>}
+        </div>
+      </div>
+    </div>
   );
 }
 
-function DeferredRow({ ticket, task, onClick }: {
+function DeferredRow({ ticket, task, onClick, accent }: {
   ticket: RankedTicket;
   task: Task | undefined;
   onClick: () => void;
+  accent?: 'amber' | 'purple' | 'red';
 }) {
+  const { status, tier, tldr } = getTicketMeta(task);
+  const borderColor = accent === 'amber' ? 'rgba(245,158,11,0.4)' : accent === 'purple' ? 'rgba(155,106,237,0.4)' : accent === 'red' ? 'rgba(239,68,68,0.4)' : 'rgba(245,158,11,0.4)';
+
   return (
-    <button
+    <div
       onClick={onClick}
-      className="w-full text-left px-3 py-2 rounded-lg border border-[#2A2F38] bg-[#141820] hover:bg-[#1A1F26] transition-colors"
+      className="group cursor-pointer p-3 rounded-xl transition-all duration-200 border-l-2"
+      style={{
+        background: 'rgba(255,255,255,0.02)',
+        border: '1px solid rgba(255,255,255,0.06)',
+        borderLeftWidth: '3px',
+        borderLeftColor: borderColor,
+      }}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-xs font-mono text-blue-400 shrink-0">{ticket.ticketKey}</span>
-          <span className="text-sm text-neutral-200 truncate">{task?.title ?? ticket.ticketKey}</span>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <span className="text-[10px] font-mono font-bold text-[#5ec1ca]">{ticket.ticketKey}</span>
+          <StatusPill status={status} />
+          <TierBadge tier={tier} />
         </div>
-        <span className="text-[10px] text-neutral-500 shrink-0 ml-3">{ticket.rankReason}</span>
       </div>
-    </button>
+      <div className="text-[12px] text-neutral-50 font-semibold truncate mb-1">
+        {task?.title ?? ticket.ticketKey}
+      </div>
+      {tldr && (
+        <div className="text-[11px] text-neutral-300 line-clamp-1 mb-1 leading-snug">{tldr}</div>
+      )}
+      <div className="text-[10px] text-neutral-400">{ticket.rankReason}</div>
+    </div>
   );
 }
 
@@ -461,160 +572,207 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
   }
 
   return (
-    <div className="max-w-5xl mx-auto">
-      <TaskListHeader
-        agentName={agentDisplayName ?? 'Agent'}
-        teamName={teamName}
-        ticketCount={queue?.tickets.length ?? 0}
+    <div className="relative max-w-5xl mx-auto">
+      {/* Ambient background */}
+      <div
+        className="fixed inset-0 pointer-events-none opacity-60"
+        style={{
+          background: `
+            radial-gradient(ellipse at 12% 18%, rgba(155,106,237,0.08) 0%, transparent 50%),
+            radial-gradient(ellipse at 88% 25%, rgba(94,193,202,0.06) 0%, transparent 50%),
+            radial-gradient(ellipse at 50% 95%, rgba(16,185,129,0.04) 0%, transparent 55%)
+          `,
+          animation: 'tlMesh 25s ease-in-out infinite alternate',
+          zIndex: 0,
+        }}
       />
+      <style>{`
+        @keyframes tlMesh { 0% { transform: translate(0,0) scale(1); } 50% { transform: translate(-1%,1%) scale(1.02); } 100% { transform: translate(1%,-1%) scale(0.99); } }
+        @keyframes tlShift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+        @keyframes tlFadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+        .tl-fade { animation: tlFadeIn 0.4s cubic-bezier(0.16,1,0.3,1) both; }
+        .tl-scroll::-webkit-scrollbar { width: 5px; }
+        .tl-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+        .tl-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+      `}</style>
 
-      {/* === NOW band === */}
-      {nowTicket ? (
-        <div className="mb-4">
-          <div className="flex items-center gap-2 px-3 py-1.5 mb-2">
-            <span className="text-xs font-bold text-emerald-400 uppercase tracking-wide">Now</span>
-            <span className="text-[10px] text-neutral-500">(1)</span>
-          </div>
-          <div className="bg-[#2f353d] border border-[#5ec1ca]/40 rounded-xl p-4 space-y-3">
-            {nowBrief && <TicketBriefCard {...nowBrief} />}
-            <AINextActionCard
-              ticketKey={nowTicket.ticketKey}
-              onEscalate={(ctx) => setEscalateTicket({ ticketKey: nowTicket.ticketKey, aiContext: ctx })}
-              onHoldingUpdate={() => setHoldingUpdateTicket(nowTicket.ticketKey)}
-              onCloseTicket={() => setCloseTicketKey(nowTicket.ticketKey)}
-              onRoute={() => {
-                const t = taskByKey.get(nowTicket.ticketKey);
-                setRouteTicket({ key: nowTicket.ticketKey, summary: t?.title ?? nowTicket.ticketKey });
+      <div className="relative z-10">
+        <TaskListHeader
+          agentName={agentDisplayName ?? 'Agent'}
+          teamName={teamName}
+          ticketCount={queue?.tickets.length ?? 0}
+        />
+
+        {/* === NOW band === */}
+        {nowTicket ? (
+          <div className="mb-5 tl-fade">
+            <div className="flex items-center gap-2.5 px-4 py-2 mb-2">
+              <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Now</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(16,185,129,0.2)', color: '#10b981' }}>1</span>
+            </div>
+            <div
+              className="relative rounded-2xl overflow-hidden p-5 space-y-3"
+              style={{
+                background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%)',
+                backdropFilter: 'blur(20px)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)',
               }}
-              onChase={() => setChaseTicketKey(nowTicket.ticketKey)}
-              onStuckHelper={() => {
-                const t = taskByKey.get(nowTicket.ticketKey);
-                setStuckHelperTicket({ key: nowTicket.ticketKey, summary: t?.title ?? nowTicket.ticketKey });
-              }}
-            />
-            <div className="flex gap-2 pt-2 border-t border-[#3a424d]">
-              {nowTicket.nextAction?.primaryAction && (
+            >
+              <div
+                className="absolute top-0 left-0 right-0 h-[2px]"
+                style={{
+                  background: 'linear-gradient(90deg, transparent, #10b981 30%, #5ec1ca 70%, transparent)',
+                  backgroundSize: '200% 100%',
+                  animation: 'tlShift 6s ease-in-out infinite',
+                }}
+              />
+              {nowBrief && <TicketBriefCard {...nowBrief} />}
+              <AINextActionCard
+                ticketKey={nowTicket.ticketKey}
+                onEscalate={(ctx) => setEscalateTicket({ ticketKey: nowTicket.ticketKey, aiContext: ctx })}
+                onHoldingUpdate={() => setHoldingUpdateTicket(nowTicket.ticketKey)}
+                onCloseTicket={() => setCloseTicketKey(nowTicket.ticketKey)}
+                onRoute={() => {
+                  const t = taskByKey.get(nowTicket.ticketKey);
+                  setRouteTicket({ key: nowTicket.ticketKey, summary: t?.title ?? nowTicket.ticketKey });
+                }}
+                onChase={() => setChaseTicketKey(nowTicket.ticketKey)}
+                onStuckHelper={() => {
+                  const t = taskByKey.get(nowTicket.ticketKey);
+                  setStuckHelperTicket({ key: nowTicket.ticketKey, summary: t?.title ?? nowTicket.ticketKey });
+                }}
+              />
+              <div className="flex gap-2 pt-3 border-t border-white/5">
+                {nowTicket.nextAction?.primaryAction && (
+                  <button
+                    onClick={() => {
+                      const pa = nowTicket.nextAction!.primaryAction;
+                      if (pa.jiraTransition && /escalat/i.test(pa.jiraTransition)) {
+                        setEscalateTicket({ ticketKey: nowTicket.ticketKey, aiContext: { headline: nowTicket.nextAction!.headline, body: nowTicket.nextAction!.body } });
+                      } else if (/update|holding|hasn.t heard/i.test(pa.label)) {
+                        setHoldingUpdateTicket(nowTicket.ticketKey);
+                      } else if (/close|resolve|mark.?resolved|confirmed.?fix/i.test(pa.label)) {
+                        setCloseTicketKey(nowTicket.ticketKey);
+                      }
+                    }}
+                    className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]"
+                    style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}
+                  >
+                    {nowTicket.nextAction.primaryAction.label}
+                  </button>
+                )}
                 <button
                   onClick={() => {
-                    const pa = nowTicket.nextAction!.primaryAction;
-                    if (pa.jiraTransition && /escalat/i.test(pa.jiraTransition)) {
-                      setEscalateTicket({ ticketKey: nowTicket.ticketKey, aiContext: { headline: nowTicket.nextAction!.headline, body: nowTicket.nextAction!.body } });
-                    } else if (/update|holding|hasn.t heard/i.test(pa.label)) {
-                      setHoldingUpdateTicket(nowTicket.ticketKey);
-                    } else if (/close|resolve|mark.?resolved|confirmed.?fix/i.test(pa.label)) {
-                      setCloseTicketKey(nowTicket.ticketKey);
-                    }
+                    const task = nowTask;
+                    if (task) setDrawerTaskId(task.id);
                   }}
-                  className="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors"
+                  className="px-3 py-1.5 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5 transition-colors"
                 >
-                  {nowTicket.nextAction.primaryAction.label}
+                  Edit first
                 </button>
-              )}
-              <button
-                onClick={() => {
-                  const task = nowTask;
-                  if (task) setDrawerTaskId(task.id);
-                }}
-                className="px-3 py-1.5 text-xs bg-[#272C33] hover:bg-[#2A2F38] text-neutral-300 rounded-lg transition-colors"
-              >
-                Edit first
-              </button>
-              <button
-                onClick={() => setDeferTicketKey(nowTicket.ticketKey)}
-                className="px-3 py-1.5 text-xs bg-amber-900/40 hover:bg-amber-900/60 text-amber-300 rounded-lg transition-colors"
-              >
-                Defer with reason
-              </button>
+                <button
+                  onClick={() => setDeferTicketKey(nowTicket.ticketKey)}
+                  className="px-3 py-1.5 text-xs rounded-lg font-semibold text-amber-300 border border-amber-500/30 hover:bg-amber-500/10 transition-colors"
+                >
+                  Defer with reason
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      ) : !isLoading ? (
-        <div className="mb-4 px-4 py-8 text-center bg-[#141820] border border-[#2A2F38] rounded-xl">
-          <p className="text-sm text-neutral-400">No tickets in queue</p>
-          <p className="text-xs text-neutral-600 mt-1">All caught up, or no tickets assigned to you</p>
-        </div>
-      ) : null}
-
-      {/* === NEXT band === */}
-      {bands.next.length > 0 && (
-        <div className="mb-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 mb-2">
-            <span className="text-xs font-semibold text-neutral-300 uppercase tracking-wide">Next</span>
-            <span className="text-[10px] text-neutral-500">— soft-locked, ranked</span>
-            <span className="text-[10px] text-neutral-500">({bands.next.length})</span>
+        ) : !isLoading ? (
+          <div className="mb-5 px-4 py-10 text-center rounded-2xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <p className="text-sm text-neutral-400">No tickets in queue</p>
+            <p className="text-xs text-neutral-600 mt-1">All caught up, or no tickets assigned to you</p>
           </div>
-          <div className="space-y-2">
-            {bands.next.map((ticket, i) => (
-              <NextTicketRow
-                key={ticket.ticketKey}
-                ticket={ticket}
-                task={taskByKey.get(ticket.ticketKey)}
-                onClick={() => handleClickNext(ticket, i + 1)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+        ) : null}
 
-      {/* === DEFERRED band === */}
-      <BandAccordion label="Deferred" count={bands.deferred.length}>
-        {bands.deferred.length === 0 ? (
-          <p className="text-xs text-neutral-600 px-3 py-2">No deferred tickets</p>
-        ) : (
-          bands.deferred.map(ticket => (
-            <DeferredRow
-              key={ticket.ticketKey}
-              ticket={ticket}
-              task={taskByKey.get(ticket.ticketKey)}
-              onClick={() => openDrawer(ticket.ticketKey)}
-            />
-          ))
+        {/* === NEXT band === */}
+        {bands.next.length > 0 && (
+          <div className="mb-4 tl-fade">
+            <div className="flex items-center gap-2.5 px-4 py-2 mb-2">
+              <span className="text-[11px] font-bold text-neutral-300 uppercase tracking-wider">Next</span>
+              <span className="text-[10px] text-neutral-500">— ranked</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(148,163,184,0.15)', color: '#94a3b8' }}>
+                {bands.next.length}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {bands.next.map((ticket, i) => (
+                <NextTicketRow
+                  key={ticket.ticketKey}
+                  ticket={ticket}
+                  task={taskByKey.get(ticket.ticketKey)}
+                  onClick={() => handleClickNext(ticket, i + 1)}
+                />
+              ))}
+            </div>
+          </div>
         )}
-      </BandAccordion>
 
-      {/* === HYGIENE QUEUE band === */}
-      <BandAccordion label="Hygiene Queue" count={bands.hygiene.length} defaultOpen={bands.hygiene.length > 0}>
-        <HygienePassPanel
-          onOpenTicket={openDrawer}
-          onAction={(ticketKey, checkId) => {
-            if (checkId === 'sla_risk' || checkId === 'chase_cadence') {
-              setHoldingUpdateTicket(ticketKey);
-            } else if (checkId === 'next_update_overdue' || checkId === 'customer_waiting') {
-              setHoldingUpdateTicket(ticketKey);
-            } else {
-              openDrawer(ticketKey);
-            }
-          }}
-        />
-        {bands.hygiene.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {bands.hygiene.map(ticket => (
+        {/* === DEFERRED band === */}
+        <BandAccordion label="Deferred" count={bands.deferred.length} accentKey="deferred">
+          {bands.deferred.length === 0 ? (
+            <p className="text-xs text-neutral-600 px-3 py-2">No deferred tickets</p>
+          ) : (
+            bands.deferred.map(ticket => (
               <DeferredRow
                 key={ticket.ticketKey}
                 ticket={ticket}
                 task={taskByKey.get(ticket.ticketKey)}
                 onClick={() => openDrawer(ticket.ticketKey)}
+                accent="amber"
               />
-            ))}
-          </div>
-        )}
-      </BandAccordion>
+            ))
+          )}
+        </BandAccordion>
 
-      {/* === WAITING ON OTHERS band === */}
-      <BandAccordion label="Waiting on Others" count={bands.waiting.length}>
-        {bands.waiting.length === 0 ? (
-          <p className="text-xs text-neutral-600 px-3 py-2">No tickets waiting on others</p>
-        ) : (
-          bands.waiting.map(ticket => (
-            <DeferredRow
-              key={ticket.ticketKey}
-              ticket={ticket}
-              task={taskByKey.get(ticket.ticketKey)}
-              onClick={() => openDrawer(ticket.ticketKey)}
-            />
-          ))
-        )}
-      </BandAccordion>
+        {/* === HYGIENE QUEUE band === */}
+        <BandAccordion label="Hygiene Queue" count={bands.hygiene.length} defaultOpen={bands.hygiene.length > 0} accentKey="hygiene">
+          <HygienePassPanel
+            onOpenTicket={openDrawer}
+            onAction={(ticketKey, checkId) => {
+              if (checkId === 'sla_risk' || checkId === 'chase_cadence') {
+                setHoldingUpdateTicket(ticketKey);
+              } else if (checkId === 'next_update_overdue' || checkId === 'customer_waiting') {
+                setHoldingUpdateTicket(ticketKey);
+              } else {
+                openDrawer(ticketKey);
+              }
+            }}
+          />
+          {bands.hygiene.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {bands.hygiene.map(ticket => (
+                <DeferredRow
+                  key={ticket.ticketKey}
+                  ticket={ticket}
+                  task={taskByKey.get(ticket.ticketKey)}
+                  onClick={() => openDrawer(ticket.ticketKey)}
+                  accent="red"
+                />
+              ))}
+            </div>
+          )}
+        </BandAccordion>
+
+        {/* === WAITING ON OTHERS band === */}
+        <BandAccordion label="Waiting on Others" count={bands.waiting.length} accentKey="waiting">
+          {bands.waiting.length === 0 ? (
+            <p className="text-xs text-neutral-600 px-3 py-2">No tickets waiting on others</p>
+          ) : (
+            bands.waiting.map(ticket => (
+              <DeferredRow
+                key={ticket.ticketKey}
+                ticket={ticket}
+                task={taskByKey.get(ticket.ticketKey)}
+                onClick={() => openDrawer(ticket.ticketKey)}
+                accent="purple"
+              />
+            ))
+          )}
+        </BandAccordion>
+      </div>
 
       {/* Defer modal */}
       {deferTicketKey && (
