@@ -573,505 +573,566 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
 
   // ---- Render ----
 
+  const drawerWidth = isJira ? 'max-w-5xl' : 'max-w-xl';
+
   return (
     <div className="fixed inset-0 z-50">
+      <style>{`
+        @keyframes tdShift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+        @keyframes tdFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        .td-scroll::-webkit-scrollbar { width: 4px; }
+        .td-scroll::-webkit-scrollbar-track { background: transparent; }
+        .td-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+        .td-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+      `}</style>
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="absolute right-0 top-0 h-full w-full max-w-xl bg-[#1f242b] border-l border-[#3a424d] shadow-2xl flex flex-col">
-        {/* Header */}
-        <div className="px-5 py-4 border-b border-[#3a424d] flex items-center gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${source.bg} ${source.text}`}>
-                {source.label}
-              </span>
-              {task.source_id && (
-                <span className="text-[10px] text-neutral-500 font-mono">{task.source_id}</span>
-              )}
-            </div>
-            <div className="text-sm text-neutral-100 font-semibold truncate">
-              {task.title}
-            </div>
-          </div>
-          {task.source_url && (
-            <a
-              href={task.source_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs px-2 py-1 rounded bg-[#2f353d] text-neutral-300 hover:text-[#5ec1ca] transition-colors shrink-0"
-            >
-              Open
-            </a>
-          )}
-          <button
-            onClick={onClose}
-            className="text-xs px-2 py-1 rounded bg-[#2f353d] text-neutral-300 hover:text-neutral-100 transition-colors shrink-0"
-          >
-            Close
-          </button>
-        </div>
+      <div className={`absolute right-0 top-0 h-full w-full ${drawerWidth} bg-[#0f1419] border-l shadow-2xl flex flex-col`} style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
 
-        {/* Navigation */}
-        <div className="px-5 py-3 border-b border-[#3a424d] flex items-center gap-2 text-xs text-neutral-400">
-          <button onClick={onPrev} disabled={index === 0} className="px-2 py-1 rounded bg-[#2f353d] disabled:opacity-40">
-            Prev
-          </button>
-          <button onClick={onNext} disabled={index >= total - 1} className="px-2 py-1 rounded bg-[#2f353d] disabled:opacity-40">
-            Next
-          </button>
-          <span className="ml-auto">{index + 1} of {total}</span>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-auto px-5 py-4 space-y-4">
-          {jiraLoading && <div className="text-sm text-neutral-400">Loading issue data...</div>}
-          {error && (
-            <div className="p-2 bg-red-950/50 border border-red-900 rounded text-red-400 text-xs">{error}</div>
-          )}
-          {success && (
-            <div className="p-2 bg-green-950/50 border border-green-900 rounded text-green-400 text-xs">{success}</div>
-          )}
-
-          {/* ---- JIRA LAYOUT ---- */}
-          {isJira && (
-            <>
-              {(() => {
-                const bp = briefPropsFromTask(task);
-                return bp ? <TicketBriefCard {...bp} compact /> : null;
-              })()}
-              {task.source === 'jira' && task.source_id && (
-                <AINextActionCard ticketKey={task.source_id} compact />
-              )}
-              <div className="grid grid-cols-2 gap-3 text-xs text-neutral-400">
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Status</div>
-                  <div className="text-neutral-200">{jiraFields?.status || metadata.status || task.status || 'Unknown'}</div>
-                </div>
-                <div className="relative">
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Assignee</div>
-                  <input
-                    type="text"
-                    value={assigneeSearch || (selectedAssignee ? selectedAssignee.displayName : (jiraFields?.assignee || metadata.assignee || 'Unassigned'))}
-                    onChange={(e) => handleAssigneeSearch(e.target.value)}
-                    onFocus={() => { if (assigneeResults.length > 0) setShowAssigneeDropdown(true); }}
-                    onBlur={() => setTimeout(() => setShowAssigneeDropdown(false), 200)}
-                    placeholder="Search users..."
-                    className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none"
-                  />
-                  {assigneeSearching && (
-                    <div className="absolute right-2 top-[22px] text-[10px] text-neutral-500">...</div>
-                  )}
-                  {showAssigneeDropdown && assigneeResults.length > 0 && (
-                    <div className="absolute z-10 left-0 right-0 mt-1 bg-[#2f353d] border border-[#3a424d] rounded shadow-lg max-h-40 overflow-auto">
-                      {assigneeResults.map((u) => (
-                        <button
-                          key={u.accountId}
-                          onMouseDown={() => handleAssigneeSelect(u)}
-                          className="w-full text-left px-3 py-1.5 text-xs text-neutral-200 hover:bg-[#363d47] transition-colors"
-                        >
-                          <span className="font-medium">{u.displayName}</span>
-                          {u.emailAddress && (
-                            <span className="text-neutral-500 ml-1.5">{u.emailAddress}</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {selectedAssignee && (
-                    <div className="mt-1 text-[10px] text-[#5ec1ca]">
-                      Will reassign to: {selectedAssignee.displayName}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Priority</div>
-                  <select
-                    value={priority || jiraFields?.priority || metadata.priority || priorityLabel(task.priority)}
-                    onChange={(e) => setPriority(e.target.value)}
-                    className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs"
-                  >
-                    {JIRA_PRIORITIES.map(p => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                    {priority && !JIRA_PRIORITIES.includes(priority) && (
-                      <option value={priority}>{priority}</option>
-                    )}
-                  </select>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Due Date</div>
-                  <input
-                    type="date"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs"
-                  />
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Current Tier</div>
-                  <div className="text-neutral-200">
-                    {(() => {
-                      const rd = (task.raw_data && typeof task.raw_data === 'object') ? task.raw_data as Record<string, unknown> : null;
-                      const raw = rd?.customfield_12981;
-                      const tier = typeof raw === 'string' ? raw : (raw as any)?.value ?? (raw as any)?.name ?? null;
-                      return tier || 'None';
-                    })()}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Agent Last Updated</div>
-                  <div className="text-neutral-200">
-                    {jiraFields?.agentLastUpdated ? formatDate(jiraFields.agentLastUpdated) : 'None'}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Agent Next Update</div>
-                  <input
-                    type="date"
-                    value={agentNextUpdate}
-                    onChange={(e) => setAgentNextUpdate(e.target.value)}
-                    className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs"
-                  />
-                </div>
-              </div>
-
-              {/* Title (read-only for Jira — edit in Jira) */}
-              <div>
-                <div className="text-[10px] uppercase tracking-widest mb-1 text-neutral-400">Summary</div>
-                <div className="text-sm text-neutral-200">{jiraFields?.summary || task.title}</div>
-              </div>
-
-              {/* Description */}
-              {(jiraFields?.description || task.description) && (
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1 text-neutral-400">Description</div>
-                  <div className="text-sm text-neutral-300 whitespace-pre-wrap bg-[#2f353d] rounded px-3 py-2 border border-[#3a424d] max-h-48 overflow-auto">
-                    {jiraFields?.description || task.description}
-                  </div>
-                </div>
-              )}
-
-              {/* Transition buttons */}
-              {canTransitionJira && allowedTransitions.length > 0 && (
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-2 text-neutral-400">Transition</div>
-                  <div className="flex flex-wrap gap-2">
-                    {allowedTransitions.map((t) => {
-                      const isWIP = t.name?.toLowerCase() === 'work in progress';
-                      return (
-                        <button
-                          key={String(t.id ?? t.name)}
-                          onClick={() => handleTransitionClick(t)}
-                          disabled={saving}
-                          className={`px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50 ${
-                            isWIP
-                              ? 'bg-blue-900/40 border-blue-800 text-blue-300 hover:bg-blue-900/60'
-                              : 'bg-[#2f353d] border-[#3a424d] text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100'
-                          }`}
-                        >
-                          {t.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Comment history */}
-              {jiraComments.length > 0 && (
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-2 text-neutral-400">
-                    Comments ({jiraComments.length})
-                  </div>
-                  <div className="space-y-2 max-h-60 overflow-auto">
-                    {[...jiraComments].reverse().map((c) => (
-                      <div key={c.id} className="px-3 py-2 rounded bg-[#272C33] border border-[#3a424d]">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs text-[#5ec1ca] font-medium">
-                            {c.author?.display_name ?? c.author?.name ?? 'Unknown'}
-                          </span>
-                          <span className="text-[10px] text-neutral-600">
-                            {new Date(c.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
-                            {' '}
-                            {new Date(c.created).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <div className="text-xs text-neutral-300 whitespace-pre-wrap break-words">
-                          {c.body}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Add comment */}
-              {canCommentJira && (
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1 text-neutral-400">Add Comment</div>
-                  <textarea
-                    value={comment}
-                    onChange={(e) => setComment(e.target.value)}
-                    rows={3}
-                    placeholder="Add a comment..."
-                    className="w-full bg-[#2f353d] text-neutral-200 rounded px-3 py-2 border border-[#3a424d] text-sm resize-none placeholder:text-neutral-600 focus:border-[#5ec1ca] focus:outline-none"
-                  />
-                </div>
-              )}
-            </>
-          )}
-
-          {/* ---- NON-JIRA LAYOUT ---- */}
-          {!isJira && (
-            <>
-              <div className="grid grid-cols-2 gap-3 text-xs text-neutral-400">
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Status</div>
-                  {canEditO365 ? (
-                    <select
-                      value={status}
-                      onChange={(e) => setStatus(e.target.value)}
-                      className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs"
-                    >
-                      <option value="open">Open</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="done">Done</option>
-                    </select>
-                  ) : (
-                    <div className="text-neutral-200 capitalize">{task.status?.replace('_', ' ') || 'Unknown'}</div>
-                  )}
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Priority</div>
-                  <div className="text-neutral-200">{priorityLabel(task.priority)}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Due Date</div>
-                  {canEditO365 ? (
-                    <input
-                      type="date"
-                      value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
-                      className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs"
-                    />
-                  ) : (
-                    <div className="text-neutral-200">{task.due_date ? formatDate(task.due_date) : 'None'}</div>
-                  )}
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest mb-1">Category</div>
-                  <div className="text-neutral-200 capitalize">{task.category ?? 'None'}</div>
-                </div>
-                {metadata.assignee && (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest mb-1">Assignee</div>
-                    <div className="text-neutral-200">{metadata.assignee}</div>
-                  </div>
+        {/* ── Header (GlassCard accent) ── */}
+        <TDGlassCard accent className="m-4 mb-0 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${source.bg} ${source.text}`}>
+                  {source.label}
+                </span>
+                {task.source_id && (
+                  <span className="text-[11px] font-mono font-bold text-[#5ec1ca]">{task.source_id}</span>
                 )}
-                {metadata.created && (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest mb-1">Created</div>
-                    <div className="text-neutral-200">{metadata.created}</div>
-                  </div>
+                {jiraFields?.status && (
+                  <span className="text-[10px] text-neutral-500">· {jiraFields.status}</span>
                 )}
               </div>
-
-              {/* Title */}
-              <div>
-                <div className="text-[10px] uppercase tracking-widest mb-1 text-neutral-400">Title</div>
-                {canEditO365 ? (
-                  <input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-2 border border-[#3a424d] text-sm"
-                  />
-                ) : (
-                  <div className="text-sm text-neutral-200">{task.title}</div>
-                )}
-              </div>
-
-              {/* Description */}
-              <div>
-                <div className="text-[10px] uppercase tracking-widest mb-1 text-neutral-400">Description</div>
-                {canEditO365 ? (
-                  <textarea
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    rows={5}
-                    className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-2 border border-[#3a424d] text-sm resize-none"
-                  />
-                ) : (
-                  <div className="text-sm text-neutral-300 whitespace-pre-wrap bg-[#2f353d] rounded px-3 py-2 border border-[#3a424d] max-h-48 overflow-auto">
-                    {task.description || 'No description'}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* Calendar edit */}
-          {isCalendar && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-[10px] uppercase tracking-widest text-neutral-400">Calendar Event</div>
-                <button
-                  onClick={() => setCalEditing(!calEditing)}
-                  className="text-[10px] text-[#5ec1ca] hover:text-[#4db0b9]"
-                >
-                  {calEditing ? 'Cancel' : 'Edit'}
-                </button>
-              </div>
-              {calEditing ? (
-                <div className="border border-[#3a424d] rounded bg-[#272C33] p-3 space-y-2">
-                  <div>
-                    <label className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block">Subject</label>
-                    <input
-                      value={calSubject} onChange={(e) => setCalSubject(e.target.value)}
-                      className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block">Start</label>
-                      <input type="datetime-local" value={calStart} onChange={(e) => setCalStart(e.target.value)}
-                        className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block">End</label>
-                      <input type="datetime-local" value={calEnd} onChange={(e) => setCalEnd(e.target.value)}
-                        className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block">Location</label>
-                    <input value={calLocation} onChange={(e) => setCalLocation(e.target.value)} placeholder="Meeting room or link"
-                      className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none" />
-                  </div>
-                  <button
-                    onClick={handleCalendarSave}
-                    disabled={calSaving || !calSubject.trim() || !calStart || !calEnd}
-                    className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50 transition-colors"
-                  >
-                    {calSaving ? 'Saving...' : 'Save Event'}
-                  </button>
-                </div>
-              ) : (
-                <div className="text-xs text-neutral-400 space-y-1">
-                  {calStart && <div>Start: <span className="text-neutral-200">{new Date(calStart).toLocaleString('en-GB')}</span></div>}
-                  {calEnd && <div>End: <span className="text-neutral-200">{new Date(calEnd).toLocaleString('en-GB')}</span></div>}
-                  {calLocation && <div>Location: <span className="text-neutral-200">{calLocation}</span></div>}
+              <h2 className="text-xl font-bold text-neutral-100 leading-tight" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+                {jiraFields?.summary || task.title}
+              </h2>
+              {isJira && (
+                <div className="flex items-center gap-3 mt-1.5 text-[11px] text-neutral-300 flex-wrap">
+                  <span>Reporter: <span className="text-neutral-100 font-semibold">{metadata.assignee ? '—' : '—'}</span></span>
+                  <span className="text-neutral-600">·</span>
+                  <span>Assignee: <span className="text-neutral-100 font-semibold">{jiraFields?.assignee || 'Unassigned'}</span></span>
+                  <span className="text-neutral-600">·</span>
+                  <span>Tier: <span className="text-neutral-100">{(() => {
+                    const rd = (task.raw_data && typeof task.raw_data === 'object') ? task.raw_data as Record<string, unknown> : null;
+                    const raw = rd?.customfield_12981;
+                    return typeof raw === 'string' ? raw : (raw as any)?.value ?? (raw as any)?.name ?? 'None';
+                  })()}</span></span>
                 </div>
               )}
             </div>
-          )}
 
-          {/* Email actions */}
-          {isEmail && (
-            <div>
-              <div className="text-[10px] uppercase tracking-widest mb-2 text-neutral-400">Email Actions</div>
-              <div className="flex flex-wrap gap-2 mb-3">
-                <button
-                  onClick={() => { setEmailMode('reply'); setEmailTo(''); setEmailBody(''); }}
-                  className={`px-3 py-1.5 text-xs rounded border transition-colors ${
-                    emailMode === 'reply'
-                      ? 'bg-[#5ec1ca]/20 border-[#5ec1ca]/40 text-[#5ec1ca]'
-                      : 'bg-[#2f353d] border-[#3a424d] text-neutral-300 hover:bg-[#363d47]'
-                  }`}
-                >
-                  Reply
-                </button>
-                <button
-                  onClick={() => { setEmailMode('forward'); setEmailTo(''); setEmailBody(''); }}
-                  className={`px-3 py-1.5 text-xs rounded border transition-colors ${
-                    emailMode === 'forward'
-                      ? 'bg-[#5ec1ca]/20 border-[#5ec1ca]/40 text-[#5ec1ca]'
-                      : 'bg-[#2f353d] border-[#3a424d] text-neutral-300 hover:bg-[#363d47]'
-                  }`}
-                >
-                  Forward
-                </button>
-              </div>
-
-              {emailMode && (
-                <div className="border border-[#3a424d] rounded bg-[#272C33] p-3 space-y-2">
-                  {emailMode === 'forward' && (
-                    <input
-                      type="email"
-                      value={emailTo}
-                      onChange={(e) => setEmailTo(e.target.value)}
-                      placeholder="Recipient email address"
-                      className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 border border-[#3a424d] text-xs focus:border-[#5ec1ca] focus:outline-none"
-                    />
-                  )}
-                  <textarea
-                    value={emailBody}
-                    onChange={(e) => setEmailBody(e.target.value)}
-                    rows={4}
-                    placeholder={emailMode === 'reply' ? 'Type your reply...' : 'Add a message (optional)...'}
-                    className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-2 border border-[#3a424d] text-xs resize-none focus:border-[#5ec1ca] focus:outline-none"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleEmailAction}
-                      disabled={emailSending || !emailBody.trim()}
-                      className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50 transition-colors"
-                    >
-                      {emailSending ? 'Sending...' : emailMode === 'reply' ? 'Send Reply' : 'Forward'}
-                    </button>
-                    <button
-                      onClick={() => setEmailMode(null)}
-                      className="px-3 py-1.5 text-xs rounded bg-[#363d47] text-neutral-400 hover:bg-[#3a424d] transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Quick actions */}
-          <div>
-            <div className="text-[10px] uppercase tracking-widest mb-2 text-neutral-400">Quick Actions</div>
-            <div className="flex flex-wrap gap-2">
+            {/* Action buttons */}
+            <div className="flex items-center gap-2 flex-shrink-0">
               <button
                 onClick={() => handleLocalAction(task.is_pinned ? 'unpin' : 'pin')}
-                className="px-3 py-1.5 text-xs rounded bg-[#2f353d] border border-[#3a424d] text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
+                className="px-2.5 py-1.5 text-[10px] rounded-lg font-semibold text-neutral-400 border border-white/10 hover:bg-white/5"
               >
                 {task.is_pinned ? 'Unfocus' : 'Focus'}
               </button>
               <button
                 onClick={() => handleLocalAction('done')}
-                className="px-3 py-1.5 text-xs rounded bg-green-900/30 border border-green-800/50 text-green-400 hover:bg-green-900/50 transition-colors"
+                className="px-2.5 py-1.5 text-[10px] rounded-lg font-semibold text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/10"
               >
-                Mark Done
+                Done
               </button>
               <button
                 onClick={() => handleLocalAction('dismiss')}
-                className="px-3 py-1.5 text-xs rounded bg-[#2f353d] border border-[#3a424d] text-neutral-400 hover:text-red-400 hover:border-red-900 transition-colors"
+                className="px-2.5 py-1.5 text-[10px] rounded-lg font-semibold text-neutral-500 border border-white/10 hover:text-red-400 hover:border-red-500/30"
               >
                 Dismiss
+              </button>
+              {task.source_url && (
+                <a
+                  href={task.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1.5 text-[10px] rounded-lg font-semibold text-[#5ec1ca] border border-[#5ec1ca]/20 hover:bg-[#5ec1ca]/10"
+                >
+                  Open in {source.label}
+                </a>
+              )}
+              <button
+                onClick={onClose}
+                className="px-2.5 py-1.5 text-[10px] rounded-lg font-semibold text-neutral-400 border border-white/10 hover:bg-white/5"
+              >
+                &times;
               </button>
             </div>
           </div>
 
-          {/* Raw data (collapsed) */}
-          <RawDataSection rawData={task.raw_data} />
+          {/* Navigation row */}
+          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/5 text-xs text-neutral-400">
+            <button onClick={onPrev} disabled={index === 0} className="px-2.5 py-1 rounded-lg border border-white/10 disabled:opacity-30 hover:bg-white/5">
+              &larr; Prev
+            </button>
+            <button onClick={onNext} disabled={index >= total - 1} className="px-2.5 py-1 rounded-lg border border-white/10 disabled:opacity-30 hover:bg-white/5">
+              Next &rarr;
+            </button>
+            <span className="ml-auto text-[11px] text-neutral-500">{index + 1} of {total}</span>
+          </div>
+        </TDGlassCard>
+
+        {/* Status messages */}
+        <div className="px-4 pt-2">
+          {jiraLoading && <div className="text-[11px] text-neutral-500 py-1">Loading issue data...</div>}
+          {error && <div className="p-2 rounded-lg text-xs text-red-400" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>{error}</div>}
+          {success && <div className="p-2 rounded-lg text-xs text-emerald-400" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>{success}</div>}
         </div>
 
-        {/* Footer — save button */}
+        {/* ── Content ── */}
+        <div className="flex-1 overflow-hidden px-4 py-3">
+          {/* ──── JIRA TWO-COLUMN LAYOUT ──── */}
+          {isJira && (
+            <div className="grid gap-4 h-full" style={{ gridTemplateColumns: '1.3fr 1fr' }}>
+              {/* Left column: Brief + Fields + Transitions */}
+              <div className="overflow-y-auto td-scroll space-y-4 pr-1">
+                {(() => {
+                  const bp = briefPropsFromTask(task);
+                  return bp ? <TicketBriefCard {...bp} compact /> : null;
+                })()}
+                {task.source === 'jira' && task.source_id && (
+                  <AINextActionCard ticketKey={task.source_id} compact />
+                )}
+
+                {/* Editable fields */}
+                <TDGlassCard className="p-4 space-y-3">
+                  {/* Priority */}
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Priority</div>
+                    <select
+                      value={priority || jiraFields?.priority || metadata.priority || priorityLabel(task.priority)}
+                      onChange={(e) => setPriority(e.target.value)}
+                      className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                    >
+                      {JIRA_PRIORITIES.map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                      {priority && !JIRA_PRIORITIES.includes(priority) && (
+                        <option value={priority}>{priority}</option>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Due Date */}
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Due Date</div>
+                    <input
+                      type="date"
+                      value={dueDate}
+                      onChange={(e) => setDueDate(e.target.value)}
+                      className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                    />
+                  </div>
+
+                  {/* Agent Next Update */}
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Agent Next Update</div>
+                    <input
+                      type="date"
+                      value={agentNextUpdate}
+                      onChange={(e) => setAgentNextUpdate(e.target.value)}
+                      className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                    />
+                  </div>
+
+                  {/* Assignee */}
+                  <div className="relative">
+                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Assignee</div>
+                    <input
+                      type="text"
+                      value={assigneeSearch || (selectedAssignee ? selectedAssignee.displayName : (jiraFields?.assignee || metadata.assignee || 'Unassigned'))}
+                      onChange={(e) => handleAssigneeSearch(e.target.value)}
+                      onFocus={() => { if (assigneeResults.length > 0) setShowAssigneeDropdown(true); }}
+                      onBlur={() => setTimeout(() => setShowAssigneeDropdown(false), 200)}
+                      placeholder="Search users..."
+                      className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                    />
+                    {assigneeSearching && (
+                      <div className="absolute right-3 top-[30px] text-[10px] text-neutral-500">...</div>
+                    )}
+                    {showAssigneeDropdown && assigneeResults.length > 0 && (
+                      <div className="absolute z-10 left-0 right-0 mt-1 rounded-lg shadow-lg max-h-40 overflow-auto" style={{ background: 'rgba(30,35,43,0.98)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                        {assigneeResults.map((u) => (
+                          <button
+                            key={u.accountId}
+                            onMouseDown={() => handleAssigneeSelect(u)}
+                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5 transition-colors"
+                          >
+                            <span className="font-medium">{u.displayName}</span>
+                            {u.emailAddress && (
+                              <span className="text-neutral-500 ml-1.5">{u.emailAddress}</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {selectedAssignee && (
+                      <div className="mt-1 text-[10px] text-[#5ec1ca]">
+                        Will reassign to: {selectedAssignee.displayName}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Read-only fields */}
+                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-white/5">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Status</div>
+                      <div className="text-[13px] text-neutral-50 rounded-lg px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                        {jiraFields?.status || metadata.status || task.status || 'Unknown'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Last Updated</div>
+                      <div className="text-[13px] text-neutral-50 rounded-lg px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                        {jiraFields?.agentLastUpdated ? formatDate(jiraFields.agentLastUpdated) : 'None'}
+                      </div>
+                    </div>
+                  </div>
+                </TDGlassCard>
+
+                {/* Transition buttons */}
+                {canTransitionJira && allowedTransitions.length > 0 && (
+                  <TDGlassCard className="p-4">
+                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-2">Transitions</div>
+                    <div className="flex flex-wrap gap-2">
+                      {allowedTransitions.map((t) => {
+                        const isWIP = t.name?.toLowerCase() === 'work in progress';
+                        return (
+                          <button
+                            key={String(t.id ?? t.name)}
+                            onClick={() => handleTransitionClick(t)}
+                            disabled={saving}
+                            className="px-3 py-1.5 text-xs rounded-lg font-semibold disabled:opacity-50 transition-colors"
+                            style={isWIP ? {
+                              background: 'linear-gradient(135deg, rgba(59,130,246,0.15), rgba(94,193,202,0.15))',
+                              border: '1px solid rgba(59,130,246,0.3)',
+                              color: '#93c5fd',
+                            } : {
+                              background: 'rgba(255,255,255,0.04)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              color: '#d4d4d8',
+                            }}
+                          >
+                            {t.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </TDGlassCard>
+                )}
+
+                <RawDataSection rawData={task.raw_data} />
+              </div>
+
+              {/* Right column: Activity thread */}
+              <TDGlassCard className="p-4 flex flex-col overflow-hidden">
+                <div className="text-[11px] uppercase tracking-wider text-[#5ec1ca] font-bold mb-3">
+                  &#9670; Activity
+                </div>
+                <div className="flex-1 overflow-y-auto td-scroll space-y-2 mb-3 pr-1">
+                  {jiraComments.length === 0 && (
+                    <div className="text-[11px] text-neutral-600 italic p-4 text-center">No comments yet</div>
+                  )}
+                  {[...jiraComments].reverse().map((c) => (
+                    <div
+                      key={c.id}
+                      className="rounded-xl p-3"
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[11px] text-[#5ec1ca] font-semibold">
+                          {c.author?.display_name ?? c.author?.name ?? 'Unknown'}
+                        </span>
+                        <span className="text-[10px] text-neutral-500">
+                          {new Date(c.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+                          {' '}
+                          {new Date(c.created).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <div className="text-[12px] text-neutral-100 whitespace-pre-wrap break-words">
+                        {c.body}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Comment composer */}
+                {canCommentJira && (
+                  <div className="pt-3 border-t border-white/5">
+                    <textarea
+                      value={comment}
+                      onChange={(e) => setComment(e.target.value)}
+                      placeholder="Add a comment..."
+                      rows={3}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-2"
+                      style={{ background: 'rgba(255,255,255,0.03)' }}
+                    />
+                  </div>
+                )}
+              </TDGlassCard>
+            </div>
+          )}
+
+          {/* ──── NON-JIRA SINGLE-COLUMN LAYOUT ──── */}
+          {!isJira && (
+            <div className="overflow-y-auto td-scroll h-full space-y-4 pr-1">
+              <TDGlassCard className="p-4">
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Status</div>
+                    {canEditO365 ? (
+                      <select
+                        value={status}
+                        onChange={(e) => setStatus(e.target.value)}
+                        className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                        style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                      >
+                        <option value="open">Open</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="done">Done</option>
+                      </select>
+                    ) : (
+                      <div className="text-[13px] text-neutral-50 rounded-lg px-3 py-2.5 capitalize" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                        {task.status?.replace('_', ' ') || 'Unknown'}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Priority</div>
+                    <div className="text-[13px] text-neutral-50 rounded-lg px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                      {priorityLabel(task.priority)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Due Date</div>
+                    {canEditO365 ? (
+                      <input
+                        type="date"
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                        className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                        style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                      />
+                    ) : (
+                      <div className="text-[13px] text-neutral-50 rounded-lg px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                        {task.due_date ? formatDate(task.due_date) : 'None'}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Category</div>
+                    <div className="text-[13px] text-neutral-50 rounded-lg px-3 py-2.5 capitalize" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                      {task.category ?? 'None'}
+                    </div>
+                  </div>
+                  {metadata.assignee && (
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Assignee</div>
+                      <div className="text-[13px] text-neutral-50 rounded-lg px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                        {metadata.assignee}
+                      </div>
+                    </div>
+                  )}
+                  {metadata.created && (
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Created</div>
+                      <div className="text-[13px] text-neutral-50 rounded-lg px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                        {metadata.created}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </TDGlassCard>
+
+              {/* Title */}
+              <TDGlassCard className="p-4">
+                <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Title</div>
+                {canEditO365 ? (
+                  <input
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                  />
+                ) : (
+                  <div className="text-sm text-neutral-200">{task.title}</div>
+                )}
+              </TDGlassCard>
+
+              {/* Description */}
+              <TDGlassCard className="p-4">
+                <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Description</div>
+                {canEditO365 ? (
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    rows={5}
+                    className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5 resize-none"
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                  />
+                ) : (
+                  <div className="text-sm text-neutral-300 whitespace-pre-wrap max-h-48 overflow-auto rounded-lg px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                    {task.description || 'No description'}
+                  </div>
+                )}
+              </TDGlassCard>
+
+              {/* Calendar edit */}
+              {isCalendar && (
+                <TDGlassCard className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold">Calendar Event</div>
+                    <button
+                      onClick={() => setCalEditing(!calEditing)}
+                      className="text-[10px] text-[#5ec1ca] hover:text-[#4db0b9]"
+                    >
+                      {calEditing ? 'Cancel' : 'Edit'}
+                    </button>
+                  </div>
+                  {calEditing ? (
+                    <div className="space-y-2">
+                      <div>
+                        <label className="text-[10px] text-[#94a3b8] uppercase tracking-wider font-bold mb-1 block">Subject</label>
+                        <input
+                          value={calSubject} onChange={(e) => setCalSubject(e.target.value)}
+                          className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-[#94a3b8] uppercase tracking-wider font-bold mb-1 block">Start</label>
+                          <input type="datetime-local" value={calStart} onChange={(e) => setCalStart(e.target.value)}
+                            className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }} />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-[#94a3b8] uppercase tracking-wider font-bold mb-1 block">End</label>
+                          <input type="datetime-local" value={calEnd} onChange={(e) => setCalEnd(e.target.value)}
+                            className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }} />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-[#94a3b8] uppercase tracking-wider font-bold mb-1 block">Location</label>
+                        <input value={calLocation} onChange={(e) => setCalLocation(e.target.value)} placeholder="Meeting room or link"
+                          className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }} />
+                      </div>
+                      <button
+                        onClick={handleCalendarSave}
+                        disabled={calSaving || !calSubject.trim() || !calStart || !calEnd}
+                        className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
+                        style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 16px rgba(94,193,202,0.35)' }}
+                      >
+                        {calSaving ? 'Saving...' : 'Save Event'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-neutral-400 space-y-1">
+                      {calStart && <div>Start: <span className="text-neutral-200">{new Date(calStart).toLocaleString('en-GB')}</span></div>}
+                      {calEnd && <div>End: <span className="text-neutral-200">{new Date(calEnd).toLocaleString('en-GB')}</span></div>}
+                      {calLocation && <div>Location: <span className="text-neutral-200">{calLocation}</span></div>}
+                    </div>
+                  )}
+                </TDGlassCard>
+              )}
+
+              {/* Email actions */}
+              {isEmail && (
+                <TDGlassCard className="p-4">
+                  <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-2">Email Actions</div>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <button
+                      onClick={() => { setEmailMode('reply'); setEmailTo(''); setEmailBody(''); }}
+                      className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                        emailMode === 'reply'
+                          ? 'bg-[#5ec1ca]/15 border-[#5ec1ca]/40 text-[#5ec1ca]'
+                          : 'text-neutral-400 hover:text-neutral-200'
+                      }`}
+                      style={emailMode !== 'reply' ? { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' } : undefined}
+                    >
+                      Reply
+                    </button>
+                    <button
+                      onClick={() => { setEmailMode('forward'); setEmailTo(''); setEmailBody(''); }}
+                      className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                        emailMode === 'forward'
+                          ? 'bg-[#5ec1ca]/15 border-[#5ec1ca]/40 text-[#5ec1ca]'
+                          : 'text-neutral-400 hover:text-neutral-200'
+                      }`}
+                      style={emailMode !== 'forward' ? { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' } : undefined}
+                    >
+                      Forward
+                    </button>
+                  </div>
+
+                  {emailMode && (
+                    <div className="space-y-2">
+                      {emailMode === 'forward' && (
+                        <input
+                          type="email"
+                          value={emailTo}
+                          onChange={(e) => setEmailTo(e.target.value)}
+                          placeholder="Recipient email address"
+                          className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
+                          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                        />
+                      )}
+                      <textarea
+                        value={emailBody}
+                        onChange={(e) => setEmailBody(e.target.value)}
+                        rows={4}
+                        placeholder={emailMode === 'reply' ? 'Type your reply...' : 'Add a message (optional)...'}
+                        className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5 resize-none"
+                        style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleEmailAction}
+                          disabled={emailSending || !emailBody.trim()}
+                          className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
+                          style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 16px rgba(94,193,202,0.35)' }}
+                        >
+                          {emailSending ? 'Sending...' : emailMode === 'reply' ? 'Send Reply' : 'Forward'}
+                        </button>
+                        <button
+                          onClick={() => setEmailMode(null)}
+                          className="px-3 py-1.5 text-xs rounded-lg text-neutral-400 hover:text-neutral-200"
+                          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </TDGlassCard>
+              )}
+
+              <RawDataSection rawData={task.raw_data} />
+            </div>
+          )}
+        </div>
+
+        {/* ── Footer ── */}
         {canSave && (
-          <div className="px-5 py-4 border-t border-[#3a424d] flex items-center gap-3">
-            <button
-              id="jira-save-btn"
-              onClick={handleSave}
-              disabled={saving}
-              className="px-4 py-2 text-sm bg-[#5ec1ca] text-[#272C33] rounded font-semibold disabled:opacity-50 hover:bg-[#4db0b9] transition-colors"
-            >
-              {saving ? 'Saving...' : 'Save & Sync'}
-            </button>
-            <span className="text-xs text-neutral-500">
-              Changes sync back to {source.label}
-            </span>
+          <div className="px-5 py-4 border-t" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+            <div className="flex items-center gap-3">
+              <button
+                id="jira-save-btn"
+                onClick={handleSave}
+                disabled={saving}
+                className="px-5 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
+                style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 16px rgba(94,193,202,0.35)' }}
+              >
+                {saving ? 'Saving…' : 'Save & Sync'}
+              </button>
+              <span className="text-[11px] text-neutral-500">Changes sync back to {source.label}</span>
+            </div>
           </div>
         )}
       </div>
@@ -1139,7 +1200,8 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
               <button
                 onClick={handleTransitionConfirm}
                 disabled={!transitionComment.trim()}
-                className="px-4 py-2 text-xs bg-[#5ec1ca] text-[#272C33] font-semibold rounded-lg hover:bg-[#4db0b9] transition-colors disabled:opacity-40"
+                className="px-4 py-2 text-xs font-bold text-[#0f172a] rounded-lg disabled:opacity-40"
+                style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 12px rgba(94,193,202,0.3)' }}
               >
                 Transition
               </button>
@@ -1147,6 +1209,32 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function TDGlassCard({ children, className = '', accent }: { children: React.ReactNode; className?: string; accent?: boolean }) {
+  return (
+    <div
+      className={`relative rounded-2xl overflow-hidden ${className}`}
+      style={{
+        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%)',
+        backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)',
+      }}
+    >
+      {accent && (
+        <div
+          className="absolute top-0 left-0 right-0 h-[2px]"
+          style={{
+            background: 'linear-gradient(90deg, transparent, #9b6aed 30%, #5ec1ca 70%, transparent)',
+            backgroundSize: '200% 100%',
+            animation: 'tdShift 6s ease-in-out infinite',
+          }}
+        />
+      )}
+      {children}
     </div>
   );
 }
