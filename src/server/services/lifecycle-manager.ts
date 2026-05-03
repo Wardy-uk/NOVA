@@ -10,6 +10,7 @@ import { query } from './database.js';
 import { LlmService } from './llm-service.js';
 import { ChaseResultSchema, type ChaseResult } from './chase-schema.js';
 import { loadPrompt } from './prompt-loader.js';
+import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 
 interface LifecycleSweepResult {
   approvalTimeouts: number;
@@ -375,10 +376,13 @@ export class LifecycleManager {
 
         if (!shadow) {
           try {
-            await this.jiraClient.updateFields(ticket.ticketId, {
-              customfield_14494: { value: 'No Fault Found' },
+            const closeDaysLabel = `${closeDays}+`;
+            const { fields, comment } = buildResolveFields({
+              tldr: `No customer response for ${closeDaysLabel} days — auto-closed per SOP-003`,
+              resolution: 'No Fault Found',
+              comment: `This ticket has had no customer response for over ${closeDays} days. Closing per SOP-003. If you still need help, please raise a new ticket or reply to reopen.`,
             });
-            await this.jiraClient.transitionIssue(ticket.ticketId, '17');
+            await this.jiraClient.transitionIssue(ticket.ticketId, '17', { fields, comment });
           } catch (err) {
             console.warn(`[lifecycle] Failed to resolve ${ticket.ticketId} in Jira:`, err instanceof Error ? err.message : err);
           }

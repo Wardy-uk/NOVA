@@ -2,10 +2,10 @@ import type { JiraRestClient } from './jira-client.js';
 import type { HybridActionMatch, HybridActionResult } from './agent-types.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { executeAndGetId } from './database.js';
+import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 
 const TPJ_PROJECT_ID = '11808';
 const QUICK_RESOLVE_TRANSITION_ID = '17';
-const CF_RESOLUTION_TYPE = 'customfield_14494';
 
 export class PluginToTpjExecutor {
   private jiraClient: JiraRestClient;
@@ -66,17 +66,19 @@ export class PluginToTpjExecutor {
         { internal: false },
       );
 
-      // 5. Set resolution type, assign to NOVA service account, then transition original to Resolved
+      // 5. Assign to NOVA, then transition to Resolved with all required fields in one call
       let resolveError: string | null = null;
       try {
-        await this.jiraClient.updateFields(ticketKey, {
-          [CF_RESOLUTION_TYPE]: { value: 'No Fault Found' },
-        });
         const novaAccountId = this.settings.get('nova_ai_jira_account_id');
         if (novaAccountId) {
           await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
         }
-        await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID);
+        const { fields, comment } = buildResolveFields({
+          tldr: `Plugin ticket cloned to ${newKey} — automated by NOVA`,
+          resolution: 'Third-Party / External Resolution',
+          comment: `This ticket has been automatically cloned to ${newKey} in the Third-Party Jira project. The original is being resolved as the plugin issue will be tracked there.`,
+        });
+        await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment });
         console.log(`[plugin-to-tpj] Resolved original ${ticketKey}`);
       } catch (err) {
         const statusCode = (err as any)?.statusCode ?? (err as any)?.status ?? 'N/A';

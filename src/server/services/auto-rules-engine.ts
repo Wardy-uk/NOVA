@@ -6,9 +6,9 @@ import type { AbuseReportExecutor } from './abuse-report-executor.js';
 import type { Observer } from './observer.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { executeAndGetId, query } from './database.js';
+import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 
 const QUICK_RESOLVE_TRANSITION_ID = '17';
-const CF_RESOLUTION_TYPE = 'customfield_14494';
 const CF_CURRENT_TIER = 'customfield_12981';
 
 const TIER_IDS: Record<string, string> = {
@@ -352,12 +352,7 @@ export class AutoRulesEngine {
     action: { type: 'close'; resolution: string; note: string },
     rule: AutoRule,
   ): Promise<void> {
-    // Set resolution type before transitioning
-    await this.jiraClient.updateFields(ticketKey, {
-      [CF_RESOLUTION_TYPE]: { value: action.resolution },
-    });
-
-    // Post internal note
+    // Post internal note before transition
     await this.jiraClient.addComment(
       ticketKey,
       `\u{1F916} Auto-actioned by NOVA rule '${rule.id}'. ${action.note}`,
@@ -370,8 +365,13 @@ export class AutoRulesEngine {
       await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
     }
 
-    // Transition to resolved
-    await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID);
+    // Transition to resolved with all required fields in one call
+    const { fields, comment } = buildResolveFields({
+      tldr: action.note,
+      resolution: action.resolution,
+      comment: `Auto-actioned by NOVA rule '${rule.id}'. ${action.note}`,
+    });
+    await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment });
   }
 
   private async handleSetTier(
