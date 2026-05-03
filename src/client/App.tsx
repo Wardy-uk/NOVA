@@ -24,7 +24,6 @@ import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
 import { ServiceDeskDashboard } from './components/ServiceDeskDashboard.js';
 import { AIApprovalQueue } from './components/AIApprovalQueue.js';
-const MyTicketsView = lazy(() => import('./components/MyTicketsView.js').then(m => ({ default: m.MyTicketsView })));
 const KpiDashboardView = lazy(() => import('./components/KpiDashboardView.js').then(m => ({ default: m.KpiDashboardView })));
 const KpiDataView = lazy(() => import('./components/KpiDataView.js').then(m => ({ default: m.KpiDataView })));
 const KpiComparisonView = lazy(() => import('./components/KpiComparisonView.js').then(m => ({ default: m.KpiComparisonView })));
@@ -1282,13 +1281,12 @@ export function App() {
 
           {/* NOVA AI Agent */}
           {view === 'tickets' && canSeeArea('ai-agent') && auth.user && (
-            <MyTicketsView
+            <TaskList
               tasks={filteredSdTasks}
               loading={sdLoading}
               onUpdateTask={updateTask}
               agentUsername={auth.user.username}
               agentDisplayName={auth.user.display_name ?? auth.user.username}
-              teamName={undefined}
             />
           )}
           {view === 'ai-approvals' && canSeeArea('ai-agent') && (

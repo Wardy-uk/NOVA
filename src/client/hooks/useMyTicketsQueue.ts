@@ -28,7 +28,7 @@ function authHeaders(): Record<string, string> {
 
 export function useMyTicketsQueue(agentId: string | null) {
   const [queue, setQueue] = useState<QueueResult | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!!agentId);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
