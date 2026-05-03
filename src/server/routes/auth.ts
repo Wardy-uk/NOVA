@@ -561,12 +561,19 @@ export function createAuthRoutes(
   // GET /api/auth/jira/status — check if OAuth is configured and user is connected
   router.get('/jira/status', authMiddleware(jwtSecret), async (req, res) => {
     const userId = (req as any).user?.id as number;
-    const configured = jiraOAuthService?.isConfigured() ?? false;
+    const oauthConfigured = jiraOAuthService?.isConfigured() ?? false;
     let connected = false;
-    if (configured && userId && userSettingsQueries) {
-      connected = !!(await userSettingsQueries.get(userId, 'jira_access_token'));
+    if (userId && userSettingsQueries) {
+      const oauthToken = await userSettingsQueries.get(userId, 'jira_access_token');
+      if (oauthToken) {
+        connected = true;
+      } else {
+        const enabled = await userSettingsQueries.get(userId, 'jira_enabled');
+        const token = await userSettingsQueries.get(userId, 'jira_token');
+        connected = enabled === 'true' && !!token;
+      }
     }
-    res.json({ ok: true, configured, connected });
+    res.json({ ok: true, configured: oauthConfigured, connected });
   });
 
   // GET /api/auth/jira/login — initiate OAuth flow
