@@ -8,6 +8,7 @@ import { AINextActionCard } from './AINextActionCard.js';
 import { DeferReasonModal } from './DeferReasonModal.js';
 import { EscalationWizardModal } from './EscalationWizardModal.js';
 import { HoldingUpdatePanel } from './HoldingUpdatePanel.js';
+import { CloseTicketPanel } from './CloseTicketPanel.js';
 import { SLATimer } from './SLATimer.js';
 
 interface Props {
@@ -184,6 +185,7 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
   const [deferTicketKey, setDeferTicketKey] = useState<string | null>(null);
   const [escalateTicket, setEscalateTicket] = useState<{ ticketKey: string; aiContext?: { headline?: string; body?: string } } | null>(null);
   const [holdingUpdateTicket, setHoldingUpdateTicket] = useState<string | null>(null);
+  const [closeTicketKey, setCloseTicketKey] = useState<string | null>(null);
 
   // --- Minimal mode state (service desk table) ---
   const [sortBy, setSortBy] = useState<SortField>(() => {
@@ -472,6 +474,7 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
               ticketKey={nowTicket.ticketKey}
               onEscalate={(ctx) => setEscalateTicket({ ticketKey: nowTicket.ticketKey, aiContext: ctx })}
               onHoldingUpdate={() => setHoldingUpdateTicket(nowTicket.ticketKey)}
+              onCloseTicket={() => setCloseTicketKey(nowTicket.ticketKey)}
             />
             <div className="flex gap-2 pt-2 border-t border-[#3a424d]">
               {nowTicket.nextAction?.primaryAction && (
@@ -482,6 +485,8 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
                       setEscalateTicket({ ticketKey: nowTicket.ticketKey, aiContext: { headline: nowTicket.nextAction!.headline, body: nowTicket.nextAction!.body } });
                     } else if (/update|holding|hasn.t heard/i.test(pa.label)) {
                       setHoldingUpdateTicket(nowTicket.ticketKey);
+                    } else if (/close|resolve|mark.?resolved|confirmed.?fix/i.test(pa.label)) {
+                      setCloseTicketKey(nowTicket.ticketKey);
                     }
                   }}
                   className="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors"
@@ -615,6 +620,18 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
           onClose={() => setHoldingUpdateTicket(null)}
           onSent={() => {
             setHoldingUpdateTicket(null);
+            refresh();
+          }}
+        />
+      )}
+
+      {/* Close ticket panel */}
+      {closeTicketKey && (
+        <CloseTicketPanel
+          ticketKey={closeTicketKey}
+          onClose={() => setCloseTicketKey(null)}
+          onResolved={() => {
+            setCloseTicketKey(null);
             refresh();
           }}
         />

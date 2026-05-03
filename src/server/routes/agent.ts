@@ -11,6 +11,7 @@ import { ResolveSummarySchema, type ResolveSummaryResult } from '../services/res
 import { loadPrompt } from '../services/prompt-loader.js';
 import { z } from 'zod';
 import { JIRA_FIELDS } from '../../shared/jira-fields.js';
+import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import type { AssignmentEngine, Pool } from '../services/assignment-engine.js';
 import type { AgentAvailabilityService, AvailabilityStatus } from '../services/agent-availability.js';
 import type { TicketClassifier } from '../services/ticket-classifier.js';
@@ -1006,23 +1007,33 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   });
 
   router.post('/quick-actions/resolve', async (req, res) => {
-    const { ticketKey, customerMessage, resolutionSummary, transitionId } = req.body;
-    if (!ticketKey) {
-      res.status(400).json({ ok: false, error: 'ticketKey is required' });
+    const { ticketKey, customerMessage, resolutionSummary, resolutionType, nurturProduct, subCategory } = req.body;
+    if (!ticketKey || !customerMessage || !resolutionSummary || !resolutionType) {
+      res.status(400).json({ ok: false, error: 'ticketKey, customerMessage, resolutionSummary, and resolutionType are required' });
       return;
     }
+    const username = (req as any).user?.username ?? 'unknown';
     try {
       const jira = agentLoop.getJiraClient();
 
-      if (customerMessage) {
-        await jira.addComment(ticketKey, customerMessage, { internal: false });
-      }
+      const { fields, comment } = buildResolveFields({
+        tldr: resolutionSummary,
+        resolution: resolutionType,
+        comment: customerMessage,
+        product: nurturProduct,
+        subCategory: subCategory,
+      });
 
-      if (transitionId) {
-        await jira.transitionIssue(ticketKey, transitionId);
-      }
+      await jira.transitionIssue(ticketKey, '17', { fields, comment });
 
-      res.json({ ok: true, data: { ticketKey, resolved: true, transitioned: !!transitionId } });
+      await recordEvent('action_taken', username, ticketKey, {
+        action_type: 'close_ticket',
+        resolution_type: resolutionType,
+        message_length: customerMessage.length,
+        via: 'close_panel',
+      });
+
+      res.json({ ok: true, data: { ticketKey, resolved: true } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to resolve' });
     }
