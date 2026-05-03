@@ -8,6 +8,7 @@ import { MODEL_PRICING } from '../services/llm-service.js';
 import { resolveStatusName, resolveStatusFromCache } from '../utils/jira-status.js';
 import { RespondResultSchema, type RespondResult } from '../services/respond-schema.js';
 import { ResolveSummarySchema, type ResolveSummaryResult } from '../services/resolve-schema.js';
+import { ChaseResultSchema, type ChaseResult } from '../services/chase-schema.js';
 import { loadPrompt } from '../services/prompt-loader.js';
 import { z } from 'zod';
 import { JIRA_FIELDS } from '../../shared/jira-fields.js';
@@ -27,6 +28,8 @@ import type { RiskScorer } from '../services/risk-scorer.js';
 import type { EscalationLogService } from '../services/escalation-log-service.js';
 import type { DriftDetector } from '../services/drift-detector.js';
 import type { UserQueries, UserTeamQueries, TeamQueries, AutoRuleOverrideQueries } from '../db/queries.js';
+import { HygieneChecker } from '../services/hygiene-checker.js';
+import { createWorkingDayClock } from '../../shared/utils/workingDayClock.js';
 
 interface AgentRouteDeps {
   agentLoop: AgentLoop;
@@ -944,6 +947,284 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // ── Hygiene Pass (SOP-012) ──
+
+  const hygieneClock = createWorkingDayClock();
+  const hygieneChecker = new HygieneChecker(hygieneClock);
+
+  router.post('/hygiene/run', async (req, res) => {
+    const username = (req as any).user?.username ?? 'unknown';
+    try {
+      const cache = deps?.jiraCache;
+      if (!cache) {
+        res.status(503).json({ ok: false, error: 'Jira cache not available' });
+        return;
+      }
+
+      const userQueries = deps?.userQueries;
+      const user = userQueries ? (await userQueries.getAll()).find(u => u.username === username) : null;
+      const agentEmail = user?.email ?? username;
+
+      const tickets = await cache.getByAssignee(agentEmail, ['NT']);
+      const agentAccountId = tickets[0]?.assignee_account_id ?? '';
+      if (tickets.length === 0) {
+        res.json({ ok: true, data: { agentId: username, hourBlock: new Date().toISOString().slice(0, 13) + ':00', startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), ticketCount: 0, failedTickets: [], passedCount: 0 } });
+        return;
+      }
+
+      const startMs = Date.now();
+      const result = await hygieneChecker.runPass({
+        agentId: username,
+        agentAccountId,
+        tickets,
+        getComments: (ticketKey) => cache.getComments(ticketKey, 10),
+        getAgentNextUpdate: async (ticketKey) => {
+          const issue = tickets.find(t => t.issue_key === ticketKey);
+          return issue?.agent_next_update ?? null;
+        },
+      });
+      const durationMs = Date.now() - startMs;
+
+      for (const failed of result.failedTickets) {
+        await recordEvent('hygiene_flagged', username, failed.ticketKey, {
+          failed_checks: failed.checks.filter(c => !c.passed).map(c => c.id),
+          detail: failed.checks.filter(c => !c.passed).map(c => c.detail).join('; '),
+        });
+      }
+
+      await recordEvent('hygiene_pass_completed', username, null, {
+        hour_block: result.hourBlock,
+        ticket_count: result.ticketCount,
+        fails: result.failedTickets.length,
+        duration_ms: durationMs,
+      });
+
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to run hygiene pass' });
+    }
+  });
+
+  router.get('/hygiene/status', async (req, res) => {
+    const username = (req as any).user?.username ?? 'unknown';
+    try {
+      const todayEvents = await query<{ id: number; event_type: string; ticket_key: string | null; payload: string; created_at: string }>(
+        `SELECT id, event_type, ticket_key, payload, created_at
+         FROM agent_events
+         WHERE agent_id = ? AND event_type IN ('hygiene_pass_completed', 'hygiene_flagged', 'action_taken')
+           AND created_at >= CAST(SYSUTCDATETIME() AS DATE)
+         ORDER BY created_at DESC`,
+        [username],
+      );
+
+      const passes = todayEvents.filter(e => e.event_type === 'hygiene_pass_completed');
+      const lastPass = passes[0] ?? null;
+      const lastPassPayload = lastPass ? (typeof lastPass.payload === 'string' ? JSON.parse(lastPass.payload) : lastPass.payload) : null;
+
+      const flaggedEvents = todayEvents.filter(e => e.event_type === 'hygiene_flagged' && e.ticket_key);
+      const dismissEvents = todayEvents.filter(e => {
+        if (e.event_type !== 'action_taken') return false;
+        const p = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
+        return p.action_type === 'hygiene_dismiss';
+      });
+
+      const dismissedKeys = new Set(dismissEvents.map(e => e.ticket_key));
+
+      const flaggedTickets = flaggedEvents
+        .filter(e => !dismissedKeys.has(e.ticket_key))
+        .reduce((acc, e) => {
+          if (acc.find(a => a.ticketKey === e.ticket_key)) return acc;
+          const p = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
+          acc.push({
+            ticketKey: e.ticket_key!,
+            failedChecks: p.failed_checks ?? [],
+            detail: p.detail ?? '',
+            flaggedAt: e.created_at,
+            resolved: false,
+          });
+          return acc;
+        }, [] as Array<{ ticketKey: string; failedChecks: string[]; detail: string; flaggedAt: string; resolved: boolean }>);
+
+      const now = new Date();
+      const currentHour = now.toISOString().slice(0, 13) + ':00';
+      const hasPassThisHour = passes.some(p => {
+        const pp = typeof p.payload === 'string' ? JSON.parse(p.payload) : p.payload;
+        return pp.hour_block === currentHour;
+      });
+      const hygieneDue = hygieneClock.isWorkingTime(now) && !hasPassThisHour;
+
+      const workingHoursElapsed = Math.max(1, Math.floor(
+        (now.getHours() >= 9 ? Math.min(now.getHours(), 17) - 9 : 0),
+      ));
+      const compliancePercent = workingHoursElapsed > 0
+        ? Math.round((passes.length / workingHoursElapsed) * 100)
+        : 100;
+
+      res.json({
+        ok: true,
+        data: {
+          lastPassAt: lastPass?.created_at ?? null,
+          lastPassHourBlock: lastPassPayload?.hour_block ?? null,
+          flaggedTickets,
+          passesTodayCount: passes.length,
+          compliancePercent: Math.min(100, compliancePercent),
+          hygieneDue,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get hygiene status' });
+    }
+  });
+
+  router.post('/hygiene/dismiss', async (req, res) => {
+    const { ticketKey, resolution } = req.body as { ticketKey?: string; resolution?: string };
+    if (!ticketKey || !resolution) {
+      res.status(400).json({ ok: false, error: 'ticketKey and resolution are required' });
+      return;
+    }
+    const validResolutions = ['actioned', 'deferred', 'false_positive'];
+    if (!validResolutions.includes(resolution)) {
+      res.status(400).json({ ok: false, error: `resolution must be one of: ${validResolutions.join(', ')}` });
+      return;
+    }
+    const username = (req as any).user?.username ?? 'unknown';
+    try {
+      await recordEvent('action_taken', username, ticketKey, {
+        action_type: 'hygiene_dismiss',
+        resolution,
+      });
+      res.json({ ok: true, data: { ticketKey, resolution } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to dismiss hygiene flag' });
+    }
+  });
+
+  // ── Chase (SOP-003) ──
+
+  router.post('/chase/draft', async (req, res) => {
+    const { ticketKey } = req.body as { ticketKey?: string };
+    if (!ticketKey) {
+      res.status(400).json({ ok: false, error: 'ticketKey is required' });
+      return;
+    }
+    try {
+      const jira = agentLoop.getJiraClient();
+      const llm = agentLoop.getLlmService();
+
+      const issue = await jira.getIssue(ticketKey, [
+        'summary', 'description', 'status', 'priority', 'reporter',
+        'assignee', 'created', 'comment',
+      ]);
+      if (!issue) {
+        res.status(404).json({ ok: false, error: `Ticket ${ticketKey} not found` });
+        return;
+      }
+
+      const f = issue.fields;
+      const comments = ((f.comment as any)?.comments as Array<{
+        author?: { displayName?: string; emailAddress?: string };
+        body?: string;
+        created?: string;
+        properties?: Array<{ key: string; value?: { internal?: boolean } }>;
+      }>) ?? [];
+
+      const assigneeEmail = (f.assignee as any)?.emailAddress ?? '';
+      const publicComments = comments.filter(c => {
+        const isInternal = c.properties?.some(p => p.key === 'sd.public.comment' && p.value?.internal) ?? false;
+        return !isInternal;
+      });
+      const lastAgentComment = publicComments.reverse().find(c =>
+        c.author?.emailAddress === assigneeEmail || !(c.author?.emailAddress),
+      );
+
+      let daysWaiting = 0;
+      if (lastAgentComment?.created) {
+        const hoursSince = hygieneClock.workingHoursBetween(new Date(lastAgentComment.created), new Date());
+        daysWaiting = Math.round((hoursSince / 8) * 10) / 10;
+      }
+
+      if (daysWaiting < 2) {
+        res.json({ ok: false, error: `Too early to chase — only ${daysWaiting} working days` });
+        return;
+      }
+
+      let stage: 'day2_nudge' | 'day4_warning' | 'day5_close';
+      if (daysWaiting >= 5) stage = 'day5_close';
+      else if (daysWaiting >= 4) stage = 'day4_warning';
+      else stage = 'day2_nudge';
+
+      if (stage === 'day5_close') {
+        res.json({ ok: true, data: { ticketKey, stage, daysWaiting, redirectToClose: true } });
+        return;
+      }
+
+      const conversationThread = comments
+        .slice(-10)
+        .map(c => {
+          const isInternal = c.properties?.some(p => p.key === 'sd.public.comment' && p.value?.internal) ?? false;
+          return `[${c.created ?? ''}] ${c.author?.displayName ?? 'Unknown'}${isInternal ? ' (internal)' : ''}:\n${typeof c.body === 'string' ? c.body.slice(0, 500) : '(complex body)'}`;
+        })
+        .join('\n\n---\n\n');
+
+      const systemPrompt = loadPrompt('chase', {
+        ticket_key: ticketKey,
+        summary: (f.summary as string) ?? '',
+        description: ((f.description as string) ?? '').slice(0, 1000),
+        priority: (f.priority as any)?.name ?? 'Medium',
+        reporter: (f.reporter as any)?.displayName ?? 'Unknown',
+        organisation: (f.reporter as any)?.emailAddress?.split('@')[1] ?? 'Unknown',
+        status: (f.status as any)?.name ?? 'Unknown',
+        days_waiting: String(Math.round(daysWaiting)),
+        conversation_thread: conversationThread || '(no comments)',
+      });
+
+      const result = await llm.call<ChaseResult>(
+        systemPrompt,
+        'Draft a chase follow-up for this ticket.',
+        ChaseResultSchema,
+        { ticketId: ticketKey, callType: 'chase_draft', temperature: 0.4 },
+      );
+
+      res.json({
+        ok: true,
+        data: {
+          ticketKey,
+          stage,
+          daysWaiting,
+          draftMessage: result.data.draft_response,
+          tone: result.data.tone_check,
+          provider: result.provider,
+          model: result.model,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to draft chase' });
+    }
+  });
+
+  router.post('/chase/send', async (req, res) => {
+    const { ticketKey, message, stage } = req.body as { ticketKey?: string; message?: string; stage?: string };
+    if (!ticketKey || !message || message.length < 10) {
+      res.status(400).json({ ok: false, error: 'ticketKey and message (min 10 chars) are required' });
+      return;
+    }
+    const username = (req as any).user?.username ?? 'unknown';
+    try {
+      const jira = agentLoop.getJiraClient();
+      await jira.addComment(ticketKey, message);
+
+      await recordEvent('action_taken', username, ticketKey, {
+        action_type: 'chase',
+        stage: stage ?? 'unknown',
+        message_length: message.length,
+      });
+
+      res.json({ ok: true, data: { ticketKey, commentPosted: true, stage } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to send chase' });
+    }
+  });
+
   router.post('/quick-actions/draft-resolve', async (req, res) => {
     const { ticketKey } = req.body;
     if (!ticketKey) {
@@ -1036,6 +1317,181 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data: { ticketKey, resolved: true } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to resolve' });
+    }
+  });
+
+  // SOP-004 route ticket
+  const MODEL_A_DESTINATIONS = new Set(['NTPJ', 'Finance', 'Starberry', 'Yomdel']);
+  const MODEL_B_DESTINATIONS = new Set(['Tech Services', 'Dev team']);
+
+  router.post('/route', async (req, res) => {
+    const { ticketKey, model, destination, reason, internalNote } = req.body;
+    if (!ticketKey || !model || !destination || !reason) {
+      res.status(400).json({ ok: false, error: 'ticketKey, model, destination, and reason are required' });
+      return;
+    }
+    if (reason.length < 10) {
+      res.status(400).json({ ok: false, error: 'Reason must be at least 10 characters' });
+      return;
+    }
+
+    const username = (req as any).user?.username ?? 'unknown';
+    const jira = agentLoop.getJiraClient();
+
+    // Load configurable project key mapping
+    const routeProjectsSetting = deps?.settingsQueries?.get('route_destination_projects');
+    let routeProjects: Record<string, string | null> = {
+      NTPJ: 'NTPJ', Finance: null, Starberry: null, Yomdel: null, 'Tech Services': null,
+    };
+    if (routeProjectsSetting) {
+      try { routeProjects = JSON.parse(routeProjectsSetting); } catch { /* use defaults */ }
+    }
+
+    if (model === 'A') {
+      if (!MODEL_A_DESTINATIONS.has(destination)) {
+        res.status(400).json({ ok: false, error: `Invalid Model A destination: ${destination}. Valid: ${[...MODEL_A_DESTINATIONS].join(', ')}` });
+        return;
+      }
+      const projectKey = routeProjects[destination];
+      if (!projectKey) {
+        res.status(400).json({ ok: false, error: `Jira project key not configured for "${destination}". Ask an admin to set route_destination_projects in NOVA settings.` });
+        return;
+      }
+
+      try {
+        const original = await jira.getIssue(ticketKey, ['summary', 'description', 'reporter', 'priority', 'comment']);
+        if (!original) {
+          res.status(404).json({ ok: false, error: `Ticket ${ticketKey} not found` });
+          return;
+        }
+
+        const f = original.fields as Record<string, any>;
+        const summary = f?.summary ?? ticketKey;
+        const description = f?.description;
+        const reporterName = f?.reporter?.displayName ?? 'Customer';
+        const priority = f?.priority;
+
+        const newIssueFields: Record<string, unknown> = {
+          project: { key: projectKey },
+          summary,
+          issuetype: { name: 'Task' },
+        };
+        if (description) newIssueFields.description = description;
+        if (priority) newIssueFields.priority = { id: priority.id };
+
+        const created = await jira.createIssue({ fields: newIssueFields });
+        const newTicketKey = created.key;
+
+        await jira.addComment(newTicketKey, `Routed from ${ticketKey}. Original reporter: ${reporterName}. Reason: ${reason}${internalNote ? `\n\nAdditional context: ${internalNote}` : ''}`, { internal: true });
+
+        const { fields: resolveFields, comment } = buildResolveFields({
+          tldr: `Routed to ${destination} — ${reason}`,
+          resolution: 'Request Cancelled / Withdrawn',
+          comment: `Hi ${reporterName}, I've transferred this to our ${destination} team who are better placed to help with this. You'll receive a notification from the new ticket shortly. Your new reference is ${newTicketKey}.`,
+        });
+
+        await jira.transitionIssue(ticketKey, '17', { fields: resolveFields, comment });
+
+        try {
+          await jira.createIssueLink({
+            type: { name: 'Relates' },
+            inwardIssue: { key: ticketKey },
+            outwardIssue: { key: newTicketKey },
+          });
+        } catch { /* linking is best-effort */ }
+
+        await recordEvent('action_taken', username, ticketKey, {
+          action_type: 'route',
+          model: 'A',
+          destination,
+          new_ticket_key: newTicketKey,
+          reason,
+        });
+
+        res.json({ ok: true, data: { ticketKey, newTicketKey, model: 'A', destination, closed: true } });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to route ticket (Model A)' });
+      }
+
+    } else if (model === 'B') {
+      if (!MODEL_B_DESTINATIONS.has(destination)) {
+        res.status(400).json({ ok: false, error: `Invalid Model B destination: ${destination}. Valid: ${[...MODEL_B_DESTINATIONS].join(', ')}` });
+        return;
+      }
+      if (destination === 'Dev team') {
+        res.status(400).json({ ok: false, error: 'Dev team routing goes through T2 escalation (SOP-002 → SOP-007). Use the Escalate action instead.' });
+        return;
+      }
+
+      try {
+        const original = await jira.getIssue(ticketKey, ['summary', 'description', 'reporter', 'priority']);
+        if (!original) {
+          res.status(404).json({ ok: false, error: `Ticket ${ticketKey} not found` });
+          return;
+        }
+
+        const f = original.fields as Record<string, any>;
+        const summary = f?.summary ?? ticketKey;
+        const description = f?.description;
+        const reporterName = f?.reporter?.displayName ?? 'Customer';
+        const priority = f?.priority;
+
+        const projectKey = routeProjects[destination];
+        let parallelKey: string | null = null;
+
+        if (projectKey) {
+          const newFields: Record<string, unknown> = {
+            project: { key: projectKey },
+            summary: `[Parallel] ${summary}`,
+            issuetype: { name: 'Task' },
+          };
+          if (description) newFields.description = description;
+          if (priority) newFields.priority = { id: priority.id };
+
+          const created = await jira.createIssue({ fields: newFields });
+          parallelKey = created.key;
+
+          try {
+            await jira.createIssueLink({
+              type: { name: 'Relates' },
+              inwardIssue: { key: ticketKey },
+              outwardIssue: { key: parallelKey },
+            });
+          } catch { /* linking is best-effort */ }
+        }
+
+        await jira.addComment(ticketKey, `Parallel ticket created: ${parallelKey ?? 'N/A (no project key configured)'}. Chasing cadence: every 3 working days. Agent retains customer ownership.${internalNote ? `\n\nAdditional context: ${internalNote}` : ''}`, { internal: true });
+
+        const nextChaseDate = new Date();
+        let daysAdded = 0;
+        while (daysAdded < 3) {
+          nextChaseDate.setDate(nextChaseDate.getDate() + 1);
+          const dow = nextChaseDate.getDay();
+          if (dow !== 0 && dow !== 6) daysAdded++;
+        }
+        const chaseDateStr = nextChaseDate.toISOString().split('T')[0];
+
+        await jira.addComment(ticketKey, `Hi ${reporterName}, I'm coordinating with our ${destination} team on this. I'll keep you updated — you can expect to hear from me by ${chaseDateStr}.`);
+
+        try {
+          await jira.updateFields(ticketKey, { [JIRA_FIELDS.AGENT_NEXT_UPDATE]: chaseDateStr });
+        } catch { /* best-effort */ }
+
+        await recordEvent('action_taken', username, ticketKey, {
+          action_type: 'route',
+          model: 'B',
+          destination,
+          parallel_ticket_key: parallelKey,
+          reason,
+        });
+
+        res.json({ ok: true, data: { ticketKey, parallelTicketKey: parallelKey, model: 'B', destination, closed: false } });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to route ticket (Model B)' });
+      }
+
+    } else {
+      res.status(400).json({ ok: false, error: 'model must be "A" or "B"' });
     }
   });
 

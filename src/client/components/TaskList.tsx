@@ -9,6 +9,10 @@ import { DeferReasonModal } from './DeferReasonModal.js';
 import { EscalationWizardModal } from './EscalationWizardModal.js';
 import { HoldingUpdatePanel } from './HoldingUpdatePanel.js';
 import { CloseTicketPanel } from './CloseTicketPanel.js';
+import { HygienePassPanel } from './HygienePassPanel.js';
+import { ChasePanel } from './ChasePanel.js';
+import { StuckHelperPanel } from './StuckHelperPanel.js';
+import { RoutePanel } from './RoutePanel.js';
 import { SLATimer } from './SLATimer.js';
 
 interface Props {
@@ -186,6 +190,9 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
   const [escalateTicket, setEscalateTicket] = useState<{ ticketKey: string; aiContext?: { headline?: string; body?: string } } | null>(null);
   const [holdingUpdateTicket, setHoldingUpdateTicket] = useState<string | null>(null);
   const [closeTicketKey, setCloseTicketKey] = useState<string | null>(null);
+  const [chaseTicketKey, setChaseTicketKey] = useState<string | null>(null);
+  const [stuckHelperTicket, setStuckHelperTicket] = useState<{ key: string; summary: string } | null>(null);
+  const [routeTicket, setRouteTicket] = useState<{ key: string; summary: string } | null>(null);
 
   // --- Minimal mode state (service desk table) ---
   const [sortBy, setSortBy] = useState<SortField>(() => {
@@ -475,6 +482,15 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
               onEscalate={(ctx) => setEscalateTicket({ ticketKey: nowTicket.ticketKey, aiContext: ctx })}
               onHoldingUpdate={() => setHoldingUpdateTicket(nowTicket.ticketKey)}
               onCloseTicket={() => setCloseTicketKey(nowTicket.ticketKey)}
+              onRoute={() => {
+                const t = taskByKey.get(nowTicket.ticketKey);
+                setRouteTicket({ key: nowTicket.ticketKey, summary: t?.title ?? nowTicket.ticketKey });
+              }}
+              onChase={() => setChaseTicketKey(nowTicket.ticketKey)}
+              onStuckHelper={() => {
+                const t = taskByKey.get(nowTicket.ticketKey);
+                setStuckHelperTicket({ key: nowTicket.ticketKey, summary: t?.title ?? nowTicket.ticketKey });
+              }}
             />
             <div className="flex gap-2 pt-2 border-t border-[#3a424d]">
               {nowTicket.nextAction?.primaryAction && (
@@ -557,18 +573,30 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
       </BandAccordion>
 
       {/* === HYGIENE QUEUE band === */}
-      <BandAccordion label="Hygiene Queue" count={bands.hygiene.length}>
-        {bands.hygiene.length === 0 ? (
-          <p className="text-xs text-neutral-600 px-3 py-2">Hygiene pass not configured</p>
-        ) : (
-          bands.hygiene.map(ticket => (
-            <DeferredRow
-              key={ticket.ticketKey}
-              ticket={ticket}
-              task={taskByKey.get(ticket.ticketKey)}
-              onClick={() => openDrawer(ticket.ticketKey)}
-            />
-          ))
+      <BandAccordion label="Hygiene Queue" count={bands.hygiene.length} defaultOpen={bands.hygiene.length > 0}>
+        <HygienePassPanel
+          onOpenTicket={openDrawer}
+          onAction={(ticketKey, checkId) => {
+            if (checkId === 'sla_risk' || checkId === 'chase_cadence') {
+              setHoldingUpdateTicket(ticketKey);
+            } else if (checkId === 'next_update_overdue' || checkId === 'customer_waiting') {
+              setHoldingUpdateTicket(ticketKey);
+            } else {
+              openDrawer(ticketKey);
+            }
+          }}
+        />
+        {bands.hygiene.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {bands.hygiene.map(ticket => (
+              <DeferredRow
+                key={ticket.ticketKey}
+                ticket={ticket}
+                task={taskByKey.get(ticket.ticketKey)}
+                onClick={() => openDrawer(ticket.ticketKey)}
+              />
+            ))}
+          </div>
         )}
       </BandAccordion>
 
@@ -633,6 +661,54 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
           onResolved={() => {
             setCloseTicketKey(null);
             refresh();
+          }}
+        />
+      )}
+
+      {/* Chase panel */}
+      {chaseTicketKey && (
+        <ChasePanel
+          ticketKey={chaseTicketKey}
+          onClose={() => setChaseTicketKey(null)}
+          onSent={() => {
+            setChaseTicketKey(null);
+            refresh();
+          }}
+          onRedirectToClose={() => {
+            setChaseTicketKey(null);
+            setCloseTicketKey(chaseTicketKey);
+          }}
+        />
+      )}
+
+      {/* Route panel */}
+      {routeTicket && (
+        <RoutePanel
+          ticketKey={routeTicket.key}
+          ticketSummary={routeTicket.summary}
+          onClose={() => setRouteTicket(null)}
+          onRouted={() => {
+            setRouteTicket(null);
+            refresh();
+          }}
+          onEscalate={() => {
+            const key = routeTicket.key;
+            setRouteTicket(null);
+            setEscalateTicket({ ticketKey: key });
+          }}
+        />
+      )}
+
+      {/* Stuck helper panel */}
+      {stuckHelperTicket && (
+        <StuckHelperPanel
+          ticketKey={stuckHelperTicket.key}
+          ticketSummary={stuckHelperTicket.summary}
+          onClose={() => setStuckHelperTicket(null)}
+          onEscalate={() => {
+            const key = stuckHelperTicket.key;
+            setStuckHelperTicket(null);
+            setEscalateTicket({ ticketKey: key });
           }}
         />
       )}

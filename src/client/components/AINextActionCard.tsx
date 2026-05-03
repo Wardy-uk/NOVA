@@ -26,6 +26,9 @@ interface Props {
   onEscalate?: (context: { headline: string; body: string }) => void;
   onHoldingUpdate?: () => void;
   onCloseTicket?: () => void;
+  onRoute?: () => void;
+  onChase?: () => void;
+  onStuckHelper?: () => void;
 }
 
 const STATE_CONFIG: Record<NextActionState, { emoji: string; color: string; bg: string; border: string; label: string }> = {
@@ -39,7 +42,7 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` };
 }
 
-export function AINextActionCard({ ticketKey, compact, onTransition, onEscalate, onHoldingUpdate, onCloseTicket }: Props) {
+export function AINextActionCard({ ticketKey, compact, onTransition, onEscalate, onHoldingUpdate, onCloseTicket, onRoute, onChase, onStuckHelper }: Props) {
   const [data, setData] = useState<NextActionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +108,18 @@ export function AINextActionCard({ ticketKey, compact, onTransition, onEscalate,
     }
     if (onCloseTicket && /close|resolve|mark.?resolved|confirmed.?fix/i.test(label)) {
       onCloseTicket();
+      return;
+    }
+    if (onRoute && /route|reassign|wrong.*team|wrong.*queue|misroute|transfer|move.*to|belongs.*to/i.test(label)) {
+      onRoute();
+      return;
+    }
+    if (onChase && /chase|follow.?up|nudge|waiting.*customer/i.test(label)) {
+      onChase();
+      return;
+    }
+    if (onStuckHelper && data.state === 'stalled') {
+      onStuckHelper();
       return;
     }
     if (transition && onTransition) {
