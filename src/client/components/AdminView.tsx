@@ -89,7 +89,7 @@ interface MatrixOffset {
 interface IntegrationConfig {
   id: string;
   name: string;
-  fields: Array<{ key: string; label: string; type: string; placeholder?: string; required: boolean }>;
+  fields: Array<{ key: string; label: string; type: string; placeholder?: string; required: boolean; options?: string[] }>;
   values: Record<string, string>;
   enabled: boolean;
   mcpStatus?: string;
