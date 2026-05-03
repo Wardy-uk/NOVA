@@ -28,6 +28,7 @@ import type { RiskScorer } from '../services/risk-scorer.js';
 import type { EscalationLogService } from '../services/escalation-log-service.js';
 import type { DriftDetector } from '../services/drift-detector.js';
 import type { UserQueries, UserTeamQueries, TeamQueries, AutoRuleOverrideQueries } from '../db/queries.js';
+import type { JiraUserClientFactory } from '../services/jira-user-client.js';
 import { HygieneChecker } from '../services/hygiene-checker.js';
 import { createWorkingDayClock } from '../../shared/utils/workingDayClock.js';
 
@@ -51,10 +52,25 @@ interface AgentRouteDeps {
   userTeamQueries: UserTeamQueries | null;
   teamQueries: TeamQueries | null;
   autoRuleOverrideQueries: AutoRuleOverrideQueries | null;
+  jiraUserClientFactory: JiraUserClientFactory | null;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
   const router = Router();
+
+  async function requireJiraForUser(req: any, res: any): Promise<import('../services/jira-client.js').JiraRestClient | null> {
+    const userId = req.user?.id as number | undefined;
+    if (!userId || !deps?.jiraUserClientFactory) {
+      res.status(403).json({ ok: false, error: 'Jira account not connected. Go to My Settings → Jira Account and click "Connect Jira" before taking actions.', code: 'JIRA_NOT_CONNECTED' });
+      return null;
+    }
+    const client = await deps.jiraUserClientFactory.getClientForUser(userId);
+    if (!client) {
+      res.status(403).json({ ok: false, error: 'Jira account not connected. Go to My Settings → Jira Account and click "Connect Jira" before taking actions.', code: 'JIRA_NOT_CONNECTED' });
+      return null;
+    }
+    return client;
+  }
 
   let kpiPool: sql.ConnectionPool | null = null;
   async function getKpiPool(): Promise<sql.ConnectionPool> {
@@ -721,7 +737,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       return;
     }
     try {
-      const jira = agentLoop.getJiraClient();
+      const jira = await requireJiraForUser(req, res);
+      if (!jira) return;
       await jira.addComment(ticketKey, message, { internal: internal === true });
       res.json({ ok: true, data: { ticketKey, posted: true, internal: internal === true } });
     } catch (err) {
@@ -736,7 +753,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       return;
     }
     try {
-      const jira = agentLoop.getJiraClient();
+      const jira = await requireJiraForUser(req, res);
+      if (!jira) return;
       const username = (req as any).user?.username ?? 'unknown';
       const briefText = `🔺 Escalation from NOVA\n\nEscalated by: ${username}\nReason: ${reason ?? 'Not specified'}\n\nThis ticket requires specialist attention. Please review and assign to the appropriate team.`;
       await jira.addComment(ticketKey, briefText, { internal: true });
@@ -789,7 +807,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
     const commentText = commentLines.join('\n');
 
-    const jira = agentLoop.getJiraClient();
+    const jira = await requireJiraForUser(req, res);
+    if (!jira) return;
     let transitionError: string | null = null;
     let escalationId: number | null = null;
 
@@ -909,7 +928,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       return;
     }
 
-    const jira = agentLoop.getJiraClient();
+    const jira = await requireJiraForUser(req, res);
+    if (!jira) return;
     const username = (req as any).user?.username ?? 'unknown';
 
     try {
@@ -1210,7 +1230,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
     const username = (req as any).user?.username ?? 'unknown';
     try {
-      const jira = agentLoop.getJiraClient();
+      const jira = await requireJiraForUser(req, res);
+      if (!jira) return;
       await jira.addComment(ticketKey, message);
 
       await recordEvent('action_taken', username, ticketKey, {
@@ -1295,7 +1316,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
     const username = (req as any).user?.username ?? 'unknown';
     try {
-      const jira = agentLoop.getJiraClient();
+      const jira = await requireJiraForUser(req, res);
+      if (!jira) return;
 
       const { fields, comment } = buildResolveFields({
         tldr: resolutionSummary,
@@ -1336,7 +1358,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
 
     const username = (req as any).user?.username ?? 'unknown';
-    const jira = agentLoop.getJiraClient();
+    const jira = await requireJiraForUser(req, res);
+    if (!jira) return;
 
     // Load configurable project key mapping
     const routeProjectsSetting = deps?.settingsQueries?.get('route_destination_projects');

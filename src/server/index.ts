@@ -68,6 +68,7 @@ import { AuditQueries } from './db/audit.js';
 import { createAuditRoutes } from './routes/audit.js';
 import { createTeamRoutes } from './routes/team.js';
 import { JiraOAuthService } from './services/jira-oauth.js';
+import { JiraUserClientFactory } from './services/jira-user-client.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
 import { createNotificationRoutes } from './routes/notifications.js';
@@ -97,6 +98,9 @@ import { createMyTicketsRoutes } from './routes/my-tickets.js';
 import { QueueRanker } from './services/queue-ranker.js';
 import { DeferService } from './services/defer-service.js';
 import { AgentLoop } from './services/agent-loop.js';
+import { recordEvent } from './services/agent-events.js';
+import { buildResolveFields } from './utils/jira-resolve-fields.js';
+import { createWorkingDayClock } from '../shared/utils/workingDayClock.js';
 import { JiraSyncService } from './services/jira-sync-service.js';
 import { JiraCacheQueries } from './services/jira-cache-queries.js';
 import { LlmService } from './services/llm-service.js';
@@ -504,6 +508,7 @@ async function main() {
   // Entra SSO service
   const ssoService = new EntraSsoService(() => settingsQueries.getAll());
   const jiraOAuthService = new JiraOAuthService(() => settingsQueries.getAll());
+  const jiraUserClientFactory = new JiraUserClientFactory(userSettingsQueries, jiraOAuthService);
 
   // Area access guard for custom role-based route protection
   const requireAreaAccess = createAreaAccessGuard(() => {
@@ -818,7 +823,7 @@ async function main() {
   }, buildOnboardingJiraClient, () => bymClient));
   app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
-  app.use('/api/jira', createJiraRoutes(taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries));
+  app.use('/api/jira', createJiraRoutes(taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries, jiraUserClientFactory));
   app.use('/api/standups', requireAreaAccess('nova_features', 'view'), createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
   const spSync = msGraphClient ? new SharePointSync(msGraphClient, deliveryQueries, () => settingsQueries.getAll()) : undefined;
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess, auditQueries, onboardingRunQueries, settingsQueries));
@@ -1074,6 +1079,7 @@ async function main() {
       userTeamQueries,
       teamQueries,
       autoRuleOverrideQueries,
+      jiraUserClientFactory,
     }));
 
     const bankHolidaysPath = path.join(__dirname, '../../config/bank-holidays.json');
@@ -1330,6 +1336,57 @@ async function main() {
         }
       }, 60_000);
     }
+    // SOP-003: Day 10 auto-close backstop — runs once per hour during working hours
+    const backstopClock = createWorkingDayClock();
+    setInterval(async () => {
+      if (!backstopClock.isWorkingTime(new Date())) return;
+      if (!agentLoop) return;
+      try {
+        const cache = jiraCacheQueries;
+        const waiting = await cache.getOpenIssues(['NT']);
+        const waitingForCustomer = waiting.filter(t => {
+          const status = (t.status_name ?? '').toLowerCase();
+          return status.includes('waiting for customer') || status.includes('waiting on requestor');
+        });
+
+        const now = new Date();
+        let closed = 0;
+        for (const ticket of waitingForCustomer) {
+          const comments = await cache.getComments(ticket.issue_key, 20);
+          const lastAgentPublic = comments.find(c =>
+            c.is_public && c.author_email === ticket.assignee_email,
+          );
+          if (!lastAgentPublic) continue;
+
+          const hoursSince = backstopClock.workingHoursBetween(new Date(lastAgentPublic.jira_created), now);
+          const daysSince = hoursSince / 8;
+          if (daysSince < 10) continue;
+
+          const jira = agentLoop.getJiraClient();
+          const { fields, comment } = buildResolveFields({
+            tldr: 'Auto-closed: no customer response after 10 working days (SOP-003 backstop)',
+            resolution: 'Request Cancelled / Withdrawn',
+            comment: 'This ticket has been automatically closed after 10 working days without a customer response. If you still need help, please reply to this email or raise a new ticket.',
+          });
+
+          try {
+            await jira.transitionIssue(ticket.issue_key, '17', { fields, comment });
+            await recordEvent('auto_close_backstop_fired', null, ticket.issue_key, {
+              agent_who_owned_it: ticket.assignee_display ?? ticket.assignee_email ?? 'unknown',
+              days_in_state: Math.round(daysSince),
+            });
+            closed++;
+          } catch (err) {
+            console.warn(`[backstop] Failed to auto-close ${ticket.issue_key}:`, err instanceof Error ? err.message : err);
+          }
+        }
+
+        if (closed > 0) console.log(`[backstop] Auto-closed ${closed} ticket(s) at Day 10`);
+      } catch (err) {
+        console.error('[backstop] Day 10 scan failed:', err instanceof Error ? err.message : err);
+      }
+    }, 60 * 60 * 1000); // every hour
+
   } else {
     console.log('[N.O.V.A] Agent loop not available — no Jira credentials configured.');
   }

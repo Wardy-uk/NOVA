@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { JiraNotConnected, isJiraNotConnected } from './JiraNotConnected.js';
 
 interface Props {
   ticketKey: string;
@@ -78,6 +79,7 @@ export function CloseTicketPanel({ ticketKey, onClose, onResolved }: Props) {
         onResolved();
       } else {
         setError(json.error ?? 'Failed to resolve ticket');
+        if (json.code === 'JIRA_NOT_CONNECTED') setJiraDisconnected(true);
       }
     } catch {
       setError('Network error');
@@ -85,6 +87,8 @@ export function CloseTicketPanel({ ticketKey, onClose, onResolved }: Props) {
       setSubmitting(false);
     }
   };
+
+  const [jiraDisconnected, setJiraDisconnected] = useState(false);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
@@ -183,7 +187,8 @@ export function CloseTicketPanel({ ticketKey, onClose, onResolved }: Props) {
         )}
 
         {/* Error */}
-        {error && (
+        {jiraDisconnected && <JiraNotConnected />}
+        {error && !jiraDisconnected && (
           <div className="mx-5 mb-3 text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">
             {error}
           </div>

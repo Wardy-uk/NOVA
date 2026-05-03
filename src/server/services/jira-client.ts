@@ -296,6 +296,10 @@ export class JiraRestClient {
     return issue;
   }
 
+  async getMyself(): Promise<{ accountId: string; displayName: string; emailAddress: string }> {
+    return this.request<{ accountId: string; displayName: string; emailAddress: string }>('GET', 'myself');
+  }
+
   async createIssue(payload: { fields: Record<string, unknown> }): Promise<JiraCreatedIssue> {
     return this.request<JiraCreatedIssue>('POST', 'issue', payload);
   }

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { TaskQueries, UserSettingsQueries } from '../db/queries.js';
 import { JiraRestClient, JiraApiError } from '../services/jira-client.js';
+import type { JiraUserClientFactory } from '../services/jira-user-client.js';
 import { getLastJiraSearchText } from '../services/aggregator.js';
 
 // Jira option-type custom fields — REST API requires { value: "..." } wrapping
@@ -44,20 +45,20 @@ export function createJiraRoutes(
   taskQueries: TaskQueries,
   getJiraClient?: () => JiraRestClient | null,
   getSettings?: () => Record<string, string>,
-  userSettingsQueries?: UserSettingsQueries
+  userSettingsQueries?: UserSettingsQueries,
+  jiraUserClientFactory?: JiraUserClientFactory,
 ): Router {
-  /** Build a JiraRestClient for the requesting user (personal credentials only).
-   *  Never falls back to global — personal and global Jira are separate. */
   async function getClientForUser(userId?: number): Promise<JiraRestClient | null> {
-    if (userId && userSettingsQueries) {
-      // 1. Per-user OAuth tokens (from Jira OAuth login)
+    if (!userId) return null;
+    if (jiraUserClientFactory) return jiraUserClientFactory.getClientForUser(userId);
+
+    // Legacy fallback if factory not available
+    if (userSettingsQueries) {
       const cloudId = await userSettingsQueries.get(userId, 'jira_cloud_id');
       const accessToken = await userSettingsQueries.get(userId, 'jira_access_token');
       if (cloudId && accessToken) {
         return new JiraRestClient({ cloudId, accessToken });
       }
-
-      // 2. Per-user Basic auth credentials (from My Settings > Jira)
       const userEnabled = await userSettingsQueries.get(userId, 'jira_enabled');
       const userUrl = await userSettingsQueries.get(userId, 'jira_url');
       const userEmail = await userSettingsQueries.get(userId, 'jira_username');
@@ -66,7 +67,6 @@ export function createJiraRoutes(
         return new JiraRestClient({ baseUrl: userUrl, email: userEmail, apiToken: userToken });
       }
     }
-
     return null;
   }
 

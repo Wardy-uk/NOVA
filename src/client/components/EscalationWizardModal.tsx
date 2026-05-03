@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { JiraNotConnected } from './JiraNotConnected.js';
 
 interface Props {
   ticketKey: string;
@@ -70,6 +71,7 @@ export function EscalationWizardModal({ ticketKey, suggestedDestination, aiConte
         onEscalated();
       } else {
         setSubmitError(json.error ?? 'Escalation failed');
+        if (json.code === 'JIRA_NOT_CONNECTED') setJiraDisconnected(true);
       }
     } catch {
       setSubmitError('Network error');
@@ -78,6 +80,7 @@ export function EscalationWizardModal({ ticketKey, suggestedDestination, aiConte
     }
   };
 
+  const [jiraDisconnected, setJiraDisconnected] = useState(false);
   const steps = ['Reason', 'Troubleshooting', 'Summary', 'Confirm'];
 
   return (
@@ -206,7 +209,8 @@ export function EscalationWizardModal({ ticketKey, suggestedDestination, aiConte
                   <span className="text-neutral-300 whitespace-pre-wrap">{summary}</span>
                 </div>
               </div>
-              {submitError && (
+              {jiraDisconnected && <JiraNotConnected />}
+              {submitError && !jiraDisconnected && (
                 <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">
                   {submitError}
                 </div>
