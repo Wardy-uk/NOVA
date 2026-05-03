@@ -10,6 +10,7 @@ import { RespondResultSchema, type RespondResult } from '../services/respond-sch
 import { ResolveSummarySchema, type ResolveSummaryResult } from '../services/resolve-schema.js';
 import { loadPrompt } from '../services/prompt-loader.js';
 import { z } from 'zod';
+import { JIRA_FIELDS } from '../../shared/jira-fields.js';
 import type { AssignmentEngine, Pool } from '../services/assignment-engine.js';
 import type { AgentAvailabilityService, AvailabilityStatus } from '../services/agent-availability.js';
 import type { TicketClassifier } from '../services/ticket-classifier.js';
@@ -831,6 +832,114 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data: { escalationId, transitionedTo: null, warning: transitionError } });
     } else {
       res.json({ ok: true, data: { escalationId, transitionedTo: destLabel } });
+    }
+  });
+
+  // ── Holding update (SOP-008) ──
+
+  router.post('/holding-update/draft', async (req, res) => {
+    const { ticketKey, tone } = req.body as { ticketKey?: string; tone?: string };
+    if (!ticketKey) {
+      res.status(400).json({ ok: false, error: 'ticketKey is required' });
+      return;
+    }
+    try {
+      const jira = agentLoop.getJiraClient();
+      const llm = agentLoop.getLlmService();
+
+      const issue = await jira.getIssue(ticketKey, [
+        'summary', 'status', 'priority', 'comment',
+      ]);
+      if (!issue) {
+        res.status(404).json({ ok: false, error: `Ticket ${ticketKey} not found` });
+        return;
+      }
+      const f = issue.fields;
+      const comments = (f.comment as any)?.comments as Array<{
+        author?: { displayName?: string };
+        body?: string;
+        created?: string;
+        properties?: Array<{ key: string; value?: { internal?: boolean } }>;
+      }> | undefined;
+
+      const conversation = (comments ?? [])
+        .slice(-5)
+        .map(c => {
+          const isInternal = c.properties?.some(p => p.key === 'sd.public.comment' && p.value?.internal) ?? false;
+          return `[${c.created ?? ''}] ${c.author?.displayName ?? 'Unknown'}${isInternal ? ' (internal)' : ''}:\n${typeof c.body === 'string' ? c.body.slice(0, 500) : '(complex body)'}`;
+        })
+        .join('\n\n---\n\n');
+
+      const systemPrompt = loadPrompt('holding-update', {
+        ticket_key: ticketKey,
+        summary: (f.summary as string) ?? '',
+        status: (f.status as any)?.name ?? 'Unknown',
+        priority: (f.priority as any)?.name ?? 'Medium',
+        conversation: conversation || '(no comments)',
+        tone: tone === 'formal' ? 'formal' : 'friendly',
+      });
+
+      const HoldingDraftSchema = z.object({ draft: z.string() });
+      const result = await llm.call(
+        systemPrompt,
+        'Generate a holding update for this ticket.',
+        HoldingDraftSchema,
+        { ticketId: ticketKey, callType: 'holding_update', temperature: 0.4 },
+      );
+
+      res.json({ ok: true, data: { draft: result.data.draft } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to generate draft' });
+    }
+  });
+
+  router.post('/holding-update/send', async (req, res) => {
+    const { ticketKey, message, nextUpdateAt, tone } = req.body as {
+      ticketKey?: string;
+      message?: string;
+      nextUpdateAt?: string;
+      tone?: string;
+    };
+    if (!ticketKey || !message || !nextUpdateAt) {
+      res.status(400).json({ ok: false, error: 'ticketKey, message, and nextUpdateAt are required' });
+      return;
+    }
+
+    const jira = agentLoop.getJiraClient();
+    const username = (req as any).user?.username ?? 'unknown';
+
+    try {
+      // Public customer-facing comment (NOT internal)
+      await jira.addComment(ticketKey, message);
+
+      // Set Agent Next Update field
+      await jira.updateFields(ticketKey, {
+        [JIRA_FIELDS.AGENT_NEXT_UPDATE]: nextUpdateAt,
+      });
+
+      // Emit action_taken event
+      await recordEvent('action_taken', username, ticketKey, {
+        action_type: 'holding_update',
+        tone: tone ?? 'friendly',
+        message_length: message.length,
+        next_update_at: nextUpdateAt,
+      });
+
+      // Emit next_update_commitment_set event
+      const committedAt = new Date().toISOString();
+      const dueAt = new Date(nextUpdateAt);
+      const msOut = dueAt.getTime() - Date.now();
+      const workingDaysOut = Math.round(msOut / (1000 * 60 * 60 * 8)) / 1;
+      await recordEvent('next_update_commitment_set', username, ticketKey, {
+        committed_at: committedAt,
+        due_at: nextUpdateAt,
+        working_days_out: workingDaysOut > 0 ? workingDaysOut : 1,
+        set_via: 'holding_update',
+      });
+
+      res.json({ ok: true, data: { ticketKey, commentPosted: true, nextUpdateAt } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to send holding update' });
     }
   });
 

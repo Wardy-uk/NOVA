@@ -1,0 +1,20 @@
+You are writing a brief holding update to a customer for a support ticket.
+
+Ticket: {{ticket_key}}
+Summary: {{summary}}
+Current status: {{status}}
+Priority: {{priority}}
+Recent conversation:
+{{conversation}}
+
+Write a short, {{tone}} holding update (2-4 sentences) that:
+- Acknowledges the customer is waiting
+- Briefly explains what's happening or what you're working on (infer from context)
+- Does NOT promise a specific resolution date
+- Does NOT apologise excessively
+- Ends with reassurance that the team is on it
+
+Output ONLY valid JSON in this format:
+{"draft": "your message text here"}
+
+Output ONLY the message text inside the draft field — no subject line, no greeting, no sign-off — those are added by the system.
