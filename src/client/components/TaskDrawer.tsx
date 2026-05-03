@@ -25,24 +25,31 @@ interface JiraTransition {
 
 interface JiraComment {
   id: string;
-  body: string;
-  author: { display_name?: string; name?: string; email?: string };
+  body: unknown;
+  author: { displayName?: string; display_name?: string; name?: string; email?: string };
   created: string;
   updated?: string;
 }
 
-const ALLOWED_TRANSITIONS: Record<string, { commentRequired: boolean; commentTypes?: ('internal' | 'public')[] }> = {
-  'Waiting on Assignee': { commentRequired: true, commentTypes: ['internal'] },
-  'Waiting On Partner': { commentRequired: true, commentTypes: ['public', 'internal'] },
-  'Waiting On Requestor': { commentRequired: true, commentTypes: ['public', 'internal'] },
-  'Work in progress': { commentRequired: false },
-};
+function commentBodyToText(body: unknown): string {
+  if (!body) return '';
+  if (typeof body === 'string') return body;
+  try {
+    const walk = (node: any): string => {
+      if (!node) return '';
+      if (typeof node === 'string') return node;
+      if (node.text) return node.text;
+      if (Array.isArray(node.content)) return node.content.map(walk).join('');
+      return '';
+    };
+    return walk(body);
+  } catch { return ''; }
+}
 
-function findAllowedTransition(name: string): { commentRequired: boolean; commentTypes?: ('internal' | 'public')[] } | null {
-  for (const [key, config] of Object.entries(ALLOWED_TRANSITIONS)) {
-    if (key.toLowerCase() === name.toLowerCase()) return config;
-  }
-  return null;
+const CUSTOMER_FACING_STATUSES = ['waiting on requestor', 'waiting on partner'];
+
+function getDefaultCommentType(transitionName: string): 'public' | 'internal' {
+  return CUSTOMER_FACING_STATUSES.includes(transitionName.toLowerCase()) ? 'public' : 'internal';
 }
 
 interface Props {
@@ -203,11 +210,13 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
       // Only set jiraIssue if the response is actually a JSON object (not markdown text)
       if (issueJson?.ok && isObj(issueJson.data)) {
         setJiraIssue(issueJson.data as Record<string, unknown>);
-        // Extract comments from issue data
+        // Extract comments — API flattens fields, so comment is at top level
         const issueData = issueJson.data as Record<string, unknown>;
+        const commentField = issueData.comment as { comments?: JiraComment[] } | JiraComment[] | undefined;
         const rawComments: JiraComment[] =
+          Array.isArray(commentField) ? commentField :
+          (commentField as { comments?: JiraComment[] })?.comments ??
           (issueData.comments as JiraComment[]) ??
-          ((issueData.fields as Record<string, unknown>)?.comment as { comments?: JiraComment[] })?.comments ??
           [];
         setJiraComments(rawComments);
       }
@@ -242,22 +251,11 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
   const canUpdateJira = jiraTools.some(t => t.includes('update_issue') || t.includes('update'));
   const canCommentJira = jiraTools.some(t => t.includes('add_comment') || t.includes('create_comment'));
   const canTransitionJira = jiraTools.some(t => t.includes('transition_issue') || t.includes('do_transition'));
-  const allowedTransitions = jiraTransitions.filter(t => t.name && findAllowedTransition(t.name));
 
   const handleTransitionClick = (t: JiraTransition) => {
-    const config = t.name ? findAllowedTransition(t.name) : null;
-    if (!config) return;
-    if (config.commentRequired && config.commentTypes) {
-      setTransitionComment('');
-      setTransitionCommentType(config.commentTypes[0]);
-      setTransitionModal({ transition: t, commentTypes: config.commentTypes });
-    } else {
-      // Immediate transition (e.g. Work in Progress) — set and auto-save
-      setTransition(String(t.id ?? t.name ?? ''));
-      setTimeout(() => {
-        document.getElementById('jira-save-btn')?.click();
-      }, 50);
-    }
+    setTransitionComment('');
+    setTransitionCommentType(getDefaultCommentType(t.name ?? ''));
+    setTransitionModal({ transition: t, commentTypes: ['public', 'internal'] });
   };
 
   const [pendingCommentVisibility, setPendingCommentVisibility] = useState<'internal' | 'public' | null>(null);
@@ -274,6 +272,20 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
       document.getElementById('jira-save-btn')?.click();
     }, 50);
   };
+
+  // Derive live Jira fields for TicketBriefCard (jiraIssue is already flattened: { key, id, ...fields })
+  const liveBriefProps = useMemo((): { ticketKey: string; fields: Record<string, unknown>; tier?: string | null } | null => {
+    if (!isJira) return null;
+    const ticketKey = task.source_id || task.title?.match(/^[A-Z]+-\d+/)?.[0] || '';
+    if (jiraIssue) {
+      // API returns flat object (key, id, self, + all issue.fields spread)
+      const tierRaw = jiraIssue.customfield_12981;
+      const tier = typeof tierRaw === 'string' ? tierRaw : (tierRaw as any)?.value ?? (tierRaw as any)?.name ?? null;
+      return { ticketKey, fields: jiraIssue, tier };
+    }
+    const bp = briefPropsFromTask(task);
+    return bp;
+  }, [isJira, jiraIssue, task]);
 
   // ---- Assignee search ----
 
@@ -371,9 +383,11 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
       if (refreshJson.ok && isObj(refreshJson.data)) {
         setJiraIssue(refreshJson.data as Record<string, unknown>);
         const d = refreshJson.data as Record<string, unknown>;
+        const cf = d.comment as { comments?: JiraComment[] } | JiraComment[] | undefined;
         setJiraComments(
+          Array.isArray(cf) ? cf :
+          (cf as { comments?: JiraComment[] })?.comments ??
           (d.comments as JiraComment[]) ??
-          ((d.fields as Record<string, unknown>)?.comment as { comments?: JiraComment[] })?.comments ??
           []
         );
       }
@@ -686,10 +700,9 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
             <div className="grid gap-4 h-full" style={{ gridTemplateColumns: '1.3fr 1fr' }}>
               {/* Left column: Brief + Fields + Transitions */}
               <div className="overflow-y-auto td-scroll space-y-4 pr-1">
-                {(() => {
-                  const bp = briefPropsFromTask(task);
-                  return bp ? <TicketBriefCard {...bp} compact /> : null;
-                })()}
+                {liveBriefProps && (
+                  <TicketBriefCard ticketKey={liveBriefProps.ticketKey} fields={liveBriefProps.fields as any} tier={liveBriefProps.tier} compact />
+                )}
                 {task.source === 'jira' && task.source_id && (
                   <AINextActionCard ticketKey={task.source_id} compact />
                 )}
@@ -794,23 +807,23 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
                   </div>
                 </TDGlassCard>
 
-                {/* Transition buttons */}
-                {canTransitionJira && allowedTransitions.length > 0 && (
+                {/* Transition buttons — all available */}
+                {canTransitionJira && jiraTransitions.length > 0 && (
                   <TDGlassCard className="p-4">
                     <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-2">Transitions</div>
                     <div className="flex flex-wrap gap-2">
-                      {allowedTransitions.map((t) => {
-                        const isWIP = t.name?.toLowerCase() === 'work in progress';
+                      {jiraTransitions.filter(t => t.name).map((t) => {
+                        const isCustomerFacing = CUSTOMER_FACING_STATUSES.includes((t.name ?? '').toLowerCase());
                         return (
                           <button
                             key={String(t.id ?? t.name)}
                             onClick={() => handleTransitionClick(t)}
                             disabled={saving}
                             className="px-3 py-1.5 text-xs rounded-lg font-semibold disabled:opacity-50 transition-colors"
-                            style={isWIP ? {
-                              background: 'linear-gradient(135deg, rgba(59,130,246,0.15), rgba(94,193,202,0.15))',
-                              border: '1px solid rgba(59,130,246,0.3)',
-                              color: '#93c5fd',
+                            style={isCustomerFacing ? {
+                              background: 'linear-gradient(135deg, rgba(94,193,202,0.12), rgba(155,106,237,0.12))',
+                              border: '1px solid rgba(94,193,202,0.3)',
+                              color: '#5ec1ca',
                             } : {
                               background: 'rgba(255,255,255,0.04)',
                               border: '1px solid rgba(255,255,255,0.1)',
@@ -845,7 +858,7 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-[11px] text-[#5ec1ca] font-semibold">
-                          {c.author?.display_name ?? c.author?.name ?? 'Unknown'}
+                          {c.author?.displayName ?? c.author?.display_name ?? c.author?.name ?? 'Unknown'}
                         </span>
                         <span className="text-[10px] text-neutral-500">
                           {new Date(c.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
@@ -854,7 +867,7 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
                         </span>
                       </div>
                       <div className="text-[12px] text-neutral-100 whitespace-pre-wrap break-words">
-                        {c.body}
+                        {commentBodyToText(c.body)}
                       </div>
                     </div>
                   ))}
@@ -863,6 +876,28 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
                 {/* Comment composer */}
                 {canCommentJira && (
                   <div className="pt-3 border-t border-white/5">
+                    <div className="flex gap-2 mb-2">
+                      <button
+                        onClick={() => setPendingCommentVisibility('internal')}
+                        className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${
+                          (pendingCommentVisibility ?? 'internal') === 'internal'
+                            ? 'bg-amber-900/50 border-amber-700 text-amber-300 font-semibold'
+                            : 'border-white/10 text-neutral-400 hover:text-neutral-200'
+                        }`}
+                      >
+                        Internal
+                      </button>
+                      <button
+                        onClick={() => setPendingCommentVisibility('public')}
+                        className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${
+                          pendingCommentVisibility === 'public'
+                            ? 'bg-blue-900/50 border-blue-700 text-blue-300 font-semibold'
+                            : 'border-white/10 text-neutral-400 hover:text-neutral-200'
+                        }`}
+                      >
+                        Public
+                      </button>
+                    </div>
                     <textarea
                       value={comment}
                       onChange={(e) => setComment(e.target.value)}
@@ -871,6 +906,19 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
                       className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-2"
                       style={{ background: 'rgba(255,255,255,0.03)' }}
                     />
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => {
+                          if (!comment.trim()) return;
+                          document.getElementById('jira-save-btn')?.click();
+                        }}
+                        disabled={!comment.trim() || saving}
+                        className="px-3 py-1.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
+                        style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 12px rgba(94,193,202,0.3)' }}
+                      >
+                        Post Comment
+                      </button>
+                    </div>
                   </div>
                 )}
               </TDGlassCard>
@@ -1146,7 +1194,7 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
               {transitionModal.transition.name}
             </h3>
             <p className="text-xs text-neutral-500 mb-4">
-              Add a comment before transitioning this ticket.
+              Optionally add a comment with this transition.
             </p>
 
             {transitionModal.commentTypes.length > 1 && (
@@ -1184,7 +1232,7 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
             <textarea
               value={transitionComment}
               onChange={(e) => setTransitionComment(e.target.value)}
-              placeholder="Enter your comment..."
+              placeholder="Add a comment (optional)..."
               autoFocus
               rows={4}
               className="w-full bg-[#272C33] border border-[#3a424d] rounded-lg px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-600 focus:border-[#5ec1ca] focus:outline-none resize-none mb-4"
@@ -1199,8 +1247,7 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
               </button>
               <button
                 onClick={handleTransitionConfirm}
-                disabled={!transitionComment.trim()}
-                className="px-4 py-2 text-xs font-bold text-[#0f172a] rounded-lg disabled:opacity-40"
+                className="px-4 py-2 text-xs font-bold text-[#0f172a] rounded-lg"
                 style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 12px rgba(94,193,202,0.3)' }}
               >
                 Transition
