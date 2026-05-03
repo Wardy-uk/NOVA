@@ -23,6 +23,7 @@ interface Props {
   ticketKey: string;
   compact?: boolean;
   onTransition?: (transitionName: string) => void;
+  onEscalate?: (context: { headline: string; body: string }) => void;
 }
 
 const STATE_CONFIG: Record<NextActionState, { emoji: string; color: string; bg: string; border: string; label: string }> = {
@@ -36,7 +37,7 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` };
 }
 
-export function AINextActionCard({ ticketKey, compact, onTransition }: Props) {
+export function AINextActionCard({ ticketKey, compact, onTransition, onEscalate }: Props) {
   const [data, setData] = useState<NextActionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,8 +91,13 @@ export function AINextActionCard({ ticketKey, compact, onTransition }: Props) {
       handleRunAgent();
       return;
     }
-    if (data.primaryAction.jiraTransition && onTransition) {
-      onTransition(data.primaryAction.jiraTransition);
+    const transition = data.primaryAction.jiraTransition;
+    if (transition && /escalat/i.test(transition) && onEscalate) {
+      onEscalate({ headline: data.headline, body: data.body });
+      return;
+    }
+    if (transition && onTransition) {
+      onTransition(transition);
     }
   };
 

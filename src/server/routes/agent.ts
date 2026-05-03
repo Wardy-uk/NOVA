@@ -3,6 +3,7 @@ import sql from 'mssql';
 import { requireRole, requireSuperAdmin } from '../middleware/auth.js';
 import type { AgentLoop } from '../services/agent-loop.js';
 import { query, execute } from '../services/database.js';
+import { recordEvent } from '../services/agent-events.js';
 import { MODEL_PRICING } from '../services/llm-service.js';
 import { resolveStatusName, resolveStatusFromCache } from '../utils/jira-status.js';
 import { RespondResultSchema, type RespondResult } from '../services/respond-schema.js';
@@ -737,6 +738,99 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data: { ticketKey, escalated: true } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to escalate' });
+    }
+  });
+
+  // SOP-002 gated escalation
+  const ESCALATION_TRANSITION_IDS: Record<string, string> = {
+    tier2: '101',
+    production: '14',
+    development: '141',
+  };
+  const ESCALATION_DESTINATION_LABELS: Record<string, string> = {
+    tier2: 'Tier 2',
+    production: 'Production',
+    development: 'Development',
+  };
+
+  router.post('/escalate', async (req, res) => {
+    const { ticketKey, destination, reason, troubleshooting, summary } = req.body;
+    if (!ticketKey || !destination || !reason || !troubleshooting || !summary) {
+      res.status(400).json({ ok: false, error: 'All fields required: ticketKey, destination, reason, troubleshooting, summary' });
+      return;
+    }
+    const transitionId = ESCALATION_TRANSITION_IDS[destination];
+    if (!transitionId) {
+      res.status(400).json({ ok: false, error: `Invalid destination: ${destination}` });
+      return;
+    }
+
+    const username = (req as any).user?.username ?? 'unknown';
+    const destLabel = ESCALATION_DESTINATION_LABELS[destination] ?? destination;
+
+    const commentLines = [
+      '── NOVA Escalation (SOP-002) ──',
+      `Escalated by: ${username}`,
+      `Destination: ${destLabel}`,
+      `Reason: ${reason}`,
+      '',
+      'Troubleshooting performed:',
+      troubleshooting,
+      '',
+      'Agent summary:',
+      summary,
+      '───────���───────────────────────',
+    ];
+
+    const commentText = commentLines.join('\n');
+
+    const jira = agentLoop.getJiraClient();
+    let transitionError: string | null = null;
+    let escalationId: number | null = null;
+
+    try {
+      await jira.addComment(ticketKey, commentText, { internal: true });
+    } catch {
+      // Comment failure is not fatal — try the transition anyway
+    }
+
+    try {
+      await jira.transitionIssue(ticketKey, transitionId);
+    } catch (err) {
+      transitionError = err instanceof Error ? err.message : 'Transition failed';
+    }
+
+    // Log to escalation_log
+    try {
+      if (deps?.escalationLog) {
+        escalationId = await deps.escalationLog.log({
+          ticket_key: ticketKey,
+          escalation_type: 'manual',
+          to_tier: destLabel,
+          reason_code: reason,
+          reason_label: reason,
+          escalated_by: username,
+          notes: summary,
+          source: 'manual_sop002',
+        });
+      }
+    } catch { /* log failure is not fatal */ }
+
+    // Emit agent event
+    try {
+      await recordEvent('action_taken', username, ticketKey, {
+        action_type: 'escalate',
+        destination,
+        reason,
+        transition_id: transitionId,
+        transition_error: transitionError,
+      });
+    } catch { /* event failure is not fatal */ }
+
+    if (transitionError) {
+      res.json({ ok: true, data: { escalationId, transitionedTo: null, warning: transitionError } });
+    } else {
+      res.json({ ok: true, data: { escalationId, transitionedTo: destLabel } });
     }
   });
 

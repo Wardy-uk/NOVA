@@ -6,6 +6,7 @@ import { TaskListHeader } from './TaskListHeader.js';
 import { TicketBriefCard, briefPropsFromTask } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
 import { DeferReasonModal } from './DeferReasonModal.js';
+import { EscalationWizardModal } from './EscalationWizardModal.js';
 import { SLATimer } from './SLATimer.js';
 
 interface Props {
@@ -180,6 +181,7 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
   const { queue, loading: queueLoading, refresh } = useMyTicketsQueue(agentUsername ?? null);
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
   const [deferTicketKey, setDeferTicketKey] = useState<string | null>(null);
+  const [escalateTicket, setEscalateTicket] = useState<{ ticketKey: string; aiContext?: { headline?: string; body?: string } } | null>(null);
 
   // --- Minimal mode state (service desk table) ---
   const [sortBy, setSortBy] = useState<SortField>(() => {
@@ -464,10 +466,19 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
           </div>
           <div className="bg-[#2f353d] border border-[#5ec1ca]/40 rounded-xl p-4 space-y-3">
             {nowBrief && <TicketBriefCard {...nowBrief} />}
-            <AINextActionCard ticketKey={nowTicket.ticketKey} />
+            <AINextActionCard
+              ticketKey={nowTicket.ticketKey}
+              onEscalate={(ctx) => setEscalateTicket({ ticketKey: nowTicket.ticketKey, aiContext: ctx })}
+            />
             <div className="flex gap-2 pt-2 border-t border-[#3a424d]">
               {nowTicket.nextAction?.primaryAction && (
                 <button
+                  onClick={() => {
+                    const pa = nowTicket.nextAction!.primaryAction;
+                    if (pa.jiraTransition && /escalat/i.test(pa.jiraTransition)) {
+                      setEscalateTicket({ ticketKey: nowTicket.ticketKey, aiContext: { headline: nowTicket.nextAction!.headline, body: nowTicket.nextAction!.body } });
+                    }
+                  }}
                   className="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors"
                 >
                   {nowTicket.nextAction.primaryAction.label}
@@ -574,6 +585,19 @@ export function TaskList({ tasks, loading, onUpdateTask, minimal, agentUsername,
           onClose={() => setDeferTicketKey(null)}
           onDeferred={() => {
             setDeferTicketKey(null);
+            refresh();
+          }}
+        />
+      )}
+
+      {/* Escalation wizard */}
+      {escalateTicket && (
+        <EscalationWizardModal
+          ticketKey={escalateTicket.ticketKey}
+          aiContext={escalateTicket.aiContext}
+          onClose={() => setEscalateTicket(null)}
+          onEscalated={() => {
+            setEscalateTicket(null);
             refresh();
           }}
         />
