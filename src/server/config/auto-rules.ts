@@ -103,6 +103,14 @@ const RULES_RAW: unknown[] = [
     action: { type: 'plugin_to_tpj' },
   },
   {
+    id: 'smart-plugin-persistent-fail',
+    match: {
+      subject: { contains: 'consistently failing to update' },
+    },
+    conditional: { type: 'pre_emption', maxRetries: 3, actionedIndicators: ['moved your request into'] },
+    action: { type: 'plugin_to_tpj' },
+  },
+  {
     id: 'abuse-report',
     match: {
       subject: { equals: 'Received Abuse Report' },
