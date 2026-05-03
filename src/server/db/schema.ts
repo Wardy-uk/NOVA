@@ -1177,6 +1177,16 @@ async function runMigrations(): Promise<void> {
     // resolved_by on agent_decisions — track human vs system for stats filtering
     `IF COL_LENGTH('agent_decisions', 'resolved_by') IS NULL
      ALTER TABLE agent_decisions ADD resolved_by NVARCHAR(100) NULL;`,
+
+    // Auto-rule enable/disable overrides (WP-70)
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'auto_rule_overrides') AND type = 'U')
+     CREATE TABLE auto_rule_overrides (
+       rule_id VARCHAR(100) PRIMARY KEY,
+       enabled BIT NOT NULL DEFAULT 1,
+       disabled_by VARCHAR(100) NULL,
+       disabled_at DATETIME2 NULL,
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

@@ -5,6 +5,7 @@ import type { PluginToTpjExecutor } from './plugin-to-tpj-executor.js';
 import type { AbuseReportExecutor } from './abuse-report-executor.js';
 import type { Observer } from './observer.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import type { AutoRuleOverrideQueries } from '../db/queries.js';
 import { executeAndGetId, query } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 
@@ -37,10 +38,15 @@ export interface AutoRuleMatch {
   matchedFields: Record<string, boolean>;
 }
 
+const OVERRIDE_CACHE_TTL_MS = 60_000;
+
 export class AutoRulesEngine {
   private dailyCounts = new Map<string, { date: string; count: number }>();
   private regexCache = new Map<string, RegExp>();
   private abuseExecutor: AbuseReportExecutor | null = null;
+  private overrideQueries: AutoRuleOverrideQueries | null = null;
+  private overrideCache: Record<string, boolean> | null = null;
+  private overrideCacheAt = 0;
 
   constructor(
     private jiraClient: JiraRestClient,
@@ -49,6 +55,46 @@ export class AutoRulesEngine {
     private settings: SettingsQueries,
   ) {
     console.log(`[auto-rules] Engine loaded with ${AUTO_RULES.length} rules: ${AUTO_RULES.map(r => r.id).join(', ')}`);
+  }
+
+  setOverrideQueries(q: AutoRuleOverrideQueries): void {
+    this.overrideQueries = q;
+    this.logStartupOverrides();
+  }
+
+  private async getOverrides(): Promise<Record<string, boolean>> {
+    if (!this.overrideQueries) return {};
+    if (this.overrideCache && Date.now() - this.overrideCacheAt < OVERRIDE_CACHE_TTL_MS) return this.overrideCache;
+    try {
+      this.overrideCache = await this.overrideQueries.getOverrides();
+      this.overrideCacheAt = Date.now();
+    } catch (err) {
+      console.warn('[auto-rules] Failed to load overrides:', err instanceof Error ? err.message : err);
+      if (!this.overrideCache) this.overrideCache = {};
+    }
+    return this.overrideCache;
+  }
+
+  invalidateOverrideCache(): void {
+    this.overrideCache = null;
+    this.overrideCacheAt = 0;
+  }
+
+  private async isRuleEnabled(ruleId: string): Promise<boolean> {
+    const overrides = await this.getOverrides();
+    return overrides[ruleId] !== false;
+  }
+
+  private async logStartupOverrides(): Promise<void> {
+    try {
+      const overrides = await this.getOverrides();
+      const disabled = Object.entries(overrides).filter(([, v]) => !v).map(([k]) => k);
+      if (disabled.length > 0) {
+        console.log(`[auto-rules] Loaded ${AUTO_RULES.length} rules (${disabled.length} disabled via overrides: ${disabled.join(', ')})`);
+      } else {
+        console.log(`[auto-rules] Loaded ${AUTO_RULES.length} rules (all enabled)`);
+      }
+    } catch { /* best effort */ }
   }
 
   setAbuseExecutor(executor: AbuseReportExecutor): void {
@@ -61,7 +107,7 @@ export class AutoRulesEngine {
   ): Promise<boolean> {
     if (event.eventType !== 'ticket_created') return false;
 
-    const match = this.evaluate(event);
+    const match = await this.evaluate(event);
     if (!match) return false;
 
     const { rule } = match;
@@ -109,8 +155,13 @@ export class AutoRulesEngine {
     return true;
   }
 
-  private evaluate(event: TicketEvent): AutoRuleMatch | null {
+  private async evaluate(event: TicketEvent): Promise<AutoRuleMatch | null> {
+    const overrides = await this.getOverrides();
     for (const rule of AUTO_RULES) {
+      if (overrides[rule.id] === false) {
+        console.debug(`[auto-rules] Skipping disabled rule '${rule.id}'`);
+        continue;
+      }
       const result = this.matchRule(rule, event);
       if (result.matched) return { rule, ticketKey: event.ticketKey, ticketId: event.ticketId, matchedFields: result.fields };
       if (result.nearMiss) {
@@ -515,6 +566,7 @@ export class AutoRulesEngine {
       [today],
     );
     const statsMap = new Map(rows.map(r => [r.action, { count: r.cnt, lastFired: r.last_fired }]));
+    const overrides = await this.getOverrides();
 
     return AUTO_RULES.map(rule => {
       const actionKey = `auto_rule_${rule.id}`;
@@ -529,7 +581,7 @@ export class AutoRulesEngine {
         requiresApproval: rule.requiresApproval,
         todayCount: stats?.count ?? 0,
         lastFired: stats?.lastFired ?? null,
-        enabled: true,
+        enabled: overrides[rule.id] !== false,
         matchSummary: this.summarizeMatch(rule),
       };
     });

@@ -71,7 +71,7 @@ import { JiraOAuthService } from './services/jira-oauth.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
 import { createNotificationRoutes } from './routes/notifications.js';
-import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries, PortalAccountQueries, BranchDistrictQueries, WelcomePackQueries, ApprovalQueries, BacklogQueries } from './db/queries.js';
+import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries, PortalAccountQueries, BranchDistrictQueries, WelcomePackQueries, ApprovalQueries, BacklogQueries, AutoRuleOverrideQueries } from './db/queries.js';
 import { createInstanceSetupRoutes } from './routes/instance-setup.js';
 import { createBranchRoutes } from './routes/branches.js';
 import { createBrandSettingsRoutes } from './routes/brand-settings.js';
@@ -311,6 +311,7 @@ async function main() {
   const trainingQueries = new TrainingQueries();
   const devReviewQueries = new DevReviewQueries();
   const backlogQueries = new BacklogQueries();
+  const autoRuleOverrideQueries = new AutoRuleOverrideQueries();
 
   // Purge transient MS365 data from previous session
   const purgedCount = await taskQueries.deleteTransientTasks();
@@ -926,6 +927,7 @@ async function main() {
 
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);
+    agentLoop.getAutoRulesEngine().setOverrideQueries(autoRuleOverrideQueries);
 
     const assignmentEngine = new AssignmentEngine(agentJiraClient, settingsQueries, 'NT');
     const availabilityService = new AgentAvailabilityService(settingsQueries);
@@ -1071,6 +1073,7 @@ async function main() {
       userQueries,
       userTeamQueries,
       teamQueries,
+      autoRuleOverrideQueries,
     }));
 
     const bankHolidaysPath = path.join(__dirname, '../../config/bank-holidays.json');

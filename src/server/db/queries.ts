@@ -3189,3 +3189,32 @@ export class BacklogQueries {
     }
   }
 }
+
+// ── Auto-Rule Override Queries ──
+
+export class AutoRuleOverrideQueries {
+  async getOverrides(): Promise<Record<string, boolean>> {
+    const rows = await query<{ rule_id: string; enabled: boolean }>(`SELECT rule_id, enabled FROM auto_rule_overrides`);
+    const map: Record<string, boolean> = {};
+    for (const r of rows) map[r.rule_id] = !!r.enabled;
+    return map;
+  }
+
+  async setEnabled(ruleId: string, enabled: boolean, username: string): Promise<void> {
+    await execute(
+      `MERGE auto_rule_overrides AS t
+       USING (SELECT ? AS rule_id) AS s ON t.rule_id = s.rule_id
+       WHEN MATCHED THEN UPDATE SET
+         enabled = ?,
+         disabled_by = CASE WHEN ? = 0 THEN ? ELSE NULL END,
+         disabled_at = CASE WHEN ? = 0 THEN GETUTCDATE() ELSE NULL END,
+         updated_at = GETUTCDATE()
+       WHEN NOT MATCHED THEN INSERT (rule_id, enabled, disabled_by, disabled_at, updated_at)
+         VALUES (?, ?,
+           CASE WHEN ? = 0 THEN ? ELSE NULL END,
+           CASE WHEN ? = 0 THEN GETUTCDATE() ELSE NULL END,
+           GETUTCDATE());`,
+      [ruleId, enabled ? 1 : 0, enabled ? 1 : 0, username, enabled ? 1 : 0, ruleId, enabled ? 1 : 0, enabled ? 1 : 0, username, enabled ? 1 : 0],
+    );
+  }
+}

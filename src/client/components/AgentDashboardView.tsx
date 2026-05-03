@@ -1692,16 +1692,26 @@ interface AutoRuleStatus {
   matchSummary: string;
 }
 
-function AutoRulesPanel() {
+function AutoRulesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const [rules, setRules] = useState<AutoRuleStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadRules = () => {
     api('/auto-rules').then(r => {
       if (r.ok) setRules(r.data.rules);
       setLoading(false);
     });
-  }, []);
+  };
+
+  useEffect(() => { loadRules(); }, []);
+
+  const toggleRule = async (ruleId: string, enabled: boolean) => {
+    setToggling(ruleId);
+    await apiJson(`/auto-rules/${ruleId}/enabled`, 'PUT', { enabled });
+    loadRules();
+    setToggling(null);
+  };
 
   const actionBadge = (type: string) => {
     const colors: Record<string, string> = {
@@ -1732,7 +1742,7 @@ function AutoRulesPanel() {
       </div>
       <div className="grid gap-2">
         {rules.map(rule => (
-          <div key={rule.id} className="border border-[#3a424d] rounded-lg bg-[#2f353d] px-4 py-3">
+          <div key={rule.id} className={`border border-[#3a424d] rounded-lg bg-[#2f353d] px-4 py-3 transition-opacity ${rule.enabled ? '' : 'opacity-50'}`}>
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-xs font-medium text-neutral-200 shrink-0">{rule.id}</span>
@@ -1742,6 +1752,11 @@ function AutoRulesPanel() {
                 {rule.requiresApproval && (
                   <span className="px-1.5 py-0.5 text-[10px] font-medium rounded border bg-amber-900/30 text-amber-400 border-amber-800/40">
                     Requires Approval
+                  </span>
+                )}
+                {!rule.enabled && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-medium rounded border bg-red-900/30 text-red-400 border-red-800/40">
+                    Disabled
                   </span>
                 )}
               </div>
@@ -1756,6 +1771,15 @@ function AutoRulesPanel() {
                   <span className="text-neutral-500">{timeAgo(rule.lastFired)}</span>
                 ) : (
                   <span className="text-neutral-600">never fired</span>
+                )}
+                {isAdmin && (
+                  <button
+                    onClick={() => toggleRule(rule.id, !rule.enabled)}
+                    disabled={toggling === rule.id}
+                    className={`relative w-9 h-5 rounded-full transition-colors ${rule.enabled ? 'bg-green-600' : 'bg-neutral-600'} ${toggling === rule.id ? 'opacity-50' : ''}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${rule.enabled ? 'translate-x-4' : ''}`} />
+                  </button>
                 )}
               </div>
             </div>
@@ -1809,7 +1833,7 @@ function AutonomyTab({ rules, onRefresh, isSuperAdmin = false }: { rules: Autono
 
   return (
     <div className="space-y-3">
-      <AutoRulesPanel />
+      <AutoRulesPanel isAdmin={isSuperAdmin} />
 
       <div className="flex items-center justify-between">
         <p className="text-xs text-neutral-500">

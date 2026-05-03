@@ -23,7 +23,7 @@ import type { SuggestionEngine } from '../services/suggestion-engine.js';
 import type { RiskScorer } from '../services/risk-scorer.js';
 import type { EscalationLogService } from '../services/escalation-log-service.js';
 import type { DriftDetector } from '../services/drift-detector.js';
-import type { UserQueries, UserTeamQueries, TeamQueries } from '../db/queries.js';
+import type { UserQueries, UserTeamQueries, TeamQueries, AutoRuleOverrideQueries } from '../db/queries.js';
 
 interface AgentRouteDeps {
   agentLoop: AgentLoop;
@@ -44,6 +44,7 @@ interface AgentRouteDeps {
   userQueries: UserQueries | null;
   userTeamQueries: UserTeamQueries | null;
   teamQueries: TeamQueries | null;
+  autoRuleOverrideQueries: AutoRuleOverrideQueries | null;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
@@ -384,6 +385,31 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data: { rules } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get auto-rules' });
+    }
+  });
+
+  router.put('/auto-rules/:ruleId/enabled', async (req, res) => {
+    const { ruleId } = req.params;
+    const { enabled } = req.body ?? {};
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({ ok: false, error: 'enabled must be a boolean' });
+      return;
+    }
+    const engine = agentLoop.getAutoRulesEngine();
+    const validIds = engine.getRules().map(r => r.id);
+    if (!validIds.includes(ruleId)) {
+      res.status(404).json({ ok: false, error: `Unknown rule ID '${ruleId}'` });
+      return;
+    }
+    try {
+      const oq = deps?.autoRuleOverrideQueries;
+      if (!oq) { res.status(503).json({ ok: false, error: 'Override queries not available' }); return; }
+      await oq.setEnabled(ruleId, enabled, req.user?.username ?? 'unknown');
+      engine.invalidateOverrideCache();
+      console.log(`[auto-rules] Rule '${ruleId}' ${enabled ? 'enabled' : 'disabled'} by ${req.user?.username ?? 'unknown'}`);
+      res.json({ ok: true, data: { ruleId, enabled } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to update rule' });
     }
   });
 
