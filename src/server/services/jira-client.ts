@@ -470,10 +470,7 @@ export class JiraRestClient {
   async getAttachmentContent(attachmentId: string): Promise<Response> {
     const url = `${this.baseUrl}/rest/api/3/attachment/content/${attachmentId}`;
     const res = await fetch(url, {
-      headers: {
-        'Authorization': this.authHeader,
-        'Accept': 'image/*,application/octet-stream',
-      },
+      headers: { 'Authorization': this.authHeader },
       redirect: 'follow',
     });
     return res;

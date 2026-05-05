@@ -564,18 +564,18 @@ export function createJiraRoutes(
         console.log(`[JiraAttachment] Looking for mediaId=${mediaId}`);
       }
 
-      // Try multiple matching strategies
+      // Try multiple matching strategies to resolve ADF media UUID → attachment
       let match = attachments.find(a => a.mediaApiFileId === mediaId);
       if (!match) match = attachments.find(a => a.id === mediaId);
-      // Some Jira instances use 'fileId' instead
-      if (!match) match = attachments.find(a => (a as any).fileId === mediaId);
-
+      // Match by filename (most reliable when mediaApiFileId is absent)
+      const filenameHint = req.query.filename as string | undefined;
+      if (!match && filenameHint) {
+        match = attachments.find(a => a.filename === filenameHint);
+      }
+      // Single image attachment fallback
       if (!match) {
-        // Last resort: if there's a filename hint in the query, match by that
-        const filenameHint = req.query.filename as string | undefined;
-        if (filenameHint) {
-          match = attachments.find(a => a.filename === filenameHint);
-        }
+        const images = attachments.filter(a => String(a.mimeType ?? '').startsWith('image/'));
+        if (images.length === 1) match = images[0];
       }
 
       if (!match) {
