@@ -538,12 +538,10 @@ export function createJiraRoutes(
     }
   });
 
-  // GET /api/jira/attachment/:mediaId — proxy attachment content from Jira (images in ADF comments)
-  // ADF media nodes use a media UUID, not a numeric attachment ID.
-  // We resolve it via the issue's attachment list (mediaApiFileId field).
-  router.get('/attachment/:mediaId', async (req, res) => {
-    const mediaId = req.params.mediaId;
-    const issueKey = req.query.issue as string | undefined;
+  // GET /api/jira/attachment/:id — proxy attachment content by numeric Jira attachment ID.
+  // The backend resolves media UUIDs → attachment IDs before sending ADF to the client.
+  router.get('/attachment/:id', async (req, res) => {
+    const attachmentId = req.params.id;
     const userId = (req as any).user?.id as number | undefined;
     const client = await getClientForUser(userId) || getGlobalClient();
     if (!client) {
@@ -551,40 +549,7 @@ export function createJiraRoutes(
       return;
     }
     try {
-      if (!issueKey) {
-        res.status(400).json({ ok: false, error: 'Missing ?issue= query parameter' });
-        return;
-      }
-      const issue = await client.getIssue(issueKey, ['attachment']);
-      const attachments = (issue?.fields?.attachment as Array<Record<string, unknown>>) ?? [];
-
-      // Log first attachment shape for debugging (once)
-      if (attachments.length > 0) {
-        console.log(`[JiraAttachment] Issue ${issueKey}: ${attachments.length} attachments. Fields on first:`, Object.keys(attachments[0]).join(', '));
-        console.log(`[JiraAttachment] Looking for mediaId=${mediaId}`);
-      }
-
-      // Try multiple matching strategies to resolve ADF media UUID → attachment
-      let match = attachments.find(a => a.mediaApiFileId === mediaId);
-      if (!match) match = attachments.find(a => a.id === mediaId);
-      // Match by filename (most reliable when mediaApiFileId is absent)
-      const filenameHint = req.query.filename as string | undefined;
-      if (!match && filenameHint) {
-        match = attachments.find(a => a.filename === filenameHint);
-      }
-      // Single image attachment fallback
-      if (!match) {
-        const images = attachments.filter(a => String(a.mimeType ?? '').startsWith('image/'));
-        if (images.length === 1) match = images[0];
-      }
-
-      if (!match) {
-        console.warn(`[JiraAttachment] No match for mediaId=${mediaId} on ${issueKey}. Attachment IDs: ${attachments.map(a => `${a.id}/${(a as any).mediaApiFileId ?? 'no-mediaApiFileId'}`).join(', ')}`);
-        res.status(404).json({ ok: false, error: 'Attachment not found on issue' });
-        return;
-      }
-
-      const upstream = await client.getAttachmentContent(String(match.id));
+      const upstream = await client.getAttachmentContent(attachmentId);
       if (!upstream.ok) {
         res.status(upstream.status).json({ ok: false, error: `Jira returned ${upstream.status}` });
         return;
@@ -595,7 +560,6 @@ export function createJiraRoutes(
       const buffer = Buffer.from(await upstream.arrayBuffer());
       res.send(buffer);
     } catch (err) {
-      console.error(`[JiraAttachment] Error for ${mediaId} on ${issueKey}:`, err);
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Attachment fetch failed' });
     }
   });

@@ -47,6 +47,75 @@ export function productToTeam(product: string | null | undefined): string {
   return product;
 }
 
+/** Resolve ADF media UUIDs → numeric Jira attachment IDs.
+ *  Walks the ADF tree, finds media nodes, and replaces the UUID `id` with
+ *  the real attachment ID from the issue's attachment list. This means the
+ *  frontend proxy URL just needs `/api/jira/attachment/{numericId}`. */
+function resolveAdfMedia(adf: unknown, attachmentMap: Map<string, string>): void {
+  if (!adf || typeof adf !== 'object') return;
+  const node = adf as Record<string, unknown>;
+  if ((node.type === 'media' || node.type === 'mediaInline') && node.attrs) {
+    const attrs = node.attrs as Record<string, unknown>;
+    const mediaId = attrs.id as string;
+    if (mediaId && attachmentMap.has(mediaId)) {
+      attrs.id = attachmentMap.get(mediaId)!;
+    }
+  }
+  if (Array.isArray(node.content)) {
+    for (const child of node.content) resolveAdfMedia(child, attachmentMap);
+  }
+}
+
+/** Build a map of filename → numeric attachment ID for an issue's attachments.
+ *  Since Jira doesn't expose mediaApiFileId via REST, we match media UUIDs
+ *  by walking comments to find which filename each UUID refers to, then
+ *  look up the attachment by filename. */
+async function buildAttachmentMap(
+  client: JiraRestClient,
+  issueKey: string,
+  adfBodies: unknown[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  // Collect all media UUIDs and their alt/filename from the ADF bodies
+  const mediaNodes: Array<{ id: string; alt?: string }> = [];
+  const walk = (n: unknown) => {
+    if (!n || typeof n !== 'object') return;
+    const node = n as Record<string, unknown>;
+    if ((node.type === 'media' || node.type === 'mediaInline') && node.attrs) {
+      const attrs = node.attrs as Record<string, unknown>;
+      if (attrs.id && attrs.type !== 'external') {
+        mediaNodes.push({ id: attrs.id as string, alt: attrs.alt as string | undefined });
+      }
+    }
+    if (Array.isArray(node.content)) node.content.forEach(walk);
+  };
+  for (const body of adfBodies) walk(body);
+  if (mediaNodes.length === 0) return map;
+
+  // Fetch the issue's attachments
+  try {
+    const issue = await client.getIssue(issueKey, ['attachment']);
+    const attachments = (issue?.fields?.attachment as Array<{ id: string; filename: string; mimeType?: string }>) ?? [];
+    if (attachments.length === 0) return map;
+
+    // Match by filename (from ADF alt text)
+    for (const media of mediaNodes) {
+      if (media.alt) {
+        const att = attachments.find(a => a.filename === media.alt);
+        if (att) { map.set(media.id, att.id); continue; }
+      }
+      // Single image fallback
+      const images = attachments.filter(a => a.mimeType?.startsWith('image/'));
+      if (images.length === 1 && !map.has(media.id)) {
+        map.set(media.id, images[0].id);
+      }
+    }
+  } catch (err) {
+    console.warn(`[dev-review] Failed to fetch attachments for ${issueKey}: ${err instanceof Error ? err.message : err}`);
+  }
+  return map;
+}
+
 /** Walk an ADF doc and extract plain text — used when importing Jira
  *  comments into the local thread. Mirrors the helper in the background
  *  watcher in index.ts. */
@@ -409,6 +478,35 @@ export function createDevReviewRoutes(
       if (state?.claimed_by_user_id) {
         const u = await userQueries.getById(state.claimed_by_user_id);
         if (u) claimed_by_display = u.display_name || u.username;
+      }
+
+      // Resolve ADF media UUIDs → numeric attachment IDs before sending to client
+      const allAdfBodies: unknown[] = [];
+      for (const t of thread) {
+        if (t.body_adf) {
+          try { allAdfBodies.push(JSON.parse(t.body_adf)); } catch { /* skip corrupt */ }
+        }
+      }
+      for (const c of jiraComments) {
+        if (c.body && typeof c.body === 'object') allAdfBodies.push(c.body);
+      }
+      const client = getJiraClient();
+      if (client && allAdfBodies.length > 0) {
+        const attachMap = await buildAttachmentMap(client, key, allAdfBodies);
+        if (attachMap.size > 0) {
+          for (const t of thread) {
+            if (t.body_adf) {
+              try {
+                const parsed = JSON.parse(t.body_adf);
+                resolveAdfMedia(parsed, attachMap);
+                (t as any).body_adf = JSON.stringify(parsed);
+              } catch { /* skip */ }
+            }
+          }
+          for (const c of jiraComments) {
+            if (c.body && typeof c.body === 'object') resolveAdfMedia(c.body, attachMap);
+          }
+        }
       }
 
       res.json({ ok: true, data: { key, fields: issueFields, state, thread, jiraComments, claimed_by_display } });
