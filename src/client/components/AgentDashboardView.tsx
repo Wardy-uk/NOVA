@@ -42,6 +42,7 @@ interface AgentStats {
 interface Decision {
   id: number;
   ticket_id: string;
+  ticket_subject: string | null;
   event_type: string;
   action: string;
   confidence: number;
@@ -769,7 +770,7 @@ function OverviewTab({ status, stats, decisions, onSelect, onNavigateToWorkspace
               </span>
               <span className="text-xs text-[#5ec1ca] font-mono w-24 shrink-0">{d.ticket_id}</span>
               <span className="text-[10px] text-neutral-500 w-20 shrink-0">{eventLabel(d.event_type)}</span>
-              <span className="text-xs text-neutral-300 truncate flex-1">{actionLabel(d.action)}</span>
+              <span className="text-xs text-neutral-300 truncate flex-1" title={d.ticket_subject ?? ''}>{d.ticket_subject || actionLabel(d.action)}</span>
               {d.shadow_mode && <span className="text-[9px] text-purple-400 font-semibold">SHADOW</span>}
               <span className="text-[10px] text-neutral-600 shrink-0">{timeAgo(d.created_at)}</span>
             </button>
@@ -850,6 +851,7 @@ function DecisionsTab({ decisions, selected, onSelect, onRefresh }: {
             <tr className="bg-[#272C33] text-neutral-500 uppercase tracking-wider text-left">
               <th className="px-3 py-2 font-medium w-14">Conf</th>
               <th className="px-3 py-2 font-medium">Ticket</th>
+              <th className="px-3 py-2 font-medium">Subject</th>
               <th className="px-3 py-2 font-medium">Event</th>
               <th className="px-3 py-2 font-medium">Action</th>
               <th className="px-3 py-2 font-medium">Provider</th>
@@ -872,6 +874,7 @@ function DecisionsTab({ decisions, selected, onSelect, onRefresh }: {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-[#5ec1ca] font-mono">{d.ticket_id}</td>
+                  <td className="px-3 py-2 text-neutral-300 max-w-[250px] truncate" title={d.ticket_subject ?? ''}>{d.ticket_subject ?? ''}</td>
                   <td className="px-3 py-2 text-neutral-400">{eventLabel(d.event_type)}</td>
                   <td className="px-3 py-2 text-neutral-200">
                     {actionLabel(d.action)}

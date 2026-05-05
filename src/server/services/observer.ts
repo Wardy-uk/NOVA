@@ -41,7 +41,10 @@ export class Observer {
 
   async getDecisions(limit = 50, offset = 0): Promise<unknown[]> {
     return query(
-      `SELECT * FROM agent_decisions ORDER BY created_at DESC
+      `SELECT d.*, c.summary AS ticket_subject
+       FROM agent_decisions d
+       LEFT JOIN jira_issue_cache c ON c.issue_key = d.ticket_id
+       ORDER BY d.created_at DESC
        OFFSET ? ROWS FETCH NEXT ? ROWS ONLY`,
       [offset, limit],
     );
