@@ -11,6 +11,8 @@
  *   adobe_sign_refresh_token = Populated after successful OAuth connection
  */
 
+import type { AdobeSignLibraryDocument as SharedLibraryDocument, AdobeSignFormField } from '../../shared/types.js';
+
 export interface AdobeSignConfig {
   clientId: string;
   clientSecret: string;
@@ -45,15 +47,7 @@ export interface AdobeSignAgreementInfo {
   }>;
 }
 
-export interface AdobeSignLibraryDocument {
-  id: string;
-  name: string;
-  createdDate: string;
-  modifiedDate: string;
-  status: string;
-  sharingMode: string;
-  templateTypes: string[];
-}
+export type AdobeSignLibraryDocument = SharedLibraryDocument;
 
 export class AdobeSignApiError extends Error {
   constructor(
@@ -321,6 +315,23 @@ export class AdobeSignClient {
       'GET', '/libraryDocuments',
     );
     return data.libraryDocumentList ?? [];
+  }
+
+  // Form fields defined on a library document. Adobe nests them under either
+  // `fields` (flat) or `formFields` (per-document) depending on tenant — handle both.
+  async getLibraryDocumentFormFields(libraryDocumentId: string): Promise<AdobeSignFormField[]> {
+    const raw = await this.request<{
+      fields?: AdobeSignFormField[];
+      formFields?: AdobeSignFormField[];
+      documents?: Array<{ formFields?: AdobeSignFormField[] }>;
+    }>('GET', `/libraryDocuments/${encodeURIComponent(libraryDocumentId)}/formFields`);
+
+    if (Array.isArray(raw.fields)) return raw.fields;
+    if (Array.isArray(raw.formFields)) return raw.formFields;
+    if (Array.isArray(raw.documents)) {
+      return raw.documents.flatMap(d => d.formFields ?? []);
+    }
+    return [];
   }
 
   // ── Download Signed Document ──

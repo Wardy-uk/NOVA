@@ -3,6 +3,18 @@ import type { AdobeSignClient } from '../services/adobe-sign-client.js';
 import type { AdobeSignAgreementQueries, ContractTemplateQueries } from '../db/queries.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 
+const SENDER_FILLABLE_FIELD_TYPES = new Set([
+  'TEXT_FIELD',
+  'DATE_FIELD',
+  'CHECK_BOX_FIELD',
+  'RADIO_BUTTON_FIELD',
+  'DROP_DOWN_LIST_FIELD',
+  'TITLE_FIELD',
+  'COMPANY_FIELD',
+  'NAME_FIELD',
+  'EMAIL_FIELD',
+]);
+
 export function createAdobeSignRoutes(
   getClient: () => AdobeSignClient | null,
   agreementQueries: AdobeSignAgreementQueries,
@@ -129,7 +141,7 @@ export function createAdobeSignRoutes(
     res.json({ ok: true, data: agreement });
   });
 
-  // POST /api/adobe-sign/agreements — create + send new agreement
+  // POST /api/adobe-sign/agreements — create + send new agreement from an Adobe library document
   router.post('/agreements', async (req, res) => {
     const client = getClient();
     if (!client) {
@@ -137,50 +149,26 @@ export function createAdobeSignRoutes(
       return;
     }
 
-    const { template_id, contract_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days } = req.body;
+    const { library_document_id, contract_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days } = req.body;
+    if (!library_document_id?.trim()) { res.status(400).json({ ok: false, error: 'library_document_id is required' }); return; }
     if (!name?.trim()) { res.status(400).json({ ok: false, error: 'name is required' }); return; }
     if (!signer_emails?.length) { res.status(400).json({ ok: false, error: 'At least one signer email is required' }); return; }
 
     try {
-      let transientDocumentId: string | undefined;
-      let libraryDocumentId: string | undefined;
-
-      // If a local template is selected, upload its file as a transient document
-      if (template_id) {
-        const template = await templateQueries.getById(template_id);
-        if (template?.adobe_library_doc_id) {
-          libraryDocumentId = template.adobe_library_doc_id;
-        } else if (template?.file_data) {
-          const result = await client.uploadTransientDocument(
-            Buffer.from(template.file_data),
-            template.file_name ?? 'document.pdf',
-            template.file_mime ?? 'application/pdf',
-          );
-          transientDocumentId = result.transientDocumentId;
-        }
-      }
-
-      if (!transientDocumentId && !libraryDocumentId) {
-        res.status(400).json({ ok: false, error: 'No document source — template must have a file or Adobe library document ID' });
-        return;
-      }
-
       const result = await client.createAgreement({
         name,
         signerEmails: signer_emails,
         ccEmails: cc_emails,
         message,
-        transientDocumentId,
-        libraryDocumentId,
+        libraryDocumentId: library_document_id,
         mergeFields: merge_fields,
         expirationDays: expiration_days,
       });
 
-      // Store in local DB
       await agreementQueries.upsert({
         agreement_id: result.id,
         contract_id: contract_id ?? null,
-        template_id: template_id ?? null,
+        template_id: null,
         name,
         status: 'OUT_FOR_SIGNATURE',
         sender_email: null,
@@ -231,6 +219,22 @@ export function createAdobeSignRoutes(
     } catch (err) {
       console.error('[Adobe Sign] Library documents error:', err);
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch library documents' });
+    }
+  });
+
+  // GET /api/adobe-sign/library-documents/:id/form-fields
+  // Returns sender-fillable merge fields defined on the Adobe template.
+  // Signature/initial fields are excluded — those are signer-only.
+  router.get('/library-documents/:id/form-fields', async (req, res) => {
+    const client = getClient();
+    if (!client) { res.status(503).json({ ok: false, error: 'Adobe Sign is not connected.' }); return; }
+    try {
+      const all = await client.getLibraryDocumentFormFields(req.params.id);
+      const senderFillable = all.filter(f => SENDER_FILLABLE_FIELD_TYPES.has(f.contentType));
+      res.json({ ok: true, data: senderFillable });
+    } catch (err) {
+      console.error('[Adobe Sign] Form fields error:', err);
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch form fields' });
     }
   });
 

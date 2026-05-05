@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { ContractTemplate, ContractTemplateFieldDef } from '../../shared/types.js';
+import type { AdobeSignLibraryDocument, AdobeSignFormField } from '../../shared/types.js';
 
 interface Props {
   onNavigateToAgreements: () => void;
@@ -18,183 +18,33 @@ const labelCls = 'text-[10px] text-neutral-500 uppercase tracking-wider mb-1 blo
 const btnPrimary = 'text-[11px] px-4 py-2 rounded bg-[#5ec1ca] text-[#272C33] font-medium hover:bg-[#4db0b9] transition-colors disabled:opacity-40';
 const btnSecondary = 'text-[11px] px-4 py-2 rounded bg-[#2f353d] text-neutral-300 hover:bg-[#3a424d] transition-colors';
 
-// ── Template Management Modal ──
-
-function TemplateFormModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('');
-  const [adobeLibraryDocId, setAdobeLibraryDocId] = useState('');
-  const [fields, setFields] = useState<ContractTemplateFieldDef[]>([]);
-  const [file, setFile] = useState<File | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  const addField = () => {
-    setFields([...fields, { key: `field_${fields.length + 1}`, label: '', type: 'text', required: false }]);
-  };
-
-  const updateField = (idx: number, updates: Partial<ContractTemplateFieldDef>) => {
-    setFields(fields.map((f, i) => i === idx ? { ...f, ...updates } : f));
-  };
-
-  const removeField = (idx: number) => {
-    setFields(fields.filter((_, i) => i !== idx));
-  };
-
-  const handleSave = async () => {
-    if (!name.trim()) return;
-    setSaving(true);
-
-    let fileBase64: string | undefined;
-    let fileName: string | undefined;
-    let fileMime: string | undefined;
-
-    if (file) {
-      const buf = await file.arrayBuffer();
-      fileBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-      fileName = file.name;
-      fileMime = file.type;
-    }
-
-    try {
-      const res = await fetch('/api/adobe-sign/templates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name, description, category,
-          fields_schema: fields.length > 0 ? fields : undefined,
-          adobe_library_doc_id: adobeLibraryDocId || undefined,
-          file_base64: fileBase64,
-          file_name: fileName,
-          file_mime: fileMime,
-        }),
-      });
-      const json = await res.json();
-      if (json.ok) {
-        onSaved();
-        onClose();
-      }
-    } catch { /* ignore */ }
-    setSaving(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-[#1e2228] rounded-xl border border-[#3a424d] w-[600px] max-h-[85vh] overflow-auto shadow-2xl">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#3a424d]">
-          <h3 className="text-[14px] font-semibold text-neutral-100">New Template</h3>
-          <button onClick={onClose} className="text-neutral-500 hover:text-neutral-300 text-lg">&times;</button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <div>
-            <label className={labelCls}>Name *</label>
-            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Standard Service Agreement" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Category</label>
-              <input className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. sales, nda, service" />
-            </div>
-            <div>
-              <label className={labelCls}>Adobe Library Doc ID</label>
-              <input className={inputCls} value={adobeLibraryDocId} onChange={(e) => setAdobeLibraryDocId(e.target.value)} placeholder="Optional — from Adobe Sign library" />
-            </div>
-          </div>
-
-          <div>
-            <label className={labelCls}>Description</label>
-            <textarea className={`${inputCls} resize-none`} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is this template used for?" />
-          </div>
-
-          <div>
-            <label className={labelCls}>Document File</label>
-            <input
-              type="file"
-              accept=".pdf,.docx,.doc"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="text-[11px] text-neutral-400 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-[11px] file:bg-[#2f353d] file:text-neutral-300 file:cursor-pointer hover:file:bg-[#3a424d]"
-            />
-            {!file && !adobeLibraryDocId && (
-              <p className="text-[10px] text-amber-500/70 mt-1">Upload a PDF/DOCX or provide an Adobe Library Document ID</p>
-            )}
-          </div>
-
-          {/* Dynamic Fields Definition */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className={labelCls}>Merge Fields</label>
-              <button onClick={addField} className="text-[10px] text-[#5ec1ca] hover:text-[#4db0b9]">+ Add Field</button>
-            </div>
-            {fields.length === 0 && (
-              <p className="text-[10px] text-neutral-600">No fields defined. Add merge fields that users will fill in when creating a contract.</p>
-            )}
-            <div className="space-y-2">
-              {fields.map((f, idx) => (
-                <div key={idx} className="flex items-center gap-2 bg-[#272C33] rounded p-2 border border-[#3a424d]">
-                  <input
-                    className="bg-transparent text-neutral-200 text-[11px] outline-none flex-1 min-w-0"
-                    value={f.key}
-                    onChange={(e) => updateField(idx, { key: e.target.value })}
-                    placeholder="field_key"
-                  />
-                  <input
-                    className="bg-transparent text-neutral-200 text-[11px] outline-none flex-1 min-w-0"
-                    value={f.label}
-                    onChange={(e) => updateField(idx, { label: e.target.value })}
-                    placeholder="Display Label"
-                  />
-                  <select
-                    className="bg-[#1e2228] text-neutral-300 text-[10px] rounded px-1.5 py-1 border border-[#3a424d] outline-none"
-                    value={f.type}
-                    onChange={(e) => updateField(idx, { type: e.target.value as ContractTemplateFieldDef['type'] })}
-                  >
-                    <option value="text">Text</option>
-                    <option value="number">Number</option>
-                    <option value="date">Date</option>
-                    <option value="email">Email</option>
-                    <option value="textarea">Textarea</option>
-                    <option value="select">Select</option>
-                  </select>
-                  <label className="flex items-center gap-1 text-[10px] text-neutral-500">
-                    <input
-                      type="checkbox"
-                      checked={f.required ?? false}
-                      onChange={(e) => updateField(idx, { required: e.target.checked })}
-                      className="accent-[#5ec1ca]"
-                    />
-                    Req
-                  </label>
-                  <button onClick={() => removeField(idx)} className="text-neutral-600 hover:text-red-400 text-sm">&times;</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-[#3a424d]">
-          <button onClick={onClose} className={btnSecondary}>Cancel</button>
-          <button onClick={handleSave} disabled={!name.trim() || saving} className={btnPrimary}>
-            {saving ? 'Saving...' : 'Create Template'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+function fmtDate(d: string | null | undefined) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-// ── Main Wizard ──
+function inputTypeFor(field: AdobeSignFormField): 'text' | 'date' | 'select' | 'checkbox' | 'radio' | 'email' {
+  switch (field.contentType) {
+    case 'DATE_FIELD': return 'date';
+    case 'DROP_DOWN_LIST_FIELD': return 'select';
+    case 'CHECK_BOX_FIELD': return 'checkbox';
+    case 'RADIO_BUTTON_FIELD': return 'radio';
+    case 'EMAIL_FIELD': return 'email';
+    default: return 'text';
+  }
+}
 
 export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [step, setStep] = useState<Step>('template');
-  const [templates, setTemplates] = useState<ContractTemplate[]>([]);
+  const [templates, setTemplates] = useState<AdobeSignLibraryDocument[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showTemplateForm, setShowTemplateForm] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Wizard state
-  const [selectedTemplate, setSelectedTemplate] = useState<ContractTemplate | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<AdobeSignLibraryDocument | null>(null);
+  const [formFields, setFormFields] = useState<AdobeSignFormField[]>([]);
+  const [fieldsLoading, setFieldsLoading] = useState(false);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+
   const [contractName, setContractName] = useState('');
   const [signers, setSigners] = useState<Array<{ email: string; name: string }>>([{ email: '', name: '' }]);
   const [ccEmails, setCcEmails] = useState('');
@@ -205,32 +55,33 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [templateSearch, setTemplateSearch] = useState('');
 
   const fetchTemplates = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
-      const res = await fetch('/api/adobe-sign/templates?status=active');
+      const res = await fetch('/api/adobe-sign/library-documents');
       const json = await res.json();
-      if (json.ok) setTemplates(json.data);
-    } catch { /* ignore */ }
+      if (json.ok) {
+        setTemplates(json.data ?? []);
+      } else {
+        setLoadError(json.error ?? 'Failed to load templates from Adobe Sign');
+      }
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load templates');
+    }
     setLoading(false);
   }, []);
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
-  const parsedFields: ContractTemplateFieldDef[] = (() => {
-    if (!selectedTemplate?.fields_schema) return [];
-    try { return JSON.parse(selectedTemplate.fields_schema); } catch { return []; }
-  })();
-
   const filteredTemplates = templates.filter((t) =>
     !templateSearch.trim() ||
-    t.name.toLowerCase().includes(templateSearch.toLowerCase()) ||
-    (t.category ?? '').toLowerCase().includes(templateSearch.toLowerCase())
+    t.name.toLowerCase().includes(templateSearch.toLowerCase())
   );
 
-  // Step validation
   const canProceed = (s: Step): boolean => {
     switch (s) {
       case 'template': return selectedTemplate !== null;
-      case 'fields': return parsedFields.filter(f => f.required).every(f => fieldValues[f.key]?.trim());
+      case 'fields': return formFields.filter(f => f.required).every(f => (fieldValues[f.name] ?? '').trim());
       case 'recipients': return contractName.trim() !== '' && signers.some(s => s.email.trim());
       case 'review': return true;
       default: return false;
@@ -241,32 +92,42 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const goNext = () => { if (stepIdx < STEPS.length - 1) setStep(STEPS[stepIdx + 1].key); };
   const goBack = () => { if (stepIdx > 0) setStep(STEPS[stepIdx - 1].key); };
 
-  const handleSelectTemplate = (t: ContractTemplate) => {
+  const handleSelectTemplate = async (t: AdobeSignLibraryDocument) => {
     setSelectedTemplate(t);
-    // Pre-populate field defaults
-    try {
-      const fields: ContractTemplateFieldDef[] = JSON.parse(t.fields_schema ?? '[]');
-      const defaults: Record<string, string> = {};
-      for (const f of fields) {
-        if (f.defaultValue) defaults[f.key] = f.defaultValue;
-      }
-      setFieldValues(defaults);
-    } catch { setFieldValues({}); }
     setContractName(t.name);
+    setFieldValues({});
+    setFormFields([]);
+    setFieldsLoading(true);
+    try {
+      const res = await fetch(`/api/adobe-sign/library-documents/${encodeURIComponent(t.id)}/form-fields`);
+      const json = await res.json();
+      if (json.ok) {
+        const fields: AdobeSignFormField[] = json.data ?? [];
+        setFormFields(fields);
+        const defaults: Record<string, string> = {};
+        for (const f of fields) {
+          if (f.defaultValue) defaults[f.name] = f.defaultValue;
+        }
+        setFieldValues(defaults);
+      }
+    } catch { /* ignore — Step 2 will show empty state */ }
+    setFieldsLoading(false);
   };
 
   const handleSend = async () => {
     setSending(true);
     try {
-      const mergeFields = parsedFields.length > 0
-        ? parsedFields.map(f => ({ fieldName: f.key, defaultValue: fieldValues[f.key] ?? '' }))
+      const mergeFields = formFields.length > 0
+        ? formFields
+            .filter(f => (fieldValues[f.name] ?? '').trim())
+            .map(f => ({ fieldName: f.name, defaultValue: fieldValues[f.name] }))
         : undefined;
 
       const res = await fetch('/api/adobe-sign/agreements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          template_id: selectedTemplate?.id,
+          library_document_id: selectedTemplate?.id,
           name: contractName,
           signer_emails: signers.filter(s => s.email.trim()).map(s => s.email.trim()),
           cc_emails: ccEmails.split(',').map(e => e.trim()).filter(Boolean),
@@ -293,7 +154,6 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
     setSigners(signers.map((s, i) => i === idx ? { ...s, ...updates } : s));
   };
 
-  // ── Sent confirmation ──
   if (sentId) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -312,7 +172,15 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
             <button onClick={onNavigateToAgreements} className={btnPrimary}>
               View Agreements
             </button>
-            <button onClick={() => { setSentId(null); setStep('template'); setSelectedTemplate(null); setFieldValues({}); setSigners([{ email: '', name: '' }]); setContractName(''); }} className={btnSecondary}>
+            <button onClick={() => {
+              setSentId(null);
+              setStep('template');
+              setSelectedTemplate(null);
+              setFormFields([]);
+              setFieldValues({});
+              setSigners([{ email: '', name: '' }]);
+              setContractName('');
+            }} className={btnSecondary}>
               Send Another
             </button>
           </div>
@@ -323,7 +191,6 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Step Indicator */}
       <div className="px-6 pt-4 pb-3 border-b border-[#3a424d]">
         <div className="flex items-center gap-1">
           {STEPS.map((s, i) => (
@@ -342,7 +209,7 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                 <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium ${
                   i < stepIdx ? 'bg-[#5ec1ca] text-[#272C33]' : i === stepIdx ? 'bg-[#5ec1ca]/20 text-[#5ec1ca]' : 'bg-[#2f353d] text-neutral-600'
                 }`}>
-                  {i < stepIdx ? '\u2713' : i + 1}
+                  {i < stepIdx ? '✓' : i + 1}
                 </span>
                 {s.label}
               </button>
@@ -352,18 +219,16 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
         </div>
       </div>
 
-      {/* Step Content */}
       <div className="flex-1 overflow-auto p-6">
-        {/* Step 1: Select Template */}
         {step === 'template' && (
           <div>
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-[14px] font-semibold text-neutral-100">Select a Template</h2>
-                <p className="text-[11px] text-neutral-500 mt-0.5">Choose a contract template to begin</p>
+                <p className="text-[11px] text-neutral-500 mt-0.5">Templates are pulled live from Adobe Sign. To add a new template, create it in Adobe Sign.</p>
               </div>
-              <button onClick={() => setShowTemplateForm(true)} className={btnSecondary}>
-                + New Template
+              <button onClick={fetchTemplates} className={btnSecondary} disabled={loading}>
+                {loading ? 'Refreshing...' : 'Refresh'}
               </button>
             </div>
 
@@ -376,10 +241,19 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
             />
 
             {loading ? (
-              <div className="text-neutral-500 text-[12px] py-8 text-center">Loading templates...</div>
+              <div className="text-neutral-500 text-[12px] py-8 text-center">Loading templates from Adobe Sign...</div>
+            ) : loadError ? (
+              <div className="text-amber-400 text-[12px] py-8 text-center max-w-md mx-auto">
+                {loadError}
+                <div className="text-neutral-500 text-[11px] mt-2">
+                  Check that Adobe Sign is connected in Admin &gt; Integrations.
+                </div>
+              </div>
             ) : filteredTemplates.length === 0 ? (
               <div className="text-neutral-500 text-[12px] py-8 text-center">
-                No templates yet. Create one to get started.
+                {templates.length === 0
+                  ? 'No library documents found in Adobe Sign. Create a template in Adobe Sign first.'
+                  : 'No templates match your search.'}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -394,15 +268,14 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                     }`}
                   >
                     <div className="text-[12px] font-medium text-neutral-200 mb-1">{t.name}</div>
-                    {t.description && <div className="text-[10px] text-neutral-500 mb-2 line-clamp-2">{t.description}</div>}
-                    <div className="flex items-center gap-2">
-                      {t.category && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#2f353d] text-neutral-400">{t.category}</span>
-                      )}
-                      {(t.file_name || t.adobe_library_doc_id) && (
-                        <span className="text-[9px] text-neutral-600">{t.file_name ?? 'Adobe Library'}</span>
-                      )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {(t.templateTypes ?? []).map((tt) => (
+                        <span key={tt} className="text-[9px] px-1.5 py-0.5 rounded bg-[#2f353d] text-neutral-400">
+                          {tt.replace(/_/g, ' ').toLowerCase()}
+                        </span>
+                      ))}
                     </div>
+                    <div className="text-[10px] text-neutral-600 mt-2">Modified {fmtDate(t.modifiedDate)}</div>
                   </button>
                 ))}
               </div>
@@ -410,59 +283,84 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
           </div>
         )}
 
-        {/* Step 2: Fill Fields */}
         {step === 'fields' && selectedTemplate && (
           <div className="max-w-lg">
             <h2 className="text-[14px] font-semibold text-neutral-100 mb-1">Fill in Contract Details</h2>
             <p className="text-[11px] text-neutral-500 mb-4">Template: {selectedTemplate.name}</p>
 
-            {parsedFields.length === 0 ? (
+            {fieldsLoading ? (
+              <div className="text-[12px] text-neutral-500 py-4">Loading fields from Adobe Sign...</div>
+            ) : formFields.length === 0 ? (
               <div className="text-[12px] text-neutral-500 py-4">
-                This template has no merge fields. You can proceed to the next step.
+                This template has no sender-fillable merge fields. Signers will fill any fields directly when signing.
               </div>
             ) : (
               <div className="space-y-3">
-                {parsedFields.map((f) => (
-                  <div key={f.key}>
-                    <label className={labelCls}>
-                      {f.label || f.key} {f.required && <span className="text-red-400">*</span>}
-                    </label>
-                    {f.type === 'textarea' ? (
-                      <textarea
-                        className={`${inputCls} resize-none`}
-                        rows={3}
-                        value={fieldValues[f.key] ?? ''}
-                        onChange={(e) => setFieldValues({ ...fieldValues, [f.key]: e.target.value })}
-                        placeholder={f.defaultValue ?? ''}
-                      />
-                    ) : f.type === 'select' ? (
-                      <select
-                        className={inputCls}
-                        value={fieldValues[f.key] ?? ''}
-                        onChange={(e) => setFieldValues({ ...fieldValues, [f.key]: e.target.value })}
-                      >
-                        <option value="">Select...</option>
-                        {(f.options ?? []).map((opt) => (
-                          <option key={opt} value={opt}>{opt}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        className={inputCls}
-                        type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : f.type === 'email' ? 'email' : 'text'}
-                        value={fieldValues[f.key] ?? ''}
-                        onChange={(e) => setFieldValues({ ...fieldValues, [f.key]: e.target.value })}
-                        placeholder={f.defaultValue ?? ''}
-                      />
-                    )}
-                  </div>
-                ))}
+                {formFields.map((f) => {
+                  const inputType = inputTypeFor(f);
+                  const value = fieldValues[f.name] ?? '';
+                  return (
+                    <div key={f.name}>
+                      <label className={labelCls}>
+                        {f.displayLabel || f.name} {f.required && <span className="text-red-400">*</span>}
+                        {f.assignee && f.assignee !== 'SENDER' && (
+                          <span className="ml-2 text-neutral-600 normal-case">(assigned: {f.assignee})</span>
+                        )}
+                      </label>
+                      {inputType === 'select' ? (
+                        <select
+                          className={inputCls}
+                          value={value}
+                          onChange={(e) => setFieldValues({ ...fieldValues, [f.name]: e.target.value })}
+                        >
+                          <option value="">Select...</option>
+                          {(f.options ?? []).map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      ) : inputType === 'checkbox' ? (
+                        <label className="flex items-center gap-2 text-[11px] text-neutral-300">
+                          <input
+                            type="checkbox"
+                            checked={value === 'true' || value === 'on'}
+                            onChange={(e) => setFieldValues({ ...fieldValues, [f.name]: e.target.checked ? 'true' : 'false' })}
+                            className="accent-[#5ec1ca]"
+                          />
+                          {f.displayLabel || f.name}
+                        </label>
+                      ) : inputType === 'radio' && (f.options ?? []).length > 0 ? (
+                        <div className="space-y-1">
+                          {(f.options ?? []).map((opt) => (
+                            <label key={opt} className="flex items-center gap-2 text-[11px] text-neutral-300">
+                              <input
+                                type="radio"
+                                name={f.name}
+                                value={opt}
+                                checked={value === opt}
+                                onChange={(e) => setFieldValues({ ...fieldValues, [f.name]: e.target.value })}
+                                className="accent-[#5ec1ca]"
+                              />
+                              {opt}
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <input
+                          className={inputCls}
+                          type={inputType === 'date' ? 'date' : inputType === 'email' ? 'email' : 'text'}
+                          value={value}
+                          onChange={(e) => setFieldValues({ ...fieldValues, [f.name]: e.target.value })}
+                          placeholder={f.defaultValue ?? ''}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
         )}
 
-        {/* Step 3: Recipients */}
         {step === 'recipients' && (
           <div className="max-w-lg">
             <h2 className="text-[14px] font-semibold text-neutral-100 mb-4">Recipients</h2>
@@ -542,7 +440,6 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
           </div>
         )}
 
-        {/* Step 4: Review & Send */}
         {step === 'review' && (
           <div className="max-w-lg">
             <h2 className="text-[14px] font-semibold text-neutral-100 mb-4">Review & Send</h2>
@@ -558,14 +455,14 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                 <span className="text-[12px] text-neutral-200">{contractName}</span>
               </div>
 
-              {parsedFields.length > 0 && (
+              {formFields.length > 0 && (
                 <div>
                   <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Merge Fields</span>
                   <div className="space-y-1">
-                    {parsedFields.map((f) => (
-                      <div key={f.key} className="flex items-baseline gap-2 text-[11px]">
-                        <span className="text-neutral-500 min-w-[120px]">{f.label || f.key}:</span>
-                        <span className="text-neutral-200">{fieldValues[f.key] || '\u2014'}</span>
+                    {formFields.map((f) => (
+                      <div key={f.name} className="flex items-baseline gap-2 text-[11px]">
+                        <span className="text-neutral-500 min-w-[120px]">{f.displayLabel || f.name}:</span>
+                        <span className="text-neutral-200">{fieldValues[f.name] || '—'}</span>
                       </div>
                     ))}
                   </div>
@@ -606,7 +503,6 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
         )}
       </div>
 
-      {/* Footer Navigation */}
       <div className="flex items-center justify-between px-6 py-4 border-t border-[#3a424d]">
         <div>
           {stepIdx > 0 && (
@@ -625,14 +521,6 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
           )}
         </div>
       </div>
-
-      {/* Template Form Modal */}
-      {showTemplateForm && (
-        <TemplateFormModal
-          onClose={() => setShowTemplateForm(false)}
-          onSaved={fetchTemplates}
-        />
-      )}
     </div>
   );
 }
