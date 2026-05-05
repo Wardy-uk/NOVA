@@ -136,6 +136,10 @@ function renderTextWithMarks(node: AdfNode): string {
   return html;
 }
 
+function getAuthToken(): string {
+  return localStorage.getItem('nova_auth_token') || sessionStorage.getItem('nova_auth_token') || '';
+}
+
 function renderMedia(node: AdfNode): string {
   const id = node.attrs?.id as string;
   const mediaType = node.attrs?.type as string;
@@ -150,7 +154,8 @@ function renderMedia(node: AdfNode): string {
   }
 
   if (id) {
-    const proxySrc = `/api/jira/attachment/${encodeURIComponent(id)}`;
+    const token = getAuthToken();
+    const proxySrc = `/api/jira/attachment/${encodeURIComponent(id)}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
     return `<img src="${escapeAttr(proxySrc)}" alt="${escapeAttr(alt)}" class="adf-image" loading="lazy" ${width ? `width="${width}"` : ''}/>`;
   }
 
