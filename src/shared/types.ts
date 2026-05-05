@@ -141,6 +141,26 @@ export interface ContractTemplate {
   updated_at: string;
 }
 
+export interface AdobeSignLibraryDocument {
+  id: string;
+  name: string;
+  createdDate: string;
+  modifiedDate: string;
+  status: string;
+  sharingMode: string;
+  templateTypes: string[];
+}
+
+export interface AdobeSignFormField {
+  name: string;
+  displayLabel?: string;
+  contentType: string;
+  defaultValue?: string;
+  options?: string[];
+  required?: boolean;
+  assignee?: string;
+}
+
 export interface AdobeSignAgreement {
   id: number;
   agreement_id: string;
