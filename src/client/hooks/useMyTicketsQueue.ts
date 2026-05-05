@@ -2,11 +2,31 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 
 export type TicketBand = 'NOW' | 'NEXT' | 'DEFERRED' | 'HYGIENE' | 'WAITING';
 
+export interface TicketFields {
+  summary: string | null;
+  status: string | null;
+  statusCategory: string | null;
+  priority: string | null;
+  tier: string | null;
+  product: string | null;
+  tldr: string | null;
+  agentSummary: string | null;
+  escalationReason: string | null;
+  reporter: string | null;
+  assignee: string | null;
+  updated: string | null;
+  created: string | null;
+  slaBreachTime: string | null;
+  slaBreached: boolean;
+  agentNextUpdate: string | null;
+}
+
 export interface RankedTicket {
   ticketKey: string;
   score: number;
   band: TicketBand;
   rankReason: string;
+  fields: TicketFields;
   nextAction?: {
     state: 'action_ready' | 'waiting' | 'stalled' | 'no_context';
     headline: string;

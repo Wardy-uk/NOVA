@@ -14,11 +14,31 @@ export interface NextAction {
   generatedAt: string;
 }
 
+export interface TicketFields {
+  summary: string | null;
+  status: string | null;
+  statusCategory: string | null;
+  priority: string | null;
+  tier: string | null;
+  product: string | null;
+  tldr: string | null;
+  agentSummary: string | null;
+  escalationReason: string | null;
+  reporter: string | null;
+  assignee: string | null;
+  updated: string | null;
+  created: string | null;
+  slaBreachTime: string | null;
+  slaBreached: boolean;
+  agentNextUpdate: string | null;
+}
+
 export interface RankedTicket {
   ticketKey: string;
   score: number;
   band: TicketBand;
   rankReason: string;
+  fields: TicketFields;
   nextAction?: NextAction;
 }
 
@@ -134,16 +154,20 @@ export class QueueRanker {
         score: totalScore,
         band,
         rankReason,
+        fields: issueToFields(issue),
       });
     }
 
-    // Add deferred tickets
+    // Add deferred tickets — look up fields from the full issues list
+    const issueByKey = new Map(issues.map(i => [i.issue_key, i]));
     for (const d of deferredRows) {
+      const issue = issueByKey.get(d.ticket_key);
       ranked.push({
         ticketKey: d.ticket_key,
         score: 0,
         band: 'DEFERRED',
         rankReason: `Deferred: ${d.reason}`,
+        fields: issue ? issueToFields(issue) : emptyFields(),
       });
     }
 
@@ -249,8 +273,38 @@ export class QueueRanker {
 
   private isCustomerComment(comment: CachedComment, issue: CachedIssue): boolean {
     if (!comment.author_email) return false;
-    // Customer comments are those NOT from the assignee or reporter
     return comment.author_email !== issue.assignee_email
       && comment.is_public;
   }
+}
+
+function issueToFields(issue: CachedIssue): TicketFields {
+  return {
+    summary: issue.summary,
+    status: issue.status_name,
+    statusCategory: issue.status_category,
+    priority: issue.priority_name,
+    tier: issue.current_tier,
+    product: issue.nurtur_product,
+    tldr: issue.tldr_text,
+    agentSummary: issue.agent_summary_text,
+    escalationReason: issue.escalation_reason_text,
+    reporter: issue.reporter_display,
+    assignee: issue.assignee_display,
+    updated: issue.jira_updated?.toISOString() ?? null,
+    created: issue.jira_created?.toISOString() ?? null,
+    slaBreachTime: issue.sla_breach_time?.toISOString() ?? null,
+    slaBreached: issue.sla_breached,
+    agentNextUpdate: issue.agent_next_update?.toISOString() ?? null,
+  };
+}
+
+function emptyFields(): TicketFields {
+  return {
+    summary: null, status: null, statusCategory: null, priority: null,
+    tier: null, product: null, tldr: null, agentSummary: null,
+    escalationReason: null, reporter: null, assignee: null,
+    updated: null, created: null, slaBreachTime: null, slaBreached: false,
+    agentNextUpdate: null,
+  };
 }

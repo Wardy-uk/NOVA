@@ -560,11 +560,15 @@ async function main() {
       res.status(400).json({ ok: false, error: 'ticket_id, ticket_summary, and resume_url are required' });
       return;
     }
+    const resolvedAdf = typeof ai_response_adf === 'string' ? ai_response_adf : JSON.stringify(ai_response_adf);
+    if (typeof ai_response_adf !== 'string') {
+      console.warn(`[approvals/ingest] ai_response_adf for ${ticket_id} is not a string — stored as JSON. This will be blocked from public posting.`);
+    }
     const businessHours = business_hours || 2;
     const expiresAt = toSqliteDatetime(addBusinessHours(new Date(), businessHours));
     const id = approvalQueries.create({
       ticket_id, ticket_summary, reporter_name, reporter_email,
-      ai_response_adf: typeof ai_response_adf === 'string' ? ai_response_adf : JSON.stringify(ai_response_adf),
+      ai_response_adf: resolvedAdf,
       conversation_json: typeof conversation_json === 'string' ? conversation_json : JSON.stringify(conversation_json),
       kb_sources: typeof kb_sources === 'string' ? kb_sources : JSON.stringify(kb_sources),
       resume_url, priority, expires_at: expiresAt,

@@ -27,6 +27,16 @@ import { query } from './database.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 
+function looksLikeStructuredPayload(text: string): boolean {
+  const trimmed = text.trim();
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try { JSON.parse(trimmed); return true; } catch { /* not valid JSON, continue checks */ }
+  }
+  const structuredKeys = ['"recommended_action"', '"draft_response"', '"internal_note"', '"classification"', '"confidence"', '"kb_gap"', '"priority_assessment"'];
+  const matchCount = structuredKeys.filter(k => trimmed.includes(k)).length;
+  return matchCount >= 2;
+}
+
 const DEFAULT_INTERVAL_MS = 60_000;
 const REDUCED_INTERVAL_MS = 5 * 60_000; // 5 min tick in reduced (out-of-hours) mode
 const HEALTH_STALE_THRESHOLD_MS = 10 * 60 * 1000;
@@ -1067,6 +1077,17 @@ export class AgentLoop {
       }
       const responseText = editedResponse || '';
       if (responseText) {
+        if (looksLikeStructuredPayload(responseText)) {
+          console.error(`[agent] BLOCKED public comment on ${ticketKey}: response looks like structured/JSON data`);
+          if (decisionId) {
+            await this.observer.logOutcome(decisionId, {
+              success: false, action: 'draft_response', ticketKey,
+              detail: 'Blocked: response contained structured/JSON data — refusing to post publicly.',
+              error: 'STRUCTURED_PAYLOAD_BLOCKED',
+            });
+          }
+          return;
+        }
         try {
           await this.jiraClient.addComment(ticketKey, responseText, { internal: false });
           console.log(`[agent] Posted approved response on ${ticketKey}`);

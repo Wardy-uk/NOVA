@@ -8,6 +8,15 @@ export class Actor {
   private escalationLog?: EscalationLogService;
   private settings: SettingsQueries;
 
+  static looksLikeStructuredPayload(text: string): boolean {
+    const trimmed = text.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try { JSON.parse(trimmed); return true; } catch { /* not valid JSON, continue */ }
+    }
+    const structuredKeys = ['"recommended_action"', '"draft_response"', '"internal_note"', '"classification"', '"confidence"', '"kb_gap"', '"priority_assessment"'];
+    return structuredKeys.filter(k => trimmed.includes(k)).length >= 2;
+  }
+
   constructor(jiraClient: JiraRestClient, escalationLog: EscalationLogService | undefined, settings: SettingsQueries) {
     this.jiraClient = jiraClient;
     this.escalationLog = escalationLog;
@@ -73,9 +82,9 @@ export class Actor {
 
   private async postComment(decision: AgentDecision): Promise<ActionResult> {
     const text = (decision.output.response as string) ?? (decision.output.comment as string) ?? decision.reasoning;
-    const internal = decision.output.internal !== false;
-    await this.jiraClient.addComment(decision.ticketKey, text, { internal });
-    return { success: true, action: decision.action, ticketKey: decision.ticketKey, detail: `Posted ${internal ? 'internal' : 'public'} comment.` };
+    // GUARDRAIL: Actor must NEVER post public comments. Public replies go through approval callback only.
+    await this.jiraClient.addComment(decision.ticketKey, text, { internal: true });
+    return { success: true, action: decision.action, ticketKey: decision.ticketKey, detail: 'Posted internal comment.' };
   }
 
   private async transitionTicket(decision: AgentDecision): Promise<ActionResult> {
@@ -128,6 +137,10 @@ export class Actor {
       : 0;
     const chaseText = (decision.output.draft_response as string) ??
       `Hi,\n\nWe're following up on ${ticketKey} — "${summary}".\n\nWe've been waiting for your reply for ${daysWaiting} days. Could you let us know if you still need help with this issue?\n\nIf we don't hear back within a few days, we'll close this ticket automatically. You can always raise a new ticket or reply to this one to reopen it.\n\nThanks,\nNurtur Support`;
+    if (Actor.looksLikeStructuredPayload(chaseText)) {
+      console.error(`[actor] BLOCKED public chase on ${ticketKey}: text looks like structured/JSON data`);
+      return { success: false, action: 'chase', ticketKey, detail: 'Blocked: chase text contained structured/JSON data.' };
+    }
     await this.jiraClient.addComment(ticketKey, chaseText, { internal: false });
     return { success: true, action: 'chase', ticketKey, detail: `Sent chase message (${daysWaiting} days waiting).` };
   }

@@ -51,6 +51,7 @@ const TrainingSummaryView = lazy(() => import('./components/TrainingSummaryView.
 const BoardMiView = lazy(() => import('./components/BoardMiView.js').then(m => ({ default: m.BoardMiView })));
 const DevReviewView = lazy(() => import('./components/DevReviewView.js').then(m => ({ default: m.DevReviewView })));
 const DevReviewDashboard = lazy(() => import('./components/DevReviewDashboard.js').then(m => ({ default: m.DevReviewDashboard })));
+const MyTicketsView = lazy(() => import('./components/MyTicketsView.js').then(m => ({ default: m.MyTicketsView })));
 const AgentKpisView = lazy(() => import('./components/AgentKpisView.js').then(m => ({ default: m.AgentKpisView })));
 const CalyxQueueView = lazy(() => import('./components/CalyxQueueView.js').then(m => ({ default: m.CalyxQueueView })));
 const CalyxDashboardView = lazy(() => import('./components/CalyxDashboardView.js').then(m => ({ default: m.CalyxDashboardView })));
@@ -1284,7 +1285,7 @@ export function App() {
 
           {/* NOVA AI Agent */}
           {view === 'tickets' && canSeeArea('ai-agent') && auth.user && (
-            <TaskList
+            <MyTicketsView
               tasks={filteredSdTasks}
               loading={sdLoading}
               onUpdateTask={updateTask}
