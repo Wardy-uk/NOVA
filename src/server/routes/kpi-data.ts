@@ -939,10 +939,13 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
   router.post('/agent-admin', async (req, res) => {
     try {
       const p = await getPool();
-      const { AgentName, AgentSurname, AgentKey, TierCode, Team, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3, IsAvailable, IsActive } = req.body;
+      const { AgentName, AgentSurname, AgentKey, AccountId, TierCode, Team, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3, IsAvailable, IsActive } = req.body;
 
       if (!AgentName?.trim() || !AgentSurname?.trim() || !AgentKey?.trim()) {
         return res.status(400).json({ ok: false, error: 'AgentName, AgentSurname, and AgentKey (email) are required' });
+      }
+      if (!AccountId?.trim()) {
+        return res.status(400).json({ ok: false, error: 'AccountId (Jira account ID) is required — find it via Jira user search' });
       }
       if (!TierCode || !['T1', 'T2', 'T3'].includes(TierCode)) {
         return res.status(400).json({ ok: false, error: 'TierCode must be T1, T2, or T3' });
@@ -966,15 +969,16 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       request.input('maxTicketsT2T3', sql.Int, MaxTicketsT2T3 ?? 0);
       request.input('isAvailable', sql.Bit, IsAvailable !== false ? 1 : 0);
       request.input('isActive', sql.Bit, IsActive !== false ? 1 : 0);
+      request.input('accountId', sql.NVarChar(200), AccountId.trim());
       request.input('department', sql.NVarChar(10), 'NT');
       request.input('now', sql.DateTime2, new Date());
 
       const result = await request.query(`
-        INSERT INTO dbo.Agent (AgentName, AgentSurname, AgentKey, TierCode, Team,
+        INSERT INTO dbo.Agent (AgentName, AgentSurname, AgentKey, AccountId, TierCode, Team,
                                MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3,
                                IsAvailable, IsActive, Department, CreatedAt, UpdatedAt)
         OUTPUT INSERTED.AgentId
-        VALUES (@name, @surname, @key, @tierCode, @team,
+        VALUES (@name, @surname, @key, @accountId, @tierCode, @team,
                 @maxTickets, @maxTicketsCC, @maxTicketsT2T3,
                 @isAvailable, @isActive, @department, @now, @now)
       `);
@@ -1434,7 +1438,7 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
                ${oldestCol} AS OldestTicketDays${oldestKeyCol},
                SolvedTickets_Today, TicketsSnapshotAt
         FROM dbo.Agent
-        WHERE IsActive = 1 ${deptFilter}
+        WHERE IsActive = 1 AND ISNULL(TierCode, '') <> 'AI' ${deptFilter}
         ORDER BY OpenTickets_Over2Hours DESC, ${orderCol} AgentName
       `);
       res.json({ ok: true, data: result.recordset, ts: new Date().toISOString() });

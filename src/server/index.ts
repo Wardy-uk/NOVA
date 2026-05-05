@@ -1706,7 +1706,7 @@ async function main() {
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                ${oldestCol} AS OldestTicketDays${oldestKeyCol},
                SolvedTickets_Today, TicketsSnapshotAt
-        FROM dbo.Agent WHERE IsActive = 1 ${deptFilter}
+        FROM dbo.Agent WHERE IsActive = 1 AND ISNULL(TierCode, '') <> 'AI' ${deptFilter}
         ORDER BY OpenTickets_Over2Hours DESC, AgentName
       `);
       const data = result.recordset;
@@ -1738,13 +1738,17 @@ async function main() {
         return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px 18px"><div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px">${label}</div><div style="font-size:26px;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
       }
 
+      const ONE_HOUR_MS = 60 * 60 * 1000;
       const rows = data.map((a: any) => {
         const name = a.AgentSurname ? `${a.AgentName} ${a.AgentSurname}` : a.AgentName;
         const hasIssues = a.OpenTickets_Over2Hours > 0 || (a.OldestTicketDays || 0) > 7;
+        const snapshotAge = a.TicketsSnapshotAt ? now.getTime() - new Date(a.TicketsSnapshotAt).getTime() : Infinity;
+        const isStale = snapshotAge > ONE_HOUR_MS;
         const tc = TEAM_COLORS[a.TierCode || a.Team] || '#64748b';
         const escapedName = name.replace(/'/g, "\\'");
+        const staleIcon = isStale ? ' <span title="Data stale — pipeline not reaching this agent" style="color:#f59e0b;font-size:10px">⚠</span>' : '';
         return `<tr style="cursor:pointer;${hasIssues ? 'background:rgba(239,68,68,.04)' : ''}" onclick="window.parent.postMessage({type:'wallboard-drill',agent:'${escapedName}',label:'${escapedName}'},'*')">
-          <td><span style="font-weight:600;color:${hasIssues ? '#fca5a5' : '#e2e8f0'}">${name}</span></td>
+          <td><span style="font-weight:600;color:${hasIssues ? '#fca5a5' : '#e2e8f0'}">${name}${staleIcon}</span></td>
           <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:${tc}22;color:${tc};border:1px solid ${tc}33">${a.TierCode || a.Team || '—'}</span></td>
           <td class="c" style="color:#94a3b8;font-weight:600">${a.OpenTickets_Total ?? '—'}</td>
           ${ragHtml(a.OpenTickets_Over2Hours || 0, 0, 2)}
