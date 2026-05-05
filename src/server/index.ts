@@ -1746,7 +1746,7 @@ async function main() {
         return `<tr style="cursor:pointer;${hasIssues ? 'background:rgba(239,68,68,.04)' : ''}" onclick="window.parent.postMessage({type:'wallboard-drill',agent:'${escapedName}',label:'${escapedName}'},'*')">
           <td><span style="font-weight:600;color:${hasIssues ? '#fca5a5' : '#e2e8f0'}">${name}</span></td>
           <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:${tc}22;color:${tc};border:1px solid ${tc}33">${a.TierCode || a.Team || '—'}</span></td>
-          <td class="c" style="color:#94a3b8;font-weight:600">${a.OpenTickets_Total}</td>
+          <td class="c" style="color:#94a3b8;font-weight:600">${a.OpenTickets_Total ?? '—'}</td>
           ${ragHtml(a.OpenTickets_Over2Hours || 0, 0, 2)}
           ${ragHtml(a.OpenTickets_NoUpdateToday || 0, 0, 1)}
           ${(() => {
