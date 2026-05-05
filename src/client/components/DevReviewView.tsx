@@ -570,6 +570,7 @@ export function DevReviewView() {
               </span>
               {loading ? 'Refreshing…' : 'Refresh'}
             </button>
+            {user?.role?.includes('admin') && <BackfillAdfButton />}
           </div>
         </div>
 
@@ -1212,6 +1213,44 @@ function TicketDetailPane({
         </GlassCard>
       </div>
     </>
+  );
+}
+
+function BackfillAdfButton() {
+  const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [result, setResult] = useState('');
+
+  const run = async () => {
+    setState('running');
+    try {
+      const r = await fetch('/api/dev-review/backfill-adf', { method: 'POST' });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error);
+      setResult(`${data.data.entries_updated} comments updated across ${data.data.tickets_scanned} tickets`);
+      setState('done');
+    } catch (err: any) {
+      setResult(err.message);
+      setState('error');
+    }
+  };
+
+  if (state === 'done' || state === 'error') {
+    return (
+      <span className={`text-[10px] ${state === 'done' ? 'text-emerald-400' : 'text-red-400'}`}>
+        {result}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      onClick={run}
+      disabled={state === 'running'}
+      className="px-2 py-1 text-[10px] rounded text-neutral-400 border border-white/10 hover:bg-white/5 transition-all disabled:opacity-60"
+      title="Re-fetch ADF bodies for existing comments so images render"
+    >
+      {state === 'running' ? 'Backfilling…' : 'Backfill Images'}
+    </button>
   );
 }
 
