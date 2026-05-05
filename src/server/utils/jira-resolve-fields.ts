@@ -4,6 +4,14 @@ const CF_NURTUR_PRODUCT = 'customfield_13183';
 const CF_PRODUCT_SUB_CATEGORY = 'customfield_14527';
 const CF_RESOLUTION_TYPE = 'customfield_14494';
 
+function textToAdf(text: string): object {
+  return {
+    type: 'doc',
+    version: 1,
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+  };
+}
+
 const RESOLUTION_TYPE_IDS: Record<string, string> = {
   'No Fault Found': '13767',
   'Duplicate': '13765',
@@ -35,7 +43,7 @@ export function buildResolveFields(ctx: ResolveContext): {
   }
 
   const fields: Record<string, unknown> = {
-    [CF_TLDR]: ctx.tldr,
+    [CF_TLDR]: textToAdf(ctx.tldr),
     [CF_NURTUR_PRODUCT]: { id: NURTUR_PRODUCT_NOT_APPLICABLE_ID },
     [CF_PRODUCT_SUB_CATEGORY]: ctx.subCategory ?? 'N/A',
   };
