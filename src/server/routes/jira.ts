@@ -538,9 +538,12 @@ export function createJiraRoutes(
     }
   });
 
-  // GET /api/jira/attachment/:id — proxy attachment content from Jira (images in ADF comments)
-  router.get('/attachment/:id', async (req, res) => {
-    const attachmentId = req.params.id;
+  // GET /api/jira/attachment/:mediaId — proxy attachment content from Jira (images in ADF comments)
+  // ADF media nodes use a media UUID, not a numeric attachment ID.
+  // We resolve it via the issue's attachment list (mediaApiFileId field).
+  router.get('/attachment/:mediaId', async (req, res) => {
+    const mediaId = req.params.mediaId;
+    const issueKey = req.query.issue as string | undefined;
     const userId = (req as any).user?.id as number | undefined;
     const client = await getClientForUser(userId) || getGlobalClient();
     if (!client) {
@@ -548,7 +551,18 @@ export function createJiraRoutes(
       return;
     }
     try {
-      const upstream = await client.getAttachmentContent(attachmentId);
+      if (!issueKey) {
+        res.status(400).json({ ok: false, error: 'Missing ?issue= query parameter' });
+        return;
+      }
+      const issue = await client.getIssue(issueKey, ['attachment']);
+      const attachments = (issue?.fields?.attachment as Array<{ id: string; content: string; mediaApiFileId?: string; filename?: string }>) ?? [];
+      const match = attachments.find(a => a.mediaApiFileId === mediaId) ?? attachments.find(a => a.id === mediaId);
+      if (!match?.content) {
+        res.status(404).json({ ok: false, error: 'Attachment not found on issue' });
+        return;
+      }
+      const upstream = await client.getAttachmentContent(match.id);
       if (!upstream.ok) {
         res.status(upstream.status).json({ ok: false, error: `Jira returned ${upstream.status}` });
         return;

@@ -1254,10 +1254,10 @@ function BackfillAdfButton() {
   );
 }
 
-function ThreadBody({ body, bodyAdf }: { body: string | null; bodyAdf?: string | null }) {
+function ThreadBody({ body, bodyAdf, issueKey }: { body: string | null; bodyAdf?: string | null; issueKey?: string }) {
   if (bodyAdf) {
     try {
-      return <AdfCommentBody body={JSON.parse(bodyAdf)} className="text-[12px] text-neutral-100 leading-relaxed" />;
+      return <AdfCommentBody body={JSON.parse(bodyAdf)} className="text-[12px] text-neutral-100 leading-relaxed" issueKey={issueKey} />;
     } catch { /* fall through to plain text */ }
   }
   if (body) return <div className="text-[12px] text-neutral-100 whitespace-pre-wrap leading-relaxed">{body}</div>;
@@ -1324,7 +1324,7 @@ function ThreadEntryRow({ entry }: { entry: ThreadEntry }) {
           <span className="text-[10px] text-neutral-400">{timeAgo(entry.created_at)}</span>
         </div>
       </div>
-      <ThreadBody body={entry.body} bodyAdf={entry.body_adf} />
+      <ThreadBody body={entry.body} bodyAdf={entry.body_adf} issueKey={entry.jira_key} />
     </div>
   );
 }

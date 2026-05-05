@@ -464,7 +464,7 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
                       </span>
                     </div>
                     {c.body && typeof c.body === 'object' ? (
-                      <AdfCommentBody body={c.body} className="text-xs text-neutral-300 break-words" />
+                      <AdfCommentBody body={c.body} className="text-xs text-neutral-300 break-words" issueKey={issueKey} />
                     ) : (
                       <div className="text-xs text-neutral-300 whitespace-pre-wrap break-words">
                         {String(c.body ?? '')}

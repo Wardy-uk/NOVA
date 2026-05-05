@@ -868,7 +868,7 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
                         </span>
                       </div>
                       {c.body && typeof c.body === 'object' ? (
-                        <AdfCommentBody body={c.body} className="text-[12px] text-neutral-100 break-words" />
+                        <AdfCommentBody body={c.body} className="text-[12px] text-neutral-100 break-words" issueKey={task.source_id ?? task.id.replace(/^jira:/, '')} />
                       ) : (
                         <div className="text-[12px] text-neutral-100 whitespace-pre-wrap break-words">
                           {commentBodyToText(c.body)}

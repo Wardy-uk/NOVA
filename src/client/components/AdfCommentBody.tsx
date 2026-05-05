@@ -32,10 +32,10 @@ function ensureStyles() {
   stylesInjected = true;
 }
 
-export function AdfCommentBody({ body, className = '' }: { body: unknown; className?: string }) {
+export function AdfCommentBody({ body, className = '', issueKey }: { body: unknown; className?: string; issueKey?: string }) {
   ensureStyles();
 
-  const html = useMemo(() => adfToHtml(body), [body]);
+  const html = useMemo(() => adfToHtml(body, issueKey), [body, issueKey]);
 
   if (!html) return null;
 
