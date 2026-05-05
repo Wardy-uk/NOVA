@@ -556,13 +556,35 @@ export function createJiraRoutes(
         return;
       }
       const issue = await client.getIssue(issueKey, ['attachment']);
-      const attachments = (issue?.fields?.attachment as Array<{ id: string; content: string; mediaApiFileId?: string; filename?: string }>) ?? [];
-      const match = attachments.find(a => a.mediaApiFileId === mediaId) ?? attachments.find(a => a.id === mediaId);
-      if (!match?.content) {
+      const attachments = (issue?.fields?.attachment as Array<Record<string, unknown>>) ?? [];
+
+      // Log first attachment shape for debugging (once)
+      if (attachments.length > 0) {
+        console.log(`[JiraAttachment] Issue ${issueKey}: ${attachments.length} attachments. Fields on first:`, Object.keys(attachments[0]).join(', '));
+        console.log(`[JiraAttachment] Looking for mediaId=${mediaId}`);
+      }
+
+      // Try multiple matching strategies
+      let match = attachments.find(a => a.mediaApiFileId === mediaId);
+      if (!match) match = attachments.find(a => a.id === mediaId);
+      // Some Jira instances use 'fileId' instead
+      if (!match) match = attachments.find(a => (a as any).fileId === mediaId);
+
+      if (!match) {
+        // Last resort: if there's a filename hint in the query, match by that
+        const filenameHint = req.query.filename as string | undefined;
+        if (filenameHint) {
+          match = attachments.find(a => a.filename === filenameHint);
+        }
+      }
+
+      if (!match) {
+        console.warn(`[JiraAttachment] No match for mediaId=${mediaId} on ${issueKey}. Attachment IDs: ${attachments.map(a => `${a.id}/${(a as any).mediaApiFileId ?? 'no-mediaApiFileId'}`).join(', ')}`);
         res.status(404).json({ ok: false, error: 'Attachment not found on issue' });
         return;
       }
-      const upstream = await client.getAttachmentContent(match.id);
+
+      const upstream = await client.getAttachmentContent(String(match.id));
       if (!upstream.ok) {
         res.status(upstream.status).json({ ok: false, error: `Jira returned ${upstream.status}` });
         return;
@@ -573,6 +595,7 @@ export function createJiraRoutes(
       const buffer = Buffer.from(await upstream.arrayBuffer());
       res.send(buffer);
     } catch (err) {
+      console.error(`[JiraAttachment] Error for ${mediaId} on ${issueKey}:`, err);
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Attachment fetch failed' });
     }
   });

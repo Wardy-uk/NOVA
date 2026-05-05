@@ -158,9 +158,11 @@ function renderMedia(node: AdfNode): string {
 
   if (id) {
     const token = getAuthToken();
+    const filename = (node.attrs?.__fileName as string) || (alt !== 'attachment' ? alt : '');
     const params = new URLSearchParams();
     if (token) params.set('token', token);
     if (_issueKey) params.set('issue', _issueKey);
+    if (filename) params.set('filename', filename);
     const qs = params.toString();
     const proxySrc = `/api/jira/attachment/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`;
     return `<img src="${escapeAttr(proxySrc)}" alt="${escapeAttr(alt)}" class="adf-image" loading="lazy" ${width ? `width="${width}"` : ''}/>`;
