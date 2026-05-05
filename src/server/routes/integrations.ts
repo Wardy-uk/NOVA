@@ -143,10 +143,26 @@ export function createIntegrationRoutes(
         }
       }
 
+      // Determine enabled: explicit 'true'/'false' wins; if key is missing, infer from credentials
+      const rawEnabledValue = isAdminOnly
+        ? globalSettings[integ.enabledKey]
+        : (userSettings[integ.enabledKey] ?? globalSettings[integ.enabledKey]);
+      let isEnabled: boolean;
+      if (rawEnabledValue === 'true') {
+        isEnabled = true;
+      } else if (rawEnabledValue === 'false') {
+        isEnabled = false;
+      } else {
+        // Key not set — infer from whether required credentials are configured
+        const source = isAdminOnly ? globalSettings : userSettings;
+        const hasRequiredCreds = integ.fields.length === 0 || integ.fields.filter(f => f.required).some(f => !!source[f.key]?.trim());
+        isEnabled = hasRequiredCreds;
+      }
+
       // For credential-only integrations without MCP, derive status from config completeness
       let effectiveMcpStatus: McpServerStatus = d365Status ?? mcpInfo?.status ?? 'disconnected';
       const configSource = isAdminOnly ? globalSettings : userSettings;
-      if (!mcpInfo && !d365Status && integ.authType === 'credentials' && configSource[integ.enabledKey] === 'true') {
+      if (!mcpInfo && !d365Status && integ.authType === 'credentials' && isEnabled) {
         const allRequired = integ.fields.filter(f => f.required).every(f => !!configSource[f.key]);
         effectiveMcpStatus = allRequired ? 'connected' : 'disconnected';
       }
@@ -155,9 +171,7 @@ export function createIntegrationRoutes(
         id: integ.id,
         name: integ.name,
         description: integ.description,
-        enabled: isAdminOnly
-          ? globalSettings[integ.enabledKey] === 'true'
-          : (userSettings[integ.enabledKey] ?? globalSettings[integ.enabledKey]) === 'true',
+        enabled: isEnabled,
         fields: integ.fields,
         values,
         mcpStatus: effectiveMcpStatus,
@@ -202,6 +216,14 @@ export function createIntegrationRoutes(
     if (isAdminOnly && (!userRole || !isAdmin(userRole))) {
       res.status(403).json({ ok: false, error: 'Admin role required to modify this integration' });
       return;
+    }
+
+    // Audit trail: log toggle changes
+    const previousEnabled = settingsQueries.getAll()[integ.enabledKey];
+    const newEnabled = String(enabled);
+    if (previousEnabled !== newEnabled) {
+      const username = (req as any).user?.username ?? `user:${userId}`;
+      console.log(`[Integration-Audit] ${integ.id} toggled ${previousEnabled ?? 'unset'} → ${newEnabled} by ${username} at ${new Date().toISOString()}`);
     }
 
     if (isAdminOnly) {

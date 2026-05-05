@@ -422,6 +422,19 @@ async function main() {
 
   // Register enabled integrations from DB settings
   const settings = settingsQueries.getAll();
+
+  // Safety net: auto-heal integrations with credentials but explicitly disabled
+  for (const integ of INTEGRATIONS) {
+    if (settings[integ.enabledKey] === 'false') {
+      const hasAllRequired = integ.fields.filter(f => f.required).every(f => !!settings[f.key]?.trim());
+      if (hasAllRequired && integ.fields.some(f => f.required)) {
+        console.warn(`[N.O.V.A] ⚠ AUTO-HEAL: ${integ.name} has all credentials but was disabled — re-enabling (${integ.enabledKey})`);
+        settingsQueries.set(integ.enabledKey, 'true');
+        settings[integ.enabledKey] = 'true';
+      }
+    }
+  }
+
   for (const integ of INTEGRATIONS) {
     if (settings[integ.enabledKey] !== 'true') continue;
     const hasRequired = integ.fields.filter(f => f.required).every(f => settings[f.key]?.trim());
