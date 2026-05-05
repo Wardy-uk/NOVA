@@ -401,6 +401,17 @@ export class DevReviewQueries {
     return rows.map(r => r.jira_key);
   }
 
+  async getThreadEntriesMissingAdf(): Promise<Array<{ id: number; jira_key: string; jira_comment_id: string }>> {
+    return query<{ id: number; jira_key: string; jira_comment_id: string }>(
+      `SELECT id, jira_key, jira_comment_id FROM dev_review_thread
+       WHERE jira_comment_id IS NOT NULL AND body_adf IS NULL`,
+    );
+  }
+
+  async updateThreadAdf(id: number, bodyAdf: string): Promise<void> {
+    await execute(`UPDATE dev_review_thread SET body_adf = ? WHERE id = ?`, [bodyAdf, id]);
+  }
+
   async markThreadSyncFailed(id: number, error: string): Promise<void> {
     await execute(
       `UPDATE dev_review_thread SET jira_sync_state='failed', jira_sync_error=? WHERE id=?`,

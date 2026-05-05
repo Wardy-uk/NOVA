@@ -1134,5 +1134,47 @@ export function createDevReviewRoutes(
     res.json({ ok: true, data: await devQueries.pendingOutbox(100) });
   });
 
+  // ── Backfill body_adf for existing thread entries ─────────────────────
+  router.post('/backfill-adf', async (req: Request, res: Response) => {
+    if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
+    const client = getJiraClient();
+    if (!client) { res.status(503).json({ ok: false, error: 'No Jira client available' }); return; }
+
+    try {
+      // Find all thread entries with a jira_comment_id but no body_adf
+      const rows = await devQueries.getThreadEntriesMissingAdf();
+      const keyGroups = new Map<string, Array<{ id: number; jira_comment_id: string }>>();
+      for (const r of rows) {
+        const group = keyGroups.get(r.jira_key) ?? [];
+        group.push({ id: r.id, jira_comment_id: r.jira_comment_id });
+        keyGroups.set(r.jira_key, group);
+      }
+
+      let updated = 0;
+      let failed = 0;
+      for (const [key, entries] of keyGroups) {
+        try {
+          const comments = await client.getComments(key, 50);
+          const byId = new Map(comments.map(c => [c.id, c]));
+          for (const entry of entries) {
+            const jiraComment = byId.get(entry.jira_comment_id);
+            if (jiraComment?.body && typeof jiraComment.body === 'object') {
+              await devQueries.updateThreadAdf(entry.id, JSON.stringify(jiraComment.body));
+              updated++;
+            }
+          }
+        } catch (err) {
+          console.warn(`[backfill-adf] Failed for ${key}: ${err instanceof Error ? err.message : err}`);
+          failed++;
+        }
+      }
+
+      console.log(`[backfill-adf] Done: ${updated} updated, ${failed} tickets failed, ${keyGroups.size} tickets scanned`);
+      res.json({ ok: true, data: { tickets_scanned: keyGroups.size, entries_updated: updated, tickets_failed: failed } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Backfill failed' });
+    }
+  });
+
   return router;
 }
