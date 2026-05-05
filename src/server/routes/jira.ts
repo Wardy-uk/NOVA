@@ -542,8 +542,7 @@ export function createJiraRoutes(
   // The backend resolves media UUIDs → attachment IDs before sending ADF to the client.
   router.get('/attachment/:id', async (req, res) => {
     const attachmentId = req.params.id;
-    const userId = (req as any).user?.id as number | undefined;
-    const client = await getClientForUser(userId) || getGlobalClient();
+    const client = getGlobalClient();
     if (!client) {
       res.status(503).json({ ok: false, error: 'No Jira connection available' });
       return;
