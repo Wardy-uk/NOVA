@@ -1187,6 +1187,9 @@ async function runMigrations(): Promise<void> {
        disabled_at DATETIME2 NULL,
        updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
      );`,
+
+    `IF COL_LENGTH('dev_review_thread', 'body_adf') IS NULL
+     ALTER TABLE dev_review_thread ADD body_adf NVARCHAR(MAX) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

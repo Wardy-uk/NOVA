@@ -465,4 +465,17 @@ export class JiraRestClient {
     );
     return result?.values ?? [];
   }
+
+  /** Proxy an attachment content download — returns raw Response for streaming to client. */
+  async getAttachmentContent(attachmentId: string): Promise<Response> {
+    const url = `${this.baseUrl}/rest/api/3/attachment/content/${attachmentId}`;
+    const res = await fetch(url, {
+      headers: {
+        'Authorization': this.authHeader,
+        'Accept': 'image/*,application/octet-stream',
+      },
+      redirect: 'follow',
+    });
+    return res;
+  }
 }

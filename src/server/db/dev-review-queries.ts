@@ -24,6 +24,7 @@ export interface DevReviewThreadEntry {
   user_display: string;
   kind: 'comment' | 'state_change' | 'accept' | 'return' | 'claim' | 'fasttrack';
   body: string | null;
+  body_adf: string | null;
   meta_json: string | null;
   jira_sync_state: 'pending' | 'synced' | 'failed' | 'skip';
   jira_sync_error: string | null;
@@ -352,18 +353,20 @@ export class DevReviewQueries {
     jira_key: string;
     author_display: string;
     body: string;
+    body_adf?: unknown;
     jira_comment_id: string;
     author_account_id?: string;
     internal?: boolean;
   }): Promise<void> {
     await execute(
       `INSERT INTO dev_review_thread
-       (jira_key, user_id, user_display, kind, body, meta_json, jira_sync_state, jira_comment_id)
-       VALUES (?, 0, ?, 'comment', ?, ?, 'synced', ?)`,
+       (jira_key, user_id, user_display, kind, body, body_adf, meta_json, jira_sync_state, jira_comment_id)
+       VALUES (?, 0, ?, 'comment', ?, ?, ?, 'synced', ?)`,
       [
         entry.jira_key,
         entry.author_display,
         entry.body,
+        entry.body_adf ? JSON.stringify(entry.body_adf) : null,
         JSON.stringify({ source: 'jira', author_account_id: entry.author_account_id, internal: !!entry.internal }),
         entry.jira_comment_id,
       ],

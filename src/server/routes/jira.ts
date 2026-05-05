@@ -538,5 +538,30 @@ export function createJiraRoutes(
     }
   });
 
+  // GET /api/jira/attachment/:id — proxy attachment content from Jira (images in ADF comments)
+  router.get('/attachment/:id', async (req, res) => {
+    const attachmentId = req.params.id;
+    const userId = (req as any).user?.id as number | undefined;
+    const client = await getClientForUser(userId) || getGlobalClient();
+    if (!client) {
+      res.status(503).json({ ok: false, error: 'No Jira connection available' });
+      return;
+    }
+    try {
+      const upstream = await client.getAttachmentContent(attachmentId);
+      if (!upstream.ok) {
+        res.status(upstream.status).json({ ok: false, error: `Jira returned ${upstream.status}` });
+        return;
+      }
+      const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      res.send(buffer);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Attachment fetch failed' });
+    }
+  });
+
   return router;
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TicketBriefCard, briefPropsFromTask } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
+import { AdfCommentBody } from './AdfCommentBody.js';
 
 const SOURCE_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   jira: { bg: 'bg-badge-info-muted', text: 'text-on-badge-info-muted', label: 'Jira' },
@@ -866,9 +867,13 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
                           {new Date(c.created).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
-                      <div className="text-[12px] text-neutral-100 whitespace-pre-wrap break-words">
-                        {commentBodyToText(c.body)}
-                      </div>
+                      {c.body && typeof c.body === 'object' ? (
+                        <AdfCommentBody body={c.body} className="text-[12px] text-neutral-100 break-words" />
+                      ) : (
+                        <div className="text-[12px] text-neutral-100 whitespace-pre-wrap break-words">
+                          {commentBodyToText(c.body)}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

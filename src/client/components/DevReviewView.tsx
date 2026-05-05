@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { TicketBriefCard } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
+import { AdfCommentBody } from './AdfCommentBody.js';
 import { useAuth } from '../hooks/useAuth.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -62,6 +63,7 @@ interface ThreadEntry {
   user_display: string;
   kind: 'comment' | 'state_change' | 'accept' | 'return' | 'claim' | 'fasttrack';
   body: string | null;
+  body_adf?: string | null;
   meta_json?: string | null;
   jira_sync_state: 'pending' | 'synced' | 'failed' | 'skip';
   jira_sync_error: string | null;
@@ -1213,6 +1215,16 @@ function TicketDetailPane({
   );
 }
 
+function ThreadBody({ body, bodyAdf }: { body: string | null; bodyAdf?: string | null }) {
+  if (bodyAdf) {
+    try {
+      return <AdfCommentBody body={JSON.parse(bodyAdf)} className="text-[12px] text-neutral-100 leading-relaxed" />;
+    } catch { /* fall through to plain text */ }
+  }
+  if (body) return <div className="text-[12px] text-neutral-100 whitespace-pre-wrap leading-relaxed">{body}</div>;
+  return null;
+}
+
 function ThreadEntryRow({ entry }: { entry: ThreadEntry }) {
   // Parse meta to detect Jira-origin (agent replies from Jira)
   let isJiraOrigin = false;
@@ -1273,9 +1285,7 @@ function ThreadEntryRow({ entry }: { entry: ThreadEntry }) {
           <span className="text-[10px] text-neutral-400">{timeAgo(entry.created_at)}</span>
         </div>
       </div>
-      {entry.body && (
-        <div className="text-[12px] text-neutral-100 whitespace-pre-wrap leading-relaxed">{entry.body}</div>
-      )}
+      <ThreadBody body={entry.body} bodyAdf={entry.body_adf} />
     </div>
   );
 }

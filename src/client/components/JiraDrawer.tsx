@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TicketBriefCard, type BriefFields } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
+import { AdfCommentBody } from './AdfCommentBody.js';
 
 interface Transition {
   id?: number | string;
@@ -19,7 +20,7 @@ interface TransitionFieldInfo {
 
 interface JiraComment {
   id: string;
-  body: string;
+  body: unknown;
   author: { display_name?: string; name?: string; email?: string };
   created: string;
   updated?: string;
@@ -462,9 +463,13 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
                         {new Date(c.created).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
-                    <div className="text-xs text-neutral-300 whitespace-pre-wrap break-words">
-                      {c.body}
-                    </div>
+                    {c.body && typeof c.body === 'object' ? (
+                      <AdfCommentBody body={c.body} className="text-xs text-neutral-300 break-words" />
+                    ) : (
+                      <div className="text-xs text-neutral-300 whitespace-pre-wrap break-words">
+                        {String(c.body ?? '')}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

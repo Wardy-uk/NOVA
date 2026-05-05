@@ -2676,6 +2676,7 @@ ${panelHtml}
               jira_key: key,
               author_display: authorName,
               body,
+              body_adf: c.body && typeof c.body === 'object' ? c.body : undefined,
               jira_comment_id: c.id,
               author_account_id: c.author?.accountId,
               internal: c.jsdPublic === false,
