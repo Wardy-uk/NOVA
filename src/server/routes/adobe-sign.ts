@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { AdobeSignClient } from '../services/adobe-sign-client.js';
+import { AdobeSignApiError, type AdobeSignClient } from '../services/adobe-sign-client.js';
 import type { AdobeSignAgreementQueries, ContractTemplateQueries } from '../db/queries.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 
@@ -14,6 +14,17 @@ const SENDER_FILLABLE_FIELD_TYPES = new Set([
   'NAME_FIELD',
   'EMAIL_FIELD',
 ]);
+
+function adobeError(err: unknown): { status: number; error: string; retryAfter?: number } {
+  if (err instanceof AdobeSignApiError) {
+    return {
+      status: err.statusCode === 429 ? 429 : 500,
+      error: err.message,
+      retryAfter: err.retryAfterSeconds,
+    };
+  }
+  return { status: 500, error: err instanceof Error ? err.message : 'Unknown error' };
+}
 
 export function createAdobeSignRoutes(
   getClient: () => AdobeSignClient | null,
@@ -210,15 +221,17 @@ export function createAdobeSignRoutes(
 
   // ── Library Documents (from Adobe Sign) ──
 
-  router.get('/library-documents', async (_req, res) => {
+  router.get('/library-documents', async (req, res) => {
     const client = getClient();
     if (!client) { res.status(503).json({ ok: false, error: 'Adobe Sign is not connected.' }); return; }
+    const force = req.query.refresh === '1' || req.query.refresh === 'true';
     try {
-      const docs = await client.getLibraryDocuments();
+      const docs = await client.getLibraryDocuments(force);
       res.json({ ok: true, data: docs });
     } catch (err) {
       console.error('[Adobe Sign] Library documents error:', err);
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch library documents' });
+      const e = adobeError(err);
+      res.status(e.status).json({ ok: false, error: e.error, retryAfter: e.retryAfter });
     }
   });
 
@@ -228,13 +241,15 @@ export function createAdobeSignRoutes(
   router.get('/library-documents/:id/form-fields', async (req, res) => {
     const client = getClient();
     if (!client) { res.status(503).json({ ok: false, error: 'Adobe Sign is not connected.' }); return; }
+    const force = req.query.refresh === '1' || req.query.refresh === 'true';
     try {
-      const all = await client.getLibraryDocumentFormFields(req.params.id);
+      const all = await client.getLibraryDocumentFormFields(req.params.id, force);
       const senderFillable = all.filter(f => SENDER_FILLABLE_FIELD_TYPES.has(f.contentType));
       res.json({ ok: true, data: senderFillable });
     } catch (err) {
       console.error('[Adobe Sign] Form fields error:', err);
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch form fields' });
+      const e = adobeError(err);
+      res.status(e.status).json({ ok: false, error: e.error, retryAfter: e.retryAfter });
     }
   });
 

@@ -54,14 +54,18 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [sentId, setSentId] = useState<string | null>(null);
   const [templateSearch, setTemplateSearch] = useState('');
 
-  const fetchTemplates = useCallback(async () => {
+  const fetchTemplates = useCallback(async (force = false) => {
     setLoading(true);
     setLoadError(null);
     try {
-      const res = await fetch('/api/adobe-sign/library-documents');
+      const url = force ? '/api/adobe-sign/library-documents?refresh=1' : '/api/adobe-sign/library-documents';
+      const res = await fetch(url);
       const json = await res.json();
       if (json.ok) {
         setTemplates(json.data ?? []);
+      } else if (res.status === 429) {
+        const retry = typeof json.retryAfter === 'number' ? json.retryAfter : 60;
+        setLoadError(`Adobe Sign is rate-limiting us. Try again in ${retry}s.`);
       } else {
         setLoadError(json.error ?? 'Failed to load templates from Adobe Sign');
       }
@@ -71,7 +75,7 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+  useEffect(() => { fetchTemplates(false); }, [fetchTemplates]);
 
   const filteredTemplates = templates.filter((t) =>
     !templateSearch.trim() ||
@@ -227,7 +231,7 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                 <h2 className="text-[14px] font-semibold text-neutral-100">Select a Template</h2>
                 <p className="text-[11px] text-neutral-500 mt-0.5">Templates are pulled live from Adobe Sign. To add a new template, create it in Adobe Sign.</p>
               </div>
-              <button onClick={fetchTemplates} className={btnSecondary} disabled={loading}>
+              <button onClick={() => fetchTemplates(true)} className={btnSecondary} disabled={loading}>
                 {loading ? 'Refreshing...' : 'Refresh'}
               </button>
             </div>
