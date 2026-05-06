@@ -46,11 +46,16 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` };
 }
 
+function queueFingerprint(q: QueueResult): string {
+  return q.tickets.map(t => `${t.ticketKey}:${t.band}:${t.score}:${t.fields.status}`).join('|');
+}
+
 export function useMyTicketsQueue(agentId: string | null) {
   const [queue, setQueue] = useState<QueueResult | null>(null);
   const [loading, setLoading] = useState(!!agentId);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fingerprintRef = useRef<string>('');
 
   const fetchQueue = useCallback(async () => {
     if (!agentId) return;
@@ -60,7 +65,12 @@ export function useMyTicketsQueue(agentId: string | null) {
       });
       const json = await res.json();
       if (json.ok) {
-        setQueue(json.data);
+        const newData = json.data as QueueResult;
+        const newFp = queueFingerprint(newData);
+        if (newFp !== fingerprintRef.current) {
+          fingerprintRef.current = newFp;
+          setQueue(newData);
+        }
         setError(null);
       } else {
         setError(json.error ?? 'Failed to fetch queue');

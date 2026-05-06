@@ -13,7 +13,7 @@ export interface BriefFields {
   customfield_12981?: { value?: string } | string;
   customfield_13184?: unknown; // TL;DR (ADF or string)
   customfield_13185?: unknown; // Agent Summary
-  customfield_13186?: { value?: string }; // Escalation Reason
+  customfield_13186?: { value?: string; name?: string } | string | null; // Escalation Reason
   customfield_13212?: unknown; // Troubleshooting Performed
   customfield_13213?: unknown; // Environment
   customfield_13214?: unknown; // Expected Outcome
@@ -108,7 +108,10 @@ export function TicketBriefCard({ ticketKey, fields, tier, compact }: TicketBrie
     const troubleshooting = adfToText(fields.customfield_13212);
     const expectedOutcome = adfToText(fields.customfield_13214);
     const environment = adfToText(fields.customfield_13213);
-    const escalationReason = fields.customfield_13186?.value ?? null;
+    const rawEsc = fields.customfield_13186;
+    const escalationReason = typeof rawEsc === 'string' ? rawEsc
+      : (rawEsc && typeof rawEsc === 'object') ? ((rawEsc as any).value ?? (rawEsc as any).name ?? null)
+      : null;
     const description = adfToText(fields.description);
     return { tldr, agentSummary, troubleshooting, expectedOutcome, environment, escalationReason, description };
   }, [fields]);

@@ -279,10 +279,13 @@ function TicketDetailPanel({ ticketKey, ticket, onDefer, onRefreshQueue }: {
       let comments: JiraComment[] = [];
       if (issueRes?.ok && isObj(issueRes.data)) {
         issue = issueRes.data as Record<string, unknown>;
+        // Comments come as a top-level array from our enriched endpoint,
+        // or nested under issue.comment.comments from raw Jira response
+        const rawComments = issue.comments;
         const cf = issue.comment as { comments?: JiraComment[] } | JiraComment[] | undefined;
-        comments = Array.isArray(cf) ? cf
+        comments = Array.isArray(rawComments) ? rawComments as JiraComment[]
+          : Array.isArray(cf) ? cf
           : (cf as { comments?: JiraComment[] })?.comments
-          ?? (issue.comments as JiraComment[])
           ?? [];
       }
 

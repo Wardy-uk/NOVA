@@ -92,12 +92,25 @@ export function createJiraRoutes(
 
     if (restClient) {
       try {
-        const issue = await restClient.getIssue(key);
+        const issue = await restClient.getIssue(key, ['*navigable'], { expand: ['names'] });
         if (!issue) {
           res.status(404).json({ ok: false, error: `Issue ${key} not found` });
           return;
         }
         const flat: Record<string, unknown> = { key: issue.key, id: issue.id, self: issue.self, ...issue.fields };
+
+        // Fetch comments separately — getIssue default fields don't include them
+        try {
+          const comments = await restClient.getComments(key, 30);
+          flat.comments = comments.map((c: any) => ({
+            id: c.id,
+            body: c.body,
+            author: c.author ?? { displayName: 'Unknown' },
+            created: c.created,
+            jsdPublic: c.jsdPublic ?? !(c.properties?.some?.((p: any) => p.key === 'sd.public.comment' && p.value?.internal === true)),
+          }));
+        } catch { flat.comments = []; }
+
         res.json({ ok: true, data: flat });
         return;
       } catch (err) {
@@ -305,11 +318,12 @@ export function createJiraRoutes(
 
         // Add comment BEFORE the transition so it appears before the status change
         if (comment?.trim()) {
-          const visibility = commentVisibility === 'internal'
+          const isInternal = commentVisibility === 'internal';
+          const visibility = isInternal
             ? { type: 'role', value: getSettings?.()?.jira_internal_comment_role || 'Service Desk Team' }
             : undefined;
           console.log(`[Jira] Adding comment to ${key} before transition (${commentVisibility})`);
-          await restClient.addComment(key, comment.trim(), visibility ? { visibility } : undefined);
+          await restClient.addComment(key, comment.trim(), { ...(visibility ? { visibility } : {}), internal: isInternal });
           results.comment = { ok: true };
         }
 
@@ -343,11 +357,12 @@ export function createJiraRoutes(
         }
 
         if (comment) {
-          const visibility = commentVisibility === 'internal'
+          const isInternal = commentVisibility === 'internal';
+          const visibility = isInternal
             ? { type: 'role', value: getSettings?.()?.jira_internal_comment_role || 'Service Desk Team' }
             : undefined;
           console.log(`[Jira] Adding ${commentVisibility ?? 'public'} comment on ${key} via REST`);
-          results.comment = await restClient.addComment(key, comment, visibility ? { visibility } : undefined);
+          results.comment = await restClient.addComment(key, comment, { ...(visibility ? { visibility } : {}), internal: isInternal });
         }
       }
 
