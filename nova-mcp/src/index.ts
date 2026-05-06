@@ -7,7 +7,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 const server = new McpServer({
   name: 'nova',
-  version: '2.0.0',
+  version: '3.0.0',
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -189,16 +189,51 @@ server.tool(
   'nova_agent_comparison',
   'Compare all team agents on a given metric. Returns ranked list with team average, above/below flags, and outliers.',
   {
-    metric: z.enum(['qa_score', 'open_tickets', 'solved_today', 'over_2h', 'no_update']).describe('Metric to compare'),
+    metric: z.enum([
+      'qa_score', 'qa_accuracy', 'qa_clarity', 'qa_tone', 'qa_tickets_scored', 'qa_red', 'qa_amber', 'qa_green',
+      'golden_overall', 'golden_ownership', 'golden_next_action', 'golden_timeframe', 'golden_clarity', 'golden_empathy',
+      'sla_resolved', 'sla_breached', 'sla_compliance',
+      'csat_count', 'csat_average',
+      'open_tickets', 'solved_today', 'over_2h', 'no_update',
+    ]).describe('Metric to compare'),
     days: z.number().default(30).describe('Lookback days (default 30)'),
   },
   async ({ metric, days }) => {
     try {
       let rankings: { agent: string; value: number }[];
 
-      if (metric === 'qa_score') {
+      const qaMetrics: Record<string, string> = {
+        qa_score: 'avgScore', qa_accuracy: 'avgAccuracy', qa_clarity: 'avgClarity', qa_tone: 'avgTone',
+        qa_tickets_scored: 'ticketsScored', qa_red: 'redCount', qa_amber: 'amberCount', qa_green: 'greenCount',
+      };
+      const goldenMetrics: Record<string, string> = {
+        golden_overall: 'avgScore', golden_ownership: 'avgRule1', golden_next_action: 'avgRule2',
+        golden_timeframe: 'avgRule3', golden_clarity: 'avgRule4', golden_empathy: 'avgRule5',
+      };
+      const agentDailyMetrics: Record<string, string> = {
+        sla_resolved: 'sla_resolved', sla_breached: 'sla_breached', sla_compliance: 'sla_compliance',
+        csat_count: 'csat_count', csat_average: 'csat_average',
+      };
+
+      if (qaMetrics[metric]) {
         const agents = await api<any[]>('/api/kpi-data/qa-agents', { days });
-        rankings = agents.map((a: any) => ({ agent: a.assigneeName, value: Number(a.avgScore || 0) }));
+        const field = qaMetrics[metric];
+        rankings = agents.map((a: any) => ({ agent: a.assigneeName, value: Number(a[field] || 0) }));
+      } else if (goldenMetrics[metric]) {
+        const agents = await api<any[]>('/api/kpi-data/qa-golden-agents', { days });
+        const field = goldenMetrics[metric];
+        rankings = agents.map((a: any) => ({ agent: a.assigneeName || a.agent, value: Number(a[field] || 0) }));
+      } else if (agentDailyMetrics[metric]) {
+        const rows = await api<any[]>('/api/admin/kpi-data/agent-daily', { days });
+        const field = agentDailyMetrics[metric];
+        const byAgent = new Map<string, number[]>();
+        for (const r of rows) {
+          const name = r.agent_name || r.AgentName;
+          if (!name) continue;
+          if (!byAgent.has(name)) byAgent.set(name, []);
+          byAgent.get(name)!.push(Number(r[field] ?? 0));
+        }
+        rankings = [...byAgent.entries()].map(([agent, vals]) => ({ agent, value: Math.round(mean(vals) * 100) / 100 }));
       } else {
         const agentKpis = await api<any[]>('/api/kpi-data/agent-kpis', { days });
         const colMap: Record<string, string> = {
@@ -222,7 +257,7 @@ server.tool(
       const teamAverage = Math.round(mean(values) * 100) / 100;
       const sd = stddev(values);
 
-      const lowerIsBetter = ['open_tickets', 'over_2h', 'no_update'].includes(metric);
+      const lowerIsBetter = ['open_tickets', 'over_2h', 'no_update', 'sla_breached', 'qa_red'].includes(metric);
       rankings.sort((a, b) => lowerIsBetter ? a.value - b.value : b.value - a.value);
 
       const rankedList = rankings.map((r, i) => ({
@@ -706,20 +741,20 @@ server.tool(
 
 server.tool(
   'nova_agent_coaching',
-  'Get QA coaching data from the Golden Rules pipeline — team-wide or per-agent. Sources from jira_qa_results and Jira_QA_GoldenRules.',
+  'Get coaching scores and nudge history — team-wide or per-agent QA coaching metrics.',
   {
-    agent_name: z.string().optional().describe('Agent display name for individual coaching (omit for team overview)'),
+    agent_id: z.string().optional().describe('Agent user ID for individual coaching (omit for team)'),
     days: z.number().default(30).describe('Lookback days (default 30, max 90)'),
   },
-  async ({ agent_name, days }) => {
+  async ({ agent_id, days }) => {
     try {
       const d = Math.min(days, 90);
-      if (agent_name) {
+      if (agent_id) {
         const [agentCoaching, nudges] = await Promise.all([
-          api<any>(`/api/agent/coaching/agent/${encodeURIComponent(agent_name)}`, { days: d }),
-          api<any>('/api/agent/coaching/nudges', { agent: agent_name, limit: 50 }),
+          api<any>(`/api/agent/coaching/agent/${encodeURIComponent(agent_id)}`, { days: d }),
+          api<any>('/api/agent/coaching/nudges', { agentUserId: agent_id, limit: 50 }),
         ]);
-        return toolResult(`Coaching for ${agent_name} over ${d} days`, { coaching: agentCoaching, nudges });
+        return toolResult(`Coaching for agent ${agent_id} over ${d} days`, { coaching: agentCoaching, nudges });
       }
       const [team, nudges] = await Promise.all([
         api<any>('/api/agent/coaching/team', { days: d }),
@@ -1031,168 +1066,539 @@ server.tool(
 interface BacklogColumn { id: number; title: string; sort_order: number; color: string | null; item_count?: number }
 interface BacklogItem { id: number; column_id: number; title: string; description: string | null; wp_ref: string | null; effort: string | null; type: string | null; priority: number; created_by: string | null; completed_at: string | null; blocked_reason: string | null }
 
-async function resolveColumnId(input: string | number): Promise<number> {
-  if (typeof input === 'number' || /^\d+$/.test(String(input))) return Number(input);
+async function resolveColumn(name: string): Promise<BacklogColumn> {
   const cols = await api<BacklogColumn[]>('/api/backlog/columns');
-  const col = cols.find(c => c.title.toLowerCase() === String(input).toLowerCase());
-  if (!col) throw new Error(`No column matching "${input}". Available: ${cols.map(c => c.title).join(', ')}`);
-  return col.id;
+  const col = cols.find(c => c.title.toLowerCase() === name.toLowerCase());
+  if (!col) throw new Error(`No column matching "${name}". Available: ${cols.map(c => c.title).join(', ')}`);
+  return col;
 }
 
-async function resolveItemId(args: { id?: number; wp_ref?: string; title_match?: string }): Promise<{ id: number; title: string }> {
-  if (args.id !== undefined) {
-    const item = await api<BacklogItem>(`/api/backlog/items/${args.id}`);
-    return { id: item.id, title: item.title };
+async function resolveItem(idOrTitle: string | number): Promise<BacklogItem> {
+  if (typeof idOrTitle === 'number' || /^\d+$/.test(String(idOrTitle))) {
+    const item = await api<BacklogItem>(`/api/backlog/items/${idOrTitle}`);
+    return item;
   }
-  const items = await api<BacklogItem[]>('/api/backlog/items');
-  let matches: BacklogItem[];
-  if (args.wp_ref) {
-    matches = items.filter(i => i.wp_ref?.toLowerCase() === args.wp_ref!.toLowerCase());
-    if (matches.length === 0) throw new Error(`No item with wp_ref "${args.wp_ref}"`);
-  } else if (args.title_match) {
-    matches = items.filter(i => i.title.toLowerCase() === args.title_match!.toLowerCase());
-    if (matches.length === 0) throw new Error(`No item with exact title "${args.title_match}"`);
-  } else {
-    throw new Error('Provide id, wp_ref, or title_match to identify the item');
+  const wpMatch = String(idOrTitle).match(/^WP-?\d+$/i);
+  if (wpMatch) {
+    const all = await api<BacklogItem[]>('/api/backlog/items');
+    const item = all.find(i => i.wp_ref?.toLowerCase() === String(idOrTitle).toLowerCase());
+    if (item) return item;
   }
-  if (matches.length > 1) throw new Error(`Multiple items match: ${matches.map(i => `#${i.id} "${i.title}"`).join(', ')}. Use numeric id.`);
-  return { id: matches[0].id, title: matches[0].title };
+  const all = await api<BacklogItem[]>('/api/backlog/items');
+  const matches = all.filter(i => i.title.toLowerCase().includes(String(idOrTitle).toLowerCase()));
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) throw new Error(`Multiple items match "${idOrTitle}": ${matches.map(i => `#${i.id} "${i.title}"`).join(', ')}. Use the numeric ID to be specific.`);
+  throw new Error(`No item found matching "${idOrTitle}"`);
 }
 
-// 1. List columns
-server.tool(
-  'nova_backlog_columns',
-  'List all backlog columns with their IDs, titles, colours, and item counts.',
-  {},
-  async () => {
-    try {
-      const cols = await api<BacklogColumn[]>('/api/backlog/columns');
-      const lines = cols.map(c => `${c.sort_order + 1}. **${c.title}** (id=${c.id}) — ${c.item_count ?? 0} items${c.color ? ` [${c.color}]` : ''}`).join('\n');
-      return toolResult(`${cols.length} columns`, { columns: cols, summary: lines });
-    } catch (err: any) { return toolError(err.message); }
-  },
-);
-
-// 2. List backlog items
+// 1. List backlog
 server.tool(
   'nova_backlog_list',
-  'List backlog items, optionally filtered by column (by title or id) or type. Returns items with column name resolved.',
+  'List all backlog items grouped by column. Optionally filter by column name or item type.',
   {
-    column: z.string().optional().describe('Filter by column title (e.g. "Backlog", "In Progress") or numeric id'),
-    type: z.string().optional().describe('Filter by item type (e.g. "code", "bugfix", "manual", "workshop")'),
+    column: z.string().optional().describe('Filter by column title (e.g. "In Progress")'),
+    type: z.string().optional().describe('Filter by item type (e.g. "code", "manual", "bugfix")'),
   },
   async ({ column, type }) => {
     try {
-      const params: Record<string, string | number> = {};
-      if (column) params.column_id = await resolveColumnId(column);
-      if (type) params.type = type;
       const [cols, items] = await Promise.all([
         api<BacklogColumn[]>('/api/backlog/columns'),
-        api<BacklogItem[]>('/api/backlog/items', Object.keys(params).length ? params : undefined),
+        api<BacklogItem[]>('/api/backlog/items'),
       ]);
-      const colMap = new Map(cols.map(c => [c.id, c.title]));
-      const enriched = items.map(i => ({ ...i, column_name: colMap.get(i.column_id) ?? '?' }));
+      let filtered = items;
+      if (column) {
+        const col = cols.find(c => c.title.toLowerCase() === column.toLowerCase());
+        if (!col) return toolError(`No column "${column}". Available: ${cols.map(c => c.title).join(', ')}`);
+        filtered = filtered.filter(i => i.column_id === col.id);
+      }
+      if (type) filtered = filtered.filter(i => i.type === type);
 
       const grouped = cols.map(c => ({
         column: c.title,
-        items: enriched.filter(i => i.column_id === c.id).sort((a, b) => a.priority - b.priority),
+        color: c.color,
+        items: filtered.filter(i => i.column_id === c.id).sort((a, b) => a.priority - b.priority).map(i => ({
+          id: i.id, title: i.title, wp_ref: i.wp_ref, effort: i.effort, type: i.type,
+          blocked: i.blocked_reason || undefined,
+        })),
       })).filter(g => g.items.length > 0);
 
       const lines = grouped.map(g => `## ${g.column} (${g.items.length})\n${g.items.map(i =>
-        `  - #${i.id} ${i.wp_ref ? `[${i.wp_ref}] ` : ''}${i.title}${i.effort ? ` (${i.effort})` : ''}${i.type ? ` [${i.type}]` : ''}${i.blocked_reason ? ` ⚠ BLOCKED: ${i.blocked_reason}` : ''}`
+        `  - ${i.wp_ref ? `[${i.wp_ref}] ` : ''}${i.title}${i.effort ? ` (${i.effort})` : ''}${i.type ? ` [${i.type}]` : ''}${i.blocked ? ` ⚠ BLOCKED: ${i.blocked}` : ''}`
       ).join('\n')}`).join('\n\n');
 
-      return toolResult(`${items.length} backlog items across ${grouped.length} columns`, { summary: lines, total: items.length, items: enriched });
+      return toolResult(`${filtered.length} backlog items across ${grouped.length} columns`, { summary: lines, total: filtered.length });
     } catch (err: any) { return toolError(err.message); }
   },
 );
 
-// 3. Add backlog item
+// 2. Add backlog item
 server.tool(
   'nova_backlog_add',
-  'Add a new backlog item. Accepts column by title (e.g. "Backlog") or id.',
+  'Add a new item to the product backlog.',
   {
-    column: z.string().describe('Column title (e.g. "Backlog", "This Sprint") or numeric id'),
     title: z.string().describe('Item title'),
+    column: z.string().default('Backlog').describe('Column to add to (default: Backlog)'),
     description: z.string().optional().describe('Markdown description'),
-    wp_ref: z.string().optional().describe('Work package reference (e.g. "WP-53")'),
-    effort: z.string().optional().describe('Effort estimate (e.g. "1-2 days", "30min")'),
-    type: z.string().optional().describe('Type: code, bugfix, manual, workshop, process, research, infrastructure, monitoring'),
-    priority: z.number().optional().describe('Sort priority within column (lower = higher)'),
+    wp_ref: z.string().optional().describe('Work package reference (e.g. "WP-15")'),
+    effort: z.string().optional().describe('Effort estimate (e.g. "2-4hr", "Half day")'),
+    type: z.string().optional().describe('Type: code, manual, workshop, monitoring, research, infrastructure, bugfix'),
   },
-  async ({ column, title, description, wp_ref, effort, type, priority }) => {
+  async ({ title, column, description, wp_ref, effort, type }) => {
     try {
-      const column_id = await resolveColumnId(column);
-      const item = await apiPost<BacklogItem>('/api/backlog/items', { column_id, title, description, wp_ref, effort, type, priority });
-      return toolResult(`Created #${item.id} "${title}"`, { item });
+      const col = await resolveColumn(column);
+      const item = await apiPost<BacklogItem>('/api/backlog/items', {
+        column_id: col.id, title, description, wp_ref, effort, type,
+      });
+      return toolResult(`Created "${title}" in ${col.title}`, { item });
     } catch (err: any) { return toolError(err.message); }
   },
 );
 
-// 4. Update backlog item
+// 3. Update backlog item
 server.tool(
   'nova_backlog_update',
-  'Update fields on an existing backlog item. Accepts item by numeric id, by wp_ref (e.g. "WP-53"), or by exact title match.',
+  'Update fields on a backlog item. Look up by ID, WP ref, or title.',
   {
-    id: z.number().optional().describe('Numeric item id'),
-    wp_ref: z.string().optional().describe('Work package reference to match (e.g. "WP-53")'),
-    title_match: z.string().optional().describe('Exact title to match (case-insensitive)'),
-    fields: z.object({
-      title: z.string().optional().describe('New title'),
-      description: z.string().optional().describe('New description'),
-      wp_ref: z.string().optional().describe('New work package reference'),
-      effort: z.string().optional().describe('New effort estimate'),
-      type: z.string().optional().describe('New type'),
-      blocked_reason: z.string().optional().describe('Blocked reason (empty string to clear)'),
-    }).describe('Fields to update (at least one required)'),
+    item: z.union([z.string(), z.number()]).describe('Item ID, WP ref (e.g. "WP-15"), or title substring'),
+    title: z.string().optional().describe('New title'),
+    description: z.string().optional().describe('New description (markdown)'),
+    wp_ref: z.string().optional().describe('New WP ref'),
+    effort: z.string().optional().describe('New effort estimate'),
+    type: z.string().optional().describe('New type'),
+    blocked_reason: z.string().optional().describe('Blocked reason (empty string to clear)'),
   },
-  async ({ id, wp_ref, title_match, fields }) => {
+  async ({ item: lookup, ...fields }) => {
     try {
-      const resolved = await resolveItemId({ id, wp_ref, title_match });
+      const resolved = await resolveItem(lookup);
       const updates: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(fields)) { if (v !== undefined) updates[k] = v; }
       if (Object.keys(updates).length === 0) return toolError('No fields to update — provide at least one field');
       const updated = await apiPut<BacklogItem>(`/api/backlog/items/${resolved.id}`, updates);
-      return toolResult(`Updated #${resolved.id} "${resolved.title}"`, { item: updated });
+      return toolResult(`Updated "${resolved.title}"`, { item: updated });
     } catch (err: any) { return toolError(err.message); }
   },
 );
 
-// 5. Move backlog item
+// 4. Move backlog item to a column
 server.tool(
   'nova_backlog_move',
-  'Move an item to a different column. Auto-completes when moved to Done.',
+  'Move a backlog item to a different column (e.g. "In Progress", "Done").',
   {
-    id: z.number().optional().describe('Numeric item id'),
-    wp_ref: z.string().optional().describe('Work package reference to match'),
-    title_match: z.string().optional().describe('Exact title to match (case-insensitive)'),
-    to_column: z.string().describe('Target column title (e.g. "In Progress", "Done") or numeric id'),
-    priority: z.number().optional().describe('Position within target column (0 = top)'),
+    item: z.union([z.string(), z.number()]).describe('Item ID, WP ref, or title substring'),
+    column: z.string().describe('Target column title'),
+    priority: z.number().optional().describe('Position within column (0 = top)'),
   },
-  async ({ id, wp_ref, title_match, to_column, priority }) => {
+  async ({ item: lookup, column, priority }) => {
     try {
-      const resolved = await resolveItemId({ id, wp_ref, title_match });
-      const column_id = await resolveColumnId(to_column);
-      const moved = await apiPut<BacklogItem>(`/api/backlog/items/${resolved.id}/move`, { column_id, priority });
-      return toolResult(`Moved #${resolved.id} "${resolved.title}" → column ${to_column}`, { item: moved });
+      const resolved = await resolveItem(lookup);
+      const col = await resolveColumn(column);
+      const moved = await apiPut<BacklogItem>(`/api/backlog/items/${resolved.id}/move`, {
+        column_id: col.id, priority,
+      });
+      return toolResult(`Moved "${resolved.title}" → ${col.title}`, { item: moved });
     } catch (err: any) { return toolError(err.message); }
   },
 );
 
-// 6. Remove backlog item
+// 5. Remove backlog item
 server.tool(
   'nova_backlog_remove',
-  'Delete a backlog item. Returns the deleted item\'s title for confirmation.',
+  'Delete a backlog item permanently.',
   {
-    id: z.number().optional().describe('Numeric item id'),
-    wp_ref: z.string().optional().describe('Work package reference to match'),
-    title_match: z.string().optional().describe('Exact title to match (case-insensitive)'),
+    item: z.union([z.string(), z.number()]).describe('Item ID, WP ref, or title substring'),
   },
-  async ({ id, wp_ref, title_match }) => {
+  async ({ item: lookup }) => {
     try {
-      const resolved = await resolveItemId({ id, wp_ref, title_match });
+      const resolved = await resolveItem(lookup);
       await apiDelete(`/api/backlog/items/${resolved.id}`);
-      return toolResult(`Deleted #${resolved.id} "${resolved.title}"`, { deleted: { id: resolved.id, title: resolved.title } });
+      return toolResult(`Deleted "${resolved.title}" (was #${resolved.id})`, { deleted: resolved });
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// 6. Manage backlog columns
+server.tool(
+  'nova_backlog_columns',
+  'List, add, rename, or delete backlog columns.',
+  {
+    action: z.enum(['list', 'add', 'rename', 'delete', 'reorder']).default('list').describe('Action to perform'),
+    title: z.string().optional().describe('Column title (for add/rename/delete)'),
+    new_title: z.string().optional().describe('New title (for rename)'),
+    color: z.string().optional().describe('Hex colour (for add/rename)'),
+    order: z.array(z.string()).optional().describe('Column titles in desired order (for reorder)'),
+  },
+  async ({ action, title, new_title, color, order }) => {
+    try {
+      if (action === 'list') {
+        const cols = await api<BacklogColumn[]>('/api/backlog/columns');
+        const lines = cols.map(c => `${c.sort_order + 1}. **${c.title}** — ${c.item_count ?? 0} items${c.color ? ` (${c.color})` : ''}`).join('\n');
+        return toolResult(`${cols.length} columns`, { summary: lines, columns: cols });
+      }
+      if (action === 'add') {
+        if (!title) return toolError('title required for add');
+        const col = await apiPost<BacklogColumn>('/api/backlog/columns', { title, color });
+        return toolResult(`Created column "${title}"`, { column: col });
+      }
+      if (action === 'rename') {
+        if (!title || !new_title) return toolError('title and new_title required for rename');
+        const col = await resolveColumn(title);
+        const updated = await apiPut<BacklogColumn>(`/api/backlog/columns/${col.id}`, { title: new_title, color });
+        return toolResult(`Renamed "${title}" → "${new_title}"`, { column: updated });
+      }
+      if (action === 'delete') {
+        if (!title) return toolError('title required for delete');
+        const col = await resolveColumn(title);
+        await apiDelete(`/api/backlog/columns/${col.id}`);
+        return toolResult(`Deleted column "${title}"`, { deleted: col });
+      }
+      if (action === 'reorder') {
+        if (!order || order.length === 0) return toolError('order array required for reorder');
+        const cols = await api<BacklogColumn[]>('/api/backlog/columns');
+        const ids = order.map(t => {
+          const c = cols.find(x => x.title.toLowerCase() === t.toLowerCase());
+          if (!c) throw new Error(`No column "${t}"`);
+          return c.id;
+        });
+        await apiPut('/api/backlog/columns/reorder', { columnIds: ids });
+        return toolResult(`Reordered columns: ${order.join(' → ')}`, { order });
+      }
+      return toolError(`Unknown action: ${action}`);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ═════════════════════════════════════════════════════════════════════
+// Part 5 — AI Learning Feedback
+// ═════════════════════════════════════════════════════════════════════
+
+server.tool(
+  'nova_agent_submit_learning',
+  `Submit a learning/correction to improve the AI agent's future responses. Provide the ticket key, the AI's draft response (optional), and the lesson learned.`,
+  {
+    ticket_key: z.string().describe('Jira ticket key (e.g. NT-17647)'),
+    ai_draft: z.string().optional().describe('The AI draft response that needs correction'),
+    learning: z.string().describe('The lesson or correction for the AI to learn'),
+    category: z.string().optional().describe('Ticket category (e.g. Data Feed, Portal, CRM) — helps match learnings to future tickets'),
+    organisation: z.string().optional().describe('Customer organisation name — scopes learnings to that customer'),
+    tags: z.array(z.string()).optional().describe('Tags for categorising this learning (e.g. ["tone", "product-knowledge", "brand-awareness"])'),
+  },
+  async ({ ticket_key, ai_draft, learning, category, organisation, tags }) => {
+    try {
+      const result = await apiPost<{ id: number }>('/api/ai-learnings', {
+        ticket_key, ai_draft, learning, category, organisation, tags,
+      });
+      return toolResult(`Learning #${result.id} submitted for ${ticket_key}`, {
+        id: result.id,
+        ticket_key,
+        learning,
+        category: category ?? null,
+        organisation: organisation ?? null,
+      });
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_agent_learnings',
+  `List active AI learnings/corrections. These are human-submitted lessons that guide the AI agent's responses.`,
+  {
+    category: z.string().optional().describe('Filter by ticket category'),
+    active: z.boolean().optional().default(true).describe('Filter by active status (default: true)'),
+    limit: z.number().optional().default(20).describe('Max results to return'),
+  },
+  async ({ category, active, limit }) => {
+    try {
+      const params: Record<string, string | number> = { limit };
+      if (active !== undefined) params.active = String(active);
+      if (category) params.category = category;
+
+      const result = await api<{ learnings: any[]; total: number }>('/api/ai-learnings', params);
+      const lines = result.learnings.map((l: any) =>
+        `- #${l.id} [${l.ticket_key}]${l.category ? ` (${l.category})` : ''}${l.organisation ? ` — ${l.organisation}` : ''}: ${l.learning.slice(0, 150)}${l.learning.length > 150 ? '...' : ''}`
+      ).join('\n');
+
+      return toolResult(`${result.total} learnings (showing ${result.learnings.length})`, {
+        summary: lines || 'No learnings found.',
+        total: result.total,
+        learnings: result.learnings,
+      });
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ═════════════════════════════════════════════════════════════════════
+// PART 6 — FULL COVERAGE TOOLS (16)
+// ═════════════════════════════════════════════════════════════════════
+
+// ── KPI Data Tools (4) ───────────────────────────────────────────────
+
+server.tool(
+  'nova_team_snapshot',
+  'Get the current live KPI snapshot for the entire support team. Returns every tracked KPI with its current value, target, direction (higher/lower is better), and category. Use this for "what are the numbers right now?" questions. For historical trends, use nova_trend_analysis instead.',
+  {
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ env }) => {
+    try {
+      const data = await api<any>('/api/admin/kpi-data/team-snapshot', { env });
+      return toolResult(`Team KPI snapshot (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_eod_snapshot',
+  'Get the end-of-day KPI snapshot for a specific date. Returns all KPI values as they were at close of business on that date. Useful for comparing specific days or investigating incidents.',
+  {
+    date: z.string().describe('Date in YYYY-MM-DD format'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ date, env }) => {
+    try {
+      const data = await api<any>('/api/admin/kpi-data/eod-snapshot', { env, date });
+      return toolResult(`EOD snapshot for ${date} (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_agent_daily',
+  'Get per-agent daily KPI time series. Returns daily values for each agent including volume (open tickets, solved), QA scores (overall, accuracy, clarity, tone), Golden Rules (all 5 dimensions), SLA (resolved, breached, compliance %), and CSAT. Supports filtering to a single agent. Use for individual agent trend analysis or identifying performance changes over time.',
+  {
+    days: z.number().default(30).describe('Lookback days (default 30, max 90)'),
+    agent: z.string().optional().describe('Filter to specific agent name'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ days, agent, env }) => {
+    try {
+      const data = await api<any[]>('/api/admin/kpi-data/agent-daily', { env, days: Math.min(days, 90) });
+      const filtered = agent
+        ? data.filter((r: any) => (r.agent_name || r.AgentName || '').toLowerCase() === agent.toLowerCase())
+        : data;
+      return toolResult(
+        `Agent daily data: ${filtered.length} rows over ${days} days${agent ? ` for ${agent}` : ''} (${env})`,
+        filtered,
+      );
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_agent_leaderboard',
+  'Get the current agent leaderboard — live stats for all agents including open ticket count, tickets solved today/this week, availability status, and latest QA scores. Use for a quick overview of team capacity and performance right now.',
+  {
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ env }) => {
+    try {
+      const data = await api<any>('/api/admin/kpi-data/agents', { env });
+      return toolResult(`Agent leaderboard (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ── QA Tools (4) ─────────────────────────────────────────────────────
+
+server.tool(
+  'nova_qa_results',
+  'Get individual ticket QA scores with full dimension breakdown (overall, accuracy, clarity, tone). Paginated. Use for reviewing specific ticket quality, finding low-scoring tickets, or building per-ticket QA reports. For aggregated QA analysis, use nova_qa_deep_dive instead.',
+  {
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+    page: z.number().default(1).describe('Page number (default 1)'),
+    limit: z.number().default(25).describe('Results per page (default 25, max 100)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ days, page, limit, env }) => {
+    try {
+      const data = await api<any>('/api/kpi-data/qa-results', { env, days, page, limit: Math.min(limit, 100) });
+      return toolResult(`QA results page ${page} (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_qa_agents',
+  'Get QA scores broken down by agent — average overall score, dimension scores (accuracy, clarity, tone), tickets scored count, and red/amber/green distribution per agent. Use for agent-level QA comparison and identifying coaching needs.',
+  {
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ days, env }) => {
+    try {
+      const data = await api<any>('/api/kpi-data/qa-agents', { env, days });
+      return toolResult(`QA agents breakdown over ${days} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_golden_rules',
+  'Get Golden Rules data — the 5-dimension quality framework (clarity, empathy, action, ownership, overall). Three views: "summary" for aggregate pass rates, "results" for individual ticket pass/fail (paginated), "agents" for per-agent pass rates. Use for coaching prioritisation and quality standards tracking.',
+  {
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+    view: z.enum(['summary', 'results', 'agents']).default('summary').describe('View mode'),
+    page: z.number().default(1).describe('Page number (used when view=results)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ days, view, page, env }) => {
+    try {
+      let data: any;
+      if (view === 'summary') {
+        data = await api<any>('/api/kpi-data/qa-golden-summary', { env, days });
+      } else if (view === 'results') {
+        data = await api<any>('/api/kpi-data/qa-golden-results', { env, days, page });
+      } else {
+        data = await api<any>('/api/kpi-data/qa-golden-agents', { env, days });
+      }
+      return toolResult(`Golden Rules (${view}) over ${days} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_kpi_digest',
+  'Get the AI-generated KPI digest narrative — a natural language summary of current KPI performance, trends, and notable changes. Generated nightly by NOVA\'s analysis pipeline.',
+  {
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ env }) => {
+    try {
+      const data = await api<any>('/api/kpi-data/digest', { env });
+      return toolResult(`KPI digest (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ── Trend Tools (4) ──────────────────────────────────────────────────
+
+server.tool(
+  'nova_sla_trend',
+  'Get SLA compliance trend over time — FRT and Resolution compliance percentages by tier, trended daily or weekly. Use for spotting SLA degradation patterns, preparing MI commentary, or comparing current vs historical compliance. For a point-in-time SLA snapshot, use nova_sla_breakdown instead.',
+  {
+    days: z.number().default(90).describe('Lookback days (default 90)'),
+    granularity: z.enum(['daily', 'weekly']).default('weekly').describe('Granularity'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ days, granularity, env }) => {
+    try {
+      const data = await api<any>('/api/trends/sla', { env, days, granularity });
+      return toolResult(`SLA trend (${granularity}) over ${days} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_queue_trend',
+  'Get queue volume trend over time — ticket counts by tier (Customer Care, Production, Tier 2, Tier 3, Development) trended daily or weekly. Shows opened, resolved, and net change. Use for capacity planning, spotting volume spikes, and backlog growth analysis.',
+  {
+    days: z.number().default(90).describe('Lookback days (default 90)'),
+    granularity: z.enum(['daily', 'weekly']).default('weekly').describe('Granularity'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ days, granularity, env }) => {
+    try {
+      const data = await api<any>('/api/trends/queue', { env, days, granularity });
+      return toolResult(`Queue trend (${granularity}) over ${days} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_qa_trend',
+  'Get QA score trend over time — overall scores and dimension averages (accuracy, clarity, tone) trended daily or weekly. Optionally filter to a single agent. Use for tracking quality improvement over time or comparing agent progress.',
+  {
+    days: z.number().default(90).describe('Lookback days (default 90)'),
+    granularity: z.enum(['daily', 'weekly']).default('weekly').describe('Granularity'),
+    agent: z.string().default('all').describe('Agent name filter (default "all")'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ days, granularity, agent, env }) => {
+    try {
+      const data = await api<any>('/api/trends/qa', { env, days, granularity, agent });
+      return toolResult(`QA trend (${granularity}) over ${days} days${agent !== 'all' ? ` for ${agent}` : ''} (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_escalation_trend',
+  'Get escalation trend over time — escalation counts by tier, escalation accuracy percentage, and trend. Use for monitoring whether escalation quality is improving and identifying training needs.',
+  {
+    days: z.number().default(90).describe('Lookback days (default 90)'),
+    granularity: z.enum(['daily', 'weekly']).default('weekly').describe('Granularity'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
+  },
+  async ({ days, granularity, env }) => {
+    try {
+      const data = await api<any>('/api/trends/escalation', { env, days, granularity });
+      return toolResult(`Escalation trend (${granularity}) over ${days} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ── Operational Tools (4) ────────────────────────────────────────────
+
+server.tool(
+  'nova_backlog',
+  'Read the NOVA backlog board. "board" view returns all columns and items grouped by column (Kanban layout). "item" view returns a single item with full description. Use for checking what\'s in the backlog, finding items by title, or reviewing item details.',
+  {
+    view: z.enum(['board', 'item']).default('board').describe('View mode'),
+    item_id: z.number().optional().describe('Item ID (used when view=item)'),
+  },
+  async ({ view, item_id }) => {
+    try {
+      if (view === 'item') {
+        if (!item_id) return toolError('item_id required when view=item');
+        const item = await api<any>(`/api/backlog/items/${item_id}`);
+        return toolResult(`Backlog item #${item_id}`, item);
+      }
+      const [cols, items] = await Promise.all([
+        api<any[]>('/api/backlog/columns'),
+        api<any[]>('/api/backlog/items'),
+      ]);
+      return toolResult(`Backlog board: ${cols.length} columns, ${items.length} items`, { columns: cols, items });
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_manager_overview',
+  'Get the manager dashboard overview — team-wide stats including queue health, agent availability, workload distribution, and key alerts. Use for a quick manager\'s-eye view of how the team is performing right now.',
+  {},
+  async () => {
+    try {
+      const data = await api<any>('/api/agent/manager/overview');
+      return toolResult('Manager overview', data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_coaching_prep',
+  'Generate AI-powered 1-2-1 coaching prep for an agent, or create a point-in-time snapshot. "generate" produces a prep pack with QA trends, Golden Rules performance, volume stats, and suggested coaching topics. "snapshot" saves the current data as a 1-2-1 record. Use before 1-2-1 meetings.',
+  {
+    agent_name: z.string().describe('Agent name'),
+    action: z.enum(['generate', 'snapshot']).default('generate').describe('Action: generate prep or save snapshot'),
+  },
+  async ({ agent_name, action }) => {
+    try {
+      const endpoint = action === 'generate'
+        ? `/api/people/agent/${encodeURIComponent(agent_name)}/generate-prep`
+        : `/api/people/agent/${encodeURIComponent(agent_name)}/snapshot`;
+      const data = await apiPost<any>(endpoint);
+      return toolResult(`Coaching ${action} for ${agent_name}`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_hygiene_status',
+  'Get the current queue hygiene status — which hygiene checks are due, which have passed, and what needs attention. Hygiene checks cover things like stale tickets, unassigned items, and SLA-at-risk tickets.',
+  {},
+  async () => {
+    try {
+      const data = await api<any>('/api/agent/hygiene/status');
+      return toolResult('Queue hygiene status', data);
     } catch (err: any) { return toolError(err.message); }
   },
 );

@@ -1,78 +1,124 @@
 # nova-mcp
 
-MCP server that exposes NOVA data + admin config as tools, for use from
-Claude Desktop / Claude Code.
-
-Bundled inside the daypilot repo so it stays in sync with the main server.
-
-## Tools
-
-**KPI analysis** (reads from MSSQL `jira_kpi_daily`):
-- `nova_trend_analysis`
-- `nova_agent_comparison`
-- `nova_focus_areas`
-- `nova_qa_deep_dive`
-- `nova_sla_breakdown`
-- `nova_checkpoint_summary`
-- `nova_raw_kpi_query`
-
-**MI reporting** (board-mi monthly pack):
-- `nova_mi_report` — full monthly MI data (service performance, escalations,
-  backlog, dev review, top products). Pass-through — returns whatever the
-  API returns, so new MI sections appear automatically.
-- `nova_mi_commentary` — read or write the monthly narrative commentary
-
-**Admin config** (reads/writes `../settings.json` directly):
-- `nova_admin_get_config` — masked dump of all settings keys (optional
-  regex filter, optional `unmask: true` for raw values)
-- `nova_admin_set_setting` — writes a single key, dry-run by default,
-  secret denylist enforced. NOVA reloads settings on every get() so no
-  server restart is required.
+MCP server for NOVA — HTTP API client for KPI analysis and AI agent management.
 
 ## Setup
 
 ```bash
-cd nova-mcp
 npm install
 npm run build
 ```
 
-KPI tools need the MSSQL connection configured via either:
-1. `config.json` in this directory (gitignored), see `config.example.json`, or
-2. Falls back to reading `../settings.json`'s `kpi_sql_*` keys automatically
-
-Admin config tools need no configuration — they read `../settings.json`
-relative to this package's location.
-
-## Wire into Claude Desktop
-
-Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or
-`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
+Create `config.json` in the project root:
 
 ```json
 {
-  "mcpServers": {
-    "nova": {
-      "command": "node",
-      "args": ["C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\nova-mcp\\dist\\index.js"]
-    }
-  }
+  "nova_api_url": "https://nova.nurtur.tech",
+  "nova_username": "...",
+  "nova_password": "..."
 }
 ```
 
-Then fully quit and relaunch Claude Desktop. The new tools appear in the
-tool picker automatically.
-
-## Development
+## Usage
 
 ```bash
-npm run dev      # run via tsx directly (no rebuild)
-npm run build    # tsc to dist/
-npm start        # run the compiled dist/index.js
+npm start        # production (compiled)
+npm run dev      # development (tsx)
 ```
 
-After changing tool code:
+## Tools (47)
 
-1. `npm run build`
-2. Quit Claude Desktop (system tray → right-click → Quit)
-3. Relaunch Claude Desktop — the MCP server respawns with the new code
+### KPI Analysis (9 original + 4 new = 13)
+
+| Tool | Description |
+|------|-------------|
+| `nova_trend_analysis` | KPI trend over time with week-over-week change, rolling average, breach periods |
+| `nova_agent_comparison` | Compare agents on 23 metrics (QA, Golden Rules, SLA, CSAT, volume) |
+| `nova_focus_areas` | Cross-reference KPIs/QA/Golden/SLA to surface top 5 areas needing attention |
+| `nova_qa_deep_dive` | Deep QA analysis: distribution, dimensions, categories, coaching priorities |
+| `nova_sla_breakdown` | SLA compliance analysis by tier with over-SLA counts |
+| `nova_checkpoint_summary` | Live vs UAT data comparison |
+| `nova_raw_kpi_query` | Low-level KPI daily data fetch by LIKE pattern |
+| `nova_admin_get_config` | Read NOVA settings (masked) |
+| `nova_admin_set_setting` | Write a single NOVA setting (dry-run by default) |
+| `nova_team_snapshot` | Current live KPI values — all KPIs with targets and RAG status |
+| `nova_eod_snapshot` | End-of-day KPI values for a specific historical date |
+| `nova_agent_daily` | Per-agent daily time series (volume, QA, Golden Rules, SLA, CSAT) |
+| `nova_agent_leaderboard` | Current agent stats — open tickets, solved, availability, QA scores |
+
+### QA Tools (4 new)
+
+| Tool | Description |
+|------|-------------|
+| `nova_qa_results` | Individual ticket-level QA scores (paginated) |
+| `nova_qa_agents` | QA score breakdown per agent with RAG distribution |
+| `nova_golden_rules` | Golden Rules summary, results, or per-agent (3 views) |
+| `nova_kpi_digest` | AI-generated KPI narrative summary |
+
+### Trend Tools (4 new)
+
+| Tool | Description |
+|------|-------------|
+| `nova_sla_trend` | SLA compliance trend (daily/weekly) |
+| `nova_queue_trend` | Queue volume trend by tier (daily/weekly) |
+| `nova_qa_trend` | QA score trend with optional agent filter |
+| `nova_escalation_trend` | Escalation volume and accuracy trend |
+
+### Operational Tools (4 new)
+
+| Tool | Description |
+|------|-------------|
+| `nova_backlog` | Read backlog board (columns + items) or single item |
+| `nova_manager_overview` | Manager dashboard — team overview with alerts |
+| `nova_coaching_prep` | Generate 1-2-1 coaching prep or save snapshot |
+| `nova_hygiene_status` | Queue hygiene check status |
+
+### AI Agent Tools (20)
+
+| Tool | Description |
+|------|-------------|
+| `nova_agent_status` | Agent loop status, health, stats |
+| `nova_agent_decisions` | Decision history with confidence scores |
+| `nova_agent_costs` | LLM cost breakdown by model/mode |
+| `nova_agent_flagged` | High-risk flagged tickets |
+| `nova_agent_approvals` | Pending/approved/declined approvals |
+| `nova_agent_coaching` | Coaching scores and nudge history |
+| `nova_agent_kb_gaps` | Knowledge base gaps by category |
+| `nova_agent_alerts` | Anomalies and threshold breaches |
+| `nova_agent_lifecycle` | Ticket lifecycle state breakdown |
+| `nova_agent_providers` | LLM provider usage stats |
+| `nova_agent_suggestions` | AI-generated rule improvement suggestions |
+| `nova_agent_guardrails` | Safety check rules |
+| `nova_agent_autonomy` | Auto-approval conditions |
+| `nova_agent_start` | Start agent loop |
+| `nova_agent_stop` | Stop agent loop |
+| `nova_agent_pause` | Pause agent loop |
+| `nova_agent_approve` | Approve pending action |
+| `nova_agent_decline` | Decline pending action |
+| `nova_agent_dismiss_flag` | Dismiss flagged ticket |
+| `nova_agent_setting` | Update agent lifecycle setting |
+
+### MI Report Tools (2)
+
+| Tool | Description |
+|------|-------------|
+| `nova_mi_report` | Full monthly MI report |
+| `nova_mi_commentary` | Read/write MI commentary narrative |
+
+### Backlog Management Tools (6)
+
+| Tool | Description |
+|------|-------------|
+| `nova_backlog_list` | List items grouped by column with filters |
+| `nova_backlog_add` | Add new backlog item |
+| `nova_backlog_update` | Update backlog item fields |
+| `nova_backlog_move` | Move item between columns |
+| `nova_backlog_remove` | Delete backlog item |
+| `nova_backlog_columns` | List/add/rename/delete/reorder columns |
+
+### AI Learning Tools (2)
+
+| Tool | Description |
+|------|-------------|
+| `nova_agent_submit_learning` | Submit correction/learning for AI agent |
+| `nova_agent_learnings` | List active AI learnings |
