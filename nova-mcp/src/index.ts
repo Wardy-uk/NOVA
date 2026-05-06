@@ -1659,7 +1659,7 @@ server.tool(
   },
   async ({ days, env }) => {
     try {
-      const data = await api<any>('/api/kpi-data/team-kpis', { env, days: num(days, 30) });
+      const data = await api<any>('/api/public/wallboard/team-kpis', { env, days: num(days, 30) });
       return toolResult(`Team KPIs over ${num(days, 30)} days (${env})`, data);
     } catch (err: any) { return toolError(err.message); }
   },
@@ -1674,7 +1674,7 @@ server.tool(
   },
   async ({ days, env }) => {
     try {
-      const data = await api<any>('/api/kpi-data/breached', { env, days: num(days, 30) });
+      const data = await api<any>('/api/public/wallboard/breached', { env, days: num(days, 30) });
       return toolResult(`SLA breached tickets over ${num(days, 30)} days (${env})`, data);
     } catch (err: any) { return toolError(err.message); }
   },
@@ -1730,7 +1730,7 @@ server.tool(
   },
   async ({ days, env }) => {
     try {
-      const data = await api<any>('/api/kpi-data/dedup', { env, days: num(days, 30) });
+      const data = await api<any>('/api/public/wallboard/dedup', { env, days: num(days, 30) });
       return toolResult(`Dedup analysis over ${num(days, 30)} days (${env})`, data);
     } catch (err: any) { return toolError(err.message); }
   },
@@ -1884,7 +1884,7 @@ server.tool(
   async ({ view, days }) => {
     try {
       const d = num(days, 30);
-      const endpoint = view === 'stats' ? '/api/escalation/stats' : '/api/escalation';
+      const endpoint = view === 'stats' ? '/api/escalations/stats' : '/api/escalations';
       const data = await api<any>(endpoint, { days: d });
       return toolResult(`Escalations (${view}) over ${d} days`, data);
     } catch (err: any) { return toolError(err.message); }
@@ -2144,7 +2144,7 @@ server.tool(
   'nova_my_tickets',
   'Get ticket queue and event data. "queue" returns an agent\'s current ticket queue. "events" returns all ticket events. "events-today" returns today\'s events for a specific agent. "defers" returns deferred tickets. "defer-reasons" returns defer reason categories.',
   {
-    view: z.enum(['queue', 'events', 'events-today', 'defers', 'defer-reasons']).default('events').describe('View mode'),
+    view: z.enum(['queue', 'events', 'events-today', 'defers', 'defer-reasons']).default('defer-reasons').describe('View mode'),
     agent_id: z.string().optional().describe('Agent user ID (required for queue, events-today, defers)'),
   },
   async ({ view, agent_id }) => {
