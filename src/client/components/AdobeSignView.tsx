@@ -46,11 +46,16 @@ export function AdobeSignView() {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<AdobeSignAgreement | null>(null);
 
+  const [statusError, setStatusError] = useState<string | null>(null);
+
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/adobe-sign/status');
       const json = await res.json();
-      if (json.ok) setConnectionStatus(json.data.status);
+      if (json.ok) {
+        setConnectionStatus(json.data.status);
+        setStatusError(json.data.lastError ?? null);
+      }
     } catch { /* ignore */ }
   }, []);
 
@@ -91,6 +96,7 @@ export function AdobeSignView() {
   const handleDisconnect = async () => {
     await fetch('/api/adobe-sign/disconnect', { method: 'POST' });
     setConnectionStatus('disconnected');
+    setStatusError(null);
     setAgreements([]);
   };
 
@@ -103,18 +109,30 @@ export function AdobeSignView() {
       {/* Connection Banner */}
       {connectionStatus !== 'connected' && (
         <div className="mx-4 mt-3 px-4 py-3 rounded-lg bg-amber-900/20 border border-amber-800/40 flex items-center justify-between">
-          <div>
+          <div className="min-w-0 pr-3">
             <span className="text-amber-400 text-[12px] font-medium">
               {connectionStatus === 'not_configured'
                 ? 'Adobe Sign is not configured. Add credentials in Admin > Integrations first.'
+                : connectionStatus === 'error'
+                ? 'Adobe Sign connection error.'
                 : 'Adobe Sign is not connected. Complete the OAuth flow to sync agreements.'}
             </span>
+            {connectionStatus === 'error' && statusError && (
+              <div className="text-amber-500/70 text-[10px] mt-0.5 truncate">{statusError}</div>
+            )}
           </div>
-          {connectionStatus === 'disconnected' && (
-            <button onClick={handleConnect} className="text-[11px] px-3 py-1.5 rounded bg-[#5ec1ca] text-[#272C33] font-medium hover:bg-[#4db0b9] transition-colors">
-              Connect
-            </button>
-          )}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {connectionStatus === 'error' && (
+              <button onClick={handleDisconnect} className="text-[11px] px-3 py-1.5 rounded bg-[#2f353d] text-neutral-300 hover:bg-[#3a424d] transition-colors">
+                Reset
+              </button>
+            )}
+            {(connectionStatus === 'disconnected' || connectionStatus === 'error') && (
+              <button onClick={handleConnect} className="text-[11px] px-3 py-1.5 rounded bg-[#5ec1ca] text-[#272C33] font-medium hover:bg-[#4db0b9] transition-colors">
+                Connect
+              </button>
+            )}
+          </div>
         </div>
       )}
 

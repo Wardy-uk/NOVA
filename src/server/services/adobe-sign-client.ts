@@ -54,17 +54,25 @@ export class AdobeSignApiError extends Error {
     public statusCode: number,
     public statusText: string,
     public body: unknown,
+    public retryAfterSeconds?: number,
   ) {
     super(`Adobe Sign API ${statusCode}: ${statusText}`);
     this.name = 'AdobeSignApiError';
   }
 }
 
+const LIBRARY_DOCS_TTL_MS = 5 * 60 * 1000;   // 5 min
+const FORM_FIELDS_TTL_MS  = 15 * 60 * 1000;  // 15 min
+
 export class AdobeSignClient {
   private tokenCache: { token: string; expiresAt: number } | null = null;
   private status: 'connected' | 'disconnected' | 'error' = 'disconnected';
   private lastError: string | null = null;
   private lastConnected: string | null = null;
+  private libraryDocsCache: { docs: AdobeSignLibraryDocument[]; expiresAt: number } | null = null;
+  private formFieldsCache = new Map<string, { fields: AdobeSignFormField[]; expiresAt: number }>();
+  // Adobe-imposed cooldown when we hit 429 — short-circuit further calls until this passes
+  private throttledUntil = 0;
 
   constructor(
     private config: AdobeSignConfig,
@@ -183,6 +191,13 @@ export class AdobeSignClient {
   // ── HTTP Helpers ──
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    if (this.throttledUntil > Date.now()) {
+      const wait = Math.ceil((this.throttledUntil - Date.now()) / 1000);
+      throw new AdobeSignApiError(429, 'Too Many Requests',
+        { code: 'THROTTLING_TOO_MANY_REQUESTS', message: `Adobe rate limit active — retry in ${wait}s` },
+        wait);
+    }
+
     const token = await this.getToken();
     const url = `${this.config.apiBaseUrl}/api/rest/v6${path}`;
 
@@ -205,10 +220,34 @@ export class AdobeSignClient {
       console.error(`[Adobe Sign API] ${method} ${path} → ${res.status} ${res.statusText}`);
       let errBody: unknown;
       try { errBody = JSON.parse(errText); } catch { errBody = errText; }
-      throw new AdobeSignApiError(res.status, res.statusText, errBody);
+
+      let retryAfterSeconds: number | undefined;
+      if (res.status === 429) {
+        const headerVal = res.headers.get('Retry-After') ?? res.headers.get('retry-after');
+        const bodyRetry = (errBody && typeof errBody === 'object' && 'retryAfter' in errBody)
+          ? Number((errBody as { retryAfter: unknown }).retryAfter) : NaN;
+        const parsed = headerVal ? Number(headerVal) : bodyRetry;
+        retryAfterSeconds = Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
+        // Set cooldown so subsequent calls fail fast instead of also hitting Adobe
+        this.throttledUntil = Date.now() + retryAfterSeconds * 1000;
+        console.warn(`[Adobe Sign API] 429 throttle — pausing all requests for ${retryAfterSeconds}s`);
+      }
+
+      throw new AdobeSignApiError(res.status, res.statusText, errBody, retryAfterSeconds);
     }
 
     return res.json() as Promise<T>;
+  }
+
+  // ── Cache Invalidation ──
+
+  invalidateCache(): void {
+    this.libraryDocsCache = null;
+    this.formFieldsCache.clear();
+  }
+
+  invalidateFormFields(libraryDocumentId: string): void {
+    this.formFieldsCache.delete(libraryDocumentId);
   }
 
   // ── Agreements ──
@@ -310,28 +349,39 @@ export class AdobeSignClient {
 
   // ── Library Documents ──
 
-  async getLibraryDocuments(): Promise<AdobeSignLibraryDocument[]> {
+  async getLibraryDocuments(forceRefresh = false): Promise<AdobeSignLibraryDocument[]> {
+    if (!forceRefresh && this.libraryDocsCache && Date.now() < this.libraryDocsCache.expiresAt) {
+      return this.libraryDocsCache.docs;
+    }
     const data = await this.request<{ libraryDocumentList: AdobeSignLibraryDocument[] }>(
       'GET', '/libraryDocuments',
     );
-    return data.libraryDocumentList ?? [];
+    const docs = data.libraryDocumentList ?? [];
+    this.libraryDocsCache = { docs, expiresAt: Date.now() + LIBRARY_DOCS_TTL_MS };
+    return docs;
   }
 
   // Form fields defined on a library document. Adobe nests them under either
   // `fields` (flat) or `formFields` (per-document) depending on tenant — handle both.
-  async getLibraryDocumentFormFields(libraryDocumentId: string): Promise<AdobeSignFormField[]> {
+  async getLibraryDocumentFormFields(libraryDocumentId: string, forceRefresh = false): Promise<AdobeSignFormField[]> {
+    if (!forceRefresh) {
+      const cached = this.formFieldsCache.get(libraryDocumentId);
+      if (cached && Date.now() < cached.expiresAt) return cached.fields;
+    }
+
     const raw = await this.request<{
       fields?: AdobeSignFormField[];
       formFields?: AdobeSignFormField[];
       documents?: Array<{ formFields?: AdobeSignFormField[] }>;
     }>('GET', `/libraryDocuments/${encodeURIComponent(libraryDocumentId)}/formFields`);
 
-    if (Array.isArray(raw.fields)) return raw.fields;
-    if (Array.isArray(raw.formFields)) return raw.formFields;
-    if (Array.isArray(raw.documents)) {
-      return raw.documents.flatMap(d => d.formFields ?? []);
-    }
-    return [];
+    let fields: AdobeSignFormField[] = [];
+    if (Array.isArray(raw.fields)) fields = raw.fields;
+    else if (Array.isArray(raw.formFields)) fields = raw.formFields;
+    else if (Array.isArray(raw.documents)) fields = raw.documents.flatMap(d => d.formFields ?? []);
+
+    this.formFieldsCache.set(libraryDocumentId, { fields, expiresAt: Date.now() + FORM_FIELDS_TTL_MS });
+    return fields;
   }
 
   // ── Download Signed Document ──
@@ -358,6 +408,9 @@ export class AdobeSignClient {
     this.config.refreshToken = null;
     this.status = 'disconnected';
     this.lastError = null;
+    this.libraryDocsCache = null;
+    this.formFieldsCache.clear();
+    this.throttledUntil = 0;
   }
 }
 
