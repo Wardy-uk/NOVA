@@ -3,16 +3,18 @@ import { AdobeSignApiError, type AdobeSignClient } from '../services/adobe-sign-
 import type { AdobeSignAgreementQueries, ContractTemplateQueries } from '../db/queries.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 
-const SENDER_FILLABLE_FIELD_TYPES = new Set([
-  'TEXT_FIELD',
-  'DATE_FIELD',
-  'CHECK_BOX_FIELD',
-  'RADIO_BUTTON_FIELD',
-  'DROP_DOWN_LIST_FIELD',
-  'TITLE_FIELD',
-  'COMPANY_FIELD',
-  'NAME_FIELD',
-  'EMAIL_FIELD',
+// Signer-only field types — these are filled at signing time, never by the sender.
+// Anything NOT in this set is shown as a sender-fillable input in the wizard.
+const SIGNER_ONLY_FIELD_TYPES = new Set([
+  'SIGNATURE_FIELD',
+  'SIGNATURE',
+  'SIGNATURE_BLOCK',
+  'INITIALS_FIELD',
+  'INITIALS',
+  'DATE_OF_SIGNING_FIELD',
+  'DATE_OF_SIGNING',
+  'HYPERLINK_FIELD',
+  'HYPERLINK',
 ]);
 
 function adobeError(err: unknown): { status: number; error: string; retryAfter?: number } {
@@ -237,14 +239,22 @@ export function createAdobeSignRoutes(
 
   // GET /api/adobe-sign/library-documents/:id/form-fields
   // Returns sender-fillable merge fields defined on the Adobe template.
-  // Signature/initial fields are excluded — those are signer-only.
+  // Signature/initials/etc. fields are excluded — those are signer-only.
+  // ?debug=1 returns the raw Adobe response untouched plus our parsed list — for diagnosis only.
   router.get('/library-documents/:id/form-fields', async (req, res) => {
     const client = getClient();
     if (!client) { res.status(503).json({ ok: false, error: 'Adobe Sign is not connected.' }); return; }
     const force = req.query.refresh === '1' || req.query.refresh === 'true';
+    const debug = req.query.debug === '1' || req.query.debug === 'true';
     try {
+      if (debug) {
+        const raw = await client.getLibraryDocumentFormFieldsRaw(req.params.id);
+        const parsed = await client.getLibraryDocumentFormFields(req.params.id, true);
+        res.json({ ok: true, data: parsed, raw });
+        return;
+      }
       const all = await client.getLibraryDocumentFormFields(req.params.id, force);
-      const senderFillable = all.filter(f => SENDER_FILLABLE_FIELD_TYPES.has(f.contentType));
+      const senderFillable = all.filter(f => !SIGNER_ONLY_FIELD_TYPES.has(f.contentType));
       res.json({ ok: true, data: senderFillable });
     } catch (err) {
       console.error('[Adobe Sign] Form fields error:', err);

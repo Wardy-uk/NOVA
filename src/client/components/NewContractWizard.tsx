@@ -23,15 +23,32 @@ function fmtDate(d: string | null | undefined) {
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function inputTypeFor(field: AdobeSignFormField): 'text' | 'date' | 'select' | 'checkbox' | 'radio' | 'email' {
-  switch (field.contentType) {
-    case 'DATE_FIELD': return 'date';
-    case 'DROP_DOWN_LIST_FIELD': return 'select';
-    case 'CHECK_BOX_FIELD': return 'checkbox';
-    case 'RADIO_BUTTON_FIELD': return 'radio';
-    case 'EMAIL_FIELD': return 'email';
-    default: return 'text';
-  }
+type InputKind = 'text' | 'textarea' | 'number' | 'date' | 'select' | 'checkbox' | 'radio' | 'email';
+
+function normaliseType(s: string | undefined): string {
+  return (s ?? '').toUpperCase().replace(/[_\-\s]/g, '');
+}
+
+function inputTypeFor(field: AdobeSignFormField): InputKind {
+  // Multi-line flags (Adobe variants)
+  if (field.multiLine === true || field.isMultiLine === true) return 'textarea';
+
+  const ct = normaliseType(field.contentType);
+  const it = normaliseType(field.inputType);
+  const both = `${ct} ${it}`;
+
+  // Multi-line text variants — check first since these often share the TEXT prefix
+  if (both.includes('MULTILINE') || both.includes('TEXTAREA') || both.includes('PARAGRAPH')) return 'textarea';
+
+  // Then specific kinds (use includes() so FIELD/ENUM/etc. suffixes don't matter)
+  if (both.includes('CHECKBOX') || both.includes('CHECKMARK')) return 'checkbox';
+  if (both.includes('RADIO')) return 'radio';
+  if (both.includes('DROPDOWN') || both.includes('COMBOBOX') || both.includes('LIST')) return 'select';
+  if (both.includes('DATE')) return 'date';
+  if (both.includes('EMAIL')) return 'email';
+  if (both.includes('NUMBER') || both.includes('NUMERIC')) return 'number';
+
+  return 'text';
 }
 
 export function NewContractWizard({ onNavigateToAgreements }: Props) {
@@ -348,10 +365,29 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                             </label>
                           ))}
                         </div>
+                      ) : inputType === 'textarea' ? (
+                        <textarea
+                          ref={(el) => {
+                            if (el) {
+                              el.style.height = 'auto';
+                              el.style.height = `${Math.max(el.scrollHeight, 60)}px`;
+                            }
+                          }}
+                          className={`${inputCls} resize-none overflow-hidden`}
+                          rows={3}
+                          value={value}
+                          onChange={(e) => {
+                            setFieldValues({ ...fieldValues, [f.name]: e.target.value });
+                            const t = e.currentTarget;
+                            t.style.height = 'auto';
+                            t.style.height = `${t.scrollHeight}px`;
+                          }}
+                          placeholder={f.defaultValue ?? ''}
+                        />
                       ) : (
                         <input
                           className={inputCls}
-                          type={inputType === 'date' ? 'date' : inputType === 'email' ? 'email' : 'text'}
+                          type={inputType === 'date' ? 'date' : inputType === 'email' ? 'email' : inputType === 'number' ? 'number' : 'text'}
                           value={value}
                           onChange={(e) => setFieldValues({ ...fieldValues, [f.name]: e.target.value })}
                           placeholder={f.defaultValue ?? ''}
