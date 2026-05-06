@@ -103,7 +103,7 @@ server.tool(
   },
   async ({ metric, days, granularity }) => {
     try {
-      const rows = await api<any[]>('/api/admin/kpi-data/daily-history', { days });
+      const rows = await api<any[]>('/api/kpi-data/daily-history', { days });
       const re = likeToRegex(metric);
       const matched = rows.filter((r: any) => re.test(r.kpi || r.KPI || ''));
 
@@ -224,7 +224,7 @@ server.tool(
         const field = goldenMetrics[metric];
         rankings = agents.map((a: any) => ({ agent: a.assigneeName || a.agent, value: Number(a[field] || 0) }));
       } else if (agentDailyMetrics[metric]) {
-        const rows = await api<any[]>('/api/admin/kpi-data/agent-daily', { days });
+        const rows = await api<any[]>('/api/kpi-data/agent-daily', { days });
         const field = agentDailyMetrics[metric];
         const byAgent = new Map<string, number[]>();
         for (const r of rows) {
@@ -288,7 +288,7 @@ server.tool(
   async ({ days }) => {
     try {
       const [snapshot, qaAgents, goldenSummary] = await Promise.all([
-        api<any[]>('/api/admin/kpi-data/team-snapshot'),
+        api<any[]>('/api/kpi-data/team-snapshot'),
         api<any[]>('/api/kpi-data/qa-agents', { days }),
         api<any>('/api/kpi-data/qa-golden-summary', { days }),
       ]);
@@ -437,7 +437,7 @@ server.tool(
   },
   async ({ tier, days }) => {
     try {
-      const rows = await api<any[]>('/api/admin/kpi-data/daily-history', { days });
+      const rows = await api<any[]>('/api/kpi-data/daily-history', { days });
 
       const tierSuffix = tier === 'all' ? '' : (() => {
         const map: Record<string, string> = { customer_care: '_CC', production: '_Prod', tier2: '_T2', tier3: '_T3', development: '_Dev' };
@@ -489,7 +489,7 @@ server.tool(
   },
   async ({ env }) => {
     try {
-      const comparison = await api<any>('/api/admin/kpi-data/comparison');
+      const comparison = await api<any>('/api/kpi-data/comparison');
       return toolResult(
         `Checkpoint comparison for ${env} environment`,
         comparison,
@@ -510,7 +510,7 @@ server.tool(
   },
   async ({ kpi_pattern, days }) => {
     try {
-      const rows = await api<any[]>('/api/admin/kpi-data/daily-history', { days });
+      const rows = await api<any[]>('/api/kpi-data/daily-history', { days });
       const re = likeToRegex(kpi_pattern);
       const matched = rows.filter((r: any) => re.test(r.kpi || r.KPI || ''));
 
@@ -1340,7 +1340,7 @@ server.tool(
   },
   async ({ env }) => {
     try {
-      const data = await api<any>('/api/admin/kpi-data/team-snapshot', { env });
+      const data = await api<any>('/api/kpi-data/team-snapshot', { env });
       return toolResult(`Team KPI snapshot (${env})`, data);
     } catch (err: any) { return toolError(err.message); }
   },
@@ -1355,7 +1355,7 @@ server.tool(
   },
   async ({ date, env }) => {
     try {
-      const data = await api<any>('/api/admin/kpi-data/eod-snapshot', { env, date });
+      const data = await api<any>('/api/kpi-data/eod-snapshot', { env, date });
       return toolResult(`EOD snapshot for ${date} (${env})`, data);
     } catch (err: any) { return toolError(err.message); }
   },
@@ -1371,7 +1371,7 @@ server.tool(
   },
   async ({ days, agent, env }) => {
     try {
-      const data = await api<any[]>('/api/admin/kpi-data/agent-daily', { env, days: Math.min(days, 90) });
+      const data = await api<any[]>('/api/kpi-data/agent-daily', { env, days: Math.min(days, 90) });
       const filtered = agent
         ? data.filter((r: any) => (r.agent_name || r.AgentName || '').toLowerCase() === agent.toLowerCase())
         : data;
@@ -1391,7 +1391,7 @@ server.tool(
   },
   async ({ env }) => {
     try {
-      const data = await api<any>('/api/admin/kpi-data/agents', { env });
+      const data = await api<any>('/api/kpi-data/agents', { env });
       return toolResult(`Agent leaderboard (${env})`, data);
     } catch (err: any) { return toolError(err.message); }
   },
