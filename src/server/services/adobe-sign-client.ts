@@ -369,19 +369,34 @@ export class AdobeSignClient {
       if (cached && Date.now() < cached.expiresAt) return cached.fields;
     }
 
-    const raw = await this.request<{
-      fields?: AdobeSignFormField[];
-      formFields?: AdobeSignFormField[];
-      documents?: Array<{ formFields?: AdobeSignFormField[] }>;
-    }>('GET', `/libraryDocuments/${encodeURIComponent(libraryDocumentId)}/formFields`);
+    const raw = await this.request<Record<string, unknown>>(
+      'GET', `/libraryDocuments/${encodeURIComponent(libraryDocumentId)}/formFields`,
+    );
+
+    console.log(`[Adobe Sign] formFields raw response for ${libraryDocumentId}:`,
+      JSON.stringify(raw).slice(0, 500));
 
     let fields: AdobeSignFormField[] = [];
-    if (Array.isArray(raw.fields)) fields = raw.fields;
-    else if (Array.isArray(raw.formFields)) fields = raw.formFields;
-    else if (Array.isArray(raw.documents)) fields = raw.documents.flatMap(d => d.formFields ?? []);
+    if (Array.isArray((raw as { fields?: unknown[] }).fields)) {
+      fields = (raw as { fields: AdobeSignFormField[] }).fields;
+    } else if (Array.isArray((raw as { formFields?: unknown[] }).formFields)) {
+      fields = (raw as { formFields: AdobeSignFormField[] }).formFields;
+    } else if (Array.isArray((raw as { documents?: unknown[] }).documents)) {
+      const docs = (raw as { documents: Array<{ formFields?: AdobeSignFormField[] }> }).documents;
+      fields = docs.flatMap(d => d.formFields ?? []);
+    }
+
+    console.log(`[Adobe Sign] Parsed ${fields.length} form fields from Adobe response`);
 
     this.formFieldsCache.set(libraryDocumentId, { fields, expiresAt: Date.now() + FORM_FIELDS_TTL_MS });
     return fields;
+  }
+
+  // Returns the raw Adobe response untouched — for ?debug=1 diagnostics
+  async getLibraryDocumentFormFieldsRaw(libraryDocumentId: string): Promise<unknown> {
+    return this.request<unknown>(
+      'GET', `/libraryDocuments/${encodeURIComponent(libraryDocumentId)}/formFields`,
+    );
   }
 
   // ── Download Signed Document ──
