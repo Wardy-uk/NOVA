@@ -155,10 +155,13 @@ export interface AdobeSignFormField {
   name: string;
   displayLabel?: string;
   contentType: string;
+  inputType?: string;
   defaultValue?: string;
   options?: string[];
   required?: boolean;
   assignee?: string;
+  multiLine?: boolean;
+  isMultiLine?: boolean;
 }
 
 export interface AdobeSignAgreement {
