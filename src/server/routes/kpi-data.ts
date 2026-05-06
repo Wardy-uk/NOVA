@@ -763,7 +763,10 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
                ${has('rule1Pass') ? 'SUM(CAST(g.rule1Pass AS INT))' : '0'} AS rule1Pass,
                ${has('rule2Pass') ? 'SUM(CAST(g.rule2Pass AS INT))' : '0'} AS rule2Pass,
                ${has('rule3Pass') ? 'SUM(CAST(g.rule3Pass AS INT))' : '0'} AS rule3Pass,
-               CAST(AVG(CAST(g.OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore
+               CAST(AVG(CAST(g.OverallScore AS FLOAT)) AS DECIMAL(4,2)) AS avgScore,
+               ${has('Rule1Score') ? 'CAST(AVG(CAST(g.Rule1Score AS FLOAT)) AS DECIMAL(4,2))' : '0'} AS avgRule1,
+               ${has('Rule2Score') ? 'CAST(AVG(CAST(g.Rule2Score AS FLOAT)) AS DECIMAL(4,2))' : '0'} AS avgRule2,
+               ${has('Rule3Score') ? 'CAST(AVG(CAST(g.Rule3Score AS FLOAT)) AS DECIMAL(4,2))' : '0'} AS avgRule3
         FROM dbo.Jira_QA_GoldenRules${s} g
         WHERE CAST(${dateCol} AS DATE) >= DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE))
           AND g.Updater IN (${TEAM_AGENTS.map(n => `'${n}'`).join(',')})

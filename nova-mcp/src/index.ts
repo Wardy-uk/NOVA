@@ -7,8 +7,14 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 const server = new McpServer({
   name: 'nova',
-  version: '3.0.0',
+  version: '4.0.0',
 });
+
+function num(v: unknown, fallback: number): number {
+  if (typeof v === 'number' && !isNaN(v)) return v;
+  if (typeof v === 'string') { const n = parseInt(v, 10); if (!isNaN(n)) return n; }
+  return fallback;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -211,8 +217,8 @@ server.tool(
         golden_timeframe: 'avgRule3', golden_clarity: 'avgRule4', golden_empathy: 'avgRule5',
       };
       const agentDailyMetrics: Record<string, string> = {
-        sla_resolved: 'sla_resolved', sla_breached: 'sla_breached', sla_compliance: 'sla_compliance',
-        csat_count: 'csat_count', csat_average: 'csat_average',
+        sla_resolved: 'SLAResolvedCount', sla_breached: 'SLABreachedCount', sla_compliance: 'SLACompliancePct',
+        csat_count: 'CSATCount', csat_average: 'CSATAverage',
       };
 
       if (qaMetrics[metric]) {
@@ -222,7 +228,7 @@ server.tool(
       } else if (goldenMetrics[metric]) {
         const agents = await api<any[]>('/api/kpi-data/qa-golden-agents', { days });
         const field = goldenMetrics[metric];
-        rankings = agents.map((a: any) => ({ agent: a.assigneeName || a.agent, value: Number(a[field] || 0) }));
+        rankings = agents.map((a: any) => ({ agent: a.agentName || a.assigneeName || a.agent, value: Number(a[field] || 0) }));
       } else if (agentDailyMetrics[metric]) {
         const rows = await api<any[]>('/api/kpi-data/agent-daily', { days });
         const field = agentDailyMetrics[metric];
@@ -1599,6 +1605,625 @@ server.tool(
     try {
       const data = await api<any>('/api/agent/hygiene/status');
       return toolResult('Queue hygiene status', data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ═════════════════════════════════════════════════════════════════════
+// PART 7 — RAW DATA ACCESS TOOLS (34)
+// ═════════════════════════════════════════════════════════════════════
+
+// ── KPI Data Gaps (8) ────────────────────────────────────────────────
+
+server.tool(
+  'nova_kpi_agent_detail',
+  'Get detailed per-agent KPI metrics including all tracked fields. More comprehensive than nova_agent_leaderboard — returns the full agent-kpis dataset with every metric field. Use for deep agent performance analysis and data completeness audits.',
+  {
+    agent: z.string().optional().describe('Filter to specific agent name'),
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ agent, days, env }) => {
+    try {
+      const data = await api<any[]>('/api/kpi-data/agent-kpis', { env, days: num(days, 30) });
+      const filtered = agent ? data.filter((r: any) => (r.AgentName || r.agentName || '').toLowerCase() === agent.toLowerCase()) : data;
+      return toolResult(`Agent KPI detail: ${filtered.length} rows over ${num(days, 30)} days${agent ? ` for ${agent}` : ''} (${env})`, filtered);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_kpi_qa_scores',
+  'Get raw QA score data — individual ticket scores before any aggregation. Use for data quality audits, verifying QA scoring consistency, and identifying scoring anomalies.',
+  {
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+    agent: z.string().optional().describe('Filter to specific agent'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ days, agent, env }) => {
+    try {
+      const params: Record<string, string | number> = { env, days: num(days, 30) };
+      if (agent) params.agent = agent;
+      const data = await api<any>('/api/kpi-data/qa-scores', params);
+      return toolResult(`Raw QA scores over ${num(days, 30)} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_kpi_team',
+  'Get team-wide aggregate KPI data — overall team metrics that aren\'t broken down by agent. Use for team-level reporting, MI preparation, and verifying that team aggregates match the sum of individual agent data.',
+  {
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ days, env }) => {
+    try {
+      const data = await api<any>('/api/kpi-data/team-kpis', { env, days: num(days, 30) });
+      return toolResult(`Team KPIs over ${num(days, 30)} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_kpi_breached',
+  'Get SLA-breached tickets — tickets that missed FRT or Resolution SLA targets. Returns ticket keys, breach type, time-to-breach, agent, tier. Use for SLA investigation, identifying patterns in breaches, and coaching data.',
+  {
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ days, env }) => {
+    try {
+      const data = await api<any>('/api/kpi-data/breached', { env, days: num(days, 30) });
+      return toolResult(`SLA breached tickets over ${num(days, 30)} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_kpi_snapshot_compare',
+  'Compare KPI snapshots from two different dates side-by-side. Returns each KPI\'s value on both dates plus the delta. Use for before/after analysis, verifying data pipeline changes, and investigating sudden metric shifts.',
+  {
+    date1: z.string().describe('First date (YYYY-MM-DD)'),
+    date2: z.string().describe('Second date (YYYY-MM-DD)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ date1, date2, env }) => {
+    try {
+      const data = await api<any>('/api/kpi-data/snapshot-compare', { env, date1, date2 });
+      return toolResult(`Snapshot comparison: ${date1} vs ${date2} (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_kpi_call_qa',
+  'Get call recording QA data. Three views: "summary" for aggregate call QA scores, "agents" for per-agent call QA breakdown, "results" for individual call scores (paginated).',
+  {
+    view: z.enum(['summary', 'agents', 'results']).default('summary').describe('View mode'),
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+    page: z.number().default(1).describe('Page number (for results view)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ view, days, page, env }) => {
+    try {
+      const d = num(days, 30);
+      const endpoints: Record<string, string> = {
+        summary: '/api/kpi-data/call-qa-summary',
+        agents: '/api/kpi-data/call-qa-agents',
+        results: '/api/kpi-data/call-qa-results',
+      };
+      const params: Record<string, string | number> = { env, days: d };
+      if (view === 'results') params.page = num(page, 1);
+      const data = await api<any>(endpoints[view], params);
+      return toolResult(`Call QA (${view}) over ${d} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_kpi_dedup',
+  'Get duplicate ticket analysis — tickets identified as potential duplicates, grouping info, and dedup stats. Use for data quality auditing and understanding ticket volume inflation from duplicates.',
+  {
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ days, env }) => {
+    try {
+      const data = await api<any>('/api/kpi-data/dedup', { env, days: num(days, 30) });
+      return toolResult(`Dedup analysis over ${num(days, 30)} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_kpi_backfill_status',
+  'Get data backfill status — progress of any running or recent backfill operations. Shows which date ranges have been backfilled, which are pending, and any errors. Critical for data quality auditing.',
+  {
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ env }) => {
+    try {
+      const data = await api<any>('/api/kpi-data/backfill-status', { env });
+      return toolResult(`Backfill status (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ── People & Roster (3) ──────────────────────────────────────────────
+
+server.tool(
+  'nova_people_roster',
+  'Get the team roster. "roster" returns all team members with roles and status. "calendar" returns availability/shift data. "survey-scores" returns internal survey scores per person.',
+  {
+    view: z.enum(['roster', 'calendar', 'survey-scores']).default('roster').describe('View mode'),
+  },
+  async ({ view }) => {
+    try {
+      const endpoints: Record<string, string> = {
+        roster: '/api/people/roster',
+        calendar: '/api/people/roster/calendar',
+        'survey-scores': '/api/people/roster/survey-scores',
+      };
+      const data = await api<any>(endpoints[view]);
+      return toolResult(`People roster (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_people_agent',
+  'Get an individual agent\'s data. "profile" returns their full profile. "plan" returns their 90-day plan. "snapshots" returns historical KPI snapshots. "actions" returns their action log. "calendar" returns their schedule. "aged-tickets" returns their over-SLA/stale tickets.',
+  {
+    agent_name: z.string().describe('Agent name'),
+    view: z.enum(['profile', 'plan', 'snapshots', 'actions', 'calendar', 'aged-tickets']).default('profile').describe('View mode'),
+  },
+  async ({ agent_name, view }) => {
+    try {
+      const base = `/api/people/agent/${encodeURIComponent(agent_name)}`;
+      const suffix = view === 'profile' ? '' : `/${view}`;
+      const data = await api<any>(`${base}${suffix}`);
+      return toolResult(`Agent ${agent_name} (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_team_workload',
+  'Get current team workload distribution — how tickets are spread across agents, who\'s overloaded, who has capacity.',
+  {},
+  async () => {
+    try {
+      const data = await api<any>('/api/team/workload');
+      return toolResult('Team workload', data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ── Pipeline & Data Quality (4) ──────────────────────────────────────
+
+server.tool(
+  'nova_pipeline',
+  'Monitor n8n data pipelines. "stats" shows pipeline execution stats and health. "runs" shows recent execution history. "drift" detects data drift. "drift-trend" tracks drift over time for a call type. "compare" compares two pipeline versions. "uat-compare" compares UAT vs Live.',
+  {
+    view: z.enum(['stats', 'runs', 'drift', 'drift-trend', 'compare', 'uat-compare']).describe('View mode'),
+    pipeline: z.string().optional().describe('Pipeline name (for compare view)'),
+    call_type: z.string().optional().describe('Call type (for drift-trend view)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ view, pipeline, call_type, env }) => {
+    try {
+      const endpoints: Record<string, string> = {
+        stats: '/api/agent/pipeline/stats',
+        runs: '/api/agent/pipeline/runs',
+        drift: '/api/agent/pipeline/drift',
+        'drift-trend': `/api/agent/pipeline/drift/trend/${encodeURIComponent(call_type || '')}`,
+        compare: `/api/agent/pipeline/compare/${encodeURIComponent(pipeline || '')}`,
+        'uat-compare': '/api/agent/pipeline/uat-compare',
+      };
+      const data = await api<any>(endpoints[view]);
+      return toolResult(`Pipeline (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_data_audit',
+  'Get the data quality audit trail — records of data quality checks, anomalies detected, and corrections applied.',
+  {
+    days: z.number().default(90).describe('Lookback days (default 90)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ days, env }) => {
+    try {
+      const data = await api<any>('/api/trends/data-audit', { env, days: num(days, 90) });
+      return toolResult(`Data audit over ${num(days, 90)} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_ai_trend',
+  'Get AI agent performance trend over time — accuracy, confidence scores, action counts, cost efficiency trended daily/weekly.',
+  {
+    days: z.number().default(90).describe('Lookback days (default 90)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ days, env }) => {
+    try {
+      const data = await api<any>('/api/trends/ai', { env, days: num(days, 90) });
+      return toolResult(`AI trend over ${num(days, 90)} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_checkpoint',
+  'Get data checkpoint summary — validation checkpoints that confirm data was captured correctly at key points.',
+  {
+    days: z.number().default(90).describe('Lookback days (default 90)'),
+    env: z.enum(['live', 'uat']).default('live').describe('Environment'),
+  },
+  async ({ days, env }) => {
+    try {
+      const data = await api<any>('/api/trends/checkpoint', { env, days: num(days, 90) });
+      return toolResult(`Checkpoint over ${num(days, 90)} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ── Escalation & Problem Tickets (3) ─────────────────────────────────
+
+server.tool(
+  'nova_escalations',
+  'Get escalation data. "list" returns individual escalations with ticket key, reason, from/to tier, agent, timestamp. "stats" returns aggregate escalation statistics by reason and tier.',
+  {
+    view: z.enum(['list', 'stats']).default('list').describe('View mode'),
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+  },
+  async ({ view, days }) => {
+    try {
+      const d = num(days, 30);
+      const endpoint = view === 'stats' ? '/api/escalation/stats' : '/api/escalation';
+      const data = await api<any>(endpoint, { days: d });
+      return toolResult(`Escalations (${view}) over ${d} days`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_problem_tickets',
+  'Get problem ticket data. "list" returns all flagged tickets. "stats" shows detection statistics. "config" shows detection rules. "scan-status" shows whether scanning is current. "detail" returns a specific ticket\'s problem analysis.',
+  {
+    view: z.enum(['list', 'stats', 'config', 'scan-status', 'detail']).default('list').describe('View mode'),
+    issue_key: z.string().optional().describe('Ticket key (for detail view)'),
+  },
+  async ({ view, issue_key }) => {
+    try {
+      const endpoints: Record<string, string> = {
+        list: '/api/problem-tickets',
+        stats: '/api/problem-tickets/stats',
+        config: '/api/problem-tickets/config',
+        'scan-status': '/api/problem-tickets/scan-status',
+        detail: `/api/problem-tickets/${encodeURIComponent(issue_key || '')}`,
+      };
+      const data = await api<any>(endpoints[view]);
+      return toolResult(`Problem tickets (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_escalation_reasons',
+  'Get escalation configuration data. "reasons" returns the list of escalation reason categories. "t2-agents" returns the Tier 2 agent roster for escalation routing.',
+  {
+    view: z.enum(['reasons', 't2-agents']).default('reasons').describe('View mode'),
+  },
+  async ({ view }) => {
+    try {
+      const endpoint = view === 't2-agents' ? '/api/agent/escalation/t2-agents' : '/api/agent/escalation/reasons';
+      const data = await api<any>(endpoint);
+      return toolResult(`Escalation ${view}`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ── Agent Intelligence (5) ───────────────────────────────────────────
+
+server.tool(
+  'nova_agent_workspace',
+  'Access the AI agent\'s workspace view. "queue" returns the full ticket queue. "queue-fast" returns a lightweight queue. "ticket" returns full ticket detail including history, comments, and agent analysis.',
+  {
+    view: z.enum(['queue', 'queue-fast', 'ticket']).default('queue').describe('View mode'),
+    ticket_key: z.string().optional().describe('Ticket key (for ticket view)'),
+  },
+  async ({ view, ticket_key }) => {
+    try {
+      const endpoints: Record<string, string> = {
+        queue: '/api/agent/workspace/queue',
+        'queue-fast': '/api/agent/workspace/queue-fast',
+        ticket: `/api/agent/workspace/ticket/${encodeURIComponent(ticket_key || '')}`,
+      };
+      const data = await api<any>(endpoints[view]);
+      return toolResult(`Agent workspace (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_agent_classifications',
+  'Get ticket classification data. "list" returns individual classifications. "breakdown" returns aggregate stats by category.',
+  {
+    view: z.enum(['list', 'breakdown']).default('list').describe('View mode'),
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+  },
+  async ({ view, days }) => {
+    try {
+      const d = num(days, 30);
+      const endpoint = view === 'breakdown' ? '/api/agent/classifications/breakdown' : '/api/agent/classifications';
+      const data = await api<any>(endpoint, { days: d });
+      return toolResult(`Classifications (${view}) over ${d} days`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_agent_confidence',
+  'Get AI agent confidence data. "history" returns confidence scores over time. "overrides" returns manual overrides where a human corrected the agent. "auto-rules" returns automation rules that bypass human review.',
+  {
+    view: z.enum(['history', 'overrides', 'auto-rules']).default('history').describe('View mode'),
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+  },
+  async ({ view, days }) => {
+    try {
+      const d = num(days, 30);
+      const endpoints: Record<string, string> = {
+        history: '/api/agent/confidence-history',
+        overrides: '/api/agent/overrides',
+        'auto-rules': '/api/agent/auto-rules',
+      };
+      const params: Record<string, string | number> = view === 'auto-rules' ? {} : { days: d };
+      const data = await api<any>(endpoints[view], params);
+      return toolResult(`Agent confidence (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_ai_improvement',
+  'Get AI improvement data. "stats" returns overall improvement metrics. "comparisons" returns before/after comparisons of AI responses. "signals" returns quality signals and indicators.',
+  {
+    view: z.enum(['stats', 'comparisons', 'signals']).default('stats').describe('View mode'),
+  },
+  async ({ view }) => {
+    try {
+      const data = await api<any>(`/api/ai-improvement/${view}`);
+      return toolResult(`AI improvement (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_agent_coaching_detail',
+  'Get coaching data for a specific agent — coaching priorities, recent nudges, improvement areas, and coaching history.',
+  {
+    agent_name: z.string().describe('Agent name'),
+  },
+  async ({ agent_name }) => {
+    try {
+      const data = await api<any>(`/api/agent/coaching/agent/${encodeURIComponent(agent_name)}`);
+      return toolResult(`Coaching detail for ${agent_name}`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ── Dev Review & Surveys (3) ─────────────────────────────────────────
+
+server.tool(
+  'nova_dev_review',
+  'Get development review queue data. "queue" returns tickets awaiting dev review. "dashboard" returns review stats and metrics. "outbox" returns tickets sent back to customers. "ticket" returns a specific ticket\'s review details.',
+  {
+    view: z.enum(['queue', 'dashboard', 'outbox', 'ticket']).default('queue').describe('View mode'),
+    ticket_key: z.string().optional().describe('Ticket key (for ticket view)'),
+  },
+  async ({ view, ticket_key }) => {
+    try {
+      const endpoint = view === 'ticket'
+        ? `/api/dev-review/ticket/${encodeURIComponent(ticket_key || '')}`
+        : `/api/dev-review/${view}`;
+      const data = await api<any>(endpoint);
+      return toolResult(`Dev review (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_surveys',
+  'Get survey and CSAT data. "list" returns all surveys. "teams" returns team-level survey results. "categories" returns survey categories. "satisfaction" returns CSAT satisfaction scores. "detail" returns a specific survey\'s full data.',
+  {
+    view: z.enum(['list', 'teams', 'categories', 'satisfaction', 'detail']).default('list').describe('View mode'),
+    survey_id: z.string().optional().describe('Survey ID (for detail view)'),
+  },
+  async ({ view, survey_id }) => {
+    try {
+      const endpoints: Record<string, string> = {
+        list: '/api/surveys',
+        teams: '/api/surveys/teams',
+        categories: '/api/surveys/categories',
+        satisfaction: '/api/surveys/satisfaction-scores',
+        detail: `/api/surveys/${encodeURIComponent(survey_id || '')}`,
+      };
+      const data = await api<any>(endpoints[view]);
+      return toolResult(`Surveys (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_standups',
+  'Get standup data. "today" returns today\'s standup entries. "cached" returns the most recent cached standup data. "history" returns historical standup records.',
+  {
+    view: z.enum(['today', 'cached', 'history']).default('today').describe('View mode'),
+  },
+  async ({ view }) => {
+    try {
+      const data = await api<any>(`/api/standups/${view}`);
+      return toolResult(`Standups (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ── Admin & Audit (4) ────────────────────────────────────────────────
+
+server.tool(
+  'nova_audit_log',
+  'Get the system audit log — records of all significant actions taken in NOVA (setting changes, data modifications, user actions).',
+  {
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+  },
+  async ({ days }) => {
+    try {
+      const data = await api<any>('/api/audit', { days: num(days, 30) });
+      return toolResult(`Audit log over ${num(days, 30)} days`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_admin_data',
+  'Get admin reference data. "users" returns all NOVA users. "teams" returns team definitions. "products" returns the Nurtur product catalog. "roles" returns role definitions.',
+  {
+    view: z.enum(['users', 'teams', 'products', 'roles']).describe('Data type'),
+  },
+  async ({ view }) => {
+    try {
+      const endpoints: Record<string, string> = {
+        users: '/api/admin/users',
+        teams: '/api/admin/teams',
+        products: '/api/admin/nurtur-products',
+        roles: '/api/admin/roles',
+      };
+      const data = await api<any>(endpoints[view]);
+      return toolResult(`Admin data (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_settings',
+  'Get system settings and feature flags. "all" returns all NOVA settings. "feature-flags" returns just the feature flag configuration.',
+  {
+    view: z.enum(['all', 'feature-flags']).default('all').describe('View mode'),
+  },
+  async ({ view }) => {
+    try {
+      const endpoint = view === 'feature-flags' ? '/api/settings/feature-flags' : '/api/settings';
+      const data = await api<any>(endpoint);
+      return toolResult(`Settings (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_training',
+  'Get training data. "summary" returns overall training completion stats. "categories" returns training categories. "items" returns individual training items. "scores" returns agent training scores. "users" returns training progress per user.',
+  {
+    view: z.enum(['summary', 'categories', 'items', 'scores', 'users']).default('summary').describe('View mode'),
+  },
+  async ({ view }) => {
+    try {
+      const data = await api<any>(`/api/training/${view}`);
+      return toolResult(`Training (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+// ── Remaining Coverage (4) ───────────────────────────────────────────
+
+server.tool(
+  'nova_my_tickets',
+  'Get ticket queue and event data. "queue" returns an agent\'s current ticket queue. "events" returns all ticket events. "events-today" returns today\'s events for a specific agent. "defers" returns deferred tickets. "defer-reasons" returns defer reason categories.',
+  {
+    view: z.enum(['queue', 'events', 'events-today', 'defers', 'defer-reasons']).default('events').describe('View mode'),
+    agent_id: z.string().optional().describe('Agent user ID (required for queue, events-today, defers)'),
+  },
+  async ({ view, agent_id }) => {
+    try {
+      const endpoints: Record<string, string> = {
+        queue: `/api/my-tickets/queue/${encodeURIComponent(agent_id || '')}`,
+        events: '/api/my-tickets/events',
+        'events-today': `/api/my-tickets/events/agent/${encodeURIComponent(agent_id || '')}/today`,
+        defers: `/api/my-tickets/defers/${encodeURIComponent(agent_id || '')}`,
+        'defer-reasons': '/api/my-tickets/defer-reasons',
+      };
+      if (['queue', 'events-today', 'defers'].includes(view) && !agent_id) {
+        return toolError(`agent_id is required for view "${view}"`);
+      }
+      const data = await api<any>(endpoints[view]);
+      return toolResult(`My tickets (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_gamification',
+  'Get gamification data. "leaderboard" returns the team leaderboard. "profile" returns a user\'s gamification profile. "achievements" returns available/earned achievements. "points" returns point history.',
+  {
+    view: z.enum(['leaderboard', 'profile', 'achievements', 'points']).default('leaderboard').describe('View mode'),
+    user_id: z.string().optional().describe('User ID (for profile view)'),
+  },
+  async ({ view, user_id }) => {
+    try {
+      const endpoint = view === 'profile' && user_id
+        ? `/api/gamification/profile/${encodeURIComponent(user_id)}`
+        : view === 'profile'
+          ? '/api/gamification/profile'
+          : `/api/gamification/${view}`;
+      const data = await api<any>(endpoint);
+      return toolResult(`Gamification (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_milestones',
+  'Get milestone and delivery tracking data. "summary" returns overall progress. "matrix" returns the tracking matrix. "calendar" returns calendar view. "overdue" returns overdue deliveries. "templates" returns milestone templates. "delivery" returns a specific delivery. "traffic-lights" returns RAG status for a delivery.',
+  {
+    view: z.enum(['summary', 'matrix', 'calendar', 'overdue', 'templates', 'delivery', 'traffic-lights']).default('summary').describe('View mode'),
+    delivery_id: z.string().optional().describe('Delivery ID (for delivery/traffic-lights views)'),
+    template_id: z.string().optional().describe('Template ID (for template detail)'),
+  },
+  async ({ view, delivery_id, template_id }) => {
+    try {
+      let endpoint: string;
+      if (view === 'delivery') {
+        endpoint = `/api/milestones/delivery/${encodeURIComponent(delivery_id || '')}`;
+      } else if (view === 'traffic-lights') {
+        endpoint = `/api/milestones/traffic-lights/${encodeURIComponent(delivery_id || '')}`;
+      } else if (view === 'templates' && template_id) {
+        endpoint = `/api/milestones/templates/${encodeURIComponent(template_id)}`;
+      } else if (view === 'overdue') {
+        endpoint = '/api/milestones/overdue-deliveries';
+      } else {
+        endpoint = `/api/milestones/${view}`;
+      }
+      const data = await api<any>(endpoint);
+      return toolResult(`Milestones (${view})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_feedback',
+  'Get internal feedback records. "list" returns all feedback entries. "mine" returns feedback for the authenticated user.',
+  {
+    view: z.enum(['list', 'mine']).default('list').describe('View mode'),
+  },
+  async ({ view }) => {
+    try {
+      const endpoint = view === 'mine' ? '/api/feedback/mine' : '/api/feedback';
+      const data = await api<any>(endpoint);
+      return toolResult(`Feedback (${view})`, data);
     } catch (err: any) { return toolError(err.message); }
   },
 );

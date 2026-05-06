@@ -1,6 +1,6 @@
 # nova-mcp
 
-MCP server for NOVA — HTTP API client for KPI analysis and AI agent management.
+MCP server for NOVA — HTTP API client for KPI analysis, AI agent management, and full raw data access.
 
 ## Setup
 
@@ -26,9 +26,9 @@ npm start        # production (compiled)
 npm run dev      # development (tsx)
 ```
 
-## Tools (47)
+## Tools (89)
 
-### KPI Analysis (9 original + 4 new = 13)
+### KPI Analysis (13)
 
 | Tool | Description |
 |------|-------------|
@@ -46,7 +46,7 @@ npm run dev      # development (tsx)
 | `nova_agent_daily` | Per-agent daily time series (volume, QA, Golden Rules, SLA, CSAT) |
 | `nova_agent_leaderboard` | Current agent stats — open tickets, solved, availability, QA scores |
 
-### QA Tools (4 new)
+### QA Tools (4)
 
 | Tool | Description |
 |------|-------------|
@@ -55,7 +55,7 @@ npm run dev      # development (tsx)
 | `nova_golden_rules` | Golden Rules summary, results, or per-agent (3 views) |
 | `nova_kpi_digest` | AI-generated KPI narrative summary |
 
-### Trend Tools (4 new)
+### Trend Tools (4)
 
 | Tool | Description |
 |------|-------------|
@@ -64,7 +64,7 @@ npm run dev      # development (tsx)
 | `nova_qa_trend` | QA score trend with optional agent filter |
 | `nova_escalation_trend` | Escalation volume and accuracy trend |
 
-### Operational Tools (4 new)
+### Operational Tools (4)
 
 | Tool | Description |
 |------|-------------|
@@ -122,3 +122,77 @@ npm run dev      # development (tsx)
 |------|-------------|
 | `nova_agent_submit_learning` | Submit correction/learning for AI agent |
 | `nova_agent_learnings` | List active AI learnings |
+
+### KPI Data Gaps (8) — v4.0
+
+| Tool | Description |
+|------|-------------|
+| `nova_kpi_agent_detail` | Detailed per-agent KPI metrics (full field set) |
+| `nova_kpi_qa_scores` | Raw QA score data before aggregation |
+| `nova_kpi_team` | Team-wide aggregate KPIs |
+| `nova_kpi_breached` | SLA-breached tickets |
+| `nova_kpi_snapshot_compare` | Compare two date snapshots side-by-side |
+| `nova_kpi_call_qa` | Call recording QA (summary/agents/results) |
+| `nova_kpi_dedup` | Duplicate ticket analysis |
+| `nova_kpi_backfill_status` | Data backfill progress |
+
+### People & Roster (3) — v4.0
+
+| Tool | Description |
+|------|-------------|
+| `nova_people_roster` | Team roster, calendar, survey scores |
+| `nova_people_agent` | Individual agent profile, plan, snapshots, actions, calendar, aged tickets |
+| `nova_team_workload` | Team workload distribution |
+
+### Pipeline & Data Quality (4) — v4.0
+
+| Tool | Description |
+|------|-------------|
+| `nova_pipeline` | n8n pipeline monitoring (stats/runs/drift/compare) |
+| `nova_data_audit` | Data quality audit trail |
+| `nova_ai_trend` | AI agent performance trend |
+| `nova_checkpoint` | Data checkpoint validation |
+
+### Escalation & Problem Tickets (3) — v4.0
+
+| Tool | Description |
+|------|-------------|
+| `nova_escalations` | Escalation list and stats |
+| `nova_problem_tickets` | Problem ticket detection (list/stats/config/scan-status/detail) |
+| `nova_escalation_reasons` | Escalation reason categories and T2 agents |
+
+### Agent Intelligence (5) — v4.0
+
+| Tool | Description |
+|------|-------------|
+| `nova_agent_workspace` | AI agent workspace queue and ticket detail |
+| `nova_agent_classifications` | Ticket classification data and breakdown |
+| `nova_agent_confidence` | Confidence scores, overrides, auto-rules |
+| `nova_ai_improvement` | AI improvement stats, comparisons, signals |
+| `nova_agent_coaching_detail` | Per-agent coaching data |
+
+### Dev Review & Surveys (3) — v4.0
+
+| Tool | Description |
+|------|-------------|
+| `nova_dev_review` | Dev review queue, dashboard, outbox, ticket detail |
+| `nova_surveys` | Surveys and CSAT (list/teams/categories/satisfaction/detail) |
+| `nova_standups` | Standup data (today/cached/history) |
+
+### Admin & Audit (4) — v4.0
+
+| Tool | Description |
+|------|-------------|
+| `nova_audit_log` | System audit trail |
+| `nova_admin_data` | Admin reference data (users/teams/products/roles) |
+| `nova_settings` | System settings and feature flags |
+| `nova_training` | Training data (summary/categories/items/scores/users) |
+
+### Remaining Coverage (4) — v4.0
+
+| Tool | Description |
+|------|-------------|
+| `nova_my_tickets` | Ticket queues, events, defers per agent |
+| `nova_gamification` | Leaderboard, profiles, achievements, points |
+| `nova_milestones` | Milestone tracking (summary/matrix/calendar/overdue/templates/delivery) |
+| `nova_feedback` | Internal feedback records |
