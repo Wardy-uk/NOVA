@@ -74,9 +74,9 @@ export class GrPipeline {
 
       const jql = `project = ${this.jiraProject} AND updated >= "${startStr}" AND updated < "${endStr}" ORDER BY updated ASC`;
       console.log(`[gr-pipeline] JQL: ${jql} → target=${this.target}`);
-      const result = await this.jiraClient.searchJql(jql, [
+      const result = await this.jiraClient.searchJqlAll(jql, [
         'summary', 'priority', 'issuetype', 'assignee', 'comment', 'status',
-      ], 100);
+      ], 500);
       const issues = result?.issues ?? [];
       console.log(`[gr-pipeline] Jira returned ${issues.length} tickets`);
 

@@ -59,10 +59,10 @@ export class QaPipeline {
 
       const jql = `project = ${this.jiraProject} AND statusCategory = Done AND resolved >= "${since}" ORDER BY resolved DESC`;
       console.log(`[qa-pipeline] Searching: ${jql.slice(0, 140)} → target=${this.target}`);
-      const result = await this.jiraClient.searchJql(jql, [
+      const result = await this.jiraClient.searchJqlAll(jql, [
         'summary', 'description', 'issuetype', 'priority', 'status',
         'resolution', 'assignee', 'reporter', 'comment', 'created', 'resolutiondate',
-      ], 50);
+      ], 500);
       const issues = result?.issues ?? [];
       console.log(`[qa-pipeline] Jira returned ${issues.length} resolved tickets`);
 
