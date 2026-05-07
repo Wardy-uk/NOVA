@@ -303,11 +303,35 @@ function TicketDetailPanel({ ticketKey, ticket, onDefer, onRefreshQueue }: {
 
   useEffect(() => { loadDetail(); }, [loadDetail]);
 
-  // Auto-refresh detail every 30s
+  // Auto-refresh detail every 60s (diff-aware to avoid flicker)
   useEffect(() => {
-    const i = setInterval(loadDetail, 30_000);
-    return () => clearInterval(i);
-  }, [loadDetail]);
+    let active = true;
+    const poll = async () => {
+      try {
+        const [issueRes, transRes] = await Promise.all([
+          fetch(`/api/my-tickets/${encodeURIComponent(ticketKey)}`).then(r => r.json()),
+          fetch(`/api/jira/issues/${encodeURIComponent(ticketKey)}/transitions`).then(r => r.json()),
+        ]);
+        if (!active) return;
+        setDetail(prev => {
+          const newIssue = issueRes?.ok ? issueRes.data as Record<string, unknown> : prev.issue;
+          const rawComments = (newIssue as any)?.comments;
+          const cf = (newIssue as any)?.comment as { comments?: unknown[] } | unknown[] | undefined;
+          const newComments = Array.isArray(rawComments) ? rawComments
+            : Array.isArray(cf) ? cf
+            : (cf as { comments?: unknown[] })?.comments ?? prev.comments;
+          const newTransitions = transRes?.ok
+            ? (Array.isArray(transRes.data) ? transRes.data : transRes.data?.transitions ?? transRes.data?.value ?? prev.transitions)
+            : prev.transitions;
+          const next = { issue: newIssue, comments: newComments as any, transitions: newTransitions as any, loading: false };
+          if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
+          return next;
+        });
+      } catch { /* silent */ }
+    };
+    const i = setInterval(poll, 60_000);
+    return () => { active = false; clearInterval(i); };
+  }, [ticketKey]);
 
   // Build BriefFields for TicketBriefCard from live issue data or queue fields
   const briefProps = useMemo(() => {

@@ -786,20 +786,42 @@ function OverviewTab({ status, stats, decisions, onSelect, onNavigateToWorkspace
 
 // ── Decisions Tab (full list) ──
 
-function DecisionsTab({ decisions, selected, onSelect, onRefresh }: {
+function DecisionsTab({ decisions: initialDecisions, selected, onSelect, onRefresh }: {
   decisions: Decision[];
   selected: Decision | null;
   onSelect: (d: Decision) => void;
   onRefresh: () => void;
 }) {
+  const PAGE_SIZE = 50;
+  const [allDecisions, setAllDecisions] = useState<Decision[]>(initialDecisions);
+  const [total, setTotal] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [filter, setFilter] = useState<string>('all');
   const [declining, setDeclining] = useState(false);
+
+  useEffect(() => { setAllDecisions(initialDecisions); }, [initialDecisions]);
+
+  useEffect(() => {
+    api(`/decisions?limit=1&offset=0`).then(r => { if (r.total != null) setTotal(r.total); });
+  }, [initialDecisions]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const res = await api(`/decisions?limit=${PAGE_SIZE}&offset=${allDecisions.length}`);
+      if (res.ok && Array.isArray(res.data)) {
+        setAllDecisions(prev => [...prev, ...res.data]);
+        if (res.total != null) setTotal(res.total);
+      }
+    } finally { setLoadingMore(false); }
+  };
+
   const isPendingApproval = (d: Decision) => d.approval_required && !d.shadow_mode && (!d.approval_status || d.approval_status === 'pending');
   const filtered = filter === 'pending_approval'
-    ? decisions.filter(isPendingApproval)
-    : filter === 'all' ? decisions : decisions.filter(d => d.event_type === filter);
-  const eventTypes = [...new Set(decisions.map(d => d.event_type))];
-  const pendingCount = decisions.filter(isPendingApproval).length;
+    ? allDecisions.filter(isPendingApproval)
+    : filter === 'all' ? allDecisions : allDecisions.filter(d => d.event_type === filter);
+  const eventTypes = [...new Set(allDecisions.map(d => d.event_type))];
+  const pendingCount = allDecisions.filter(isPendingApproval).length;
 
   const handleDeclineAll = async () => {
     if (!confirm(`Decline all ${pendingCount} pending approvals? This cannot be undone.`)) return;
@@ -898,6 +920,20 @@ function DecisionsTab({ decisions, selected, onSelect, onRefresh }: {
         </table>
         {filtered.length === 0 && (
           <div className="px-4 py-6 text-center text-xs text-neutral-500">No decisions match this filter</div>
+        )}
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-neutral-500">
+          Showing {filtered.length} of {total ?? '?'} decisions
+        </span>
+        {total != null && allDecisions.length < total && (
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="text-xs px-3 py-1 rounded bg-[#272C33] border border-[#3a424d] text-[#5ec1ca] hover:bg-[#363d47] transition-colors disabled:opacity-50"
+          >
+            {loadingMore ? 'Loading…' : `Load More (${allDecisions.length}/${total})`}
+          </button>
         )}
       </div>
     </div>

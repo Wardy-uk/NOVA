@@ -330,11 +330,12 @@ export class Perceiver {
 
     for (const ci of updatedCandidates.slice(0, 20)) {
       const recentComments = await this.cache!.getRecentComments(ci.issue_key, since);
-      // Filter: public, not internal author, not already processed
+      // Filter: public, not internal author, not assignee, not already processed
       const newCustomerComments = recentComments.filter(c => {
         if (!c.is_public) return false;
         if (this.isInternalAuthor(c)) return false;
         if (this.processedCommentIds.has(c.jira_comment_id)) return false;
+        if (c.author_account_id && c.author_account_id === ci.assignee_account_id) return false;
         return true;
       });
       if (newCustomerComments.length === 0) continue;
@@ -432,12 +433,14 @@ export class Perceiver {
     for (const issue of updatedCandidates.slice(0, 20)) {
       try {
         const comments = await this.jiraClient.getComments(issue.key, 20);
+        const assigneeId = (issue.fields?.assignee as { accountId?: string } | undefined)?.accountId;
         const recentCustomer = comments.filter(c => {
           const isRecent = new Date(c.created).getTime() > since.getTime();
           const isPublic = c.jsdPublic !== false;
           if (!isRecent || !isPublic) return false;
           if (this.isInternalAuthorApi(c, agentEmail)) return false;
           if (this.processedCommentIds.has(c.id)) return false;
+          if (assigneeId && c.author?.accountId === assigneeId) return false;
           return true;
         });
         if (recentCustomer.length === 0) continue;

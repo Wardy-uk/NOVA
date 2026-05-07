@@ -143,10 +143,14 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   });
 
   router.get('/decisions', async (req, res) => {
-    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 500);
     const offset = parseInt(req.query.offset as string, 10) || 0;
-    const decisions = await agentLoop.getObserver().getDecisions(limit, offset);
-    res.json({ ok: true, data: decisions });
+    const observer = agentLoop.getObserver();
+    const [decisions, total] = await Promise.all([
+      observer.getDecisions(limit, offset),
+      observer.getDecisionsCount(),
+    ]);
+    res.json({ ok: true, data: decisions, total });
   });
 
   router.get('/decisions/:id', async (req, res) => {

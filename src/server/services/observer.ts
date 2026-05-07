@@ -39,6 +39,11 @@ export class Observer {
     );
   }
 
+  async getDecisionsCount(): Promise<number> {
+    const rows = await query<{ cnt: number }>('SELECT COUNT(*) AS cnt FROM agent_decisions');
+    return rows[0]?.cnt ?? 0;
+  }
+
   async getDecisions(limit = 50, offset = 0): Promise<unknown[]> {
     return query(
       `SELECT d.*, c.summary AS ticket_subject

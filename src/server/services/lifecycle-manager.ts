@@ -11,6 +11,7 @@ import { LlmService } from './llm-service.js';
 import { ChaseResultSchema, type ChaseResult } from './chase-schema.js';
 import { loadPrompt } from './prompt-loader.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+import { addBusinessMinutes } from '../utils/business-hours.js';
 
 interface LifecycleSweepResult {
   approvalTimeouts: number;
@@ -135,10 +136,12 @@ export class LifecycleManager {
 
     for (const approval of pendingApprovals) {
       const createdAt = new Date(approval.created_at);
-      const ageMs = Date.now() - createdAt.getTime();
-      const ageMins = ageMs / 60_000;
+      const now = new Date();
+      const timeoutDeadline = addBusinessMinutes(createdAt, timeoutMins);
+      const alertDeadline = addBusinessMinutes(createdAt, alertMins);
+      const ageMins = Math.round((now.getTime() - createdAt.getTime()) / 60_000);
 
-      if (ageMins >= timeoutMins) {
+      if (now >= timeoutDeadline) {
         let confidence = 0;
         try {
           const conv = JSON.parse(approval.conversation_json ?? '{}');
@@ -206,7 +209,7 @@ export class LifecycleManager {
           console.log(`[lifecycle] Approval timed out for ${approval.ticket_id} — ${shadow ? '[SHADOW] would escalate' : 'escalated'} (confidence: ${confidence.toFixed(2)})`);
         }
         timedOut++;
-      } else if (ageMins >= alertMins) {
+      } else if (now >= alertDeadline) {
         await this.alertService.createAlert({
           alertType: 'approval_abandoned',
           severity: 'info',
