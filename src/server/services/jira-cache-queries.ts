@@ -94,10 +94,12 @@ export class JiraCacheQueries {
   async getRecentlyCreated(projects: string[], since: Date): Promise<CachedIssue[]> {
     const placeholders = projects.map(() => '?').join(',');
     return query<CachedIssue>(
-      `SELECT * FROM jira_issue_cache
-       WHERE project_key IN (${placeholders})
-         AND jira_created >= ?
-       ORDER BY jira_created DESC`,
+      `SELECT c.* FROM jira_issue_cache c
+       LEFT JOIN agent_ticket_state ts ON ts.ticket_id = c.issue_key
+       WHERE c.project_key IN (${placeholders})
+         AND c.jira_created >= ?
+         AND ts.ticket_id IS NULL
+       ORDER BY c.jira_created DESC`,
       [...projects, since],
     );
   }

@@ -23,6 +23,30 @@ export interface JiraCloudBasicConfig {
   apiToken: string;      // API token from id.atlassian.com
 }
 
+// Known Jira error patterns (Chinese locale on service account) → English
+const JIRA_ERROR_TRANSLATIONS: Array<[RegExp, string]> = [
+  [/无法移动.*缺少必要信息/i, 'Cannot transition — required fields are missing'],
+  [/无法移动/i, 'Cannot transition this issue'],
+  [/您无权/i, 'Permission denied'],
+  [/不具有相应权限/i, 'Insufficient permissions'],
+  [/此工作项缺少必要信息/i, 'Required fields are missing on this issue'],
+  [/请联系您的 Jira 管理员/i, 'Contact your Jira administrator'],
+  [/无权在此项目中创建/i, 'No permission to create issues in this project'],
+];
+
+function translateJiraError(detail: string): string {
+  // If mostly ASCII, leave it alone
+  const nonAscii = detail.replace(/[\x00-\x7F]/g, '');
+  if (nonAscii.length < 3) return detail;
+  // Try known translations
+  const translations: string[] = [];
+  for (const [pattern, english] of JIRA_ERROR_TRANSLATIONS) {
+    if (pattern.test(detail)) translations.push(english);
+  }
+  if (translations.length > 0) return `${translations.join('; ')} [原文: ${detail}]`;
+  return `Non-English Jira error (service account locale) [原文: ${detail}]`;
+}
+
 export class JiraApiError extends Error {
   constructor(
     public statusCode: number,
@@ -31,9 +55,10 @@ export class JiraApiError extends Error {
     public retryable: boolean = false,
     public requestBody?: unknown,
   ) {
-    const detail = body && typeof body === 'object'
+    const rawDetail = body && typeof body === 'object'
       ? (body as any).errorMessages?.join('; ') || (body as any).message || JSON.stringify(body).slice(0, 200)
       : String(body).slice(0, 200);
+    const detail = translateJiraError(rawDetail);
     super(`Jira API ${statusCode}: ${statusText} — ${detail}`);
     this.name = 'JiraApiError';
   }
