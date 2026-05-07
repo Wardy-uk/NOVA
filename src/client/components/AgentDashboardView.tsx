@@ -158,6 +158,27 @@ interface FlaggedSummary {
 
 // ── Helpers ──
 
+const ZH_TRANSLATIONS: Array<[RegExp, string]> = [
+  [/无法移动.*缺少必要信息/g, 'Cannot transition — required fields are missing'],
+  [/无法移动/g, 'Cannot transition this issue'],
+  [/您无权在此项目中创建事务/g, 'No permission to create issues in this project'],
+  [/您无权/g, 'Permission denied'],
+  [/不具有相应权限/g, 'Insufficient permissions'],
+  [/此工作项缺少必要信息/g, 'Required fields are missing'],
+  [/请联系您的 Jira 管理员/g, 'Contact your Jira administrator'],
+  [/您可能不具有相应权限，或是此工作项缺少必要信息。如果此问题依然存在，请联系您的 Jira 管理员。/g,
+    'You may lack permissions, or the issue is missing required fields. Contact your Jira admin if this persists.'],
+];
+
+function translateZh(text: string): string {
+  if (!text) return text;
+  let result = text;
+  for (const [pattern, english] of ZH_TRANSLATIONS) {
+    result = result.replace(pattern, english);
+  }
+  return result;
+}
+
 async function api(path: string, opts?: RequestInit) {
   const r = await fetch(`/api/agent${path}`, opts);
   const text = await r.text();
@@ -906,7 +927,7 @@ function DecisionsTab({ decisions: initialDecisions, selected, onSelect, onRefre
                   <td className="px-3 py-2">
                     {outcome ? (
                       <span className={`text-[10px] ${outcome.success ? 'text-green-400' : 'text-red-400'}`}>
-                        {outcome.success ? '✓' : '✗'} {(outcome.detail as string)?.slice(0, 40) ?? ''}
+                        {outcome.success ? '✓' : '✗'} {translateZh((outcome.detail as string) ?? '').slice(0, 40)}
                       </span>
                     ) : (
                       <span className="text-neutral-600">pending</span>
@@ -1120,8 +1141,8 @@ function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decisio
           {outcome && (
             <Section title="Outcome">
               <div className={`text-xs ${outcome.success ? 'text-green-400' : 'text-red-400'}`}>
-                {outcome.success ? '✓ Success' : '✗ Failed'}: {String(outcome.detail ?? '')}
-                {outcome.error ? <div className="mt-1 text-red-500">{String(outcome.error)}</div> : null}
+                {outcome.success ? '✓ Success' : '✗ Failed'}: {translateZh(String(outcome.detail ?? ''))}
+                {outcome.error ? <div className="mt-1 text-red-500">{translateZh(String(outcome.error))}</div> : null}
               </div>
             </Section>
           )}
