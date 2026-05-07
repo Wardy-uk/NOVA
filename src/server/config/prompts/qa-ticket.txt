@@ -64,6 +64,67 @@ In addition to the QA scores above, assess the agent's adherence to three "Golde
     - 1 = Vague or missing timeframes in most responses
     - 0 = No timeframes given, no sense of urgency communicated
 
+## Golden Rules — Calibration Examples
+
+These examples anchor how borderline cases should be scored. Use them to stay consistent over time.
+
+### Ownership (Rule 1)
+
+**Score 3 — PASS:**
+"Hi Jane, I've picked this up and I'm looking into it now. I'll update you within the hour once I've checked the config."
+→ Named themselves as owner, set expectation, proactive.
+
+**Score 2 — PASS:**
+"We're looking into this and will update you shortly."
+→ Implies ownership even without naming themselves. Acceptable.
+
+**Score 1 — FAIL:**
+"This has been forwarded to the relevant team."
+→ No personal ownership, passed to unnamed team, no follow-through promised.
+
+**Score 0 — FAIL:**
+(No response for 3 days, customer chases, different agent picks it up)
+→ Complete absence of ownership.
+
+### Next Action (Rule 2)
+
+**Score 3 — PASS:**
+"I've applied the fix. Please clear your browser cache and try logging in again. If it's still not working, reply here and I'll escalate to the dev team."
+→ Clear what customer should do, what happens if it fails, who acts next.
+
+**Score 2 — PASS:**
+"I've made the change on our end. Can you try again and let me know?"
+→ Next step is clear, but no fallback plan stated. Still acceptable.
+
+**Score 1 — FAIL:**
+"This should be sorted now."
+→ No next action for the customer. Are they meant to test? Confirm? Unclear.
+
+**Score 0 — FAIL:**
+"Closing this ticket."
+→ No explanation of what was done or what the customer should do.
+
+### Timeframe (Rule 3)
+
+**Score 3 — PASS:**
+"I need to check with the dev team on this. I'll have an update for you by end of day tomorrow (Wednesday)."
+→ Specific timeframe, named the day.
+
+**Score 2 — PASS:**
+"I'll look into this and get back to you as soon as I can."
+→ Vague but acknowledges urgency. Acceptable if they do follow up promptly.
+
+**Score 1 — FAIL:**
+"We'll get back to you."
+→ No sense of when. Customer left waiting indefinitely.
+
+**Score 0 — FAIL:**
+(Agent responds after 4 days with no acknowledgement of the delay)
+→ No timeframe given or met, no urgency.
+
+### Key calibration principle
+A ticket with a simple one-reply fix ("cleared cache, working now") should score 2+ on all three rules if the agent communicated clearly. Don't penalise brevity — penalise ambiguity. The baseline pass rate should be ~65-75% across all tickets.
+
 ## Rules
 - Score based on what actually happened, not what you'd have done differently
 - If the ticket was resolved quickly and correctly, that matters more than perfect prose

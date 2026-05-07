@@ -77,22 +77,86 @@ export class PipelineMonitor {
 
     await p.request().query(`
       IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'KpiSnapshotUAT')
-      SELECT * INTO dbo.KpiSnapshotUAT FROM dbo.KpiSnapshot WHERE 1=0;
+      CREATE TABLE dbo.KpiSnapshotUAT (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        KPI NVARCHAR(100) NOT NULL,
+        KPIGroup NVARCHAR(100),
+        Value FLOAT,
+        Target FLOAT,
+        Direction NVARCHAR(50),
+        RAG INT,
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+      );
 
       IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'jira_kpi_dailyUAT')
-      SELECT * INTO dbo.jira_kpi_dailyUAT FROM dbo.jira_kpi_daily WHERE 1=0;
+      CREATE TABLE dbo.jira_kpi_dailyUAT (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        kpi NVARCHAR(100) NOT NULL,
+        kpiGroup NVARCHAR(100),
+        [count] FLOAT,
+        target FLOAT,
+        direction NVARCHAR(50),
+        rag INT,
+        CreatedAt DATE NOT NULL
+      );
 
       IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'jira_agent_kpi_dailyUAT')
-      SELECT * INTO dbo.jira_agent_kpi_dailyUAT FROM dbo.jira_agent_kpi_daily WHERE 1=0;
+      CREATE TABLE dbo.jira_agent_kpi_dailyUAT (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        ReportDate DATE NOT NULL,
+        AgentId NVARCHAR(100),
+        AgentName NVARCHAR(200),
+        TierCode NVARCHAR(50),
+        Team NVARCHAR(100),
+        OpenTickets_Total INT,
+        OpenTickets_Over2Hours INT,
+        OpenTickets_NoUpdateToday INT,
+        SolvedTickets_Today INT,
+        SolvedTickets_ThisWeek INT,
+        OldestTicketDays INT
+      );
 
       IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'jira_kpi_digestUAT')
-      SELECT * INTO dbo.jira_kpi_digestUAT FROM dbo.jira_kpi_digest WHERE 1=0;
+      CREATE TABLE dbo.jira_kpi_digestUAT (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        period NVARCHAR(20),
+        summary NVARCHAR(4000),
+        html NVARCHAR(MAX),
+        CreatedAt DATETIME NOT NULL
+      );
 
       IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'jira_qa_resultsUAT')
-      SELECT * INTO dbo.jira_qa_resultsUAT FROM dbo.jira_qa_results WHERE 1=0;
+      CREATE TABLE dbo.jira_qa_resultsUAT (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        issueKey NVARCHAR(50) NOT NULL,
+        assigneeName NVARCHAR(200),
+        qaType NVARCHAR(50),
+        overallScore FLOAT,
+        accuracyScore FLOAT,
+        clarityScore FLOAT,
+        toneScore FLOAT,
+        grade NVARCHAR(10),
+        isConcerning BIT,
+        severity NVARCHAR(20),
+        category NVARCHAR(100),
+        CreatedAt DATETIME NOT NULL
+      );
 
       IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Jira_QA_GoldenRulesUAT')
-      SELECT * INTO dbo.Jira_QA_GoldenRulesUAT FROM dbo.Jira_QA_GoldenRules WHERE 1=0;
+      CREATE TABLE dbo.Jira_QA_GoldenRulesUAT (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        IssueKey NVARCHAR(50) NOT NULL,
+        OverallScore FLOAT,
+        Rule1Score FLOAT,
+        Rule2Score FLOAT,
+        Rule3Score FLOAT,
+        rule1Pass BIT,
+        rule2Pass BIT,
+        rule3Pass BIT,
+        Summary NVARCHAR(2000),
+        Assignee NVARCHAR(200),
+        CreatedAt DATETIME NOT NULL
+      );
     `);
   }
 

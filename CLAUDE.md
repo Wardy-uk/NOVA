@@ -93,3 +93,21 @@ git push origin && git push azdo
 - `azdo` → Azure DevOps (https://nickw@tfs.briefyourmarket.com/BYM2020/Core/_git/N.O.V.A)
 
 Never push to only one. If one push fails, flag it — don't silently skip.
+
+## Backlog — What To Work On
+
+The single source of truth for all NOVA backlog items is Nick's Obsidian vault:
+
+```
+C:\Users\NickW\Documents\Nicks knowledge base\Projects\NOVA\NOVA Backlog - Prioritised.md
+```
+
+**Read this file at the start of every session.** It contains:
+- Go-live checklist (Phases 1–5) with verification steps
+- Priority 1–5 items with effort estimates and WP numbers
+- Harness gaps that gate autonomy activation
+- Done table for shipped items
+
+When you ship a WP or complete a task, update that file — move the item to the Done table, add the version number and date. Don't update a separate file or board — this is the only backlog.
+
+Nick's personal (non-NOVA) tasks are in `C:\Users\NickW\Documents\Nicks knowledge base\Tasks\Master Todo.md` — read this if Nick asks about his wider task list.
