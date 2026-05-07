@@ -248,8 +248,10 @@ export function DevReviewView() {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
+  const [jumpKey, setJumpKey] = useState('');
 
   const currentUserId = user?.id ?? 0;
+  const isAdminUser = !!user?.role?.includes('admin');
 
   const fireToast = (kind: 'ok' | 'err', msg: string) => {
     setToast({ kind, msg });
@@ -363,6 +365,24 @@ export function DevReviewView() {
       fireToast('err', e instanceof Error ? e.message : 'Action failed');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onJumpToTicket = async () => {
+    const key = jumpKey.trim().toUpperCase();
+    if (!key) return;
+    setJumpKey('');
+    setSelectedKey(key);
+    setDetailLoading(true);
+    try {
+      const data = await api<TicketDetail>(`/ticket/${key}`);
+      setDetail(data);
+      fireToast('ok', `Loaded ${key}`);
+    } catch (e) {
+      fireToast('err', e instanceof Error ? e.message : `Could not load ${key}`);
+      setDetailLoading(false);
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -593,6 +613,24 @@ export function DevReviewView() {
                 style={{ background: 'rgba(255,255,255,0.03)' }}
               />
             </div>
+            {isAdminUser && (
+              <div className="flex items-center gap-1 mb-3">
+                <input
+                  value={jumpKey}
+                  onChange={(e) => setJumpKey(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && onJumpToTicket()}
+                  placeholder="NT-xxxxx"
+                  className="w-28 px-2 py-1.5 text-[11px] rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 font-mono"
+                  style={{ background: 'rgba(255,255,255,0.03)' }}
+                />
+                <button
+                  onClick={onJumpToTicket}
+                  className="px-2 py-1.5 text-[10px] rounded-lg font-semibold border border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                >
+                  Jump to ticket
+                </button>
+              </div>
+            )}
             <div className="mb-3 space-y-2">
               <select
                 value={teamFilter}
