@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     Deploy latest N.O.V.A code and restart the service.
@@ -29,7 +29,7 @@ try {
     Write-Host "=== N.O.V.A Deployment ===" -ForegroundColor Cyan
     Write-Host ""
 
-    # ── Stop service (so native .node binaries aren't locked) ─────────────────
+    # -- Stop service (so native .node binaries aren't locked) -----------------
     Write-Host "[0/4] Stopping $ServiceName service..." -ForegroundColor Yellow
     $ErrorActionPreference = "Continue"
     nssm stop $ServiceName 2>$null
@@ -41,20 +41,20 @@ try {
     } | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
 
-    # ── Pull latest code ─────────────────────────────────────────────────────
+    # -- Pull latest code -----------------------------------------------------
     Write-Host "[1/4] Pulling latest from azdo/$Branch..." -ForegroundColor Yellow
     git checkout -- package-lock.json 2>$null
     git pull azdo $Branch
     if ($LASTEXITCODE -ne 0) { throw "git pull failed" }
     Write-Host ""
 
-    # ── Install dependencies ─────────────────────────────────────────────────
+    # -- Install dependencies -------------------------------------------------
     Write-Host "[2/4] Installing dependencies..." -ForegroundColor Yellow
     npm ci
     if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
     Write-Host ""
 
-    # ── Build nova-mcp ────────────────────────────────────────────────────────
+    # -- Build nova-mcp --------------------------------------------------------
     Write-Host "[2.5/4] Building nova-mcp..." -ForegroundColor Yellow
     $mcpDir = Join-Path $AppDir "nova-mcp"
     if (Test-Path $mcpDir) {
@@ -65,11 +65,11 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "nova-mcp build failed" }
         Pop-Location
     } else {
-        Write-Host "nova-mcp directory not found — skipping" -ForegroundColor DarkYellow
+        Write-Host "nova-mcp directory not found - skipping" -ForegroundColor DarkYellow
     }
     Write-Host ""
 
-    # ── Build ────────────────────────────────────────────────────────────────
+    # -- Build ----------------------------------------------------------------
     Write-Host "[3/4] Building client + server..." -ForegroundColor Yellow
     npm run build
     # TypeScript emits JS despite type errors (noEmitOnError: false)
@@ -79,7 +79,7 @@ try {
     Write-Host "Build output verified: $entry" -ForegroundColor Green
     Write-Host ""
 
-    # ── Restart service ──────────────────────────────────────────────────────
+    # -- Restart service ------------------------------------------------------
     Write-Host "[4/4] Restarting $ServiceName service..." -ForegroundColor Yellow
     nssm restart $ServiceName
     Start-Sleep -Seconds 3
