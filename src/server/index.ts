@@ -1194,7 +1194,7 @@ async function main() {
 
     // QA pipeline — score resolved tickets every 2 hours
     setInterval(() => qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] scoring failed:', e.message)), 2 * 60 * 60 * 1000);
-    setTimeout(() => qaPipeline.scoreRecentlyResolved(24).catch(() => {}), 120_000);
+    setTimeout(() => qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] initial run failed:', e instanceof Error ? e.message : e)), 120_000);
 
     // GR comment scoring — every 60 min during business hours (Mon-Fri 08-18 UTC)
     setInterval(() => {
@@ -1204,7 +1204,7 @@ async function main() {
         grPipeline.scoreRecentComments().catch(e => console.warn('[gr-pipeline] scoring failed:', e.message));
       }
     }, 60 * 60 * 1000);
-    setTimeout(() => grPipeline.scoreRecentComments().catch(() => {}), 30_000);
+    setTimeout(() => grPipeline.scoreRecentComments().catch(e => console.warn('[gr-pipeline] initial run failed:', e instanceof Error ? e.message : e)), 30_000);
 
     // QA daily digest email — 17:00 UTC
     setInterval(() => {

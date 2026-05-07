@@ -73,15 +73,18 @@ export class GrPipeline {
       const endStr = windowEnd.toISOString().replace('T', ' ').slice(0, 19);
 
       const jql = `project = ${this.jiraProject} AND updated >= "${startStr}" AND updated < "${endStr}" ORDER BY updated ASC`;
+      console.log(`[gr-pipeline] Searching: window=${windowMinutes}min → target=${this.target}`);
       const result = await this.jiraClient.searchJql(jql, [
         'summary', 'priority', 'issuetype', 'assignee', 'comment', 'status',
       ], 100);
       const issues = result?.issues ?? [];
 
       if (issues.length === 0) {
+        console.log('[gr-pipeline] 0 updated tickets in window');
         await this.logRun(started, 'success', 0);
         return 0;
       }
+      console.log(`[gr-pipeline] ${issues.length} tickets to scan for comments`);
 
       const p = await getKpiPool(this.settings);
       const s = this.s;

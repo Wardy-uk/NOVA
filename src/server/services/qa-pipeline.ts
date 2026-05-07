@@ -58,6 +58,7 @@ export class QaPipeline {
         .toISOString().replace('T', ' ').slice(0, 19);
 
       const jql = `project = ${this.jiraProject} AND status IN (Done, Closed, Resolved) AND resolved >= "${since}" ORDER BY resolved DESC`;
+      console.log(`[qa-pipeline] Searching: ${jql.slice(0, 120)}… → target=${this.target}`);
       const result = await this.jiraClient.searchJql(jql, [
         'summary', 'description', 'issuetype', 'priority', 'status',
         'resolution', 'assignee', 'reporter', 'comment', 'created', 'resolutiondate',
@@ -65,6 +66,7 @@ export class QaPipeline {
       const issues = result?.issues ?? [];
 
       if (issues.length === 0) {
+        console.log('[qa-pipeline] 0 resolved tickets found');
         await this.monitor?.logRun({
           pipeline_name: 'qa-scoring', started_at: started, completed_at: new Date(),
           status: 'success', rows_affected: 0, error_message: null,
