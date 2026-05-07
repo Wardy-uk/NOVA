@@ -1804,14 +1804,15 @@ server.tool(
 
 server.tool(
   'nova_pipeline',
-  'Monitor n8n data pipelines. "stats" shows pipeline execution stats and health. "runs" shows recent execution history. "drift" detects data drift. "drift-trend" tracks drift over time for a call type. "compare" compares two pipeline versions. "uat-compare" compares UAT vs Live.',
+  'Monitor n8n data pipelines. "stats" shows pipeline execution stats and health. "runs" shows recent execution history. "drift" detects data drift. "drift-trend" tracks drift over time for a call type. "compare" compares two pipeline versions. "uat-compare" compares UAT vs Live (requires table param).',
   {
     view: z.enum(['stats', 'runs', 'drift', 'drift-trend', 'compare', 'uat-compare']).describe('View mode'),
     pipeline: z.string().optional().describe('Pipeline name (for compare view)'),
     call_type: z.string().optional().describe('Call type (for drift-trend view)'),
+    table: z.enum(['kpi_daily', 'agent_kpi_daily', 'qa_results', 'golden_rules', 'kpi_digest']).optional().describe('Table name (required for uat-compare view)'),
     env: z.enum(['live', 'uat']).default('live').describe('Environment'),
   },
-  async ({ view, pipeline, call_type, env }) => {
+  async ({ view, pipeline, call_type, table, env }) => {
     try {
       const endpoints: Record<string, string> = {
         stats: '/api/agent/pipeline/stats',
@@ -1819,7 +1820,7 @@ server.tool(
         drift: '/api/agent/pipeline/drift',
         'drift-trend': `/api/agent/pipeline/drift/trend/${encodeURIComponent(call_type || '')}`,
         compare: `/api/agent/pipeline/compare/${encodeURIComponent(pipeline || '')}`,
-        'uat-compare': '/api/agent/pipeline/uat-compare',
+        'uat-compare': `/api/agent/pipeline/uat-compare${table ? `?table=${encodeURIComponent(table)}` : ''}`,
       };
       const data = await api<any>(endpoints[view]);
       return toolResult(`Pipeline (${view})`, data);
@@ -1838,6 +1839,50 @@ server.tool(
     try {
       const data = await api<any>('/api/trends/data-audit', { env, days: num(days, 90) });
       return toolResult(`Data audit over ${num(days, 90)} days (${env})`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_uat_query',
+  'Query UAT pipeline tables directly. Returns rows from the specified UAT table with date filtering. Use to verify pipeline output after deploys.',
+  {
+    table: z.enum(['kpi_daily', 'agent_kpi_daily', 'qa_results', 'golden_rules', 'kpi_digest']).describe('UAT table to query'),
+    days: z.number().default(7).describe('Lookback days (default 7)'),
+    limit: z.number().default(50).describe('Max rows returned (default 50)'),
+  },
+  async ({ table, days, limit }) => {
+    try {
+      const data = await api<any>(`/api/pipeline/uat-query`, { table, days: num(days, 7), limit: num(limit, 50) });
+      return toolResult(`UAT Query: ${table}`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_uat_schema',
+  'Get column schema of a UAT pipeline table — names, types, nullable. Use to verify schema changes landed correctly after deploys.',
+  {
+    table: z.enum(['kpi_daily', 'agent_kpi_daily', 'qa_results', 'golden_rules', 'kpi_digest']).describe('UAT table to inspect'),
+  },
+  async ({ table }) => {
+    try {
+      const data = await api<any>(`/api/pipeline/uat-schema`, { table });
+      return toolResult(`UAT Schema: ${table}`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
+  'nova_uat_stats',
+  'Summary statistics for a UAT pipeline table — row counts, null rates, score distributions, pass rates. Use for quick health checks without pulling full data.',
+  {
+    table: z.enum(['kpi_daily', 'agent_kpi_daily', 'qa_results', 'golden_rules', 'kpi_digest']).describe('UAT table to summarise'),
+  },
+  async ({ table }) => {
+    try {
+      const data = await api<any>(`/api/pipeline/uat-stats`, { table });
+      return toolResult(`UAT Stats: ${table}`, data);
     } catch (err: any) { return toolError(err.message); }
   },
 );
