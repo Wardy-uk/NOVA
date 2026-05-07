@@ -110,6 +110,11 @@ export class AutoRulesEngine {
     const match = await this.evaluate(event);
     if (!match) return false;
 
+    if (await this.wasAlreadyActioned(event.ticketKey)) {
+      console.log(`[auto-rules] Skipping '${match.rule.id}' on ${event.ticketKey} — already actioned by a prior auto-rule`);
+      return true;
+    }
+
     const { rule } = match;
 
     // In full_shadow mode, all auto-rules are shadowed.
@@ -153,6 +158,21 @@ export class AutoRulesEngine {
 
     await this.executeAction(match, event);
     return true;
+  }
+
+  private async wasAlreadyActioned(ticketKey: string): Promise<boolean> {
+    try {
+      const rows = await query<{ cnt: number }>(
+        `SELECT COUNT(*) AS cnt FROM agent_decisions
+         WHERE ticket_id = ?
+           AND action LIKE 'auto_rule_%'
+           AND JSON_VALUE(outcome, '$.success') = 'true'`,
+        [ticketKey],
+      );
+      return (rows[0]?.cnt ?? 0) > 0;
+    } catch {
+      return false;
+    }
   }
 
   private async evaluate(event: TicketEvent): Promise<AutoRuleMatch | null> {
@@ -403,6 +423,17 @@ export class AutoRulesEngine {
     action: { type: 'close'; resolution: string; note: string },
     rule: AutoRule,
   ): Promise<void> {
+    try {
+      const issue = await this.jiraClient.getIssue(ticketKey, ['status']);
+      const statusCat = (issue?.fields?.status as { statusCategory?: { key?: string } })?.statusCategory?.key;
+      if (statusCat === 'done') {
+        console.log(`[auto-rules] ${ticketKey} already resolved — skipping close`);
+        return;
+      }
+    } catch (err) {
+      console.warn(`[auto-rules] Could not check status for ${ticketKey} — proceeding with close:`, err instanceof Error ? err.message : err);
+    }
+
     // Post internal note before transition
     await this.jiraClient.addComment(
       ticketKey,
