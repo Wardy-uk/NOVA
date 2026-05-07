@@ -25,11 +25,14 @@ export interface JiraCloudBasicConfig {
 
 // Known Jira error patterns (Chinese locale on service account) → English
 const JIRA_ERROR_TRANSLATIONS: Array<[RegExp, string]> = [
+  [/您可能不具有相应权限，或是此工作项缺少必要信息。如果此问题依然存在，请联系您的 Jira 管理员。/i,
+    'You may lack permissions, or the issue is missing required fields. Contact your Jira admin if this persists.'],
   [/无法移动.*缺少必要信息/i, 'Cannot transition — required fields are missing'],
   [/无法移动/i, 'Cannot transition this issue'],
   [/您无权/i, 'Permission denied'],
   [/不具有相应权限/i, 'Insufficient permissions'],
   [/此工作项缺少必要信息/i, 'Required fields are missing on this issue'],
+  [/如果此问题依然存在/i, 'If this problem persists'],
   [/请联系您的 Jira 管理员/i, 'Contact your Jira administrator'],
   [/无权在此项目中创建/i, 'No permission to create issues in this project'],
 ];

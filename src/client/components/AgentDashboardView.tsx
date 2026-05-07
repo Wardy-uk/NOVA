@@ -159,15 +159,17 @@ interface FlaggedSummary {
 // ── Helpers ──
 
 const ZH_TRANSLATIONS: Array<[RegExp, string]> = [
+  // Full sentences first — must match before fragments break them up
+  [/您可能不具有相应权限，或是此工作项缺少必要信息。如果此问题依然存在，请联系您的 Jira 管理员。/g,
+    'You may lack permissions, or the issue is missing required fields. Contact your Jira admin if this persists.'],
   [/无法移动.*缺少必要信息/g, 'Cannot transition — required fields are missing'],
   [/无法移动/g, 'Cannot transition this issue'],
   [/您无权在此项目中创建事务/g, 'No permission to create issues in this project'],
   [/您无权/g, 'Permission denied'],
   [/不具有相应权限/g, 'Insufficient permissions'],
   [/此工作项缺少必要信息/g, 'Required fields are missing'],
+  [/如果此问题依然存在，?/g, 'If this problem persists, '],
   [/请联系您的 Jira 管理员/g, 'Contact your Jira administrator'],
-  [/您可能不具有相应权限，或是此工作项缺少必要信息。如果此问题依然存在，请联系您的 Jira 管理员。/g,
-    'You may lack permissions, or the issue is missing required fields. Contact your Jira admin if this persists.'],
 ];
 
 function translateZh(text: string): string {
@@ -176,6 +178,7 @@ function translateZh(text: string): string {
   for (const [pattern, english] of ZH_TRANSLATIONS) {
     result = result.replace(pattern, english);
   }
+  result = result.replace(/[一-鿿　-〿＀-￯]+[，。、；：！？]*/g, '').replace(/\s{2,}/g, ' ').trim();
   return result;
 }
 
