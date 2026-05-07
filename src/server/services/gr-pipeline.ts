@@ -63,7 +63,7 @@ export class GrPipeline {
     return tableSuffix(this.target);
   }
 
-  async scoreRecentComments(windowMinutes: number = 70): Promise<number> {
+  async scoreRecentComments(windowMinutes: number = 1440): Promise<number> {
     const started = new Date();
     let rowsAffected = 0;
     try {
