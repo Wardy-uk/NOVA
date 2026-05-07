@@ -344,7 +344,9 @@ export function createDevReviewRoutes(
         if (allProducts.size > 0) {
           userTeamFilterActive = true;
           if (!showAll) {
-            enriched = enriched.filter((item) => allProducts.has(item.team));
+            enriched = enriched.filter((item) =>
+              allProducts.has(item.team) || item.state?.claimed_by_user_id === req.user!.id
+            );
           }
         }
       }
@@ -1062,7 +1064,8 @@ export function createDevReviewRoutes(
           `Support Ticket: ${key}\n` +
           `Customer: ${reporterName}\n` +
           `Priority: ${priorityName}\n\n` +
-          `── TL;DR ──\n${briefTldr}\n\n` +
+          `── TL;DR ──\n${tldr}\n\n` +
+          `── Development Details ──\n${developmentDetails}\n\n` +
           `── Agent Summary ──\n${briefAgentSummary}\n\n` +
           `── Troubleshooting Performed ──\n${briefTroubleshooting}\n\n` +
           `── Expected Outcome ──\n${briefExpectedOutcome}\n\n` +

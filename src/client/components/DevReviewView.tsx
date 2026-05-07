@@ -688,6 +688,7 @@ export function DevReviewView() {
                 selectedItem={selectedItem}
                 busy={busy}
                 currentUserId={currentUserId}
+                isAdmin={!!user?.role?.includes('admin')}
                 commentDraft={commentDraft}
                 setCommentDraft={setCommentDraft}
                 onClaim={onClaim}
@@ -994,7 +995,7 @@ function QueueRow({
 }
 
 function TicketDetailPane({
-  detail, selectedItem, busy, currentUserId,
+  detail, selectedItem, busy, currentUserId, isAdmin,
   commentDraft, setCommentDraft, onClaim, onUnclaim, onFastTrack, onComment,
   onAcceptClick, onReturnClick, claimedByDisplay,
 }: {
@@ -1002,6 +1003,7 @@ function TicketDetailPane({
   selectedItem: QueueItem | undefined;
   busy: boolean;
   currentUserId: number;
+  isAdmin: boolean;
   commentDraft: string;
   setCommentDraft: (v: string) => void;
   onClaim: () => void;
@@ -1101,7 +1103,7 @@ function TicketDetailPane({
                 ◉ Claim to review
               </button>
             ) : !isMine ? (
-              /* Claimed by someone else — read-only */
+              /* Claimed by someone else — read-only (admins can release) */
               <div className="flex items-center gap-2">
                 <div
                   className="text-[11px] font-semibold px-3 py-2 rounded-lg"
@@ -1113,6 +1115,15 @@ function TicketDetailPane({
                 >
                   Claimed by {claimedByDisplay || 'another reviewer'}
                 </div>
+                {isAdmin && (
+                  <button
+                    onClick={onUnclaim}
+                    disabled={busy}
+                    className="px-3 py-1.5 text-[10px] rounded-lg font-semibold text-red-400 border border-red-500/30 hover:bg-red-500/10 disabled:opacity-40"
+                  >
+                    Admin Release
+                  </button>
+                )}
               </div>
             ) : (
               /* Claimed by me — full action set */
