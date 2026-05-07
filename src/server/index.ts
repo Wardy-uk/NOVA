@@ -28,6 +28,7 @@ import { createO365Routes } from './routes/o365.js';
 import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
+import { createPipelineUatRoutes } from './routes/pipeline-uat.js';
 import { createBoardMiRoutes } from './routes/board-mi.js';
 import { createDevReviewRoutes } from './routes/dev-review.js';
 import { createBriefingRoutes } from './routes/briefing.js';
@@ -898,6 +899,7 @@ async function main() {
   });
 
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
+  app.use('/api/pipeline', requireRole('admin'), createPipelineUatRoutes({ settings: settingsQueries }));
   let boardMiLlm: import('./services/llm-service.js').LlmService | null = null;
   app.use('/api/board-mi', requireAreaAccess('mi', 'view'), createBoardMiRoutes(
     settingsQueries,
