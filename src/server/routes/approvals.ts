@@ -2,11 +2,16 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { ApprovalQueries } from '../db/queries.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
+import type { JiraRestClient } from '../services/jira-client.js';
 import type { CustomRole } from '../middleware/auth.js';
+import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+
+const QUICK_RESOLVE_TRANSITION_ID = '17';
 
 export function createApprovalRoutes(
   approvalQueries: ApprovalQueries,
   settingsQueries: FileSettingsQueries,
+  jiraClient?: JiraRestClient,
 ): Router {
   const router = Router();
 
@@ -137,6 +142,25 @@ export function createApprovalRoutes(
         }
       } catch (err) {
         console.error(`[Approvals] Failed to hit n8n resume URL for approval ${id}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    // For abuse report approvals: transition the Jira ticket to Resolved
+    if (action === 'approve' && item.ticket_id && jiraClient) {
+      try {
+        const novaAccountId = settingsQueries.get('nova_ai_jira_account_id');
+        if (novaAccountId) {
+          await jiraClient.updateFields(item.ticket_id, { assignee: { accountId: novaAccountId } });
+        }
+        const { fields, comment } = buildResolveFields({
+          tldr: 'Abuse report approved and processed by NOVA',
+          resolution: 'Done',
+          comment: `Abuse report approved by ${user.username}. Processed automatically.`,
+        });
+        await jiraClient.transitionIssue(item.ticket_id, QUICK_RESOLVE_TRANSITION_ID, { fields, comment });
+        console.log(`[Approvals] Resolved Jira ticket ${item.ticket_id} after abuse report approval`);
+      } catch (err) {
+        console.error(`[Approvals] Failed to resolve Jira ticket ${item.ticket_id}:`, err instanceof Error ? err.message : err);
       }
     }
 

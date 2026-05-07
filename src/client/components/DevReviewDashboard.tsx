@@ -34,6 +34,8 @@ interface Dashboard {
     returned_week: number;
     accepted_all: number;
     returned_all: number;
+    breached_now: number;
+    breach_hours_worst: number;
   }>;
   unpickedKpi: {
     today: number;
@@ -484,7 +486,9 @@ export function DevReviewDashboard() {
                         <th className="text-right py-2 px-3" style={{ color: '#10b981' }}>Accepted (7d)</th>
                         <th className="text-right py-2 px-3" style={{ color: '#9b6aed' }}>Returned (7d)</th>
                         <th className="text-right py-2 px-3">Accepted (all)</th>
-                        <th className="text-right py-2 pl-3">Returned (all)</th>
+                        <th className="text-right py-2 px-3">Returned (all)</th>
+                        <th className="text-right py-2 px-3" style={{ color: '#ef4444' }}>Breached</th>
+                        <th className="text-right py-2 pl-3" style={{ color: '#ef4444' }}>Worst (hrs)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -507,7 +511,9 @@ export function DevReviewDashboard() {
                           <td className="text-right px-3 text-emerald-400 font-semibold">{t.accepted_week || '—'}</td>
                           <td className="text-right px-3 text-purple-400 font-semibold">{t.returned_week || '—'}</td>
                           <td className="text-right px-3 text-neutral-400">{t.accepted_all || '—'}</td>
-                          <td className="text-right pl-3 text-neutral-400">{t.returned_all || '—'}</td>
+                          <td className="text-right px-3 text-neutral-400">{t.returned_all || '—'}</td>
+                          <td className="text-right px-3 font-bold text-red-400">{t.breached_now || '—'}</td>
+                          <td className="text-right pl-3 text-red-400">{t.breach_hours_worst ? t.breach_hours_worst.toFixed(1) : '—'}</td>
                         </tr>
                       ))}
                     </tbody>

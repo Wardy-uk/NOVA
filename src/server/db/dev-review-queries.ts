@@ -733,6 +733,8 @@ export class DevReviewQueries {
       returned_week: number;
       accepted_all: number;
       returned_all: number;
+      breached_now: number;
+      breach_hours_worst: number;
     }>();
     for (const r of teamQueueRows) {
       teamMap.set(r.team, {
@@ -740,12 +742,14 @@ export class DevReviewQueries {
         in_queue: r.in_queue,
         waiting: r.waiting,
         accepted_week: 0, returned_week: 0, accepted_all: 0, returned_all: 0,
+        breached_now: 0, breach_hours_worst: 0,
       });
     }
     for (const r of teamDecisionRows) {
       const existing = teamMap.get(r.team) || {
         team: r.team, in_queue: 0, waiting: 0,
         accepted_week: 0, returned_week: 0, accepted_all: 0, returned_all: 0,
+        breached_now: 0, breach_hours_worst: 0,
       };
       if (r.kind === 'accept') {
         existing.accepted_week = r.week;
@@ -783,8 +787,8 @@ export class DevReviewQueries {
       const breachDate = new Date(deadlineMs).toISOString().slice(0, 10);
       byBreachDate.set(breachDate, (byBreachDate.get(breachDate) || 0) + 1);
 
-      // Live breach = no pickup yet AND status is still active/pending
-      const stillActive = state.status !== 'accepted' && state.status !== 'returned' && pickupMs === undefined;
+      // Live breach = past deadline AND not yet resolved (accepted/returned)
+      const stillActive = state.status !== 'accepted' && state.status !== 'returned';
       if (stillActive) {
         liveBreaches.push({
           jira_key: state.jira_key,
@@ -805,6 +809,16 @@ export class DevReviewQueries {
       d.setDate(d.getDate() - i);
       const iso = d.toISOString().slice(0, 10);
       history14d.push({ date: iso, count: byBreachDate.get(iso) || 0 });
+    }
+
+    // Aggregate breaches by team
+    for (const breach of liveBreaches) {
+      const team = breach.team || 'Unassigned';
+      const existing = teamMap.get(team);
+      if (existing) {
+        existing.breached_now += 1;
+        existing.breach_hours_worst = Math.max(existing.breach_hours_worst, breach.hours_overdue);
+      }
     }
 
     liveBreaches.sort((a, b) => b.hours_overdue - a.hours_overdue);

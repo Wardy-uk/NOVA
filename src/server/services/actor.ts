@@ -21,12 +21,15 @@ export class Actor {
     this.jiraClient = jiraClient;
     this.escalationLog = escalationLog;
     this.settings = settings;
+    if (!settings.get('nova_ai_jira_account_id')) {
+      console.error('[actor] WARNING: nova_ai_jira_account_id is not set in settings. AI-actioned tickets will NOT be assigned to NOVA.');
+    }
   }
 
   private async assignToNovaServiceAccount(ticketKey: string): Promise<void> {
     const accountId = this.settings.get('nova_ai_jira_account_id');
     if (!accountId) {
-      console.warn('[actor] nova_ai_jira_account_id not configured — skipping service account assignment');
+      console.error('[actor] CRITICAL: nova_ai_jira_account_id not configured — ticket will not be assigned to NOVA');
       return;
     }
     try {
@@ -38,6 +41,20 @@ export class Actor {
 
   async execute(decision: AgentDecision): Promise<ActionResult> {
     try {
+      // Remove [Action Required] prefix when a new action is taken (customer replied or ticket progressed)
+      const recAction = decision.output.recommended_action as string | undefined;
+      if (recAction !== 'gather_context' && decision.eventType === 'comment_added') {
+        try {
+          const issue = await this.jiraClient.getIssue(decision.ticketKey, ['summary']);
+          const summary = (issue?.fields?.summary as string) || '';
+          if (summary.startsWith('[Action Required] ')) {
+            await this.jiraClient.updateFields(decision.ticketKey, {
+              summary: summary.replace('[Action Required] ', ''),
+            });
+          }
+        } catch { /* best effort */ }
+      }
+
       // Assign to NOVA service account before any ticket-modifying action
       if (decision.action !== 'no_action' && decision.action !== 'assign') {
         await this.assignToNovaServiceAccount(decision.ticketKey);
@@ -84,6 +101,23 @@ export class Actor {
     const text = (decision.output.response as string) ?? (decision.output.comment as string) ?? decision.reasoning;
     // GUARDRAIL: Actor must NEVER post public comments. Public replies go through approval callback only.
     await this.jiraClient.addComment(decision.ticketKey, text, { internal: true });
+
+    // Prefix subject with [Action Required] when AI is requesting customer info
+    const recAction = decision.output.recommended_action as string | undefined;
+    if (recAction === 'gather_context') {
+      try {
+        const issue = await this.jiraClient.getIssue(decision.ticketKey, ['summary']);
+        const currentSummary = (issue?.fields?.summary as string) || '';
+        if (!currentSummary.startsWith('[Action Required]')) {
+          await this.jiraClient.updateFields(decision.ticketKey, {
+            summary: `[Action Required] ${currentSummary}`,
+          });
+        }
+      } catch (err) {
+        console.warn(`[actor] Failed to add [Action Required] prefix to ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
     return { success: true, action: decision.action, ticketKey: decision.ticketKey, detail: 'Posted internal comment.' };
   }
 
