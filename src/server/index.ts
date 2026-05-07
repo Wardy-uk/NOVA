@@ -119,6 +119,8 @@ import type { KbSyncProvider } from './services/kb-sync-provider.js';
 import { createKbAdminRoutes } from './routes/kb-admin.js';
 import { KpiPipeline } from './services/kpi-pipeline.js';
 import { QaPipeline } from './services/qa-pipeline.js';
+import { GrPipeline } from './services/gr-pipeline.js';
+import { QaDigest } from './services/qa-digest.js';
 import { PipelineMonitor } from './services/pipeline-monitor.js';
 import { DriftDetector } from './services/drift-detector.js';
 import { ConfigService } from './services/config-service.js';
@@ -1001,6 +1003,8 @@ async function main() {
 
     const kpiPipeline = new KpiPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor, jiraCacheQueries);
     const qaPipeline = new QaPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
+    const grPipeline = new GrPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
+    const qaDigest = new QaDigest(settingsQueries, pipelineMonitor);
     const driftDetector = new DriftDetector(settingsQueries, agentLoop.getAlertService());
 
     // Calendar sync (WP-12)
@@ -1189,6 +1193,32 @@ async function main() {
     // QA pipeline — score resolved tickets every 2 hours
     setInterval(() => qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] scoring failed:', e.message)), 2 * 60 * 60 * 1000);
     setTimeout(() => qaPipeline.scoreRecentlyResolved(24).catch(() => {}), 120_000);
+
+    // GR comment scoring — every 60 min during business hours (Mon-Fri 08-18 UTC)
+    setInterval(() => {
+      const hour = new Date().getUTCHours();
+      const day = new Date().getUTCDay();
+      if (hour >= 8 && hour <= 18 && day >= 1 && day <= 5) {
+        grPipeline.scoreRecentComments().catch(e => console.warn('[gr-pipeline] scoring failed:', e.message));
+      }
+    }, 60 * 60 * 1000);
+    setTimeout(() => grPipeline.scoreRecentComments().catch(() => {}), 30_000);
+
+    // QA daily digest email — 17:00 UTC
+    setInterval(() => {
+      const now = new Date();
+      if (now.getUTCHours() === 17 && now.getUTCMinutes() < 15) {
+        qaDigest.sendDailyDigest().catch(e => console.warn('[qa-digest] daily failed:', e.message));
+      }
+    }, 15 * 60 * 1000);
+
+    // QA weekly digest email — Monday 08:00 UTC
+    setInterval(() => {
+      const now = new Date();
+      if (now.getUTCDay() === 1 && now.getUTCHours() === 8 && now.getUTCMinutes() < 15) {
+        qaDigest.sendWeeklyDigest().catch(e => console.warn('[qa-digest] weekly failed:', e.message));
+      }
+    }, 15 * 60 * 1000);
 
     // Pipeline health check — every 15 min
     setInterval(() => pipelineMonitor.checkStaleRuns().catch(() => {}), 15 * 60 * 1000);

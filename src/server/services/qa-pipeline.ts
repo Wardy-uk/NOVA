@@ -90,6 +90,11 @@ export class QaPipeline {
 
       for (const issue of toScore) {
         try {
+          if (this.isChatTicket(issue)) {
+            await this.saveExcludedResult(issue);
+            rowsAffected++;
+            continue;
+          }
           const qaResult = await this.scoreSingle(issue);
           if (qaResult) {
             await this.saveQaResult(issue, qaResult);
@@ -173,6 +178,47 @@ export class QaPipeline {
     } catch { return []; }
   }
 
+  private isChatTicket(issue: any): boolean {
+    const fields = issue.fields as any;
+    const cf13482 = fields.customfield_13482;
+    let requestType = '';
+    if (typeof cf13482 === 'string') requestType = cf13482;
+    else if (cf13482?.value) requestType = cf13482.value;
+    else if (cf13482?.name) requestType = cf13482.name;
+    if (!requestType) {
+      requestType = fields.customfield_12800?.requestType?.name ?? '';
+    }
+    return requestType.toLowerCase() === 'chat';
+  }
+
+  private async saveExcludedResult(issue: any): Promise<void> {
+    const p = await getKpiPool(this.settings);
+    const s = this.s;
+    const fields = issue.fields as any;
+    const assignee = fields.assignee?.displayName ?? 'Unassigned';
+
+    const request = p.request();
+    request.input('issueKey', sql.NVarChar, issue.key);
+    request.input('assigneeName', sql.NVarChar, assignee);
+    request.input('statusName', sql.NVarChar(100), (fields.status?.name ?? '').slice(0, 100));
+    request.input('ticketSummary', sql.NVarChar(500), (fields.summary ?? '').slice(0, 500));
+    request.input('ticketType', sql.NVarChar(50), (fields.issuetype?.name ?? '').slice(0, 50));
+    request.input('ticketPriority', sql.NVarChar(50), (fields.priority?.name ?? '').slice(0, 50));
+
+    await request.query(`
+      INSERT INTO dbo.jira_qa_results${s}
+        (issueKey, assigneeName, statusName, summary, qaType, overallScore,
+         accuracyScore, clarityScore, toneScore, closureScore,
+         grade, isConcerning, severity, category,
+         ticketType, ticketPriority, processedAt, CreatedAt)
+      VALUES
+        (@issueKey, @assigneeName, @statusName, @ticketSummary, 'excluded', 0,
+         0, 0, 0, 0,
+         'EXCLUDED', 0, NULL, 'Chat',
+         @ticketType, @ticketPriority, SYSUTCDATETIME(), GETUTCDATE())
+    `);
+  }
+
   private async getAlreadyScored(ticketKeys: string[]): Promise<Set<string>> {
     if (ticketKeys.length === 0) return new Set();
     try {
@@ -180,7 +226,7 @@ export class QaPipeline {
       const s = this.s;
       const keyList = ticketKeys.map(k => `'${k.replace(/'/g, "''")}'`).join(',');
       const result = await p.request().query(
-        `SELECT DISTINCT issueKey FROM dbo.jira_qa_results${s} WHERE issueKey IN (${keyList}) AND CreatedAt >= DATEADD(day, -1, GETDATE())`,
+        `SELECT DISTINCT issueKey FROM dbo.jira_qa_results${s} WHERE issueKey IN (${keyList}) AND qaType IN ('resolved', 'excluded', 'ticket_full') AND CreatedAt >= DATEADD(day, -1, GETDATE())`,
       );
       return new Set(result.recordset.map((r: any) => r.issueKey));
     } catch {
@@ -194,26 +240,45 @@ export class QaPipeline {
     const fields = issue.fields as any;
     const assignee = fields.assignee?.displayName ?? 'Unassigned';
 
+    const computedScore = Math.round(
+      (qa.accuracyScore * 0.35 + qa.clarityScore * 0.25 + qa.toneScore * 0.20 + qa.closureScore * 0.20) * 100
+    ) / 100;
+
     const request = p.request();
     request.input('issueKey', sql.NVarChar, issue.key);
     request.input('assigneeName', sql.NVarChar, assignee);
+    request.input('statusName', sql.NVarChar(100), (fields.status?.name ?? '').slice(0, 100));
+    request.input('ticketSummary', sql.NVarChar(500), (fields.summary ?? '').slice(0, 500));
     request.input('qaType', sql.NVarChar, 'resolved');
-    request.input('overallScore', sql.Float, qa.overallScore);
+    request.input('overallScore', sql.Float, computedScore);
     request.input('accuracyScore', sql.Float, qa.accuracyScore);
     request.input('clarityScore', sql.Float, qa.clarityScore);
     request.input('toneScore', sql.Float, qa.toneScore);
+    request.input('closureScore', sql.Float, qa.closureScore);
     request.input('grade', sql.NVarChar, qa.grade);
     request.input('isConcerning', sql.Bit, qa.isConcerning ? 1 : 0);
     request.input('severity', sql.NVarChar, qa.severity ?? null);
     request.input('category', sql.NVarChar, qa.category);
+    request.input('issues', sql.NVarChar(2000), (qa.issues ?? '').slice(0, 2000));
+    request.input('coachingPoints', sql.NVarChar(2000), (qa.coachingPoints ?? '').slice(0, 2000));
+    request.input('suggestedReply', sql.NVarChar(2000), (qa.suggestedReply ?? '').slice(0, 2000));
+    request.input('customerSentiment', sql.NVarChar(20), qa.customerSentiment ?? 'neutral');
+    request.input('ticketType', sql.NVarChar(50), (fields.issuetype?.name ?? '').slice(0, 50));
+    request.input('ticketPriority', sql.NVarChar(50), (fields.priority?.name ?? '').slice(0, 50));
 
     await request.query(`
       INSERT INTO dbo.jira_qa_results${s}
-        (issueKey, assigneeName, qaType, overallScore, accuracyScore, clarityScore, toneScore,
-         grade, isConcerning, severity, category, CreatedAt)
+        (issueKey, assigneeName, statusName, summary, qaType, overallScore,
+         accuracyScore, clarityScore, toneScore, closureScore,
+         grade, isConcerning, severity, category,
+         issues, coachingPoints, suggestedReply, customerSentiment,
+         ticketType, ticketPriority, processedAt, CreatedAt)
       VALUES
-        (@issueKey, @assigneeName, @qaType, @overallScore, @accuracyScore, @clarityScore, @toneScore,
-         @grade, @isConcerning, @severity, @category, GETUTCDATE())
+        (@issueKey, @assigneeName, @statusName, @ticketSummary, @qaType, @overallScore,
+         @accuracyScore, @clarityScore, @toneScore, @closureScore,
+         @grade, @isConcerning, @severity, @category,
+         @issues, @coachingPoints, @suggestedReply, @customerSentiment,
+         @ticketType, @ticketPriority, SYSUTCDATETIME(), GETUTCDATE())
     `);
 
     const grRequest = p.request();

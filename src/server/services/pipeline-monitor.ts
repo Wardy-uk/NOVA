@@ -130,15 +130,25 @@ export class PipelineMonitor {
         id INT IDENTITY(1,1) PRIMARY KEY,
         issueKey NVARCHAR(50) NOT NULL,
         assigneeName NVARCHAR(200),
+        statusName NVARCHAR(100),
+        summary NVARCHAR(500),
         qaType NVARCHAR(50),
         overallScore FLOAT,
         accuracyScore FLOAT,
         clarityScore FLOAT,
         toneScore FLOAT,
+        closureScore FLOAT,
         grade NVARCHAR(10),
         isConcerning BIT,
         severity NVARCHAR(20),
         category NVARCHAR(100),
+        issues NVARCHAR(2000),
+        coachingPoints NVARCHAR(2000),
+        suggestedReply NVARCHAR(2000),
+        customerSentiment NVARCHAR(20),
+        ticketType NVARCHAR(50),
+        ticketPriority NVARCHAR(50),
+        processedAt DATETIME,
         CreatedAt DATETIME NOT NULL
       );
 
@@ -146,6 +156,7 @@ export class PipelineMonitor {
       CREATE TABLE dbo.Jira_QA_GoldenRulesUAT (
         id INT IDENTITY(1,1) PRIMARY KEY,
         IssueKey NVARCHAR(50) NOT NULL,
+        CommentId NVARCHAR(50),
         OverallScore FLOAT,
         Rule1Score FLOAT,
         Rule2Score FLOAT,
@@ -154,10 +165,46 @@ export class PipelineMonitor {
         rule2Pass BIT,
         rule3Pass BIT,
         Summary NVARCHAR(2000),
+        SuggestedRewrite NVARCHAR(2000),
         Assignee NVARCHAR(200),
+        Updater NVARCHAR(200),
+        CommentBody NVARCHAR(MAX),
+        agentEmail NVARCHAR(200),
+        ticketPriority NVARCHAR(50),
+        ticketType NVARCHAR(50),
+        commentTimestamp DATETIME,
+        processedAt DATETIME,
         CreatedAt DATETIME NOT NULL
       );
     `);
+
+    // Add missing columns to existing tables (idempotent)
+    const alterQueries = [
+      // jira_qa_resultsUAT
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'statusName') ALTER TABLE dbo.jira_qa_resultsUAT ADD statusName NVARCHAR(100);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'summary') ALTER TABLE dbo.jira_qa_resultsUAT ADD summary NVARCHAR(500);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'closureScore') ALTER TABLE dbo.jira_qa_resultsUAT ADD closureScore FLOAT;`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'issues') ALTER TABLE dbo.jira_qa_resultsUAT ADD issues NVARCHAR(2000);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'coachingPoints') ALTER TABLE dbo.jira_qa_resultsUAT ADD coachingPoints NVARCHAR(2000);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'suggestedReply') ALTER TABLE dbo.jira_qa_resultsUAT ADD suggestedReply NVARCHAR(2000);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'customerSentiment') ALTER TABLE dbo.jira_qa_resultsUAT ADD customerSentiment NVARCHAR(20);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'ticketType') ALTER TABLE dbo.jira_qa_resultsUAT ADD ticketType NVARCHAR(50);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'ticketPriority') ALTER TABLE dbo.jira_qa_resultsUAT ADD ticketPriority NVARCHAR(50);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'processedAt') ALTER TABLE dbo.jira_qa_resultsUAT ADD processedAt DATETIME;`,
+      // Jira_QA_GoldenRulesUAT
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'CommentId') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD CommentId NVARCHAR(50);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'SuggestedRewrite') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD SuggestedRewrite NVARCHAR(2000);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'Updater') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD Updater NVARCHAR(200);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'CommentBody') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD CommentBody NVARCHAR(MAX);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'agentEmail') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD agentEmail NVARCHAR(200);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'ticketPriority') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD ticketPriority NVARCHAR(50);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'ticketType') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD ticketType NVARCHAR(50);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'commentTimestamp') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD commentTimestamp DATETIME;`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'processedAt') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD processedAt DATETIME;`,
+    ];
+    for (const q of alterQueries) {
+      try { await p.request().query(q); } catch { /* column may already exist */ }
+    }
   }
 
   async truncateUatTables(): Promise<{ truncated: string[] }> {
