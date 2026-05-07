@@ -54,6 +54,21 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
     Write-Host ""
 
+    # ── Build nova-mcp ────────────────────────────────────────────────────────
+    Write-Host "[2.5/4] Building nova-mcp..." -ForegroundColor Yellow
+    $mcpDir = Join-Path $AppDir "nova-mcp"
+    if (Test-Path $mcpDir) {
+        Push-Location $mcpDir
+        npm ci
+        if ($LASTEXITCODE -ne 0) { throw "nova-mcp npm install failed" }
+        npm run build
+        if ($LASTEXITCODE -ne 0) { throw "nova-mcp build failed" }
+        Pop-Location
+    } else {
+        Write-Host "nova-mcp directory not found — skipping" -ForegroundColor DarkYellow
+    }
+    Write-Host ""
+
     # ── Build ────────────────────────────────────────────────────────────────
     Write-Host "[3/4] Building client + server..." -ForegroundColor Yellow
     npm run build
