@@ -3,6 +3,7 @@ import type { HybridActionMatch, HybridActionResult } from './agent-types.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { executeAndGetId } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+import { isBusinessDay } from '../utils/business-hours.js';
 
 const TPJ_PROJECT_ID = '11808';
 const QUICK_RESOLVE_TRANSITION_ID = '17';
@@ -19,22 +20,53 @@ export class PluginToTpjExecutor {
   async execute(match: HybridActionMatch): Promise<HybridActionResult> {
     const { ticketKey, summary, description } = match;
 
-    try {
-      // 1. Get labels from original ticket
-      const original = await this.jiraClient.getIssue(ticketKey, ['labels']);
-      const labels: string[] = (original?.fields?.labels as string[]) ?? [];
+    // On weekends and bank holidays, only close the original — don't create TPJ ticket
+    if (!isBusinessDay(new Date())) {
+      console.log(`[plugin-to-tpj] Non-business day — closing ${ticketKey} without creating TPJ ticket`);
+      try {
+        const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+        if (novaAccountId) {
+          await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
+        }
+        const { fields, comment } = buildResolveFields({
+          tldr: 'Plugin notification received outside business hours — closed automatically by NOVA',
+          resolution: 'No Fault Found',
+          comment: 'This plugin notification was received outside business hours. It has been closed automatically. If the issue persists, a new ticket will be created on the next business day.',
+        });
+        await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment });
+        if (novaAccountId) {
+          await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
+        }
+      } catch (err) {
+        console.error(`[plugin-to-tpj] Failed to close ${ticketKey} on non-business day:`, err instanceof Error ? err.message : err);
+      }
+      return {
+        success: true,
+        actionId: 'plugin_to_tpj',
+        ticketKey,
+        detail: 'Non-business day — original closed without TPJ clone',
+      };
+    }
 
-      // 2. Create ticket in TPJ
-      const truncatedDesc = (description || '').slice(0, 5000);
+    try {
+      // 1. Get labels and description (ADF) from original ticket
+      const original = await this.jiraClient.getIssue(ticketKey, ['labels', 'description']);
+      const labels: string[] = (original?.fields?.labels as string[]) ?? [];
+      const originalDescription = original?.fields?.description;
+
+      // 2. Create ticket in TPJ — preserve original ADF formatting
+      const adfDescription = originalDescription && typeof originalDescription === 'object'
+        ? originalDescription
+        : {
+            type: 'doc',
+            version: 1,
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: (description || '').slice(0, 5000) || 'No description provided.' }] }],
+          };
       const created = await this.jiraClient.createIssue({
         fields: {
           project: { id: TPJ_PROJECT_ID },
           summary,
-          description: {
-            type: 'doc',
-            version: 1,
-            content: [{ type: 'paragraph', content: [{ type: 'text', text: truncatedDesc || 'No description provided.' }] }],
-          },
+          description: adfDescription,
           issuetype: { name: 'Support' },
           ...(labels.length > 0 ? { labels } : {}),
         },
@@ -66,7 +98,7 @@ export class PluginToTpjExecutor {
         { internal: false },
       );
 
-      // 5. Assign to NOVA, then transition to Resolved with all required fields in one call
+      // 5. Assign to NOVA, transition to Resolved, then re-assign (in case transition resets assignee)
       let resolveError: string | null = null;
       try {
         const novaAccountId = this.settings.get('nova_ai_jira_account_id');
@@ -79,6 +111,10 @@ export class PluginToTpjExecutor {
           comment: `This ticket has been automatically cloned to ${newKey} in the Third-Party Jira project. The original is being resolved as the plugin issue will be tracked there.`,
         });
         await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment });
+        // Re-assign after transition in case it resets assignee
+        if (novaAccountId) {
+          await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
+        }
         console.log(`[plugin-to-tpj] Resolved original ${ticketKey}`);
       } catch (err) {
         const statusCode = (err as any)?.statusCode ?? (err as any)?.status ?? 'N/A';

@@ -427,15 +427,32 @@ export class AutoRulesEngine {
 
   private async handleSetTier(
     ticketKey: string,
-    action: { type: 'set_tier'; tier: string; note: string },
+    action: { type: 'set_tier'; tier: string; note: string; requestType?: string; priority?: string },
     rule: AutoRule,
   ): Promise<void> {
     const tierId = TIER_IDS[action.tier];
     if (!tierId) throw new Error(`Unknown tier '${action.tier}' — valid: ${Object.keys(TIER_IDS).join(', ')}`);
 
-    await this.jiraClient.updateFields(ticketKey, {
+    const updatePayload: Record<string, unknown> = {
       [CF_CURRENT_TIER]: { id: tierId },
-    });
+    };
+
+    if (action.priority) {
+      updatePayload.priority = { name: action.priority };
+    }
+
+    await this.jiraClient.updateFields(ticketKey, updatePayload);
+
+    // Request type in JSM is set via a separate field (customfield_10010)
+    if (action.requestType) {
+      try {
+        await this.jiraClient.updateFields(ticketKey, {
+          issuetype: { name: action.requestType },
+        });
+      } catch (err) {
+        console.warn(`[auto-rules] Failed to set request type '${action.requestType}' on ${ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
 
     await this.jiraClient.addComment(
       ticketKey,

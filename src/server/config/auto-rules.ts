@@ -48,6 +48,8 @@ const SetTierAction = z.object({
   type: z.literal('set_tier'),
   tier: z.string(),
   note: z.string(),
+  requestType: z.string().optional(),
+  priority: z.string().optional(),
 });
 
 const PluginToTpjAction = z.object({
@@ -167,9 +169,20 @@ const RULES_RAW: unknown[] = [
   {
     id: 'mwu-tier-2',
     match: {
-      subject: { equals: 'MWU Live Morning Report' },
+      subject: {
+        startsWithAny: [
+          'MWU Live Morning Report',
+          'BriefYourMarket Scheduled Report: DW check',
+        ],
+      },
     },
-    action: { type: 'set_tier', tier: 'Tier 2', note: 'MWU morning report routed to Tier 2.' },
+    action: {
+      type: 'set_tier',
+      tier: 'Tier 2',
+      requestType: 'Incident',
+      priority: 'Critical',
+      note: 'MWU/DW check report routed to Tier 2 as Critical Incident.',
+    },
   },
   {
     id: 'cia-letter-dedup',

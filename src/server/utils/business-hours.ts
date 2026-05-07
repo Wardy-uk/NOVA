@@ -36,7 +36,7 @@ function isBankHoliday(d: Date): boolean {
   return UK_BANK_HOLIDAYS.has(dateToYMD(d));
 }
 
-function isBusinessDay(d: Date): boolean {
+export function isBusinessDay(d: Date): boolean {
   return !isWeekend(d) && !isBankHoliday(d);
 }
 
