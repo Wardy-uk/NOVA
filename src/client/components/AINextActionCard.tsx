@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { PendingDecision } from '../hooks/useMyTicketsQueue.js';
 
 type NextActionState = 'action_ready' | 'waiting' | 'stalled' | 'no_context';
 
@@ -22,6 +23,8 @@ interface NextActionData {
 interface Props {
   ticketKey: string;
   compact?: boolean;
+  pendingDecision?: PendingDecision | null;
+  onDecisionActioned?: () => void;
   onTransition?: (transitionName: string) => void;
   onEscalate?: (context: { headline: string; body: string }) => void;
   onHoldingUpdate?: () => void;
@@ -42,12 +45,16 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` };
 }
 
-export function AINextActionCard({ ticketKey, compact, onTransition, onEscalate, onHoldingUpdate, onCloseTicket, onRoute, onChase, onStuckHelper }: Props) {
+export function AINextActionCard({ ticketKey, compact, pendingDecision, onDecisionActioned, onTransition, onEscalate, onHoldingUpdate, onCloseTicket, onRoute, onChase, onStuckHelper }: Props) {
   const [data, setData] = useState<NextActionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showWhy, setShowWhy] = useState(false);
   const [runningAgent, setRunningAgent] = useState(false);
+  const [decisionActing, setDecisionActing] = useState(false);
+  const [decisionResult, setDecisionResult] = useState<string | null>(null);
+  const [showDeclineInput, setShowDeclineInput] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
 
   useEffect(() => {
     if (!ticketKey) return;
@@ -74,6 +81,37 @@ export function AINextActionCard({ ticketKey, compact, onTransition, onEscalate,
       </div>
     );
   }
+
+  const handleDecisionAction = async (action: 'confirm' | 'execute' | 'decline') => {
+    if (!pendingDecision) return;
+    if (action === 'decline' && !declineReason.trim()) return;
+    setDecisionActing(true);
+    try {
+      const r = await fetch(`/api/agent/decisions/${pendingDecision.id}/decide`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          ...(action === 'decline' ? { declineReason: declineReason.trim() } : {}),
+        }),
+      });
+      const json = await r.json();
+      if (!json.ok) throw new Error(json.error || 'Failed');
+      const msgs: Record<string, string> = {
+        confirm: 'Confirmed',
+        execute: 'Executed',
+        decline: 'Declined',
+      };
+      setDecisionResult(msgs[action]);
+      setShowDeclineInput(false);
+      setDeclineReason('');
+      if (onDecisionActioned) setTimeout(onDecisionActioned, 800);
+    } catch {
+      setDecisionResult('Error');
+    } finally {
+      setDecisionActing(false);
+    }
+  };
 
   if (error || !data) return null;
 
@@ -128,6 +166,111 @@ export function AINextActionCard({ ticketKey, compact, onTransition, onEscalate,
   };
 
   return (
+    <div className="space-y-3">
+      {/* Pending AI Decision Banner */}
+      {pendingDecision && !decisionResult && (
+        <div
+          className="rounded-2xl overflow-hidden p-4"
+          style={{ background: 'rgba(94,193,202,0.08)', border: '1px solid rgba(94,193,202,0.25)' }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-sm">💡</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#5ec1ca]">
+              AI Draft Ready — Review Needed
+            </span>
+            {pendingDecision.shadowMode && (
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-purple-900/60 text-purple-300 border border-purple-700/40">SHADOW</span>
+            )}
+            <span className="ml-auto text-[10px] text-neutral-500">
+              {Math.round(pendingDecision.confidence * 100)}% confidence
+              {pendingDecision.category ? ` · ${pendingDecision.category}` : ''}
+            </span>
+          </div>
+          {pendingDecision.draftPreview && (
+            <div className="text-[12px] text-neutral-300 leading-relaxed mb-3 line-clamp-3">
+              {pendingDecision.draftPreview}
+            </div>
+          )}
+          {!showDeclineInput ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              {pendingDecision.shadowMode ? (
+                <>
+                  <button
+                    onClick={() => handleDecisionAction('confirm')}
+                    disabled={decisionActing}
+                    className="px-3 py-1.5 text-[11px] rounded-lg font-bold transition-colors disabled:opacity-40 bg-green-600/20 text-green-400 border border-green-600/30 hover:bg-green-600/30"
+                    title="AI was correct — no Jira action"
+                  >
+                    {decisionActing ? 'Processing…' : 'Confirm Correct'}
+                  </button>
+                  <button
+                    onClick={() => handleDecisionAction('execute')}
+                    disabled={decisionActing}
+                    className="px-3 py-1.5 text-[11px] rounded-lg font-bold transition-colors disabled:opacity-40 text-[#0f172a]"
+                    style={{ background: '#5ec1ca', boxShadow: '0 2px 8px rgba(94,193,202,0.4)' }}
+                    title="Execute this action on Jira now"
+                  >
+                    {decisionActing ? 'Processing…' : 'Execute Action'}
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => handleDecisionAction('execute')}
+                  disabled={decisionActing}
+                  className="px-3 py-1.5 text-[11px] rounded-lg font-bold transition-colors disabled:opacity-40 text-[#0f172a]"
+                  style={{ background: '#10b981', boxShadow: '0 2px 8px rgba(16,185,129,0.4)' }}
+                >
+                  {decisionActing ? 'Processing…' : 'Approve'}
+                </button>
+              )}
+              <button
+                onClick={() => setShowDeclineInput(true)}
+                disabled={decisionActing}
+                className="px-3 py-1.5 text-[11px] rounded-lg font-semibold text-red-400 border border-red-600/30 hover:bg-red-600/20 transition-colors disabled:opacity-40"
+              >
+                Decline
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <textarea
+                value={declineReason}
+                onChange={e => setDeclineReason(e.target.value)}
+                placeholder="Reason for declining (required)…"
+                className="w-full bg-[#272C33] border border-[#3a424d] text-neutral-200 text-[11px] rounded p-2 resize-y min-h-[50px] focus:outline-none focus:border-red-500/50"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDecisionAction('decline')}
+                  disabled={decisionActing || !declineReason.trim()}
+                  className="px-3 py-1.5 text-[11px] rounded-lg font-bold bg-red-600/20 text-red-400 border border-red-600/30 hover:bg-red-600/30 transition-colors disabled:opacity-40"
+                >
+                  {decisionActing ? 'Processing…' : 'Confirm Decline'}
+                </button>
+                <button
+                  onClick={() => { setShowDeclineInput(false); setDeclineReason(''); }}
+                  className="px-3 py-1.5 text-[11px] rounded-lg font-semibold text-neutral-400 hover:text-neutral-200 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {decisionResult && (
+        <div
+          className="rounded-2xl overflow-hidden p-3 text-center text-[12px] font-semibold"
+          style={{
+            background: decisionResult === 'Declined' ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)',
+            border: `1px solid ${decisionResult === 'Declined' ? 'rgba(239,68,68,0.25)' : 'rgba(16,185,129,0.25)'}`,
+            color: decisionResult === 'Declined' ? '#ef4444' : '#10b981',
+          }}
+        >
+          {decisionResult === 'Executed' ? 'Executed [OVERRIDE]' : decisionResult}
+        </div>
+      )}
+
     <div
       className={`rounded-2xl overflow-hidden ${compact ? 'p-3' : 'p-5'}`}
       style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}
@@ -212,6 +355,7 @@ export function AINextActionCard({ ticketKey, compact, onTransition, onEscalate,
           If you see this frequently, check the agent pipeline for failures.
         </div>
       )}
+    </div>
     </div>
   );
 }

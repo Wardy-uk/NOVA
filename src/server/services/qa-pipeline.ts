@@ -283,29 +283,7 @@ export class QaPipeline {
          @ticketType, @ticketPriority, SYSUTCDATETIME(), GETUTCDATE())
     `);
 
-    const grRequest = p.request();
-    grRequest.input('issueKey', sql.NVarChar, issue.key);
-    grRequest.input('overallScore', sql.Float, qa.overallScore);
-    const gr = qa.goldenRules;
-    grRequest.input('rule1Score', sql.Float, gr.ownership);
-    grRequest.input('rule2Score', sql.Float, gr.nextAction);
-    grRequest.input('rule3Score', sql.Float, gr.timeframe);
-    grRequest.input('rule1Pass', sql.Bit, gr.ownership >= 2 ? 1 : 0);
-    grRequest.input('rule2Pass', sql.Bit, gr.nextAction >= 2 ? 1 : 0);
-    grRequest.input('rule3Pass', sql.Bit, gr.timeframe >= 2 ? 1 : 0);
-    grRequest.input('summary', sql.NVarChar, qa.summary.slice(0, 2000));
-    grRequest.input('assignee', sql.NVarChar, assignee);
-
-    await grRequest.query(`
-      INSERT INTO dbo.Jira_QA_GoldenRules${s}
-        (IssueKey, OverallScore, Rule1Score, Rule2Score, Rule3Score,
-         rule1Pass, rule2Pass, rule3Pass, Summary, Assignee, CreatedAt)
-      VALUES
-        (@issueKey, @overallScore, @rule1Score, @rule2Score, @rule3Score,
-         @rule1Pass, @rule2Pass, @rule3Pass, @summary, @assignee, GETUTCDATE())
-    `);
-
-    // agent_coaching bridge removed — coaching dashboard now reads from jira_qa_results directly
+    // Golden rules table is the GR pipeline's responsibility — QA pipeline only writes to jira_qa_results
   }
 
   private extractText(adf: any): string {

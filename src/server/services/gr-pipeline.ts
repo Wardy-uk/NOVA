@@ -91,6 +91,9 @@ export class GrPipeline {
 
       const passThreshold = await this.getPassThreshold(p, s);
       const agentKeys = await this.getAgentKeys(p);
+      console.log(`[gr-pipeline] Loaded ${agentKeys.size} agent keys (raw unique count)`);
+
+      let skippedNoId = 0, skippedDate = 0, skippedInternal = 0, skippedCustomer = 0, skippedBot = 0, skippedNotAgent = 0, skippedAlready = 0, skippedEmpty = 0, eligible = 0;
 
       for (const issue of issues) {
         const fields = issue.fields as any;
@@ -101,13 +104,26 @@ export class GrPipeline {
 
         for (const comment of comments) {
           try {
-            if (!this.isEligibleComment(comment, windowStart, windowEnd, agentKeys)) continue;
+            const filterResult = this.classifyComment(comment, windowStart, windowEnd, agentKeys);
+            if (filterResult === 'no_id') { skippedNoId++; continue; }
+            if (filterResult === 'date') { skippedDate++; continue; }
+            if (filterResult === 'internal') { skippedInternal++; continue; }
+            if (filterResult === 'customer') { skippedCustomer++; continue; }
+            if (filterResult === 'bot') { skippedBot++; continue; }
+            if (filterResult === 'not_agent') {
+              if (skippedNotAgent < 3) {
+                const accountId = comment.author?.accountId ?? '';
+                console.log(`[gr-pipeline] Agent key miss: accountId="${accountId}", agentKeys sample: [${[...agentKeys].slice(0, 3).join(', ')}]`);
+              }
+              skippedNotAgent++;
+              continue;
+            }
 
             const alreadyScored = await this.isAlreadyScored(p, s, issue.key, comment.id);
-            if (alreadyScored) continue;
+            if (alreadyScored) { skippedAlready++; continue; }
 
             const commentBody = this.extractText(comment.body);
-            if (!commentBody.trim()) continue;
+            if (!commentBody.trim()) { skippedEmpty++; continue; }
 
             const agentEmail = await this.lookupAgentEmail(p, comment.author?.accountId);
 
@@ -127,6 +143,7 @@ export class GrPipeline {
               commentTimestamp: comment.created ? new Date(comment.created) : new Date(),
               passThreshold,
             });
+            eligible++;
             rowsAffected++;
           } catch (err) {
             console.warn(`[gr-pipeline] Failed to score ${issue.key}/${comment.id}:`, err instanceof Error ? err.message : err);
@@ -134,6 +151,8 @@ export class GrPipeline {
         }
       }
 
+      const totalComments = skippedNoId + skippedDate + skippedInternal + skippedCustomer + skippedBot + skippedNotAgent + skippedAlready + skippedEmpty + eligible;
+      console.log(`[gr-pipeline] Comment filter stats: ${totalComments} total, ${eligible} eligible, skipped: noId=${skippedNoId} date=${skippedDate} internal=${skippedInternal} customer=${skippedCustomer} bot=${skippedBot} notAgent=${skippedNotAgent} already=${skippedAlready} empty=${skippedEmpty}`);
       console.log(`[gr-pipeline] Scored ${rowsAffected} comments from ${issues.length} issues → ${s || 'live'}`);
       await this.logRun(started, 'success', rowsAffected);
       return rowsAffected;
@@ -144,31 +163,32 @@ export class GrPipeline {
     }
   }
 
-  private isEligibleComment(
+  private classifyComment(
     comment: any,
     windowStart: Date,
     windowEnd: Date,
     agentKeys: Set<string>,
-  ): boolean {
-    if (!comment.id) return false;
+  ): 'eligible' | 'no_id' | 'date' | 'internal' | 'customer' | 'bot' | 'not_agent' {
+    if (!comment.id) return 'no_id';
 
     const created = comment.created ? new Date(comment.created) : null;
-    if (!created || created < windowStart || created >= windowEnd) return false;
+    if (!created || created < windowStart || created >= windowEnd) return 'date';
 
-    if (comment.jsdPublic === false) return false;
+    if (comment.jsdPublic === false) return 'internal';
 
     const authorType = comment.author?.accountType;
-    if (authorType === 'customer') return false;
+    if (authorType === 'customer') return 'customer';
 
     const displayName = (comment.author?.displayName ?? '').toLowerCase();
-    if (BOT_PATTERNS.some(pat => displayName.includes(pat))) return false;
+    if (BOT_PATTERNS.some(pat => displayName.includes(pat))) return 'bot';
 
     const accountId = comment.author?.accountId ?? '';
-    if (!accountId) return false;
+    if (!accountId) return 'no_id';
     const encodedId = accountId.replace(/:/g, '%3A');
-    if (!agentKeys.has(accountId) && !agentKeys.has(encodedId)) return false;
+    const decodedId = accountId.replace(/%3A/gi, ':');
+    if (!agentKeys.has(accountId) && !agentKeys.has(encodedId) && !agentKeys.has(decodedId)) return 'not_agent';
 
-    return true;
+    return 'eligible';
   }
 
   private async getPassThreshold(p: sql.ConnectionPool, suffix: string): Promise<number> {

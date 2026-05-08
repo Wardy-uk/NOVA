@@ -486,7 +486,7 @@ function TicketDetailPanel({ ticketKey, ticket, onDefer, onRefreshQueue }: {
         {/* Left: Brief + AI */}
         <div className="space-y-4">
           <TicketBriefCard {...briefProps} />
-          <AINextActionCard ticketKey={ticketKey} />
+          <AINextActionCard ticketKey={ticketKey} pendingDecision={ticket.pendingDecision} onDecisionActioned={onRefreshQueue} />
         </div>
 
         {/* Right: Activity + Comments + Actions */}

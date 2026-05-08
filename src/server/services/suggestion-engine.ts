@@ -423,7 +423,7 @@ export class SuggestionEngine {
       `SELECT
          JSON_VALUE(inputs, '$.classification.category') as category,
          COUNT(*) as total,
-         SUM(CASE WHEN outcome LIKE '%Approved%' OR outcome LIKE '%success%' THEN 1 ELSE 0 END) as approved,
+         SUM(CASE WHEN outcome LIKE '%Approved%' OR outcome LIKE '%success%' OR approval_status IN ('approved', 'confirmed', 'executed') THEN 1 ELSE 0 END) as approved,
          AVG(confidence) as avg_conf
        FROM agent_decisions
        WHERE created_at >= DATEADD(day, -90, GETUTCDATE())
@@ -466,7 +466,7 @@ export class SuggestionEngine {
       const rows = await query<{ total: number; approved: number; declined: number }>(
         `SELECT
            COUNT(*) as total,
-           SUM(CASE WHEN outcome LIKE '%Approved%' OR outcome LIKE '%success%' OR outcome LIKE '%auto%' THEN 1 ELSE 0 END) as approved,
+           SUM(CASE WHEN outcome LIKE '%Approved%' OR outcome LIKE '%success%' OR outcome LIKE '%auto%' OR approval_status IN ('approved', 'confirmed', 'executed') THEN 1 ELSE 0 END) as approved,
            SUM(CASE WHEN outcome LIKE '%Declined%' OR outcome LIKE '%rejected%' THEN 1 ELSE 0 END) as declined
          FROM agent_decisions
          WHERE JSON_VALUE(inputs, '$.classification.category') = ?
@@ -572,7 +572,7 @@ export class SuggestionEngine {
 
     const statsRows = await query<{ approved: number; declined: number; avg_conf: number; min_conf: number; total: number }>(
       `SELECT
-         SUM(CASE WHEN outcome LIKE '%Approved%' OR outcome LIKE '%success%' OR outcome LIKE '%auto%' THEN 1 ELSE 0 END) as approved,
+         SUM(CASE WHEN outcome LIKE '%Approved%' OR outcome LIKE '%success%' OR outcome LIKE '%auto%' OR approval_status IN ('approved', 'confirmed', 'executed') THEN 1 ELSE 0 END) as approved,
          SUM(CASE WHEN outcome LIKE '%Declined%' OR outcome LIKE '%rejected%' OR outcome LIKE '%edited%' THEN 1 ELSE 0 END) as declined,
          AVG(confidence) as avg_conf,
          MIN(confidence) as min_conf,

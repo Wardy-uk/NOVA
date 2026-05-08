@@ -2,7 +2,7 @@ import { Router } from 'express';
 import sql from 'mssql';
 import { requireRole, requireSuperAdmin } from '../middleware/auth.js';
 import type { AgentLoop } from '../services/agent-loop.js';
-import { query, execute } from '../services/database.js';
+import { query, execute, queryOne } from '../services/database.js';
 import { recordEvent, type AgentEvent } from '../services/agent-events.js';
 import { MODEL_PRICING } from '../services/llm-service.js';
 import { resolveStatusName, resolveStatusFromCache } from '../utils/jira-status.js';
@@ -3230,9 +3230,9 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid ID' }); return; }
 
-    const { action, declineReason } = req.body;
-    if (!action || !['approve', 'decline'].includes(action)) {
-      res.status(400).json({ ok: false, error: 'action must be "approve" or "decline"' });
+    const { action, declineReason, editedResponse } = req.body;
+    if (!action || !['approve', 'confirm', 'execute', 'decline'].includes(action)) {
+      res.status(400).json({ ok: false, error: 'action must be "approve", "confirm", "execute", or "decline"' });
       return;
     }
     if (action === 'decline' && (!declineReason || !declineReason.trim())) {
@@ -3240,8 +3240,14 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       return;
     }
 
+    const statusMap: Record<string, string> = {
+      approve: 'approved',
+      confirm: 'confirmed',
+      execute: 'executed',
+      decline: 'declined',
+    };
     const user = (req as any).user;
-    const newStatus = action === 'approve' ? 'approved' : 'declined';
+    const newStatus = statusMap[action];
 
     try {
       const rows = await query<{ ticket_id: string; approval_status: string | null }>(
@@ -3254,8 +3260,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       }
 
       await execute(
-        `UPDATE agent_decisions SET approval_status = ?, resolved_at = GETUTCDATE() WHERE id = ?`,
-        [newStatus, id],
+        `UPDATE agent_decisions SET approval_status = ?, resolved_at = GETUTCDATE(), resolved_by = ? WHERE id = ?`,
+        [newStatus, user.username, id],
       );
 
       // Also update matching approval_queue entry if one exists
@@ -3266,6 +3272,53 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
           [newStatus, user.username, action === 'decline' ? declineReason.trim() : null, ticketId],
         );
       } catch { /* approval_queue may not have a matching entry */ }
+
+      // Enhanced hybrid: feed learning loop for confirm/execute
+      if (action === 'confirm' || action === 'execute') {
+        const fullDecision = await queryOne<{ ticket_id: string; output: string; shadow_mode: number; action: string }>(
+          `SELECT ticket_id, output, shadow_mode, action FROM agent_decisions WHERE id = ?`, [id],
+        );
+        if (fullDecision) {
+          let output: any = {};
+          try { output = JSON.parse(fullDecision.output || '{}'); } catch { /* best effort */ }
+          const category = output.classification?.category ?? 'unknown';
+
+          try {
+            await execute(
+              `INSERT INTO ai_learnings (ticket_key, category, ai_draft, learning, submitted_by)
+               VALUES (?, ?, ?, ?, ?)`,
+              [
+                fullDecision.ticket_id,
+                category,
+                (output.draft_response ?? '').slice(0, 2000),
+                action === 'confirm'
+                  ? `Shadow decision confirmed as correct. Action: ${fullDecision.action}. Category: ${category}.`
+                  : `Shadow decision executed by human override. Action: ${fullDecision.action}. Category: ${category}.`,
+                user.username,
+              ],
+            );
+          } catch { /* best effort */ }
+
+          // Execute the Jira action only for 'execute'
+          if (action === 'execute') {
+            const draftResponse = output.draft_response || '';
+            if (draftResponse) {
+              try {
+                await agentLoop.handleApprovalCallback(
+                  'approve',
+                  fullDecision.ticket_id,
+                  undefined,
+                  editedResponse || draftResponse,
+                  user.username,
+                );
+                console.log(`[agent] Enhanced hybrid execute: ${fullDecision.ticket_id} by ${user.username}`);
+              } catch (err) {
+                console.warn(`[agent] Execute callback failed for ${fullDecision.ticket_id}:`, err instanceof Error ? err.message : err);
+              }
+            }
+          }
+        }
+      }
 
       res.json({ ok: true, data: { id, status: newStatus } });
     } catch (err) {

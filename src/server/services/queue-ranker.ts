@@ -33,6 +33,16 @@ export interface TicketFields {
   agentNextUpdate: string | null;
 }
 
+export interface PendingDecision {
+  id: number;
+  action: string;
+  confidence: number;
+  shadowMode: boolean;
+  draftPreview: string | null;
+  category: string | null;
+  createdAt: string;
+}
+
 export interface RankedTicket {
   ticketKey: string;
   score: number;
@@ -40,6 +50,7 @@ export interface RankedTicket {
   rankReason: string;
   fields: TicketFields;
   nextAction?: NextAction;
+  pendingDecision?: PendingDecision | null;
 }
 
 export interface QueueResult {
@@ -52,6 +63,7 @@ interface RankingWeights {
   sla_breach_imminent: number;
   next_update_elapsed: number;
   customer_reply_no_response: number;
+  pending_ai_decision: number;
   last_comment_stale: number;
   ai_action_ready: number;
   ai_stalled: number;
@@ -62,6 +74,7 @@ interface RankingWeights {
 const DEFAULT_WEIGHTS: RankingWeights = {
   sla_breach_imminent: 100,
   next_update_elapsed: 95,
+  pending_ai_decision: 80,
   customer_reply_no_response: 80,
   last_comment_stale: 70,
   ai_action_ready: 50,
@@ -134,13 +147,52 @@ export class QueueRanker {
     );
     const hygieneKeys = new Set(hygieneRows.map(r => r.ticket_key));
 
+    // Load pending AI decisions for all tickets in one query
+    const pendingDecisionRows = await query<{
+      ticket_id: string; id: number; action: string; confidence: number;
+      shadow_mode: number; draft_preview: string | null; category: string | null; created_at: string;
+    }>(
+      `SELECT d.ticket_id, d.id, d.action, d.confidence, d.shadow_mode,
+              CAST(JSON_VALUE(d.output, '$.draft_response') AS NVARCHAR(200)) as draft_preview,
+              JSON_VALUE(d.output, '$.classification.category') as category,
+              d.created_at
+       FROM agent_decisions d
+       WHERE d.approval_required = 1
+         AND (d.approval_status IS NULL OR d.approval_status = 'pending')
+       ORDER BY d.created_at DESC`,
+    );
+    const pendingByTicket = new Map<string, PendingDecision>();
+    for (const row of pendingDecisionRows) {
+      if (!pendingByTicket.has(row.ticket_id)) {
+        pendingByTicket.set(row.ticket_id, {
+          id: row.id,
+          action: row.action,
+          confidence: row.confidence,
+          shadowMode: !!row.shadow_mode,
+          draftPreview: row.draft_preview?.slice(0, 200) ?? null,
+          category: row.category,
+          createdAt: row.created_at,
+        });
+      }
+    }
+
     const ranked: RankedTicket[] = [];
     const w = this.weights;
 
     for (const issue of issues) {
       if (deferredKeys.has(issue.issue_key)) continue;
 
+      const hasPendingDecision = pendingByTicket.has(issue.issue_key);
       const signals = await this.computeSignals(issue, w);
+
+      if (hasPendingDecision) {
+        signals.push({
+          signal: 'pending_ai_decision',
+          score: w.pending_ai_decision,
+          reason: 'AI draft ready for review',
+        });
+      }
+
       const totalScore = signals.reduce((sum, s) => sum + s.score, 0);
 
       const topSignal = signals.sort((a, b) => b.score - a.score)[0];
@@ -155,6 +207,7 @@ export class QueueRanker {
         band,
         rankReason,
         fields: issueToFields(issue),
+        pendingDecision: pendingByTicket.get(issue.issue_key) ?? null,
       });
     }
 

@@ -21,6 +21,16 @@ export interface TicketFields {
   agentNextUpdate: string | null;
 }
 
+export interface PendingDecision {
+  id: number;
+  action: string;
+  confidence: number;
+  shadowMode: boolean;
+  draftPreview: string | null;
+  category: string | null;
+  createdAt: string;
+}
+
 export interface RankedTicket {
   ticketKey: string;
   score: number;
@@ -34,6 +44,7 @@ export interface RankedTicket {
     primaryAction: { label: string; jiraTransition: string | null };
     generatedAt: string;
   };
+  pendingDecision?: PendingDecision | null;
 }
 
 export interface QueueResult {

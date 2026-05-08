@@ -1066,14 +1066,7 @@ export class AgentLoop {
 
     if (action === 'approve' || action === 'approved') {
       if (this.isShadowMode()) {
-        console.log(`[agent] [SHADOW] Approval received for ${ticketKey} but shadow mode is active — not posting public comment.`);
-        if (decisionId) {
-          await this.observer.logOutcome(decisionId, {
-            success: true, action: 'draft_response', ticketKey,
-            detail: `[SHADOW] Approved by human but shadow mode blocked posting. Edited: ${editedResponse ? 'yes' : 'no'}`,
-          });
-        }
-        return;
+        console.log(`[agent] Enhanced hybrid: executing ${ticketKey} despite shadow mode — human override by ${decidedBy}`);
       }
       const responseText = editedResponse || '';
       if (responseText) {

@@ -218,7 +218,7 @@ export class DriftDetector {
     const decisionRows = await query<{ total: number; approved: number; declined: number }>(
       `SELECT
          COUNT(*) as total,
-         SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as approved,
+         SUM(CASE WHEN approval_status IN ('approved', 'confirmed', 'executed') THEN 1 ELSE 0 END) as approved,
          SUM(CASE WHEN approval_status = 'declined' THEN 1 ELSE 0 END) as declined
        FROM agent_decisions
        WHERE call_type = ?

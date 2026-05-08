@@ -2586,7 +2586,7 @@ export class ApprovalQueries {
   private async getNovaDecisions(status?: string): Promise<ApprovalItem[]> {
     let where = 'WHERE d.approval_required = 1';
     if (status === 'pending') where += ` AND (d.approval_status IS NULL OR d.approval_status = 'pending')`;
-    else if (status === 'approved') where += ` AND d.approval_status = 'approved'`;
+    else if (status === 'approved') where += ` AND d.approval_status IN ('approved', 'confirmed', 'executed')`;
     else if (status === 'declined') where += ` AND d.approval_status = 'declined'`;
     else if (status === 'timed_out' || status === 'cancelled') return [];
     const rows = await query<Record<string, unknown>>(
@@ -2680,13 +2680,13 @@ export class ApprovalQueries {
     const nRow = await queryOne<Record<string, unknown>>(`
       SELECT
         SUM(CASE WHEN approval_status IS NULL OR approval_status = 'pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN approval_status IN ('approved', 'confirmed', 'executed') THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN approval_status = 'declined' THEN 1 ELSE 0 END) as declined,
         SUM(CASE WHEN approval_status = 'declined' AND resolved_at >= CAST(GETUTCDATE() AS DATE)
             AND (resolved_by IS NULL OR resolved_by NOT IN ('system', 'system-sla', 'system-cleanup', 'NOVA-lifecycle')) THEN 1 ELSE 0 END) as declined_today,
-        SUM(CASE WHEN approval_status IN ('approved', 'declined') AND resolved_at >= CAST(GETUTCDATE() AS DATE)
+        SUM(CASE WHEN approval_status IN ('approved', 'confirmed', 'executed', 'declined') AND resolved_at >= CAST(GETUTCDATE() AS DATE)
             AND (resolved_by IS NULL OR resolved_by NOT IN ('system', 'system-sla', 'system-cleanup')) THEN 1 ELSE 0 END) as today_decided,
-        SUM(CASE WHEN approval_status = 'approved' AND resolved_at >= CAST(GETUTCDATE() AS DATE)
+        SUM(CASE WHEN approval_status IN ('approved', 'confirmed', 'executed') AND resolved_at >= CAST(GETUTCDATE() AS DATE)
             AND resolved_by IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as system_approved_today,
         SUM(CASE WHEN approval_status = 'timed_out' AND resolved_at >= CAST(GETUTCDATE() AS DATE)
             AND resolved_by IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as system_expired_today
@@ -2834,13 +2834,13 @@ export class ApprovalQueries {
         GROUP BY CAST(decided_at AS DATE)
         UNION ALL
         SELECT CAST(resolved_at AS DATE) as date,
-          SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as approved,
+          SUM(CASE WHEN approval_status IN ('approved', 'confirmed', 'executed') THEN 1 ELSE 0 END) as approved,
           SUM(CASE WHEN approval_status = 'declined' THEN 1 ELSE 0 END) as declined,
           0 as timed_out,
           COUNT(*) as total_decisions
         FROM agent_decisions
         WHERE approval_required = 1
-          AND approval_status IN ('approved', 'declined')
+          AND approval_status IN ('approved', 'confirmed', 'executed', 'declined')
           AND resolved_at >= DATEADD(day, -?, GETUTCDATE())
         GROUP BY CAST(resolved_at AS DATE)
       ) combined
@@ -2862,11 +2862,11 @@ export class ApprovalQueries {
     `);
     const nRow = await queryOne<Record<string, unknown>>(`
       SELECT
-        SUM(CASE WHEN approval_status = 'approved' AND CAST(resolved_at AS DATE) = CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN approval_status IN ('approved', 'confirmed', 'executed') AND CAST(resolved_at AS DATE) = CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN approval_status = 'declined' AND CAST(resolved_at AS DATE) = CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) as declined,
         SUM(CASE WHEN approval_status IS NULL OR approval_status = 'pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as total_approved,
-        SUM(CASE WHEN approval_status IN ('approved', 'declined') THEN 1 ELSE 0 END) as total_decisions
+        SUM(CASE WHEN approval_status IN ('approved', 'confirmed', 'executed') THEN 1 ELSE 0 END) as total_approved,
+        SUM(CASE WHEN approval_status IN ('approved', 'confirmed', 'executed', 'declined') THEN 1 ELSE 0 END) as total_decisions
       FROM agent_decisions WHERE approval_required = 1
     `);
     const totalApproved = ((qRow?.total_approved as number) || 0) + ((nRow?.total_approved as number) || 0);
