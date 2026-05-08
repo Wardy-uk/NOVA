@@ -60,19 +60,27 @@ export class AbuseReportExecutor {
         console.warn(`[abuse-report] Failed to insert abuse log for ${ticketKey} (non-blocking):`, err instanceof Error ? err.message : err);
       }
 
-      // 2. Call stored procedure on Admin DB
-      try {
-        const adminPool = await this.externalDb.getAdminPool();
-        await adminPool.request()
-          .input('ContactID', parseInt(contactId, 10))
-          .input('InstanceID', parseInt(instanceId, 10))
-          .input('UserName', 'bym\\AbuseReport')
-          .execute('dbo.ProcessAbuseReport');
-        console.log(`[abuse-report] Stored procedure executed for ${ticketKey}`);
-      } catch (err) {
-        console.error(`[abuse-report] Stored procedure failed for ${ticketKey}:`, err);
-        await this.updateExternalLog(logId, 'sql_error', err);
-        return this.fail(ticketKey, 'ProcessAbuseReport stored procedure failed', err);
+      // 2. Call stored procedure on Admin DB (retry once with pool reset on connection failure)
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const adminPool = await this.externalDb.getAdminPool();
+          await adminPool.request()
+            .input('ContactID', parseInt(contactId, 10))
+            .input('InstanceID', parseInt(instanceId, 10))
+            .input('UserName', 'bym\\AbuseReport')
+            .execute('dbo.ProcessAbuseReport');
+          console.log(`[abuse-report] Stored procedure executed for ${ticketKey}`);
+          break;
+        } catch (err) {
+          if (attempt < 2) {
+            console.warn(`[abuse-report] Stored procedure attempt ${attempt} failed for ${ticketKey}, resetting pool and retrying:`, err instanceof Error ? err.message : err);
+            await this.externalDb.resetAdminPool();
+            continue;
+          }
+          console.error(`[abuse-report] Stored procedure failed for ${ticketKey} (attempt ${attempt}):`, err);
+          await this.updateExternalLog(logId, 'sql_error', err);
+          return this.fail(ticketKey, 'ProcessAbuseReport stored procedure failed', err);
+        }
       }
 
       // 3. Update log: SqlProcessed=1

@@ -503,7 +503,9 @@ export class AutoRulesEngine {
       requiresApproval: false,
     };
     const result = await this.pluginExecutor.execute(hybridMatch);
-    if (!result.success) throw new Error(result.detail);
+    if (!result.success) {
+      throw new Error(result.error ? `${result.detail}: ${result.error}` : result.detail);
+    }
   }
 
   private async handleAbuseReport(match: AutoRuleMatch, event: TicketEvent): Promise<void> {
@@ -533,7 +535,9 @@ export class AutoRulesEngine {
       requiresApproval: true,
     };
     const result = await this.abuseExecutor.executePhaseA(hybridMatch);
-    if (!result.success) throw new Error(result.detail);
+    if (!result.success) {
+      throw new Error(result.error ? `${result.detail}: ${result.error}` : result.detail);
+    }
   }
 
   private async logShadowDecision(match: AutoRuleMatch, event: TicketEvent, reason: string): Promise<void> {

@@ -29,7 +29,29 @@ export class ExternalDbService {
 
   async getAbuseReportPool(): Promise<sql.ConnectionPool> {
     if (this.abuseReportPool?.connected) return this.abuseReportPool;
+    return this.createAbuseReportPool();
+  }
 
+  async getAdminPool(): Promise<sql.ConnectionPool> {
+    if (this.adminPool?.connected) return this.adminPool;
+    return this.createAdminPool();
+  }
+
+  async resetAbuseReportPool(): Promise<void> {
+    if (this.abuseReportPool) {
+      try { await this.abuseReportPool.close(); } catch { /* ignore */ }
+      this.abuseReportPool = null;
+    }
+  }
+
+  async resetAdminPool(): Promise<void> {
+    if (this.adminPool) {
+      try { await this.adminPool.close(); } catch { /* ignore */ }
+      this.adminPool = null;
+    }
+  }
+
+  private async createAbuseReportPool(): Promise<sql.ConnectionPool> {
     const connStr = this.settings.get('abuse_report_db_connection');
     if (!connStr) throw new Error('abuse_report_db_connection not configured');
 
@@ -47,9 +69,7 @@ export class ExternalDbService {
     return this.abuseReportPool;
   }
 
-  async getAdminPool(): Promise<sql.ConnectionPool> {
-    if (this.adminPool?.connected) return this.adminPool;
-
+  private async createAdminPool(): Promise<sql.ConnectionPool> {
     const connStr = this.settings.get('abuse_report_admin_db_connection');
     if (!connStr) throw new Error('abuse_report_admin_db_connection not configured');
 
@@ -68,13 +88,7 @@ export class ExternalDbService {
   }
 
   async closeAll(): Promise<void> {
-    if (this.abuseReportPool) {
-      try { await this.abuseReportPool.close(); } catch { /* ignore */ }
-      this.abuseReportPool = null;
-    }
-    if (this.adminPool) {
-      try { await this.adminPool.close(); } catch { /* ignore */ }
-      this.adminPool = null;
-    }
+    await this.resetAbuseReportPool();
+    await this.resetAdminPool();
   }
 }
