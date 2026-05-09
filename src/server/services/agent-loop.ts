@@ -1163,6 +1163,7 @@ export class AgentLoop {
        LEFT JOIN agent_decisions d ON d.ticket_id = c.issue_key
        WHERE c.project_key IN (${projectPlaceholders})
          AND c.status_category != 'done'
+         AND (c.current_tier IS NULL OR c.current_tier != 'Development')
          AND d.id IS NULL
        ORDER BY c.jira_created DESC`,
       projects,
