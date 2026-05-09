@@ -24,9 +24,11 @@ import { AbuseReportExecutor } from './abuse-report-executor.js';
 import { AutoRulesEngine } from './auto-rules-engine.js';
 import { QuickWinExecutor } from './quick-win-executor.js';
 import { ExternalDbService } from './external-db.js';
-import { query } from './database.js';
+import { query, executeAndGetId } from './database.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
+import { createHash } from 'crypto';
+import type { AssignmentEngine, Pool } from './assignment-engine.js';
 
 function looksLikeStructuredPayload(text: string): boolean {
   const trimmed = text.trim();
@@ -79,6 +81,7 @@ export class AgentLoop {
   private settings: SettingsQueries;
   private approvalQueries: ApprovalQueries | null;
   private baseUrl: string;
+  private assignmentEngine: AssignmentEngine | null = null;
 
   constructor(
     jiraClient: JiraRestClient,
@@ -92,6 +95,7 @@ export class AgentLoop {
     this.perceiver = new Perceiver(jiraClient, settings, cache);
     this.reasoner = new Reasoner(llmService, this.kbSearch, this.autonomyEngine);
     this.actor = new Actor(jiraClient, new EscalationLogService(), settings);
+    this.actor.setLlmService(llmService);
     this.observer = new Observer();
     this.alertService = new AlertService(settings);
     llmService.setAlertService(this.alertService);
@@ -125,6 +129,10 @@ export class AgentLoop {
 
   setKbEmbedder(embedder: KbEmbedder): void {
     this.kbSearch.setEmbedder(embedder);
+  }
+
+  setAssignmentEngine(engine: AssignmentEngine): void {
+    this.assignmentEngine = engine;
   }
 
   getSettings(): SettingsQueries { return this.settings; }
@@ -593,6 +601,20 @@ export class AgentLoop {
       // Runs in all modes (shadow-only, no LLM budget concern outside hours)
       await this.runBackfillTriage();
 
+      // 8. EXTENDED SWEEPS (every Nth sweep tick, during working hours only)
+      if ((isFirstSweep || this.tickCount % sweepInterval === 0) && this.currentMode === 'full') {
+        await this.runApprovalSlaSweep();
+        await this.runPipelineHealthCheck();
+        await this.runChaseSweep(shadowMode);
+        await this.runUnassignedSweep();
+        await this.runPatternExtraction();
+
+        // Weekly memory compaction (every ~168th sweep ≈ weekly)
+        if (this.tickCount % (sweepInterval * 168) === 0) {
+          await this.runMemoryCompaction();
+        }
+      }
+
       this.lastTickAt = new Date();
       const tickDuration = Date.now() - tickStart;
       console.log(`[agent] Tick #${this.tickCount} complete — processed ${deduped.length} events (${tickDuration}ms)`);
@@ -714,6 +736,393 @@ export class AgentLoop {
     }
   }
 
+  // ── B1: Approval SLA sweep ──
+  private async runApprovalSlaSweep(): Promise<void> {
+    try {
+      const slaHours = this.getNumber('agent_approval_sla_hours', 4);
+      const autoAction = this.settings.get('agent_approval_auto_action') ?? 'decline';
+      const alertOnBreach = this.settings.get('agent_approval_alert_on_breach') !== 'false';
+
+      const overdue = await query<{ id: number; ticket_id: string; hours_waiting: number }>(
+        `SELECT id, ticket_id, DATEDIFF(hour, created_at, GETUTCDATE()) as hours_waiting
+         FROM agent_approvals
+         WHERE status = 'pending'
+           AND DATEDIFF(hour, created_at, GETUTCDATE()) >= ?`,
+        [slaHours],
+      );
+
+      if (overdue.length === 0) return;
+      console.log(`[agent] Approval SLA: ${overdue.length} overdue approvals found`);
+
+      for (const approval of overdue) {
+        try {
+          // Mark SLA breach timestamp
+          await executeAndGetId(
+            `UPDATE agent_approvals SET sla_breached_at = GETUTCDATE() WHERE id = ? AND sla_breached_at IS NULL`,
+            [approval.id],
+          );
+
+          if (autoAction === 'decline') {
+            await this.approvalQueries?.decide(approval.id, 'declined', 'system-sla-breach');
+            console.log(`[agent] Auto-declined approval #${approval.id} for ${approval.ticket_id} (${approval.hours_waiting}h overdue)`);
+          } else if (autoAction === 'approve') {
+            await this.handleApprovalCallback('approve', approval.ticket_id, approval.id, undefined, 'system-sla-breach');
+            console.log(`[agent] Auto-approved approval #${approval.id} for ${approval.ticket_id} (${approval.hours_waiting}h overdue)`);
+          }
+
+          if (alertOnBreach) {
+            await this.alertService.createAlert({
+              alertType: 'approval_sla_warning',
+              severity: 'warning',
+              title: `Approval SLA breach: ${approval.ticket_id} waiting ${approval.hours_waiting}h`,
+              detail: `Auto-action: ${autoAction}. Threshold: ${slaHours}h`,
+              ticketKey: approval.ticket_id,
+            });
+          }
+        } catch (err) {
+          console.warn(`[agent] Failed to process overdue approval #${approval.id}:`, err instanceof Error ? err.message : err);
+        }
+      }
+    } catch (err) {
+      console.warn('[agent] Approval SLA sweep failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // ── B2: Pipeline health check ──
+  private async runPipelineHealthCheck(): Promise<void> {
+    const enabled = this.settings.get('agent_pipeline_health_enabled') !== 'false';
+    if (!enabled) return;
+
+    const windowHours = this.getNumber('agent_pipeline_health_window_hours', 24);
+
+    const checks = [
+      { name: 'decisions', table: 'agent_decisions', minPerDay: 5 },
+      { name: 'classifications', table: 'ticket_classifications', minPerDay: 5 },
+      { name: 'coaching', table: 'agent_coaching', minPerDay: 1 },
+      { name: 'kb_gaps', table: 'kb_gap_log', minPerDay: 0 },
+      { name: 'kb_drafts', table: 'kb_article_drafts', minPerDay: 0 },
+    ];
+
+    try {
+      for (const check of checks) {
+        if (check.minPerDay === 0) continue;
+        try {
+          const rows = await query<{ cnt: number }>(
+            `SELECT COUNT(*) as cnt FROM ${check.table} WHERE created_at > DATEADD(hour, -${windowHours}, GETUTCDATE())`,
+          );
+          const count = rows[0]?.cnt ?? 0;
+          if (count < check.minPerDay) {
+            await this.alertService.createAlert({
+              alertType: 'error',
+              severity: 'warning',
+              title: `Pipeline health: ${check.name} produced ${count} outputs in ${windowHours}h (threshold: ${check.minPerDay})`,
+              detail: `Pipeline "${check.name}" may be stalled. Check logs for errors.`,
+            });
+            console.warn(`[agent] Pipeline health: ${check.name} below threshold (${count}/${check.minPerDay})`);
+          }
+        } catch { /* table may not exist yet */ }
+      }
+    } catch (err) {
+      console.warn('[agent] Pipeline health check failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // ── C1: Chase sweep ──
+  private async runChaseSweep(shadowMode: AgentShadowMode): Promise<void> {
+    const enabled = this.settings.get('agent_chase_enabled') !== 'false';
+    if (!enabled) return;
+
+    const afterDays = this.getNumber('agent_chase_after_days', 5);
+    const intervalDays = this.getNumber('agent_chase_interval_days', 3);
+    const maxCount = this.getNumber('agent_chase_max_count', 2);
+    const batchSize = this.getNumber('agent_chase_batch_size', 10);
+
+    try {
+      const staleWaiting = await query<{
+        issue_key: string; summary: string; status_name: string;
+        assignee_email: string; reporter_display: string; reporter_email: string;
+        organisation: string; days_stale: number;
+      }>(
+        `SELECT TOP (${batchSize}) c.issue_key, c.summary, c.status_name, c.assignee_email,
+                c.reporter_display, c.reporter_email, c.organisation,
+                DATEDIFF(day, c.jira_updated, GETUTCDATE()) as days_stale
+         FROM jira_issue_cache c
+         LEFT JOIN agent_decisions d ON d.ticket_id = c.issue_key AND d.action = 'chase'
+           AND d.created_at > DATEADD(day, -${intervalDays}, GETUTCDATE())
+         WHERE c.status_name IN ('Waiting on Customer', 'Waiting for Customer')
+           AND c.status_category != 'done'
+           AND DATEDIFF(day, c.jira_updated, GETUTCDATE()) >= ${afterDays}
+           AND d.id IS NULL
+         ORDER BY c.jira_updated ASC`,
+      );
+
+      if (staleWaiting.length === 0) return;
+      console.log(`[agent] Chase sweep: ${staleWaiting.length} stale tickets found`);
+
+      for (const ticket of staleWaiting) {
+        // Check chase count cap
+        const priorChases = await query<{ cnt: number }>(
+          `SELECT COUNT(*) as cnt FROM agent_decisions WHERE ticket_id = ? AND action = 'chase'`,
+          [ticket.issue_key],
+        );
+        if ((priorChases[0]?.cnt ?? 0) >= maxCount) {
+          console.log(`[agent] Chase: ${ticket.issue_key} already chased ${priorChases[0]?.cnt} times — skipping`);
+          continue;
+        }
+
+        const chaseText = `Hi,\n\nWe're following up on ${ticket.issue_key} — "${ticket.summary}".\n\nWe've been waiting for your reply for ${ticket.days_stale} days. Could you let us know if you still need help with this issue?\n\nIf we don't hear back within 5 working days, we'll close this ticket automatically. You can always raise a new ticket or reply to this one to reopen it.\n\nThanks,\nNurtur Support`;
+
+        const decision: import('./agent-types.js').AgentDecision = {
+          ticketId: ticket.issue_key,
+          ticketKey: ticket.issue_key,
+          eventType: 'stale',
+          action: 'chase',
+          confidence: 1.0,
+          reasoning: `Ticket waiting on customer for ${ticket.days_stale} days — automated chase per SOP-003`,
+          approvalRequired: shadowMode === 'hybrid',
+          shadowMode: shadowMode === 'full_shadow',
+          inputs: { summary: ticket.summary, status: ticket.status_name, updated: new Date(Date.now() - ticket.days_stale * 86400000).toISOString() },
+          output: { draft_response: chaseText, recommended_action: 'chase' },
+        };
+
+        if (shadowMode === 'full_shadow') {
+          const decisionId = await this.observer.logDecision(decision);
+          await this.observer.logOutcome(decisionId, {
+            success: true, action: 'chase', ticketKey: ticket.issue_key,
+            detail: `[SHADOW] Would chase (${ticket.days_stale} days stale)`,
+          });
+        } else if (shadowMode === 'hybrid') {
+          await this.submitToApprovalQueue(decision, await this.observer.logDecision(decision));
+        } else {
+          await this.executeDecision(decision);
+        }
+      }
+    } catch (err) {
+      console.warn('[agent] Chase sweep failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // ── C2: Auto-assign after triage ──
+  private async tryAutoAssign(decision: import('./agent-types.js').AgentDecision): Promise<void> {
+    if (!this.assignmentEngine) return;
+    const project = this.assignmentEngine.resolveProjectFromTicketKey(decision.ticketKey);
+    const pool = this.determinePool(decision, project);
+
+    try {
+      const assignment = await this.assignmentEngine.assignWithFallback(
+        decision.ticketKey, pool, project,
+      );
+
+      if (assignment) {
+        console.log(`[agent] Assigned ${decision.ticketKey} → ${assignment.agent.display_name} (${pool}, ${project})`);
+        decision.inputs.assignee = assignment.agent.jira_account_id;
+        decision.inputs.assigneeName = assignment.agent.display_name;
+        await this.assignmentEngine.postAssignmentComment(decision.ticketKey, assignment);
+      } else if (this.assignmentEngine.isWorkingTime()) {
+        console.warn(`[agent] No available agents for ${decision.ticketKey} in pool ${pool}`);
+        await this.alertService.createAlert({
+          alertType: 'error',
+          severity: 'warning',
+          title: `Assignment failed: ${decision.ticketKey}`,
+          detail: `No available agents in pool ${pool} (project ${project}). Ticket is unassigned.`,
+        });
+      } else {
+        console.log(`[agent] ${decision.ticketKey} queued for assignment — outside working hours`);
+      }
+    } catch (err) {
+      console.error(`[agent] Assignment failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  private determinePool(decision: import('./agent-types.js').AgentDecision, project: string): Pool {
+    if (project === 'NTPJ') return 'tpj';
+
+    const action = decision.action || (decision.output?.recommended_action as string);
+    if (action === 'escalate') return 't2';
+
+    const category = (decision.output?.classification as any)?.category
+      || (decision.output?.category as string)
+      || (decision.inputs?.category as string);
+
+    const t2Categories = [
+      'integration_issue', 'api_error', 'data_migration', 'server_error',
+      'database_issue', 'feed_issue', 'technical_escalation',
+    ];
+    if (category && t2Categories.includes(category)) return 't2';
+
+    return 'cc';
+  }
+
+  // ── C3: Unassigned ticket sweep ──
+  private async runUnassignedSweep(): Promise<void> {
+    if (!this.assignmentEngine || !this.assignmentEngine.isWorkingTime()) return;
+
+    try {
+      const projects = this.assignmentEngine.getConfiguredProjects();
+      const projectPlaceholders = projects.map(() => '?').join(', ');
+
+      const unassigned = await query<{
+        issue_key: string; summary: string; status_name: string;
+        request_type: string | null; current_tier: string | null;
+      }>(
+        `SELECT TOP (10) c.issue_key, c.summary, c.status_name, c.request_type, c.current_tier
+         FROM jira_issue_cache c
+         WHERE c.assignee_account_id IS NULL
+           AND c.status_category != 'done'
+           AND (c.current_tier IS NULL OR c.current_tier != 'Development')
+           AND c.created_at < DATEADD(minute, -5, GETUTCDATE())
+           AND c.project_key IN (${projectPlaceholders})
+         ORDER BY c.created_at ASC`,
+        projects,
+      );
+
+      if (unassigned.length === 0) return;
+      console.log(`[agent] Unassigned sweep: ${unassigned.length} tickets found`);
+
+      for (const ticket of unassigned) {
+        const project = this.assignmentEngine.resolveProjectFromTicketKey(ticket.issue_key);
+        const pool = this.determinePoolFromTicket(ticket, project);
+
+        const assignment = await this.assignmentEngine.assignWithFallback(
+          ticket.issue_key, pool, project,
+        );
+        if (assignment) {
+          await this.assignmentEngine.postAssignmentComment(ticket.issue_key, assignment);
+          console.log(`[agent] Sweep: assigned ${ticket.issue_key} → ${assignment.agent.display_name}`);
+        }
+      }
+    } catch (err) {
+      console.warn('[agent] Unassigned sweep failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  private determinePoolFromTicket(ticket: { issue_key: string; current_tier?: string | null }, project: string): Pool {
+    if (project === 'NTPJ') return 'tpj';
+    if (ticket.current_tier === 'T2' || ticket.current_tier === 'T3') return 't2';
+    return 'cc';
+  }
+
+  // ── D1: Pattern extraction from resolved tickets ──
+  private async runPatternExtraction(): Promise<void> {
+    try {
+      const resolved = await query<{
+        issue_key: string; summary: string; description_text: string; category: string;
+      }>(
+        `SELECT TOP 10 c.issue_key, c.summary, c.description_text, tc.category
+         FROM jira_issue_cache c
+         INNER JOIN ticket_classifications tc ON tc.ticket_key = c.issue_key
+         LEFT JOIN agent_patterns p ON p.source_tickets LIKE '%' + c.issue_key + '%'
+         WHERE c.status_category = 'done'
+           AND c.jira_updated > DATEADD(day, -1, GETUTCDATE())
+           AND p.id IS NULL
+           AND tc.category IS NOT NULL
+         ORDER BY c.jira_updated DESC`,
+      );
+
+      if (resolved.length === 0) return;
+      console.log(`[agent] Pattern extraction: ${resolved.length} resolved tickets to process`);
+
+      for (const ticket of resolved) {
+        try {
+          const comments = await query<{ body: string; author_display_name: string }>(
+            `SELECT TOP 5 body, author_display_name FROM jira_comment_cache
+             WHERE issue_key = ? ORDER BY jira_created DESC`,
+            [ticket.issue_key],
+          );
+
+          const resolutionComments = comments.map(c => `${c.author_display_name}: ${c.body?.slice(0, 300)}`).join('\n');
+          const symptom = ticket.summary;
+          const resolution = resolutionComments.slice(0, 1000) || ticket.description_text?.slice(0, 500) || 'No resolution details';
+
+          const hash = createHash('sha256').update(symptom.toLowerCase()).digest('hex').substring(0, 16);
+
+          // Upsert pattern
+          const existing = await query<{ id: number; observed_count: number; source_tickets: string }>(
+            `SELECT id, observed_count, source_tickets FROM agent_patterns WHERE category = ? AND symptom_hash = ?`,
+            [ticket.category, hash],
+          );
+
+          if (existing.length > 0) {
+            const sources = JSON.parse(existing[0].source_tickets || '[]') as string[];
+            if (!sources.includes(ticket.issue_key)) {
+              sources.push(ticket.issue_key);
+              await executeAndGetId(
+                `UPDATE agent_patterns SET observed_count = observed_count + 1, last_observed = GETUTCDATE(), source_tickets = ?, resolution = ? WHERE id = ?`,
+                [JSON.stringify(sources), resolution, existing[0].id],
+              );
+            }
+          } else {
+            await executeAndGetId(
+              `INSERT INTO agent_patterns (category, symptom_hash, symptom, resolution, source_tickets) VALUES (?, ?, ?, ?, ?)`,
+              [ticket.category, hash, symptom, resolution, JSON.stringify([ticket.issue_key])],
+            );
+          }
+        } catch (err) {
+          console.warn(`[agent] Pattern extraction failed for ${ticket.issue_key}:`, err instanceof Error ? err.message : err);
+        }
+      }
+    } catch (err) {
+      console.warn('[agent] Pattern extraction sweep failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // ── E2: Customer memory compaction ──
+  private async runMemoryCompaction(): Promise<void> {
+    const maxSizeBytes = this.getNumber('agent_memory_max_size_bytes', 4000);
+
+    try {
+      // Evict stale entries (>180 days without update)
+      const stale = await query<{ id: number; account_id: string; patterns: string; created_at: string; last_updated: string }>(
+        `SELECT id, account_id, patterns, created_at, last_updated FROM agent_customer_memory
+         WHERE DATEDIFF(day, last_updated, GETUTCDATE()) > 180`,
+      );
+
+      for (const entry of stale) {
+        await executeAndGetId(
+          `INSERT INTO agent_customer_memory_archive (account_id, patterns, original_created_at, original_last_updated) VALUES (?, ?, ?, ?)`,
+          [entry.account_id, entry.patterns, entry.created_at, entry.last_updated],
+        );
+        await executeAndGetId(`DELETE FROM agent_customer_memory WHERE id = ?`, [entry.id]);
+      }
+      if (stale.length > 0) console.log(`[agent] Memory compaction: archived ${stale.length} stale entries`);
+
+      // Compact oversized entries
+      const large = await query<{ id: number; account_id: string; patterns: string }>(
+        `SELECT id, account_id, patterns FROM agent_customer_memory WHERE LEN(patterns) > ?`,
+        [maxSizeBytes],
+      );
+
+      if (large.length > 0) {
+        console.log(`[agent] Memory compaction: ${large.length} oversized entries to compact`);
+        for (const entry of large) {
+          try {
+            const patterns = JSON.parse(entry.patterns);
+            // Simple compaction: keep most recent entries, trim old ones
+            if (Array.isArray(patterns)) {
+              const compacted = patterns.slice(-10);
+              await executeAndGetId(
+                `UPDATE agent_customer_memory SET patterns = ?, last_updated = GETUTCDATE() WHERE id = ?`,
+                [JSON.stringify(compacted), entry.id],
+              );
+            } else if (typeof patterns === 'object') {
+              const keys = Object.keys(patterns);
+              if (keys.length > 20) {
+                const trimmed: Record<string, unknown> = {};
+                for (const k of keys.slice(-20)) trimmed[k] = patterns[k];
+                await executeAndGetId(
+                  `UPDATE agent_customer_memory SET patterns = ?, last_updated = GETUTCDATE() WHERE id = ?`,
+                  [JSON.stringify(trimmed), entry.id],
+                );
+              }
+            }
+          } catch { /* skip unparseable entries */ }
+        }
+      }
+    } catch (err) {
+      console.warn('[agent] Memory compaction failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
   private async runBackfillTriage(): Promise<void> {
     const enabled = this.settings.get('agent_backfill_enabled');
     if (enabled === 'false' || enabled === '0') {
@@ -756,9 +1165,14 @@ export class AgentLoop {
 
     // Lifecycle: transition to 'triaged' on new ticket triage
     if (decision.eventType === 'ticket_created' && decision.action !== 'no_action') {
+      // Auto-assign via Round Robin if ticket is unassigned
+      if (!decision.inputs.assignee && this.assignmentEngine && !decision.shadowMode) {
+        await this.tryAutoAssign(decision);
+      }
+
       try {
         const assignee = decision.inputs.assignee as string | null;
-        const assigneeName = decision.inputs.assignee as string | null;
+        const assigneeName = (decision.inputs.assigneeName as string) ?? (decision.inputs.assignee as string | null);
         await ticketState.transition(decision.ticketKey, 'triaged', {
           lastTriageDecisionId: decisionId,
           assignee: assignee ?? null,

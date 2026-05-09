@@ -957,6 +957,7 @@ async function main() {
 
     const assignmentEngine = new AssignmentEngine(agentJiraClient, settingsQueries, 'NT');
     agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
+    agentLoop.setAssignmentEngine(assignmentEngine);
     const availabilityService = new AgentAvailabilityService(settingsQueries);
     const ticketClassifier = new TicketClassifier(llmService, agentJiraClient, 'NT');
     const kbEmbedder = new KbEmbedder(settingsQueries);

@@ -1231,6 +1231,117 @@ async function runMigrations(): Promise<void> {
 
     `IF COL_LENGTH('agent_decisions', 'quick_win_undone_by') IS NULL
      ALTER TABLE agent_decisions ADD quick_win_undone_by NVARCHAR(100) NULL;`,
+
+    // ── A1: Eval suite — labelled decisions + eval run history ──
+    `IF COL_LENGTH('agent_decisions', 'eval_label') IS NULL
+     ALTER TABLE agent_decisions ADD eval_label NVARCHAR(20) NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_eval_runs') AND type = 'U')
+     CREATE TABLE agent_eval_runs (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       run_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       run_type NVARCHAR(20) NOT NULL DEFAULT 'eval',
+       sample_size INT NOT NULL,
+       matched INT NOT NULL,
+       accept_rate DECIMAL(5,2) NOT NULL,
+       baseline_rate DECIMAL(5,2) NULL,
+       delta DECIMAL(5,2) NULL,
+       prompt_version NVARCHAR(100) NULL,
+       model_override NVARCHAR(100) NULL,
+       details NVARCHAR(MAX) NULL,
+       run_by NVARCHAR(100) NULL
+     );`,
+
+    // ── A2: Critic gate columns on agent_decisions ──
+    `IF COL_LENGTH('agent_decisions', 'critic_approved') IS NULL
+     ALTER TABLE agent_decisions ADD critic_approved BIT NULL;`,
+
+    `IF COL_LENGTH('agent_decisions', 'critic_reason') IS NULL
+     ALTER TABLE agent_decisions ADD critic_reason NVARCHAR(500) NULL;`,
+
+    `IF COL_LENGTH('agent_decisions', 'critic_model') IS NULL
+     ALTER TABLE agent_decisions ADD critic_model NVARCHAR(100) NULL;`,
+
+    // ── B1: Approval SLA tracking ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_approvals') AND name = 'sla_breached_at')
+     BEGIN TRY ALTER TABLE agent_approvals ADD sla_breached_at DATETIME2 NULL; END TRY BEGIN CATCH END CATCH;`,
+
+    // ── D1: Cross-ticket pattern library ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_patterns') AND type = 'U')
+     CREATE TABLE agent_patterns (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       category NVARCHAR(100) NOT NULL,
+       symptom_hash VARCHAR(64) NULL,
+       symptom NVARCHAR(MAX) NULL,
+       resolution NVARCHAR(MAX) NULL,
+       observed_count INT NOT NULL DEFAULT 1,
+       success_rate DECIMAL(5,2) NULL,
+       last_observed DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       source_tickets NVARCHAR(MAX) NULL
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_patterns_category')
+     CREATE INDEX IX_agent_patterns_category ON agent_patterns (category, observed_count DESC);`,
+
+    // ── E1: A/B testing framework ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_ab_tests') AND type = 'U')
+     CREATE TABLE agent_ab_tests (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       name NVARCHAR(100) NOT NULL,
+       test_type NVARCHAR(20) NOT NULL,
+       variant_a NVARCHAR(MAX) NULL,
+       variant_b NVARCHAR(MAX) NULL,
+       split_percentage INT NOT NULL DEFAULT 50,
+       metric NVARCHAR(50) NOT NULL DEFAULT 'accept_rate',
+       min_sample INT NOT NULL DEFAULT 100,
+       status NVARCHAR(20) NOT NULL DEFAULT 'active',
+       started_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       completed_at DATETIME2 NULL,
+       results NVARCHAR(MAX) NULL
+     );`,
+
+    `IF COL_LENGTH('agent_decisions', 'ab_test_id') IS NULL
+     ALTER TABLE agent_decisions ADD ab_test_id INT NULL;`,
+
+    `IF COL_LENGTH('agent_decisions', 'ab_variant') IS NULL
+     ALTER TABLE agent_decisions ADD ab_variant CHAR(1) NULL;`,
+
+    // ── E2: Customer memory archive (for eviction) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_customer_memory_archive') AND type = 'U')
+     CREATE TABLE agent_customer_memory_archive (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       account_id NVARCHAR(100) NOT NULL,
+       patterns NVARCHAR(MAX) NOT NULL,
+       archived_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       original_created_at DATETIME2 NULL,
+       original_last_updated DATETIME2 NULL
+     );`,
+
+    // ── E4: Shadow model comparison ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_model_comparisons') AND type = 'U')
+     CREATE TABLE agent_model_comparisons (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       call_type NVARCHAR(50) NOT NULL,
+       primary_model NVARCHAR(100) NOT NULL,
+       shadow_model NVARCHAR(100) NOT NULL,
+       primary_action NVARCHAR(50) NULL,
+       shadow_action NVARCHAR(50) NULL,
+       actions_match BIT NULL,
+       primary_confidence FLOAT NULL,
+       shadow_confidence FLOAT NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    // WP-RR: Add project_key to assignment log for multi-project round robin
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_assignment_log') AND name = 'project_key')
+     ALTER TABLE agent_assignment_log ADD project_key NVARCHAR(10) NOT NULL DEFAULT 'NT';`,
+
+    // ── A1: Backfill eval labels from existing approval data ──
+    `UPDATE agent_decisions SET eval_label = 'correct'
+     WHERE eval_label IS NULL AND approval_status = 'approved';`,
+
+    `UPDATE agent_decisions SET eval_label = 'incorrect'
+     WHERE eval_label IS NULL AND approval_status = 'declined';`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

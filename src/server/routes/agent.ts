@@ -3005,7 +3005,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   });
 
   router.post('/roster/assign', async (req, res) => {
-    const { ticketKey, pool, preferredSkills } = req.body;
+    const { ticketKey, pool, preferredSkills, projectKey } = req.body;
     if (!ticketKey) {
       res.status(400).json({ ok: false, error: 'ticketKey is required' });
       return;
@@ -3016,7 +3016,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         res.status(503).json({ ok: false, error: 'Assignment engine not available' });
         return;
       }
-      const result = await engine.assignToJira(ticketKey, pool ?? 'cc', preferredSkills);
+      const result = await engine.assignToJira(ticketKey, pool ?? 'cc', preferredSkills, projectKey);
       if (!result) {
         res.status(404).json({ ok: false, error: 'No available agents in pool' });
         return;
@@ -3029,13 +3029,14 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
   router.get('/roster/assignment-log', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+    const projectKey = req.query.project as string | undefined;
     try {
       const engine = deps?.assignmentEngine;
       if (!engine) {
         res.json({ ok: true, data: [] });
         return;
       }
-      const data = await engine.getAssignmentLog(limit);
+      const data = await engine.getAssignmentLog(limit, projectKey);
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get assignment log' });
@@ -3620,6 +3621,176 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // ── A1/E3: Eval suite endpoints ──
+
+  router.post('/eval/run', requireSuperAdmin, async (req, res) => {
+    try {
+      const { EvalSuite } = await import('../services/eval-suite.js');
+      const { KbSearchService } = await import('../services/kb-search.js');
+      const llm = agentLoop.getReasoner() as any;
+      const kbSearch = new KbSearchService(deps?.settingsQueries as any);
+      const evalSuite = new EvalSuite(llm.llmService ?? llm, deps?.settingsQueries as any, kbSearch);
+
+      const { sampleSize = 50, promptOverride, modelOverride } = req.body;
+      const result = await evalSuite.runEval({
+        sampleSize: Math.min(sampleSize, 200),
+        promptOverride,
+        modelOverride,
+        runBy: (req as any).user?.username,
+      });
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Eval run failed' });
+    }
+  });
+
+  router.post('/eval/replay', requireSuperAdmin, async (req, res) => {
+    try {
+      const { EvalSuite } = await import('../services/eval-suite.js');
+      const { KbSearchService } = await import('../services/kb-search.js');
+      const llm = agentLoop.getReasoner() as any;
+      const kbSearch = new KbSearchService(deps?.settingsQueries as any);
+      const evalSuite = new EvalSuite(llm.llmService ?? llm, deps?.settingsQueries as any, kbSearch);
+
+      const { sampleSize = 50, promptOverride, modelOverride } = req.body;
+      const result = await evalSuite.runReplay({
+        sampleSize: Math.min(sampleSize, 200),
+        promptOverride,
+        modelOverride,
+        runBy: (req as any).user?.username,
+      });
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Replay failed' });
+    }
+  });
+
+  router.get('/eval/runs', requireSuperAdmin, async (_req, res) => {
+    try {
+      const runs = await query('SELECT TOP 20 * FROM agent_eval_runs ORDER BY run_at DESC');
+      res.json({ ok: true, data: runs });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch eval runs' });
+    }
+  });
+
+  // ── E1: A/B test endpoints ──
+
+  router.get('/ab-tests', requireSuperAdmin, async (_req, res) => {
+    try {
+      const tests = await query('SELECT * FROM agent_ab_tests ORDER BY started_at DESC');
+      res.json({ ok: true, data: tests });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch A/B tests' });
+    }
+  });
+
+  router.post('/ab-tests', requireSuperAdmin, async (req, res) => {
+    try {
+      const { name, test_type = 'prompt', variant_a, variant_b, split_percentage = 50, metric = 'accept_rate', min_sample = 100 } = req.body;
+      if (!name || !variant_b) return res.status(400).json({ ok: false, error: 'name and variant_b are required' });
+
+      const id = await execute(
+        `INSERT INTO agent_ab_tests (name, test_type, variant_a, variant_b, split_percentage, metric, min_sample) VALUES (@p1, @p2, @p3, @p4, @p5, @p6, @p7)`,
+        [name, test_type, variant_a ?? null, variant_b, split_percentage, metric, min_sample],
+      );
+      res.json({ ok: true, data: { id } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create A/B test' });
+    }
+  });
+
+  router.post('/ab-tests/:id/complete', requireSuperAdmin, async (req, res) => {
+    try {
+      const testId = parseInt(req.params.id, 10);
+      // Compute results
+      const variantStats = await query<{ ab_variant: string; cnt: number; avg_conf: number }>(
+        `SELECT ab_variant, COUNT(*) as cnt, AVG(confidence) as avg_conf
+         FROM agent_decisions WHERE ab_test_id = ? AND ab_variant IS NOT NULL
+         GROUP BY ab_variant`,
+        [testId],
+      );
+
+      const results = {
+        variants: variantStats,
+        completed_at: new Date().toISOString(),
+      };
+
+      await execute(
+        `UPDATE agent_ab_tests SET status = 'completed', completed_at = GETUTCDATE(), results = @p1 WHERE id = @p2`,
+        [JSON.stringify(results), testId],
+      );
+      res.json({ ok: true, data: results });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to complete A/B test' });
+    }
+  });
+
+  // ── D1: Pattern library endpoints ──
+
+  router.get('/patterns', async (_req, res) => {
+    try {
+      const patterns = await query('SELECT TOP 100 * FROM agent_patterns ORDER BY observed_count DESC, last_observed DESC');
+      res.json({ ok: true, data: patterns });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch patterns' });
+    }
+  });
+
+  // ── E4: Model comparison endpoints ──
+
+  router.get('/model-comparisons', async (_req, res) => {
+    try {
+      const comparisons = await query('SELECT TOP 100 * FROM agent_model_comparisons ORDER BY created_at DESC');
+      const summary = await query<{ shadow_model: string; total: number; matches: number; agreement_rate: number }>(
+        `SELECT shadow_model, COUNT(*) as total,
+                SUM(CASE WHEN actions_match = 1 THEN 1 ELSE 0 END) as matches,
+                CAST(SUM(CASE WHEN actions_match = 1 THEN 1.0 ELSE 0.0 END) / COUNT(*) * 100 AS DECIMAL(5,2)) as agreement_rate
+         FROM agent_model_comparisons
+         GROUP BY shadow_model`,
+      );
+      res.json({ ok: true, data: { comparisons, summary } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch model comparisons' });
+    }
+  });
+
+  // ── B2: Pipeline health endpoint ──
+
+  router.get('/pipeline-health', async (_req, res) => {
+    try {
+      const checks = [
+        { name: 'decisions', table: 'agent_decisions', minPerDay: 5 },
+        { name: 'classifications', table: 'ticket_classifications', minPerDay: 5 },
+        { name: 'coaching', table: 'agent_coaching', minPerDay: 1 },
+        { name: 'kb_gaps', table: 'kb_gap_log', minPerDay: 0 },
+        { name: 'kb_drafts', table: 'kb_article_drafts', minPerDay: 0 },
+      ];
+
+      const results = [];
+      for (const check of checks) {
+        try {
+          const rows = await query<{ cnt: number }>(
+            `SELECT COUNT(*) as cnt FROM ${check.table} WHERE created_at > DATEADD(hour, -24, GETUTCDATE())`,
+          );
+          const count = rows[0]?.cnt ?? 0;
+          results.push({
+            name: check.name,
+            count,
+            threshold: check.minPerDay,
+            status: check.minPerDay === 0 ? 'ok' : count >= check.minPerDay ? 'ok' : count > 0 ? 'warning' : 'error',
+          });
+        } catch {
+          results.push({ name: check.name, count: 0, threshold: check.minPerDay, status: 'unknown' });
+        }
+      }
+      res.json({ ok: true, data: results });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to check pipeline health' });
+    }
+  });
+
   return router;
 }
+
 

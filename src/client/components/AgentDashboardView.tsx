@@ -310,7 +310,7 @@ interface ApprovalHealth {
 
 export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { userRole?: string; onNavigateToWorkspace?: (filter: { aiAction?: string }) => void }) {
   const isSuperAdmin = checkSuperAdmin(userRole);
-  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'kb-index' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement'>('overview');
+  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'kb-index' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement' | 'pipelines' | 'assignment'>('overview');
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
@@ -484,6 +484,8 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
           { key: 'ai-improvement', label: 'AI Learning' },
           { key: 'quick-actions', label: 'Quick Actions' },
           { key: 'providers', label: 'Providers' },
+          { key: 'assignment' as const, label: 'Assignment' },
+          ...(isSuperAdmin ? [{ key: 'pipelines' as const, label: 'Pipelines' }] : []),
           ...(isSuperAdmin ? [{ key: 'costs' as const, label: 'Costs' }] : []),
         ] as const).map(t => (
           <button
@@ -512,6 +514,8 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       {tab === 'quick-actions' && <QuickActionsTab />}
       {tab === 'providers' && <ProvidersTab providers={providers} confHistory={confHistory} />}
       {tab === 'flagged' && <FlaggedTab tickets={flaggedTickets} onRefresh={() => { api('/flagged').then(r => { if (r.ok) setFlaggedTickets(r.data); }); api('/flagged/summary').then(r => { if (r.ok) setFlaggedSummary(r.data); }); }} />}
+      {tab === 'assignment' && <AssignmentTab isSuperAdmin={isSuperAdmin} />}
+      {tab === 'pipelines' && <PipelinesTab />}
       {tab === 'costs' && <CostsTab data={costData} onPeriodChange={(days) => api(`/costs?days=${days}`).then(r => { if (r.ok) setCostData(r.data); })} />}
 
       {/* Detail panel */}
@@ -1135,6 +1139,8 @@ function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decisio
             {d.quick_win_type && d.quick_win_type !== 'none' && <QuickWinBadge type={d.quick_win_type} />}
             {d.quick_win_executed && !d.quick_win_undone && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-900/60 text-emerald-300 border border-emerald-700/40">AUTO-CLOSED</span>}
             {d.quick_win_undone && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-neutral-800 text-neutral-400 border border-neutral-600">UNDONE</span>}
+            {(d as any).critic_approved === true && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-green-900/40 text-green-400 border border-green-700/30">Critic: approved</span>}
+            {(d as any).critic_approved === false && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-red-900/40 text-red-400 border border-red-700/30" title={(d as any).critic_reason}>Critic: blocked</span>}
           </div>
           <button onClick={onClose} className="text-neutral-500 hover:text-neutral-300 text-lg">✕</button>
         </div>
@@ -3906,6 +3912,365 @@ function KbIndexTab() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ── Pipelines Tab: Eval Suite, A/B Tests, Pipeline Health, Patterns, Model Comparisons ──
+
+function PipelinesTab() {
+  const [section, setSection] = useState<'eval' | 'ab-tests' | 'health' | 'patterns' | 'model-compare'>('eval');
+  const [evalRuns, setEvalRuns] = useState<any[]>([]);
+  const [evalLoading, setEvalLoading] = useState(false);
+  const [evalSampleSize, setEvalSampleSize] = useState(50);
+  const [abTests, setAbTests] = useState<any[]>([]);
+  const [pipelineHealth, setPipelineHealth] = useState<any[]>([]);
+  const [patterns, setPatterns] = useState<any[]>([]);
+  const [modelComparisons, setModelComparisons] = useState<{ comparisons: any[]; summary: any[] }>({ comparisons: [], summary: [] });
+
+  useEffect(() => {
+    api('/eval/runs').then(r => { if (r.ok) setEvalRuns(r.data); });
+    api('/ab-tests').then(r => { if (r.ok) setAbTests(r.data); });
+    api('/pipeline-health').then(r => { if (r.ok) setPipelineHealth(r.data); });
+    api('/patterns').then(r => { if (r.ok) setPatterns(r.data); });
+    api('/model-comparisons').then(r => { if (r.ok) setModelComparisons(r.data); });
+  }, []);
+
+  const runEval = async (type: 'eval' | 'replay') => {
+    setEvalLoading(true);
+    const endpoint = type === 'eval' ? '/eval/run' : '/eval/replay';
+    const r = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sampleSize: evalSampleSize }) });
+    if (r.ok) {
+      api('/eval/runs').then(r2 => { if (r2.ok) setEvalRuns(r2.data); });
+    }
+    setEvalLoading(false);
+  };
+
+  const sectionButtons = [
+    { key: 'eval' as const, label: 'Eval & Replay' },
+    { key: 'ab-tests' as const, label: 'A/B Tests' },
+    { key: 'health' as const, label: 'Pipeline Health' },
+    { key: 'patterns' as const, label: 'Patterns' },
+    { key: 'model-compare' as const, label: 'Model Comparison' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 flex-wrap">
+        {sectionButtons.map(s => (
+          <button key={s.key} onClick={() => setSection(s.key)} className={`px-3 py-1 text-xs rounded ${section === s.key ? 'bg-[#5ec1ca] text-black' : 'bg-[#2f353d] text-neutral-400 hover:text-neutral-200'}`}>{s.label}</button>
+        ))}
+      </div>
+
+      {section === 'eval' && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-neutral-400">Sample size:</label>
+            <input type="number" value={evalSampleSize} onChange={e => setEvalSampleSize(Number(e.target.value))} className="w-20 bg-[#1e2228] border border-[#3a424d] rounded px-2 py-1 text-xs text-neutral-200" />
+            <button onClick={() => runEval('eval')} disabled={evalLoading} className="px-3 py-1 text-xs rounded bg-[#5ec1ca] text-black hover:bg-[#7dd3d8] disabled:opacity-50">{evalLoading ? 'Running...' : 'Run Eval'}</button>
+            <button onClick={() => runEval('replay')} disabled={evalLoading} className="px-3 py-1 text-xs rounded bg-[#363d47] text-[#5ec1ca] hover:bg-[#3a424d] disabled:opacity-50">{evalLoading ? 'Running...' : 'Run Replay'}</button>
+          </div>
+          {evalRuns.length > 0 ? (
+            <table className="w-full text-[11px]">
+              <thead><tr className="border-b border-[#3a424d] text-neutral-500"><th className="py-1 text-left">Date</th><th className="text-left">Type</th><th className="text-right">Sample</th><th className="text-right">Matched</th><th className="text-right">Accept Rate</th><th className="text-right">Delta</th><th className="text-left">Status</th></tr></thead>
+              <tbody>
+                {evalRuns.map((run: any) => {
+                  const passThreshold = -5;
+                  const passed = (run.delta ?? 0) >= passThreshold;
+                  return (
+                    <tr key={run.id} className="border-b border-[#2f353d] text-neutral-300">
+                      <td className="py-1">{new Date(run.run_at).toLocaleString()}</td>
+                      <td>{run.run_type}</td>
+                      <td className="text-right">{run.sample_size}</td>
+                      <td className="text-right">{run.matched}</td>
+                      <td className="text-right">{run.accept_rate?.toFixed(1)}%</td>
+                      <td className={`text-right ${(run.delta ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{run.delta >= 0 ? '+' : ''}{run.delta?.toFixed(1)}%</td>
+                      <td><span className={`px-1.5 py-0.5 rounded text-[10px] ${passed ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>{passed ? 'PASS' : 'FAIL'}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-xs text-neutral-500">No eval runs yet. Run one to establish a baseline.</p>
+          )}
+        </div>
+      )}
+
+      {section === 'ab-tests' && (
+        <div className="space-y-3">
+          {abTests.length > 0 ? (
+            <table className="w-full text-[11px]">
+              <thead><tr className="border-b border-[#3a424d] text-neutral-500"><th className="py-1 text-left">Name</th><th className="text-left">Type</th><th className="text-right">Split</th><th className="text-left">Status</th><th className="text-left">Started</th></tr></thead>
+              <tbody>
+                {abTests.map((t: any) => (
+                  <tr key={t.id} className="border-b border-[#2f353d] text-neutral-300">
+                    <td className="py-1">{t.name}</td>
+                    <td>{t.test_type}</td>
+                    <td className="text-right">{t.split_percentage}%</td>
+                    <td><span className={`px-1.5 py-0.5 rounded text-[10px] ${t.status === 'active' ? 'bg-green-900/30 text-green-400' : 'bg-neutral-700 text-neutral-400'}`}>{t.status}</span></td>
+                    <td>{new Date(t.started_at).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-xs text-neutral-500">No A/B tests configured. Create one via the API.</p>
+          )}
+        </div>
+      )}
+
+      {section === 'health' && (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {pipelineHealth.map((p: any) => (
+            <div key={p.name} className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium text-neutral-200">{p.name}</span>
+                <span className={`w-2 h-2 rounded-full ${p.status === 'ok' ? 'bg-green-500' : p.status === 'warning' ? 'bg-amber-500' : p.status === 'error' ? 'bg-red-500' : 'bg-neutral-600'}`} />
+              </div>
+              <div className="text-lg font-mono text-neutral-200">{p.count}</div>
+              <div className="text-[10px] text-neutral-500">threshold: {p.threshold}/day</div>
+            </div>
+          ))}
+          {pipelineHealth.length === 0 && <p className="text-xs text-neutral-500 col-span-3">No pipeline health data.</p>}
+        </div>
+      )}
+
+      {section === 'patterns' && (
+        <div className="space-y-3">
+          {patterns.length > 0 ? (
+            <table className="w-full text-[11px]">
+              <thead><tr className="border-b border-[#3a424d] text-neutral-500"><th className="py-1 text-left">Category</th><th className="text-left">Symptom</th><th className="text-left">Resolution</th><th className="text-right">Count</th><th className="text-left">Last Seen</th></tr></thead>
+              <tbody>
+                {patterns.slice(0, 50).map((p: any) => (
+                  <tr key={p.id} className="border-b border-[#2f353d] text-neutral-300">
+                    <td className="py-1">{p.category}</td>
+                    <td className="max-w-[200px] truncate">{p.symptom}</td>
+                    <td className="max-w-[200px] truncate">{p.resolution}</td>
+                    <td className="text-right font-mono">{p.observed_count}</td>
+                    <td>{p.last_observed ? new Date(p.last_observed).toLocaleDateString() : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-xs text-neutral-500">No patterns extracted yet. Patterns build automatically from resolved tickets.</p>
+          )}
+        </div>
+      )}
+
+      {section === 'model-compare' && (
+        <div className="space-y-3">
+          {modelComparisons.summary.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              {modelComparisons.summary.map((s: any) => (
+                <div key={s.shadow_model} className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-3">
+                  <div className="text-xs text-neutral-400 mb-1">vs {s.shadow_model}</div>
+                  <div className="text-lg font-mono text-neutral-200">{s.agreement_rate}%</div>
+                  <div className="text-[10px] text-neutral-500">agreement ({s.matches}/{s.total} calls)</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {modelComparisons.comparisons.length > 0 ? (
+            <table className="w-full text-[11px]">
+              <thead><tr className="border-b border-[#3a424d] text-neutral-500"><th className="py-1 text-left">Date</th><th className="text-left">Type</th><th className="text-left">Primary</th><th className="text-left">Shadow</th><th className="text-left">Match</th></tr></thead>
+              <tbody>
+                {modelComparisons.comparisons.slice(0, 50).map((c: any) => (
+                  <tr key={c.id} className="border-b border-[#2f353d] text-neutral-300">
+                    <td className="py-1">{new Date(c.created_at).toLocaleString()}</td>
+                    <td>{c.call_type}</td>
+                    <td>{c.primary_action}</td>
+                    <td>{c.shadow_action}</td>
+                    <td>{c.actions_match ? <span className="text-green-400">Yes</span> : <span className="text-red-400">No</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-xs text-neutral-500">No model comparisons yet. Enable shadow model in settings.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Assignment Tab ──
+function AssignmentTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
+  const [log, setLog] = useState<any[]>([]);
+  const [poolStats, setPoolStats] = useState<Record<string, { total: number; available: number; avgLoad: number }> | null>(null);
+  const [projectFilter, setProjectFilter] = useState<string>('');
+  const [bankHolidays, setBankHolidays] = useState<string[]>([]);
+  const [newHoliday, setNewHoliday] = useState('');
+  const [projectPools, setProjectPools] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+
+  const loadData = useCallback(() => {
+    const q = projectFilter ? `?project=${projectFilter}` : '';
+    api(`/roster/assignment-log${q}`).then(r => { if (r.ok) setLog(r.data ?? []); });
+    api('/roster/pool-stats').then(r => { if (r.ok) setPoolStats(r.data); });
+  }, [projectFilter]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    fetch('/api/settings').then(r => r.json()).then(r => {
+      if (r.ok && r.data) {
+        const holidays = r.data.agent_bank_holidays;
+        if (holidays) { try { setBankHolidays(JSON.parse(holidays)); } catch { /* ignore */ } }
+        const pools = r.data.agent_assignment_project_pools;
+        if (pools) setProjectPools(pools);
+      }
+    });
+  }, []);
+
+  const saveBankHolidays = async () => {
+    setSaving(true);
+    await fetch('/api/settings/agent_bank_holidays', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: JSON.stringify(bankHolidays) }),
+    });
+    setSaving(false);
+  };
+
+  const saveProjectPools = async () => {
+    setSaving(true);
+    await fetch('/api/settings/agent_assignment_project_pools', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: projectPools }),
+    });
+    setSaving(false);
+  };
+
+  const addHoliday = () => {
+    if (newHoliday && !bankHolidays.includes(newHoliday)) {
+      const updated = [...bankHolidays, newHoliday].sort();
+      setBankHolidays(updated);
+      setNewHoliday('');
+    }
+  };
+
+  const removeHoliday = (date: string) => {
+    setBankHolidays(prev => prev.filter(d => d !== date));
+  };
+
+  return (
+    <div className="space-y-4 py-4">
+      {/* Pool Stats */}
+      {poolStats && (
+        <div className="bg-[#2f353d] rounded-lg p-4">
+          <h3 className="text-sm font-medium text-neutral-200 mb-3">Pool Stats</h3>
+          <div className="grid grid-cols-4 gap-3">
+            {Object.entries(poolStats).map(([pool, stats]) => (
+              <div key={pool} className="bg-[#252a31] rounded p-3">
+                <div className="text-xs font-medium text-[#5ec1ca] uppercase mb-1">{pool}</div>
+                <div className="text-xs text-neutral-400">
+                  {stats.available}/{stats.total} available
+                </div>
+                <div className="text-xs text-neutral-400">
+                  Avg load: {Math.round(stats.avgLoad * 100)}%
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Assignment Log */}
+      <div className="bg-[#2f353d] rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-neutral-200">Assignment Log</h3>
+          <div className="flex items-center gap-2">
+            <select
+              value={projectFilter}
+              onChange={e => setProjectFilter(e.target.value)}
+              className="bg-[#252a31] text-xs text-neutral-300 rounded px-2 py-1 border border-[#3a424d]"
+            >
+              <option value="">All Projects</option>
+              <option value="NT">NT</option>
+              <option value="NTPJ">NTPJ</option>
+            </select>
+            <button onClick={loadData} className="text-xs text-[#5ec1ca] hover:underline">Refresh</button>
+          </div>
+        </div>
+        {log.length === 0 ? (
+          <p className="text-xs text-neutral-500">No assignment records yet.</p>
+        ) : (
+          <div className="max-h-80 overflow-y-auto">
+            <table className="w-full text-[11px]">
+              <thead><tr className="border-b border-[#3a424d] text-neutral-500">
+                <th className="py-1 text-left">Time</th>
+                <th className="text-left">Ticket</th>
+                <th className="text-left">Pool</th>
+                <th className="text-left">Project</th>
+                <th className="text-left">Assigned To</th>
+                <th className="text-left">Reason</th>
+              </tr></thead>
+              <tbody>
+                {log.map((entry: any, i: number) => (
+                  <tr key={i} className="border-b border-[#2f353d] text-neutral-300">
+                    <td className="py-1">{new Date(entry.created_at).toLocaleString()}</td>
+                    <td className="font-mono">{entry.ticket_key}</td>
+                    <td><span className="px-1.5 py-0.5 bg-[#363d47] rounded text-[10px] uppercase">{entry.pool}</span></td>
+                    <td>{entry.project_key || 'NT'}</td>
+                    <td>{entry.assigned_to}</td>
+                    <td className="text-neutral-400 max-w-[200px] truncate">{entry.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Bank Holidays (admin only) */}
+      {isSuperAdmin && (
+        <div className="bg-[#2f353d] rounded-lg p-4">
+          <h3 className="text-sm font-medium text-neutral-200 mb-3">Bank Holidays</h3>
+          <p className="text-xs text-neutral-400 mb-2">Assignment engine skips these dates. Format: YYYY-MM-DD</p>
+          <div className="flex gap-2 mb-3">
+            <input
+              type="date"
+              value={newHoliday}
+              onChange={e => setNewHoliday(e.target.value)}
+              className="bg-[#252a31] text-xs text-neutral-300 rounded px-2 py-1 border border-[#3a424d]"
+            />
+            <button onClick={addHoliday} className="px-2 py-1 bg-[#5ec1ca]/20 text-[#5ec1ca] text-xs rounded hover:bg-[#5ec1ca]/30">Add</button>
+            <button onClick={saveBankHolidays} disabled={saving} className="px-2 py-1 bg-green-900/40 text-green-400 text-xs rounded hover:bg-green-900/60 disabled:opacity-50">
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {bankHolidays.map(d => (
+              <span key={d} className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#252a31] text-xs text-neutral-300 rounded border border-[#3a424d]">
+                {d}
+                <button onClick={() => removeHoliday(d)} className="text-red-400 hover:text-red-300 ml-1">&times;</button>
+              </span>
+            ))}
+            {bankHolidays.length === 0 && <span className="text-xs text-neutral-500">No bank holidays configured.</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Project Pool Config (admin only) */}
+      {isSuperAdmin && (
+        <div className="bg-[#2f353d] rounded-lg p-4">
+          <h3 className="text-sm font-medium text-neutral-200 mb-3">Project Pool Configuration</h3>
+          <p className="text-xs text-neutral-400 mb-2">JSON mapping of projects to allowed pools. Example: {`{"NT": {"defaultPool": "cc", "allowedPools": ["cc", "t2"]}, "NTPJ": {"defaultPool": "tpj", "allowedPools": ["tpj", "t2"]}}`}</p>
+          <textarea
+            value={projectPools}
+            onChange={e => setProjectPools(e.target.value)}
+            rows={4}
+            className="w-full bg-[#252a31] text-xs text-neutral-300 rounded p-2 border border-[#3a424d] font-mono"
+          />
+          <button onClick={saveProjectPools} disabled={saving} className="mt-2 px-3 py-1 bg-green-900/40 text-green-400 text-xs rounded hover:bg-green-900/60 disabled:opacity-50">
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
