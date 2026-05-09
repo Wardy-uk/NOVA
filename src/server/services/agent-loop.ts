@@ -484,12 +484,6 @@ export class AgentLoop {
         ...perception.newEvents,
       ];
 
-      if (events.length === 0) {
-        this.lastTickAt = new Date();
-        console.log(`[agent] Tick #${this.tickCount} complete — no events to process (${Date.now() - tickStart}ms)`);
-        return;
-      }
-
       // Deduplicate by ticket key
       const seen = new Set<string>();
       const unique = events.filter(e => {
@@ -589,9 +583,8 @@ export class AgentLoop {
       }
 
       // 7. BACKFILL TRIAGE (every tick — batch-limited, no-op when caught up)
-      if (this.currentMode === 'full') {
-        await this.runBackfillTriage();
-      }
+      // Runs in all modes (shadow-only, no LLM budget concern outside hours)
+      await this.runBackfillTriage();
 
       this.lastTickAt = new Date();
       const tickDuration = Date.now() - tickStart;
@@ -716,16 +709,18 @@ export class AgentLoop {
 
   private async runBackfillTriage(): Promise<void> {
     const enabled = this.settings.get('agent_backfill_enabled');
-    if (enabled === 'false' || enabled === '0') return;
+    if (enabled === 'false' || enabled === '0') {
+      console.log(`[backfill] Skipped — agent_backfill_enabled=${enabled}`);
+      return;
+    }
 
     try {
-      console.log(`[agent] Running backfill triage sweep...`);
       const result = await this.runBackfillSweep();
       if (result.processed > 0 || result.errors > 0) {
-        console.log(`[agent] Backfill triage complete — ${result.processed} processed, ${result.errors} errors`);
+        console.log(`[backfill] Triaged ${result.processed}, errors ${result.errors}`);
       }
     } catch (err) {
-      console.warn(`[agent] Backfill triage failed:`, err instanceof Error ? err.message : err);
+      console.warn(`[backfill] Sweep failed:`, err instanceof Error ? err.message : err);
     }
   }
 
@@ -1174,10 +1169,11 @@ export class AgentLoop {
     );
 
     if (untriaged.length === 0) {
+      console.log(`[backfill] No untriaged tickets found — backfill complete`);
       return { processed: 0, skipped: 0, errors: 0 };
     }
 
-    console.log(`[agent] Backfill sweep: ${untriaged.length} untriaged tickets found`);
+    console.log(`[backfill] Found ${untriaged.length} untriaged tickets (batch ${batchSize}, projects: ${projects.join(',')})`);
 
     let processed = 0;
     let skipped = 0;
@@ -1217,12 +1213,12 @@ export class AgentLoop {
         });
         processed++;
       } catch (err) {
-        console.error(`[agent] Backfill triage failed for ${row.issue_key}:`, err instanceof Error ? err.message : err);
+        console.error(`[backfill] Triage failed for ${row.issue_key}:`, err instanceof Error ? err.message : err);
         errors++;
       }
     }
 
-    console.log(`[agent] Backfill sweep complete: ${processed} processed, ${skipped} skipped, ${errors} errors`);
+    console.log(`[backfill] Sweep done: ${processed} processed, ${errors} errors`);
     return { processed, skipped, errors };
   }
 }
