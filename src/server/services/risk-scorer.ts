@@ -22,6 +22,13 @@ export interface FlaggedTicket {
   reviewed_by: string | null;
   status: 'pending' | 'reviewed' | 'dismissed';
   last_notified_score: number;
+  ticket_status: string | null;
+  sla_breach_at: string | null;
+  sla_breached: boolean;
+  last_customer_comment: string | null;
+  last_customer_comment_at: string | null;
+  last_agent_comment: string | null;
+  last_agent_comment_at: string | null;
 }
 
 interface TicketRiskInput {
@@ -41,11 +48,13 @@ interface TicketRiskInput {
   sentimentScore: number | null;
   reassignCount: number;
   uniqueInternalCommenters: number;
-  hasEscalationLanguage: boolean;
+  hasStrongEscalation: boolean;
+  hasModerateEscalation: boolean;
   reporterOpenTicketCount: number;
 }
 
-const ESCALATION_WORDS = /\b(escalat|manager|urgent|asap|complaint|unacceptable|disgraceful|ridiculous|lawyer|legal|cancel)\b/i;
+const STRONG_ESCALATION = /\b(formal\s+complaint|lawyer|solicitor|legal\s+action|trading\s+standards|ombudsman|ICO|GDPR\s+breach|data\s+protection)\b/i;
+const MODERATE_ESCALATION = /\b(escalat|unacceptable|disgraceful|ridiculous|appalling|demand|threatening)\b/i;
 
 export class RiskScorer {
   private settings: SettingsQueries;
@@ -72,9 +81,11 @@ export class RiskScorer {
       }
     }
 
-    // 2. Escalation language — highest non-SLA weight
-    if (input.hasEscalationLanguage) {
-      factors.push({ id: 'escalation_language', label: 'Escalation requested', score: 35 });
+    // 2. Escalation language — tiered scoring
+    if (input.hasStrongEscalation) {
+      factors.push({ id: 'escalation_strong', label: 'Legal/formal escalation', score: 35 });
+    } else if (input.hasModerateEscalation) {
+      factors.push({ id: 'escalation_moderate', label: 'Customer frustration', score: 15 });
     }
 
     // 3. Age + activity — ONLY flag if combined with other signals (age alone is NOT flagworthy)
@@ -94,7 +105,7 @@ export class RiskScorer {
     if (input.reassignCount >= 3) {
       factors.push({ id: 'bounced', label: `Bounced ${input.reassignCount}x`, score: 20 });
     }
-    if (input.uniqueInternalCommenters >= 4) {
+    if (input.uniqueInternalCommenters >= 6) {
       factors.push({ id: 'many_hands', label: `${input.uniqueInternalCommenters} internal commenters`, score: 15 });
     }
 
@@ -124,7 +135,7 @@ export class RiskScorer {
     }
 
     // 7. Customer importance — repeat reporter
-    if (input.reporterOpenTicketCount >= 3) {
+    if (input.reporterOpenTicketCount >= 5) {
       factors.push({ id: 'repeat_reporter', label: `Reporter has ${input.reporterOpenTicketCount} open tickets`, score: 10 });
     }
 
@@ -199,13 +210,19 @@ export class RiskScorer {
         `SELECT issue_key, sentiment_score FROM problem_ticket_alerts
          WHERE issue_key IN (${keyPlaceholders}) AND sentiment_score IS NOT NULL AND resolved_at IS NULL`, ticketKeys,
       ),
-      query<{ issue_key: string; unique_authors: number; has_escalation: number; total_comments: number }>(
+      query<{ issue_key: string; unique_authors: number; has_strong_escalation: number; has_moderate_escalation: number; total_comments: number }>(
         `SELECT issue_key,
                 COUNT(DISTINCT author_account_id) as unique_authors,
-                MAX(CASE WHEN body_text LIKE '%escalat%' OR body_text LIKE '%manager%'
-                         OR body_text LIKE '%urgent%' OR body_text LIKE '%asap%'
-                         OR body_text LIKE '%complaint%' OR body_text LIKE '%unacceptable%'
-                    THEN 1 ELSE 0 END) as has_escalation,
+                MAX(CASE WHEN body_text LIKE '%formal complaint%' OR body_text LIKE '%lawyer%'
+                         OR body_text LIKE '%solicitor%' OR body_text LIKE '%legal action%'
+                         OR body_text LIKE '%trading standards%' OR body_text LIKE '%ombudsman%'
+                         OR body_text LIKE '%ICO%' OR body_text LIKE '%GDPR breach%'
+                         OR body_text LIKE '%data protection%'
+                    THEN 1 ELSE 0 END) as has_strong_escalation,
+                MAX(CASE WHEN body_text LIKE '%escalat%' OR body_text LIKE '%unacceptable%'
+                         OR body_text LIKE '%disgraceful%' OR body_text LIKE '%ridiculous%'
+                         OR body_text LIKE '%appalling%' OR body_text LIKE '%threatening%'
+                    THEN 1 ELSE 0 END) as has_moderate_escalation,
                 COUNT(*) as total_comments
          FROM jira_comment_cache
          WHERE issue_key IN (${keyPlaceholders}) AND is_public = 1
@@ -219,7 +236,7 @@ export class RiskScorer {
       query<{ reporter_account_id: string; open_count: number }>(
         `SELECT reporter_account_id, COUNT(*) as open_count FROM jira_issue_cache
          WHERE reporter_account_id IS NOT NULL AND status_category != 'done'
-         GROUP BY reporter_account_id HAVING COUNT(*) >= 3`, [],
+         GROUP BY reporter_account_id HAVING COUNT(*) >= 5`, [],
       ),
     ]);
 
@@ -262,7 +279,8 @@ export class RiskScorer {
         sentimentScore: sentimentMap.get(ticket.issue_key) ?? null,
         reassignCount: reassignMap.get(ticket.issue_key) ?? 0,
         uniqueInternalCommenters: comments?.unique_authors ?? 0,
-        hasEscalationLanguage: (comments?.has_escalation ?? 0) === 1,
+        hasStrongEscalation: (comments?.has_strong_escalation ?? 0) === 1,
+        hasModerateEscalation: (comments?.has_moderate_escalation ?? 0) === 1,
         reporterOpenTicketCount: ticket.reporter_account_id ? (reporterCountMap.get(ticket.reporter_account_id) ?? 0) : 0,
       };
 
@@ -332,6 +350,15 @@ export class RiskScorer {
          SELECT ticket_key FROM agent_flagged_tickets WHERE status = 'pending'
        ) OR (status = 'pending' AND risk_score < ?)`,
       [threshold],
+    );
+
+    // Auto-dismiss stale flags — flagged 7+ days with no score increase
+    await execute(
+      `UPDATE agent_flagged_tickets
+       SET status = 'dismissed', reviewed_by = 'system-decay', reviewed_at = GETUTCDATE()
+       WHERE status = 'pending'
+         AND DATEDIFF(day, flagged_at, GETUTCDATE()) >= 7
+         AND risk_score <= last_notified_score`,
     );
 
     return { flagged, notified };
@@ -437,12 +464,18 @@ export class RiskScorer {
         `SELECT sentiment_score FROM problem_ticket_alerts
          WHERE issue_key = ? AND sentiment_score IS NOT NULL AND resolved_at IS NULL`, [ticketKey],
       ),
-      queryOne<{ unique_authors: number; has_escalation: number; total_comments: number }>(
+      queryOne<{ unique_authors: number; has_strong_escalation: number; has_moderate_escalation: number; total_comments: number }>(
         `SELECT COUNT(DISTINCT author_account_id) as unique_authors,
-                MAX(CASE WHEN body_text LIKE '%escalat%' OR body_text LIKE '%manager%'
-                         OR body_text LIKE '%urgent%' OR body_text LIKE '%asap%'
-                         OR body_text LIKE '%complaint%' OR body_text LIKE '%unacceptable%'
-                    THEN 1 ELSE 0 END) as has_escalation,
+                MAX(CASE WHEN body_text LIKE '%formal complaint%' OR body_text LIKE '%lawyer%'
+                         OR body_text LIKE '%solicitor%' OR body_text LIKE '%legal action%'
+                         OR body_text LIKE '%trading standards%' OR body_text LIKE '%ombudsman%'
+                         OR body_text LIKE '%ICO%' OR body_text LIKE '%GDPR breach%'
+                         OR body_text LIKE '%data protection%'
+                    THEN 1 ELSE 0 END) as has_strong_escalation,
+                MAX(CASE WHEN body_text LIKE '%escalat%' OR body_text LIKE '%unacceptable%'
+                         OR body_text LIKE '%disgraceful%' OR body_text LIKE '%ridiculous%'
+                         OR body_text LIKE '%appalling%' OR body_text LIKE '%threatening%'
+                    THEN 1 ELSE 0 END) as has_moderate_escalation,
                 COUNT(*) as total_comments
          FROM jira_comment_cache WHERE issue_key = ? AND is_public = 1`, [ticketKey],
       ),
@@ -474,7 +507,8 @@ export class RiskScorer {
       sentimentScore: sentimentRow?.sentiment_score ?? null,
       reassignCount: reassignRow?.reassigns ?? 0,
       uniqueInternalCommenters: commentRow?.unique_authors ?? 0,
-      hasEscalationLanguage: (commentRow?.has_escalation ?? 0) === 1,
+      hasStrongEscalation: (commentRow?.has_strong_escalation ?? 0) === 1,
+      hasModerateEscalation: (commentRow?.has_moderate_escalation ?? 0) === 1,
       reporterOpenTicketCount: reporterRow?.open_count ?? 0,
     };
 
@@ -504,8 +538,21 @@ export class RiskScorer {
       : `WHERE f.status != 'dismissed' AND j.status_category != 'done'`;
     const params = status ? [status] : [];
     const rows = await query<Record<string, unknown>>(
-      `SELECT f.* FROM agent_flagged_tickets f
+      `SELECT f.*, j.status_name AS ticket_status, j.sla_breach_time, j.sla_breached,
+              cc.body_text AS last_customer_comment, cc.jira_created AS last_customer_comment_at,
+              ac.body_text AS last_agent_comment, ac.jira_created AS last_agent_comment_at
+       FROM agent_flagged_tickets f
        JOIN jira_issue_cache j ON j.issue_key = f.ticket_key
+       OUTER APPLY (
+         SELECT TOP(1) body_text, jira_created FROM jira_comment_cache
+         WHERE issue_key = f.ticket_key AND is_public = 1
+         ORDER BY jira_created DESC
+       ) cc
+       OUTER APPLY (
+         SELECT TOP(1) body_text, jira_created FROM jira_comment_cache
+         WHERE issue_key = f.ticket_key AND is_public = 0
+         ORDER BY jira_created DESC
+       ) ac
        ${where} ORDER BY f.risk_score DESC`, params,
     );
     return rows.map(this.rowToFlagged);
@@ -551,6 +598,10 @@ export class RiskScorer {
   private rowToFlagged(row: Record<string, unknown>): FlaggedTicket {
     let factors: RiskFactor[] = [];
     try { factors = JSON.parse(row.risk_factors as string); } catch {}
+    const truncate = (s: unknown, len = 200) => {
+      if (!s || typeof s !== 'string') return null;
+      return s.length > len ? s.slice(0, len) + '...' : s;
+    };
     return {
       id: row.id as number,
       ticket_key: row.ticket_key as string,
@@ -565,6 +616,13 @@ export class RiskScorer {
       reviewed_by: (row.reviewed_by as string) ?? null,
       status: row.status as 'pending' | 'reviewed' | 'dismissed',
       last_notified_score: (row.last_notified_score as number) ?? 0,
+      ticket_status: (row.ticket_status as string) ?? null,
+      sla_breach_at: (row.sla_breach_time as string) ?? null,
+      sla_breached: (row.sla_breached as number) === 1,
+      last_customer_comment: truncate(row.last_customer_comment),
+      last_customer_comment_at: (row.last_customer_comment_at as string) ?? null,
+      last_agent_comment: truncate(row.last_agent_comment),
+      last_agent_comment_at: (row.last_agent_comment_at as string) ?? null,
     };
   }
 }

@@ -148,6 +148,13 @@ interface FlaggedTicket {
   reviewed_by: string | null;
   status: 'pending' | 'reviewed' | 'dismissed';
   last_notified_score: number;
+  ticket_status: string | null;
+  sla_breach_at: string | null;
+  sla_breached: boolean;
+  last_customer_comment: string | null;
+  last_customer_comment_at: string | null;
+  last_agent_comment: string | null;
+  last_agent_comment_at: string | null;
 }
 
 interface FlaggedSummary {
@@ -3217,6 +3224,24 @@ function riskScoreBg(score: number): string {
   return 'bg-yellow-950/20 border-yellow-800/30';
 }
 
+function slaDisplay(t: FlaggedTicket): { text: string; color: string } | null {
+  if (t.sla_breached) {
+    if (!t.sla_breach_at) return { text: 'SLA Breached', color: 'text-red-400' };
+    const mins = Math.round((Date.now() - new Date(t.sla_breach_at).getTime()) / 60000);
+    if (mins < 60) return { text: `Breached ${mins}m ago`, color: 'text-red-400' };
+    const hrs = Math.round(mins / 60);
+    return { text: `Breached ${hrs}h ago`, color: 'text-red-400' };
+  }
+  if (t.sla_breach_at) {
+    const mins = Math.round((new Date(t.sla_breach_at).getTime() - Date.now()) / 60000);
+    if (mins <= 0) return { text: 'SLA Breached', color: 'text-red-400' };
+    if (mins < 60) return { text: `SLA in ${mins}m`, color: 'text-amber-400' };
+    const hrs = Math.round(mins / 60);
+    return { text: `SLA in ${hrs}h`, color: 'text-neutral-400' };
+  }
+  return null;
+}
+
 function FlaggedTab({ tickets, onRefresh }: { tickets: FlaggedTicket[]; onRefresh: () => void }) {
   const [reviewing, setReviewing] = useState<string | null>(null);
 
@@ -3252,45 +3277,90 @@ function FlaggedTab({ tickets, onRefresh }: { tickets: FlaggedTicket[]; onRefres
       )}
 
       {pending.length > 0 && (
-        <div className="space-y-2">
-          {pending.map(t => (
-            <div key={t.ticket_key} className={`border rounded-lg p-4 ${riskScoreBg(t.risk_score)}`}>
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <span className={`text-xl font-bold ${riskScoreColor(t.risk_score)}`}>{t.risk_score}</span>
-                  <div>
-                    <span className="text-sm font-mono text-[#5ec1ca]">{t.ticket_key}</span>
-                    <span className="text-xs text-neutral-500 ml-2">{t.priority}</span>
+        <div className="space-y-3">
+          {pending.map(t => {
+            const sla = slaDisplay(t);
+            return (
+              <div key={t.ticket_key} className={`border rounded-lg p-4 ${riskScoreBg(t.risk_score)}`}>
+                {/* Header: score, ticket key (linked), priority, status, SLA */}
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <span className={`text-xl font-bold ${riskScoreColor(t.risk_score)}`}>{t.risk_score}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <a
+                        href={`https://nurturtech.atlassian.net/browse/${t.ticket_key}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-mono text-[#5ec1ca] hover:underline"
+                      >{t.ticket_key}</a>
+                      <span className="text-xs text-neutral-500">{t.priority}</span>
+                      {t.ticket_status && (
+                        <span className="px-1.5 py-0.5 text-[10px] rounded bg-[#272C33] border border-[#3a424d] text-neutral-400">{t.ticket_status}</span>
+                      )}
+                      {sla && (
+                        <span className={`text-[10px] font-semibold ${sla.color}`}>{sla.text}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      href={`https://nurturtech.atlassian.net/browse/${t.ticket_key}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 text-[11px] font-medium rounded bg-[#2f353d] text-[#5ec1ca] border border-[#3a424d] hover:bg-[#363d47] transition-colors"
+                    >View in Jira</a>
+                    <button
+                      disabled={reviewing === t.ticket_key}
+                      onClick={() => handleReview(t.ticket_key, false)}
+                      className="px-2.5 py-1 text-[11px] font-medium rounded bg-green-900/30 text-green-400 border border-green-800/40 hover:bg-green-900/50 transition-colors disabled:opacity-50"
+                    >Reviewed</button>
+                    <button
+                      disabled={reviewing === t.ticket_key}
+                      onClick={() => handleReview(t.ticket_key, true)}
+                      className="px-2.5 py-1 text-[11px] font-medium rounded bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:text-neutral-200 transition-colors disabled:opacity-50"
+                    >Dismiss</button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    disabled={reviewing === t.ticket_key}
-                    onClick={() => handleReview(t.ticket_key, false)}
-                    className="px-2.5 py-1 text-[11px] font-medium rounded bg-green-900/30 text-green-400 border border-green-800/40 hover:bg-green-900/50 transition-colors disabled:opacity-50"
-                  >Reviewed</button>
-                  <button
-                    disabled={reviewing === t.ticket_key}
-                    onClick={() => handleReview(t.ticket_key, true)}
-                    className="px-2.5 py-1 text-[11px] font-medium rounded bg-[#2f353d] text-neutral-400 border border-[#3a424d] hover:text-neutral-200 transition-colors disabled:opacity-50"
-                  >Dismiss</button>
+
+                {/* Summary */}
+                <div className="text-xs text-neutral-300 mb-2">{t.summary ?? 'No summary'}</div>
+
+                {/* Risk factor badges */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {t.risk_factors.map((f, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full bg-[#272C33] border border-[#3a424d] text-neutral-400">
+                      <span className="font-mono text-neutral-500">+{f.score}</span> {f.label}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Comment previews */}
+                {(t.last_customer_comment || t.last_agent_comment) && (
+                  <div className="space-y-1.5 mb-3 text-[11px]">
+                    {t.last_customer_comment && (
+                      <div className="flex gap-2">
+                        <span className="shrink-0 text-violet-400">Customer{t.last_customer_comment_at ? ` (${timeAgo(t.last_customer_comment_at)})` : ''}:</span>
+                        <span className="text-neutral-400 line-clamp-2">{t.last_customer_comment}</span>
+                      </div>
+                    )}
+                    {t.last_agent_comment && (
+                      <div className="flex gap-2">
+                        <span className="shrink-0 text-blue-400">Agent{t.last_agent_comment_at ? ` (${timeAgo(t.last_agent_comment_at)})` : ''}:</span>
+                        <span className="text-neutral-400 line-clamp-2">{t.last_agent_comment}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Footer: assignee, reporter, flagged time */}
+                <div className="flex items-center gap-4 text-[10px] text-neutral-500">
+                  <span>Assignee: {t.assignee ?? 'Unassigned'}</span>
+                  <span>Reporter: {t.reporter ?? '—'}</span>
+                  <span>Flagged {timeAgo(t.flagged_at)}</span>
                 </div>
               </div>
-              <div className="text-xs text-neutral-300 mb-2">{t.summary ?? 'No summary'}</div>
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {t.risk_factors.map((f, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full bg-[#272C33] border border-[#3a424d] text-neutral-400">
-                    <span className="font-mono text-neutral-500">+{f.score}</span> {f.label}
-                  </span>
-                ))}
-              </div>
-              <div className="flex items-center gap-4 text-[10px] text-neutral-500">
-                <span>Assignee: {t.assignee ?? 'Unassigned'}</span>
-                <span>Reporter: {t.reporter ?? '—'}</span>
-                <span>Flagged {timeAgo(t.flagged_at)}</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -3302,7 +3372,12 @@ function FlaggedTab({ tickets, onRefresh }: { tickets: FlaggedTicket[]; onRefres
               <div key={t.ticket_key} className="flex items-center justify-between px-3 py-2 rounded bg-[#2f353d] border border-[#3a424d] text-xs">
                 <div className="flex items-center gap-3">
                   <span className="text-neutral-500 font-mono w-6">{t.risk_score}</span>
-                  <span className="text-[#5ec1ca] font-mono">{t.ticket_key}</span>
+                  <a
+                    href={`https://nurturtech.atlassian.net/browse/${t.ticket_key}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#5ec1ca] font-mono hover:underline"
+                  >{t.ticket_key}</a>
                   <span className="text-neutral-400 truncate max-w-md">{t.summary}</span>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] text-neutral-600">
