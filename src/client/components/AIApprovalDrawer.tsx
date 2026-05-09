@@ -24,13 +24,15 @@ interface ApprovalItem {
   action_type: string | null;
   confidence: number | null;
   reasoning: string | null;
+  shadow_mode: boolean;
+  decision_id: number | null;
 }
 
 interface AIApprovalDrawerProps {
   item: ApprovalItem;
   canInteract: boolean;
   onClose: () => void;
-  onDecide: (id: number, action: 'approve' | 'decline' | 'cancel', editedResponse?: string, declineReason?: string) => void;
+  onDecide: (id: number, action: 'approve' | 'decline' | 'cancel' | 'confirm' | 'execute', editedResponse?: string, declineReason?: string) => void;
   onPrev?: () => void;
   onNext?: () => void;
   hasPrev?: boolean;
@@ -272,12 +274,24 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
   const priStyle = PRIORITY_STYLES[(item.priority || 'normal').toLowerCase()] || PRIORITY_STYLES.normal;
   const statusStyle = STATUS_STYLES[item.status] || STATUS_STYLES.pending;
 
+  const isShadow = item.shadow_mode && item.source === 'nova_ai';
+
   function handleApprove() {
-    if (hasEdits) {
+    if (isShadow) {
+      if (hasEdits) {
+        onDecide(item.id, 'execute', editedText);
+      } else {
+        onDecide(item.id, 'execute');
+      }
+    } else if (hasEdits) {
       onDecide(item.id, 'approve', textToAdf(editedText));
     } else {
       onDecide(item.id, 'approve');
     }
+  }
+
+  function handleConfirm() {
+    onDecide(item.id, 'confirm');
   }
 
   const [showDeclineForm, setShowDeclineForm] = useState(false);
@@ -290,6 +304,10 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
     }
     if (!declineReason.trim()) return;
     onDecide(item.id, 'decline', undefined, declineReason.trim());
+  }
+
+  function handleExecute() {
+    onDecide(item.id, 'execute');
   }
 
   function handleCancel() {
@@ -331,6 +349,11 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
               <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${item.source === 'nova_ai' ? 'bg-[#5ec1ca]/15 text-[#5ec1ca]' : 'bg-violet-500/15 text-violet-400'}`}>
                 {item.source === 'nova_ai' ? 'NOVA AI' : 'n8n AI'}
               </span>
+              {isShadow && (
+                <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-purple-500/15 text-purple-400">
+                  SHADOW
+                </span>
+              )}
             </div>
             <div className="text-sm text-neutral-100 font-semibold truncate">{item.ticket_summary}</div>
           </div>
@@ -621,7 +644,35 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
                     >
                       {showDeclineForm ? 'Confirm Decline' : 'Decline'}
                     </button>
-                    {!showDeclineForm && (
+                    {!showDeclineForm && isShadow && (
+                      <>
+                        <button
+                          onClick={handleConfirm}
+                          className="bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-600/30 px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                          title="AI was correct — record as learning, no Jira action"
+                        >
+                          Confirm Correct
+                        </button>
+                        {hasEdits ? (
+                          <button
+                            onClick={handleApprove}
+                            className="bg-[#5ec1ca] hover:bg-[#4db0ba] text-[#272C33] px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                            title="Execute the edited response on Jira"
+                          >
+                            Edit & Execute
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleApprove}
+                            className="bg-[#5ec1ca] hover:bg-[#4db0ba] text-[#272C33] px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors"
+                            title="Execute the action on Jira now"
+                          >
+                            Execute Action
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {!showDeclineForm && !isShadow && (
                       hasEdits ? (
                         <button
                           onClick={handleApprove}

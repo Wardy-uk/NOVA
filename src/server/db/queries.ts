@@ -2532,6 +2532,8 @@ export interface ApprovalItem {
   action_type: string | null; source: string | null;
   confidence: number | null; reasoning: string | null;
   warned_at: string | null;
+  shadow_mode: boolean;
+  decision_id: number | null;
 }
 
 // NOVA agent_decisions use negative IDs (-id) to distinguish from approval_queue items.
@@ -2579,6 +2581,8 @@ function agentDecisionToApproval(row: Record<string, unknown>): ApprovalItem {
     confidence: row.confidence != null ? Number(row.confidence) : null,
     reasoning: (row.reasoning as string) ?? null,
     warned_at: null,
+    shadow_mode: !!(row.shadow_mode),
+    decision_id: id,
   };
 }
 
@@ -2592,7 +2596,7 @@ export class ApprovalQueries {
     const rows = await query<Record<string, unknown>>(
       `SELECT d.id, d.ticket_id, d.event_type, d.inputs, d.output, d.action,
               d.confidence, d.reasoning, d.approval_required, d.approval_status,
-              d.created_at, d.resolved_at
+              d.shadow_mode, d.created_at, d.resolved_at
        FROM agent_decisions d ${where}
        ORDER BY d.created_at DESC`,
     );
@@ -2601,7 +2605,7 @@ export class ApprovalQueries {
 
   async getAll(status?: string): Promise<ApprovalItem[]> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
-    let sql = `SELECT * FROM approval_queue`;
+    let sql = `SELECT *, CAST(0 AS BIT) AS shadow_mode, NULL AS decision_id FROM approval_queue`;
     const params: string[] = [];
     if (status) { sql += ` WHERE status = ?`; params.push(status); }
     sql += ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`;
@@ -2622,23 +2626,23 @@ export class ApprovalQueries {
       const rows = await query<Record<string, unknown>>(
         `SELECT id, ticket_id, event_type, inputs, output, action,
                 confidence, reasoning, approval_required, approval_status,
-                created_at, resolved_at
+                shadow_mode, created_at, resolved_at
          FROM agent_decisions WHERE id = ?`, [Math.abs(id)],
       );
       return rows.length ? agentDecisionToApproval(rows[0]) : undefined;
     }
-    return queryOne<ApprovalItem>(`SELECT * FROM approval_queue WHERE id = ?`, [id]);
+    return queryOne<ApprovalItem>(`SELECT *, CAST(0 AS BIT) AS shadow_mode, NULL AS decision_id FROM approval_queue WHERE id = ?`, [id]);
   }
 
   async getPending(): Promise<ApprovalItem[]> { return this.getAll('pending'); }
 
   async getPendingByTicket(ticketId: string): Promise<ApprovalItem | undefined> {
-    const queueItem = await queryOne<ApprovalItem>(`SELECT * FROM approval_queue WHERE ticket_id = ? AND status = 'pending' ORDER BY created_at DESC`, [ticketId]);
+    const queueItem = await queryOne<ApprovalItem>(`SELECT *, CAST(0 AS BIT) AS shadow_mode, NULL AS decision_id FROM approval_queue WHERE ticket_id = ? AND status = 'pending' ORDER BY created_at DESC`, [ticketId]);
     if (queueItem) return queueItem;
     const novaRows = await query<Record<string, unknown>>(
       `SELECT id, ticket_id, event_type, inputs, output, action,
               confidence, reasoning, approval_required, approval_status,
-              created_at, resolved_at
+              shadow_mode, created_at, resolved_at
        FROM agent_decisions
        WHERE ticket_id = ? AND approval_required = 1
          AND (approval_status IS NULL OR approval_status = 'pending')

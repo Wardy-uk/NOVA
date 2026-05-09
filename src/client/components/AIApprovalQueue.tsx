@@ -23,6 +23,8 @@ interface ApprovalItem {
   action_type: string | null;
   confidence: number | null;
   reasoning: string | null;
+  shadow_mode: boolean;
+  decision_id: number | null;
 }
 
 interface ApprovalStats {
@@ -188,9 +190,17 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
 
   // ---- Actions ----
 
-  async function handleDecide(id: number, action: 'approve' | 'decline' | 'cancel', editedResponse?: string, declineReason?: string) {
+  async function handleDecide(id: number, action: 'approve' | 'decline' | 'cancel' | 'confirm' | 'execute', editedResponse?: string, declineReason?: string) {
     try {
-      const res = await fetch(`${API_BASE}/${id}/decide`, {
+      // Shadow decisions route through the agent decisions endpoint
+      const item = items.find(i => i.id === id);
+      const isShadowAction = action === 'confirm' || action === 'execute' || (action === 'decline' && item?.shadow_mode);
+      const useShadowEndpoint = isShadowAction && item?.decision_id;
+      const url = useShadowEndpoint
+        ? `/api/agent/decisions/${item!.decision_id}/decide`
+        : `${API_BASE}/${id}/decide`;
+
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, editedResponse, declineReason }),
@@ -301,7 +311,17 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
         case 'a':
           if (drawerItem && canInteract && drawerItem.status === 'pending') {
             e.preventDefault();
-            handleDecide(drawerItem.id, 'approve');
+            if (drawerItem.shadow_mode) {
+              handleDecide(drawerItem.id, 'confirm');
+            } else {
+              handleDecide(drawerItem.id, 'approve');
+            }
+          }
+          break;
+        case 'e':
+          if (drawerItem && canInteract && drawerItem.status === 'pending' && drawerItem.shadow_mode) {
+            e.preventDefault();
+            handleDecide(drawerItem.id, 'execute');
           }
           break;
         case 'd':
@@ -532,7 +552,8 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
       <div className="flex items-center justify-center gap-4 text-[11px] text-neutral-600">
         <span><kbd className="px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-500 font-mono">j</kbd> / <kbd className="px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-500 font-mono">k</kbd> navigate</span>
         <span><kbd className="px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-500 font-mono">Enter</kbd> open</span>
-        <span><kbd className="px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-500 font-mono">a</kbd> approve</span>
+        <span><kbd className="px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-500 font-mono">a</kbd> approve/confirm</span>
+        <span><kbd className="px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-500 font-mono">e</kbd> execute</span>
         <span><kbd className="px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-500 font-mono">d</kbd> decline</span>
         <span><kbd className="px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-500 font-mono">Esc</kbd> close</span>
       </div>
