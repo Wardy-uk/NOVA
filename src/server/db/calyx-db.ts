@@ -1,7 +1,17 @@
-import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { addBusinessMinutes, toSqliteDatetime } from '../utils/business-hours.js';
+
+// better-sqlite3 is optional — Calyx features degrade gracefully without it
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let DatabaseConstructor: any = null;
+try {
+  DatabaseConstructor = (await import('better-sqlite3')).default;
+} catch {
+  console.warn('[Calyx] better-sqlite3 not available — Calyx features disabled');
+}
+
+type DatabaseType = any;
 
 // ── Audit Log Helper ──
 
@@ -15,7 +25,7 @@ export interface AuditEntry {
   ipAddress?: string;
 }
 
-export function auditLog(db: Database.Database, entry: AuditEntry): void {
+export function auditLog(db: DatabaseType, entry: AuditEntry): void {
   try {
     db.prepare(`
       INSERT INTO calyx_audit_log
@@ -37,19 +47,20 @@ export function auditLog(db: Database.Database, entry: AuditEntry): void {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-let db: Database.Database | null = null;
+let db: DatabaseType | null = null;
 
-export function getCalyxDb(): Database.Database {
+export function getCalyxDb(): DatabaseType | null {
   if (db) return db;
+  if (!DatabaseConstructor) return null;
 
   const dbPath = process.env.CALYX_DB_PATH ?? path.join(process.cwd(), 'calyx.db');
-  db = new Database(dbPath);
+  db = new DatabaseConstructor(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   return db;
 }
 
-export function initializeCalyxSchema(database: Database.Database): void {
+export function initializeCalyxSchema(database: DatabaseType): void {
   // ── Migrate old unprefixed tables to calyx_ prefix ──
   const oldTables = ['teams', 'categories', 'agents', 'sla_policies', 'tickets', 'ticket_events', 'ticket_comments'];
   for (const t of oldTables) {
@@ -493,7 +504,7 @@ export function initializeCalyxSchema(database: Database.Database): void {
   }
 }
 
-export function seedCalyxData(database: Database.Database): void {
+export function seedCalyxData(database: DatabaseType): void {
   const hasTeams = database.prepare('SELECT COUNT(*) as c FROM calyx_teams').get() as { c: number };
   if (hasTeams.c > 0) return;
 

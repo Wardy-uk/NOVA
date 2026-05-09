@@ -174,12 +174,17 @@ async function main() {
   // Forward declaration — populated later when Jira creds are available
   let agentLoop: AgentLoop | null = null;
 
-  // Calyx database (separate SQLite via better-sqlite3)
-  console.log('[N.O.V.A] Initializing Calyx database...');
+  // Calyx database (separate SQLite via better-sqlite3, optional)
   const calyxDb = getCalyxDb();
-  initializeCalyxSchema(calyxDb);
-  seedCalyxData(calyxDb);
-  const calyxQueries = new CalyxQueries(calyxDb);
+  let calyxQueries: CalyxQueries | null = null;
+  if (calyxDb) {
+    console.log('[N.O.V.A] Initializing Calyx database...');
+    initializeCalyxSchema(calyxDb);
+    seedCalyxData(calyxDb);
+    calyxQueries = new CalyxQueries(calyxDb);
+  } else {
+    console.log('[N.O.V.A] Calyx database not available (better-sqlite3 not installed) — Calyx features disabled');
+  }
 
   const taskQueries = new TaskQueries();
   const fileSettings = new FileSettingsQueries();
@@ -190,10 +195,12 @@ async function main() {
   const settingsQueries = configService as FileSettingsQueries;
 
   // Calyx background timers (must be after settingsQueries is initialized)
-  setInterval(() => checkSloBreaches(calyxDb, settingsQueries.getAll()), 5 * 60 * 1000);
-  setInterval(() => processEmailQueue(calyxDb, settingsQueries.getAll()), 60_000);
-  setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 30 * 60 * 1000);
-  setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 60_000);
+  if (calyxDb) {
+    setInterval(() => checkSloBreaches(calyxDb, settingsQueries.getAll()), 5 * 60 * 1000);
+    setInterval(() => processEmailQueue(calyxDb, settingsQueries.getAll()), 60_000);
+    setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 30 * 60 * 1000);
+    setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 60_000);
+  }
 
   // Wallboard live cache — cohort-scoped stats from jira_issue_cache (5-min refresh)
   startWallboardLiveCache().catch(err => console.warn('[wallboard-live-cache] startup failed:', err instanceof Error ? err.message : err));
@@ -797,7 +804,9 @@ async function main() {
   });
 
   // Calyx portal — public + portal-JWT auth (no NOVA auth)
-  app.use('/api/calyx/portal', createCalyxPortalRoutes(calyxDb, settingsQueries));
+  if (calyxDb) {
+    app.use('/api/calyx/portal', createCalyxPortalRoutes(calyxDb, settingsQueries));
+  }
 
   // Protected API routes — role cache with 30s TTL avoids hitting DB on every single request
   const roleCache = new Map<number, { role: string; expires: number }>();
@@ -824,10 +833,12 @@ async function main() {
   });
 
   const getCalyxSettings = () => settingsQueries.getAll();
-  app.use('/api/calyx', createCalyxRoutes(calyxQueries, calyxDb, getCalyxSettings));
-  app.use('/api/calyx', createCalyxPhase4Routes(calyxDb, getCalyxSettings));
-  app.use('/api/calyx', createCalyxPhase5Routes(calyxDb, settingsQueries));
-  app.use('/api/calyx', createCalyxReportRoutes(calyxDb));
+  if (calyxDb && calyxQueries) {
+    app.use('/api/calyx', createCalyxRoutes(calyxQueries, calyxDb, getCalyxSettings));
+    app.use('/api/calyx', createCalyxPhase4Routes(calyxDb, getCalyxSettings));
+    app.use('/api/calyx', createCalyxPhase5Routes(calyxDb, settingsQueries));
+    app.use('/api/calyx', createCalyxReportRoutes(calyxDb));
+  }
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries, settingsQueries, onboardingRunQueries, problemTicketQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries, userSettingsQueries, (key) => {
