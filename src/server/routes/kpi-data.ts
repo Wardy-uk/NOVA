@@ -891,7 +891,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
                ISNULL(MaxTickets, 0) AS MaxTickets,
                ISNULL(MaxTicketsCustomerCare, 0) AS MaxTicketsCustomerCare,
                ISNULL(MaxTicketsT2T3, 0) AS MaxTicketsT2T3,
-               PeopleHrId
+               PeopleHrId, AccountId
         FROM dbo.Agent
         ORDER BY Team, AgentName
       `);
