@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { AIAnalysisPanel } from './AIAnalysisPanel.js';
 
 // ── Types ──
 
@@ -811,98 +812,12 @@ function TicketDetailView({ ticketKey, onBack, onNavigate }: {
         {/* Right column: AI Analysis + Context (1/3 width) */}
         <div className="space-y-3">
           {/* AI Analysis */}
-          <div className="border border-[#3a424d] rounded-lg bg-[#272C33]">
-            <div className="px-4 py-2 border-b border-[#3a424d] bg-[#2a3039]">
-              <h4 className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">AI Analysis</h4>
-            </div>
-            <div className="p-3 space-y-3">
-              {latestDecision ? (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-medium text-neutral-200">
-                      {latestDecision.action === 'draft_response' ? 'Respond' : latestDecision.action}
-                    </span>
-                    <span className="text-[9px] text-neutral-600">{latestDecision.created_at ? timeAgo(latestDecision.created_at) : ''}</span>
-                  </div>
-
-                  {/* Confidence meter */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[9px] text-neutral-500 uppercase tracking-wider">Confidence</span>
-                      <span className={`text-xs font-bold ${latestDecision.confidence >= 0.8 ? 'text-green-400' : latestDecision.confidence >= 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
-                        {(latestDecision.confidence * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="w-full h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full transition-all ${confidenceBar(latestDecision.confidence)}`}
-                        style={{ width: `${Math.round(latestDecision.confidence * 100)}%` }} />
-                    </div>
-                  </div>
-
-                  {/* Classification */}
-                  {latestOutput?.classification && (
-                    <div className="bg-[#2f353d] rounded p-2">
-                      <div className="text-[9px] text-neutral-500 uppercase tracking-wider mb-1">Classification</div>
-                      <div className="text-xs text-neutral-300">
-                        {latestOutput.classification.category}
-                        {latestOutput.classification.sub_category && <span className="text-neutral-500"> / {latestOutput.classification.sub_category}</span>}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Sentiment */}
-                  {(latestInputs?.sentiment || latestOutput?.sentiment) && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[9px] text-neutral-500 uppercase tracking-wider">Sentiment</span>
-                      <SentimentBadge sentiment={latestInputs?.sentiment ?? latestOutput?.sentiment ?? ''} />
-                    </div>
-                  )}
-
-                  {/* SLA Risk */}
-                  {latestInputs?.sla_risk && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[9px] text-neutral-500 uppercase tracking-wider">SLA Risk</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                        latestInputs.sla_risk === 'critical' || latestInputs.sla_risk === 'high' ? 'bg-red-950/40 text-red-400 border-red-800/40'
-                          : latestInputs.sla_risk === 'medium' ? 'bg-amber-950/40 text-amber-400 border-amber-800/40'
-                          : 'bg-neutral-800/50 text-neutral-400 border-neutral-700/40'
-                      }`}>{latestInputs.sla_risk}</span>
-                    </div>
-                  )}
-
-                  {/* Reasoning */}
-                  <div>
-                    <div className="text-[9px] text-neutral-500 uppercase tracking-wider mb-1">Reasoning</div>
-                    <div className="text-[10px] text-neutral-400 leading-relaxed bg-[#2f353d] rounded p-2 max-h-28 overflow-y-auto">
-                      {typeof latestDecision.reasoning === 'string' ? latestDecision.reasoning : ''}
-                    </div>
-                  </div>
-
-                  {/* AI Draft preview */}
-                  {latestOutput?.draft_response && activeAction !== 'reply' && (
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[9px] text-neutral-500 uppercase tracking-wider">AI Draft</span>
-                        <button onClick={() => setActiveAction('reply')} className="text-[9px] text-[#5ec1ca] hover:text-[#7dd3d8]">Use this draft →</button>
-                      </div>
-                      <div className="text-[10px] text-neutral-400 bg-[#2f353d] rounded p-2 max-h-20 overflow-y-auto leading-relaxed">
-                        {latestOutput.draft_response.slice(0, 300)}{latestOutput.draft_response.length > 300 ? '...' : ''}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Provider info */}
-                  {(latestDecision.provider || latestDecision.model) && (
-                    <div className="text-[9px] text-neutral-600">
-                      {latestDecision.provider}/{latestDecision.model}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="text-[10px] text-neutral-600 italic py-2 text-center">No AI decisions for this ticket yet.</div>
-              )}
-            </div>
-          </div>
+          <AIAnalysisPanel
+            ticketKey={ticketKey}
+            decision={latestDecision}
+            onUseDraft={() => setActiveAction('reply')}
+            hideDraft={activeAction === 'reply'}
+          />
 
           {/* Customer Context */}
           <div className="border border-[#3a424d] rounded-lg bg-[#272C33]">

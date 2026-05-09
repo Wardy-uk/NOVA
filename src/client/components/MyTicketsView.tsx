@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { Task } from '../../shared/types.js';
 import { useMyTicketsQueue, type RankedTicket, type TicketBand } from '../hooks/useMyTicketsQueue.js';
 import { TicketBriefCard, type BriefFields } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
 import { AdfCommentBody } from './AdfCommentBody.js';
+import { AIAnalysisPanel } from './AIAnalysisPanel.js';
 import { DeferReasonModal } from './DeferReasonModal.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -261,6 +262,8 @@ function TicketDetailPanel({ ticketKey, ticket, onDefer, onRefreshQueue }: {
   const [transitionModal, setTransitionModal] = useState<{ transition: JiraTransition; comment: string; commentType: 'internal' | 'public' } | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
+  const [aiDraftUsed, setAiDraftUsed] = useState(false);
+  const commentRef = useRef<HTMLTextAreaElement>(null);
 
   const fireToast = (kind: 'ok' | 'err', msg: string) => {
     setToast({ kind, msg });
@@ -487,6 +490,18 @@ function TicketDetailPanel({ ticketKey, ticket, onDefer, onRefreshQueue }: {
         <div className="space-y-4">
           <TicketBriefCard {...briefProps} />
           <AINextActionCard ticketKey={ticketKey} pendingDecision={ticket.pendingDecision} onDecisionActioned={onRefreshQueue} />
+          <AIAnalysisPanel
+            ticketKey={ticketKey}
+            onUseDraft={(draft) => {
+              setCommentDraft(draft);
+              setCommentType('public');
+              setAiDraftUsed(true);
+              setTimeout(() => {
+                commentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                commentRef.current?.focus();
+              }, 100);
+            }}
+          />
         </div>
 
         {/* Right: Activity + Comments + Actions */}
@@ -513,10 +528,16 @@ function TicketDetailPanel({ ticketKey, ticket, onDefer, onRefreshQueue }: {
 
           {/* Comment composer */}
           <GlassCard className="p-4">
-            <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-2">Add Comment</div>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold">Add Comment</div>
+              {aiDraftUsed && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#5ec1ca]/15 text-[#5ec1ca] border border-[#5ec1ca]/30">AI draft</span>
+              )}
+            </div>
             <textarea
+              ref={commentRef}
               value={commentDraft}
-              onChange={(e) => setCommentDraft(e.target.value)}
+              onChange={(e) => { setCommentDraft(e.target.value); if (aiDraftUsed) setAiDraftUsed(false); }}
               placeholder="Write a comment…"
               rows={3}
               className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600 mb-2"
