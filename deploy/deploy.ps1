@@ -50,6 +50,7 @@ try {
 
     # -- Install dependencies -------------------------------------------------
     Write-Host "[2/4] Installing dependencies..." -ForegroundColor Yellow
+    $env:NODE_OPTIONS = "--max-old-space-size=1536"
     npm ci
     if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
     Write-Host ""
