@@ -18,6 +18,9 @@ interface AiInfo {
   summary: string | null;
   eventType: string;
   decidedAt: string;
+  quickWinType: string | null;
+  quickWinConfidence: number | null;
+  quickWinExecuted: boolean;
 }
 
 interface QueueTicket {
@@ -394,6 +397,7 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
   const assignees = useMemo(() => [...new Set(tickets.map(t => t.assignee).filter(Boolean))].sort() as string[], [tickets]);
   const tiers = useMemo(() => [...new Set(tickets.map(t => t.currentTier).filter(Boolean))].sort() as string[], [tickets]);
   const aiActions = useMemo(() => [...new Set(tickets.map(t => t.ai?.action).filter(Boolean))].sort() as string[], [tickets]);
+  const qwTypes = useMemo(() => [...new Set(tickets.map(t => t.ai?.quickWinType).filter(Boolean) as string[])].sort(), [tickets]);
 
   const filtered = useMemo(() => {
     let list = [...tickets];
@@ -405,7 +409,15 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
     }
     if (slaFilter !== 'all') list = list.filter(t => t.sla.status === slaFilter);
     if (tierFilter !== 'all') list = list.filter(t => (t.currentTier ?? 'none') === tierFilter);
-    if (aiActionFilter !== 'all') list = list.filter(t => t.ai?.action === aiActionFilter);
+    if (aiActionFilter !== 'all') {
+      if (aiActionFilter === 'qw:all') {
+        list = list.filter(t => t.ai?.quickWinType && t.ai.quickWinType !== 'none');
+      } else if (aiActionFilter.startsWith('qw:')) {
+        list = list.filter(t => t.ai?.quickWinType === aiActionFilter.slice(3));
+      } else {
+        list = list.filter(t => t.ai?.action === aiActionFilter);
+      }
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter(t =>
@@ -512,7 +524,15 @@ function QueueView({ onOpenTicket }: { onOpenTicket: (key: string) => void }) {
         <FilterSelect label="Assignee" value={assigneeFilter} onChange={setAssigneeFilter} options={[{ value: 'all', label: 'All assignees' }, { value: 'unassigned', label: 'Unassigned' }, ...assignees.map(a => ({ value: a, label: a }))]} />
         <FilterSelect label="SLA" value={slaFilter} onChange={setSlaFilter} options={[{ value: 'all', label: 'All SLA' }, { value: 'breached', label: 'Breached' }, { value: 'at_risk', label: 'At Risk' }, { value: 'ok', label: 'OK' }]} />
         {tiers.length > 0 && <FilterSelect label="Tier" value={tierFilter} onChange={setTierFilter} options={[{ value: 'all', label: 'All Tiers' }, { value: 'none', label: 'No Tier' }, ...tiers.map(t => ({ value: t, label: t }))]} />}
-        {aiActions.length > 0 && <FilterSelect label="AI Action" value={aiActionFilter} onChange={setAiActionFilter} options={[{ value: 'all', label: 'All Actions' }, ...aiActions.map(a => ({ value: a, label: a === 'draft_response' ? 'Draft Response' : a === 'no_action' ? 'No Action' : a.charAt(0).toUpperCase() + a.slice(1) }))]} />}
+        {aiActions.length > 0 && <FilterSelect label="AI Action" value={aiActionFilter} onChange={setAiActionFilter} options={[
+          { value: 'all', label: 'All Actions' },
+          ...aiActions.map(a => ({ value: a, label: a === 'draft_response' ? 'Draft Response' : a === 'no_action' ? 'No Action' : a.charAt(0).toUpperCase() + a.slice(1) })),
+          ...(qwTypes.length > 0 ? [
+            { value: '_qw_sep', label: '── Quick Wins ──' },
+            { value: 'qw:all', label: 'All Quick Wins' },
+            ...qwTypes.map(t => ({ value: `qw:${t}`, label: t === 'spam' ? 'Spam' : t === 'thank_you' ? 'Thank You' : t === 'kba_match' ? 'KBA Match' : t === 'stale_no_response' ? 'Stale / No Response' : t === 'duplicate' ? 'Duplicate' : t === 'auto_resolved' ? 'Auto Resolved' : t })),
+          ] : []),
+        ]} />}
         {(projectFilter !== 'all' || statusFilter !== 'all' || priorityFilter !== 'all' || assigneeFilter !== 'all' || slaFilter !== 'all' || tierFilter !== 'all' || aiActionFilter !== 'all' || searchQuery) && (
           <button onClick={() => { setProjectFilter('all'); setStatusFilter('all'); setPriorityFilter('all'); setAssigneeFilter('all'); setSlaFilter('all'); setTierFilter('all'); setAiActionFilter('all'); setSearchQuery(''); }}
             className="text-[10px] text-neutral-600 hover:text-red-400 transition-colors">Clear filters</button>

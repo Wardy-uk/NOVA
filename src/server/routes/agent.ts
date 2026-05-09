@@ -2039,11 +2039,14 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
           output_category: string | null; approval_required: boolean;
           approval_status: string | null; shadow_mode: boolean;
           created_at: string; event_type: string;
+          quick_win_type: string | null; quick_win_confidence: number | null;
+          quick_win_executed: boolean;
         }>(
           `SELECT d.ticket_id, d.action, d.confidence,
              JSON_VALUE(d.output, '$.classification.category') as output_category,
              d.approval_required, d.approval_status, d.shadow_mode,
-             d.created_at, d.event_type
+             d.created_at, d.event_type,
+             d.quick_win_type, d.quick_win_confidence, d.quick_win_executed
            FROM agent_decisions d
            INNER JOIN (
              SELECT ticket_id, MAX(id) as max_id
@@ -2127,6 +2130,9 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
             summary: aiSummary,
             eventType: ai.event_type,
             decidedAt: ai.created_at,
+            quickWinType: ai.quick_win_type ?? null,
+            quickWinConfidence: ai.quick_win_confidence ?? null,
+            quickWinExecuted: !!ai.quick_win_executed,
           } : null,
         };
       });
@@ -2234,11 +2240,14 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
           output_category: string | null; approval_required: boolean;
           approval_status: string | null; shadow_mode: boolean;
           created_at: string; event_type: string;
+          quick_win_type: string | null; quick_win_confidence: number | null;
+          quick_win_executed: boolean;
         }>(
           `SELECT d.ticket_id, d.action, d.confidence,
              JSON_VALUE(d.output, '$.classification.category') as output_category,
              d.approval_required, d.approval_status, d.shadow_mode,
-             d.created_at, d.event_type
+             d.created_at, d.event_type,
+             d.quick_win_type, d.quick_win_confidence, d.quick_win_executed
            FROM agent_decisions d
            INNER JOIN (
              SELECT ticket_id, MAX(id) as max_id
@@ -2343,6 +2352,9 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
             summary: aiSummary,
             eventType: ai.event_type,
             decidedAt: ai.created_at,
+            quickWinType: ai.quick_win_type ?? null,
+            quickWinConfidence: ai.quick_win_confidence ?? null,
+            quickWinExecuted: !!ai.quick_win_executed,
           } : null,
         };
       });
