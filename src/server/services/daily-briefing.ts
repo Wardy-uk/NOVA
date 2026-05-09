@@ -4,7 +4,6 @@ import { query, executeAndGetId } from './database.js';
 import type { LlmService } from './llm-service.js';
 import type { JiraCacheQueries } from './jira-cache-queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
-import type { CalendarSyncService } from './calendar-sync.js';
 import type { EmailService } from './email.js';
 
 // ── Types ──
@@ -61,7 +60,6 @@ export class DailyBriefingService {
     private llm: LlmService,
     private cache: JiraCacheQueries,
     private settings: SettingsQueries,
-    private calendar: CalendarSyncService,
     private email: EmailService | null,
   ) {}
 
@@ -88,7 +86,7 @@ export class DailyBriefingService {
     const project = this.settings.get('agent_jira_project') || 'NT';
     const today = new Date().toISOString().slice(0, 10);
 
-    const [myTickets, breached, atRisk, recentDecisions, coaching, availability] = await Promise.all([
+    const [myTickets, breached, atRisk, recentDecisions, coaching] = await Promise.all([
       this.cache.getByAssignee(agentEmail, [project]),
       this.cache.getSlaBreach(project),
       this.cache.getSlaAtRisk(project, 60 * 60 * 1000),
@@ -116,7 +114,6 @@ export class DailyBriefingService {
           }));
         } catch { return []; }
       }),
-      this.calendar.getTeamAvailability(today).catch(() => null),
     ]);
 
     const myBreached = breached.filter(t => t.assignee_email === agentEmail);
@@ -163,7 +160,7 @@ export class DailyBriefingService {
       newOvernight.length > 0 ? `New overnight: ${newOvernight.map(t => `${t.issue_key} — ${t.summary}`).join('; ')}` : 'No new tickets overnight',
       staleTickets.length > 0 ? `Awaiting your reply: ${staleTickets.map(t => `${t.issue_key} — ${t.summary}`).join('; ')}` : 'No pending customer replies',
       coaching.length > 0 ? `Coaching nudges: ${coaching.map(c => `${c.nudge_type}: ${c.message.slice(0, 100)}`).join('; ')}` : '',
-      availability ? `On leave today: ${availability.unavailable.length > 0 ? availability.unavailable.map((u: any) => u.name).join(', ') : 'nobody'}` : '',
+      '',
     ].filter(Boolean).join('\n');
 
     const systemPrompt = `You are a daily briefing assistant for a service desk agent. Generate a short, direct, actionable morning briefing. Address the agent by first name. Use plain text — no markdown, no bullets with asterisks. Use line breaks to separate sections. Be warm but direct. Focus on what needs attention NOW. If there are SLA breaches, lead with those. Keep it under 300 words.
@@ -212,7 +209,7 @@ Produce JSON with:
       openCount, unassignedCount, breachedCount,
       breached, atRisk,
       resolvedYesterday, createdYesterday,
-      flagged, availability,
+      flagged,
       aiDecisions, pendingApprovals, costYesterday,
     ] = await Promise.all([
       this.cache.countOpen(project),
@@ -226,7 +223,6 @@ Produce JSON with:
         `SELECT TOP 10 ticket_key, risk_score, summary, assignee
          FROM agent_flagged_tickets WHERE status = 'pending' ORDER BY risk_score DESC`
       ),
-      this.calendar.getTeamAvailability(today).catch(() => null),
       query<{ action: string; cnt: number }>(
         `SELECT action, COUNT(*) as cnt FROM agent_decisions
          WHERE created_at >= DATEADD(day, -1, GETUTCDATE()) GROUP BY action`
@@ -290,7 +286,7 @@ Produce JSON with:
       workload.slice(0, 10).map(w => `${w.assignee_display}: ${w.cnt} open`).join('\n'),
       ``,
       `AVAILABILITY:`,
-      availability ? (availability.unavailable.length > 0 ? `On leave: ${availability.unavailable.map((u: any) => `${u.name} (${u.type})`).join(', ')}` : 'Full team available') : 'Calendar sync unavailable',
+      'Calendar sync removed',
       ``,
       `AI AGENT:`,
       `Decisions yesterday: ${totalAiDecisions} | Pending approvals: ${pendingApprovals[0]?.cnt ?? 0}`,

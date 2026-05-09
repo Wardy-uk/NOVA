@@ -17,14 +17,14 @@ import { createTaskRoutes } from './routes/tasks.js';
 import { createHealthRoutes } from './routes/health.js';
 import { createSettingsRoutes } from './routes/settings.js';
 import { createIntegrationRoutes } from './routes/integrations.js';
-import { createIngestRoutes } from './routes/ingest.js';
+
 import { createActionRoutes } from './routes/actions.js';
 import { createJiraRoutes } from './routes/jira.js';
 import { createStandupRoutes } from './routes/standups.js';
 import { createDeliveryRoutes } from './routes/delivery.js';
 import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
-import { createO365Routes } from './routes/o365.js';
+
 import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
@@ -58,7 +58,7 @@ import { isAdmin } from './utils/role-helpers.js';
 import crypto from 'crypto';
 import { generateMorningBriefing } from './services/ai-standup.js';
 import { INTEGRATIONS, buildMcpConfig } from './services/integrations.js';
-import { OneDriveWatcher } from './services/onedrive-watcher.js';
+
 import { SharePointSync } from './services/sharepoint-sync.js';
 import { MsGraphClient } from './services/msgraph-client.js';
 import { Dynamics365Service } from './services/dynamics365.js';
@@ -126,7 +126,7 @@ import { PipelineMonitor } from './services/pipeline-monitor.js';
 import { DriftDetector } from './services/drift-detector.js';
 import { ConfigService } from './services/config-service.js';
 import { SuggestionEngine } from './services/suggestion-engine.js';
-import { CalendarSyncService } from './services/calendar-sync.js';
+
 import { DailyBriefingService } from './services/daily-briefing.js';
 import { EmailService } from './services/email.js';
 import { ProductCancellationService } from './services/product-cancellation.js';
@@ -407,11 +407,7 @@ async function main() {
       settingsQueries.set('jira_url', process.env.JIRA_URL);
       settingsQueries.set('jira_token', process.env.JIRA_PERSONAL_TOKEN);
     }
-    if (process.env.MONDAY_API_TOKEN) {
-      settingsQueries.set('monday_enabled', 'true');
-      settingsQueries.set('monday_token', process.env.MONDAY_API_TOKEN);
-      settingsQueries.set('monday_board_ids', process.env.MONDAY_BOARD_IDS ?? '');
-    }
+
   }
 
   // Seed OpenAI API key from env if not already in DB
@@ -841,7 +837,7 @@ async function main() {
     if (key.startsWith('bym_')) buildBymService();
     if (key.startsWith('adobe_sign_')) buildAdobeSignService();
   }, buildOnboardingJiraClient, () => bymClient));
-  app.use('/api/ingest', createIngestRoutes(taskQueries, settingsQueries));
+
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
   app.use('/api/jira', createJiraRoutes(taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries, jiraUserClientFactory));
   app.use('/api/standups', requireAreaAccess('nova_features', 'view'), createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
@@ -855,7 +851,7 @@ async function main() {
   app.use('/api/surveys', createSurveyRoutes(settingsQueries, userQueries, teamQueries));
   app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries, buildOnboardingJiraClient() ?? undefined));
   app.use('/api/training', createTrainingRoutes(trainingQueries, userQueries, requireAreaAccess, settingsQueries));
-  app.use('/api/o365', createO365Routes(mcpManager));
+
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries, buildServiceDeskJiraClient, userTeamQueries));
 
   // Wallboard diagnostics log endpoints (admin-only)
@@ -1011,9 +1007,6 @@ async function main() {
     const qaDigest = new QaDigest(settingsQueries, pipelineMonitor);
     const driftDetector = new DriftDetector(settingsQueries, agentLoop.getAlertService());
 
-    // Calendar sync (WP-12)
-    const calendarSync = new CalendarSyncService(settingsQueries);
-
     // Operational workflow services (WP-22)
     const productCancellation = new ProductCancellationService(settingsQueries, agentJiraClient);
     const abuseReportProcessor = new AbuseReportProcessor(settingsQueries, agentJiraClient);
@@ -1023,7 +1016,7 @@ async function main() {
 
     // Daily briefing service
     const briefingEmailService = new EmailService(() => settingsQueries.getAll());
-    const dailyBriefingService = new DailyBriefingService(llmService, jiraCacheQueries, settingsQueries, calendarSync, briefingEmailService);
+    const dailyBriefingService = new DailyBriefingService(llmService, jiraCacheQueries, settingsQueries, briefingEmailService);
     app.use('/api/briefing', createBriefingRoutes(dailyBriefingService, userQueries));
 
     // KB article service
@@ -1320,36 +1313,6 @@ async function main() {
       }
     }, 10 * 60 * 1000);
 
-    // Calendar sync (WP-12) — every 30 min during working hours
-    const runCalendarSync = () => {
-      const hour = new Date().getHours();
-      if (hour >= 7 && hour <= 19) {
-        calendarSync.sync().catch(e => console.warn('[calendar-sync] sync failed:', e instanceof Error ? e.message : e));
-      }
-    };
-    setInterval(runCalendarSync, 30 * 60 * 1000);
-    setTimeout(runCalendarSync, 105_000);
-
-    // Calendar availability routes (WP-12) — already behind global /api auth
-    app.get('/api/calendar/availability', async (req, res) => {
-      try {
-        const date = req.query.date as string | undefined;
-        const data = await calendarSync.getTeamAvailability(date);
-        res.json({ ok: true, data });
-      } catch (err) {
-        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get availability' });
-      }
-    });
-    app.post('/api/calendar/sync', async (req, res) => {
-      if (!isAdmin((req as any).user?.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
-      try {
-        const result = await calendarSync.sync();
-        res.json({ ok: true, data: result });
-      } catch (err) {
-        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Calendar sync failed' });
-      }
-    });
-
     // Operational workflow routes (WP-22)
     app.get('/api/agent/abuse-reports', requireRole('admin', 'super_admin'), async (req, res) => {
       try {
@@ -1401,16 +1364,21 @@ async function main() {
       }
     }, 4 * 60 * 60 * 1000);
 
-    // Check MSSQL agent_config first (survives deploys), fall back to settings.json
+    // Check persisted agent running state — honours manual stop across restarts
     let agentEnabled = settingsQueries.get('agent_enabled') === 'true';
     try {
       const row = await queryOne<{ config_value: string }>(`SELECT config_value FROM agent_config WHERE config_key = 'agent_enabled'`);
       if (row) agentEnabled = row.config_value === 'true';
     } catch {}
-    if (agentEnabled) {
+    const persistedState = settingsQueries.get('agent_running_state');
+    const persistedMode = settingsQueries.get('agent_running_mode');
+    const shouldAutoStart = persistedState === 'running' || (!persistedState && agentEnabled);
+    const wasExplicitlyStopped = persistedState === 'stopped';
+    if (shouldAutoStart && !wasExplicitlyStopped) {
       setTimeout(() => {
-        agentLoop!.start();
-        console.log('[N.O.V.A] Agent loop auto-started (agent_enabled=true, delayed 60s for startup stagger)');
+        agentLoop!.start(persistedMode || undefined);
+        const reason = persistedState === 'running' ? 'was running before restart' : 'agent_enabled=true, first boot';
+        console.log(`[N.O.V.A] Agent auto-started (${reason}, delayed 60s for startup stagger)`);
 
         if (fullSyncPromise) {
           fullSyncPromise.then(async () => {
@@ -1428,6 +1396,8 @@ async function main() {
           });
         }
       }, 60_000);
+    } else if (wasExplicitlyStopped) {
+      console.log('[N.O.V.A] Agent not started (was manually stopped before restart)');
     }
     // SOP-003: Day 10 auto-close backstop — runs once per hour during working hours
     const backstopClock = createWorkingDayClock();
@@ -1480,6 +1450,41 @@ async function main() {
       }
     }, 60 * 60 * 1000); // every hour
 
+    // Flagged ticket auto-dismiss sweep — every 30 minutes
+    setInterval(async () => {
+      try {
+        const { FlagAutoDismissService } = await import('./services/flag-auto-dismiss.js');
+        const svc = new FlagAutoDismissService(settingsQueries);
+        const result = await svc.sweep();
+        if (result.total > 0) {
+          console.log(`[flag-dismiss] Auto-dismissed ${result.total} flags: resolved=${result.resolved}, aged=${result.aged_out}, handled=${result.auto_handled}`);
+        }
+      } catch (err) {
+        console.warn('[flag-dismiss] Sweep failed:', err instanceof Error ? err.message : err);
+      }
+    }, 30 * 60 * 1000);
+
+    // Weekly impact snapshot — runs Monday 07:00 UK time
+    let lastImpactSnapshotDay = -1;
+    setInterval(async () => {
+      const ukNow = new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', hour: 'numeric', hour12: false });
+      const [day, hourStr] = ukNow.split(' ');
+      const hour = parseInt(hourStr, 10);
+      const dayNum = new Date().getDay();
+      if (day === 'Mon' && hour === 7 && dayNum !== lastImpactSnapshotDay) {
+        lastImpactSnapshotDay = dayNum;
+        try {
+          const { ImpactMeasurement } = await import('./services/impact-measurement.js');
+          const svc = new ImpactMeasurement(settingsQueries);
+          const metrics = await svc.computeMetrics(7);
+          await svc.saveSnapshot(metrics);
+          console.log(`[impact] Weekly snapshot saved: hours_saved=${metrics.queue_hours_saved}, resolution_rate=${(metrics.autonomous_resolution_rate * 100).toFixed(1)}%`);
+        } catch (err) {
+          console.warn('[impact] Weekly snapshot failed:', err instanceof Error ? err.message : err);
+        }
+      }
+    }, 60_000);
+
   } else {
     console.log('[N.O.V.A] Agent loop not available — no Jira credentials configured.');
   }
@@ -1487,7 +1492,7 @@ async function main() {
   // DELETE /api/data/source/:source — purge local records for a given integration source
   app.delete('/api/data/source/:source', async (req, res) => {
     const source = req.params.source;
-    const validSources = ['jira', 'planner', 'todo', 'calendar', 'email', 'monday', 'dynamics365'];
+    const validSources = ['jira', 'milestone', 'dynamics365'];
     if (!validSources.includes(source)) {
       res.status(400).json({ ok: false, error: `Invalid source: ${source}. Valid: ${validSources.join(', ')}` });
       return;
@@ -1704,13 +1709,6 @@ async function main() {
     return problemTicketScanner;
   }, () => settingsQueries));
 
-  // 6. OneDrive file watcher (Power Automate bridge)
-  const watcher = new OneDriveWatcher(taskQueries, settingsQueries);
-  watcher.start();
-
-  app.get('/api/onedrive/status', (_req, res) => {
-    res.json({ ok: true, data: watcher.getStatus() });
-  });
 
   // JSON error handler — catch unhandled errors before Express default HTML handler
   app.use('/api', (err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -3039,7 +3037,6 @@ ${panelHtml}
     if (aiScanTimer) clearInterval(aiScanTimer);
     for (const timer of syncTimers.values()) clearInterval(timer);
     agentLoop?.stop();
-    watcher.stop();
     await mcpManager.disconnectAll();
     await shutdownDatabase();
     console.log('[N.O.V.A] Database pool closed');

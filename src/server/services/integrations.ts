@@ -66,21 +66,10 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
   {
     id: 'msgraph',
     name: 'Microsoft 365',
-    description: 'Planner tasks, To-Do lists, Calendar events, and flagged emails. Sign in with your Microsoft account.',
+    description: 'Microsoft authentication for onboarding workflows.',
     enabledKey: 'msgraph_enabled',
     authType: 'device_code',
     fields: [],
-  },
-  {
-    id: 'monday',
-    name: 'Monday.com',
-    description: 'Monday.com boards and items. Syncs active tasks from all or selected boards.',
-    enabledKey: 'monday_enabled',
-    authType: 'credentials',
-    fields: [
-      { key: 'monday_token', label: 'API Token', type: 'password', placeholder: 'Monday.com API token', required: true },
-      { key: 'monday_board_ids', label: 'Board IDs', type: 'text', placeholder: 'Comma-separated (optional, blank = all)', required: false },
-    ],
   },
   {
     id: 'dynamics365',
@@ -344,25 +333,6 @@ export function buildMcpConfig(
         env: {
           MS365_MCP_TOKEN_CACHE_PATH: path.join(MS365_DATA_DIR, '.ms365-token-cache.json'),
           MS365_MCP_SELECTED_ACCOUNT_PATH: path.join(MS365_DATA_DIR, '.ms365-selected-account.json'),
-        },
-      };
-    }
-    case 'monday': {
-      // Use globally-installed package directly to avoid npx cache corruption
-      // (OpenTelemetry EPERM on Windows breaks npx cache)
-      const mondayEntry = process.env.APPDATA
-        ? `${process.env.APPDATA}\\npm\\node_modules\\@mondaydotcomorg\\monday-api-mcp\\dist\\index.js`
-        : 'mcp-server-monday-api';
-      return {
-        command: 'node',
-        args: [
-          mondayEntry,
-          '--read-only',
-          '-t',
-          settings.monday_token ?? '',
-        ],
-        env: {
-          OTEL_SDK_DISABLED: 'true',
         },
       };
     }

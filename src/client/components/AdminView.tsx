@@ -1498,7 +1498,7 @@ export function AdminView() {
       <CollapsibleSection title="Integrations">
         <div className="space-y-4">
           <p className="text-xs text-neutral-500">
-            Global integrations managed by admins. Personal integrations (Jira, M365, Monday) are in My Settings.
+            Global integrations managed by admins. Personal integrations (Jira, M365) are in My Settings.
           </p>
           {integrations.length === 0 && (
             <div className="text-center py-8 text-sm text-neutral-500">

@@ -34,8 +34,7 @@ function greeting(): string {
 
 function sourceLabel(source: string): string {
   const labels: Record<string, string> = {
-    jira: 'Jira', planner: 'Planner', todo: 'To-Do',
-    monday: 'Monday', email: 'Email', calendar: 'Calendar',
+    jira: 'Jira',
     milestone: 'Onboarding',
   };
   return labels[source] ?? source;

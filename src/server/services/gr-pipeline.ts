@@ -90,8 +90,8 @@ export class GrPipeline {
       const s = this.s;
 
       const passThreshold = await this.getPassThreshold(p, s);
-      const agentKeys = await this.getAgentKeys(p);
-      console.log(`[gr-pipeline] Loaded ${agentKeys.size} agent keys (raw unique count)`);
+      const agentLookup = await this.getAgentKeys(p);
+      console.log(`[gr-pipeline] Loaded ${agentLookup.keys.size} agent keys, ${agentLookup.displayNames.size} display names`);
 
       let skippedNoId = 0, skippedDate = 0, skippedInternal = 0, skippedCustomer = 0, skippedBot = 0, skippedNotAgent = 0, skippedAlready = 0, skippedEmpty = 0, eligible = 0;
 
@@ -104,7 +104,7 @@ export class GrPipeline {
 
         for (const comment of comments) {
           try {
-            const filterResult = this.classifyComment(comment, windowStart, windowEnd, agentKeys);
+            const filterResult = this.classifyComment(comment, windowStart, windowEnd, agentLookup);
             if (filterResult === 'no_id') { skippedNoId++; continue; }
             if (filterResult === 'date') { skippedDate++; continue; }
             if (filterResult === 'internal') { skippedInternal++; continue; }
@@ -113,7 +113,8 @@ export class GrPipeline {
             if (filterResult === 'not_agent') {
               if (skippedNotAgent < 3) {
                 const accountId = comment.author?.accountId ?? '';
-                console.log(`[gr-pipeline] Agent key miss: accountId="${accountId}", agentKeys sample: [${[...agentKeys].slice(0, 3).join(', ')}]`);
+                const dispName = comment.author?.displayName ?? '';
+                console.log(`[gr-pipeline] Agent key miss: accountId="${accountId}", displayName="${dispName}", keys sample: [${[...agentLookup.keys].slice(0, 3).join(', ')}]`);
               }
               skippedNotAgent++;
               continue;
@@ -167,7 +168,7 @@ export class GrPipeline {
     comment: any,
     windowStart: Date,
     windowEnd: Date,
-    agentKeys: Set<string>,
+    agentLookup: { keys: Set<string>; displayNames: Set<string> },
   ): 'eligible' | 'no_id' | 'date' | 'internal' | 'customer' | 'bot' | 'not_agent' {
     if (!comment.id) return 'no_id';
 
@@ -186,9 +187,10 @@ export class GrPipeline {
     if (!accountId) return 'no_id';
     const encodedId = accountId.replace(/:/g, '%3A');
     const decodedId = accountId.replace(/%3A/gi, ':');
-    if (!agentKeys.has(accountId) && !agentKeys.has(encodedId) && !agentKeys.has(decodedId)) return 'not_agent';
+    if (agentLookup.keys.has(accountId) || agentLookup.keys.has(encodedId) || agentLookup.keys.has(decodedId)) return 'eligible';
+    if (displayName && agentLookup.displayNames.has(displayName)) return 'eligible';
 
-    return 'eligible';
+    return 'not_agent';
   }
 
   private async getPassThreshold(p: sql.ConnectionPool, suffix: string): Promise<number> {
@@ -204,19 +206,33 @@ export class GrPipeline {
     }
   }
 
-  private async getAgentKeys(p: sql.ConnectionPool): Promise<Set<string>> {
+  private async getAgentKeys(p: sql.ConnectionPool): Promise<{ keys: Set<string>; displayNames: Set<string> }> {
     try {
-      const result = await p.request().query(`SELECT AgentKey FROM dbo.Agent WHERE IsActive = 1`);
+      const result = await p.request().query(
+        `SELECT AgentKey, DisplayName, JiraAccountId FROM dbo.Agent WHERE IsActive = 1`,
+      );
       const keys = new Set<string>();
+      const displayNames = new Set<string>();
       for (const row of result.recordset) {
         if (row.AgentKey) {
           keys.add(row.AgentKey);
           keys.add(row.AgentKey.replace(/:/g, '%3A'));
         }
+        if (row.JiraAccountId) {
+          keys.add(row.JiraAccountId);
+          keys.add(row.JiraAccountId.replace(/:/g, '%3A'));
+        }
+        if (row.DisplayName) {
+          displayNames.add(row.DisplayName.toLowerCase());
+        }
       }
-      return keys;
-    } catch {
-      return new Set();
+      const sampleKeys = [...keys].slice(0, 5);
+      const sampleRow = result.recordset[0];
+      console.log(`[gr-pipeline] Agent lookup: ${result.recordset.length} active agents, ${keys.size} keys. Sample keys: [${sampleKeys.join(', ')}]. Columns present: AgentKey=${!!sampleRow?.AgentKey}, JiraAccountId=${!!sampleRow?.JiraAccountId}, DisplayName=${!!sampleRow?.DisplayName}`);
+      return { keys, displayNames };
+    } catch (err) {
+      console.warn('[gr-pipeline] getAgentKeys failed:', err instanceof Error ? err.message : err);
+      return { keys: new Set(), displayNames: new Set() };
     }
   }
 

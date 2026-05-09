@@ -10,8 +10,8 @@ const SECTIONS: Section[] = [
     title: 'Getting Started',
     content: [
       'N.O.V.A (Nurtur Operational Virtual Assistant) is a personal productivity dashboard that aggregates your tasks, calendar, email, and delivery tracking into one place.',
-      'On first launch, create an admin account. After logging in, head to My Settings to connect your personal integrations (Jira, Microsoft 365, Monday.com, Dynamics 365).',
-      'Once connected, N.O.V.A will automatically sync tasks from all your sources on a configurable interval. Your My NOVA dashboard will populate with KPIs and the morning standup will trigger automatically on your first visit each day.',
+      'On first launch, create an admin account. After logging in, head to My Settings to connect your personal integrations (Jira, Dynamics 365).',
+      'Once connected, N.O.V.A will automatically sync tasks from all your sources on a configurable interval. Your My NOVA dashboard will populate with KPIs.',
       'N.O.V.A uses role-based access: Admins can manage users, teams, and system settings. Editors can modify settings and data. Viewers have read-only access across the app.',
     ],
   },
@@ -22,28 +22,17 @@ const SECTIONS: Section[] = [
       'NOVA Insights — type a question or request and the AI assistant will analyse your tasks and provide suggestions. Use the source selector to choose which integrations to include in the analysis.',
       'Team Load — a workload overview showing active deliveries, pending milestones, overdue milestones, and open tickets per team member. Colour-coded cells highlight where the team is stretched.',
       'The morning standup triggers automatically on your first visit each day. It analyses your tasks and prepares a prioritised briefing.',
-      'Quick links let you jump to My Focus, Tasks, or Standup directly from the dashboard.',
-    ],
-  },
-  {
-    title: 'My Focus',
-    content: [
-      'A dedicated view for tasks you\'ve marked as "focused" — your personal workstream for the day.',
-      'Focus a task by clicking the Focus button on any task card (in Tasks, Standup, or My NOVA). Unfocus to remove it.',
-      'Focused tasks appear in a priority list. Use this to build a short, actionable queue rather than wading through all your tasks.',
+      'Quick links let you jump to Tasks or Standup directly from the dashboard.',
     ],
   },
   {
     title: 'Tasks',
     content: [
-      'The full task list aggregated from all connected sources: Jira, Microsoft Planner, To-Do, Calendar, Email, Monday.com, and Onboarding milestones. Tasks are grouped by source with collapsible sections.',
+      'The full task list aggregated from all connected sources: Jira and Onboarding milestones. Tasks are grouped by source with collapsible sections.',
       'Filter by source using the chips at the top. Toggle "Overdue only" to narrow down. Sort by due date, priority, or recently updated.',
-      'Click Edit on any task to open the Task Drawer — a side panel with full details. For Planner and To-Do tasks, you can edit the title, status, and due date directly.',
-      'Jira tasks show transitions (e.g. In Progress \u2192 Done) with optional comments, plus assignee reassignment via the user search picker.',
-      'Email tasks — click Reply or Forward in the Task Drawer to compose a response. Replies go to the original sender; forwards prompt for a recipient.',
-      'Calendar tasks — click Edit in the Task Drawer to modify the event subject, start/end time, and location. You can also create new calendar events and delete existing ones. Changes sync back to Outlook.',
+      'Click Edit on any task to open the Task Drawer — a side panel with full details.',
+      'Jira tasks show transitions (e.g. In Progress → Done) with optional comments, plus assignee reassignment via the user search picker.',
       'Task badges show source, status, priority, age, and due date. Overdue tasks are highlighted in red.',
-      'Create Task — use the Create Task form to add new Planner or To-Do tasks. Toggle batch mode to create multiple To-Do tasks at once by entering one title per line.',
     ],
   },
   {
@@ -113,7 +102,7 @@ const SECTIONS: Section[] = [
       'Import Users — click "Import Users" in the Users tab to bulk-create accounts from an Excel (.xlsx) or CSV file. Upload the file, preview parsed users (username, display name, email, role), optionally send invite emails, then import. Duplicate usernames are skipped.',
       'Teams tab — create and manage teams. Assign users to teams for future team-scoped features.',
       'AI Keys tab — manage the global OpenAI API key used by all users. Individual users can set a personal API key override in My Settings > AI Preferences, which takes priority over the global key.',
-      'Integrations tab — configure global/service-account integrations: Jira (Onboarding) service account for automated ticket creation, Entra ID SSO for Microsoft single sign-on, Jira OAuth app credentials for personal Jira connections, and Email (built-in SMTP for invites and password resets). Personal integrations (Jira, M365, Monday, D365) are managed by each user in My Settings.',
+      'Integrations tab — configure global/service-account integrations: Jira (Onboarding) service account for automated ticket creation, Entra ID SSO for Microsoft single sign-on, Jira OAuth app credentials for personal Jira connections, and Email (built-in SMTP for invites and password resets). Personal integrations (Jira, M365, D365) are managed by each user in My Settings.',
       'Milestones tab — configure delivery milestone templates (day offsets, checklists) used when onboarding new customers.',
       'Onboarding tab — manage the onboarding matrix, sale types, ticket groups, capabilities, and items for Jira ticket automation.',
       'Permissions tab — create custom roles with per-area access levels (hidden/view/edit) for My NOVA, Service Desk, Onboarding, and Account Management.',
@@ -133,15 +122,12 @@ const SECTIONS: Section[] = [
     title: 'My Settings',
     content: [
       'Manage your personal integrations, sync preferences, and AI settings. Accessible via the user menu in the top-right corner.',
-      'Integration Cards — each personal source (Jira, Microsoft 365, Monday.com, Dynamics 365) has its own card. Toggle enabled/disabled, enter your credentials, configure sync options, and sign in.',
+      'Integration Cards — each personal source (Jira, Dynamics 365) has its own card. Toggle enabled/disabled, enter your credentials, configure sync options, and sign in.',
       'Jira — enter your Jira URL, email address, and personal API token (generate one at id.atlassian.com/manage-profile/security/api-tokens). This connects your personal Jira account to sync your assigned issues.',
       'Jira Account (OAuth) — if your admin has configured Jira OAuth, a "Connect Jira" card appears. Click to sign in with your Atlassian account via OAuth 3LO. This grants personal ticket access without sharing API tokens. You can disconnect at any time.',
-      'Microsoft 365 — sign in with your Microsoft account using the device code flow. Per-source toggles for Planner, To-Do, Calendar, and Email. Each source can have its own sync interval. Configure email filters (flagged/unread/all) and days to pull (1\u201330 days).',
-      'Monday.com — enter your Monday.com API token and optionally filter to specific board IDs.',
       'Dynamics 365 — sign in with your Microsoft account. Client ID and Tenant ID are configured here for the device code authentication flow.',
-      'Sync Frequency — set a per-integration sync interval (1, 2, 5, 10, 15, or 30 minutes) or use the global default. O365 sources (Planner, To-Do, Calendar, Email) each have independent intervals. Every integration also has a "Sync Now" button for immediate refresh.',
+      'Sync Frequency — set a per-integration sync interval (1, 2, 5, 10, 15, or 30 minutes) or use the global default. Every integration also has a "Sync Now" button for immediate refresh.',
       'AI Preferences — choose your AI provider (OpenAI or Claude), set the number of suggestions, and configure the default sync frequency. You can also set a personal API key override that takes priority over the global key set by your admin.',
-      'Power Automate Bridge — optional integration for PA-based data flows. Has a global on/off toggle and per-source toggles (Planner, To-Do, Calendar, Email).',
       'Remember Me — when unchecked on the login page, your session is stored in sessionStorage (cleared when the browser closes). When checked, it uses localStorage for persistent sessions.',
     ],
   },
@@ -217,16 +203,12 @@ const SECTIONS: Section[] = [
   {
     title: 'Tips & Shortcuts',
     content: [
-      'Focus workflow — mark the 3\u20135 most important tasks each morning using Focus buttons. Use the My Focus page as your daily driver instead of the full Tasks list.',
       'Star scoping — when starring delivery entries, "Team Stars" are visible to all users while "My Stars" are personal. Use team stars for shared priorities.',
-      'Batch task creation — when creating To-Do tasks, toggle batch mode to enter multiple task titles (one per line) and create them all at once.',
-      'Email filters — in Settings, set email to "flagged only" to reduce noise. Flagged emails sync as tasks so you can track them alongside everything else.',
       'Standup persistence — standup results save automatically and persist until midnight. No need to re-run unless your priorities change.',
-      'Sync frequency — for fast-moving sources like Jira, set a lower sync interval (1\u20132 min). For slower sources like Monday, 10\u201315 min is fine. O365 sources can each have their own interval.',
-      'Task editing — Planner, To-Do, and Calendar tasks can be edited directly in N.O.V.A. Email tasks support reply and forward. Changes sync back to the source automatically.',
+      'Sync frequency — for fast-moving sources like Jira, set a lower sync interval (1–2 min).',
       'Inline editing — for quick changes to delivery entries, click directly on a cell value in the table instead of opening the full drawer. Press Escape to cancel an edit.',
       'Import workflow — for new deployments, pull the delivery sheet from SharePoint first, then use "Import xlsx to DB" to bulk-create database entries with auto-assigned onboarding IDs.',
-      'MCP auto-reconnect — if a connection to Jira, Monday.com, or Microsoft 365 drops unexpectedly, N.O.V.A will automatically reconnect on the next operation.',
+      'MCP auto-reconnect — if a connection to Jira drops unexpectedly, N.O.V.A will automatically reconnect on the next operation.',
     ],
   },
 ];
@@ -243,7 +225,7 @@ function CollapsibleSection({ section, defaultOpen }: { section: Section; defaul
         <h3 className="text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold">
           {section.title}
         </h3>
-        <span className="text-neutral-500 text-sm font-mono">{open ? '\u2212' : '+'}</span>
+        <span className="text-neutral-500 text-sm font-mono">{open ? '−' : '+'}</span>
       </button>
       {open && (
         <div className="px-5 pb-4 space-y-2.5">

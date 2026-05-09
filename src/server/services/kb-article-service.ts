@@ -193,7 +193,7 @@ Generate:
 
     await execute(
       `UPDATE kb_article_drafts
-       SET status = 'published', confluence_page_id = ?, confluence_url = ?, published_at = GETUTCDATE()
+       SET status = 'published', confluence_page_id = ?, confluence_url = ?, published_at = GETUTCDATE(), body = NULL
        WHERE id = ?`,
       [pageId, url, id],
     );

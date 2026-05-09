@@ -14,31 +14,16 @@ interface Props {
 
 const SOURCE_COLORS: Record<string, string> = {
   jira: 'bg-[#0052CC]',
-  planner: 'bg-[#31752F]',
-  todo: 'bg-[#797673]',
-  monday: 'bg-[#FF6D00]',
-  email: 'bg-[#0078D4]',
-  calendar: 'bg-[#8764B8]',
   milestone: 'bg-emerald-600',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
   jira: 'JIRA',
-  planner: 'PLANNER',
-  todo: 'TODO',
-  monday: 'MON',
-  email: 'EMAIL',
-  calendar: 'CAL',
   milestone: 'OB',
 };
 
 const SOURCES = [
   { value: 'jira', label: 'Jira' },
-  { value: 'planner', label: 'Planner' },
-  { value: 'todo', label: 'To-Do' },
-  { value: 'monday', label: 'Monday' },
-  { value: 'email', label: 'Email' },
-  { value: 'calendar', label: 'Calendar' },
   { value: 'milestone', label: 'Onboarding' },
 ];
 
@@ -183,9 +168,7 @@ export function NextActions({ onUpdateTask }: Props) {
             {SOURCES.map((opt) => {
               const isActive = sourceFilter.has(opt.value);
               const dotColors: Record<string, string> = {
-                jira: '#0052CC', planner: '#31752F', todo: '#797673',
-                monday: '#FF6D00', email: '#0078D4', calendar: '#8764B8',
-                milestone: '#10B981',
+                jira: '#0052CC', milestone: '#10B981',
               };
               return (
                 <button

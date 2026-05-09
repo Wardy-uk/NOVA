@@ -90,14 +90,11 @@ function dueDateDisplay(dateStr: string | null): { text: string; className: stri
 type SortField = 'priority' | 'due_date' | 'updated_at';
 
 const SOURCE_LABELS: Record<string, string> = {
-  jira: 'JIRA', planner: 'PLAN', todo: 'TODO', monday: 'MON',
-  email: 'EMAIL', calendar: 'CAL', milestone: 'OB',
+  jira: 'JIRA', milestone: 'OB',
 };
 
 const SOURCE_COLORS: Record<string, string> = {
-  jira: 'bg-[#0052CC]', planner: 'bg-[#31752F]', todo: 'bg-[#797673]',
-  monday: 'bg-[#FF6D00]', email: 'bg-[#0078D4]', calendar: 'bg-[#8764B8]',
-  milestone: 'bg-emerald-600',
+  jira: 'bg-[#0052CC]', milestone: 'bg-emerald-600',
 };
 
 // --- ADF text helper ---

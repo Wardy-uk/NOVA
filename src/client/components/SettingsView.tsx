@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useIntegrations } from '../hooks/useIntegrations.js';
 import { useAuth } from '../hooks/useAuth.js';
 import { IntegrationCard } from './IntegrationCard.js';
-import { PABridgeCard } from './PABridgeCard.js';
 import { AISettingsCard } from './AISettingsCard.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
 
@@ -12,8 +11,7 @@ const ADMIN_ONLY_INTEGRATIONS = new Set(['jira-onboarding', 'jira-servicedesk', 
 // Map integration IDs to the data source(s) they populate locally
 const INTEGRATION_SOURCES: Record<string, string[]> = {
   jira: ['jira'],
-  msgraph: ['planner', 'todo', 'calendar', 'email'],
-  monday: ['monday'],
+  msgraph: [],
   dynamics365: ['dynamics365'],
 };
 
@@ -86,10 +84,6 @@ export function SettingsView() {
 
       <CollapsibleSection title="Jira Account">
         <JiraOAuthCard />
-      </CollapsibleSection>
-
-      <CollapsibleSection title="Power Automate Bridge">
-        <PABridgeCard />
       </CollapsibleSection>
 
       <CollapsibleSection title="AI Preferences">

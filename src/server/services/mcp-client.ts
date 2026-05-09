@@ -47,7 +47,7 @@ export class McpClientManager {
     await Promise.allSettled(promises);
   }
 
-  /** Connect with retry logic for flaky initial connections (e.g. Monday.com) */
+  /** Connect with retry logic for flaky initial connections */
   async connectWithRetry(name: string, maxRetries = 2): Promise<boolean> {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const ok = await this.connect(name);

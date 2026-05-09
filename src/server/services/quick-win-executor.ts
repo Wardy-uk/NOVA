@@ -3,6 +3,7 @@ import type { AgentDecision, ActionResult } from './agent-types.js';
 import type { Observer } from './observer.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { executeAndGetId, query } from './database.js';
+import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 
 const QW_COMMENT_PREFIX = '[AI Agent — Auto-Close]';
 
@@ -86,18 +87,30 @@ export class QuickWinExecutor {
         };
       }
 
-      // Set resolution type for resolve transitions (reuse actor pattern)
-      if (targetTransition === 'resolve') {
-        try {
-          await this.jiraClient.updateFields(ticketKey, {
-            customfield_14494: { value: 'No Fault Found' },
-          });
-        } catch (err) {
-          console.warn(`[quick-win] Failed to set resolution type on ${ticketKey}:`, err instanceof Error ? err.message : err);
-        }
-      }
+      // Set resolution type using configurable mapping
+      const resMapRaw = this.settings.get('agent_resolution_type_map');
+      let resMap: Record<string, string> = {
+        spam: 'Cancelled', thank_you: 'No Fault Found', kba_match: 'Tech Services Fix',
+        stale_no_response: 'Cancelled', duplicate: 'Duplicate', auto_resolved: 'No Fault Found',
+      };
+      try { if (resMapRaw) resMap = { ...resMap, ...JSON.parse(resMapRaw) }; } catch {}
 
-      await this.jiraClient.transitionIssue(ticketKey, transitionId);
+      if (targetTransition === 'resolve' || targetTransition === 'cancel') {
+        try {
+          const resolution = resMap[qw.type] || 'No Fault Found';
+          const { fields, comment: resolveComment } = buildResolveFields({
+            tldr: `Quick win auto-close: ${qw.type}`,
+            resolution,
+            comment: CLOSE_COMMENTS[qw.type] || 'Auto-closed by NOVA quick win detection.',
+          });
+          await this.jiraClient.transitionIssue(ticketKey, transitionId, { fields, comment: resolveComment });
+        } catch (err) {
+          console.warn(`[quick-win] Failed to set resolve fields on ${ticketKey}:`, err instanceof Error ? err.message : err);
+          await this.jiraClient.transitionIssue(ticketKey, transitionId);
+        }
+      } else {
+        await this.jiraClient.transitionIssue(ticketKey, transitionId);
+      }
 
       // Mark as executed
       await executeAndGetId(

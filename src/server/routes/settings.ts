@@ -14,7 +14,6 @@ const SENSITIVE_KEYS = new Set([
   'jwt_secret',
   'jira_token', 'jira_ob_token',
   'openai_api_key', 'anthropic_api_key',
-  'monday_token',
   'd365_client_secret', 'sso_client_secret',
   'smtp_pass',
 ]);

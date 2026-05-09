@@ -40,8 +40,8 @@ function looksLikeStructuredPayload(text: string): boolean {
   return matchCount >= 2;
 }
 
-const DEFAULT_INTERVAL_MS = 60_000;
-const REDUCED_INTERVAL_MS = 5 * 60_000; // 5 min tick in reduced (out-of-hours) mode
+const FALLBACK_INTERVAL_MS = 60_000;
+const FALLBACK_REDUCED_INTERVAL_MS = 5 * 60_000;
 const HEALTH_STALE_THRESHOLD_MS = 10 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_TICKS = 30; // sweep every 30th tick (~30 min at 1 min interval)
 
@@ -211,7 +211,7 @@ export class AgentLoop {
     return this.lifecycleManager;
   }
 
-  start(): void {
+  start(mode?: string): void {
     if (this.state === 'running') return;
     const working = this.isWorkingHours();
     this.currentMode = working ? 'full' : 'reduced';
@@ -220,6 +220,8 @@ export class AgentLoop {
     this.state = 'running';
     const debug = this.getWorkingHoursDebug();
     console.log(`[agent] Starting agent loop (interval: ${intervalMs}ms, mode: ${this.currentMode}, isWorkingHours=${working}, tz=${debug.tz}, day=${debug.parsedWeekday}/${debug.parsedDay}, time=${debug.parsedHour}:${String(debug.parsedMinute ?? '').padStart(2, '0')}, days=${debug.workingDays}, hours=${debug.workingHours})`);
+
+    this.persistRunState('running', mode);
 
     this.checkAutonomyReadiness().catch(() => {});
     this.riskScorer.runStartupCleanup().catch(err => {
@@ -290,6 +292,7 @@ export class AgentLoop {
     }
     this.state = 'stopped';
     this.perceiver.resetLastTick();
+    this.persistRunState('stopped');
     console.log('[agent] Agent loop stopped.');
   }
 
@@ -299,6 +302,7 @@ export class AgentLoop {
       this.timer = null;
     }
     this.state = 'paused';
+    this.persistRunState('paused');
     console.log('[agent] Agent loop paused.');
   }
 
@@ -307,14 +311,33 @@ export class AgentLoop {
     this.start();
   }
 
+  private persistRunState(state: AgentState, mode?: string): void {
+    try {
+      this.settings.set('agent_running_state', state);
+      if (mode) this.settings.set('agent_running_mode', mode);
+      const ts = new Date().toISOString();
+      if (state === 'running') this.settings.set('agent_last_started_at', ts);
+      else if (state === 'stopped') this.settings.set('agent_last_stopped_at', ts);
+    } catch (err) {
+      console.warn('[agent] Failed to persist run state:', err instanceof Error ? err.message : err);
+    }
+  }
+
   private getIntervalMs(): number {
-    if (this.currentMode === 'reduced') return REDUCED_INTERVAL_MS;
-    const configured = this.settings.get('agent_interval_ms');
+    if (this.currentMode === 'reduced') {
+      const reducedCfg = this.settings.get('agent_tick_reduced_interval_ms');
+      if (reducedCfg) {
+        const parsed = parseInt(reducedCfg, 10);
+        if (!isNaN(parsed) && parsed >= 30_000) return parsed;
+      }
+      return FALLBACK_REDUCED_INTERVAL_MS;
+    }
+    const configured = this.settings.get('agent_tick_interval_ms') || this.settings.get('agent_interval_ms');
     if (configured) {
       const parsed = parseInt(configured, 10);
       if (!isNaN(parsed) && parsed >= 10_000) return parsed;
     }
-    return DEFAULT_INTERVAL_MS;
+    return FALLBACK_INTERVAL_MS;
   }
 
   private isWeekendModeEnabled(): boolean {
@@ -1364,6 +1387,23 @@ export class AgentLoop {
       } catch { /* best effort */ }
 
       console.log(`[agent] Submitted ${decision.ticketKey} to approval queue (id: ${approvalId})`);
+
+      // In-app notification for approvers
+      try {
+        const approverRoles = ['admin', 'super_admin', 'ai-approver'];
+        const approvers = await query<{ id: number }>(
+          `SELECT id FROM users WHERE ${approverRoles.map(() => `role LIKE '%' + ? + '%'`).join(' OR ')}`,
+          approverRoles,
+        );
+        for (const u of approvers) {
+          await executeAndGetId(
+            `INSERT INTO nova_notifications (user_id, type, title, body, ticket_key, reference_id) VALUES (?, 'approval_pending', ?, ?, ?, ?)`,
+            [u.id, `Approval needed: ${decision.ticketKey}`, `NOVA recommends: ${decision.action}`, decision.ticketKey, String(approvalId)],
+          );
+        }
+      } catch (notifErr) {
+        console.warn('[agent] Failed to create approval notifications:', notifErr instanceof Error ? notifErr.message : notifErr);
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       await this.observer.logOutcome(decisionId, {

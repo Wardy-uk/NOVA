@@ -1,12 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { IntegrationStatus } from '../../shared/types.js';
 
-const O365_SYNC_SOURCES = [
-  { key: 'planner', label: 'Planner', desc: 'Task boards and assignments' },
-  { key: 'todo', label: 'To-Do', desc: 'Personal task lists' },
-  { key: 'calendar', label: 'Calendar', desc: 'Next 7 days of events' },
-  { key: 'email', label: 'Email', desc: 'Flagged emails only' },
-];
+const O365_SYNC_SOURCES: { key: string; label: string; desc: string }[] = [];
 
 const STATUS_DOTS: Record<string, string> = {
   connected: 'bg-green-400',
@@ -197,8 +192,6 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
   // O365 per-source sync toggles (only for msgraph)
   const [syncToggles, setSyncToggles] = useState<Record<string, boolean>>({});
   const [syncIntervals, setSyncIntervals] = useState<Record<string, string>>({});
-  const [emailFilter, setEmailFilter] = useState('flagged');
-  const [emailDays, setEmailDays] = useState('7');
 
   const loadSyncToggles = useCallback(() => {
     fetch('/api/settings')
@@ -214,8 +207,6 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
           }
           setSyncToggles(toggles);
           setSyncIntervals(intervals);
-          setEmailFilter(settings['email_filter'] ?? 'flagged');
-          setEmailDays(settings['email_days'] ?? '7');
         } else {
           // Non-O365 integration — load its own interval
           const key = `sync_${integration.id}_interval_minutes`;
@@ -307,7 +298,7 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
         </div>
       )}
 
-      {/* Sync interval + Sync Now for non-O365 integrations (jira, monday) */}
+      {/* Sync interval + Sync Now for non-O365 integrations (jira) */}
       {enabled && !isMsgraph && (
         <div className="mb-4">
           <label className="block text-[10px] text-neutral-500 uppercase tracking-wider mb-1">
@@ -456,54 +447,6 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
               )}
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Email sync settings */}
-      {isMsgraph && enabled && integration.mcpStatus === 'connected' && syncToggles['email'] && (
-        <div className="mb-4 space-y-2">
-          <div className="text-[10px] text-neutral-500 uppercase tracking-wider">
-            Email Settings
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-[10px] text-neutral-500 mb-1">Filter</label>
-              <select
-                value={emailFilter}
-                onChange={(e) => {
-                  setEmailFilter(e.target.value);
-                  saveEmailSetting('email_filter', e.target.value);
-                }}
-                className="w-full bg-[#2f353d] border border-[#3a424d] rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:border-[#5ec1ca] focus:outline-none"
-              >
-                <option value="flagged">Flagged only</option>
-                <option value="unread">Unread only</option>
-                <option value="unread_and_flagged">Unread + Flagged</option>
-                <option value="all">All emails</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-[10px] text-neutral-500 mb-1">Days to pull</label>
-              <select
-                value={emailDays}
-                onChange={(e) => {
-                  setEmailDays(e.target.value);
-                  saveEmailSetting('email_days', e.target.value);
-                }}
-                className="w-full bg-[#2f353d] border border-[#3a424d] rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:border-[#5ec1ca] focus:outline-none"
-              >
-                <option value="1">Last 1 day</option>
-                <option value="3">Last 3 days</option>
-                <option value="7">Last 7 days</option>
-                <option value="14">Last 14 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="0">No limit</option>
-              </select>
-            </div>
-          </div>
-          <p className="text-[10px] text-neutral-600">
-            Changes apply on next sync cycle.
-          </p>
         </div>
       )}
 

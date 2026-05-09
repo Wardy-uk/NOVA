@@ -2749,6 +2749,29 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       }
 
       const p = await getKpiPool();
+
+      // Build department filter — restricts coaching to configured departments
+      const deptSetting = deps?.settingsQueries?.get('coaching_departments');
+      let deptFilter = '';
+      const deptParams: string[] = [];
+      if (deptSetting) {
+        try {
+          const depts: string[] = JSON.parse(deptSetting);
+          if (depts.length > 0) {
+            const agentResult = await p.request().query(
+              `SELECT DisplayName FROM dbo.Agent WHERE IsActive = 1 AND Department IN (${depts.map((_, i) => `N'${depts[i].replace(/'/g, "''")}'`).join(',')})`,
+            );
+            const coachableNames = new Set(agentResult.recordset.map((r: any) => r.DisplayName));
+            if (coachableNames.size > 0) {
+              teamMemberNames = teamMemberNames ?? new Set();
+              for (const name of coachableNames) {
+                if (name) teamMemberNames.add(name.toLowerCase());
+              }
+            }
+          }
+        } catch {}
+      }
+
       const result = await p.request().query(`
         DECLARE @since DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
 
@@ -3790,7 +3813,266 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // ── KB Gaps Revalidation (E1) ──
+  router.post('/kb-gaps/revalidate', requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const ids: number[] | undefined = req.body?.ids;
+      const whereClause = ids?.length ? `AND g.id IN (${ids.map(() => '?').join(',')})` : '';
+      const params = ids?.length ? ids : [];
+
+      let closedResolved = 0, closedCovered = 0, stale = 0;
+
+      const openGaps = await query<{ id: number; ticket_key: string; topic: string; created_at: string }>(
+        `SELECT g.id, g.ticket_key, g.topic, g.created_at FROM kb_gap_log g WHERE g.status = 'open' ${whereClause}`,
+        params,
+      );
+
+      for (const gap of openGaps) {
+        const ticket = await queryOne<{ status_name: string }>(
+          `SELECT status_name FROM jira_issue_cache WHERE issue_key = ?`, [gap.ticket_key],
+        );
+        if (ticket && ['Done', 'Resolved', 'Closed'].includes(ticket.status_name)) {
+          await execute(`UPDATE kb_gap_log SET status = 'auto_closed_resolved' WHERE id = ?`, [gap.id]);
+          closedResolved++;
+          continue;
+        }
+
+        const published = await queryOne<{ id: number }>(
+          `SELECT TOP 1 id FROM kb_article_drafts WHERE status = 'published' AND topic LIKE '%' + ? + '%'`,
+          [gap.topic?.substring(0, 50) || ''],
+        );
+        if (published) {
+          await execute(`UPDATE kb_gap_log SET status = 'auto_closed_covered' WHERE id = ?`, [gap.id]);
+          closedCovered++;
+          continue;
+        }
+
+        const age = (Date.now() - new Date(gap.created_at).getTime()) / 86400_000;
+        if (age > 90) {
+          await execute(`UPDATE kb_gap_log SET status = 'stale' WHERE id = ?`, [gap.id]);
+          stale++;
+        }
+      }
+
+      const stillOpen = openGaps.length - closedResolved - closedCovered - stale;
+      res.json({ ok: true, data: { closedResolved, closedCovered, stale, stillOpen, total: openGaps.length } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Revalidation failed' });
+    }
+  });
+
+  // ── KB Drafts Reject (L1) ──
+  router.post('/kb-drafts/:id/reject', requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id as string, 10);
+      const reason = req.body?.reason || 'No reason provided';
+      await execute(
+        `UPDATE kb_article_drafts SET status = 'rejected', rejected_at = GETUTCDATE(), rejection_reason = ? WHERE id = ?`,
+        [reason, id],
+      );
+      await execute(
+        `INSERT INTO agent_coaching_events (event_type, details, created_at) VALUES ('kb_draft_rejected', ?, GETUTCDATE())`,
+        [JSON.stringify({ draft_id: id, reason })],
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Reject failed' });
+    }
+  });
+
+  // ── Triage Tuning (N1) ──
+  router.post('/triage-tuning/analyse', requireRole('admin', 'super_admin'), async (_req, res) => {
+    try {
+      const { TriageTuningService } = await import('../services/triage-tuning.js');
+      const svc = new TriageTuningService(deps?.settingsQueries as any);
+      const results = await svc.analyse();
+      res.json({ ok: true, data: results });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Analysis failed' });
+    }
+  });
+
+  router.get('/triage-tuning', requireRole('admin', 'super_admin'), async (_req, res) => {
+    try {
+      const { TriageTuningService } = await import('../services/triage-tuning.js');
+      const svc = new TriageTuningService(deps?.settingsQueries as any);
+      const data = await svc.getResults();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get tuning data' });
+    }
+  });
+
+  // ── Impact Measurement (O1) ──
+  router.get('/impact', requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const { ImpactMeasurement } = await import('../services/impact-measurement.js');
+      const svc = new ImpactMeasurement(deps?.settingsQueries as any);
+      const days = parseInt(req.query.days as string, 10) || 7;
+      const data = await svc.computeMetrics(days);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Impact computation failed' });
+    }
+  });
+
+  router.get('/impact/history', requireRole('admin', 'super_admin'), async (_req, res) => {
+    try {
+      const { ImpactMeasurement } = await import('../services/impact-measurement.js');
+      const svc = new ImpactMeasurement(deps?.settingsQueries as any);
+      const data = await svc.getHistory();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get impact history' });
+    }
+  });
+
+  router.post('/impact/compute', requireRole('admin', 'super_admin'), async (_req, res) => {
+    try {
+      const { ImpactMeasurement } = await import('../services/impact-measurement.js');
+      const svc = new ImpactMeasurement(deps?.settingsQueries as any);
+      const metrics = await svc.computeMetrics();
+      await svc.saveSnapshot(metrics);
+      res.json({ ok: true, data: metrics });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Impact snapshot failed' });
+    }
+  });
+
+  // ── Flagged Ticket Auto-Dismiss (M1) ──
+  router.post('/flagged/sweep', requireRole('admin', 'super_admin'), async (_req, res) => {
+    try {
+      const { FlagAutoDismissService } = await import('../services/flag-auto-dismiss.js');
+      const svc = new FlagAutoDismissService(deps?.settingsQueries as any);
+      const data = await svc.sweep();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Sweep failed' });
+    }
+  });
+
+  // ── Ownership Registry (P1) ──
+  router.get('/ownership', async (_req, res) => {
+    try {
+      const raw = deps?.settingsQueries?.get('agent_ownership_registry');
+      const registry = raw ? JSON.parse(raw) : {
+        round_robin_assignment: { owner: 'nova', since: '2026-05-09', n8n_workflow: 'disabled' },
+        triage_classification: { owner: 'nova', since: '2026-04-22', n8n_workflow: 'disabled' },
+        plugin_to_tpj: { owner: 'nova', since: '2026-04-28', n8n_workflow: null },
+        abuse_report: { owner: 'nova', since: '2026-04-28', n8n_workflow: null },
+        respond_to_customer: { owner: 'shared', since: null, n8n_workflow: 'active', notes: 'NOVA in approval-only mode' },
+        escalate_to_t2: { owner: 'shared', since: null, n8n_workflow: 'active' },
+        close_ticket: { owner: 'nova', since: '2026-05-09', n8n_workflow: 'disabled', notes: 'quick wins + lifecycle' },
+        chase_customer: { owner: 'nova', since: '2026-05-09', n8n_workflow: null },
+      };
+      res.json({ ok: true, data: registry });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get ownership registry' });
+    }
+  });
+
+  // ── Notifications (H1) ──
+  router.get('/notifications', async (req, res) => {
+    try {
+      const userId = (req as any).user?.id;
+      if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
+      const data = await query(
+        `SELECT TOP 50 id, type, title, body, ticket_key, reference_id, read, created_at FROM nova_notifications WHERE user_id = ? ORDER BY created_at DESC`,
+        [userId],
+      );
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get notifications' });
+    }
+  });
+
+  router.get('/notifications/count', async (req, res) => {
+    try {
+      const userId = (req as any).user?.id;
+      if (!userId) { res.json({ ok: true, data: { count: 0 } }); return; }
+      const row = await queryOne<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM nova_notifications WHERE user_id = ? AND read = 0`, [userId],
+      );
+      res.json({ ok: true, data: { count: row?.cnt ?? 0 } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get count' });
+    }
+  });
+
+  router.patch('/notifications/:id/read', async (req, res) => {
+    try {
+      const userId = (req as any).user?.id;
+      const id = parseInt(req.params.id as string, 10);
+      await execute(`UPDATE nova_notifications SET read = 1 WHERE id = ? AND user_id = ?`, [id, userId]);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to mark as read' });
+    }
+  });
+
+  // ── Improvement Scan Manual Trigger (K1) ──
+  router.post('/improvement/scan', requireRole('admin', 'super_admin'), async (_req, res) => {
+    try {
+      const { AiImprovementService } = await import('../services/ai-improvement.js');
+      const svc = new AiImprovementService(agentLoop.getLlmService(), deps?.settingsQueries as any);
+      const signals = await svc.runComparisonScan();
+      res.json({ ok: true, data: { signals_found: signals } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Scan failed' });
+    }
+  });
+
+  // ── Auto-Rules List (D2) ──
+  router.get('/auto-rules', requireRole('admin', 'super_admin'), async (_req, res) => {
+    try {
+      const engine = agentLoop.getAutoRulesEngine();
+      const rules = engine.getRules();
+      const disabledRaw = deps?.settingsQueries?.get('agent_auto_rules_disabled') ?? '[]';
+      let disabled: string[] = [];
+      try { disabled = JSON.parse(disabledRaw); } catch {}
+
+      const stats = await query<{ rule_id: string; match_count: number; shadow_count: number }>(
+        `SELECT rule_id,
+                SUM(CASE WHEN shadowed = 0 THEN 1 ELSE 0 END) as match_count,
+                SUM(CASE WHEN shadowed = 1 THEN 1 ELSE 0 END) as shadow_count
+         FROM agent_auto_rule_log
+         WHERE created_at >= DATEADD(DAY, -7, GETUTCDATE())
+         GROUP BY rule_id`,
+      );
+      const statsMap = new Map(stats.map(s => [s.rule_id, s]));
+
+      const data = rules.map(r => ({
+        ...r,
+        enabled: !disabled.includes(r.id),
+        match_count_7d: statsMap.get(r.id)?.match_count ?? 0,
+        shadow_count_7d: statsMap.get(r.id)?.shadow_count ?? 0,
+      }));
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to list rules' });
+    }
+  });
+
+  router.patch('/auto-rules/:ruleId/toggle', requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const ruleId = req.params.ruleId as string;
+      const enabled = req.body?.enabled;
+      const disabledRaw = deps?.settingsQueries?.get('agent_auto_rules_disabled') ?? '[]';
+      let disabled: string[] = [];
+      try { disabled = JSON.parse(disabledRaw); } catch {}
+
+      if (enabled === false && !disabled.includes(ruleId)) {
+        disabled.push(ruleId);
+      } else if (enabled === true) {
+        disabled = disabled.filter(id => id !== ruleId);
+      }
+      deps?.settingsQueries?.set('agent_auto_rules_disabled', JSON.stringify(disabled));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Toggle failed' });
+    }
+  });
+
   return router;
 }
-
 

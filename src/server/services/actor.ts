@@ -4,6 +4,7 @@ import type { EscalationLogService } from './escalation-log-service.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { LlmService } from './llm-service.js';
 import { query, executeAndGetId } from './database.js';
+import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 
 const HIGH_STAKES_ACTIONS = ['close', 'resolve', 'draft_response', 'escalate', 'quick_win_close', 'transition'];
 
@@ -238,22 +239,30 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
     if (!transitionId) {
       return { success: false, action: 'transition', ticketKey: decision.ticketKey, detail: 'No transitionId in decision output.' };
     }
-    // Quick Resolve (17) requires resolution type — set default if not in fields
     if (transitionId === '17') {
-      const fields = (decision.output.fields as Record<string, unknown>) ?? {};
-      if (!fields['customfield_14494']) {
+      const existingFields = (decision.output.fields as Record<string, unknown>) ?? {};
+      if (!existingFields['customfield_14494']) {
         try {
-          await this.jiraClient.updateFields(decision.ticketKey, {
-            customfield_14494: { value: 'No Fault Found' },
+          const resMapRaw = this.settings.get('agent_resolution_type_map');
+          let resMap: Record<string, string> = {};
+          try { if (resMapRaw) resMap = JSON.parse(resMapRaw); } catch {}
+          const resolution = resMap[decision.action] || 'Tech Services Fix';
+          const { fields: resolveFields } = buildResolveFields({
+            tldr: (decision.output.tldr as string) || `Resolved by NOVA agent (${decision.action})`,
+            resolution,
+            comment: '',
           });
+          Object.assign(existingFields, resolveFields);
         } catch (err) {
-          console.warn(`[actor] Failed to set resolution type on ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+          console.warn(`[actor] Failed to build resolve fields for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
         }
       }
+      await this.jiraClient.transitionIssue(decision.ticketKey, transitionId, { fields: existingFields });
+    } else {
+      await this.jiraClient.transitionIssue(decision.ticketKey, transitionId, {
+        fields: (decision.output.fields as Record<string, unknown>) ?? undefined,
+      });
     }
-    await this.jiraClient.transitionIssue(decision.ticketKey, transitionId, {
-      fields: (decision.output.fields as Record<string, unknown>) ?? undefined,
-    });
     return { success: true, action: 'transition', ticketKey: decision.ticketKey, detail: `Transitioned with ID ${transitionId}.` };
   }
 

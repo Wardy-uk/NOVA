@@ -25,11 +25,6 @@ interface Props {
 
 const SOURCE_META: Record<string, { label: string; color: string }> = {
   jira: { label: 'Jira', color: '#0052CC' },
-  planner: { label: 'Planner', color: '#31752F' },
-  todo: { label: 'To-Do', color: '#797673' },
-  monday: { label: 'Monday', color: '#FF6D00' },
-  email: { label: 'Email', color: '#0078D4' },
-  calendar: { label: 'Calendar', color: '#8764B8' },
   milestone: { label: 'Onboarding', color: '#10B981' },
 };
 

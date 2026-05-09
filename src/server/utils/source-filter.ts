@@ -26,13 +26,6 @@ export async function getAllowedSources(
   };
 
   if (check('jira_enabled')) allowed.add('jira');
-  if (check('msgraph_enabled')) {
-    allowed.add('planner');
-    allowed.add('todo');
-    allowed.add('calendar');
-    allowed.add('email');
-  }
-  if (check('monday_enabled')) allowed.add('monday');
   return allowed;
 }
 

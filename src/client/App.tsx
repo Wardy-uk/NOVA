@@ -9,7 +9,6 @@ import { CrmView } from './components/CrmView.js';
 import { ContractsView } from './components/ContractsView.js';
 import { AdobeSignView } from './components/AdobeSignView.js';
 import { NewContractWizard } from './components/NewContractWizard.js';
-import { MyFocusView } from './components/MyFocusView.js';
 import { LoginView } from './components/LoginView.js';
 import { HelpView } from './components/HelpView.js';
 const AdminView = lazy(() => import('./components/AdminView.js').then(m => ({ default: m.AdminView })));
@@ -91,7 +90,7 @@ declare const __APP_VERSION__: string;
 // ── Area / View definitions ──
 
 type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'calyx' | 'ai-agent' | 'backlog';
-type View = 'daily' | 'focus' | 'tasks' | 'standup' | 'nova' | 'briefing'
+type View = 'daily' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
@@ -139,10 +138,9 @@ const TAB_AREA_GATE: Partial<Record<View, string>> = {
 const AREAS: Record<Area, AreaDef> = {
   command: {
     label: 'My NOVA',
-    defaultView: 'focus',
+    defaultView: 'daily',
     tabs: [
       { view: 'briefing', label: 'Briefing' },
-      { view: 'focus', label: 'My Focus' },
       { view: 'daily', label: 'My Dashboard' },
       { view: 'nova', label: 'NOVA Insights' },
       { view: 'tasks', label: 'My Tasks' },
@@ -373,7 +371,7 @@ export function App() {
     return <KpiBreachedView isWallboard />;
   }
 
-  const [view, setViewRaw] = useState<View>(() => getViewFromHash() ?? 'focus');
+  const [view, setViewRaw] = useState<View>(() => getViewFromHash() ?? 'daily');
 
   // Wrap setView to sync hash
   const setView = useCallback((v: View) => {
@@ -769,7 +767,7 @@ export function App() {
             <div className="flex items-center gap-4">
               <h1
                 className="text-lg font-bold tracking-tight font-[var(--font-heading)] cursor-pointer"
-                onClick={() => setView('focus')}
+                onClick={() => setView('daily')}
               >
                 <span className="text-[#5ec1ca]">N.O.V.A</span>
               </h1>
@@ -1016,9 +1014,6 @@ export function App() {
           )}
           {view === 'nova' && (
             <NextActions onUpdateTask={updateTask} />
-          )}
-          {view === 'focus' && (
-            <MyFocusView tasks={tasks} onUpdateTask={updateTask} />
           )}
           {view === 'tasks' && (
             <>

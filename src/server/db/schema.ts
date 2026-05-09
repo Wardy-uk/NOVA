@@ -1342,6 +1342,59 @@ async function runMigrations(): Promise<void> {
 
     `UPDATE agent_decisions SET eval_label = 'incorrect'
      WHERE eval_label IS NULL AND approval_status = 'declined';`,
+
+    // ── Notifications table (H1) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'nova_notifications') AND type = 'U')
+     CREATE TABLE nova_notifications (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       user_id INT NOT NULL,
+       type VARCHAR(50) NOT NULL,
+       title NVARCHAR(200) NOT NULL,
+       body NVARCHAR(500) NULL,
+       ticket_key VARCHAR(20) NULL,
+       reference_id VARCHAR(50) NULL,
+       read BIT DEFAULT 0,
+       created_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_nova_notifications_user')
+     CREATE INDEX IX_nova_notifications_user ON nova_notifications(user_id, read, created_at DESC);`,
+
+    // ── Triage tuning table (N1) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_triage_tuning') AND type = 'U')
+     CREATE TABLE agent_triage_tuning (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       bucket VARCHAR(30) NOT NULL,
+       pattern_description NVARCHAR(500) NULL,
+       ticket_count INT NULL,
+       example_ticket_keys NVARCHAR(500) NULL,
+       suggested_fix NVARCHAR(1000) NULL,
+       applied BIT DEFAULT 0,
+       created_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+
+    // ── Impact snapshots table (O1) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_impact_snapshots') AND type = 'U')
+     CREATE TABLE agent_impact_snapshots (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       period_start DATE NOT NULL,
+       period_end DATE NOT NULL,
+       autonomous_resolution_rate FLOAT NULL,
+       deflection_rate FLOAT NULL,
+       queue_hours_saved FLOAT NULL,
+       approval_rate FLOAT NULL,
+       reversal_rate FLOAT NULL,
+       assignment_automation_rate FLOAT NULL,
+       kb_coverage_delta FLOAT NULL,
+       escalation_accuracy FLOAT NULL,
+       raw_data NVARCHAR(MAX) NULL,
+       created_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+
+    // ── KB drafts rejection columns (L1) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'kb_article_drafts') AND name = 'rejected_at')
+     ALTER TABLE kb_article_drafts ADD rejected_at DATETIME2 NULL;`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'kb_article_drafts') AND name = 'rejection_reason')
+     ALTER TABLE kb_article_drafts ADD rejection_reason NVARCHAR(500) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

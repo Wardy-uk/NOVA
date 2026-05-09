@@ -11,21 +11,11 @@ interface Props {
 
 const SOURCE_COLORS: Record<string, string> = {
   jira: 'bg-[#0052CC]',
-  planner: 'bg-[#31752F]',
-  todo: 'bg-[#797673]',
-  monday: 'bg-[#FF6D00]',
-  email: 'bg-[#0078D4]',
-  calendar: 'bg-[#8764B8]',
   milestone: 'bg-emerald-600',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
   jira: 'JIRA',
-  planner: 'PLANNER',
-  todo: 'TODO',
-  monday: 'MON',
-  email: 'EMAIL',
-  calendar: 'CAL',
   milestone: 'OB',
 };
 
