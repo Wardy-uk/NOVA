@@ -41,6 +41,7 @@ import { ReleaseNotesModal, LATEST_RELEASE_VERSION } from './components/ReleaseN
 import { TourOverlay, useTour } from './components/TourOverlay.js';
 import { SetupPortal } from './components/SetupPortal.js';
 const SurveyAdminView = lazy(() => import('./components/SurveyAdminView.js').then(m => ({ default: m.SurveyAdminView })));
+const PortalAdminView = lazy(() => import('./components/PortalAdminView.js'));
 import { SurveyRespondView } from './components/SurveyRespondView.js';
 import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
 const TrendsView = lazy(() => import('./components/TrendsView.js').then(m => ({ default: m.TrendsView })));
@@ -105,11 +106,11 @@ type View = 'daily' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-tickets' | 'calyx-kb' | 'calyx-improvements' | 'calyx-settings' | 'calyx-problems' | 'calyx-changes' | 'calyx-major-incidents' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
   | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
   | 'backlog-board'
-  | 'settings' | 'admin-panel' | 'my-feedback'
+  | 'settings' | 'admin-panel' | 'portal-admin' | 'my-feedback'
   | 'help' | 'debug';
 
 // Standalone views that don't belong to any area (no sub-tab bar)
-const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel', 'my-feedback']);
+const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel', 'portal-admin', 'my-feedback']);
 
 interface AreaDef {
   label: string;
@@ -851,12 +852,20 @@ export function App() {
                       My Settings
                     </button>
                     {areaAccess.admin === 'edit' && (
-                      <button
-                        onClick={() => { setView('admin-panel'); setShowUserMenu(false); }}
-                        className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
-                      >
-                        Admin
-                      </button>
+                      <>
+                        <button
+                          onClick={() => { setView('admin-panel'); setShowUserMenu(false); }}
+                          className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
+                        >
+                          Admin
+                        </button>
+                        <button
+                          onClick={() => { setView('portal-admin'); setShowUserMenu(false); }}
+                          className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
+                        >
+                          Portal Admin
+                        </button>
+                      </>
                     )}
                     <button
                       onClick={() => { setView('help'); setShowUserMenu(false); }}
@@ -1328,6 +1337,11 @@ export function App() {
           )}
           {view === 'admin-panel' && (
             <AdminView />
+          )}
+          {view === 'portal-admin' && (
+            <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>
+              <PortalAdminView />
+            </Suspense>
           )}
           {view === 'my-feedback' && (
             <MyFeedbackView />

@@ -1,0 +1,304 @@
+import React, { useEffect, useState } from 'react';
+
+interface Props {
+  onCreated: (ticketKey: string) => void;
+}
+
+interface Category {
+  id: string;
+  name: string;
+  children: Array<{ id: string; name: string }>;
+}
+
+const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
+
+export default function PortalNewRequest({ onCreated }: Props) {
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [subject, setSubject] = useState('');
+  const [category, setCategory] = useState('');
+  const [subcategory, setSubcategory] = useState('');
+  const [description, setDescription] = useState('');
+  const [account, setAccount] = useState('');
+  const [url, setUrl] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [urgency, setUrgency] = useState<'Normal' | 'High' | 'Critical'>('Normal');
+  const [contactPreference, setContactPreference] = useState<'portal' | 'email' | 'phone'>('portal');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [kbSuggestions, setKbSuggestions] = useState<Array<{ id: number; title: string; excerpt: string }>>([]);
+  const [showKbSuggestions, setShowKbSuggestions] = useState(false);
+
+  useEffect(() => {
+    pf('/api/portal/categories')
+      .then(r => r.json())
+      .then(data => { if (data.ok) setCategories(data.data); })
+      .catch(console.error);
+  }, []);
+
+  const selectedCategory = categories.find(c => c.id === category);
+  const showUrl = ['website', 'crm', 'portal'].includes(category);
+  const showBrowser = ['website', 'portal'].includes(category);
+
+  // Auto-detect browser info
+  const browserInfo = `${navigator.userAgent.match(/Chrome\/[\d.]+|Firefox\/[\d.]+|Safari\/[\d.]+|Edge\/[\d.]+/)?.[0] || 'Unknown'}`;
+  const osInfo = navigator.platform;
+
+  const handlePreSubmitKbCheck = async () => {
+    if (subject.length < 5 && description.length < 10) return;
+
+    try {
+      const q = `${subject} ${category} ${description}`.slice(0, 200);
+      const res = await pf(`/api/portal/kb/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (data.ok && data.data.articles.length > 0) {
+        setKbSuggestions(data.data.articles.slice(0, 3));
+        setShowKbSuggestions(true);
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleSubmit = async () => {
+    if (!subject || !category || !description) {
+      setError('Please fill in all required fields.');
+      return;
+    }
+
+    // Check KB first if we haven't already
+    if (!showKbSuggestions && kbSuggestions.length === 0) {
+      await handlePreSubmitKbCheck();
+      if (kbSuggestions.length > 0) return; // Will show suggestions
+    }
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const res = await pf('/api/portal/tickets', {
+        method: 'POST',
+        body: JSON.stringify({
+          subject,
+          category,
+          subcategory: subcategory || undefined,
+          description,
+          account: account || undefined,
+          url: url || undefined,
+          errorMessage: errorMessage || undefined,
+          urgency,
+          contactPreference,
+          browser: showBrowser ? browserInfo : undefined,
+          os: showBrowser ? osInfo : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSuccess(data.data.ticketKey);
+      } else {
+        setError(data.error || 'Failed to create ticket');
+      }
+    } catch {
+      setError('Failed to submit request');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (success) {
+    return (
+      <div className="max-w-2xl mx-auto text-center py-16">
+        <div className="w-16 h-16 mx-auto rounded-full bg-green-100 flex items-center justify-center mb-6">
+          <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Request Submitted</h2>
+        <p className="text-gray-600 mb-6">
+          Your ticket <span className="font-mono font-medium text-blue-600">{success}</span> has been created.
+          Our team will review it shortly.
+        </p>
+        <button
+          onClick={() => onCreated(success)}
+          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          View Ticket
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <h1 className="text-2xl font-bold text-gray-900 mb-6">New Support Request</h1>
+
+      {/* KB Suggestions */}
+      {showKbSuggestions && kbSuggestions.length > 0 && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+          <h3 className="text-sm font-medium text-blue-800 mb-3">
+            We found some articles that might help:
+          </h3>
+          <div className="space-y-2">
+            {kbSuggestions.map(a => (
+              <div key={a.id} className="bg-white rounded-lg p-3 border border-blue-100">
+                <div className="text-sm font-medium text-gray-900">{a.title}</div>
+                <div className="text-xs text-gray-500 mt-1 line-clamp-2">{a.excerpt}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex gap-3">
+            <button
+              onClick={() => { setShowKbSuggestions(false); setKbSuggestions([]); }}
+              className="text-sm text-blue-700 font-medium hover:text-blue-800"
+            >
+              No, I still need help
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
+        {error && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
+        )}
+
+        {/* Subject */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Subject *</label>
+          <input
+            type="text"
+            value={subject}
+            onChange={e => setSubject(e.target.value)}
+            placeholder="Brief summary of your issue"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+          />
+        </div>
+
+        {/* Category */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+            <select
+              value={category}
+              onChange={e => { setCategory(e.target.value); setSubcategory(''); }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            >
+              <option value="">Select category</option>
+              {categories.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          {selectedCategory && selectedCategory.children.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Sub-category</label>
+              <select
+                value={subcategory}
+                onChange={e => setSubcategory(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="">Select sub-category</option>
+                {selectedCategory.children.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Account */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Account / Site</label>
+          <input
+            type="text"
+            value={account}
+            onChange={e => setAccount(e.target.value)}
+            placeholder="Which account or site is affected?"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+          />
+        </div>
+
+        {/* Description */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+          <textarea
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            placeholder="What should be happening vs what is happening?"
+            rows={5}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
+          />
+        </div>
+
+        {/* URL */}
+        {showUrl && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">URL / Page</label>
+            <input
+              type="text"
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              placeholder="https://..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            />
+          </div>
+        )}
+
+        {/* Error message */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Error message (if any)</label>
+          <input
+            type="text"
+            value={errorMessage}
+            onChange={e => setErrorMessage(e.target.value)}
+            placeholder="Copy and paste the error message"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+          />
+        </div>
+
+        {/* Urgency + Contact Preference */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Urgency</label>
+            <select
+              value={urgency}
+              onChange={e => setUrgency(e.target.value as 'Normal' | 'High' | 'Critical')}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            >
+              <option value="Normal">Normal</option>
+              <option value="High">High</option>
+              <option value="Critical">Critical</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Contact preference</label>
+            <select
+              value={contactPreference}
+              onChange={e => setContactPreference(e.target.value as 'portal' | 'email' | 'phone')}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            >
+              <option value="portal">Portal reply</option>
+              <option value="email">Email</option>
+              <option value="phone">Phone callback</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Browser info (auto-detected) */}
+        {showBrowser && (
+          <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-500">
+            Detected: {browserInfo} on {osInfo}
+          </div>
+        )}
+
+        <div className="flex justify-end pt-2">
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !subject || !category || !description}
+            className="px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {submitting ? 'Submitting...' : 'Submit Request'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

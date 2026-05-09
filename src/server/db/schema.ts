@@ -1505,6 +1505,113 @@ async function runMigrations(): Promise<void> {
        drift_score FLOAT NULL,
        checked_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
      );`,
+
+    // ── P6: Customer Portal ──
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_organisations') AND type = 'U')
+     CREATE TABLE portal_organisations (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       external_id NVARCHAR(255) NOT NULL UNIQUE,
+       name NVARCHAR(255) NOT NULL,
+       domain NVARCHAR(255) NULL,
+       created_at DATETIME2 DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_users') AND type = 'U')
+     CREATE TABLE portal_users (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       external_id NVARCHAR(255) NOT NULL UNIQUE,
+       org_id INT NOT NULL REFERENCES portal_organisations(id),
+       email NVARCHAR(255) NOT NULL,
+       display_name NVARCHAR(255) NOT NULL,
+       avatar_url NVARCHAR(500) NULL,
+       role NVARCHAR(50) DEFAULT 'requester',
+       last_login DATETIME2 DEFAULT GETUTCDATE(),
+       created_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_chat_sessions') AND type = 'U')
+     CREATE TABLE portal_chat_sessions (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       portal_user_id INT NOT NULL REFERENCES portal_users(id),
+       jira_issue_key NVARCHAR(50) NULL,
+       status NVARCHAR(50) DEFAULT 'active',
+       started_at DATETIME2 DEFAULT GETUTCDATE(),
+       ended_at DATETIME2 NULL,
+       metadata NVARCHAR(MAX) NULL
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_chat_messages') AND type = 'U')
+     CREATE TABLE portal_chat_messages (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       session_id INT NOT NULL REFERENCES portal_chat_sessions(id),
+       role NVARCHAR(20) NOT NULL,
+       content NVARCHAR(MAX) NOT NULL,
+       metadata NVARCHAR(MAX) NULL,
+       created_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_form_submissions') AND type = 'U')
+     CREATE TABLE portal_form_submissions (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       portal_user_id INT NOT NULL REFERENCES portal_users(id),
+       jira_issue_key NVARCHAR(50) NULL,
+       form_data NVARCHAR(MAX) NOT NULL,
+       category NVARCHAR(255) NULL,
+       created_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_analytics') AND type = 'U')
+     CREATE TABLE portal_analytics (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       event_type NVARCHAR(50) NOT NULL,
+       portal_user_id INT NULL,
+       org_id INT NULL,
+       metadata NVARCHAR(MAX) NULL,
+       created_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_analytics_event')
+     CREATE INDEX IX_portal_analytics_event ON portal_analytics(event_type, created_at);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_org_jira_mapping') AND type = 'U')
+     CREATE TABLE portal_org_jira_mapping (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       org_id INT NOT NULL REFERENCES portal_organisations(id),
+       jira_organisation_id NVARCHAR(255) NULL,
+       jira_email_domain NVARCHAR(255) NULL,
+       CONSTRAINT UQ_portal_org_jira_mapping UNIQUE(org_id)
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_kb_articles') AND type = 'U')
+     CREATE TABLE portal_kb_articles (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       confluence_page_id NVARCHAR(50) NOT NULL UNIQUE,
+       title NVARCHAR(500) NOT NULL,
+       body_html NVARCHAR(MAX) NOT NULL,
+       body_text NVARCHAR(MAX) NOT NULL,
+       category NVARCHAR(255) NULL,
+       labels NVARCHAR(500) NULL,
+       published_at DATETIME2 NOT NULL,
+       updated_at DATETIME2 NOT NULL,
+       view_count INT DEFAULT 0,
+       helpful_yes INT DEFAULT 0,
+       helpful_no INT DEFAULT 0,
+       synced_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_chat_sessions_user')
+     CREATE INDEX IX_portal_chat_sessions_user ON portal_chat_sessions(portal_user_id, started_at DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_chat_messages_session')
+     CREATE INDEX IX_portal_chat_messages_session ON portal_chat_messages(session_id, created_at);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_users_org')
+     CREATE INDEX IX_portal_users_org ON portal_users(org_id);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_kb_articles_category')
+     CREATE INDEX IX_portal_kb_articles_category ON portal_kb_articles(category);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

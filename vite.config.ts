@@ -24,7 +24,7 @@ export default defineConfig({
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/wallboard\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/wallboard\//, /^\/portal/, /^\/widget\//],
         runtimeCaching: [
           {
             urlPattern: /^\/api\/.*/,
@@ -48,6 +48,12 @@ export default defineConfig({
   build: {
     outDir: '../../dist/client',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: 'src/client/index.html',
+        portal: 'src/client/portal.html',
+      },
+    },
   },
   server: {
     host: '127.0.0.1',
@@ -58,6 +64,10 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/wallboard': {
+        target: 'http://127.0.0.1:3069',
+        changeOrigin: true,
+      },
+      '/widget': {
         target: 'http://127.0.0.1:3069',
         changeOrigin: true,
       },

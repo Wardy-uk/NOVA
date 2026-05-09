@@ -182,14 +182,14 @@ export function createCalyxPortalRoutes(db: Database.Database, settingsQueries: 
       FROM calyx_requesters r
       LEFT JOIN calyx_organisations o ON o.id = r.organisation_id
       WHERE r.id = ?
-    `).get(req.portalUser!.requesterId) as any;
+    `).get(req.calyxPortalUser!.requesterId) as any;
     if (!r) { res.status(404).json({ ok: false, error: 'Requester not found' }); return; }
     res.json({ ok: true, data: r });
   });
 
   // ── Tickets (own only) ──
   router.get('/tickets', (req, res) => {
-    const rid = req.portalUser!.requesterId;
+    const rid = req.calyxPortalUser!.requesterId;
     const limit = Math.min(Number(req.query.limit) || 20, 100);
     const offset = Number(req.query.offset) || 0;
     const status = req.query.status as string | undefined;
@@ -210,7 +210,7 @@ export function createCalyxPortalRoutes(db: Database.Database, settingsQueries: 
   });
 
   router.post('/tickets', (req, res) => {
-    const rid = req.portalUser!.requesterId;
+    const rid = req.calyxPortalUser!.requesterId;
     const requester = db.prepare('SELECT * FROM calyx_requesters WHERE id = ?').get(rid) as any;
     if (!requester) { res.status(400).json({ ok: false, error: 'Requester not found' }); return; }
 
@@ -286,7 +286,7 @@ export function createCalyxPortalRoutes(db: Database.Database, settingsQueries: 
   });
 
   router.get('/tickets/:ref', (req, res) => {
-    const rid = req.portalUser!.requesterId;
+    const rid = req.calyxPortalUser!.requesterId;
     const ticket = db.prepare('SELECT * FROM calyx_tickets WHERE reference = ?').get(req.params.ref) as any;
     if (!ticket) { res.status(404).json({ ok: false, error: 'Ticket not found' }); return; }
     if (ticket.requester_id !== rid) {
@@ -329,7 +329,7 @@ export function createCalyxPortalRoutes(db: Database.Database, settingsQueries: 
   });
 
   router.post('/tickets/:ref/reply', (req, res) => {
-    const rid = req.portalUser!.requesterId;
+    const rid = req.calyxPortalUser!.requesterId;
     const ticket = db.prepare('SELECT * FROM calyx_tickets WHERE reference = ?').get(req.params.ref) as any;
     if (!ticket) { res.status(404).json({ ok: false, error: 'Ticket not found' }); return; }
     if (ticket.requester_id !== rid) {

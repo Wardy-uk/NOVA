@@ -12,7 +12,7 @@ export interface PortalUser {
 declare global {
   namespace Express {
     interface Request {
-      portalUser?: PortalUser;
+      calyxPortalUser?: PortalUser;
     }
   }
 }
@@ -44,7 +44,7 @@ export function portalAuthMiddleware(settingsQueries: FileSettingsQueries) {
         res.status(401).json({ ok: false, error: 'Invalid portal token' });
         return;
       }
-      req.portalUser = payload;
+      req.calyxPortalUser = payload;
       next();
     } catch {
       res.status(401).json({ ok: false, error: 'Portal session expired or invalid' });

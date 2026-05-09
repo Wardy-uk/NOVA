@@ -97,6 +97,17 @@ import { createSetupPortalPublicRoutes, createSetupPortalRoutes } from './routes
 import { createBackfillRoutes } from './routes/backfill.js';
 import { createBacklogRoutes } from './routes/backlog.js';
 import { logWallboard, getWallboardLogs, clearWallboardLogs, logWallboardClient } from './services/wallboard-logger.js';
+import { createPortalAuthRoutes } from './routes/portal-auth.js';
+import { createPortalTicketRoutes } from './routes/portal-tickets.js';
+import { createPortalChatRoutes } from './routes/portal-chat.js';
+import { createPortalKbRoutes } from './routes/portal-kb.js';
+import { createPortalAdminRoutes } from './routes/portal-admin.js';
+import { createPortalEventsRoutes } from './routes/portal-events.js';
+import { portalAuthMiddleware } from './middleware/portal-auth-middleware.js';
+import { PortalJiraService } from './services/portal-jira.js';
+import { PortalIntakeService } from './services/portal-intake.js';
+import { PortalChatService } from './services/portal-chat.js';
+import { PortalKbService } from './services/portal-kb.js';
 import { startWallboardLiveCache, getCohortSnapshot, type CohortSnapshot } from './services/wallboard-live-cache.js';
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
@@ -811,14 +822,21 @@ async function main() {
   // Protected API routes — role cache with 30s TTL avoids hitting DB on every single request
   const roleCache = new Map<number, { role: string; expires: number }>();
   const ROLE_CACHE_TTL = 30_000;
-  app.use('/api', authMiddleware(jwtSecret, async (id) => {
+  const novaAuthHandler = authMiddleware(jwtSecret, async (id) => {
     const now = Date.now();
     const cached = roleCache.get(id);
     if (cached && cached.expires > now) return cached.role;
     const user = await userQueries.getById(id);
     if (user?.role) roleCache.set(id, { role: user.role, expires: now + ROLE_CACHE_TTL });
     return user?.role;
-  }));
+  });
+  app.use('/api', (req, res, next) => {
+    // Portal routes use their own auth — skip NOVA JWT for /api/portal/* (except /api/portal/admin)
+    if (req.path.startsWith('/portal') && !req.path.startsWith('/portal/admin')) {
+      return next();
+    }
+    novaAuthHandler(req, res, next);
+  });
 
   // Lightweight user list — any authenticated user
   app.get('/api/users/list', async (_req, res) => {
@@ -2292,6 +2310,58 @@ ${panelHtml}
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
+
+  // ── P6: Customer Portal routes ──
+  if (settingsQueries.get('portal_enabled') === 'true') {
+    console.log('[N.O.V.A] Portal enabled — wiring portal routes');
+
+    const portalJiraClient = buildOnboardingJiraClient();
+    const portalJira = new PortalJiraService(settingsQueries, portalJiraClient);
+    const portalIntake = new PortalIntakeService(settingsQueries, portalJira);
+    const portalChat = new PortalChatService(settingsQueries, typeof llmService !== 'undefined' ? llmService : null, portalJira);
+    const portalKb = new PortalKbService(settingsQueries, mcpManager);
+
+    // Start KB sync timer
+    portalKb.startSync();
+
+    // Auth routes (no portal auth middleware — these handle login/callback)
+    app.use('/api/portal/auth', createPortalAuthRoutes(settingsQueries));
+
+    // KB routes (public — no auth required for read)
+    app.use('/api/portal/kb', createPortalKbRoutes(portalKb));
+
+    // Authenticated portal routes
+    const portalAuth = portalAuthMiddleware(settingsQueries);
+    app.use('/api/portal', portalAuth, createPortalTicketRoutes(portalJira, portalIntake));
+    app.use('/api/portal', portalAuth, createPortalChatRoutes(portalChat));
+    app.use('/api/portal', portalAuth, createPortalEventsRoutes());
+
+    // Portal admin (requires internal NOVA auth + admin role)
+    app.use('/api/portal/admin', requireRole('admin', 'super_admin'), createPortalAdminRoutes(settingsQueries));
+  } else {
+    console.log('[N.O.V.A] Portal disabled (set portal_enabled=true to activate)');
+  }
+
+  // Serve portal SPA (always serve even if portal disabled — shows login page)
+  app.get('/portal', (_req, res) => {
+    if (isProduction) {
+      res.sendFile(path.resolve(__dirname, '../../client/portal.html'));
+    } else {
+      res.redirect('http://localhost:5173/portal.html');
+    }
+  });
+  app.get('/portal/*', (_req, res) => {
+    if (isProduction) {
+      res.sendFile(path.resolve(__dirname, '../../client/portal.html'));
+    } else {
+      res.redirect('http://localhost:5173/portal.html');
+    }
+  });
+
+  // Serve widget bundle
+  if (isProduction) {
+    app.use('/widget', express.static(path.resolve(__dirname, '../../client/portal-widget')));
+  }
 
   // Production: serve built Vite frontend
   if (isProduction) {
