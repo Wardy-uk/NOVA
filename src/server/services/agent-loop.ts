@@ -585,8 +585,12 @@ export class AgentLoop {
           await this.runTicketClassification();
           await this.runCoachingHealthChecks();
           await this.runRiskSweep();
-          await this.runBackfillTriage();
         }
+      }
+
+      // 7. BACKFILL TRIAGE (every tick — batch-limited, no-op when caught up)
+      if (this.currentMode === 'full') {
+        await this.runBackfillTriage();
       }
 
       this.lastTickAt = new Date();
