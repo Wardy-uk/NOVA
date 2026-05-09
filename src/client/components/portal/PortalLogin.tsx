@@ -1,7 +1,19 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
-export default function PortalLogin() {
+interface PortalLoginProps {
+  onInternalAuth?: () => void;
+}
+
+export default function PortalLogin({ onInternalAuth }: PortalLoginProps) {
   const error = new URLSearchParams(window.location.search).get('error');
+  const [authMode, setAuthMode] = useState<'oidc' | 'internal' | null>(null);
+
+  useEffect(() => {
+    fetch('/api/portal/auth/mode')
+      .then(r => r.json())
+      .then(d => { if (d.ok) setAuthMode(d.data.mode); })
+      .catch(() => setAuthMode('oidc'));
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">
@@ -16,16 +28,29 @@ export default function PortalLogin() {
 
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-            Authentication failed. Please try again.
+            {error === 'nova_auth_required'
+              ? 'Please log in to NOVA first, then return here.'
+              : 'Authentication failed. Please try again.'}
           </div>
         )}
 
-        <a
-          href="/api/portal/auth/login"
-          className="inline-flex items-center justify-center w-full px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-        >
-          Sign in with Nurtur
-        </a>
+        {authMode === null ? (
+          <div className="py-3 text-gray-400 text-sm">Loading...</div>
+        ) : authMode === 'internal' ? (
+          <button
+            onClick={onInternalAuth}
+            className="inline-flex items-center justify-center w-full px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          >
+            Access Portal
+          </button>
+        ) : (
+          <a
+            href="/api/portal/auth/login"
+            className="inline-flex items-center justify-center w-full px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          >
+            Sign in with Nurtur
+          </a>
+        )}
 
         <p className="mt-6 text-xs text-gray-500">
           By signing in, you agree to our terms of service and privacy policy.

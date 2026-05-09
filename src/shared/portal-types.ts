@@ -13,7 +13,7 @@ export interface PortalOrganisation {
 
 // ── Portal User ──
 
-export type PortalUserRole = 'requester' | 'org_admin';
+export type PortalUserRole = 'requester' | 'org_admin' | 'admin';
 
 export interface PortalUser {
   id: number;

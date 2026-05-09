@@ -846,8 +846,15 @@ async function main() {
     return user?.role;
   });
   app.use('/api', (req, res, next) => {
-    // Portal routes use their own auth — skip NOVA JWT for /api/portal/* (except /api/portal/admin)
     if (req.path.startsWith('/portal') && !req.path.startsWith('/portal/admin')) {
+      // Always public: auth endpoints + KB (read-only)
+      if (req.path.startsWith('/portal/auth') || req.path.startsWith('/portal/kb')) return next();
+      const authMode = settingsQueries.get('portal_auth_mode') || 'internal';
+      if (authMode === 'internal') {
+        // Internal mode: portal routes need NOVA JWT — let them through NOVA auth
+        return novaAuthHandler(req, res, next);
+      }
+      // OIDC mode: portal routes use their own auth — skip NOVA JWT
       return next();
     }
     novaAuthHandler(req, res, next);

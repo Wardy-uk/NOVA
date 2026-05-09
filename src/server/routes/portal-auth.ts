@@ -1,11 +1,23 @@
 import { Router, type Request, type Response } from 'express';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import { generateAuthUrl, handleCallback, generateLogoutUrl } from '../services/portal-auth.js';
+import { isInternalMode } from '../middleware/portal-auth-middleware.js';
 
 export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
   const router = Router();
 
+  router.get('/mode', (_req: Request, res: Response) => {
+    const mode = (settings.get('portal_auth_mode') || 'internal') === 'internal' ? 'internal' : 'oidc';
+    res.json({ ok: true, data: { mode } });
+  });
+
   router.get('/login', (req: Request, res: Response) => {
+    if (isInternalMode(settings)) {
+      // Internal mode: redirect to portal — NOVA auth handles the rest
+      res.redirect('/portal');
+      return;
+    }
+
     try {
       const { url } = generateAuthUrl(settings);
       res.redirect(url);
@@ -37,11 +49,14 @@ export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
   });
 
   router.post('/refresh', async (req: Request, res: Response) => {
-    // For now, refresh is not implemented — client should re-authenticate
     res.status(501).json({ ok: false, error: 'Token refresh not yet implemented' });
   });
 
   router.post('/logout', (req: Request, res: Response) => {
+    if (isInternalMode(settings)) {
+      res.json({ ok: true, data: { logoutUrl: '/' } });
+      return;
+    }
     const logoutUrl = generateLogoutUrl(settings);
     res.json({ ok: true, data: { logoutUrl } });
   });

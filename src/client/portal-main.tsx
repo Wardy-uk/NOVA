@@ -15,9 +15,17 @@ const PortalChat = lazy(() => import('./components/portal/PortalChat.js'));
 type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 'chat';
 
 const PORTAL_TOKEN_KEY = 'portal_token';
+const NOVA_TOKEN_KEY = 'token';
+
+function getNovaToken(): string | null {
+  return localStorage.getItem(NOVA_TOKEN_KEY);
+}
 
 function portalFetch(path: string, opts: RequestInit = {}): Promise<Response> {
-  const token = localStorage.getItem(PORTAL_TOKEN_KEY);
+  // In internal mode, use NOVA JWT; in OIDC mode, use portal token
+  const portalToken = localStorage.getItem(PORTAL_TOKEN_KEY);
+  const novaToken = getNovaToken();
+  const token = portalToken || novaToken;
   return fetch(path, {
     ...opts,
     headers: {
@@ -45,29 +53,76 @@ function PortalApp() {
   const [user, setUser] = useState<PortalAuthPayload | null>(null);
   const [view, setView] = useState<PortalView>('home');
   const [selectedTicketKey, setSelectedTicketKey] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<'oidc' | 'internal' | null>(null);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // Check for token in hash (from OIDC callback)
-    const hash = window.location.hash;
-    if (hash.startsWith('#token=')) {
-      const token = hash.slice(7);
-      localStorage.setItem(PORTAL_TOKEN_KEY, token);
-      window.location.hash = '';
-      const payload = parseJwt(token);
-      if (payload) setUser(payload);
-      return;
-    }
+    (async () => {
+      // Fetch auth mode
+      try {
+        const modeRes = await fetch('/api/portal/auth/mode');
+        const modeData = await modeRes.json();
+        if (modeData.ok) setAuthMode(modeData.data.mode);
+      } catch {
+        setAuthMode('oidc');
+      }
 
-    // Check stored token
-    const stored = localStorage.getItem(PORTAL_TOKEN_KEY);
-    if (stored) {
-      const payload = parseJwt(stored);
-      if (payload) {
-        setUser(payload);
-      } else {
+      // Check for OIDC token in hash (from OIDC callback)
+      const hash = window.location.hash;
+      if (hash.startsWith('#token=')) {
+        const token = hash.slice(7);
+        localStorage.setItem(PORTAL_TOKEN_KEY, token);
+        window.location.hash = '';
+        const payload = parseJwt(token);
+        if (payload) { setUser(payload); setChecking(false); return; }
+      }
+
+      // Check stored portal token (OIDC mode)
+      const stored = localStorage.getItem(PORTAL_TOKEN_KEY);
+      if (stored) {
+        const payload = parseJwt(stored);
+        if (payload) { setUser(payload); setChecking(false); return; }
         localStorage.removeItem(PORTAL_TOKEN_KEY);
       }
+
+      // Internal mode: try NOVA JWT — probe a portal endpoint to check access
+      const novaToken = getNovaToken();
+      if (novaToken) {
+        try {
+          const res = await fetch('/api/portal/kb/categories', {
+            headers: { Authorization: `Bearer ${novaToken}` },
+          });
+          if (res.ok) {
+            // NOVA JWT works for portal — extract user info from it
+            const jwt = parseNovaJwt(novaToken);
+            if (jwt) {
+              setUser({
+                userId: jwt.id,
+                email: jwt.username + '@nurtur.tech',
+                orgId: 0,
+                orgName: 'Nurtur Limited',
+                role: 'admin',
+              });
+              setChecking(false);
+              return;
+            }
+          }
+        } catch { /* fall through to login */ }
+      }
+
+      setChecking(false);
+    })();
+  }, []);
+
+  const handleInternalAuth = useCallback(() => {
+    const novaToken = getNovaToken();
+    if (!novaToken) {
+      // Redirect to NOVA login, then back to portal
+      window.location.href = '/?redirect=/portal';
+      return;
     }
+    // Try using the NOVA token — reload to trigger the auth check
+    window.location.reload();
   }, []);
 
   const handleLogout = useCallback(() => {
@@ -81,8 +136,16 @@ function PortalApp() {
     setView('ticket-detail');
   }, []);
 
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+        <div className="animate-pulse text-gray-400">Loading...</div>
+      </div>
+    );
+  }
+
   if (!user) {
-    return <PortalLogin />;
+    return <PortalLogin onInternalAuth={handleInternalAuth} />;
   }
 
   const fallback = (
@@ -108,6 +171,16 @@ function PortalApp() {
       </Suspense>
     </PortalLayout>
   );
+}
+
+function parseNovaJwt(token: string): { id: number; username: string; role: string } | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    return JSON.parse(atob(parts[1]));
+  } catch {
+    return null;
+  }
 }
 
 const root = document.getElementById('portal-root');
