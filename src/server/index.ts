@@ -148,6 +148,21 @@ import { SuggestionEngine } from './services/suggestion-engine.js';
 
 import { DailyBriefingService } from './services/daily-briefing.js';
 import { EmailService } from './services/email.js';
+import { KbHealthService } from './services/kb-health.js';
+import { KbGapClosureService } from './services/kb-gap-closure.js';
+import { TrainingSignalGenerator } from './services/training-signal-generator.js';
+import { Briefing121Service } from './services/briefing-121.js';
+import { OpsPackService } from './services/ops-pack.js';
+import { SelfDirectedLearning } from './services/self-directed-learning.js';
+import { CapacityPlanner } from './services/capacity-planner.js';
+import { CrossFunctionalIntelligence } from './services/cross-functional-intelligence.js';
+import { createKbHealthRoutes } from './routes/kb-health.js';
+import { createTrainingSignalRoutes } from './routes/training-signals.js';
+import { createBriefing121Routes } from './routes/briefing-121.js';
+import { createOpsPackRoutes } from './routes/ops-pack.js';
+import { createCapacityRoutes } from './routes/capacity.js';
+import { createCrossFunctionalRoutes } from './routes/cross-functional.js';
+import { createLearningRoutes } from './routes/learning.js';
 import { ProductCancellationService } from './services/product-cancellation.js';
 import { AbuseReportProcessor } from './services/abuse-report-processor.js';
 import { CallReviewService } from './services/call-reviews.js';
@@ -1146,6 +1161,63 @@ async function main() {
         console.warn('[sla-manager] proactive check failed:', e instanceof Error ? e.message : e);
       }
     }, 5 * 60 * 1000);
+
+    // P5 Theme 2: Knowledge Autonomy
+    const kbGapClosure = new KbGapClosureService();
+    const kbHealth = new KbHealthService(llmService, settingsQueries, kbArticleService);
+    app.use('/api/kb-health', createKbHealthRoutes(kbHealth, kbGapClosure));
+
+    // P5 Theme 3: Operational Colleague
+    const trainingSignals = new TrainingSignalGenerator(llmService, settingsQueries);
+    const briefing121 = new Briefing121Service(llmService, settingsQueries);
+    const opsPack = new OpsPackService(llmService, settingsQueries);
+    const selfDirectedLearning = new SelfDirectedLearning(settingsQueries);
+    const capacityPlanner = new CapacityPlanner(settingsQueries);
+    const crossFunctional = new CrossFunctionalIntelligence(llmService, settingsQueries);
+
+    app.use('/api/training-signals', createTrainingSignalRoutes(trainingSignals));
+    app.use('/api/briefing/121', createBriefing121Routes(briefing121));
+    app.use('/api/ops-pack', createOpsPackRoutes(opsPack));
+    app.use('/api/learning', createLearningRoutes(selfDirectedLearning));
+    app.use('/api/capacity', createCapacityRoutes(capacityPlanner));
+    app.use('/api/cross-functional', createCrossFunctionalRoutes(crossFunctional));
+
+    // P5 background jobs — registered with JobRegistry
+    jobRegistry.register('kb-staleness-scan', 'KB Staleness & Drift Scan (weekly Sun)', async () => {
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
+      if (now.getDay() === 0 && ukHour >= 22 && ukHour < 23) {
+        await kbHealth.runStalenessCheck();
+        console.log('[kb-health] Staleness scan complete');
+      }
+    }, 60 * 60 * 1000);
+
+    jobRegistry.register('training-signals-weekly', 'Weekly Training Signal Generation (Mon 07:00)', async () => {
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
+      if (now.getDay() === 1 && ukHour === 7) {
+        const count = await trainingSignals.generateWeeklySignals();
+        console.log(`[training-signals] Generated ${count} signals`);
+      }
+    }, 60 * 60 * 1000);
+
+    jobRegistry.register('capacity-forecast-monday', 'Capacity Forecast (Mon 06:00)', async () => {
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
+      if (now.getDay() === 1 && ukHour === 6) {
+        await capacityPlanner.generateForecast();
+        console.log('[capacity] Forecast generated');
+      }
+    }, 60 * 60 * 1000);
+
+    jobRegistry.register('cross-functional-monthly', 'Cross-Functional Intelligence (1st of month)', async () => {
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
+      if (now.getDate() === 1 && ukHour === 6) {
+        await crossFunctional.generateMonthlyReport();
+        console.log('[cross-functional] Monthly report generated');
+      }
+    }, 60 * 60 * 1000);
 
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,

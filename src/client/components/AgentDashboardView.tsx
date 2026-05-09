@@ -310,7 +310,7 @@ interface ApprovalHealth {
 
 export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { userRole?: string; onNavigateToWorkspace?: (filter: { aiAction?: string }) => void }) {
   const isSuperAdmin = checkSuperAdmin(userRole);
-  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'kb-index' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement' | 'pipelines' | 'assignment' | 'predictions' | 'incidents' | 'sla-management'>('overview');
+  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'kb-index' | 'kb-health' | 'training-signals' | 'learning' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement' | 'pipelines' | 'assignment' | 'predictions' | 'incidents' | 'sla-management'>('overview');
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
@@ -481,6 +481,9 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
           { key: 'flagged', label: `Flagged${(flaggedSummary?.count ?? 0) > 0 ? ` (${flaggedSummary!.count})` : ''}` },
           { key: 'kb-gaps', label: 'KB Gaps' },
           { key: 'kb-index', label: 'KB Index' },
+          { key: 'kb-health' as const, label: 'KB Health' },
+          { key: 'training-signals' as const, label: 'Training' },
+          { key: 'learning' as const, label: 'Learning' },
           { key: 'ai-improvement', label: 'AI Learning' },
           { key: 'quick-actions', label: 'Quick Actions' },
           { key: 'providers', label: 'Providers' },
@@ -521,6 +524,9 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       {tab === 'predictions' && <PredictionsTab />}
       {tab === 'incidents' && <IncidentsTab />}
       {tab === 'sla-management' && <SlaManagementTab />}
+      {tab === 'kb-health' && <KbHealthTab />}
+      {tab === 'training-signals' && <TrainingSignalsTab />}
+      {tab === 'learning' && <LearningTab />}
       {tab === 'pipelines' && <PipelinesTab />}
       {tab === 'costs' && <CostsTab data={costData} onPeriodChange={(days) => api(`/costs?days=${days}`).then(r => { if (r.ok) setCostData(r.data); })} />}
 
@@ -4524,6 +4530,162 @@ function SlaManagementTab() {
           <p className="text-neutral-500 text-sm">SLA management data unavailable</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function KbHealthTab() {
+  const [stats, setStats] = useState<{ total: number; current: number; stale: number; unused: number; drifted: number; gap_closure_rate: number } | null>(null);
+  const [articles, setArticles] = useState<Array<{ id: number; article_id: string; article_title: string | null; status: string; usage_count_30d: number | null; drift_score: number | null }>>([]);
+  const [scanning, setScanning] = useState(false);
+
+  const load = async () => {
+    const [s, a] = await Promise.all([
+      api('/kb-health/stats'), api('/kb-health/articles'),
+    ]);
+    if (s.ok) setStats(s.data);
+    if (a.ok) setArticles(a.data ?? []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const scan = async () => { setScanning(true); await api('/kb-health/scan', { method: 'POST' }); await load(); setScanning(false); };
+  const statusColor = (s: string) => s === 'current' ? 'text-green-400' : s === 'stale' ? 'text-amber-400' : s === 'drifted' ? 'text-red-400' : 'text-neutral-500';
+
+  return (
+    <div className="space-y-4">
+      {stats && (
+        <div className="grid grid-cols-5 gap-3">
+          {[
+            { l: 'Total', v: stats.total, c: 'text-neutral-200' },
+            { l: 'Current', v: stats.current, c: 'text-green-400' },
+            { l: 'Stale', v: stats.stale, c: 'text-amber-400' },
+            { l: 'Unused', v: stats.unused, c: 'text-neutral-500' },
+            { l: 'Drifted', v: stats.drifted, c: 'text-red-400' },
+          ].map(s => (
+            <div key={s.l} className="bg-[#2f353d] rounded-lg p-3 text-center">
+              <div className={`text-xl font-bold ${s.c}`}>{s.v}</div>
+              <div className="text-xs text-neutral-400">{s.l}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-neutral-400">Gap closure rate: <span className="text-[#5ec1ca]">{stats ? (stats.gap_closure_rate * 100).toFixed(0) + '%' : '-'}</span></span>
+        <button onClick={scan} disabled={scanning} className="px-3 py-1 bg-[#5ec1ca]/20 text-[#5ec1ca] text-xs rounded hover:bg-[#5ec1ca]/30 disabled:opacity-50">
+          {scanning ? 'Scanning...' : 'Run Scan'}
+        </button>
+      </div>
+      <table className="w-full text-xs">
+        <thead><tr className="border-b border-[#3a424d]">
+          <th className="text-left py-2 px-2 text-neutral-400">Article</th>
+          <th className="text-center py-2 px-2 text-neutral-400">Status</th>
+          <th className="text-right py-2 px-2 text-neutral-400">30d Uses</th>
+          <th className="text-right py-2 px-2 text-neutral-400">Drift</th>
+        </tr></thead>
+        <tbody>
+          {articles.map(a => (
+            <tr key={a.id} className="border-b border-[#3a424d]/50">
+              <td className="py-2 px-2 text-neutral-200">{a.article_title ?? a.article_id}</td>
+              <td className={`py-2 px-2 text-center ${statusColor(a.status)}`}>{a.status}</td>
+              <td className="py-2 px-2 text-right text-neutral-300">{a.usage_count_30d ?? 0}</td>
+              <td className="py-2 px-2 text-right text-neutral-300">{a.drift_score != null ? (a.drift_score * 100).toFixed(0) + '%' : '-'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TrainingSignalsTab() {
+  const [signals, setSignals] = useState<Array<{ id: number; agent_name: string | null; signal_type: string; request_type: string | null; metric_value: number | null; team_average: number | null; recommendation: string | null; actioned: boolean; generated_at: string }>>([]);
+  const [generating, setGenerating] = useState(false);
+
+  const load = async () => { const r = await api('/training-signals?actioned=false'); if (r.ok) setSignals(r.data ?? []); };
+  useEffect(() => { load(); }, []);
+
+  const generate = async () => { setGenerating(true); await api('/training-signals/generate', { method: 'POST' }); await load(); setGenerating(false); };
+  const markActioned = async (id: number) => { await api(`/training-signals/${id}/action`, { method: 'POST' }); setSignals(prev => prev.filter(s => s.id !== id)); };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-neutral-400">{signals.length} unactioned signals</span>
+        <button onClick={generate} disabled={generating} className="px-3 py-1 bg-[#5ec1ca]/20 text-[#5ec1ca] text-xs rounded hover:bg-[#5ec1ca]/30 disabled:opacity-50">
+          {generating ? 'Generating...' : 'Generate Signals'}
+        </button>
+      </div>
+      {signals.map(s => (
+        <div key={s.id} className="bg-[#2f353d] rounded-lg p-4">
+          <div className="flex items-start justify-between mb-1">
+            <div>
+              <span className="text-sm text-neutral-200">{s.agent_name}</span>
+              <span className="ml-2 px-2 py-0.5 rounded text-xs bg-amber-900/20 text-amber-400">{s.signal_type.replace(/_/g, ' ')}</span>
+            </div>
+            <button onClick={() => markActioned(s.id)} className="px-2 py-0.5 bg-green-900/30 text-green-400 text-xs rounded">Actioned</button>
+          </div>
+          {s.request_type && <div className="text-xs text-neutral-400">{s.request_type} — Agent: {s.metric_value?.toFixed(2)} vs Team: {s.team_average?.toFixed(2)}</div>}
+          {s.recommendation && <p className="text-xs text-neutral-300 mt-1">{s.recommendation}</p>}
+        </div>
+      ))}
+      {signals.length === 0 && <div className="text-center text-neutral-500 text-sm py-8">No training signals. Run generation to analyse agent performance.</div>}
+    </div>
+  );
+}
+
+function LearningTab() {
+  const [velocity, setVelocity] = useState<{ novel_encountered: number; learning_acquired: number; avg_days_to_learn: number | null; autonomy_suggestions: number } | null>(null);
+  const [tickets, setTickets] = useState<Array<{ ticket_id: string; created_at: string; learning_acquired_at: string | null; action: string; outcome: string }>>([]);
+
+  const load = async () => {
+    const [v, t] = await Promise.all([api('/learning/velocity'), api('/learning/novel-tickets')]);
+    if (v.ok) setVelocity(v.data);
+    if (t.ok) setTickets(t.data ?? []);
+  };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div className="space-y-4">
+      {velocity && (
+        <div className="grid grid-cols-4 gap-3">
+          <div className="bg-[#2f353d] rounded-lg p-3 text-center">
+            <div className="text-xl font-bold text-neutral-200">{velocity.novel_encountered}</div>
+            <div className="text-xs text-neutral-400">Novel Types</div>
+          </div>
+          <div className="bg-[#2f353d] rounded-lg p-3 text-center">
+            <div className="text-xl font-bold text-green-400">{velocity.learning_acquired}</div>
+            <div className="text-xs text-neutral-400">Learned</div>
+          </div>
+          <div className="bg-[#2f353d] rounded-lg p-3 text-center">
+            <div className="text-xl font-bold text-[#5ec1ca]">{velocity.avg_days_to_learn?.toFixed(1) ?? '-'}</div>
+            <div className="text-xs text-neutral-400">Avg Days to Learn</div>
+          </div>
+          <div className="bg-[#2f353d] rounded-lg p-3 text-center">
+            <div className="text-xl font-bold text-amber-400">{velocity.autonomy_suggestions}</div>
+            <div className="text-xs text-neutral-400">Autonomy Suggestions</div>
+          </div>
+        </div>
+      )}
+      <table className="w-full text-xs">
+        <thead><tr className="border-b border-[#3a424d]">
+          <th className="text-left py-2 px-2 text-neutral-400">Ticket</th>
+          <th className="text-left py-2 px-2 text-neutral-400">Action</th>
+          <th className="text-left py-2 px-2 text-neutral-400">Outcome</th>
+          <th className="text-center py-2 px-2 text-neutral-400">Learning</th>
+          <th className="text-right py-2 px-2 text-neutral-400">Date</th>
+        </tr></thead>
+        <tbody>
+          {tickets.map(t => (
+            <tr key={t.ticket_id + t.created_at} className="border-b border-[#3a424d]/50">
+              <td className="py-2 px-2 text-neutral-200">{t.ticket_id}</td>
+              <td className="py-2 px-2 text-neutral-300">{t.action}</td>
+              <td className="py-2 px-2 text-neutral-300">{t.outcome}</td>
+              <td className="py-2 px-2 text-center">{t.learning_acquired_at ? <span className="text-green-400">Acquired</span> : <span className="text-amber-400">Pending</span>}</td>
+              <td className="py-2 px-2 text-right text-neutral-500">{new Date(t.created_at).toLocaleDateString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

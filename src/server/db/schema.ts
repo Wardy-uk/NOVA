@@ -1506,6 +1506,96 @@ async function runMigrations(): Promise<void> {
        checked_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
      );`,
 
+    // ── P5 Theme 2+3: Training signals, briefings, capacity, cross-functional ──
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_training_signals') AND type = 'U')
+     CREATE TABLE agent_training_signals (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       agent_id VARCHAR(100) NOT NULL,
+       agent_name NVARCHAR(100) NULL,
+       signal_type VARCHAR(30) NOT NULL,
+       request_type NVARCHAR(100) NULL,
+       component NVARCHAR(100) NULL,
+       metric_value FLOAT NULL,
+       team_average FLOAT NULL,
+       recommendation NVARCHAR(1000) NULL,
+       example_tickets NVARCHAR(500) NULL,
+       kb_article_link NVARCHAR(500) NULL,
+       actioned BIT NOT NULL DEFAULT 0,
+       generated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_training_signals_agent')
+     CREATE INDEX IX_training_signals_agent ON agent_training_signals(agent_id, generated_at DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_121_briefings') AND type = 'U')
+     CREATE TABLE agent_121_briefings (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       manager_user_id INT NOT NULL,
+       agent_id VARCHAR(100) NOT NULL,
+       agent_name NVARCHAR(100) NULL,
+       period_start DATE NULL,
+       period_end DATE NULL,
+       content_json NVARCHAR(MAX) NULL,
+       generated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_121_briefings_agent')
+     CREATE INDEX IX_121_briefings_agent ON agent_121_briefings(agent_id, generated_at DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ops_meeting_packs') AND type = 'U')
+     CREATE TABLE ops_meeting_packs (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       generated_by INT NULL,
+       period_start DATE NULL,
+       period_end DATE NULL,
+       content_json NVARCHAR(MAX) NULL,
+       generated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_capacity_forecasts') AND type = 'U')
+     CREATE TABLE agent_capacity_forecasts (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       forecast_date DATE NOT NULL,
+       day_of_week INT NULL,
+       predicted_volume INT NULL,
+       confidence_low INT NULL,
+       confidence_high INT NULL,
+       actual_volume INT NULL,
+       team_capacity INT NULL,
+       surplus_deficit INT NULL,
+       generated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_capacity_forecast_date')
+     CREATE INDEX IX_capacity_forecast_date ON agent_capacity_forecasts(forecast_date);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_cross_functional_signals') AND type = 'U')
+     CREATE TABLE agent_cross_functional_signals (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       signal_type VARCHAR(30) NOT NULL,
+       component NVARCHAR(100) NULL,
+       title NVARCHAR(200) NULL,
+       detail NVARCHAR(MAX) NULL,
+       ticket_count INT NULL,
+       customer_count INT NULL,
+       trend VARCHAR(20) NULL,
+       recommendation NVARCHAR(500) NULL,
+       period_start DATE NULL,
+       period_end DATE NULL,
+       generated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_cross_func_type')
+     CREATE INDEX IX_cross_func_type ON agent_cross_functional_signals(signal_type, generated_at DESC);`,
+
+    // kb_gap_log — add confluence_page_id for loop closure tracking
+    `IF COL_LENGTH('kb_gap_log', 'confluence_page_id') IS NULL
+     ALTER TABLE kb_gap_log ADD confluence_page_id VARCHAR(100) NULL;`,
+
+    `IF COL_LENGTH('kb_gap_log', 'article_title') IS NULL
+     ALTER TABLE kb_gap_log ADD article_title NVARCHAR(500) NULL;`,
+
+    // kb_article_health — add article_url for linking
+    `IF COL_LENGTH('kb_article_health', 'article_url') IS NULL
+     ALTER TABLE kb_article_health ADD article_url NVARCHAR(500) NULL;`,
+
     // ── P6: Customer Portal ──
 
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_organisations') AND type = 'U')

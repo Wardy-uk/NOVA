@@ -79,6 +79,12 @@ const ManagerDashboardView = lazy(() => import('./components/ManagerDashboardVie
 const AgentRosterView = lazy(() => import('./components/AgentRosterView.js').then(m => ({ default: m.AgentRosterView })));
 const BriefingView = lazy(() => import('./components/BriefingView.js').then(m => ({ default: m.BriefingView })));
 const BacklogKanbanView = lazy(() => import('./components/BacklogKanbanView.js').then(m => ({ default: m.BacklogKanbanView })));
+const KbHealthView = lazy(() => import('./components/KbHealthView.js').then(m => ({ default: m.KbHealthView })));
+const TrainingSignalsView = lazy(() => import('./components/TrainingSignalsView.js').then(m => ({ default: m.TrainingSignalsView })));
+const CapacityView = lazy(() => import('./components/CapacityView.js').then(m => ({ default: m.CapacityView })));
+const IntelligenceView = lazy(() => import('./components/IntelligenceView.js').then(m => ({ default: m.IntelligenceView })));
+const OpsPackView = lazy(() => import('./components/OpsPackView.js').then(m => ({ default: m.OpsPackView })));
+const Briefing121View = lazy(() => import('./components/Briefing121View.js').then(m => ({ default: m.Briefing121View })));
 import { BriefingPopup } from './components/BriefingPopup.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
@@ -105,6 +111,7 @@ type View = 'daily' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'dev-review' | 'dev-review-dashboard'
   | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-tickets' | 'calyx-kb' | 'calyx-improvements' | 'calyx-settings' | 'calyx-problems' | 'calyx-changes' | 'calyx-major-incidents' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
   | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
+  | 'agent-kb-health' | 'agent-training' | 'agent-capacity' | 'agent-intelligence' | 'agent-ops-pack' | 'agent-121'
   | 'backlog-board'
   | 'settings' | 'admin-panel' | 'portal-admin' | 'my-feedback'
   | 'help' | 'debug';
@@ -286,7 +293,12 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'agent-pipelines', label: 'Pipelines' },
       { view: 'agent-uat-compare', label: 'UAT Compare' },
       { view: 'agent-kb-gaps', label: 'KB Gaps' },
+      { view: 'agent-kb-health', label: 'KB Health' },
+      { view: 'agent-training', label: 'Training' },
       { view: 'agent-learnings', label: 'Learnings' },
+      { view: 'agent-capacity', label: 'Capacity' },
+      { view: 'agent-intelligence', label: 'Intelligence' },
+      { view: 'agent-ops-pack', label: 'Ops Pack' },
     ],
   },
   backlog: {
@@ -1329,6 +1341,21 @@ export function App() {
           )}
           {view === 'agent-learnings' && canSeeArea('ai-agent') && (
             <AgentLearningsView token={auth.token!} />
+          )}
+          {view === 'agent-kb-health' && canSeeArea('ai-agent') && (
+            <KbHealthView />
+          )}
+          {view === 'agent-training' && canSeeArea('ai-agent') && (
+            <TrainingSignalsView />
+          )}
+          {view === 'agent-capacity' && canSeeArea('ai-agent') && (
+            <CapacityView />
+          )}
+          {view === 'agent-intelligence' && canSeeArea('ai-agent') && (
+            <IntelligenceView />
+          )}
+          {view === 'agent-ops-pack' && canSeeArea('ai-agent') && (
+            <OpsPackView />
           )}
 
           {/* Administration */}
