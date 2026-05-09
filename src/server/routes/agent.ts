@@ -599,7 +599,10 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
            COUNT(*) as frequency,
            MIN(created_at) as first_seen,
            MAX(created_at) as last_seen,
-           STRING_AGG(ticket_id, ', ') as ticket_ids
+           STRING_AGG(ticket_id, ', ') as ticket_ids,
+           MIN(id) as id,
+           MAX(assigned_to) as assigned_to,
+           MAX(jira_ticket_key) as jira_ticket_key
          FROM kb_gap_log
          WHERE status = ?
          GROUP BY category, suggested_title
@@ -662,6 +665,77 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to dismiss KB gaps' });
+    }
+  });
+
+  router.patch('/kb-gaps/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const { assigned_to } = req.body;
+    try {
+      await execute(
+        `UPDATE kb_gap_log SET assigned_to = ? WHERE id = ? OR (category = (SELECT category FROM kb_gap_log WHERE id = ?) AND ISNULL(suggested_title, '') = ISNULL((SELECT suggested_title FROM kb_gap_log WHERE id = ?), ''))`,
+        [assigned_to ?? null, id, id, id],
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to update KB gap' });
+    }
+  });
+
+  router.post('/kb-gaps/:id/create-ticket', requireRole('admin'), async (req, res) => {
+    const id = parseInt(req.params.id as string, 10);
+    try {
+      const gap = await queryOne<{ id: number; category: string; suggested_title: string; reason: string; assigned_to: string; jira_ticket_key: string; ticket_ids: string }>(
+        `SELECT TOP 1 id, category, suggested_title, reason, assigned_to, jira_ticket_key,
+                (SELECT STRING_AGG(ticket_id, ', ') FROM kb_gap_log g2 WHERE g2.category = g1.category AND ISNULL(g2.suggested_title, '') = ISNULL(g1.suggested_title, '')) as ticket_ids
+         FROM kb_gap_log g1 WHERE id = ?`,
+        [id],
+      );
+      if (!gap) { res.status(404).json({ ok: false, error: 'KB gap not found' }); return; }
+      if (gap.jira_ticket_key) { res.json({ ok: true, data: { ticket_key: gap.jira_ticket_key, already_exists: true } }); return; }
+
+      const jiraClient = agentLoop.getJiraClient();
+      const project = deps?.settingsQueries?.get('kb_jira_project') || deps?.settingsQueries?.get('agent_jira_project')?.split(',')[0]?.trim() || 'NT';
+      const issueType = deps?.settingsQueries?.get('kb_jira_issue_type') || 'Task';
+
+      const description = [
+        `*AI-identified knowledge base gap*\n`,
+        gap.reason ? `*Why:* ${gap.reason}\n` : '',
+        gap.ticket_ids ? `*Referenced tickets:* ${gap.ticket_ids}\n` : '',
+        gap.category ? `*Category:* ${gap.category}` : '',
+      ].filter(Boolean).join('\n');
+
+      const fields: Record<string, unknown> = {
+        project: { key: project },
+        issuetype: { name: issueType },
+        summary: `Create KB Article: ${gap.suggested_title || gap.category || 'Untitled'}`.slice(0, 255),
+        description: {
+          type: 'doc', version: 1,
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: description }] }],
+        },
+        labels: ['kb-article', 'ai-identified'],
+      };
+
+      if (gap.assigned_to) {
+        const roster = await queryOne<{ jira_account_id: string }>(
+          `SELECT jira_account_id FROM agent_roster WHERE display_name = ? AND active = 1`,
+          [gap.assigned_to],
+        );
+        if (roster?.jira_account_id) {
+          fields.assignee = { accountId: roster.jira_account_id };
+        }
+      }
+
+      const created = await jiraClient.createIssue({ fields });
+
+      await execute(
+        `UPDATE kb_gap_log SET jira_ticket_key = ? WHERE id = ? OR (category = (SELECT category FROM kb_gap_log WHERE id = ?) AND ISNULL(suggested_title, '') = ISNULL((SELECT suggested_title FROM kb_gap_log WHERE id = ?), ''))`,
+        [created.key, id, id, id],
+      );
+
+      res.json({ ok: true, data: { ticket_key: created.key, ticket_url: `https://nurtur.atlassian.net/browse/${created.key}` } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create Jira ticket' });
     }
   });
 
@@ -1533,10 +1607,10 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
   // ── Manager Dashboard endpoints ──
 
-  function periodToDateFilter(period: string): string {
-    if (period === 'week') return `AND created_at >= DATEADD(DAY, -7, SYSUTCDATETIME())`;
-    if (period === 'month') return `AND created_at >= DATEADD(DAY, -30, SYSUTCDATETIME())`;
-    return `AND created_at >= CAST(SYSUTCDATETIME() AS DATE)`;
+  function periodToDateFilter(period: string, alias = 'e'): string {
+    if (period === 'week') return `AND ${alias}.created_at >= DATEADD(DAY, -7, SYSUTCDATETIME())`;
+    if (period === 'month') return `AND ${alias}.created_at >= DATEADD(DAY, -30, SYSUTCDATETIME())`;
+    return `AND ${alias}.created_at >= CAST(SYSUTCDATETIME() AS DATE)`;
   }
 
   function workingHoursInPeriod(period: string): number {
@@ -1649,12 +1723,12 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
       // Hourly activity heatmap
       const hourlyRows = await query<{ hour: number; day: string; eventCount: number }>(
-        `SELECT DATEPART(HOUR, created_at) AS hour,
-                CONVERT(VARCHAR(10), created_at, 23) AS day,
+        `SELECT DATEPART(HOUR, e.created_at) AS hour,
+                CONVERT(VARCHAR(10), e.created_at, 23) AS day,
                 COUNT(*) AS eventCount
-         FROM agent_events
-         WHERE event_type IN ('action_taken', 'action_deferred', 'hygiene_pass_completed') ${dateFilter}
-         GROUP BY DATEPART(HOUR, created_at), CONVERT(VARCHAR(10), created_at, 23)
+         FROM agent_events e
+         WHERE e.event_type IN ('action_taken', 'action_deferred', 'hygiene_pass_completed') ${dateFilter}
+         GROUP BY DATEPART(HOUR, e.created_at), CONVERT(VARCHAR(10), e.created_at, 23)
          ORDER BY day, hour`,
         [],
       );
@@ -1768,10 +1842,10 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
     try {
       const recentEvents = (await query<AgentEvent>(
-        `SELECT TOP(50) id, event_type, ticket_key, agent_id, payload, created_at
-         FROM agent_events
-         WHERE agent_id = ? ${dateFilter}
-         ORDER BY created_at DESC`,
+        `SELECT TOP(50) e.id, e.event_type, e.ticket_key, e.agent_id, e.payload, e.created_at
+         FROM agent_events e
+         WHERE e.agent_id = ? ${dateFilter}
+         ORDER BY e.created_at DESC`,
         [agentId],
       )).map(r => {
         if (typeof r.payload === 'string') try { r.payload = JSON.parse(r.payload as any); } catch { r.payload = {}; }
@@ -1840,7 +1914,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       )).map(r => ({ ticketKey: r.ticket_key, daysInState: r.days_in_state, createdAt: r.created_at }));
 
       const rankOverrides = (await query<{ cnt: number }>(
-        `SELECT COUNT(*) AS cnt FROM agent_events WHERE agent_id = ? AND event_type = 'rank_override' ${dateFilter}`,
+        `SELECT COUNT(*) AS cnt FROM agent_events e WHERE e.agent_id = ? AND e.event_type = 'rank_override' ${dateFilter}`,
         [agentId],
       ))[0]?.cnt ?? 0;
 

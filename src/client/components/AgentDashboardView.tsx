@@ -119,12 +119,15 @@ interface AgentAlert {
 }
 
 interface KbGap {
+  id: number;
   category: string;
   suggested_title: string | null;
   frequency: number;
   first_seen: string;
   last_seen: string;
   ticket_ids: string;
+  assigned_to: string | null;
+  jira_ticket_key: string | null;
 }
 
 interface RiskFactor {
@@ -2219,9 +2222,12 @@ function KbGapsTab({ gaps, onRefresh }: { gaps: KbGap[]; onRefresh: () => void }
   const [publishing, setPublishing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [rosterNames, setRosterNames] = useState<string[]>([]);
+  const [creatingTicket, setCreatingTicket] = useState<number | null>(null);
 
   useEffect(() => {
     api('/kb-gaps/counts').then(r => { if (r.ok) setCounts(r.data); });
+    api('/roster').then(r => { if (r.ok && Array.isArray(r.data)) setRosterNames(r.data.filter((a: any) => a.active).map((a: any) => a.display_name)); });
   }, [gaps]);
 
   const loadDrafts = async () => {
@@ -2255,6 +2261,21 @@ function KbGapsTab({ gaps, onRefresh }: { gaps: KbGap[]; onRefresh: () => void }
       setDraftError(e instanceof Error ? e.message : 'Generation failed');
     } finally {
       setGenerating(null);
+    }
+  };
+
+  const assignGap = async (id: number, assignedTo: string) => {
+    await apiJson(`/kb-gaps/${id}`, 'PATCH', { assigned_to: assignedTo || null });
+    onRefresh();
+  };
+
+  const createGapTicket = async (gap: KbGap) => {
+    setCreatingTicket(gap.id);
+    try {
+      const r = await apiJson(`/kb-gaps/${gap.id}/create-ticket`, 'POST', {});
+      if (r.ok) onRefresh();
+    } finally {
+      setCreatingTicket(null);
     }
   };
 
@@ -2438,6 +2459,8 @@ function KbGapsTab({ gaps, onRefresh }: { gaps: KbGap[]; onRefresh: () => void }
                 <th className="px-4 py-2 font-medium w-24">First Seen</th>
                 <th className="px-4 py-2 font-medium w-24">Last Seen</th>
                 <th className="px-4 py-2 font-medium w-28">Tickets</th>
+                <th className="px-4 py-2 font-medium w-32">Assign</th>
+                <th className="px-4 py-2 font-medium w-28">Jira</th>
                 <th className="px-4 py-2 font-medium w-36"></th>
               </tr>
             </thead>
@@ -2463,6 +2486,29 @@ function KbGapsTab({ gaps, onRefresh }: { gaps: KbGap[]; onRefresh: () => void }
                     <td className="px-4 py-2 text-[10px] text-neutral-500">{g.first_seen ? new Date(g.first_seen).toLocaleDateString() : ''}</td>
                     <td className="px-4 py-2 text-[10px] text-neutral-500">{g.last_seen ? new Date(g.last_seen).toLocaleDateString() : ''}</td>
                     <td className="px-4 py-2 text-[10px] text-neutral-500 font-mono truncate max-w-[7rem]" title={g.ticket_ids}>{g.ticket_ids}</td>
+                    <td className="px-4 py-2">
+                      <select
+                        value={g.assigned_to || ''}
+                        onChange={e => assignGap(g.id, e.target.value)}
+                        className="bg-[#272C33] border border-[#3a424d] rounded px-1.5 py-0.5 text-[10px] text-neutral-300 w-full"
+                      >
+                        <option value="">Unassigned</option>
+                        {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-4 py-2">
+                      {g.jira_ticket_key ? (
+                        <a href={`https://nurturtech.atlassian.net/browse/${g.jira_ticket_key}`} target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:text-blue-300 font-mono">{g.jira_ticket_key} &rarr;</a>
+                      ) : (
+                        <button
+                          onClick={() => createGapTicket(g)}
+                          disabled={creatingTicket === g.id}
+                          className="text-[10px] text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
+                        >
+                          {creatingTicket === g.id ? 'Creating…' : 'Create Ticket'}
+                        </button>
+                      )}
+                    </td>
                     <td className="px-4 py-2 flex gap-2">
                       <button
                         onClick={() => generateArticle(g)}

@@ -174,6 +174,12 @@ async function runMigrations(): Promise<void> {
        resolved_at DATETIME2 NULL
      );`,
 
+    `IF COL_LENGTH('kb_gap_log', 'assigned_to') IS NULL
+     ALTER TABLE kb_gap_log ADD assigned_to NVARCHAR(100) NULL;`,
+
+    `IF COL_LENGTH('kb_gap_log', 'jira_ticket_key') IS NULL
+     ALTER TABLE kb_gap_log ADD jira_ticket_key NVARCHAR(20) NULL;`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_kb_gap_log_status')
      CREATE INDEX IX_kb_gap_log_status ON kb_gap_log (status, created_at DESC);`,
 
