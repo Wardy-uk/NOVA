@@ -11,6 +11,16 @@ export interface AiLearning {
   submitted_by: string;
   active: boolean;
   created_at: string;
+  last_applied_at: string | null;
+  apply_count: number;
+}
+
+export interface LearningApplication {
+  decision_id: number;
+  ticket_key: string;
+  action: string;
+  confidence: number;
+  created_at: string;
 }
 
 export interface SubmitLearningInput {
@@ -103,6 +113,38 @@ export class AiLearningService {
     return query<AiLearning>(
       `SELECT * FROM ai_learnings WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC`,
       params,
+    );
+  }
+
+  async recordCitations(reasoning: string, learnings: AiLearning[]): Promise<void> {
+    if (!reasoning || learnings.length === 0) return;
+
+    const cited: number[] = [];
+    for (const l of learnings) {
+      if (reasoning.includes(l.ticket_key)) {
+        cited.push(l.id);
+      }
+    }
+    if (cited.length === 0) return;
+
+    const idPlaceholders = cited.map(() => '?').join(',');
+    await execute(
+      `UPDATE ai_learnings SET apply_count = apply_count + 1, last_applied_at = GETUTCDATE()
+       WHERE id IN (${idPlaceholders})`,
+      cited,
+    );
+  }
+
+  async getApplicationHistory(learningId: number, limit = 5): Promise<LearningApplication[]> {
+    const learning = await this.getById(learningId);
+    if (!learning) return [];
+
+    return query<LearningApplication>(
+      `SELECT TOP (${limit}) id AS decision_id, ticket_id AS ticket_key, action, confidence, created_at
+       FROM agent_decisions
+       WHERE reasoning LIKE ?
+       ORDER BY created_at DESC`,
+      [`%${learning.ticket_key}%`],
     );
   }
 

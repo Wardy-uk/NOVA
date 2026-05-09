@@ -71,7 +71,7 @@ export class Reasoner {
     const kbText = this.kbSearch.formatForPrompt(kbMatches);
 
     const customerContext = this.buildCustomerContext(event);
-    const learningsText = await this.buildLearningsContext(event);
+    const learningsCtx = await this.buildLearningsContext(event);
 
     const systemPrompt = loadPrompt('triage', {
       ticket_key: event.ticketKey,
@@ -84,7 +84,7 @@ export class Reasoner {
       created: event.created,
       customer_context: customerContext,
       kb_matches: kbText,
-      learnings: learningsText,
+      learnings: learningsCtx.text,
     });
 
     const userMessage = `Analyse this ticket and produce the structured JSON assessment.`;
@@ -154,6 +154,9 @@ export class Reasoner {
     };
 
     decision.approvalRequired = await this.needsApproval(triage, decision);
+
+    await this.trackLearningCitations(triage.reasoning_trace, learningsCtx.learnings);
+
     return decision;
   }
 
@@ -161,7 +164,7 @@ export class Reasoner {
     const kbMatches = await this.kbSearch.search(`${event.summary} ${(event.comments?.[0]?.body ?? '').slice(0, 200)}`);
     const kbText = this.kbSearch.formatForPrompt(kbMatches);
     const customerContext = this.buildCustomerContext(event);
-    const learningsText = await this.buildLearningsContext(event);
+    const learningsCtx = await this.buildLearningsContext(event);
 
     const conversationThread = (event.comments ?? [])
       .map(c => `[${c.created}] ${c.author}${c.isPublic ? '' : ' (internal)'}:\n${c.body}`)
@@ -193,7 +196,7 @@ export class Reasoner {
       conversation_thread: conversationThread || '(no comments)',
       customer_context: customerContext,
       kb_matches: kbText,
-      learnings: learningsText,
+      learnings: learningsCtx.text,
     });
 
     const result = await this.llmService.call<RespondResult>(
@@ -247,6 +250,9 @@ export class Reasoner {
     };
 
     decision.approvalRequired = await this.needsRespondApproval(respond, decision);
+
+    await this.trackLearningCitations(respond.reasoning_trace, learningsCtx.learnings);
+
     return decision;
   }
 
@@ -314,15 +320,24 @@ export class Reasoner {
     return true;
   }
 
-  private async buildLearningsContext(event: TicketEvent): Promise<string> {
-    if (!this.learningService) return 'No prior learnings available.';
+  private async buildLearningsContext(event: TicketEvent): Promise<{ text: string; learnings: import('./ai-learning-service.js').AiLearning[] }> {
+    if (!this.learningService) return { text: 'No prior learnings available.', learnings: [] };
     try {
       const category = (event as any).classification?.category;
       const learnings = await this.learningService.getRelevantLearnings(category, event.organisation ?? undefined);
-      return this.learningService.formatForPrompt(learnings);
+      return { text: this.learningService.formatForPrompt(learnings), learnings };
     } catch (err) {
       console.warn('[reasoner] Failed to load learnings:', err instanceof Error ? err.message : err);
-      return 'No prior learnings available.';
+      return { text: 'No prior learnings available.', learnings: [] };
+    }
+  }
+
+  private async trackLearningCitations(reasoning: string, learnings: import('./ai-learning-service.js').AiLearning[]): Promise<void> {
+    if (!this.learningService || learnings.length === 0) return;
+    try {
+      await this.learningService.recordCitations(reasoning, learnings);
+    } catch (err) {
+      console.warn('[reasoner] Failed to track learning citations:', err instanceof Error ? err.message : err);
     }
   }
 

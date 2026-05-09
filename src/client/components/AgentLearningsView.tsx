@@ -11,6 +11,16 @@ interface AiLearning {
   submitted_by: string;
   active: boolean;
   created_at: string;
+  last_applied_at: string | null;
+  apply_count: number;
+}
+
+interface LearningApplication {
+  decision_id: number;
+  ticket_key: string;
+  action: string;
+  confidence: number;
+  created_at: string;
 }
 
 interface CategoryCount {
@@ -45,6 +55,10 @@ export function AgentLearningsView({ token }: { token: string }) {
 
   // Expanded AI draft
   const [expandedDraft, setExpandedDraft] = useState<number | null>(null);
+
+  // Application history expansion
+  const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
+  const [historyData, setHistoryData] = useState<Record<number, LearningApplication[]>>({});
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -134,6 +148,26 @@ export function AgentLearningsView({ token }: { token: string }) {
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  const timeAgo = (iso: string) => {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 60_000) return 'just now';
+    if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
+    if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
+    return `${Math.floor(ms / 86_400_000)}d ago`;
+  };
+
+  const toggleHistory = async (id: number) => {
+    if (expandedHistory === id) { setExpandedHistory(null); return; }
+    setExpandedHistory(id);
+    if (!historyData[id]) {
+      try {
+        const res = await fetch(`/api/ai-learnings/${id}/applications?limit=5`, { headers });
+        const json = await res.json();
+        if (json.ok) setHistoryData(prev => ({ ...prev, [id]: json.data }));
+      } catch { /* ignore */ }
+    }
   };
 
   return (
@@ -349,8 +383,14 @@ export function AgentLearningsView({ token }: { token: string }) {
                       {l.organisation && (
                         <span className="text-xs px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded-full">{l.organisation}</span>
                       )}
-                      {!l.active && (
+                      {!l.active ? (
                         <span className="text-xs px-2 py-0.5 bg-neutral-500/10 text-neutral-400 rounded-full">Inactive</span>
+                      ) : l.apply_count > 0 ? (
+                        <span className="text-xs px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded-full">
+                          Applied ({l.apply_count}){l.last_applied_at ? ` · last ${timeAgo(l.last_applied_at)}` : ''}
+                        </span>
+                      ) : (
+                        <span className="text-xs px-2 py-0.5 bg-neutral-500/10 text-neutral-500 rounded-full">Not yet applied</span>
                       )}
                       {l.tags && l.tags.split(',').map(tag => (
                         <span key={tag} className="text-xs px-1.5 py-0.5 bg-neutral-700 text-neutral-300 rounded">{tag.trim()}</span>
@@ -370,6 +410,33 @@ export function AgentLearningsView({ token }: { token: string }) {
                         {expandedDraft === l.id && (
                           <div className="mt-1 p-3 bg-neutral-900 border border-neutral-700 rounded text-xs text-neutral-400 whitespace-pre-wrap max-h-48 overflow-y-auto">
                             {l.ai_draft}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {l.active && l.apply_count > 0 && (
+                      <div className="mt-2">
+                        <button
+                          onClick={() => toggleHistory(l.id)}
+                          className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                        >
+                          {expandedHistory === l.id ? 'Hide' : 'Show'} application history
+                        </button>
+                        {expandedHistory === l.id && (
+                          <div className="mt-1 p-3 bg-neutral-900 border border-neutral-700 rounded text-xs space-y-1.5 max-h-48 overflow-y-auto">
+                            {!historyData[l.id] ? (
+                              <span className="text-neutral-500">Loading...</span>
+                            ) : historyData[l.id].length === 0 ? (
+                              <span className="text-neutral-500">No application records found</span>
+                            ) : historyData[l.id].map(app => (
+                              <div key={app.decision_id} className="flex items-center gap-2 text-neutral-400">
+                                <span className="font-mono text-indigo-400">{app.ticket_key}</span>
+                                <span className="text-neutral-600">({timeAgo(app.created_at)})</span>
+                                <span>— {app.action.replace(/_/g, ' ')},</span>
+                                <span>confidence {(app.confidence * 100).toFixed(0)}%</span>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>

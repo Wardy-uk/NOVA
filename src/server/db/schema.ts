@@ -1090,6 +1090,12 @@ async function runMigrations(): Promise<void> {
        created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
      );`,
 
+    `IF COL_LENGTH('ai_learnings', 'last_applied_at') IS NULL
+     ALTER TABLE ai_learnings ADD last_applied_at DATETIME2 NULL;`,
+
+    `IF COL_LENGTH('ai_learnings', 'apply_count') IS NULL
+     ALTER TABLE ai_learnings ADD apply_count INT NOT NULL DEFAULT 0;`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ai_learnings_active')
      CREATE INDEX IX_ai_learnings_active ON ai_learnings (active, category, created_at DESC);`,
 

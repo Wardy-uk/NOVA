@@ -95,6 +95,17 @@ export function createAiLearningRoutes(service: AiLearningService): Router {
     }
   });
 
+  router.get('/:id/applications', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 5;
+      const applications = await service.getApplicationHistory(id, limit);
+      res.json({ ok: true, data: applications });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   router.delete('/:id', async (req, res) => {
     try {
       if (!isAdmin(req)) return res.status(403).json({ ok: false, error: 'Admin only' });
