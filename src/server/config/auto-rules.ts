@@ -196,15 +196,12 @@ const RULES_RAW: unknown[] = [
     id: 'product-cancellation',
     match: {
       subject: {
-        startsWithAny: [
-          'Product Cancellation - Google SEO',
-          'Product Cancellation - Ad Spend',
-          'Product Cancellation - LeadPro (Social - Ad Spend)',
-          'Product Cancellation - Management Fee',
-          'Product Cancellation - Digital Marketing',
-          'Product Cancellation - Communications Managed',
-          'Product Cancellation - LeadPro (Social - Management Fee)',
-        ],
+        // Match all "Product Cancellation - X" EXCEPT products that need manual processing:
+        //   - BriefYourMarket (requires CRM deprovisioning)
+        //   - LeadPro variants except (Social - *) (require platform changes)
+        // Excluded: BriefYourMarket, LeadPro, LeadPro (Autocaller), LeadPro (Dashboard),
+        //           LeadPro (Instant Valuation Tool), LeadPro (Lead Responder)
+        regex: '^Product Cancellation - (?!BriefYourMarket |LeadPro(?! \\(Social))',
       },
     },
     action: { type: 'close', resolution: 'No Fault Found', note: 'Automated product cancellation notification — informational, no action required.' },
