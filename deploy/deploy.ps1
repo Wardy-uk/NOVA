@@ -48,20 +48,35 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "git pull failed" }
     Write-Host ""
 
-    # -- Install dependencies -------------------------------------------------
-    Write-Host "[2/4] Installing dependencies..." -ForegroundColor Yellow
+    # -- Install dependencies (skip if lockfile unchanged) ----------------------
     $env:NODE_OPTIONS = "--max-old-space-size=1536"
-    npm ci
-    if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+    $lockHash = Get-FileHash -Path "package-lock.json" -Algorithm MD5 | Select-Object -ExpandProperty Hash
+    $cachedHash = if (Test-Path ".deploy-lock-hash") { Get-Content ".deploy-lock-hash" } else { "" }
+    if ($lockHash -ne $cachedHash) {
+        Write-Host "[2/4] Installing dependencies (lockfile changed)..." -ForegroundColor Yellow
+        npm install --production
+        if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+        $lockHash | Set-Content ".deploy-lock-hash"
+    } else {
+        Write-Host "[2/4] Dependencies up to date (lockfile unchanged)" -ForegroundColor Green
+    }
     Write-Host ""
 
     # -- Build nova-mcp --------------------------------------------------------
-    Write-Host "[2.5/4] Building nova-mcp..." -ForegroundColor Yellow
     $mcpDir = Join-Path $AppDir "nova-mcp"
     if (Test-Path $mcpDir) {
         Push-Location $mcpDir
-        npm ci
-        if ($LASTEXITCODE -ne 0) { throw "nova-mcp npm install failed" }
+        $mcpLockHash = Get-FileHash -Path "package-lock.json" -Algorithm MD5 | Select-Object -ExpandProperty Hash
+        $mcpCachedHash = if (Test-Path ".deploy-lock-hash") { Get-Content ".deploy-lock-hash" } else { "" }
+        if ($mcpLockHash -ne $mcpCachedHash) {
+            Write-Host "[2.5/4] Installing nova-mcp dependencies..." -ForegroundColor Yellow
+            npm install --production
+            if ($LASTEXITCODE -ne 0) { throw "nova-mcp npm install failed" }
+            $mcpLockHash | Set-Content ".deploy-lock-hash"
+        } else {
+            Write-Host "[2.5/4] nova-mcp dependencies up to date" -ForegroundColor Green
+        }
+        Write-Host "[2.5/4] Building nova-mcp..." -ForegroundColor Yellow
         npm run build
         if ($LASTEXITCODE -ne 0) { throw "nova-mcp build failed" }
         Pop-Location

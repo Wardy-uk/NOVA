@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.deploy-lock-hash
 daypilot.db
 daypilot.db.tmp
 daypilot.db.backup-*
