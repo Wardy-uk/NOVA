@@ -60,7 +60,14 @@ const AbuseReportAction = z.object({
   type: z.literal('abuse_report'),
 });
 
-const RuleAction = z.discriminatedUnion('type', [CloseAction, SetTierAction, PluginToTpjAction, AbuseReportAction]);
+const AssignAction = z.object({
+  type: z.literal('assign'),
+  team: z.string(),
+  comment: z.string(),
+  note: z.string().optional(),
+});
+
+const RuleAction = z.discriminatedUnion('type', [CloseAction, SetTierAction, PluginToTpjAction, AbuseReportAction, AssignAction]);
 
 // ── Rule Schema ──
 
@@ -191,6 +198,18 @@ const RULES_RAW: unknown[] = [
     },
     conditional: { type: 'duplicate_open_ticket', sameSubject: true },
     action: { type: 'close', resolution: 'Duplicate', note: 'Auto-closed — duplicate of an existing open CIA Letter Alerting ticket.' },
+  },
+  {
+    id: 'cia-letter-assign',
+    match: {
+      subject: { equals: 'CIA Letter Alerting' },
+    },
+    action: {
+      type: 'assign',
+      team: 'Customer Care',
+      comment: 'This CIA Letter alert has been assigned for triage. Please check the CIA instance to confirm letters are being processed correctly.',
+      note: 'Auto-assigned by NOVA — CIA Letter Alerting ticket, routed to Customer Care for CIA instance verification.',
+    },
   },
   {
     id: 'product-cancellation',

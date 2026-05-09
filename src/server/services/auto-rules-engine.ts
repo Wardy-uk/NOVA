@@ -3,6 +3,7 @@ import type { TicketEvent, AgentShadowMode } from './agent-types.js';
 import type { JiraRestClient } from './jira-client.js';
 import type { PluginToTpjExecutor } from './plugin-to-tpj-executor.js';
 import type { AbuseReportExecutor } from './abuse-report-executor.js';
+import type { AssignmentEngine } from './assignment-engine.js';
 import type { Observer } from './observer.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { AutoRuleOverrideQueries } from '../db/queries.js';
@@ -44,6 +45,7 @@ export class AutoRulesEngine {
   private dailyCounts = new Map<string, { date: string; count: number }>();
   private regexCache = new Map<string, RegExp>();
   private abuseExecutor: AbuseReportExecutor | null = null;
+  private assignmentEngine: AssignmentEngine | null = null;
   private overrideQueries: AutoRuleOverrideQueries | null = null;
   private overrideCache: Record<string, boolean> | null = null;
   private overrideCacheAt = 0;
@@ -99,6 +101,10 @@ export class AutoRulesEngine {
 
   setAbuseExecutor(executor: AbuseReportExecutor): void {
     this.abuseExecutor = executor;
+  }
+
+  setAssignmentEngine(engine: AssignmentEngine): void {
+    this.assignmentEngine = engine;
   }
 
   async evaluateAndExecute(
@@ -375,7 +381,7 @@ export class AutoRulesEngine {
       approvalRequired: rule.requiresApproval ?? false,
       shadowMode: false,
       inputs: { summary: event.summary, matchedFields: match.matchedFields, ruleId: rule.id },
-      output: { action_type: action.type, ...('resolution' in action ? { resolution: action.resolution } : {}), ...('tier' in action ? { tier: action.tier } : {}) },
+      output: { action_type: action.type, ...('resolution' in action ? { resolution: action.resolution } : {}), ...('tier' in action ? { tier: action.tier } : {}), ...('team' in action ? { team: action.team } : {}) },
     });
 
     try {
@@ -387,6 +393,8 @@ export class AutoRulesEngine {
         await this.handlePluginToTpj(match, event);
       } else if (action.type === 'abuse_report') {
         await this.handleAbuseReport(match, event);
+      } else if (action.type === 'assign') {
+        await this.handleAssign(match, event, action as { type: 'assign'; team: string; comment: string; note?: string });
       }
 
       await this.observer.logOutcome(decisionId, {
@@ -540,6 +548,39 @@ export class AutoRulesEngine {
     }
   }
 
+  private async handleAssign(
+    match: AutoRuleMatch,
+    event: TicketEvent,
+    action: { type: 'assign'; team: string; comment: string; note?: string },
+  ): Promise<void> {
+    if (!this.assignmentEngine) {
+      throw new Error('AssignmentEngine not available — cannot process assign action');
+    }
+
+    const { ticketKey } = match;
+    const { team, comment, note } = action;
+
+    const normalizedPool = team.toLowerCase().replace(/\s+/g, '') as any;
+    const pool = ({ cc: 'cc', customercare: 'cc', t2: 't2', t3: 't2', tpj: 'tpj', digital: 'digital' } as Record<string, string>)[normalizedPool] ?? 'cc';
+
+    const result = await this.assignmentEngine.assignToJira(ticketKey, pool as any);
+    if (!result) {
+      throw new Error(`No available agents in pool '${team}' — ticket ${ticketKey} left unassigned`);
+    }
+
+    console.log(`[auto-rules] Assigned ${ticketKey} to ${result.agent.display_name} (${team}, ${result.reason})`);
+
+    await this.jiraClient.addComment(ticketKey, comment, { internal: false });
+
+    if (note) {
+      await this.jiraClient.addComment(
+        ticketKey,
+        `\u{1F916} Auto-actioned by NOVA rule '${match.rule.id}'. ${note}\nAssigned to: ${result.agent.display_name}`,
+        { internal: true },
+      );
+    }
+  }
+
   private async logShadowDecision(match: AutoRuleMatch, event: TicketEvent, reason: string): Promise<void> {
     const { rule, ticketKey } = match;
     const decisionId = await this.observer.logDecision({
@@ -571,7 +612,9 @@ export class AutoRulesEngine {
         ? `set tier to '${(a as { tier: string }).tier}'`
         : a.type === 'plugin_to_tpj'
           ? `route via plugin_to_tpj`
-          : `process abuse report`;
+          : a.type === 'assign'
+            ? `assign to team '${(a as { team: string }).team}'`
+            : `process abuse report`;
     try {
       await this.jiraClient.addComment(
         event.ticketKey,

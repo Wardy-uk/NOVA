@@ -13,6 +13,7 @@ interface Agent {
   MaxTicketsCustomerCare: number;
   MaxTicketsT2T3: number;
   PeopleHrId: string | null;
+  AccountId: string | null;
 }
 
 interface EditState {
@@ -24,6 +25,7 @@ interface EditState {
   MaxTicketsCustomerCare: number;
   MaxTicketsT2T3: number;
   PeopleHrId: string;
+  AccountId: string;
 }
 
 type Toast = { message: string; type: 'success' | 'error' };
@@ -45,6 +47,7 @@ function editStateFromAgent(a: Agent): EditState {
     MaxTicketsCustomerCare: a.MaxTicketsCustomerCare ?? 0,
     MaxTicketsT2T3: a.MaxTicketsT2T3 ?? 0,
     PeopleHrId: a.PeopleHrId || '',
+    AccountId: a.AccountId || '',
   };
 }
 
@@ -57,7 +60,8 @@ function hasChanges(original: Agent, edit: EditState): boolean {
     (original.MaxTickets ?? 0) !== edit.MaxTickets ||
     (original.MaxTicketsCustomerCare ?? 0) !== edit.MaxTicketsCustomerCare ||
     (original.MaxTicketsT2T3 ?? 0) !== edit.MaxTicketsT2T3 ||
-    (original.PeopleHrId || '') !== edit.PeopleHrId
+    (original.PeopleHrId || '') !== edit.PeopleHrId ||
+    (original.AccountId || '') !== edit.AccountId
   );
 }
 
@@ -456,6 +460,7 @@ export function AgentAdminView() {
           MaxTicketsCustomerCare: edit.MaxTicketsCustomerCare,
           MaxTicketsT2T3: edit.MaxTicketsT2T3,
           PeopleHrId: edit.PeopleHrId,
+          AccountId: edit.AccountId,
         }),
       });
       const json = await res.json();
@@ -474,6 +479,7 @@ export function AgentAdminView() {
                   MaxTicketsCustomerCare: edit.MaxTicketsCustomerCare,
                   MaxTicketsT2T3: edit.MaxTicketsT2T3,
                   PeopleHrId: edit.PeopleHrId || null,
+                  AccountId: edit.AccountId || null,
                 }
               : a
           )
@@ -559,6 +565,7 @@ export function AgentAdminView() {
                 <th className={TH}>Agent Name</th>
                 <th className={TH}>Email</th>
                 <th className={TH}>People HR ID</th>
+                <th className={TH}>Account ID</th>
                 <th className={TH}>Tier</th>
                 <th className={TH}>Team</th>
                 <th className={`${TH} text-center`}>Max</th>
@@ -600,6 +607,17 @@ export function AgentAdminView() {
                         onChange={e => updateEdit(agent.AgentId, 'PeopleHrId', e.target.value)}
                         placeholder="—"
                         className={`${INPUT} w-24`}
+                      />
+                    </td>
+
+                    {/* AccountId */}
+                    <td className={TD}>
+                      <input
+                        type="text"
+                        value={edit.AccountId}
+                        onChange={e => updateEdit(agent.AgentId, 'AccountId', e.target.value)}
+                        placeholder="—"
+                        className={`${INPUT} w-44 font-mono text-[10px]`}
                       />
                     </td>
 

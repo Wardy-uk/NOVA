@@ -956,6 +956,7 @@ async function main() {
     agentLoop.getAutoRulesEngine().setOverrideQueries(autoRuleOverrideQueries);
 
     const assignmentEngine = new AssignmentEngine(agentJiraClient, settingsQueries, 'NT');
+    agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
     const availabilityService = new AgentAvailabilityService(settingsQueries);
     const ticketClassifier = new TicketClassifier(llmService, agentJiraClient, 'NT');
     const kbEmbedder = new KbEmbedder(settingsQueries);
@@ -1137,29 +1138,73 @@ async function main() {
           server: srv, database: db, user: usr, password: pwd,
           options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
         }).connect();
+        const novaAccountId = all.nova_ai_jira_account_id || '712020:67acd53f-75f0-4548-adfe-91bba72ad38f';
         const exists = await p.request()
           .input('key', sqlMod.default.NVarChar(200), 'nova-ai@system.local')
-          .query(`SELECT AgentId FROM dbo.Agent WHERE AgentKey = @key`);
+          .query(`SELECT AgentId, AccountId FROM dbo.Agent WHERE AgentKey = @key`);
         if (exists.recordset.length === 0) {
           await p.request()
             .input('name', sqlMod.default.NVarChar(100), 'NOVA')
             .input('surname', sqlMod.default.NVarChar(100), 'AI')
             .input('key', sqlMod.default.NVarChar(200), 'nova-ai@system.local')
+            .input('accountId', sqlMod.default.NVarChar(200), novaAccountId)
             .input('tierCode', sqlMod.default.NVarChar(10), 'AI')
             .input('team', sqlMod.default.NVarChar(50), 'NOVA AI')
             .input('dept', sqlMod.default.NVarChar(10), 'NOVA_AI')
             .input('now', sqlMod.default.DateTime2, new Date())
-            .query(`INSERT INTO dbo.Agent (AgentName, AgentSurname, AgentKey, TierCode, Team,
+            .query(`INSERT INTO dbo.Agent (AgentName, AgentSurname, AgentKey, AccountId, TierCode, Team,
                      MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3,
                      IsAvailable, IsActive, Department, CreatedAt, UpdatedAt)
-                    VALUES (@name, @surname, @key, @tierCode, @team, 0, 0, 0, 0, 1, @dept, @now, @now)`);
+                    VALUES (@name, @surname, @key, @accountId, @tierCode, @team, 0, 0, 0, 0, 1, @dept, @now, @now)`);
           console.log('[kpi] NOVA AI synthetic agent created in dbo.Agent');
+        } else if (!exists.recordset[0].AccountId) {
+          await p.request()
+            .input('accountId', sqlMod.default.NVarChar(200), novaAccountId)
+            .input('key', sqlMod.default.NVarChar(200), 'nova-ai@system.local')
+            .query(`UPDATE dbo.Agent SET AccountId = @accountId WHERE AgentKey = @key`);
+          console.log('[kpi] NOVA AI agent AccountId updated');
         }
         await p.close();
       } catch (err) {
         console.warn('[kpi] Failed to seed NOVA AI agent:', err instanceof Error ? err.message : err);
       }
     })();
+
+    // Auto-populate missing AccountIds from Jira (delayed startup, best-effort)
+    if (agentJiraClient) {
+      setTimeout(async () => {
+        try {
+          const all = settingsQueries.getAll();
+          const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = all;
+          if (!srv || !db || !usr || !pwd) return;
+          const sqlMod = await import('mssql');
+          const p = await new sqlMod.default.ConnectionPool({
+            server: srv, database: db, user: usr, password: pwd,
+            options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
+          }).connect();
+          const missing = await p.request().query(
+            `SELECT AgentId, AgentKey FROM dbo.Agent WHERE IsActive = 1 AND (AccountId IS NULL OR AccountId = '') AND AgentKey IS NOT NULL AND AgentKey <> ''`
+          );
+          let filled = 0;
+          for (const row of missing.recordset) {
+            try {
+              const users = await agentJiraClient.searchUsers(row.AgentKey, 1);
+              if (users.length > 0) {
+                await p.request()
+                  .input('id', sqlMod.default.Int, row.AgentId)
+                  .input('accountId', sqlMod.default.NVarChar(200), users[0].accountId)
+                  .query(`UPDATE dbo.Agent SET AccountId = @accountId WHERE AgentId = @id`);
+                filled++;
+              }
+            } catch { /* best effort per agent */ }
+          }
+          if (filled > 0) console.log(`[kpi] Auto-populated AccountId for ${filled} agent(s)`);
+          await p.close();
+        } catch (err) {
+          console.warn('[kpi] AccountId auto-populate failed:', err instanceof Error ? err.message : err);
+        }
+      }, 60_000);
+    }
 
     // Ensure NOVA AI synthetic agent exists in KPI database
     kpiPipeline.ensureNovaAiAgent().catch(() => {});
@@ -1747,13 +1792,13 @@ async function main() {
       const hasOldestKey = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketKey'`);
       const oldestKeyCol = hasOldestKey.recordset.length > 0 ? ', OldestTicketKey' : '';
       const hasDept = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`);
-      const deptFilter = hasDept.recordset.length > 0 ? "AND Department = 'NT'" : '';
+      const deptFilter = hasDept.recordset.length > 0 ? "AND Department IN ('NT', 'NOVA_AI')" : '';
       const result = await pool.request().query(`
         SELECT AgentName, AgentSurname, TierCode, Team,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                ${oldestCol} AS OldestTicketDays${oldestKeyCol},
                SolvedTickets_Today, TicketsSnapshotAt
-        FROM dbo.Agent WHERE IsActive = 1 AND ISNULL(TierCode, '') <> 'AI' ${deptFilter}
+        FROM dbo.Agent WHERE IsActive = 1 ${deptFilter}
         ORDER BY OpenTickets_Over2Hours DESC, AgentName
       `);
       const data = result.recordset;

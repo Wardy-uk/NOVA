@@ -906,7 +906,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
     try {
       const p = await getPool();
       const { agentId } = req.params;
-      const { Team, TierCode, IsActive, IsAvailable, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3, PeopleHrId } = req.body;
+      const { Team, TierCode, IsActive, IsAvailable, MaxTickets, MaxTicketsCustomerCare, MaxTicketsT2T3, PeopleHrId, AccountId } = req.body;
 
       const request = p.request();
       request.input('agentId', sql.Int, parseInt(agentId));
@@ -918,6 +918,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       request.input('maxTicketsCC', sql.Int, MaxTicketsCustomerCare ?? 0);
       request.input('maxTicketsT2T3', sql.Int, MaxTicketsT2T3 ?? 0);
       request.input('peopleHrId', sql.NVarChar(50), PeopleHrId || null);
+      request.input('accountId', sql.NVarChar(200), AccountId || null);
 
       await request.query(`
         UPDATE dbo.Agent SET
@@ -928,7 +929,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
           MaxTickets = @maxTickets,
           MaxTicketsCustomerCare = @maxTicketsCC,
           MaxTicketsT2T3 = @maxTicketsT2T3,
-          PeopleHrId = @peopleHrId
+          PeopleHrId = @peopleHrId,
+          AccountId = @accountId
         WHERE AgentId = @agentId
       `);
 
@@ -1434,14 +1436,14 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
       const hasOldestKey = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketKey'`);
       const oldestKeyCol = hasOldestKey.recordset.length > 0 ? ', OldestTicketKey' : '';
       const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`);
-      const deptFilter = hasDept.recordset.length > 0 ? "AND Department = 'NT'" : '';
+      const deptFilter = hasDept.recordset.length > 0 ? "AND Department IN ('NT', 'NOVA_AI')" : '';
       const result = await p.request().query(`
         SELECT AgentName, AgentSurname, TierCode, Team,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                ${oldestCol} AS OldestTicketDays${oldestKeyCol},
                SolvedTickets_Today, TicketsSnapshotAt
         FROM dbo.Agent
-        WHERE IsActive = 1 AND ISNULL(TierCode, '') <> 'AI' ${deptFilter}
+        WHERE IsActive = 1 ${deptFilter}
         ORDER BY OpenTickets_Over2Hours DESC, ${orderCol} AgentName
       `);
       res.json({ ok: true, data: result.recordset, ts: new Date().toISOString() });
