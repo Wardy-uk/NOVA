@@ -1,4 +1,4 @@
-﻿#Requires -RunAsAdministrator
+#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     Deploy latest N.O.V.A code and restart the service.
@@ -52,9 +52,11 @@ try {
     $env:NODE_OPTIONS = "--max-old-space-size=1536"
     $lockHash = Get-FileHash -Path "package-lock.json" -Algorithm MD5 | Select-Object -ExpandProperty Hash
     $cachedHash = if (Test-Path ".deploy-lock-hash") { Get-Content ".deploy-lock-hash" } else { "" }
-    if ($lockHash -ne $cachedHash) {
+    # Force reinstall if devDeps are missing (e.g. previous deploy used --production)
+    $tscExists = Test-Path "node_modules\.bin\tsc.cmd"
+    if ($lockHash -ne $cachedHash -or -not $tscExists) {
         Write-Host "[2/4] Installing dependencies (lockfile changed)..." -ForegroundColor Yellow
-        npm install --production
+        npm install
         if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
         $lockHash | Set-Content ".deploy-lock-hash"
     } else {
@@ -70,7 +72,7 @@ try {
         $mcpCachedHash = if (Test-Path ".deploy-lock-hash") { Get-Content ".deploy-lock-hash" } else { "" }
         if ($mcpLockHash -ne $mcpCachedHash) {
             Write-Host "[2.5/4] Installing nova-mcp dependencies..." -ForegroundColor Yellow
-            npm install --production
+            npm install
             if ($LASTEXITCODE -ne 0) { throw "nova-mcp npm install failed" }
             $mcpLockHash | Set-Content ".deploy-lock-hash"
         } else {
@@ -93,6 +95,10 @@ try {
     $entry = Join-Path $AppDir "dist\server\server\index.js"
     if (-not (Test-Path $entry)) { throw "Build failed: $entry not found" }
     Write-Host "Build output verified: $entry" -ForegroundColor Green
+
+    # Prune devDependencies after build to save disk space in production
+    Write-Host "Pruning devDependencies..." -ForegroundColor DarkGray
+    npm prune --omit=dev 2>$null
     Write-Host ""
 
     # -- Restart service ------------------------------------------------------
