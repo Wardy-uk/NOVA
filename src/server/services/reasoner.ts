@@ -147,6 +147,7 @@ export class Reasoner {
         priority_assessment: triage.priority_assessment,
         classification: triage.classification,
         kb_gap: triage.kb_gap,
+        quick_win: triage.quick_win,
       },
       provider: result.provider,
       model: result.model,

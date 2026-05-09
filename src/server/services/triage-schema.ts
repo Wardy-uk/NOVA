@@ -80,6 +80,12 @@ export const TriageResultSchema = z.object({
     reason: flexString,
     suggested_title: flexNullableString,
   }),
+  quick_win: z.object({
+    type: flexEnum(['spam', 'thank_you', 'kba_match', 'stale_no_response', 'duplicate', 'auto_resolved', 'none'] as const),
+    confidence: flexConfidence,
+    reasoning: flexString,
+    suggested_kba: flexNullableString,
+  }).optional().default({ type: 'none', confidence: 0, reasoning: '', suggested_kba: null }),
 });
 
 export type TriageResult = z.infer<typeof TriageResultSchema>;

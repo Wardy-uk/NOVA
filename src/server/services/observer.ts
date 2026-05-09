@@ -3,11 +3,16 @@ import type { AgentDecision, ActionResult } from './agent-types.js';
 
 export class Observer {
   async logDecision(decision: AgentDecision): Promise<number> {
+    const qw = decision.output?.quick_win as { type?: string; confidence?: number } | undefined;
+    const qwType = (qw?.type && qw.type !== 'none') ? qw.type : null;
+    const qwConf = qwType ? (qw?.confidence ?? null) : null;
+
     return executeAndGetId(
       `INSERT INTO agent_decisions
          (ticket_id, event_type, inputs, reasoning, output, action, confidence,
-          provider, model, approval_required, shadow_mode, latency_ms, prompt_version, call_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          provider, model, approval_required, shadow_mode, latency_ms, prompt_version, call_type,
+          quick_win_type, quick_win_confidence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         decision.ticketKey,
         decision.eventType,
@@ -23,6 +28,8 @@ export class Observer {
         0,
         decision.promptVersion ?? null,
         decision.callType ?? decision.action,
+        qwType,
+        qwConf,
       ],
     );
   }
@@ -290,6 +297,88 @@ export class Observer {
     return {
       working: { cost: working?.cost ?? 0, calls: working?.calls ?? 0 },
       outOfHours: { cost: outOfHours?.cost ?? 0, calls: outOfHours?.calls ?? 0 },
+    };
+  }
+
+  async getDecisionsFiltered(opts: {
+    limit: number;
+    offset: number;
+    quickWinType?: string;
+    eventType?: string;
+  }): Promise<unknown[]> {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (opts.quickWinType) {
+      if (opts.quickWinType === 'all') {
+        conditions.push(`d.quick_win_type IS NOT NULL AND d.quick_win_type != 'none'`);
+      } else {
+        conditions.push(`d.quick_win_type = ?`);
+        params.push(opts.quickWinType);
+      }
+    }
+    if (opts.eventType) {
+      conditions.push(`d.event_type = ?`);
+      params.push(opts.eventType);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(opts.offset, opts.limit);
+
+    return query(
+      `SELECT d.*, c.summary AS ticket_subject
+       FROM agent_decisions d
+       LEFT JOIN jira_issue_cache c ON c.issue_key = d.ticket_id
+       ${where}
+       ORDER BY d.created_at DESC
+       OFFSET ? ROWS FETCH NEXT ? ROWS ONLY`,
+      params,
+    );
+  }
+
+  async getQuickWinStats(): Promise<{
+    byType: Record<string, number>;
+    totalToday: number;
+    executedToday: number;
+    undoRate30d: number;
+  }> {
+    const [typeRows, execRows, undoRows] = await Promise.all([
+      query<{ quick_win_type: string; cnt: number }>(
+        `SELECT quick_win_type, COUNT(*) as cnt FROM agent_decisions
+         WHERE quick_win_type IS NOT NULL AND quick_win_type != 'none'
+           AND created_at >= CAST(GETUTCDATE() AS DATE)
+         GROUP BY quick_win_type`,
+      ),
+      query<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM agent_decisions
+         WHERE quick_win_executed = 1
+           AND quick_win_executed_at >= CAST(GETUTCDATE() AS DATE)`,
+      ),
+      query<{ executed: number; undone: number }>(
+        `SELECT
+           COUNT(*) as executed,
+           SUM(CASE WHEN quick_win_undone = 1 THEN 1 ELSE 0 END) as undone
+         FROM agent_decisions
+         WHERE quick_win_executed = 1
+           AND quick_win_executed_at >= DATEADD(day, -30, GETUTCDATE())`,
+      ),
+    ]);
+
+    const byType: Record<string, number> = {};
+    let totalToday = 0;
+    for (const r of typeRows) {
+      byType[r.quick_win_type] = r.cnt;
+      totalToday += r.cnt;
+    }
+
+    const executed30d = undoRows[0]?.executed ?? 0;
+    const undone30d = undoRows[0]?.undone ?? 0;
+
+    return {
+      byType,
+      totalToday,
+      executedToday: execRows[0]?.cnt ?? 0,
+      undoRate30d: executed30d > 0 ? undone30d / executed30d : 0,
     };
   }
 

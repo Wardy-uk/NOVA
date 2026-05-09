@@ -57,6 +57,10 @@ interface Decision {
   shadow_mode: boolean;
   created_at: string;
   resolved_at: string | null;
+  quick_win_type: string | null;
+  quick_win_confidence: number | null;
+  quick_win_executed: boolean;
+  quick_win_undone: boolean;
 }
 
 interface ProviderStat {
@@ -265,6 +269,25 @@ function timeAgo(iso: string): string {
   if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
   if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
   return `${Math.floor(ms / 86_400_000)}d ago`;
+}
+
+const QW_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+  spam: { bg: 'bg-red-600/20', text: 'text-red-400', label: 'Spam' },
+  thank_you: { bg: 'bg-green-600/20', text: 'text-green-400', label: 'Thank You' },
+  kba_match: { bg: 'bg-blue-600/20', text: 'text-blue-400', label: 'KBA Match' },
+  stale_no_response: { bg: 'bg-orange-600/20', text: 'text-orange-400', label: 'Stale' },
+  duplicate: { bg: 'bg-neutral-600/20', text: 'text-neutral-400', label: 'Duplicate' },
+  auto_resolved: { bg: 'bg-teal-600/20', text: 'text-teal-400', label: 'Auto Resolved' },
+};
+
+function QuickWinBadge({ type }: { type: string }) {
+  const badge = QW_BADGE[type];
+  if (!badge) return null;
+  return (
+    <span className={`ml-1 px-1 py-0.5 rounded text-[8px] font-bold border ${badge.bg} ${badge.text} border-current/20`}>
+      {badge.label}
+    </span>
+  );
 }
 
 // ── Main Component ──
@@ -851,9 +874,21 @@ function DecisionsTab({ decisions: initialDecisions, selected, onSelect, onRefre
   };
 
   const isPendingApproval = (d: Decision) => d.approval_required && !d.shadow_mode && (!d.approval_status || d.approval_status === 'pending');
+
+  useEffect(() => {
+    if (!filter.startsWith('qw:')) return;
+    const qwType = filter.slice(3);
+    const param = qwType === 'all' ? 'all' : qwType;
+    api(`/decisions?quick_win_type=${param}&limit=${PAGE_SIZE}&offset=0`).then(r => {
+      if (r.ok && Array.isArray(r.data)) setAllDecisions(r.data);
+    });
+  }, [filter]);
+
   const filtered = filter === 'pending_approval'
     ? allDecisions.filter(isPendingApproval)
-    : filter === 'all' ? allDecisions : allDecisions.filter(d => d.event_type === filter);
+    : filter === 'all' ? allDecisions
+    : filter.startsWith('qw:') ? allDecisions
+    : allDecisions.filter(d => d.event_type === filter);
   const eventTypes = [...new Set(allDecisions.map(d => d.event_type))];
   const pendingCount = allDecisions.filter(isPendingApproval).length;
 
@@ -887,6 +922,15 @@ function DecisionsTab({ decisions: initialDecisions, selected, onSelect, onRefre
           <option value="all">All Events</option>
           <option value="pending_approval">Pending Approval{pendingCount > 0 ? ` (${pendingCount})` : ''}</option>
           {eventTypes.map(et => <option key={et} value={et}>{eventLabel(et)}</option>)}
+          <optgroup label="Quick Wins">
+            <option value="qw:all">All Quick Wins</option>
+            <option value="qw:spam">Spam</option>
+            <option value="qw:thank_you">Thank You</option>
+            <option value="qw:kba_match">KBA Match</option>
+            <option value="qw:stale_no_response">Stale / No Response</option>
+            <option value="qw:duplicate">Duplicate</option>
+            <option value="qw:auto_resolved">Auto Resolved</option>
+          </optgroup>
         </select>
         {filter === 'pending_approval' && pendingCount > 0 && (
           <button
@@ -931,7 +975,11 @@ function DecisionsTab({ decisions: initialDecisions, selected, onSelect, onRefre
                   </td>
                   <td className="px-3 py-2 text-[#5ec1ca] font-mono">{d.ticket_id}</td>
                   <td className="px-3 py-2 text-neutral-300 max-w-[250px] truncate" title={d.ticket_subject ?? ''}>{d.ticket_subject ?? ''}</td>
-                  <td className="px-3 py-2 text-neutral-400">{eventLabel(d.event_type)}</td>
+                  <td className="px-3 py-2 text-neutral-400">
+                    {eventLabel(d.event_type)}
+                    {d.quick_win_type && d.quick_win_type !== 'none' && <QuickWinBadge type={d.quick_win_type} />}
+                    {d.quick_win_executed && !d.quick_win_undone && <span className="ml-1 px-1 py-0.5 rounded text-[8px] font-bold bg-emerald-600/30 text-emerald-300 border border-emerald-600/40">AUTO-CLOSED</span>}
+                  </td>
                   <td className="px-3 py-2 text-neutral-200">
                     {actionLabel(d.action)}
                     {d.shadow_mode ? <span className="ml-1.5 text-[9px] text-purple-400 font-semibold">SHADOW</span> : null}
@@ -1084,11 +1132,42 @@ function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decisio
               d.approval_status === 'declined' ? 'bg-red-900/60 text-red-300 border-red-700/40' :
               'bg-neutral-800 text-neutral-400 border-neutral-600'
             }`}>{d.approval_status === 'executed' ? 'EXECUTED [OVERRIDE]' : d.approval_status!.toUpperCase()}</span>}
+            {d.quick_win_type && d.quick_win_type !== 'none' && <QuickWinBadge type={d.quick_win_type} />}
+            {d.quick_win_executed && !d.quick_win_undone && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-900/60 text-emerald-300 border border-emerald-700/40">AUTO-CLOSED</span>}
+            {d.quick_win_undone && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-neutral-800 text-neutral-400 border border-neutral-600">UNDONE</span>}
           </div>
           <button onClick={onClose} className="text-neutral-500 hover:text-neutral-300 text-lg">✕</button>
         </div>
 
         <div className="p-6 space-y-5">
+          {/* Quick-win undo */}
+          {d.quick_win_executed && !d.quick_win_undone && (
+            <div className="border border-emerald-700/40 bg-emerald-900/20 rounded-lg p-4 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-semibold text-emerald-300">Auto-Closed — {QW_BADGE[d.quick_win_type!]?.label ?? d.quick_win_type}</div>
+                <div className="text-[10px] text-neutral-400 mt-1">Confidence: {((d.quick_win_confidence ?? 0) * 100).toFixed(0)}%</div>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!confirm('Undo this auto-close? The ticket will be reopened in Jira.')) return;
+                  setActing(true);
+                  try {
+                    const r = await fetch(`/api/agent/decisions/${d.id}/undo-close`, { method: 'POST' });
+                    const data = await r.json();
+                    showToast(data.ok ? 'Auto-close undone — ticket reopened' : `Undo failed: ${data.error}`);
+                    if (data.ok) setTimeout(onRefresh, 800);
+                  } catch (err: any) {
+                    showToast(`Error: ${err.message}`);
+                  } finally { setActing(false); }
+                }}
+                disabled={acting}
+                className="px-3 py-1.5 text-xs rounded font-medium bg-amber-600/20 text-amber-400 border border-amber-600/30 hover:bg-amber-600/30 transition-colors disabled:opacity-50"
+              >
+                {acting ? 'Undoing…' : 'Undo Close'}
+              </button>
+            </div>
+          )}
+
           {/* Approval Actions — non-shadow */}
           {isPendingApproval && !approvalLoading && (
             <div className="border border-amber-700/40 bg-amber-900/20 rounded-lg p-4 space-y-3">
@@ -2116,6 +2195,101 @@ function AutonomyTab({ rules, onRefresh, isSuperAdmin = false }: { rules: Autono
         });
         setAdding(true);
       }} />
+
+      {isSuperAdmin && <QuickWinSettingsPanel />}
+    </div>
+  );
+}
+
+function QuickWinSettingsPanel() {
+  const QW_LABELS: Record<string, string> = {
+    spam: 'Spam', thank_you: 'Thank You', kba_match: 'KBA Match',
+    stale_no_response: 'Stale / No Response', duplicate: 'Duplicate', auto_resolved: 'Auto Resolved',
+  };
+  const QW_TYPES = Object.keys(QW_LABELS);
+
+  const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
+  const [stats, setStats] = useState<{ byType: Record<string, number>; totalToday: number; executedToday: number; undoRate30d: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api('/quick-win/settings').then(r => { if (r.ok) setSettings(r.data); });
+    api('/quick-win/stats').then(r => { if (r.ok) setStats(r.data); });
+  }, []);
+
+  const toggle = async (type: string, enabled: boolean) => {
+    setSaving(true);
+    await apiJson('/quick-win/settings', 'PUT', { [type]: enabled });
+    setSettings(prev => prev ? { ...prev, [type]: enabled } : prev);
+    setSaving(false);
+  };
+
+  const updateConfidence = async (val: number) => {
+    setSaving(true);
+    await apiJson('/quick-win/settings', 'PUT', { min_confidence: val });
+    setSettings(prev => prev ? { ...prev, min_confidence: val } : prev);
+    setSaving(false);
+  };
+
+  if (!settings) return null;
+
+  return (
+    <div className="mt-4 border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-hidden">
+      <div className="px-4 py-3 bg-[#272C33] border-b border-[#3a424d] flex items-center justify-between">
+        <div>
+          <span className="text-xs font-semibold text-neutral-200">Quick Win Auto-Close</span>
+          <span className="ml-2 text-[10px] text-neutral-500">Auto-close low-risk tickets when the AI is confident</span>
+        </div>
+        {stats && (
+          <div className="flex gap-4 text-[10px] text-neutral-400">
+            <span>Detected today: <span className="text-neutral-200 font-mono">{stats.totalToday}</span></span>
+            <span>Auto-closed: <span className="text-emerald-400 font-mono">{stats.executedToday}</span></span>
+            <span>Undo rate (30d): <span className={`font-mono ${stats.undoRate30d > 0.05 ? 'text-amber-400' : 'text-green-400'}`}>{(stats.undoRate30d * 100).toFixed(1)}%</span></span>
+          </div>
+        )}
+      </div>
+
+      <div className="px-4 py-3 border-b border-[#3a424d] flex items-center gap-3">
+        <span className="text-[10px] text-neutral-500">Minimum confidence:</span>
+        <input
+          type="range" min="0.85" max="1" step="0.01"
+          value={Number(settings.min_confidence) || 0.90}
+          onChange={e => updateConfidence(parseFloat(e.target.value))}
+          disabled={saving}
+          className="w-32 accent-[#5ec1ca]"
+        />
+        <span className="text-xs text-neutral-200 font-mono w-10">{(Number(settings.min_confidence) || 0.90).toFixed(2)}</span>
+      </div>
+
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="bg-[#272C33] text-neutral-500 uppercase tracking-wider text-left">
+            <th className="px-4 py-2 font-medium w-10">On</th>
+            <th className="px-4 py-2 font-medium">Type</th>
+            <th className="px-4 py-2 font-medium w-24 text-right">Detected Today</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#3a424d]">
+          {QW_TYPES.map(t => (
+            <tr key={t} className="hover:bg-[#363d47]/50 transition-colors">
+              <td className="px-4 py-2">
+                <button
+                  onClick={() => toggle(t, !settings[t])}
+                  disabled={saving || t === 'duplicate'}
+                  className={`w-8 h-4 rounded-full transition-colors relative ${settings[t] ? 'bg-green-600' : 'bg-neutral-700'} ${t === 'duplicate' ? 'opacity-40 cursor-not-allowed' : ''}`}
+                >
+                  <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${settings[t] ? 'left-4' : 'left-0.5'}`} />
+                </button>
+              </td>
+              <td className="px-4 py-2">
+                <span className="text-neutral-200 text-xs">{QW_LABELS[t]}</span>
+                {t === 'duplicate' && <span className="ml-2 text-[9px] text-neutral-600">(detection only)</span>}
+              </td>
+              <td className="px-4 py-2 text-right text-neutral-300 font-mono">{stats?.byType[t] ?? 0}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -22,6 +22,7 @@ import { RiskScorer } from './risk-scorer.js';
 import { PluginToTpjExecutor } from './plugin-to-tpj-executor.js';
 import { AbuseReportExecutor } from './abuse-report-executor.js';
 import { AutoRulesEngine } from './auto-rules-engine.js';
+import { QuickWinExecutor } from './quick-win-executor.js';
 import { ExternalDbService } from './external-db.js';
 import { query } from './database.js';
 import { EscalationLogService } from './escalation-log-service.js';
@@ -70,6 +71,7 @@ export class AgentLoop {
   private pluginExecutor: PluginToTpjExecutor;
   private abuseExecutor: AbuseReportExecutor | null = null;
   private autoRulesEngine: AutoRulesEngine;
+  private quickWinExecutor: QuickWinExecutor;
   private externalDb: ExternalDbService;
   private kbSearch: KbSearchService;
   private jiraClient: JiraRestClient;
@@ -108,6 +110,7 @@ export class AgentLoop {
     this.riskScorer = new RiskScorer(settings);
     this.pluginExecutor = new PluginToTpjExecutor(jiraClient, settings);
     this.autoRulesEngine = new AutoRulesEngine(jiraClient, this.pluginExecutor, this.observer, settings);
+    this.quickWinExecutor = new QuickWinExecutor(jiraClient, settings, this.observer);
     this.externalDb = new ExternalDbService(settings);
     if (approvalQueries) {
       this.abuseExecutor = new AbuseReportExecutor(jiraClient, settings, approvalQueries, this.externalDb);
@@ -174,6 +177,10 @@ export class AgentLoop {
 
   getAutoRulesEngine(): AutoRulesEngine {
     return this.autoRulesEngine;
+  }
+
+  getQuickWinExecutor(): QuickWinExecutor {
+    return this.quickWinExecutor;
   }
 
   getActor(): Actor {
@@ -835,6 +842,21 @@ export class AgentLoop {
       console.log(`[agent] [SHADOW] ${decision.ticketKey}: would ${wouldDo} (confidence: ${decision.confidence.toFixed(2)})`);
       this.ticketsProcessed++;
       return;
+    }
+
+    // Quick-win auto-close (only reached in non-shadow mode)
+    const qw = decision.output.quick_win as { type?: string; confidence?: number } | undefined;
+    if (qw?.type && qw.type !== 'none') {
+      const shouldClose = await this.quickWinExecutor.shouldAutoClose(decision, decisionId);
+      if (shouldClose) {
+        const qwResult = await this.quickWinExecutor.executeAutoClose(decision, decisionId);
+        await this.observer.logOutcome(decisionId, qwResult);
+        if (!qwResult.success) {
+          console.warn(`[agent] Quick-win auto-close failed for ${decision.ticketKey}: ${qwResult.error}`);
+        }
+        this.ticketsProcessed++;
+        return;
+      }
     }
 
     // Route based on action + approval requirement

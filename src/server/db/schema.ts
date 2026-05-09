@@ -1202,6 +1202,35 @@ async function runMigrations(): Promise<void> {
 
     `IF COL_LENGTH('dev_review_thread', 'body_adf') IS NULL
      ALTER TABLE dev_review_thread ADD body_adf NVARCHAR(MAX) NULL;`,
+
+    // Quick-win detection columns on agent_decisions
+    `IF COL_LENGTH('agent_decisions', 'quick_win_type') IS NULL
+     ALTER TABLE agent_decisions ADD quick_win_type NVARCHAR(30) NULL;`,
+
+    `IF COL_LENGTH('agent_decisions', 'quick_win_confidence') IS NULL
+     ALTER TABLE agent_decisions ADD quick_win_confidence FLOAT NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_quick_win')
+     CREATE INDEX IX_agent_decisions_quick_win ON agent_decisions (quick_win_type) WHERE quick_win_type IS NOT NULL;`,
+
+    // Quick-win auto-close execution tracking
+    `IF COL_LENGTH('agent_decisions', 'quick_win_executed') IS NULL
+     ALTER TABLE agent_decisions ADD quick_win_executed BIT NOT NULL DEFAULT 0;`,
+
+    `IF COL_LENGTH('agent_decisions', 'quick_win_executed_at') IS NULL
+     ALTER TABLE agent_decisions ADD quick_win_executed_at DATETIME2 NULL;`,
+
+    `IF COL_LENGTH('agent_decisions', 'pre_close_status') IS NULL
+     ALTER TABLE agent_decisions ADD pre_close_status NVARCHAR(100) NULL;`,
+
+    `IF COL_LENGTH('agent_decisions', 'quick_win_undone') IS NULL
+     ALTER TABLE agent_decisions ADD quick_win_undone BIT NOT NULL DEFAULT 0;`,
+
+    `IF COL_LENGTH('agent_decisions', 'quick_win_undone_at') IS NULL
+     ALTER TABLE agent_decisions ADD quick_win_undone_at DATETIME2 NULL;`,
+
+    `IF COL_LENGTH('agent_decisions', 'quick_win_undone_by') IS NULL
+     ALTER TABLE agent_decisions ADD quick_win_undone_by NVARCHAR(100) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

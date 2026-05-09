@@ -74,7 +74,9 @@ export type AgentAction =
   | 'alert'
   | 'bug_redirect'
   | 'plugin_to_tpj'
-  | 'abuse_report';
+  | 'abuse_report'
+  | 'quick_win_close'
+  | 'undo_close';
 
 export interface CommentSnapshot {
   author: string;

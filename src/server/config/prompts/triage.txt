@@ -92,6 +92,18 @@ Produce a JSON object with the following structure:
    - reason: one sentence explaining your assessment (e.g. "Common how-to question about feed configuration" or "One-off data issue, no article needed")
    - suggested_title: if should_have_article is true, suggest a concise KB article title. Otherwise null.
 
+10. **quick_win** — Assess whether this ticket is a "quick win" that could potentially be resolved without human judgment. Quick win types:
+   - **spam**: Junk mail, phishing, vendor outreach, automated bounce-backs, out-of-office auto-replies, test submissions, gibberish, bot-generated content. NOT a real customer asking for help.
+   - **thank_you**: Customer replied with thanks, confirmation, "all sorted", or acknowledgment of resolution. No new question or issue raised. The ticket's purpose has been fulfilled.
+   - **kba_match**: The question is directly and completely answered by one of the KB articles listed in the "Knowledge Base Matches" section above. Only flag this if the article covers the EXACT issue — not just a related topic. Set `suggested_kba` to the matching article title.
+   - **stale_no_response**: The description itself indicates the issue is no longer relevant, or the ticket is extremely old (30+ days) with no recent activity and the original issue was minor. Do NOT flag tickets where the customer is actively waiting for us.
+   - **duplicate**: Customer explicitly states this is a duplicate of another ticket (e.g. "same as NT-1234"), or the description is essentially a copy of another submission.
+   - **auto_resolved**: Customer or description indicates the problem fixed itself, was transient, or has already been resolved by other means. Comments or description contain phrases like "working now", "resolved itself", "never mind".
+   - **none**: This ticket requires genuine human attention. Use this when unsure.
+   - confidence: How certain you are that this IS a quick win (0.0 to 1.0). Only set above 0.85 if you are very confident. When in doubt, return "none".
+   - reasoning: One sentence explaining your classification.
+   - suggested_kba: If type is "kba_match", the title of the matching KB article from above. Otherwise null.
+
 ## Hard Rules (non-negotiable)
 
 - Never promise refunds, credits, or compensation — that is a commercial decision for humans only

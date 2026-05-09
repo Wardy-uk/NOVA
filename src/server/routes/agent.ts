@@ -145,12 +145,20 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   router.get('/decisions', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 500);
     const offset = parseInt(req.query.offset as string, 10) || 0;
+    const quickWinType = req.query.quick_win_type as string | undefined;
+    const eventType = req.query.event_type as string | undefined;
     const observer = agentLoop.getObserver();
-    const [decisions, total] = await Promise.all([
-      observer.getDecisions(limit, offset),
-      observer.getDecisionsCount(),
-    ]);
-    res.json({ ok: true, data: decisions, total });
+
+    if (quickWinType || eventType) {
+      const decisions = await observer.getDecisionsFiltered({ limit, offset, quickWinType, eventType });
+      res.json({ ok: true, data: decisions, total: decisions.length + offset });
+    } else {
+      const [decisions, total] = await Promise.all([
+        observer.getDecisions(limit, offset),
+        observer.getDecisionsCount(),
+      ]);
+      res.json({ ok: true, data: decisions, total });
+    }
   });
 
   router.get('/decisions/:id', async (req, res) => {
@@ -542,6 +550,62 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data: { message: 'All autonomy rules disabled.' } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Kill switch failed' });
+    }
+  });
+
+  // ── Quick Win Settings & Stats ──
+
+  const QW_TYPES = ['spam', 'thank_you', 'kba_match', 'stale_no_response', 'duplicate', 'auto_resolved'] as const;
+
+  router.get('/quick-win/settings', (_req, res) => {
+    const sq = deps?.settingsQueries;
+    if (!sq) return res.status(503).json({ ok: false, error: 'Settings not available' });
+    const result: Record<string, unknown> = {
+      min_confidence: parseFloat(sq.get('agent_quick_win_min_confidence') || '0.90'),
+    };
+    for (const t of QW_TYPES) {
+      result[t] = sq.get(`agent_quick_win_auto_close_${t}`) === 'true';
+    }
+    res.json({ ok: true, data: result });
+  });
+
+  router.put('/quick-win/settings', requireSuperAdmin(), (req, res) => {
+    const sq = deps?.settingsQueries;
+    if (!sq) return res.status(503).json({ ok: false, error: 'Settings not available' });
+    const body = req.body as Record<string, unknown>;
+    if (body.min_confidence !== undefined) {
+      const mc = Math.max(0.85, Math.min(1, Number(body.min_confidence)));
+      sq.set('agent_quick_win_min_confidence', String(mc));
+    }
+    for (const t of QW_TYPES) {
+      if (body[t] !== undefined) {
+        sq.set(`agent_quick_win_auto_close_${t}`, body[t] ? 'true' : 'false');
+      }
+    }
+    res.json({ ok: true });
+  });
+
+  router.get('/quick-win/stats', async (_req, res) => {
+    try {
+      const observer = agentLoop.getObserver();
+      const stats = await observer.getQuickWinStats();
+      res.json({ ok: true, data: stats });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Stats failed' });
+    }
+  });
+
+  router.post('/decisions/:id/undo-close', requireSuperAdmin(), async (req, res) => {
+    const id = parseInt(req.params.id as string, 10);
+    if (isNaN(id)) return res.status(400).json({ ok: false, error: 'Invalid ID' });
+    const username = (req as any).user?.username ?? 'unknown';
+    try {
+      const executor = agentLoop.getQuickWinExecutor();
+      if (!executor) return res.status(503).json({ ok: false, error: 'Quick-win executor not available' });
+      const result = await executor.undoClose(id, username);
+      res.json({ ok: result.success, data: result, error: result.success ? undefined : result.error });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Undo failed' });
     }
   });
 
