@@ -255,6 +255,15 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.post('/backfill', requireRole('admin'), async (_req, res) => {
+    try {
+      const result = await agentLoop.runBackfillSweep();
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Backfill failed' });
+    }
+  });
+
   router.get('/stats', async (_req, res) => {
     try {
       const stats = await agentLoop.getObserver().getStats();

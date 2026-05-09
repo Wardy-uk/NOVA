@@ -86,7 +86,7 @@ export interface CommentSnapshot {
 export interface TicketEvent {
   ticketId: string;
   ticketKey: string;
-  eventType: 'ticket_created' | 'comment_added' | 'status_changed' | 'sla_warning' | 'stale' | 'resolution_review';
+  eventType: 'ticket_created' | 'comment_added' | 'status_changed' | 'sla_warning' | 'stale' | 'resolution_review' | 'backfill';
   summary: string;
   description: string;
   status: string;

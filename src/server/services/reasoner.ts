@@ -62,6 +62,10 @@ export class Reasoner {
     return results;
   }
 
+  async triageBackfill(event: TicketEvent): Promise<AgentDecision> {
+    return this.triageNewTicket(event);
+  }
+
   private async triageNewTicket(event: TicketEvent): Promise<AgentDecision> {
     const kbMatches = await this.kbSearch.search(`${event.summary} ${event.description.slice(0, 200)}`);
     const kbText = this.kbSearch.formatForPrompt(kbMatches);

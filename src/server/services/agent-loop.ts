@@ -207,6 +207,9 @@ export class AgentLoop {
     console.log(`[agent] Starting agent loop (interval: ${intervalMs}ms, mode: ${this.currentMode}, isWorkingHours=${working}, tz=${debug.tz}, day=${debug.parsedWeekday}/${debug.parsedDay}, time=${debug.parsedHour}:${String(debug.parsedMinute ?? '').padStart(2, '0')}, days=${debug.workingDays}, hours=${debug.workingHours})`);
 
     this.checkAutonomyReadiness().catch(() => {});
+    this.riskScorer.runStartupCleanup().catch(err => {
+      console.warn('[agent] Startup cleanup failed:', err instanceof Error ? err.message : err);
+    });
 
     this.tick();
     this.timer = setInterval(() => this.tick(), intervalMs);
@@ -582,6 +585,7 @@ export class AgentLoop {
           await this.runTicketClassification();
           await this.runCoachingHealthChecks();
           await this.runRiskSweep();
+          await this.runBackfillTriage();
         }
       }
 
@@ -703,6 +707,21 @@ export class AgentLoop {
       console.log(`[agent] Risk sweep complete — ${result.flagged} flagged, ${result.notified} notified`);
     } catch (err) {
       console.warn(`[agent] Risk sweep failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  private async runBackfillTriage(): Promise<void> {
+    const enabled = this.settings.get('agent_backfill_enabled');
+    if (enabled === 'false' || enabled === '0') return;
+
+    try {
+      console.log(`[agent] Running backfill triage sweep...`);
+      const result = await this.runBackfillSweep();
+      if (result.processed > 0 || result.errors > 0) {
+        console.log(`[agent] Backfill triage complete — ${result.processed} processed, ${result.errors} errors`);
+      }
+    } catch (err) {
+      console.warn(`[agent] Backfill triage failed:`, err instanceof Error ? err.message : err);
     }
   }
 
@@ -1121,5 +1140,84 @@ export class AgentLoop {
       }
     }
     // 'cancel' / 'cancelled' — no action needed
+  }
+
+  async runBackfillSweep(): Promise<{ processed: number; skipped: number; errors: number }> {
+    const batchSize = this.getNumber('agent_backfill_batch_size', 10);
+    const agentProject = this.settings.get('agent_jira_project') || 'NT';
+    const projects = agentProject.split(',').map(p => p.trim());
+    const projectPlaceholders = projects.map(() => '?').join(',');
+
+    const untriaged = await query<{
+      issue_key: string; jira_id: string; summary: string; description_text: string;
+      status_name: string; priority_name: string; request_type: string;
+      assignee_display: string; reporter_display: string; reporter_email: string;
+      jira_created: string; jira_updated: string; sla_breach_time: string;
+      fields_json: string;
+    }>(
+      `SELECT TOP (${batchSize}) c.issue_key, c.jira_id, c.summary, c.description_text,
+              c.status_name, c.priority_name, c.request_type,
+              c.assignee_display, c.reporter_display, c.reporter_email,
+              c.jira_created, c.jira_updated, c.sla_breach_time, c.fields_json
+       FROM jira_issue_cache c
+       LEFT JOIN agent_decisions d ON d.ticket_id = c.issue_key
+       WHERE c.project_key IN (${projectPlaceholders})
+         AND c.status_category != 'done'
+         AND d.id IS NULL
+       ORDER BY c.jira_created DESC`,
+      projects,
+    );
+
+    if (untriaged.length === 0) {
+      return { processed: 0, skipped: 0, errors: 0 };
+    }
+
+    console.log(`[agent] Backfill sweep: ${untriaged.length} untriaged tickets found`);
+
+    let processed = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    for (const row of untriaged) {
+      const event = {
+        ticketId: row.jira_id,
+        ticketKey: row.issue_key,
+        eventType: 'backfill' as const,
+        summary: row.summary ?? '',
+        description: row.description_text ?? '',
+        status: row.status_name ?? 'Unknown',
+        priority: row.priority_name ?? 'Medium',
+        requestType: row.request_type ?? '',
+        assignee: row.assignee_display ?? null,
+        reporter: row.reporter_display ?? null,
+        reporterEmail: row.reporter_email ?? null,
+        organisation: row.reporter_email?.split('@')[1] ?? null,
+        created: row.jira_created ?? '',
+        updated: row.jira_updated ?? '',
+        slaBreachTime: row.sla_breach_time ?? null,
+        fields: row.fields_json ? JSON.parse(row.fields_json) : {},
+      };
+
+      try {
+        const decision = await this.reasoner.triageBackfill(event);
+        decision.shadowMode = true;
+        decision.eventType = 'backfill';
+
+        const decisionId = await this.observer.logDecision(decision);
+        await this.observer.logOutcome(decisionId, {
+          success: true,
+          action: decision.action,
+          ticketKey: decision.ticketKey,
+          detail: `[BACKFILL] Shadow triage complete. Confidence: ${decision.confidence.toFixed(2)}`,
+        });
+        processed++;
+      } catch (err) {
+        console.error(`[agent] Backfill triage failed for ${row.issue_key}:`, err instanceof Error ? err.message : err);
+        errors++;
+      }
+    }
+
+    console.log(`[agent] Backfill sweep complete: ${processed} processed, ${skipped} skipped, ${errors} errors`);
+    return { processed, skipped, errors };
   }
 }

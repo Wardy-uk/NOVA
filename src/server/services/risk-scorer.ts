@@ -63,6 +63,20 @@ export class RiskScorer {
     this.settings = settings;
   }
 
+  async runStartupCleanup(): Promise<void> {
+    const guard = this.settings.get('agent_retune_v2_applied');
+    if (guard) return;
+
+    console.log('[risk] Running one-time retune v2 stale flag dismissal...');
+    const result = await execute(
+      `UPDATE agent_flagged_tickets
+       SET status = 'dismissed', reviewed_by = 'system-retune', reviewed_at = GETUTCDATE()
+       WHERE status = 'pending'`,
+    );
+    console.log(`[risk] Dismissed all pending flagged tickets for retune v2`);
+    this.settings.set('agent_retune_v2_applied', 'true');
+  }
+
   private getThreshold(): number {
     const val = this.settings.get('agent_risk_threshold');
     return val ? parseInt(val, 10) || 60 : 60;
