@@ -310,7 +310,7 @@ interface ApprovalHealth {
 
 export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { userRole?: string; onNavigateToWorkspace?: (filter: { aiAction?: string }) => void }) {
   const isSuperAdmin = checkSuperAdmin(userRole);
-  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'kb-index' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement' | 'pipelines' | 'assignment'>('overview');
+  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'kb-index' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement' | 'pipelines' | 'assignment' | 'predictions' | 'incidents' | 'sla-management'>('overview');
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
@@ -485,6 +485,9 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
           { key: 'quick-actions', label: 'Quick Actions' },
           { key: 'providers', label: 'Providers' },
           { key: 'assignment' as const, label: 'Assignment' },
+          { key: 'predictions' as const, label: 'Predictions' },
+          { key: 'incidents' as const, label: 'Incidents' },
+          { key: 'sla-management' as const, label: 'SLA Mgmt' },
           ...(isSuperAdmin ? [{ key: 'pipelines' as const, label: 'Pipelines' }] : []),
           ...(isSuperAdmin ? [{ key: 'costs' as const, label: 'Costs' }] : []),
         ] as const).map(t => (
@@ -515,6 +518,9 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       {tab === 'providers' && <ProvidersTab providers={providers} confHistory={confHistory} />}
       {tab === 'flagged' && <FlaggedTab tickets={flaggedTickets} onRefresh={() => { api('/flagged').then(r => { if (r.ok) setFlaggedTickets(r.data); }); api('/flagged/summary').then(r => { if (r.ok) setFlaggedSummary(r.data); }); }} />}
       {tab === 'assignment' && <AssignmentTab isSuperAdmin={isSuperAdmin} />}
+      {tab === 'predictions' && <PredictionsTab />}
+      {tab === 'incidents' && <IncidentsTab />}
+      {tab === 'sla-management' && <SlaManagementTab />}
       {tab === 'pipelines' && <PipelinesTab />}
       {tab === 'costs' && <CostsTab data={costData} onPeriodChange={(days) => api(`/costs?days=${days}`).then(r => { if (r.ok) setCostData(r.data); })} />}
 
@@ -4269,6 +4275,253 @@ function AssignmentTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           <button onClick={saveProjectPools} disabled={saving} className="mt-2 px-3 py-1 bg-green-900/40 text-green-400 text-xs rounded hover:bg-green-900/60 disabled:opacity-50">
             {saving ? 'Saving...' : 'Save'}
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Predictions Tab ──
+function PredictionsTab() {
+  const [predictions, setPredictions] = useState<any[]>([]);
+  const [accuracy, setAccuracy] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [testKey, setTestKey] = useState('');
+  const [testResult, setTestResult] = useState<any>(null);
+
+  useEffect(() => {
+    Promise.all([
+      api('/predictions/active').then(r => { if (r.ok) setPredictions(r.data ?? []); }),
+      api('/predictions/accuracy').then(r => { if (r.ok) setAccuracy(r.data); }),
+    ]).finally(() => setLoading(false));
+  }, []);
+
+  const runTest = async () => {
+    if (!testKey.trim()) return;
+    const r = await api('/predictions/test', { method: 'POST', body: JSON.stringify({ ticketKey: testKey.trim() }) });
+    if (r.ok) setTestResult(r.data);
+  };
+
+  if (loading) return <div className="text-neutral-400 text-sm p-4">Loading predictions...</div>;
+
+  return (
+    <div className="space-y-4 p-4">
+      {accuracy && (
+        <div className="grid grid-cols-4 gap-3">
+          {[
+            { label: 'Total Predictions', value: accuracy.total },
+            { label: 'Correct', value: accuracy.correct, color: 'text-green-400' },
+            { label: 'Incorrect', value: accuracy.incorrect, color: 'text-red-400' },
+            { label: 'Accuracy Rate', value: `${(accuracy.accuracy * 100).toFixed(1)}%`, color: accuracy.accuracy >= 0.7 ? 'text-green-400' : 'text-amber-400' },
+          ].map(s => (
+            <div key={s.label} className="bg-[#2f353d] rounded-lg p-3 text-center">
+              <div className={`text-lg font-bold ${s.color || 'text-neutral-200'}`}>{s.value}</div>
+              <div className="text-xs text-neutral-500 mt-1">{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="bg-[#2f353d] rounded-lg p-4">
+        <h3 className="text-sm font-medium text-neutral-200 mb-2">Test Prediction</h3>
+        <div className="flex gap-2">
+          <input
+            value={testKey}
+            onChange={e => setTestKey(e.target.value)}
+            placeholder="Enter ticket key (e.g. NT-1234)"
+            className="flex-1 bg-[#252a31] text-xs text-neutral-300 rounded px-3 py-2 border border-[#3a424d]"
+          />
+          <button onClick={runTest} className="px-3 py-1.5 bg-[#5ec1ca]/20 text-[#5ec1ca] text-xs rounded hover:bg-[#5ec1ca]/30">
+            Predict
+          </button>
+        </div>
+        {testResult && (
+          <div className="mt-3 bg-[#252a31] rounded p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`text-sm font-bold ${testResult.probability >= 0.75 ? 'text-red-400' : testResult.probability >= 0.5 ? 'text-amber-400' : 'text-green-400'}`}>
+                {(testResult.probability * 100).toFixed(0)}% escalation risk
+              </span>
+            </div>
+            <p className="text-xs text-neutral-400">{testResult.reasoning}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-[#2f353d] rounded-lg p-4">
+        <h3 className="text-sm font-medium text-neutral-200 mb-3">Active High-Risk Predictions</h3>
+        {predictions.length === 0 ? (
+          <p className="text-xs text-neutral-500">No active predictions</p>
+        ) : (
+          <div className="space-y-2">
+            {predictions.map((p: any) => (
+              <div key={p.ticket_key} className="flex items-center justify-between bg-[#252a31] rounded p-2">
+                <div>
+                  <span className="text-xs font-mono text-[#5ec1ca]">{p.ticket_key}</span>
+                  <span className="text-xs text-neutral-400 ml-2">{new Date(p.predicted_at).toLocaleDateString()}</span>
+                </div>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                  p.probability >= 0.75 ? 'bg-red-900/40 text-red-400' : 'bg-amber-900/40 text-amber-400'
+                }`}>
+                  {(p.probability * 100).toFixed(0)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Incidents Tab ──
+function IncidentsTab() {
+  const [incidents, setIncidents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = () => {
+    setLoading(true);
+    api('/incidents/active').then(r => {
+      if (r.ok) setIncidents(r.data ?? []);
+    }).finally(() => setLoading(false));
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  const resolveIncident = async (id: number) => {
+    const r = await api(`/incidents/${id}/resolve`, { method: 'POST' });
+    if (r.ok) refresh();
+  };
+
+  const runScan = async () => {
+    const r = await api('/incidents/scan', { method: 'POST' });
+    if (r.ok) refresh();
+  };
+
+  if (loading) return <div className="text-neutral-400 text-sm p-4">Loading incidents...</div>;
+
+  return (
+    <div className="space-y-4 p-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium text-neutral-200">Active Incidents</h3>
+        <div className="flex gap-2">
+          <button onClick={runScan} className="px-3 py-1.5 bg-amber-900/30 text-amber-400 text-xs rounded hover:bg-amber-900/40">
+            Run Scan Now
+          </button>
+          <button onClick={refresh} className="px-3 py-1.5 bg-[#2f353d] text-neutral-400 text-xs rounded hover:bg-[#3a424d]">
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {incidents.length === 0 ? (
+        <div className="bg-[#2f353d] rounded-lg p-8 text-center">
+          <p className="text-neutral-500 text-sm">No active incidents detected</p>
+          <p className="text-neutral-600 text-xs mt-1">Scans run every 15 minutes automatically</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {incidents.map((inc: any) => (
+            <div key={inc.id} className="bg-[#2f353d] rounded-lg p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    {inc.incident_key && (
+                      <span className="text-xs font-mono text-red-400">{inc.incident_key}</span>
+                    )}
+                    <span className={`text-xs px-2 py-0.5 rounded ${
+                      inc.status === 'open' ? 'bg-red-900/40 text-red-400' : 'bg-amber-900/40 text-amber-400'
+                    }`}>{inc.status}</span>
+                  </div>
+                  <p className="text-sm text-neutral-200">{inc.summary}</p>
+                  {inc.root_cause && (
+                    <p className="text-xs text-neutral-400 mt-1">Root cause: {inc.root_cause}</p>
+                  )}
+                  <div className="flex items-center gap-4 mt-2 text-xs text-neutral-500">
+                    <span>{inc.ticket_count} tickets</span>
+                    <span>{new Date(inc.detected_at).toLocaleString()}</span>
+                  </div>
+                  {Array.isArray(inc.ticket_keys) && inc.ticket_keys.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {inc.ticket_keys.map((k: string) => (
+                        <span key={k} className="text-xs font-mono bg-[#252a31] text-[#5ec1ca] px-1.5 py-0.5 rounded">{k}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => resolveIncident(inc.id)}
+                  className="px-3 py-1.5 bg-green-900/30 text-green-400 text-xs rounded hover:bg-green-900/40"
+                >
+                  Resolve
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── SLA Management Tab ──
+function SlaManagementTab() {
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api('/sla-management/stats').then(r => {
+      if (r.ok) setStats(r.data);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="text-neutral-400 text-sm p-4">Loading SLA management data...</div>;
+
+  return (
+    <div className="space-y-4 p-4">
+      {stats && (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-[#2f353d] rounded-lg p-3 text-center">
+              <div className="text-lg font-bold text-neutral-200">{stats.total}</div>
+              <div className="text-xs text-neutral-500 mt-1">Total Interventions (30d)</div>
+            </div>
+            <div className="bg-[#2f353d] rounded-lg p-3 text-center">
+              <div className="text-lg font-bold text-green-400">{stats.breaches_prevented}</div>
+              <div className="text-xs text-neutral-500 mt-1">Breaches Prevented</div>
+            </div>
+            <div className="bg-[#2f353d] rounded-lg p-3 text-center">
+              <div className="text-lg font-bold text-[#5ec1ca]">
+                {stats.total > 0 ? ((stats.breaches_prevented / stats.total) * 100).toFixed(0) : 0}%
+              </div>
+              <div className="text-xs text-neutral-500 mt-1">Prevention Rate</div>
+            </div>
+          </div>
+
+          <div className="bg-[#2f353d] rounded-lg p-4">
+            <h3 className="text-sm font-medium text-neutral-200 mb-3">Intervention Breakdown</h3>
+            <div className="space-y-2">
+              {Object.entries(stats.by_type ?? {}).map(([type, count]: [string, any]) => (
+                <div key={type} className="flex items-center justify-between bg-[#252a31] rounded p-2">
+                  <span className="text-xs text-neutral-300">
+                    {type === 'log_warning' ? 'Warning (120min)' :
+                     type === 'auto_assign' ? 'Auto-Assign (60min)' :
+                     type === 'nudge_agent' ? 'Agent Nudge (30min)' :
+                     type === 'escalate_lead' ? 'Lead Escalation (15min)' : type}
+                  </span>
+                  <span className="text-xs font-mono text-neutral-400">{String(count)}</span>
+                </div>
+              ))}
+              {Object.keys(stats.by_type ?? {}).length === 0 && (
+                <p className="text-xs text-neutral-500">No interventions recorded yet</p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {!stats && (
+        <div className="bg-[#2f353d] rounded-lg p-8 text-center">
+          <p className="text-neutral-500 text-sm">SLA management data unavailable</p>
         </div>
       )}
     </div>

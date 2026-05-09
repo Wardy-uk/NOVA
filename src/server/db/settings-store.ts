@@ -31,7 +31,12 @@ function save(data: SettingsData): void {
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }
 
-export type SettingsQueries = FileSettingsQueries;
+export interface SettingsQueries {
+  get(key: string): string | null;
+  set(key: string, value: string): void;
+  getAll(): Record<string, string>;
+  delete(key: string): void;
+}
 
 export class FileSettingsQueries {
   get(key: string): string | null {

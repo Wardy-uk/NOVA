@@ -79,6 +79,14 @@ import { createBranchRoutes } from './routes/branches.js';
 import { createBrandSettingsRoutes } from './routes/brand-settings.js';
 import { createLogoRoutes } from './routes/logos.js';
 import { ProblemTicketScanner } from './services/problem-ticket-scanner.js';
+import { JobRegistry } from './services/job-registry.js';
+import { EscalationPredictor } from './services/escalation-predictor.js';
+import { IncidentDetector } from './services/incident-detector.js';
+import { SlaManager } from './services/sla-manager.js';
+import { createPredictionRoutes } from './routes/predictions.js';
+import { createIncidentRoutes } from './routes/incidents.js';
+import { createSlaManagementRoutes } from './routes/sla-management.js';
+import { createAdminJobRoutes } from './routes/admin-jobs.js';
 import { createProblemTicketRoutes } from './routes/problem-tickets.js';
 import { AzDoClient } from './services/azdo-client.js';
 import { BymClient } from './services/bym-client.js';
@@ -159,6 +167,9 @@ async function main() {
   // 1. Database
   console.log('[N.O.V.A] Initializing database...');
   await initializeDatabase();
+
+  // Job registry — central visibility for all background timers
+  const jobRegistry = new JobRegistry();
 
   // Forward declaration — populated later when Jira creds are available
   let agentLoop: AgentLoop | null = null;
@@ -853,6 +864,7 @@ async function main() {
   app.use('/api/training', createTrainingRoutes(trainingQueries, userQueries, requireAreaAccess, settingsQueries));
 
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries, buildServiceDeskJiraClient, userTeamQueries));
+  app.use('/api/admin/jobs', createAdminJobRoutes(jobRegistry));
 
   // Wallboard diagnostics log endpoints (admin-only)
   app.get('/api/admin/wallboard-logs', (req, res) => {
@@ -1075,6 +1087,36 @@ async function main() {
       escalationLog,
       jiraClient: agentLoop.getJiraClient(),
     }));
+
+    // P5: Predictive Intelligence + Platform Hardening services
+    const escalationPredictor = new EscalationPredictor(llmService, settingsQueries);
+    const incidentDetector = new IncidentDetector(llmService, settingsQueries, agentJiraClient);
+    const slaManager = new SlaManager(settingsQueries, agentJiraClient, assignmentEngine);
+
+    app.use('/api/agent/predictions', createPredictionRoutes(escalationPredictor));
+    app.use('/api/agent/incidents', createIncidentRoutes(incidentDetector));
+    app.use('/api/agent/sla-management', createSlaManagementRoutes(slaManager));
+
+    // Incident detection — piggyback on problem scanner interval (every 15 min)
+    jobRegistry.register('incident-scan', 'Incident Detection Scan', async () => {
+      try { await incidentDetector.scan(); } catch (e) {
+        console.warn('[incident-detector] scan failed:', e instanceof Error ? e.message : e);
+      }
+    }, 15 * 60 * 1000);
+
+    // SLA proactive management — check every 5 min during working hours
+    jobRegistry.register('sla-proactive', 'Proactive SLA Management', async () => {
+      try {
+        if (!assignmentEngine.isWorkingTime()) return;
+        const projects = assignmentEngine.getConfiguredProjects();
+        const projectJql = projects.length === 1 ? `project = ${projects[0]}` : `project IN (${projects.join(', ')})`;
+        const jql = `${projectJql} AND resolution = EMPTY ORDER BY created DESC`;
+        const result = await agentJiraClient.searchJql(jql, undefined, 200);
+        await slaManager.runProactiveCheck(result.issues);
+      } catch (e) {
+        console.warn('[sla-manager] proactive check failed:', e instanceof Error ? e.message : e);
+      }
+    }, 5 * 60 * 1000);
 
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,

@@ -83,7 +83,7 @@ export class AssignmentEngine {
     return this.kpiPool;
   }
 
-  async assign(ticketKey: string, pool: Pool = 'cc', preferredSkills?: string[], projectKey?: string): Promise<AssignmentResult | null> {
+  async assign(ticketKey: string, pool: Pool = 'cc', preferredSkills?: string[], projectKey?: string, options?: { reporterEmail?: string; complexity?: number }): Promise<AssignmentResult | null> {
     this.refreshClockIfNeeded();
     if (!this.workingDayClock.isWorkingTime(new Date())) {
       console.log(`[assignment] Outside working hours — skipping assignment for ${ticketKey}`);
@@ -96,17 +96,29 @@ export class AssignmentEngine {
     const available = await this.getAvailableAgents(pool);
     if (available.length === 0) return null;
 
-    const loads = await this.getAgentLoads(available);
+    const loads = await this.getAgentLoads(available, options?.complexity);
     let ranked = this.rankByCapacity(loads);
+    let assignmentReason: string = 'capacity_best';
+
+    // Customer continuity: boost agent who previously resolved for this reporter
+    const continuityEnabled = this.settingsQueries.get('assignment_customer_continuity_enabled') !== 'false';
+    if (continuityEnabled && options?.reporterEmail) {
+      const continuityResult = await this.boostByCustomerContinuity(ranked, options.reporterEmail);
+      if (continuityResult.boosted) {
+        ranked = continuityResult.ranked;
+        assignmentReason = 'customer_continuity';
+      }
+    }
 
     if (preferredSkills?.length) {
       ranked = this.boostBySkills(ranked, preferredSkills);
+      if (assignmentReason === 'capacity_best') assignmentReason = 'skill_match';
     }
 
     const chosen = ranked[0];
     if (!chosen) return null;
 
-    await this.recordAssignment(ticketKey, pool, chosen, project);
+    await this.recordAssignment(ticketKey, pool, chosen, project, assignmentReason);
     await this.updateLastAssigned(chosen.agent.id);
 
     return {
@@ -323,7 +335,7 @@ export class AssignmentEngine {
 
   // --- Private helpers ---
 
-  private async getAgentLoads(agents: RosterAgent[]): Promise<AgentLoad[]> {
+  private async getAgentLoads(agents: RosterAgent[], complexityWeight: number = 1): Promise<AgentLoad[]> {
     const loads: AgentLoad[] = [];
     const projects = this.getConfiguredProjects();
     const projectJql = projects.length === 1 ? `project = ${projects[0]}` : `project IN (${projects.join(', ')})`;
@@ -338,14 +350,45 @@ export class AssignmentEngine {
         openCount = 0;
       }
 
+      // Complexity-aware: effective slots = openCount + (complexityWeight - 1) for the incoming ticket
+      const effectiveLoad = openCount + Math.max(0, complexityWeight - 1);
+
       loads.push({
         agent,
         openCount,
-        capacityRatio: agent.max_capacity > 0 ? openCount / agent.max_capacity : 1,
+        capacityRatio: agent.max_capacity > 0 ? effectiveLoad / agent.max_capacity : 1,
       });
     }
 
     return loads;
+  }
+
+  private async boostByCustomerContinuity(
+    ranked: AgentLoad[],
+    reporterEmail: string,
+  ): Promise<{ ranked: AgentLoad[]; boosted: boolean }> {
+    const days = parseInt(this.settingsQueries.get('assignment_customer_continuity_days') ?? '30', 10);
+    const previous = await queryOne<{ assignee_account_id: string; assignee_name: string }>(
+      `SELECT TOP 1 assignee_account_id, assignee_name FROM jira_issue_cache
+       WHERE reporter_email = ?
+         AND status_name IN ('Done', 'Resolved', 'Closed')
+         AND resolved_date >= DATEADD(day, -?, GETUTCDATE())
+       ORDER BY resolved_date DESC`,
+      [reporterEmail, days],
+    );
+
+    if (!previous?.assignee_account_id) return { ranked, boosted: false };
+
+    const idx = ranked.findIndex(r => r.agent.jira_account_id === previous.assignee_account_id);
+    if (idx <= 0) return { ranked, boosted: idx === 0 };
+
+    // Only boost if the agent isn't at capacity
+    const agent = ranked[idx];
+    if (agent.capacityRatio >= 0.9) return { ranked, boosted: false };
+
+    const boosted = [agent, ...ranked.filter((_, i) => i !== idx)];
+    console.log(`[assignment] Customer continuity: boosting ${previous.assignee_name} for repeat reporter ${reporterEmail}`);
+    return { ranked: boosted, boosted: true };
   }
 
   private rankByCapacity(loads: AgentLoad[]): AgentLoad[] {
@@ -367,11 +410,11 @@ export class AssignmentEngine {
     });
   }
 
-  private async recordAssignment(ticketKey: string, pool: Pool, chosen: AgentLoad, project: string = 'NT'): Promise<void> {
+  private async recordAssignment(ticketKey: string, pool: Pool, chosen: AgentLoad, project: string = 'NT', assignmentReason: string = 'capacity_best'): Promise<void> {
     await executeAndGetId(`
-      INSERT INTO agent_assignment_log (ticket_key, pool, assigned_to, reason, open_ticket_count, project_key)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [ticketKey, pool, chosen.agent.display_name, this.buildReason(chosen), chosen.openCount, project]);
+      INSERT INTO agent_assignment_log (ticket_key, pool, assigned_to, reason, open_ticket_count, project_key, assignment_reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [ticketKey, pool, chosen.agent.display_name, this.buildReason(chosen), chosen.openCount, project, assignmentReason]);
   }
 
   private async updateLastAssigned(agentId: number): Promise<void> {

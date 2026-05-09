@@ -4,6 +4,7 @@ import { AuditLogView } from './AuditPanel.js';
 import { SsoLogPanel } from './SsoLogPanel.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
 import { AgentAdminView } from './AgentAdminView.js';
+import { BackgroundJobsPanel } from './BackgroundJobsPanel.js';
 import { WallboardLogPanel } from './WallboardLogPanel.js';
 
 
@@ -1220,6 +1221,10 @@ export function AdminView() {
 
       <CollapsibleSection title="Agents">
         <AgentAdminView />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Background Jobs">
+        <BackgroundJobsPanel />
       </CollapsibleSection>
 
       <CollapsibleSection title="Teams">

@@ -1395,6 +1395,116 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE kb_article_drafts ADD rejected_at DATETIME2 NULL;`,
     `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'kb_article_drafts') AND name = 'rejection_reason')
      ALTER TABLE kb_article_drafts ADD rejection_reason NVARCHAR(500) NULL;`,
+
+    // ── P5: nova_settings (settings store migration) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'nova_settings') AND type = 'U')
+     CREATE TABLE nova_settings (
+       setting_key VARCHAR(100) NOT NULL PRIMARY KEY,
+       setting_value NVARCHAR(MAX) NULL,
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    // ── P5: teams table extensions (department, manager) ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'teams') AND name = 'department')
+     ALTER TABLE teams ADD department NVARCHAR(100) NULL;`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'teams') AND name = 'manager_user_id')
+     ALTER TABLE teams ADD manager_user_id INT NULL;`,
+
+    // Seed default teams if empty
+    `IF NOT EXISTS (SELECT 1 FROM teams WHERE name = '2nd Line Technical Support')
+     INSERT INTO teams (name, department, description) VALUES
+       ('2nd Line Technical Support', 'Technical', 'T2 support team');`,
+    `IF NOT EXISTS (SELECT 1 FROM teams WHERE name = '1st Line Customer Care')
+     INSERT INTO teams (name, department, description) VALUES
+       ('1st Line Customer Care', 'Support', 'CC front-line support');`,
+    `IF NOT EXISTS (SELECT 1 FROM teams WHERE name = 'Digital Design')
+     INSERT INTO teams (name, department, description) VALUES
+       ('Digital Design', 'Digital', 'Digital design team');`,
+
+    // ── P5: assignment_log — assignment_reason column ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_assignment_log') AND name = 'assignment_reason')
+     ALTER TABLE agent_assignment_log ADD assignment_reason NVARCHAR(200) NULL;`,
+
+    // ── P5: agent_decisions — novel type + learning columns ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_decisions') AND name = 'is_novel_type')
+     ALTER TABLE agent_decisions ADD is_novel_type BIT DEFAULT 0;`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_decisions') AND name = 'learning_acquired_at')
+     ALTER TABLE agent_decisions ADD learning_acquired_at DATETIME2 NULL;`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'agent_decisions') AND name = 'escalation_risk')
+     ALTER TABLE agent_decisions ADD escalation_risk VARCHAR(20) NULL;`,
+
+    // ── P5: Escalation predictions ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_escalation_predictions') AND type = 'U')
+     CREATE TABLE agent_escalation_predictions (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key VARCHAR(20) NOT NULL,
+       probability FLOAT NOT NULL,
+       features_json NVARCHAR(MAX) NULL,
+       reasoning NVARCHAR(MAX) NULL,
+       predicted_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       actual_outcome VARCHAR(20) NULL,
+       correct BIT NULL,
+       resolved_at DATETIME2 NULL
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_esc_pred_ticket')
+     CREATE INDEX IX_esc_pred_ticket ON agent_escalation_predictions(ticket_key);`,
+
+    // ── P5: Incidents ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_incidents') AND type = 'U')
+     CREATE TABLE agent_incidents (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       incident_key VARCHAR(20) NULL,
+       summary NVARCHAR(500) NOT NULL,
+       root_cause NVARCHAR(500) NULL,
+       ticket_count INT NOT NULL,
+       ticket_keys NVARCHAR(MAX) NULL,
+       status VARCHAR(20) NOT NULL DEFAULT 'open',
+       detected_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       resolved_at DATETIME2 NULL,
+       created_by VARCHAR(20) NOT NULL DEFAULT 'nova_ai'
+     );`,
+
+    // ── P5: SLA interventions log ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_sla_interventions') AND type = 'U')
+     CREATE TABLE agent_sla_interventions (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key VARCHAR(20) NOT NULL,
+       sla_type VARCHAR(30) NOT NULL,
+       minutes_remaining INT NOT NULL,
+       intervention_type VARCHAR(30) NOT NULL,
+       detail NVARCHAR(500) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_sla_interv_ticket')
+     CREATE INDEX IX_sla_interv_ticket ON agent_sla_interventions(ticket_key, created_at);`,
+
+    // ── P5: KB article usage tracking ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'kb_article_usage') AND type = 'U')
+     CREATE TABLE kb_article_usage (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       article_id VARCHAR(100) NOT NULL,
+       article_title NVARCHAR(200) NULL,
+       ticket_key VARCHAR(20) NOT NULL,
+       used_in_response BIT NOT NULL DEFAULT 0,
+       retrieved_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_kb_usage_article')
+     CREATE INDEX IX_kb_usage_article ON kb_article_usage(article_id, retrieved_at);`,
+
+    // ── P5: KB article health ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'kb_article_health') AND type = 'U')
+     CREATE TABLE kb_article_health (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       article_id VARCHAR(100) NOT NULL,
+       article_title NVARCHAR(200) NULL,
+       space_key VARCHAR(10) NULL,
+       status VARCHAR(20) NOT NULL,
+       last_updated DATE NULL,
+       usage_count_30d INT NULL,
+       usage_count_90d INT NULL,
+       drift_score FLOAT NULL,
+       checked_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
