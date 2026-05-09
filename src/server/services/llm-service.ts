@@ -528,6 +528,10 @@ export class LlmService {
           if (parsed.success) {
             recordSuccess(config.provider);
             await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, true, null, promptVersion, redactionsForLog);
+
+            // E4: Shadow model comparison (fire-and-forget)
+            this.maybeShadowCompare(fullSystem, sanitisedUser, options.callType, config.model, parsed.data as Record<string, unknown>, maxTokens, temperature).catch(() => {});
+
             return {
               data: parsed.data,
               provider: config.provider,
@@ -566,6 +570,52 @@ export class LlmService {
     }
 
     throw new Error(`All LLM providers failed. Last error: ${lastError?.message ?? 'unknown'}`);
+  }
+
+  private async maybeShadowCompare(
+    systemPrompt: string,
+    userMessage: string,
+    callType: string,
+    primaryModel: string,
+    primaryResult: Record<string, unknown>,
+    maxTokens: number,
+    temperature: number,
+  ): Promise<void> {
+    const enabled = this.settings.get('agent_shadow_model_enabled') === 'true';
+    if (!enabled) return;
+
+    const shadowModelId = this.settings.get('agent_shadow_model_id');
+    if (!shadowModelId) return;
+
+    const sampleRate = parseInt(this.settings.get('agent_shadow_model_sample_rate') ?? '10', 10);
+    if (Math.random() * 100 >= sampleRate) return;
+
+    try {
+      // Determine provider from model ID
+      let shadowProvider: LlmProvider = 'openai';
+      if (shadowModelId.startsWith('claude')) shadowProvider = 'anthropic';
+      else if (shadowModelId.includes('/')) shadowProvider = 'openrouter';
+
+      const apiKey = this.getApiKey(shadowProvider);
+      if (!apiKey) return;
+
+      const result = await callProvider(shadowProvider, systemPrompt, userMessage, shadowModelId, apiKey, maxTokens, temperature);
+      const jsonStr = extractJson(result.content);
+      const parsed = JSON.parse(jsonStr);
+
+      const primaryAction = (primaryResult as any)?.recommended_action ?? 'unknown';
+      const shadowAction = parsed?.recommended_action ?? 'unknown';
+      const primaryConf = (primaryResult as any)?.classification?.confidence ?? null;
+      const shadowConf = parsed?.classification?.confidence ?? null;
+
+      await executeAndGetId(
+        `INSERT INTO agent_model_comparisons (call_type, primary_model, shadow_model, primary_action, shadow_action, actions_match, primary_confidence, shadow_confidence)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [callType, primaryModel, shadowModelId, primaryAction, shadowAction, primaryAction === shadowAction ? 1 : 0, primaryConf, shadowConf],
+      );
+    } catch (err) {
+      console.warn('[llm] Shadow model comparison failed:', err instanceof Error ? err.message : err);
+    }
   }
 
   resetCircuitBreakers(): void {

@@ -2,11 +2,16 @@ import type { JiraRestClient } from './jira-client.js';
 import type { AgentDecision, ActionResult } from './agent-types.js';
 import type { EscalationLogService } from './escalation-log-service.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import type { LlmService } from './llm-service.js';
+import { query, executeAndGetId } from './database.js';
+
+const HIGH_STAKES_ACTIONS = ['close', 'resolve', 'draft_response', 'escalate', 'quick_win_close', 'transition'];
 
 export class Actor {
   private jiraClient: JiraRestClient;
   private escalationLog?: EscalationLogService;
   private settings: SettingsQueries;
+  private llmService?: LlmService;
 
   static looksLikeStructuredPayload(text: string): boolean {
     const trimmed = text.trim();
@@ -26,6 +31,10 @@ export class Actor {
     }
   }
 
+  setLlmService(llmService: LlmService): void {
+    this.llmService = llmService;
+  }
+
   private async assignToNovaServiceAccount(ticketKey: string): Promise<void> {
     const accountId = this.settings.get('nova_ai_jira_account_id');
     if (!accountId) {
@@ -39,8 +48,111 @@ export class Actor {
     }
   }
 
+  async runCritic(decision: AgentDecision): Promise<{ approved: boolean; reason: string; model?: string }> {
+    if (!this.llmService) return { approved: true, reason: 'No LLM service available — skipping critic' };
+
+    const criticEnabled = this.settings.get('agent_critic_enabled') !== 'false';
+    if (!criticEnabled) return { approved: true, reason: 'Critic disabled' };
+
+    const allowedActionsRaw = this.settings.get('agent_critic_actions') ?? 'close,resolve,draft_response,escalate,quick_win_close,transition';
+    const allowedActions = allowedActionsRaw.split(',').map(a => a.trim());
+    if (!allowedActions.includes(decision.action)) return { approved: true, reason: `Action ${decision.action} not subject to critic` };
+
+    try {
+      const prompt = `You are a quality gate for an AI support agent at Nurtur (proptech SaaS).
+The agent wants to perform this action on a Jira service desk ticket.
+
+Action: ${decision.action}
+Ticket: ${decision.ticketKey}
+Confidence: ${(decision.confidence * 100).toFixed(0)}%
+Reasoning: ${decision.reasoning?.slice(0, 500) ?? 'None'}
+Draft response (if any): ${((decision.output.draft_response as string) ?? 'None').slice(0, 1000)}
+
+Guardrails to check:
+- No refund/credit/compensation promises
+- No blaming product, team, or individuals
+- No internal process disclosure to customers
+- No timeline commitments for fixes
+- No cross-customer data leakage
+- Response addresses the customer's actual issue (if responding)
+- Tone is professional and warm (Nurtur voice)
+- Escalation has documented reasoning
+
+Should this action proceed? Reply with JSON only: { "approved": true/false, "reason": "..." }`;
+
+      const result = await this.llmService.call<{ approved: boolean; reason: string }>(
+        prompt,
+        'Evaluate this action and return your verdict as JSON.',
+        undefined as any,
+        { callType: 'critic', temperature: 0.1, tier: 'cheap' as any },
+      );
+
+      return { approved: result.data.approved, reason: result.data.reason, model: result.model };
+    } catch (err) {
+      console.warn('[actor] Critic call failed, allowing action to proceed:', err instanceof Error ? err.message : err);
+      return { approved: true, reason: `Critic error: ${err instanceof Error ? err.message : 'unknown'}` };
+    }
+  }
+
+  async validateEscalation(decision: AgentDecision): Promise<{ valid: boolean; missing: string[] }> {
+    const missing: string[] = [];
+
+    const hasDecision = await query<{ cnt: number }>(
+      'SELECT COUNT(*) as cnt FROM agent_decisions WHERE ticket_id = ?', [decision.ticketKey],
+    );
+    if (!hasDecision[0] || hasDecision[0].cnt === 0) missing.push('No AI triage on this ticket');
+
+    const internalComments = await query<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM jira_comment_cache
+       WHERE issue_key = ? AND is_internal = 1 AND author_display_name != 'NOVA AI'`,
+      [decision.ticketKey],
+    );
+    if (!internalComments[0] || internalComments[0].cnt === 0) missing.push('No troubleshooting documented (no internal comments from agent)');
+
+    const escalationReason = decision.output?.reasonCode as string | undefined;
+    if (!escalationReason || escalationReason === 'None') {
+      if (!decision.reasoning || decision.reasoning.length < 20) {
+        missing.push('No escalation reason provided');
+      }
+    }
+
+    return { valid: missing.length === 0, missing };
+  }
+
   async execute(decision: AgentDecision): Promise<ActionResult> {
     try {
+      // A2: Critic gate — run on high-stakes actions before execution
+      if (HIGH_STAKES_ACTIONS.includes(decision.action) && !(decision.output as any).critic_approved) {
+        const criticResult = await this.runCritic(decision);
+        try {
+          await executeAndGetId(
+            `UPDATE agent_decisions SET critic_approved = ?, critic_reason = ?, critic_model = ? WHERE ticket_id = ? AND id = (SELECT MAX(id) FROM agent_decisions WHERE ticket_id = ?)`,
+            [criticResult.approved ? 1 : 0, criticResult.reason?.slice(0, 500) ?? null, criticResult.model ?? null, decision.ticketKey, decision.ticketKey],
+          );
+        } catch { /* best effort logging */ }
+
+        if (!criticResult.approved) {
+          console.warn(`[actor] Critic BLOCKED ${decision.action} on ${decision.ticketKey}: ${criticResult.reason}`);
+          return { success: false, action: decision.action, ticketKey: decision.ticketKey, detail: `Critic blocked: ${criticResult.reason}`, error: 'CRITIC_BLOCKED' };
+        }
+        (decision.output as any).critic_approved = true;
+      }
+
+      // D2: Escalation gate — validate SOP-002 compliance
+      if (decision.action === 'escalate') {
+        const validation = await this.validateEscalation(decision);
+        if (!validation.valid) {
+          const violationDetail = validation.missing.join('; ');
+          console.warn(`[actor] Escalation gate violation on ${decision.ticketKey}: ${violationDetail}`);
+          try {
+            await executeAndGetId(
+              `INSERT INTO agent_alerts (alert_type, severity, title, detail, ticket_key) VALUES (?, ?, ?, ?, ?)`,
+              ['error', 'warning', `Escalation gate: SOP-002 violation on ${decision.ticketKey}`, violationDetail, decision.ticketKey],
+            );
+          } catch { /* best effort */ }
+        }
+      }
+
       // Remove [Action Required] prefix when a new action is taken (customer replied or ticket progressed)
       const recAction = decision.output.recommended_action as string | undefined;
       if (recAction !== 'gather_context' && decision.eventType === 'comment_added') {

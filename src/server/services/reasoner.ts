@@ -7,7 +7,7 @@ import type { AiLearningService } from './ai-learning-service.js';
 import { TriageResultSchema, type TriageResult } from './triage-schema.js';
 import { RespondResultSchema, type RespondResult } from './respond-schema.js';
 import { loadPrompt } from './prompt-loader.js';
-import { executeAndGetId } from './database.js';
+import { executeAndGetId, query } from './database.js';
 
 const CONFIDENCE_HIGH = 0.8;
 const CONFIDENCE_LOW = 0.4;
@@ -72,6 +72,7 @@ export class Reasoner {
 
     const customerContext = this.buildCustomerContext(event);
     const learningsCtx = await this.buildLearningsContext(event);
+    const patternsCtx = await this.buildPatternsContext(event);
 
     const systemPrompt = loadPrompt('triage', {
       ticket_key: event.ticketKey,
@@ -84,13 +85,23 @@ export class Reasoner {
       created: event.created,
       customer_context: customerContext,
       kb_matches: kbText,
-      learnings: learningsCtx.text,
+      learnings: learningsCtx.text + (patternsCtx ? `\n\n${patternsCtx}` : ''),
     });
 
     const userMessage = `Analyse this ticket and produce the structured JSON assessment.`;
 
+    // E1: A/B test — check for active test on triage
+    const abTest = await this.getActiveAbTest('triage');
+    let abVariant: 'A' | 'B' | null = null;
+    let effectivePrompt = systemPrompt;
+    if (abTest) {
+      const useB = Math.random() * 100 < abTest.split_percentage;
+      abVariant = useB ? 'B' : 'A';
+      if (useB && abTest.variant_b) effectivePrompt = abTest.variant_b;
+    }
+
     const result = await this.llmService.call<TriageResult>(
-      systemPrompt,
+      effectivePrompt,
       userMessage,
       TriageResultSchema,
       {
@@ -155,6 +166,12 @@ export class Reasoner {
     };
 
     decision.approvalRequired = await this.needsApproval(triage, decision);
+
+    // E1: Tag with A/B test variant
+    if (abTest && abVariant) {
+      (decision as any).ab_test_id = abTest.id;
+      (decision as any).ab_variant = abVariant;
+    }
 
     await this.trackLearningCitations(triage.reasoning_trace, learningsCtx.learnings);
 
@@ -321,6 +338,19 @@ export class Reasoner {
     return true;
   }
 
+  private async getActiveAbTest(callType: string): Promise<{ id: number; split_percentage: number; variant_b: string | null } | null> {
+    try {
+      const rows = await query<{ id: number; split_percentage: number; variant_b: string | null }>(
+        `SELECT id, split_percentage, variant_b FROM agent_ab_tests
+         WHERE status = 'active' AND test_type = 'prompt'
+         ORDER BY started_at DESC`,
+      );
+      return rows[0] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private async buildLearningsContext(event: TicketEvent): Promise<{ text: string; learnings: import('./ai-learning-service.js').AiLearning[] }> {
     if (!this.learningService) return { text: 'No prior learnings available.', learnings: [] };
     try {
@@ -339,6 +369,34 @@ export class Reasoner {
       await this.learningService.recordCitations(reasoning, learnings);
     } catch (err) {
       console.warn('[reasoner] Failed to track learning citations:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  private async buildPatternsContext(event: TicketEvent): Promise<string> {
+    try {
+      const classification = (event as any).classification?.category;
+      const category = classification ?? null;
+      if (!category) return '';
+
+      const patterns = await query<{ symptom: string; resolution: string; observed_count: number; success_rate: number | null }>(
+        `SELECT TOP 3 symptom, resolution, observed_count, success_rate
+         FROM agent_patterns
+         WHERE category = ? AND observed_count >= 2
+         ORDER BY observed_count DESC, last_observed DESC`,
+        [category],
+      );
+
+      if (patterns.length === 0) return '';
+
+      const lines = ['Known resolution patterns for this category:'];
+      for (const p of patterns) {
+        lines.push(`- Symptom: ${p.symptom?.slice(0, 200)}`);
+        lines.push(`  Resolution: ${p.resolution?.slice(0, 300)}`);
+        lines.push(`  Seen ${p.observed_count} times${p.success_rate != null ? `, ${p.success_rate}% success` : ''}`);
+      }
+      return lines.join('\n');
+    } catch {
+      return '';
     }
   }
 
