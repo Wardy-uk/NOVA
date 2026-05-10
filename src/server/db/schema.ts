@@ -1353,11 +1353,11 @@ async function runMigrations(): Promise<void> {
        body NVARCHAR(500) NULL,
        ticket_key VARCHAR(20) NULL,
        reference_id VARCHAR(50) NULL,
-       read BIT DEFAULT 0,
+       [read] BIT DEFAULT 0,
        created_at DATETIME2 DEFAULT GETUTCDATE()
      );`,
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_nova_notifications_user')
-     CREATE INDEX IX_nova_notifications_user ON nova_notifications(user_id, read, created_at DESC);`,
+     CREATE INDEX IX_nova_notifications_user ON nova_notifications(user_id, [read], created_at DESC);`,
 
     // ── Triage tuning table (N1) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_triage_tuning') AND type = 'U')

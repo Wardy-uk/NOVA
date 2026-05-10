@@ -3977,7 +3977,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       const userId = (req as any).user?.id;
       if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
       const data = await query(
-        `SELECT TOP 50 id, type, title, body, ticket_key, reference_id, read, created_at FROM nova_notifications WHERE user_id = ? ORDER BY created_at DESC`,
+        `SELECT TOP 50 id, type, title, body, ticket_key, reference_id, [read], created_at FROM nova_notifications WHERE user_id = ? ORDER BY created_at DESC`,
         [userId],
       );
       res.json({ ok: true, data });
@@ -3991,7 +3991,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       const userId = (req as any).user?.id;
       if (!userId) { res.json({ ok: true, data: { count: 0 } }); return; }
       const row = await queryOne<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM nova_notifications WHERE user_id = ? AND read = 0`, [userId],
+        `SELECT COUNT(*) as cnt FROM nova_notifications WHERE user_id = ? AND [read] = 0`, [userId],
       );
       res.json({ ok: true, data: { count: row?.cnt ?? 0 } });
     } catch (err) {
@@ -4003,7 +4003,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     try {
       const userId = (req as any).user?.id;
       const id = parseInt(req.params.id as string, 10);
-      await execute(`UPDATE nova_notifications SET read = 1 WHERE id = ? AND user_id = ?`, [id, userId]);
+      await execute(`UPDATE nova_notifications SET [read] = 1 WHERE id = ? AND user_id = ?`, [id, userId]);
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to mark as read' });
