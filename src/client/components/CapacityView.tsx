@@ -17,6 +17,14 @@ const api = async (path: string, method = 'GET') => {
 };
 
 const dayName = (dow: number) => ['', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dow] ?? '';
+const fmtDate = (iso: string) => {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+};
+const fmtDateFull = (iso: string) => {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+};
 
 export function CapacityView() {
   const [forecast, setForecast] = useState<DayForecast[]>([]);
@@ -104,7 +112,7 @@ export function CapacityView() {
           <div key={d.forecast_date}
             className={`${cellColor(d.surplus_deficit, d.team_capacity)} rounded-lg p-3 text-center`}>
             <div className="text-xs text-neutral-500">{dayName(d.day_of_week)}</div>
-            <div className="text-xs text-neutral-400">{d.forecast_date.split('-').slice(1).join('/')}</div>
+            <div className="text-xs text-neutral-400">{fmtDate(d.forecast_date)}</div>
             <div className="text-lg font-bold text-neutral-200 mt-1">{d.predicted_volume}</div>
             <div className="text-xs text-neutral-500">
               {d.confidence_low}–{d.confidence_high}
@@ -126,17 +134,17 @@ export function CapacityView() {
             <tr className="border-b border-[#3a424d]">
               <th className="text-left py-2 px-2 text-neutral-400 font-medium">Date</th>
               <th className="text-left py-2 px-2 text-neutral-400 font-medium">Day</th>
-              <th className="text-right py-2 px-2 text-neutral-400 font-medium">Predicted</th>
-              <th className="text-right py-2 px-2 text-neutral-400 font-medium">Range</th>
-              <th className="text-right py-2 px-2 text-neutral-400 font-medium">Actual</th>
-              <th className="text-right py-2 px-2 text-neutral-400 font-medium">Capacity</th>
-              <th className="text-right py-2 px-2 text-neutral-400 font-medium">Surplus</th>
+              <th className="text-right py-2 px-2 text-neutral-400 font-medium">Predicted Tickets</th>
+              <th className="text-right py-2 px-2 text-neutral-400 font-medium">Confidence Range</th>
+              <th className="text-right py-2 px-2 text-neutral-400 font-medium">Actual Tickets</th>
+              <th className="text-right py-2 px-2 text-neutral-400 font-medium">Team Capacity</th>
+              <th className="text-right py-2 px-2 text-neutral-400 font-medium">Surplus / Deficit</th>
             </tr>
           </thead>
           <tbody>
             {data.filter(d => d.predicted_volume > 0 || d.actual_volume !== null).map(d => (
               <tr key={d.forecast_date} className="border-b border-[#3a424d]/50 hover:bg-[#2f353d]/50">
-                <td className="py-2 px-2 text-neutral-300">{d.forecast_date}</td>
+                <td className="py-2 px-2 text-neutral-300">{fmtDateFull(d.forecast_date)}</td>
                 <td className="py-2 px-2 text-neutral-400">{dayName(d.day_of_week)}</td>
                 <td className="py-2 px-2 text-right text-neutral-200">{d.predicted_volume}</td>
                 <td className="py-2 px-2 text-right text-neutral-500">{d.confidence_low}–{d.confidence_high}</td>
