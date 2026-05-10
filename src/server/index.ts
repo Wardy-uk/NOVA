@@ -2447,7 +2447,7 @@ ${panelHtml}
       res.redirect('http://localhost:5173/portal.html');
     }
   });
-  app.get('/portal/*', (_req, res) => {
+  app.get('/portal/{*path}', (_req, res) => {
     if (isProduction) {
       res.sendFile(path.resolve(__dirname, '../../client/portal.html'));
     } else {
