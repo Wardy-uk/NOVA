@@ -23,6 +23,7 @@ export function CapacityView() {
   const [historical, setHistorical] = useState<DayForecast[]>([]);
   const [accuracy, setAccuracy] = useState<Accuracy | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showTab, setShowTab] = useState<'forecast' | 'historical'>('forecast');
 
   const load = async () => {
@@ -38,8 +39,16 @@ export function CapacityView() {
 
   const generate = async () => {
     setGenerating(true);
-    await api('/generate', 'POST');
-    await load();
+    setError(null);
+    try {
+      const r = await api('/generate', 'POST');
+      if (!r.ok) {
+        setError(r.error ?? 'Failed to generate forecast');
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error');
+    }
     setGenerating(false);
   };
 
@@ -82,6 +91,12 @@ export function CapacityView() {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-red-950/40 border border-red-800/40 rounded-lg px-4 py-2 text-xs text-red-400">
+          {error}
+        </div>
+      )}
 
       {/* Capacity Heatmap */}
       <div className="grid grid-cols-7 gap-1">
