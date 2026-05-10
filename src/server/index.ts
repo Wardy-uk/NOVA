@@ -1101,6 +1101,15 @@ async function main() {
     app.use('/api/ai-learnings', createAiLearningRoutes(aiLearningService));
     agentLoop.getReasoner().setLearningService(aiLearningService);
 
+    // Escalation policy engine (Gap 1)
+    const { EscalationPolicy } = await import('./services/escalation-policy.js');
+    agentLoop.getReasoner().setEscalationPolicy(new EscalationPolicy());
+
+    // Triage tuning feedback (Gap 8)
+    const { TriageTuningFeedback } = await import('./services/triage-tuning-feedback.js');
+    const tuningFeedback = new TriageTuningFeedback();
+    agentLoop.getReasoner().setTuningFeedback(tuningFeedback);
+
     // Human edit detection — every 30 minutes, initial run after 2 minutes
     jobRegistry.register('ai-improvement-edits', 'AI improvement: human edit detection', async () => {
       const signals = await aiImprovementService.detectHumanEdits();
@@ -1224,6 +1233,16 @@ async function main() {
       if (now.getDate() === 1 && ukHour === 6) {
         await crossFunctional.generateMonthlyReport();
         console.log('[cross-functional] Monthly report generated');
+      }
+    }, 60 * 60 * 1000);
+
+    // Gap 8: Triage tuning refresh (Mon 08:00)
+    jobRegistry.register('triage-tuning-refresh', 'Triage Tuning Signal Refresh (Mon 08:00)', async () => {
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
+      if (now.getDay() === 1 && ukHour === 8) {
+        const result = await tuningFeedback.refresh();
+        console.log(`[triage-tuning] Refreshed: ${result.created} new signals`);
       }
     }, 60 * 60 * 1000);
 
@@ -2389,6 +2408,10 @@ ${panelHtml}
     const portalIntake = new PortalIntakeService(settingsQueries, portalJira);
     const portalChat = new PortalChatService(settingsQueries, typeof llmService !== 'undefined' ? llmService : null, portalJira);
     const portalKb = new PortalKbService(settingsQueries, mcpManager);
+
+    // Gap 5: Playbook service
+    const { PortalPlaybookService } = await import('./services/portal-playbooks.js');
+    portalChat.setPlaybookService(new PortalPlaybookService(settingsQueries));
 
     // Start KB sync timer
     portalKb.startSync();

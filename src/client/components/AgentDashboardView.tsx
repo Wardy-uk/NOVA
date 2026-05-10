@@ -251,6 +251,21 @@ function actionLabel(action: string): string {
   return map[action] ?? action;
 }
 
+const NO_ACTION_REASON_STYLES: Record<string, string> = {
+  no_customer_action: 'bg-zinc-700/50 text-zinc-400',
+  waiting_customer: 'bg-amber-900/40 text-amber-400',
+  waiting_partner: 'bg-amber-900/40 text-amber-400',
+  human_should_act: 'bg-red-900/40 text-red-400',
+  defer_check_later: 'bg-blue-900/40 text-blue-400',
+};
+
+function getNoActionReason(d: Decision): string | null {
+  try {
+    const o = typeof d.output === 'string' ? JSON.parse(d.output) : d.output;
+    return o?.no_action_reason ?? null;
+  } catch { return null; }
+}
+
 function eventLabel(et: string): string {
   const map: Record<string, string> = {
     ticket_created: 'New Ticket',
@@ -998,6 +1013,11 @@ function DecisionsTab({ decisions: initialDecisions, selected, onSelect, onRefre
                   </td>
                   <td className="px-3 py-2 text-neutral-200">
                     {actionLabel(d.action)}
+                    {d.action === 'no_action' && getNoActionReason(d) && (
+                      <span className={`ml-1.5 text-[9px] px-1 py-0.5 rounded ${NO_ACTION_REASON_STYLES[getNoActionReason(d)!] ?? 'bg-zinc-700/50 text-zinc-400'}`}>
+                        {getNoActionReason(d)!.replace(/_/g, ' ')}
+                      </span>
+                    )}
                     {d.shadow_mode ? <span className="ml-1.5 text-[9px] text-purple-400 font-semibold">SHADOW</span> : null}
                   </td>
                   <td className="px-3 py-2 text-neutral-500">{d.provider ?? '—'}/{d.model?.split('-').slice(-1)[0] ?? ''}</td>

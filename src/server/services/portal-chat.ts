@@ -5,8 +5,27 @@ import type { LlmService } from './llm-service.js';
 import type { PortalJiraService } from './portal-jira.js';
 import type { PortalChatSession, PortalChatMessage } from '../../shared/portal-types.js';
 import { trackEvent } from './portal-analytics.js';
+import type { PortalPlaybookService } from './portal-playbooks.js';
 
 const ChatResponseSchema = z.object({ response: z.string() });
+
+const HandoffSummarySchema = z.object({
+  issue_summary: z.string(),
+  category: z.string().default('General'),
+  customer_intent: z.string().default(''),
+  information_gathered: z.object({
+    account_or_site: z.string().optional(),
+    url_or_page: z.string().optional(),
+    error_message: z.string().optional(),
+    expected_vs_actual: z.string().optional(),
+    steps_tried: z.array(z.string()).optional(),
+  }).default({}),
+  kb_articles_tried: z.array(z.string()).default([]),
+  resolution_attempted: z.boolean().default(false),
+  suggested_next_action: z.string().default('Review the chat transcript'),
+});
+
+type HandoffSummary = z.infer<typeof HandoffSummarySchema>;
 
 interface ChatContext {
   orgName: string;
@@ -17,11 +36,17 @@ interface ChatContext {
 }
 
 export class PortalChatService {
+  private playbookService: PortalPlaybookService | null = null;
+
   constructor(
     private settings: FileSettingsQueries,
     private llm: LlmService | null,
     private portalJira: PortalJiraService,
   ) {}
+
+  setPlaybookService(service: PortalPlaybookService): void {
+    this.playbookService = service;
+  }
 
   async startSession(portalUserId: number): Promise<PortalChatSession> {
     const result = await queryOne<{ id: number }>(
@@ -67,7 +92,27 @@ export class PortalChatService {
     if (userMessages >= maxExchanges) {
       responseContent = await this.handleHandoff(sessionId, context, history);
     } else {
-      responseContent = await this.generateResponse(history, context, userMessages >= handoffThreshold);
+      // Gap 5: Check playbooks before generic LLM response
+      if (this.playbookService) {
+        const pbResult = await this.playbookService.tryMatch(content, sessionId, context);
+        if (pbResult) {
+          if (pbResult.resolved) {
+            await execute(
+              `UPDATE portal_chat_sessions SET status = 'resolved' WHERE id = ?`,
+              [sessionId],
+            );
+            await trackEvent('deflection', context.portalUserId, context.orgId, {
+              playbook_id: pbResult.playbookId,
+              session_id: sessionId,
+            });
+          }
+          responseContent = pbResult.response;
+        } else {
+          responseContent = await this.generateResponse(history, context, userMessages >= handoffThreshold);
+        }
+      } else {
+        responseContent = await this.generateResponse(history, context, userMessages >= handoffThreshold);
+      }
     }
 
     // Store assistant message
@@ -188,28 +233,82 @@ Important rules:
     context: ChatContext,
     history: Array<{ role: string; content: string }>,
   ): Promise<string> {
-    // Gather conversation into a transcript
     const transcript = history.map(m => `[${m.role}]: ${m.content}`).join('\n\n');
-
     const projectKey = this.settings.get('portal_jira_project_nt') || 'NT';
+
+    // Gap 4: Generate structured handoff summary via LLM
+    let summary: HandoffSummary | null = null;
+    if (this.llm) {
+      try {
+        const summaryResult = await this.llm.call(
+          `You are summarising a support chat conversation for handoff to a human agent.
+Analyse the transcript and produce a structured JSON summary.
+The human agent should be able to understand the issue without reading the full transcript.`,
+          `Transcript:\n\n${transcript}`,
+          HandoffSummarySchema,
+          { callType: 'portal_handoff_summary', tier: 'standard', maxTokens: 800, temperature: 0.1 },
+        );
+        summary = summaryResult.data;
+      } catch (err) {
+        console.warn('[portal-chat] Handoff summary generation failed:', err instanceof Error ? err.message : err);
+      }
+    }
+
+    const ticketSummary = summary?.issue_summary
+      ? `[Portal] ${summary.issue_summary}`
+      : `[Portal] Chat support request from ${context.userName} (${context.orgName})`;
+
+    // Build structured internal note
+    let internalNote = '';
+    if (summary) {
+      internalNote += `*Handoff Summary*\n\n`;
+      internalNote += `*Issue:* ${summary.issue_summary}\n`;
+      internalNote += `*Category:* ${summary.category}\n`;
+      internalNote += `*Customer Intent:* ${summary.customer_intent}\n\n`;
+      if (Object.keys(summary.information_gathered).length > 0) {
+        internalNote += `*Information Gathered:*\n`;
+        const ig = summary.information_gathered;
+        if (ig.account_or_site) internalNote += `- Account/Site: ${ig.account_or_site}\n`;
+        if (ig.url_or_page) internalNote += `- URL/Page: ${ig.url_or_page}\n`;
+        if (ig.error_message) internalNote += `- Error: ${ig.error_message}\n`;
+        if (ig.expected_vs_actual) internalNote += `- Expected vs Actual: ${ig.expected_vs_actual}\n`;
+        if (ig.steps_tried?.length) internalNote += `- Steps Tried: ${ig.steps_tried.join(', ')}\n`;
+        internalNote += '\n';
+      }
+      if (summary.kb_articles_tried.length > 0) {
+        internalNote += `*KB Articles Tried (didn't resolve):* ${summary.kb_articles_tried.join(', ')}\n\n`;
+      }
+      internalNote += `*Suggested Next Action:* ${summary.suggested_next_action}\n`;
+      internalNote += `\n----\n\n`;
+    }
+    internalNote += `*Full Chat Transcript (session ${sessionId})*\n\n${transcript}`;
 
     try {
       const ticketKey = await this.portalJira.createTicket({
         projectKey,
-        summary: `Chat support request from ${context.userName} (${context.orgName})`,
-        description: `Support chat conversation - user requested human assistance.\n\nPlease review the chat transcript in the internal notes.`,
+        summary: ticketSummary.slice(0, 250),
+        description: summary
+          ? `Portal chat handoff — ${summary.issue_summary}\n\nSee internal notes for structured summary and full transcript.`
+          : `Support chat conversation - user requested human assistance.\n\nPlease review the chat transcript in the internal notes.`,
         priority: 'Medium',
         reporterEmail: context.userEmail,
-        internalNote: `*Portal chat transcript (session ${sessionId})*\n\n${transcript}`,
+        internalNote,
       });
 
-      // Link session to ticket
       await execute(
         `UPDATE portal_chat_sessions SET jira_issue_key = ?, status = 'handed_off' WHERE id = ?`,
         [ticketKey, sessionId],
       );
 
-      await trackEvent('chat_handoff', context.portalUserId, context.orgId, {
+      // Store summary in session metadata
+      if (summary) {
+        await execute(
+          `UPDATE portal_chat_sessions SET metadata = ? WHERE id = ?`,
+          [JSON.stringify({ handoff_summary: summary }), sessionId],
+        ).catch(() => {});
+      }
+
+      await trackEvent(summary ? 'handoff_with_summary' : 'handoff_raw_transcript', context.portalUserId, context.orgId, {
         session_id: sessionId,
         ticket_key: ticketKey,
       });

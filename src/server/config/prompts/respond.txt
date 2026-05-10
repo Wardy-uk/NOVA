@@ -69,7 +69,14 @@ Produce a JSON object with the following structure:
    - close: customer confirmed resolution or said thanks
    - gather_context: you need more information before acting
    - assign: route to a human agent (medium complexity, not AI-handleable)
-   - no_action: internal comment or no customer-facing action needed
+   - no_action: no customer-facing action needed. You MUST also set no_action_reason:
+     - no_customer_action: internal note, system update, or duplicate — genuinely nothing to do
+     - waiting_customer: customer owes a reply — the ball is in their court
+     - waiting_partner: waiting on a third-party or external dependency
+     - human_should_act: you can't handle this but a human should — NOVA should route to a person
+     - defer_check_later: not urgent now, re-check this ticket later
+
+4b. **no_action_reason** (required when recommended_action is "no_action") — one of: no_customer_action, waiting_customer, waiting_partner, human_should_act, defer_check_later
 
 5. **draft_response** — ALWAYS draft a customer-facing response when action is "respond", "gather_context", or "escalate". Only null for "no_action" or "close".
    - Write as plain text (NOVA converts to ADF before posting)

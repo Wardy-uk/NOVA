@@ -68,5 +68,15 @@ export function createPortalKbRoutes(kbService: PortalKbService): Router {
     }
   });
 
+  // Gap 6: KB Effectiveness
+  router.get('/effectiveness', async (_req: Request, res: Response) => {
+    try {
+      const data = await kbService.getEffectiveness();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get effectiveness' });
+    }
+  });
+
   return router;
 }

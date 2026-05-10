@@ -4073,6 +4073,54 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // ── Escalation Policy (Gap 1) ──
+  router.get('/escalation-policy', requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const { EscalationPolicy } = await import('../services/escalation-policy.js');
+      const svc = new EscalationPolicy();
+      const limit = parseInt(req.query.limit as string, 10) || 50;
+      const data = await svc.getRecentEvaluations(limit);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get evaluations' });
+    }
+  });
+
+  router.get('/escalation-policy/stats', async (req, res) => {
+    try {
+      const { EscalationPolicy } = await import('../services/escalation-policy.js');
+      const svc = new EscalationPolicy();
+      const days = parseInt(req.query.days as string, 10) || 7;
+      const data = await svc.getStats(days);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get policy stats' });
+    }
+  });
+
+  // ── Tuning Signals (Gap 8) ──
+  router.get('/tuning-signals', async (_req, res) => {
+    try {
+      const { TriageTuningFeedback } = await import('../services/triage-tuning-feedback.js');
+      const svc = new TriageTuningFeedback();
+      const data = await svc.getActiveSignals();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get tuning signals' });
+    }
+  });
+
+  router.post('/tuning-signals/refresh', requireRole('admin', 'super_admin'), async (_req, res) => {
+    try {
+      const { TriageTuningFeedback } = await import('../services/triage-tuning-feedback.js');
+      const svc = new TriageTuningFeedback();
+      const data = await svc.refresh();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Tuning refresh failed' });
+    }
+  });
+
   return router;
 }
 

@@ -44,5 +44,50 @@ export function createCrossFunctionalRoutes(crossFunc: CrossFunctionalIntelligen
     }
   });
 
+  // Gap 7: Actionable workflow endpoints
+
+  router.put('/:id/assign', async (req, res) => {
+    try {
+      const { owner } = req.body;
+      if (!owner) { res.status(400).json({ ok: false, error: 'owner is required' }); return; }
+      await crossFunc.assignOwner(parseInt(req.params.id, 10), owner);
+      res.json({ ok: true });
+    } catch (err) {
+      res.json({ ok: false, error: err instanceof Error ? err.message : 'Assign failed' });
+    }
+  });
+
+  router.put('/:id/status', async (req, res) => {
+    try {
+      const { status, outcome } = req.body;
+      if (!status) { res.status(400).json({ ok: false, error: 'status is required' }); return; }
+      await crossFunc.updateStatus(parseInt(req.params.id, 10), status, outcome);
+      res.json({ ok: true });
+    } catch (err) {
+      res.json({ ok: false, error: err instanceof Error ? err.message : 'Status update failed' });
+    }
+  });
+
+  router.put('/:id/dismiss', async (req, res) => {
+    try {
+      const { reason } = req.body;
+      await crossFunc.dismiss(parseInt(req.params.id, 10), reason || 'No reason provided');
+      res.json({ ok: true });
+    } catch (err) {
+      res.json({ ok: false, error: err instanceof Error ? err.message : 'Dismiss failed' });
+    }
+  });
+
+  router.put('/:id/volume-after', async (req, res) => {
+    try {
+      const { volume_after } = req.body;
+      if (typeof volume_after !== 'number') { res.status(400).json({ ok: false, error: 'volume_after (number) is required' }); return; }
+      await crossFunc.recordVolumeAfter(parseInt(req.params.id, 10), volume_after);
+      res.json({ ok: true });
+    } catch (err) {
+      res.json({ ok: false, error: err instanceof Error ? err.message : 'Update failed' });
+    }
+  });
+
   return router;
 }

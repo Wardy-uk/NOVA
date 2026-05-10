@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { LlmService } from './llm-service.js';
 import type { SettingsQueries } from '../db/settings-store.js';
-import { query, executeAndGetId } from './database.js';
+import { query, execute, executeAndGetId } from './database.js';
 
 export interface CrossFunctionalSignal {
   id: number;
@@ -267,5 +267,75 @@ Group these into thematic clusters. For each cluster, provide: theme name, count
     }
 
     return lines.join('\n');
+  }
+
+  // Gap 7: Actionable workflow methods
+
+  async assignOwner(signalId: number, owner: string): Promise<void> {
+    await execute(
+      `UPDATE agent_cross_functional_signals SET owner = ?, status = CASE WHEN status = 'new' THEN 'acknowledged' ELSE status END WHERE id = ?`,
+      [owner, signalId],
+    );
+  }
+
+  async updateStatus(signalId: number, status: string, outcome?: string): Promise<void> {
+    const now = status === 'resolved' ? `, actioned_at = GETUTCDATE()` : '';
+    const outcomeUpdate = outcome ? `, outcome = ?` : '';
+    const params: unknown[] = outcome ? [status, outcome, signalId] : [status, signalId];
+    await execute(
+      `UPDATE agent_cross_functional_signals SET status = ?${outcomeUpdate}${now} WHERE id = ?`,
+      params,
+    );
+  }
+
+  async dismiss(signalId: number, reason: string): Promise<void> {
+    await execute(
+      `UPDATE agent_cross_functional_signals SET status = 'dismissed', outcome = ? WHERE id = ?`,
+      [reason, signalId],
+    );
+  }
+
+  async createJiraTicket(signalId: number, jiraClient: any, projectKey: string): Promise<string | null> {
+    const signals = await query<CrossFunctionalSignal>(
+      `SELECT * FROM agent_cross_functional_signals WHERE id = ?`,
+      [signalId],
+    );
+    const signal = signals[0];
+    if (!signal) return null;
+
+    try {
+      const result = await jiraClient.createIssue({
+        projectKey,
+        issueType: 'Task',
+        summary: `[Intelligence] ${signal.title}`,
+        description: `Cross-functional intelligence signal:\n\n${signal.detail}\n\nTickets affected: ${signal.ticket_count}\nCustomers affected: ${signal.customer_count}\nTrend: ${signal.trend}\n\nRecommendation: ${signal.recommendation}`,
+      });
+      const ticketKey = result?.key;
+      if (ticketKey) {
+        await execute(
+          `UPDATE agent_cross_functional_signals SET jira_ticket_key = ?, status = 'in_progress' WHERE id = ?`,
+          [ticketKey, signalId],
+        );
+      }
+      return ticketKey ?? null;
+    } catch (err) {
+      console.error('[cross-func] Failed to create Jira ticket:', err instanceof Error ? err.message : err);
+      return null;
+    }
+  }
+
+  async recordVolumeAfter(signalId: number, volumeAfter: number): Promise<void> {
+    await execute(
+      `UPDATE agent_cross_functional_signals SET volume_after = ? WHERE id = ?`,
+      [volumeAfter, signalId],
+    );
+  }
+
+  async getSignalById(id: number): Promise<CrossFunctionalSignal | null> {
+    const rows = await query<CrossFunctionalSignal>(
+      `SELECT * FROM agent_cross_functional_signals WHERE id = ?`,
+      [id],
+    );
+    return rows[0] ?? null;
   }
 }

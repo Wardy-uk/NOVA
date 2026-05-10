@@ -1702,6 +1702,59 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_kb_articles_category')
      CREATE INDEX IX_portal_kb_articles_category ON portal_kb_articles(category);`,
+
+    // ── Quality Hardening Phase 1 ──
+
+    // Gap 1: Escalation Policy Log
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_escalation_policy_log') AND type = 'U')
+     CREATE TABLE agent_escalation_policy_log (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key VARCHAR(20) NOT NULL,
+       original_action VARCHAR(30) NOT NULL,
+       final_action VARCHAR(30) NOT NULL,
+       evidence_score FLOAT NOT NULL,
+       policy_result VARCHAR(20) NOT NULL,
+       reason NVARCHAR(500),
+       suggestion VARCHAR(30),
+       evaluated_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+
+    // Gap 7: Cross-functional signals — actionable workflow columns
+    `IF COL_LENGTH('agent_cross_functional_signals', 'owner') IS NULL
+     ALTER TABLE agent_cross_functional_signals ADD owner NVARCHAR(100) NULL;`,
+    `IF COL_LENGTH('agent_cross_functional_signals', 'status') IS NULL
+     ALTER TABLE agent_cross_functional_signals ADD status VARCHAR(20) DEFAULT 'new';`,
+    `IF COL_LENGTH('agent_cross_functional_signals', 'jira_ticket_key') IS NULL
+     ALTER TABLE agent_cross_functional_signals ADD jira_ticket_key VARCHAR(20) NULL;`,
+    `IF COL_LENGTH('agent_cross_functional_signals', 'actioned_at') IS NULL
+     ALTER TABLE agent_cross_functional_signals ADD actioned_at DATETIME2 NULL;`,
+    `IF COL_LENGTH('agent_cross_functional_signals', 'outcome') IS NULL
+     ALTER TABLE agent_cross_functional_signals ADD outcome NVARCHAR(500) NULL;`,
+    `IF COL_LENGTH('agent_cross_functional_signals', 'volume_after') IS NULL
+     ALTER TABLE agent_cross_functional_signals ADD volume_after INT NULL;`,
+
+    // Gap 8: Tuning Signals
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_tuning_signals') AND type = 'U')
+     CREATE TABLE agent_tuning_signals (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       category NVARCHAR(100) NOT NULL,
+       signal_type VARCHAR(30) NOT NULL,
+       bias_instruction NVARCHAR(500) NOT NULL,
+       strength FLOAT NOT NULL,
+       sample_size INT NOT NULL,
+       active BIT DEFAULT 1,
+       generated_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+
+    // Gap 6: KB effectiveness columns
+    `IF COL_LENGTH('portal_kb_articles', 'deflection_count') IS NULL
+     ALTER TABLE portal_kb_articles ADD deflection_count INT DEFAULT 0;`,
+    `IF COL_LENGTH('portal_kb_articles', 'failed_deflection_count') IS NULL
+     ALTER TABLE portal_kb_articles ADD failed_deflection_count INT DEFAULT 0;`,
+
+    // Gap 4: Portal chat session metadata column
+    `IF COL_LENGTH('portal_chat_sessions', 'metadata') IS NULL
+     ALTER TABLE portal_chat_sessions ADD metadata NVARCHAR(MAX) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

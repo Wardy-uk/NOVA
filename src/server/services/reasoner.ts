@@ -4,6 +4,8 @@ import type { KbSearchService } from './kb-search.js';
 import type { AutonomyEngine } from './autonomy-engine.js';
 import type { LifecycleManager } from './lifecycle-manager.js';
 import type { AiLearningService } from './ai-learning-service.js';
+import type { EscalationPolicy } from './escalation-policy.js';
+import type { TriageTuningFeedback } from './triage-tuning-feedback.js';
 import { TriageResultSchema, type TriageResult } from './triage-schema.js';
 import { RespondResultSchema, type RespondResult } from './respond-schema.js';
 import { loadPrompt } from './prompt-loader.js';
@@ -19,6 +21,8 @@ export class Reasoner {
   private lifecycleManager: LifecycleManager | null = null;
   private lastAutonomyCheck: AutonomyCheck | null = null;
   private learningService: AiLearningService | null = null;
+  private escalationPolicy: EscalationPolicy | null = null;
+  private tuningFeedback: TriageTuningFeedback | null = null;
 
   constructor(llmService: LlmService, kbSearch: KbSearchService, autonomyEngine?: AutonomyEngine) {
     this.llmService = llmService;
@@ -32,6 +36,14 @@ export class Reasoner {
 
   setLifecycleManager(manager: LifecycleManager): void {
     this.lifecycleManager = manager;
+  }
+
+  setEscalationPolicy(policy: EscalationPolicy): void {
+    this.escalationPolicy = policy;
+  }
+
+  setTuningFeedback(feedback: TriageTuningFeedback): void {
+    this.tuningFeedback = feedback;
   }
 
   getLastAutonomyCheck(): AutonomyCheck | null {
@@ -74,6 +86,16 @@ export class Reasoner {
     const learningsCtx = await this.buildLearningsContext(event);
     const patternsCtx = await this.buildPatternsContext(event);
 
+    // Gap 8: Inject tuning signals for this category
+    let tuningSignalsCtx = '';
+    if (this.tuningFeedback) {
+      try {
+        tuningSignalsCtx = await this.tuningFeedback.getSignalsForCategory(
+          (event as any).classification?.category ?? event.summary,
+        );
+      } catch { /* non-critical */ }
+    }
+
     const systemPrompt = loadPrompt('triage', {
       ticket_key: event.ticketKey,
       summary: event.summary,
@@ -85,7 +107,7 @@ export class Reasoner {
       created: event.created,
       customer_context: customerContext,
       kb_matches: kbText,
-      learnings: learningsCtx.text + (patternsCtx ? `\n\n${patternsCtx}` : ''),
+      learnings: learningsCtx.text + (patternsCtx ? `\n\n${patternsCtx}` : '') + (tuningSignalsCtx ? `\n\n## Historical Tuning Signals\n\n${tuningSignalsCtx}` : ''),
     });
 
     const userMessage = `Analyse this ticket and produce the structured JSON assessment.`;
@@ -229,7 +251,14 @@ export class Reasoner {
     );
 
     const respond = result.data;
-    const action = this.mapRespondAction(respond);
+    let action = this.mapRespondAction(respond);
+
+    // Gap 2: Handle no_action sub-states
+    if (respond.recommended_action === 'no_action' && respond.no_action_reason) {
+      if (respond.no_action_reason === 'human_should_act') {
+        action = 'assign';
+      }
+    }
 
     const decision: AgentDecision = {
       ticketId: event.ticketId,
@@ -258,6 +287,7 @@ export class Reasoner {
       },
       output: {
         recommended_action: respond.recommended_action,
+        no_action_reason: respond.no_action_reason ?? null,
         draft_response: respond.draft_response,
         internal_note: respond.internal_note,
         intent: respond.intent,
@@ -287,7 +317,26 @@ export class Reasoner {
   }
 
   private async needsRespondApproval(respond: RespondResult, decision: AgentDecision): Promise<boolean> {
-    if (respond.recommended_action === 'escalate') return false;
+    if (respond.recommended_action === 'escalate') {
+      if (this.escalationPolicy) {
+        try {
+          const policy = await this.escalationPolicy.evaluate(decision, respond);
+          if (!policy.allowed) {
+            decision.action = this.mapPolicySuggestion(policy.suggestion);
+            decision.reasoning += `\n[Escalation policy: ${policy.reason}]`;
+          } else if (policy.evidence_score < 0.6) {
+            return true;
+          } else {
+            return false;
+          }
+        } catch (err) {
+          console.warn('[reasoner] Escalation policy check failed:', err instanceof Error ? err.message : err);
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
     if (respond.recommended_action === 'assign') return false;
     if (respond.recommended_action === 'no_action') return false;
 
@@ -318,7 +367,27 @@ export class Reasoner {
   }
 
   private async needsApproval(triage: TriageResult, decision: AgentDecision): Promise<boolean> {
-    if (triage.recommended_action === 'escalate') return false;
+    if (triage.recommended_action === 'escalate') {
+      if (this.escalationPolicy) {
+        try {
+          const policy = await this.escalationPolicy.evaluate(decision, triage);
+          if (!policy.allowed) {
+            decision.action = this.mapPolicySuggestion(policy.suggestion);
+            decision.reasoning += `\n[Escalation policy: ${policy.reason}]`;
+          } else if (policy.evidence_score < 0.6) {
+            return true;
+          } else {
+            return false;
+          }
+        } catch (err) {
+          console.warn('[reasoner] Escalation policy check failed:', err instanceof Error ? err.message : err);
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
+
     if (triage.recommended_action === 'assign') return false;
 
     // Phase 2: check autonomy engine for eligible categories
@@ -336,6 +405,15 @@ export class Reasoner {
     }
 
     return true;
+  }
+
+  private mapPolicySuggestion(suggestion?: string): AgentDecision['action'] {
+    switch (suggestion) {
+      case 'respond_first': return 'draft_response';
+      case 'gather_context_first': return 'draft_response';
+      case 'assign_instead': return 'assign';
+      default: return 'draft_response';
+    }
   }
 
   private async getActiveAbTest(callType: string): Promise<{ id: number; split_percentage: number; variant_b: string | null } | null> {

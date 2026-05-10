@@ -37,6 +37,8 @@ const flexString = z.any().transform((val): string => {
   return String(val ?? '');
 });
 
+const NO_ACTION_REASONS = ['no_customer_action', 'waiting_customer', 'waiting_partner', 'human_should_act', 'defer_check_later'] as const;
+
 export const RespondResultSchema = z.object({
   intent: z.any().transform((val) => {
     if (typeof val === 'string') return { type: val, confidence: 0.5 };
@@ -49,9 +51,12 @@ export const RespondResultSchema = z.object({
   confidence: flexConfidence,
   sentiment: flexEnum(['positive', 'neutral', 'frustrated', 'angry', 'urgent'] as const),
   recommended_action: flexEnum(['respond', 'escalate', 'close', 'gather_context', 'assign', 'no_action'] as const),
+  no_action_reason: flexEnum([...NO_ACTION_REASONS] as [typeof NO_ACTION_REASONS[0], ...typeof NO_ACTION_REASONS[number][]]).optional(),
   draft_response: flexNullableString,
   internal_note: flexString,
   reasoning_trace: flexString,
 });
+
+export type NoActionReason = typeof NO_ACTION_REASONS[number];
 
 export type RespondResult = z.infer<typeof RespondResultSchema>;

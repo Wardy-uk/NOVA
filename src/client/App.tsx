@@ -71,6 +71,7 @@ const AgentDashboardView = lazy(() => import('./components/AgentDashboardView.js
 const AgentWorkspaceView = lazy(() => import('./components/AgentWorkspaceView.js').then(m => ({ default: m.AgentWorkspaceView })));
 const AgentCoachingView = lazy(() => import('./components/AgentCoachingView.js').then(m => ({ default: m.AgentCoachingView })));
 const AgentPipelinesView = lazy(() => import('./components/AgentPipelinesView.js').then(m => ({ default: m.AgentPipelinesView })));
+const AgentImpactView = lazy(() => import('./components/AgentImpactView.js').then(m => ({ default: m.AgentImpactView })));
 const UatComparisonView = lazy(() => import('./components/UatComparisonView.js').then(m => ({ default: m.UatComparisonView })));
 const AgentProfileView = lazy(() => import('./components/AgentProfileView.js').then(m => ({ default: m.AgentProfileView })));
 const KbGapsView = lazy(() => import('./components/KbGapsView.js').then(m => ({ default: m.KbGapsView })));
@@ -111,7 +112,7 @@ type View = 'daily' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'dev-review' | 'dev-review-dashboard'
   | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-tickets' | 'calyx-kb' | 'calyx-improvements' | 'calyx-settings' | 'calyx-problems' | 'calyx-changes' | 'calyx-major-incidents' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
   | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
-  | 'agent-kb-health' | 'agent-training' | 'agent-capacity' | 'agent-intelligence' | 'agent-ops-pack' | 'agent-121'
+  | 'agent-kb-health' | 'agent-training' | 'agent-capacity' | 'agent-intelligence' | 'agent-impact' | 'agent-ops-pack' | 'agent-121'
   | 'backlog-board'
   | 'settings' | 'admin-panel' | 'portal-admin' | 'my-feedback'
   | 'help' | 'debug';
@@ -298,6 +299,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'agent-learnings', label: 'Learnings' },
       { view: 'agent-capacity', label: 'Capacity' },
       { view: 'agent-intelligence', label: 'Intelligence' },
+      { view: 'agent-impact', label: 'Impact' },
       { view: 'agent-ops-pack', label: 'Ops Pack' },
       { view: 'agent-121', label: '1-2-1 Prep' },
     ],
@@ -1354,6 +1356,9 @@ export function App() {
           )}
           {view === 'agent-intelligence' && canSeeArea('ai-agent') && (
             <IntelligenceView />
+          )}
+          {view === 'agent-impact' && canSeeArea('ai-agent') && (
+            <AgentImpactView />
           )}
           {view === 'agent-ops-pack' && canSeeArea('ai-agent') && (
             <OpsPackView />

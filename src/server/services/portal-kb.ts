@@ -1,8 +1,10 @@
-import { query, queryOne, execute } from './database.js';
+import { query, queryOne, execute, executeAndGetId } from './database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { McpClientManager } from './mcp-client.js';
 import type { PortalKbArticle } from '../../shared/portal-types.js';
 import { trackEvent } from './portal-analytics.js';
+
+const kbViewCache = new Map<number, { articleIds: number[]; viewedAt: number }>();
 
 export class PortalKbService {
   private syncTimer: ReturnType<typeof setInterval> | null = null;
@@ -205,9 +207,116 @@ export class PortalKbService {
     if (article) {
       await execute(`UPDATE portal_kb_articles SET view_count = view_count + 1 WHERE id = ?`, [id]);
       await trackEvent('kb_view', portalUserId || null, orgId || null, { article_id: id });
+
+      // Gap 6: Track article view for effectiveness correlation
+      if (portalUserId) {
+        const existing = kbViewCache.get(portalUserId);
+        if (existing) {
+          if (!existing.articleIds.includes(id)) existing.articleIds.push(id);
+          existing.viewedAt = Date.now();
+        } else {
+          kbViewCache.set(portalUserId, { articleIds: [id], viewedAt: Date.now() });
+        }
+      }
     }
 
     return article;
+  }
+
+  async recordKbDeflection(portalUserId: number, orgId: number): Promise<void> {
+    const cached = kbViewCache.get(portalUserId);
+    if (!cached || cached.articleIds.length === 0) return;
+    // Only count if they viewed articles in the last 30 minutes
+    if (Date.now() - cached.viewedAt > 30 * 60 * 1000) return;
+
+    await trackEvent('kb_deflection', portalUserId, orgId, {
+      article_ids: cached.articleIds,
+    });
+
+    for (const articleId of cached.articleIds) {
+      await execute(
+        `UPDATE portal_kb_articles SET deflection_count = ISNULL(deflection_count, 0) + 1 WHERE id = ?`,
+        [articleId],
+      ).catch(() => {});
+    }
+    kbViewCache.delete(portalUserId);
+  }
+
+  async recordKbFailedDeflection(portalUserId: number, orgId: number, ticketKey: string): Promise<void> {
+    const cached = kbViewCache.get(portalUserId);
+    if (!cached || cached.articleIds.length === 0) {
+      await trackEvent('no_kb_ticket', portalUserId, orgId, { ticket_key: ticketKey });
+      return;
+    }
+    if (Date.now() - cached.viewedAt > 30 * 60 * 1000) {
+      await trackEvent('no_kb_ticket', portalUserId, orgId, { ticket_key: ticketKey });
+      return;
+    }
+
+    await trackEvent('kb_failed_deflection', portalUserId, orgId, {
+      article_ids: cached.articleIds,
+      ticket_key: ticketKey,
+    });
+
+    for (const articleId of cached.articleIds) {
+      await execute(
+        `UPDATE portal_kb_articles SET failed_deflection_count = ISNULL(failed_deflection_count, 0) + 1 WHERE id = ?`,
+        [articleId],
+      ).catch(() => {});
+    }
+    kbViewCache.delete(portalUserId);
+  }
+
+  async getEffectiveness(): Promise<{
+    aggregate: { deflection_rate: number; no_kb_rate: number };
+    most_effective: Array<{ id: number; title: string; deflection_count: number }>;
+    least_effective: Array<{ id: number; title: string; failed_deflection_count: number }>;
+    category_gaps: Array<{ category: string; no_kb_count: number }>;
+  }> {
+    const [deflections, failedDeflections, noKb, mostEffective, leastEffective, categoryGaps] = await Promise.all([
+      query<{ cnt: number }>(
+        `SELECT COUNT(*) AS cnt FROM portal_analytics WHERE event_type = 'kb_deflection' AND created_at >= DATEADD(DAY, -30, GETUTCDATE())`,
+      ),
+      query<{ cnt: number }>(
+        `SELECT COUNT(*) AS cnt FROM portal_analytics WHERE event_type = 'kb_failed_deflection' AND created_at >= DATEADD(DAY, -30, GETUTCDATE())`,
+      ),
+      query<{ cnt: number }>(
+        `SELECT COUNT(*) AS cnt FROM portal_analytics WHERE event_type = 'no_kb_ticket' AND created_at >= DATEADD(DAY, -30, GETUTCDATE())`,
+      ),
+      query<{ id: number; title: string; deflection_count: number }>(
+        `SELECT TOP 10 id, title, ISNULL(deflection_count, 0) AS deflection_count
+         FROM portal_kb_articles WHERE ISNULL(deflection_count, 0) > 0
+         ORDER BY deflection_count DESC`,
+      ),
+      query<{ id: number; title: string; failed_deflection_count: number }>(
+        `SELECT TOP 10 id, title, ISNULL(failed_deflection_count, 0) AS failed_deflection_count
+         FROM portal_kb_articles WHERE ISNULL(failed_deflection_count, 0) > 0
+         ORDER BY failed_deflection_count DESC`,
+      ),
+      query<{ category: string; no_kb_count: number }>(
+        `SELECT JSON_VALUE(metadata, '$.category') AS category, COUNT(*) AS no_kb_count
+         FROM portal_analytics
+         WHERE event_type = 'no_kb_ticket' AND created_at >= DATEADD(DAY, -30, GETUTCDATE())
+           AND JSON_VALUE(metadata, '$.category') IS NOT NULL
+         GROUP BY JSON_VALUE(metadata, '$.category')
+         ORDER BY no_kb_count DESC`,
+      ),
+    ]);
+
+    const d = deflections[0]?.cnt ?? 0;
+    const fd = failedDeflections[0]?.cnt ?? 0;
+    const nk = noKb[0]?.cnt ?? 0;
+    const totalTickets = fd + nk;
+
+    return {
+      aggregate: {
+        deflection_rate: d + fd > 0 ? Math.round((d / (d + fd)) * 10000) / 10000 : 0,
+        no_kb_rate: totalTickets > 0 ? Math.round((nk / totalTickets) * 10000) / 10000 : 0,
+      },
+      most_effective: mostEffective,
+      least_effective: leastEffective,
+      category_gaps: categoryGaps,
+    };
   }
 
   async submitFeedback(id: number, helpful: boolean): Promise<void> {
