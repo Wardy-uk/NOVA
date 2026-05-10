@@ -100,7 +100,7 @@ export function CapacityView() {
 
       {/* Capacity Heatmap */}
       <div className="grid grid-cols-7 gap-1">
-        {data.filter(d => d.team_capacity > 0).map(d => (
+        {data.filter(d => d.predicted_volume > 0 || d.actual_volume !== null).map(d => (
           <div key={d.forecast_date}
             className={`${cellColor(d.surplus_deficit, d.team_capacity)} rounded-lg p-3 text-center`}>
             <div className="text-xs text-neutral-500">{dayName(d.day_of_week)}</div>
@@ -134,7 +134,7 @@ export function CapacityView() {
             </tr>
           </thead>
           <tbody>
-            {data.filter(d => d.team_capacity > 0).map(d => (
+            {data.filter(d => d.predicted_volume > 0 || d.actual_volume !== null).map(d => (
               <tr key={d.forecast_date} className="border-b border-[#3a424d]/50 hover:bg-[#2f353d]/50">
                 <td className="py-2 px-2 text-neutral-300">{d.forecast_date}</td>
                 <td className="py-2 px-2 text-neutral-400">{dayName(d.day_of_week)}</td>

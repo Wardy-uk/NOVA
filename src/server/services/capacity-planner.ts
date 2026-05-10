@@ -67,7 +67,7 @@ export class CapacityPlanner {
     const rosterCount = await query<{ cnt: number }>(
       `SELECT COUNT(*) AS cnt FROM agent_roster WHERE active = 1`,
     );
-    const agentCount = rosterCount[0]?.cnt ?? 5;
+    const agentCount = rosterCount[0]?.cnt || parseInt(this.settings.get('capacity_default_agents') ?? '5', 10);
     const capacityPerAgent = parseInt(this.settings.get('agent_max_capacity') ?? '12', 10);
     const dailyCapacity = agentCount * capacityPerAgent;
 
