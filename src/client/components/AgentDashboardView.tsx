@@ -1502,8 +1502,9 @@ function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
 
   const actionBreakdown = ev.actionBreakdown as Record<string, number> | undefined;
   const exampleTickets = [...new Set(ev.exampleTickets as string[] | undefined ?? [])];
-  const statKeys = Object.entries(ev).filter(([k]) => !['sampleTickets', 'actionBreakdown', 'exampleTickets', 'riskFlag', 'proposedRule', 'category'].includes(k));
-  const hasDetail = (actionBreakdown && Object.keys(actionBreakdown).length > 0) || exampleTickets.length > 0 || statKeys.length > 0;
+  const statKeys = Object.entries(ev).filter(([k]) => !['sampleTickets', 'actionBreakdown', 'exampleTickets', 'riskFlag', 'proposedRule', 'category',
+    'approvalRate', 'avgConfidence', 'approvedCount', 'declinedCount', 'estimatedWeeklySavings'].includes(k));
+  const hasDetail = exampleTickets.length > 0 || statKeys.length > 0;
 
   return (
     <div className={`rounded-lg bg-[#272C33] overflow-hidden border ${cfg ? cfg.border : 'border-[#3a424d]'}`}>
@@ -1514,10 +1515,8 @@ function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
               {cfg.label}
             </span>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className={`text-sm font-semibold ${cfg.text}`}>{v.headline}</span>
-                <span className="text-[10px] text-neutral-500">{category}</span>
-              </div>
+              <span className={`text-sm font-semibold ${cfg.text}`}>{v.headline}</span>
+              <div className="text-xs text-neutral-400 mt-0.5">{category}</div>
               <div className="text-[11px] text-neutral-300 leading-relaxed mt-1">
                 {v.reason}
               </div>
@@ -1528,12 +1527,62 @@ function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
         )}
       </div>
 
+      {ev.proposedRule && (
+        <div className="mx-4 mt-1 mb-2 px-3 py-2 rounded bg-[#1e2530] border border-[#3a424d]/60 text-xs text-neutral-200 font-mono">
+          {ev.proposedRule as string}
+        </div>
+      )}
+
+      {(ev.approvalRate !== undefined || ev.avgConfidence !== undefined || ev.approvedCount !== undefined || (ev.estimatedWeeklySavings !== undefined && Number(ev.estimatedWeeklySavings) > 0)) && (
+        <div className="px-4 flex flex-wrap gap-2 text-[10px]">
+          {ev.approvalRate !== undefined && (
+            <span className={`px-2 py-0.5 rounded-full border ${
+              Number(ev.approvalRate) >= 95 ? 'bg-green-950/40 text-green-400 border-green-800/30' :
+              Number(ev.approvalRate) >= 80 ? 'bg-amber-950/40 text-amber-400 border-amber-800/30' :
+              'bg-red-950/40 text-red-400 border-red-800/30'
+            }`}>
+              {ev.approvalRate}% approved
+            </span>
+          )}
+          {ev.avgConfidence !== undefined && (
+            <span className={`px-2 py-0.5 rounded-full border ${
+              Number(ev.avgConfidence) >= 85 ? 'bg-green-950/40 text-green-400 border-green-800/30' :
+              Number(ev.avgConfidence) >= 75 ? 'bg-amber-950/40 text-amber-400 border-amber-800/30' :
+              'bg-red-950/40 text-red-400 border-red-800/30'
+            }`}>
+              {ev.avgConfidence}% avg confidence
+            </span>
+          )}
+          {ev.approvedCount !== undefined && (
+            <span className="px-2 py-0.5 rounded-full bg-[#363d47] text-neutral-400 border border-[#3a424d]/50">
+              {ev.approvedCount} approved / {ev.declinedCount ?? 0} declined
+            </span>
+          )}
+          {ev.estimatedWeeklySavings !== undefined && Number(ev.estimatedWeeklySavings) > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-blue-950/40 text-blue-400 border border-blue-900/30">
+              ~{ev.estimatedWeeklySavings}/week saved
+            </span>
+          )}
+        </div>
+      )}
+
+      {actionBreakdown && Object.keys(actionBreakdown).length > 0 && (
+        <div className="px-4 flex flex-wrap gap-1.5 items-center">
+          <span className="text-[9px] text-neutral-500 mr-1">Actions:</span>
+          {Object.entries(actionBreakdown).sort((a, b) => b[1] - a[1]).map(([action, cnt]) => (
+            <span key={action} className="text-[9px] px-1.5 py-0.5 rounded bg-blue-950/40 text-blue-400 border border-blue-900/30">
+              {action} ({cnt})
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="px-4 py-3 space-y-3">
+        <RiskPill riskFlag={riskFlag} />
+
         {s.bodyText && (
           <div className="text-[11px] text-neutral-400 leading-relaxed whitespace-pre-line">{s.bodyText}</div>
         )}
-
-        <RiskPill riskFlag={riskFlag} />
 
         <div className="flex items-center gap-2">
           {v?.verdict === 'apply' && (
@@ -1621,21 +1670,14 @@ function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
                 ))}
               </div>
             )}
-            {actionBreakdown && Object.keys(actionBreakdown).length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                <span className="text-[9px] text-neutral-500">Actions:</span>
-                {Object.entries(actionBreakdown).map(([action, cnt]) => (
-                  <span key={action} className="text-[9px] px-1.5 py-0.5 rounded bg-blue-950/40 text-blue-400 border border-blue-900/30">
-                    {action} ({cnt})
-                  </span>
-                ))}
-              </div>
-            )}
             {exampleTickets.length > 0 && (
               <div className="flex flex-wrap gap-1.5 items-center">
                 <span className="text-[9px] text-neutral-500">Recent:</span>
                 {exampleTickets.map(t => (
-                  <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-[#363d47] text-neutral-300 font-mono">{t}</span>
+                  <a key={t} href={`https://nurturtech.atlassian.net/browse/${t}`} target="_blank" rel="noopener noreferrer"
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-[#363d47] text-blue-400 hover:text-blue-300 font-mono transition-colors">
+                    {t}
+                  </a>
                 ))}
               </div>
             )}
