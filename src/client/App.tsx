@@ -299,6 +299,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'agent-capacity', label: 'Capacity' },
       { view: 'agent-intelligence', label: 'Intelligence' },
       { view: 'agent-ops-pack', label: 'Ops Pack' },
+      { view: 'agent-121', label: '1-2-1 Prep' },
     ],
   },
   backlog: {
@@ -369,7 +370,7 @@ function getViewFromHash(): View | null {
 
 export function App() {
   // Calyx requester portal — standalone (no NOVA chrome or auth)
-  if (window.location.pathname.startsWith('/portal')) return <CalyxPortal />;
+  if (window.location.pathname.startsWith('/portal/calyx')) return <CalyxPortal />;
 
   // Customer setup portal — standalone public page (no NOVA auth)
   const setupMatch = window.location.pathname.match(/^\/setup\/([a-f0-9]{64})$/);
@@ -1356,6 +1357,11 @@ export function App() {
           )}
           {view === 'agent-ops-pack' && canSeeArea('ai-agent') && (
             <OpsPackView />
+          )}
+          {view === 'agent-121' && canSeeArea('ai-agent') && (
+            <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>
+              <Briefing121View />
+            </Suspense>
           )}
 
           {/* Administration */}

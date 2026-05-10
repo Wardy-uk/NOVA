@@ -31,14 +31,87 @@ class NurturChatWidget {
     this.init();
   }
 
+  private shadowRoot: ShadowRoot | null = null;
+
   private init(): void {
-    // Create shadow DOM container for style isolation
+    const host = document.createElement('div');
+    host.id = 'nurtur-chat-widget';
+    document.body.appendChild(host);
+
+    this.shadowRoot = host.attachShadow({ mode: 'open' });
     this.container = document.createElement('div');
-    this.container.id = 'nurtur-chat-widget';
-    document.body.appendChild(this.container);
+    this.shadowRoot.appendChild(this.container);
+
+    // Inject styles into shadow DOM
+    const style = document.createElement('style');
+    style.textContent = this.getWidgetStyles();
+    this.shadowRoot.appendChild(style);
 
     this.createBubble();
     this.createPanel();
+  }
+
+  private getWidgetStyles(): string {
+    // Inline the widget CSS so host page styles don't leak in
+    return `
+      .nurtur-chat-bubble {
+        position: fixed; bottom: 20px; width: 56px; height: 56px;
+        border-radius: 50%; border: none; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 99999;
+        transition: transform 0.2s;
+      }
+      .nurtur-chat-bubble:hover { transform: scale(1.1); }
+      .nurtur-chat-bubble.open { transform: scale(0.9); }
+      .nurtur-chat-panel {
+        position: fixed; bottom: 90px; width: 380px; height: 520px;
+        background: white; border-radius: 16px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+        z-index: 99999; flex-direction: column; overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      .nurtur-chat-panel.right { right: 20px; }
+      .nurtur-chat-panel.left { left: 20px; }
+      .nurtur-chat-header {
+        padding: 16px; color: white; display: flex;
+        align-items: center; justify-content: space-between; font-weight: 600;
+      }
+      .nurtur-chat-close {
+        background: none; border: none; color: white;
+        font-size: 20px; cursor: pointer; padding: 0 4px;
+      }
+      .nurtur-chat-messages {
+        flex: 1; overflow-y: auto; padding: 16px;
+      }
+      .nurtur-chat-message {
+        margin-bottom: 12px; display: flex;
+      }
+      .nurtur-chat-message.user { justify-content: flex-end; }
+      .nurtur-chat-msg-content {
+        max-width: 80%; padding: 10px 14px; border-radius: 16px;
+        font-size: 14px; line-height: 1.4;
+      }
+      .nurtur-chat-message.assistant .nurtur-chat-msg-content {
+        background: #f3f4f6; color: #111;
+      }
+      .nurtur-chat-message.user .nurtur-chat-msg-content {
+        background: #2563eb; color: white;
+      }
+      .nurtur-chat-input-area {
+        padding: 12px; border-top: 1px solid #e5e7eb;
+        display: flex; gap: 8px;
+      }
+      .nurtur-chat-input {
+        flex: 1; padding: 8px 12px; border: 1px solid #d1d5db;
+        border-radius: 8px; font-size: 14px; outline: none;
+      }
+      .nurtur-chat-input:focus { border-color: #2563eb; }
+      .nurtur-chat-send {
+        width: 36px; height: 36px; border-radius: 8px;
+        border: none; cursor: pointer; display: flex;
+        align-items: center; justify-content: center;
+      }
+    `;
   }
 
   private createBubble(): void {

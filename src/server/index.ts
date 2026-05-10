@@ -222,9 +222,15 @@ async function main() {
 
   // Calyx background timers (must be after settingsQueries is initialized)
   if (calyxDb) {
-    setInterval(() => checkSloBreaches(calyxDb, settingsQueries.getAll()), 5 * 60 * 1000);
-    setInterval(() => processEmailQueue(calyxDb, settingsQueries.getAll()), 60_000);
-    setInterval(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 30 * 60 * 1000);
+    jobRegistry.register('calyx-slo-check', 'Calyx SLO breach check', async () => {
+      checkSloBreaches(calyxDb, settingsQueries.getAll());
+    }, 5 * 60 * 1000);
+    jobRegistry.register('calyx-email-queue', 'Calyx email queue processor', async () => {
+      processEmailQueue(calyxDb, settingsQueries.getAll());
+    }, 60_000);
+    jobRegistry.register('calyx-kpi-sync', 'Calyx KPI sync to NOVA', async () => {
+      await syncCalyxKpisToNova(calyxDb, settingsQueries);
+    }, 30 * 60 * 1000);
     setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 60_000);
   }
 
@@ -1000,7 +1006,7 @@ async function main() {
     jiraSyncService.start(45_000);
   }
 
-  let aiScanTimer: ReturnType<typeof setInterval> | null = null;
+  // AI scan jobs registered via jobRegistry below
 
   // Agent loop — feature-flagged, admin-only
   const agentJiraClient = buildOnboardingJiraClient();
@@ -1054,11 +1060,11 @@ async function main() {
     // Recurring sync timers
     const tfsSyncMin = parseInt(settingsQueries.get('tfs_docs_sync_interval_min') || '60', 10);
     const confSyncMin = parseInt(settingsQueries.get('confluence_sync_interval_min') || '60', 10);
-    setInterval(() => {
-      if (tfsProvider.isConfigured()) kbSyncWorker.sync(tfsProvider).catch(() => {});
+    jobRegistry.register('kb-sync-tfs', 'KB sync: TFS Docs', async () => {
+      if (tfsProvider.isConfigured()) await kbSyncWorker.sync(tfsProvider);
     }, tfsSyncMin * 60_000);
-    setInterval(() => {
-      if (confluenceProvider.isConfigured()) kbSyncWorker.sync(confluenceProvider).catch(() => {});
+    jobRegistry.register('kb-sync-confluence', 'KB sync: Confluence', async () => {
+      if (confluenceProvider.isConfigured()) await kbSyncWorker.sync(confluenceProvider);
     }, confSyncMin * 60_000);
     const pipelineMonitor = new PipelineMonitor(settingsQueries);
     pipelineMonitor.ensureRunsTable().catch(e => console.warn('[pipeline-monitor] ensureRunsTable failed:', e.message));
@@ -1096,13 +1102,9 @@ async function main() {
     agentLoop.getReasoner().setLearningService(aiLearningService);
 
     // Human edit detection — every 30 minutes, initial run after 2 minutes
-    aiScanTimer = setInterval(async () => {
-      try {
-        const signals = await aiImprovementService.detectHumanEdits();
-        if (signals > 0) console.log(`[ai-improvement] edit scan: ${signals} signals`);
-      } catch (err) {
-        console.error('[ai-improvement] edit scan failed:', err);
-      }
+    jobRegistry.register('ai-improvement-edits', 'AI improvement: human edit detection', async () => {
+      const signals = await aiImprovementService.detectHumanEdits();
+      if (signals > 0) console.log(`[ai-improvement] edit scan: ${signals} signals`);
     }, 30 * 60 * 1000);
     setTimeout(() => { aiImprovementService.detectHumanEdits().catch(() => {}); }, 120_000);
 
@@ -1115,14 +1117,13 @@ async function main() {
     const comparisonCron = settingsQueries.get('agent_comparison_scan_cron') || '0 6,11,14,17 * * *';
     const comparisonHours = parseCronHours(comparisonCron);
     let lastComparisonHour = -1;
-    void setInterval(() => {
+    jobRegistry.register('ai-improvement-comparison', 'AI improvement: comparison scan', async () => {
       const ukHour = new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false });
       const hour = parseInt(ukHour, 10);
       if (comparisonHours.includes(hour) && hour !== lastComparisonHour) {
         lastComparisonHour = hour;
-        aiImprovementService.runComparisonScan().then(n => {
-          if (n > 0) console.log(`[ai-improvement] comparison scan: ${n} compared`);
-        }).catch(err => console.error('[ai-improvement] comparison scan failed:', err));
+        const n = await aiImprovementService.runComparisonScan();
+        if (n > 0) console.log(`[ai-improvement] comparison scan: ${n} compared`);
       }
     }, 60_000);
     // Initial comparison scan after 3 minutes
@@ -1266,9 +1267,8 @@ async function main() {
     }));
 
     // Defer sweeper — check every 60s for overdue/elapsed defers
-    setInterval(() => {
-      deferService.sweepOverdueDefers().catch(e =>
-        console.warn('[defer-sweeper] sweep failed:', e.message));
+    jobRegistry.register('defer-sweeper', 'Defer sweeper', async () => {
+      await deferService.sweepOverdueDefers();
     }, 60_000);
 
     // Ensure NOVA AI synthetic agent exists in dbo.Agent (idempotent)
@@ -1355,64 +1355,72 @@ async function main() {
     kpiPipeline.ensureDigestColumns().catch(() => {});
 
     // KPI pipeline timers (initial kicks staggered to avoid startup storm)
-    setInterval(() => kpiPipeline.collectJiraSnapshot().catch(e => console.warn('[kpi-pipeline] snapshot failed:', e.message)), 10 * 60 * 1000);
-    setInterval(() => kpiPipeline.snapshotAgentKpis().catch(e => console.warn('[kpi-pipeline] agent snapshot failed:', e.message)), 30 * 60 * 1000);
+    jobRegistry.register('kpi-jira-snapshot', 'KPI Jira snapshot collection', async () => {
+      await kpiPipeline.collectJiraSnapshot();
+    }, 10 * 60 * 1000);
+    jobRegistry.register('kpi-agent-snapshot', 'KPI agent snapshot', async () => {
+      await kpiPipeline.snapshotAgentKpis();
+    }, 30 * 60 * 1000);
     setTimeout(() => kpiPipeline.collectJiraSnapshot().catch(() => {}), 90_000);
 
     // Daily digest at 17:30, weekly digest Monday 09:00
-    setInterval(() => {
+    jobRegistry.register('kpi-daily-rollup', 'KPI daily/weekly digest', async () => {
       const now = new Date();
       if (now.getHours() === 17 && now.getMinutes() >= 30 && now.getMinutes() < 40) {
-        kpiPipeline.generateDailyDigest().catch(e => console.warn('[kpi-pipeline] daily digest failed:', e.message));
+        await kpiPipeline.generateDailyDigest();
       }
       if (now.getDay() === 1 && now.getHours() === 9 && now.getMinutes() < 10) {
-        kpiPipeline.generateWeeklyDigest().catch(e => console.warn('[kpi-pipeline] weekly digest failed:', e.message));
+        await kpiPipeline.generateWeeklyDigest();
       }
     }, 10 * 60 * 1000);
 
     // SharePoint delivery sheet — auto-pull daily at 02:00
     if (spSync) {
-      setInterval(() => {
+      jobRegistry.register('sp-delivery-pull', 'SharePoint delivery sheet pull', async () => {
         const now = new Date();
         if (now.getHours() === 2 && now.getMinutes() < 10 && !spSync.running) {
           console.log('[SP-Sync] Starting scheduled overnight pull');
-          spSync.pull().catch(e => console.warn('[SP-Sync] scheduled pull failed:', e.message));
+          await spSync.pull();
         }
       }, 10 * 60 * 1000);
     }
 
     // QA pipeline — score resolved tickets every 2 hours
-    setInterval(() => qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] scoring failed:', e.message)), 2 * 60 * 60 * 1000);
+    jobRegistry.register('qa-scoring', 'QA pipeline: score resolved tickets', async () => {
+      await qaPipeline.scoreRecentlyResolved(24);
+    }, 2 * 60 * 60 * 1000);
     setTimeout(() => qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] initial run failed:', e instanceof Error ? e.message : e)), 120_000);
 
     // GR comment scoring — every 60 min during business hours (Mon-Fri 08-18 UTC)
-    setInterval(() => {
+    jobRegistry.register('gr-scoring', 'Golden rules pipeline', async () => {
       const hour = new Date().getUTCHours();
       const day = new Date().getUTCDay();
       if (hour >= 8 && hour <= 18 && day >= 1 && day <= 5) {
-        grPipeline.scoreRecentComments().catch(e => console.warn('[gr-pipeline] scoring failed:', e.message));
+        await grPipeline.scoreRecentComments();
       }
     }, 60 * 60 * 1000);
     setTimeout(() => grPipeline.scoreRecentComments().catch(e => console.warn('[gr-pipeline] initial run failed:', e instanceof Error ? e.message : e)), 30_000);
 
     // QA daily digest email — 17:00 UTC
-    setInterval(() => {
+    jobRegistry.register('qa-daily-digest', 'QA daily digest email', async () => {
       const now = new Date();
       if (now.getUTCHours() === 17 && now.getUTCMinutes() < 15) {
-        qaDigest.sendDailyDigest().catch(e => console.warn('[qa-digest] daily failed:', e.message));
+        await qaDigest.sendDailyDigest();
       }
     }, 15 * 60 * 1000);
 
     // QA weekly digest email — Monday 08:00 UTC
-    setInterval(() => {
+    jobRegistry.register('qa-weekly-digest', 'QA weekly digest email', async () => {
       const now = new Date();
       if (now.getUTCDay() === 1 && now.getUTCHours() === 8 && now.getUTCMinutes() < 15) {
-        qaDigest.sendWeeklyDigest().catch(e => console.warn('[qa-digest] weekly failed:', e.message));
+        await qaDigest.sendWeeklyDigest();
       }
     }, 15 * 60 * 1000);
 
     // Pipeline health check — every 15 min
-    setInterval(() => pipelineMonitor.checkStaleRuns().catch(() => {}), 15 * 60 * 1000);
+    jobRegistry.register('pipeline-monitor', 'Pipeline monitor: stale run check', async () => {
+      await pipelineMonitor.checkStaleRuns();
+    }, 15 * 60 * 1000);
 
     // WP-62: Drift detection — Monday 06:00 UK, with startup catch-up
     let driftFiredThisWindow = false;
@@ -1429,14 +1437,14 @@ async function main() {
         console.warn('[drift-detector] Startup catch-up failed:', e instanceof Error ? e.message : e);
       }
     })();
-    setInterval(() => {
+    jobRegistry.register('drift-detection', 'Drift detection (Mon 06:00)', async () => {
       const now = new Date();
       const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
       const ukMinute = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }));
       if (now.getDay() === 1 && ukHour === 6 && ukMinute < 10) {
         if (!driftFiredThisWindow) {
           driftFiredThisWindow = true;
-          driftDetector.snapshotDrift().catch(e => console.warn('[drift-detector] Weekly snapshot failed:', e.message));
+          await driftDetector.snapshotDrift();
         }
       } else {
         driftFiredThisWindow = false;
@@ -1444,22 +1452,18 @@ async function main() {
     }, 10 * 60 * 1000);
 
     // Daily briefing generation — check every 10 min, generate at configured time (default 07:00)
-    setInterval(async () => {
-      try {
-        const briefingTime = settingsQueries.get('agent_briefing_time') || '07:00';
-        const [targetH, targetM] = briefingTime.split(':').map(Number);
-        const now = new Date();
-        const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
-        const ukMinute = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }));
-        if (ukHour === targetH && ukMinute >= targetM && ukMinute < targetM + 10) {
-          const allUsers = await userQueries.getAll();
-          const eligible = allUsers.filter(u => u.email && u.role && u.role.split(',').map(r => r.trim()).includes('briefing'));
-          await dailyBriefingService.generateAll(eligible.map(u => ({
-            id: u.id, email: u.email!, display_name: u.display_name || u.username, role: u.role,
-          })));
-        }
-      } catch (e) {
-        console.warn('[daily-briefing] Timer failed:', e instanceof Error ? e.message : e);
+    jobRegistry.register('daily-briefing', 'Daily briefing generation', async () => {
+      const briefingTime = settingsQueries.get('agent_briefing_time') || '07:00';
+      const [targetH, targetM] = briefingTime.split(':').map(Number);
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
+      const ukMinute = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }));
+      if (ukHour === targetH && ukMinute >= targetM && ukMinute < targetM + 10) {
+        const allUsers = await userQueries.getAll();
+        const eligible = allUsers.filter(u => u.email && u.role && u.role.split(',').map(r => r.trim()).includes('briefing'));
+        await dailyBriefingService.generateAll(eligible.map(u => ({
+          id: u.id, email: u.email!, display_name: u.display_name || u.username, role: u.role,
+        })));
       }
     }, 10 * 60 * 1000);
 
@@ -1505,12 +1509,10 @@ async function main() {
     });
 
     // Product cancellation check — every 4 hours during working hours
-    setInterval(() => {
+    jobRegistry.register('product-cancellation', 'Product cancellation check', async () => {
       const hour = new Date().getHours();
       if (hour >= 8 && hour <= 18) {
-        productCancellation.checkForCancellations().catch(e =>
-          console.warn('[product-cancellation] check failed:', e instanceof Error ? e.message : e)
-        );
+        await productCancellation.checkForCancellations();
       }
     }, 4 * 60 * 60 * 1000);
 
@@ -1551,87 +1553,75 @@ async function main() {
     }
     // SOP-003: Day 10 auto-close backstop — runs once per hour during working hours
     const backstopClock = createWorkingDayClock();
-    setInterval(async () => {
+    jobRegistry.register('day10-auto-close', 'SOP-003 Day 10 auto-close backstop', async () => {
       if (!backstopClock.isWorkingTime(new Date())) return;
       if (!agentLoop) return;
-      try {
-        const cache = jiraCacheQueries;
-        const waiting = await cache.getOpenIssues(['NT']);
-        const waitingForCustomer = waiting.filter(t => {
-          const status = (t.status_name ?? '').toLowerCase();
-          return status.includes('waiting for customer') || status.includes('waiting on requestor');
+      const cache = jiraCacheQueries;
+      const waiting = await cache.getOpenIssues(['NT']);
+      const waitingForCustomer = waiting.filter(t => {
+        const status = (t.status_name ?? '').toLowerCase();
+        return status.includes('waiting for customer') || status.includes('waiting on requestor');
+      });
+
+      const now = new Date();
+      let closed = 0;
+      for (const ticket of waitingForCustomer) {
+        const comments = await cache.getComments(ticket.issue_key, 20);
+        const lastAgentPublic = comments.find(c =>
+          c.is_public && c.author_email === ticket.assignee_email,
+        );
+        if (!lastAgentPublic) continue;
+
+        const hoursSince = backstopClock.workingHoursBetween(new Date(lastAgentPublic.jira_created), now);
+        const daysSince = hoursSince / 8;
+        if (daysSince < 10) continue;
+
+        const jira = agentLoop.getJiraClient();
+        const { fields, comment } = buildResolveFields({
+          tldr: 'Auto-closed: no customer response after 10 working days (SOP-003 backstop)',
+          resolution: 'Request Cancelled / Withdrawn',
+          comment: 'This ticket has been automatically closed after 10 working days without a customer response. If you still need help, please reply to this email or raise a new ticket.',
         });
 
-        const now = new Date();
-        let closed = 0;
-        for (const ticket of waitingForCustomer) {
-          const comments = await cache.getComments(ticket.issue_key, 20);
-          const lastAgentPublic = comments.find(c =>
-            c.is_public && c.author_email === ticket.assignee_email,
-          );
-          if (!lastAgentPublic) continue;
-
-          const hoursSince = backstopClock.workingHoursBetween(new Date(lastAgentPublic.jira_created), now);
-          const daysSince = hoursSince / 8;
-          if (daysSince < 10) continue;
-
-          const jira = agentLoop.getJiraClient();
-          const { fields, comment } = buildResolveFields({
-            tldr: 'Auto-closed: no customer response after 10 working days (SOP-003 backstop)',
-            resolution: 'Request Cancelled / Withdrawn',
-            comment: 'This ticket has been automatically closed after 10 working days without a customer response. If you still need help, please reply to this email or raise a new ticket.',
+        try {
+          await jira.transitionIssue(ticket.issue_key, '17', { fields, comment });
+          await recordEvent('auto_close_backstop_fired', null, ticket.issue_key, {
+            agent_who_owned_it: ticket.assignee_display ?? ticket.assignee_email ?? 'unknown',
+            days_in_state: Math.round(daysSince),
           });
-
-          try {
-            await jira.transitionIssue(ticket.issue_key, '17', { fields, comment });
-            await recordEvent('auto_close_backstop_fired', null, ticket.issue_key, {
-              agent_who_owned_it: ticket.assignee_display ?? ticket.assignee_email ?? 'unknown',
-              days_in_state: Math.round(daysSince),
-            });
-            closed++;
-          } catch (err) {
-            console.warn(`[backstop] Failed to auto-close ${ticket.issue_key}:`, err instanceof Error ? err.message : err);
-          }
+          closed++;
+        } catch (err) {
+          console.warn(`[backstop] Failed to auto-close ${ticket.issue_key}:`, err instanceof Error ? err.message : err);
         }
-
-        if (closed > 0) console.log(`[backstop] Auto-closed ${closed} ticket(s) at Day 10`);
-      } catch (err) {
-        console.error('[backstop] Day 10 scan failed:', err instanceof Error ? err.message : err);
       }
-    }, 60 * 60 * 1000); // every hour
+
+      if (closed > 0) console.log(`[backstop] Auto-closed ${closed} ticket(s) at Day 10`);
+    }, 60 * 60 * 1000);
 
     // Flagged ticket auto-dismiss sweep — every 30 minutes
-    setInterval(async () => {
-      try {
-        const { FlagAutoDismissService } = await import('./services/flag-auto-dismiss.js');
-        const svc = new FlagAutoDismissService(settingsQueries);
-        const result = await svc.sweep();
-        if (result.total > 0) {
-          console.log(`[flag-dismiss] Auto-dismissed ${result.total} flags: resolved=${result.resolved}, aged=${result.aged_out}, handled=${result.auto_handled}`);
-        }
-      } catch (err) {
-        console.warn('[flag-dismiss] Sweep failed:', err instanceof Error ? err.message : err);
+    jobRegistry.register('flag-auto-dismiss', 'Flagged ticket auto-dismiss sweep', async () => {
+      const { FlagAutoDismissService } = await import('./services/flag-auto-dismiss.js');
+      const svc = new FlagAutoDismissService(settingsQueries);
+      const result = await svc.sweep();
+      if (result.total > 0) {
+        console.log(`[flag-dismiss] Auto-dismissed ${result.total} flags: resolved=${result.resolved}, aged=${result.aged_out}, handled=${result.auto_handled}`);
       }
     }, 30 * 60 * 1000);
 
     // Weekly impact snapshot — runs Monday 07:00 UK time
     let lastImpactSnapshotDay = -1;
-    setInterval(async () => {
+    jobRegistry.register('weekly-impact-snapshot', 'Weekly impact snapshot (Mon 07:00)', async () => {
       const ukNow = new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', hour: 'numeric', hour12: false });
       const [day, hourStr] = ukNow.split(' ');
       const hour = parseInt(hourStr, 10);
       const dayNum = new Date().getDay();
       if (day === 'Mon' && hour === 7 && dayNum !== lastImpactSnapshotDay) {
         lastImpactSnapshotDay = dayNum;
-        try {
-          const { ImpactMeasurement } = await import('./services/impact-measurement.js');
-          const svc = new ImpactMeasurement(settingsQueries);
-          const metrics = await svc.computeMetrics(7);
-          await svc.saveSnapshot(metrics);
-          console.log(`[impact] Weekly snapshot saved: hours_saved=${metrics.queue_hours_saved}, resolution_rate=${(metrics.autonomous_resolution_rate * 100).toFixed(1)}%`);
-        } catch (err) {
-          console.warn('[impact] Weekly snapshot failed:', err instanceof Error ? err.message : err);
-        }
+        const { ImpactMeasurement } = await import('./services/impact-measurement.js');
+        const svc = new ImpactMeasurement(settingsQueries);
+        const metrics = await svc.computeMetrics(7);
+        await svc.saveSnapshot(metrics);
+        console.log(`[impact] Weekly snapshot saved: hours_saved=${metrics.queue_hours_saved}, resolution_rate=${(metrics.autonomous_resolution_rate * 100).toFixed(1)}%`);
       }
     }, 60_000);
 
@@ -2403,6 +2393,11 @@ ${panelHtml}
     // Start KB sync timer
     portalKb.startSync();
 
+    // Refresh portal categories from Jira daily
+    jobRegistry.register('portal-category-refresh', 'Portal intake category refresh', async () => {
+      await portalIntake.refreshCategories();
+    }, 24 * 60 * 60 * 1000);
+
     // Auth routes (no portal auth middleware — these handle login/callback)
     app.use('/api/portal/auth', createPortalAuthRoutes(settingsQueries));
 
@@ -2592,30 +2587,22 @@ ${panelHtml}
   }, 5000);
 
   // Milestone workflow evaluation every 15 minutes
-  const workflowTimer = setInterval(async () => {
-    try {
-      const result = await workflowEngine.evaluateAll();
-      if (result.tasksCreated > 0 || result.ticketsCreated > 0) {
-        console.log(`[Workflow] Scheduled: ${result.tasksCreated} tasks, ${result.ticketsCreated} tickets created`);
-      }
-    } catch (err) {
-      console.error('[Workflow] Scheduled evaluation failed:', err instanceof Error ? err.message : err);
+  jobRegistry.register('milestone-eval', 'Milestone evaluation', async () => {
+    const result = await workflowEngine.evaluateAll();
+    if (result.tasksCreated > 0 || result.ticketsCreated > 0) {
+      console.log(`[Workflow] Scheduled: ${result.tasksCreated} tasks, ${result.ticketsCreated} tickets created`);
     }
   }, 15 * 60 * 1000);
 
   // Problem Ticket Scanner: configurable interval (default 15 min), 0 disables
   const ptScanMinutes = Number(settingsQueries.get('problem_scanner_interval_minutes')) || 15;
-  let ptScanTimer: ReturnType<typeof setInterval> | null = null;
+  // Problem scan registered via jobRegistry below
   if (ptScanMinutes > 0) {
     const ptScanMs = ptScanMinutes * 60 * 1000;
     console.log(`[ProblemTicketScanner] Scheduled every ${ptScanMinutes} minutes`);
-    ptScanTimer = setInterval(async () => {
-      try {
-        problemTicketScanner.setJiraClient(buildOnboardingJiraClient());
-        await problemTicketScanner.scan();
-      } catch (err) {
-        console.error('[ProblemTicketScanner] Scheduled scan failed:', err instanceof Error ? err.message : err);
-      }
+    jobRegistry.register('problem-scan', 'Problem ticket scan', async () => {
+      problemTicketScanner.setJiraClient(buildOnboardingJiraClient());
+      await problemTicketScanner.scan();
     }, ptScanMs);
     setTimeout(async () => {
       try {
@@ -2630,100 +2617,92 @@ ${panelHtml}
   }
 
   // Adobe Sign agreement sync — every 5 minutes
-  setInterval(async () => {
+  jobRegistry.register('adobe-sign-sync', 'Adobe Sign agreement sync', async () => {
     if (!adobeSignClient || adobeSignClient.getStatus().status !== 'connected') return;
-    try {
-      const remoteAgreements = await adobeSignClient.listAgreements();
-      for (const a of remoteAgreements) {
-        const signerEmails = a.participantSetsInfo
-          ?.filter(ps => ps.role === 'SIGNER')
-          .flatMap(ps => ps.memberInfos.map(m => m.email)) ?? [];
-        adobeSignAgreementQueries.upsert({
-          agreement_id: a.id,
-          contract_id: null,
-          template_id: null,
-          name: a.name,
-          status: a.status,
-          sender_email: a.senderEmail ?? null,
-          signer_emails: JSON.stringify(signerEmails),
-          filled_fields: null,
-          created_via_nova: 0,
-          adobe_created_date: a.createdDate ?? null,
-          adobe_expiration_date: a.expirationDate ?? null,
-          signed_document_url: null,
-          raw_data: JSON.stringify(a),
-          synced_at: new Date().toISOString(),
-        });
-      }
-      console.log(`[Adobe Sign] Synced ${remoteAgreements.length} agreements`);
-    } catch (err) {
-      console.error('[Adobe Sign] Auto-sync failed:', err instanceof Error ? err.message : err);
+    const remoteAgreements = await adobeSignClient.listAgreements();
+    for (const a of remoteAgreements) {
+      const signerEmails = a.participantSetsInfo
+        ?.filter(ps => ps.role === 'SIGNER')
+        .flatMap(ps => ps.memberInfos.map(m => m.email)) ?? [];
+      adobeSignAgreementQueries.upsert({
+        agreement_id: a.id,
+        contract_id: null,
+        template_id: null,
+        name: a.name,
+        status: a.status,
+        sender_email: a.senderEmail ?? null,
+        signer_emails: JSON.stringify(signerEmails),
+        filled_fields: null,
+        created_via_nova: 0,
+        adobe_created_date: a.createdDate ?? null,
+        adobe_expiration_date: a.expirationDate ?? null,
+        signed_document_url: null,
+        raw_data: JSON.stringify(a),
+        synced_at: new Date().toISOString(),
+      });
     }
+    console.log(`[Adobe Sign] Synced ${remoteAgreements.length} agreements`);
   }, 5 * 60 * 1000);
 
   // ── Dev Review outbox worker — drain failed Jira writes every 2 min ──
   // When an accept/return/comment fails to write through to Jira, the route
   // queues an entry in dev_review_outbox. This worker picks them up, retries,
   // marks done on success, increments attempts on failure, and gives up after 5.
-  setInterval(async () => {
-    try {
-      const client = buildServiceDeskJiraClient();
-      if (!client) return;
-      const pending = await devReviewQueries.pendingOutbox(20);
-      if (pending.length === 0) return;
-      console.log(`[DevReviewOutbox] Draining ${pending.length} pending`);
-      for (const entry of pending) {
-        try {
-          const payload = JSON.parse(entry.payload_json) as Record<string, unknown>;
-          if (entry.op === 'accept') {
-            const transitionId = String(payload.transitionId || '141');
-            const text = String(payload.commentText || '');
-            const tldr = String(payload.tldr || '');
-            const developmentDetails = String(payload.developmentDetails || '');
-            const adf = (t: string) => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }] });
-            const fields: Record<string, unknown> = {};
-            if (tldr) fields.customfield_13184 = adf(tldr);
-            if (developmentDetails) fields.customfield_13215 = adf(developmentDetails);
-            try {
+  jobRegistry.register('dev-review-outbox', 'Dev Review outbox worker', async () => {
+    const client = buildServiceDeskJiraClient();
+    if (!client) return;
+    const pending = await devReviewQueries.pendingOutbox(20);
+    if (pending.length === 0) return;
+    console.log(`[DevReviewOutbox] Draining ${pending.length} pending`);
+    for (const entry of pending) {
+      try {
+        const payload = JSON.parse(entry.payload_json) as Record<string, unknown>;
+        if (entry.op === 'accept') {
+          const transitionId = String(payload.transitionId || '141');
+          const text = String(payload.commentText || '');
+          const tldr = String(payload.tldr || '');
+          const developmentDetails = String(payload.developmentDetails || '');
+          const adf = (t: string) => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }] });
+          const fields: Record<string, unknown> = {};
+          if (tldr) fields.customfield_13184 = adf(tldr);
+          if (developmentDetails) fields.customfield_13215 = adf(developmentDetails);
+          try {
+            await client.transitionIssue(entry.jira_key, transitionId, {
+              fields: Object.keys(fields).length > 0 ? fields : undefined,
+              comment: { body: adf(text) },
+            });
+          } catch (fieldErr: unknown) {
+            const msg = fieldErr instanceof Error ? fieldErr.message : String(fieldErr);
+            if (msg.includes('cannot be set') || msg.includes('not on the appropriate screen')) {
+              console.warn(`[DevReviewOutbox] ${entry.jira_key}: transition fields rejected, retrying without custom fields`);
               await client.transitionIssue(entry.jira_key, transitionId, {
-                fields: Object.keys(fields).length > 0 ? fields : undefined,
                 comment: { body: adf(text) },
               });
-            } catch (fieldErr: unknown) {
-              const msg = fieldErr instanceof Error ? fieldErr.message : String(fieldErr);
-              if (msg.includes('cannot be set') || msg.includes('not on the appropriate screen')) {
-                console.warn(`[DevReviewOutbox] ${entry.jira_key}: transition fields rejected, retrying without custom fields`);
-                await client.transitionIssue(entry.jira_key, transitionId, {
-                  comment: { body: adf(text) },
-                });
-              } else {
-                throw fieldErr;
-              }
-            }
-            await devReviewQueries.markAccepted(entry.jira_key);
-          } else if (entry.op === 'return') {
-            const transitionId = String(payload.returnTransitionId || '');
-            const text = String(payload.commentText || '');
-            if (transitionId) {
-              await client.transitionIssue(entry.jira_key, transitionId, {
-                comment: { body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] } },
-              });
             } else {
-              await client.updateFields(entry.jira_key, { customfield_12981: { id: '13062' } });
-              await client.addComment(entry.jira_key, text);
+              throw fieldErr;
             }
-            await devReviewQueries.markReturned(entry.jira_key);
-          } else if (entry.op === 'comment') {
-            const text = String(payload.commentText || payload.body || '');
+          }
+          await devReviewQueries.markAccepted(entry.jira_key);
+        } else if (entry.op === 'return') {
+          const transitionId = String(payload.returnTransitionId || '');
+          const text = String(payload.commentText || '');
+          if (transitionId) {
+            await client.transitionIssue(entry.jira_key, transitionId, {
+              comment: { body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] } },
+            });
+          } else {
+            await client.updateFields(entry.jira_key, { customfield_12981: { id: '13062' } });
             await client.addComment(entry.jira_key, text);
           }
-          await devReviewQueries.markOutboxDone(entry.id);
-        } catch (e) {
-          await devReviewQueries.bumpOutboxFailure(entry.id, e instanceof Error ? e.message : 'unknown');
+          await devReviewQueries.markReturned(entry.jira_key);
+        } else if (entry.op === 'comment') {
+          const text = String(payload.commentText || payload.body || '');
+          await client.addComment(entry.jira_key, text);
         }
+        await devReviewQueries.markOutboxDone(entry.id);
+      } catch (e) {
+        await devReviewQueries.bumpOutboxFailure(entry.id, e instanceof Error ? e.message : 'unknown');
       }
-    } catch (err) {
-      console.error('[DevReviewOutbox] Worker failed:', err instanceof Error ? err.message : err);
     }
   }, 2 * 60 * 1000);
 
@@ -2913,7 +2892,7 @@ ${panelHtml}
       console.error('[DevReviewWatcher] Poll failed:', err instanceof Error ? err.message : err);
     }
   };
-  setInterval(devWatch, 5 * 60 * 1000);
+  jobRegistry.register('dev-review-watcher', 'Dev Review T3 watcher', devWatch, 5 * 60 * 1000);
   setTimeout(devWatch, 75_000);
 
   // ── Dev Review comment watcher — pulls external (agent) Jira comments ──
@@ -2977,7 +2956,7 @@ ${panelHtml}
       console.error('[DevReviewComments] Watcher failed:', err instanceof Error ? err.message : err);
     }
   };
-  setInterval(commentWatch, 2 * 60 * 1000);
+  jobRegistry.register('dev-review-comments', 'Dev Review comment watcher', commentWatch, 2 * 60 * 1000);
   setTimeout(commentWatch, 120_000);
 
   // Expose last sync time + per-source intervals
@@ -2998,16 +2977,14 @@ ${panelHtml}
 
 
   // Survey scheduler: auto-activate, auto-close, send invites/reminders every 15 min
-  const surveyTimer = setInterval(() => runSurveyScheduler(settingsQueries), 15 * 60 * 1000);
+  jobRegistry.register('survey-scheduler', 'Survey scheduler', async () => {
+    await runSurveyScheduler(settingsQueries);
+  }, 15 * 60 * 1000);
 
   // Expired portal token cleanup: every 6 hours
-  const portalCleanupTimer = setInterval(async () => {
-    try {
-      const deleted = await portalQueries.deleteExpired();
-      if (deleted > 0) console.log(`[SetupPortal] Cleaned up ${deleted} expired tokens`);
-    } catch (err) {
-      console.error('[SetupPortal] Cleanup failed:', err instanceof Error ? err.message : err);
-    }
+  jobRegistry.register('portal-token-cleanup', 'Expired portal token cleanup', async () => {
+    const deleted = await portalQueries.deleteExpired();
+    if (deleted > 0) console.log(`[SetupPortal] Cleaned up ${deleted} expired tokens`);
   }, 6 * 60 * 60 * 1000);
 
   // Auto-expire approval queue items and check Jira status every minute
@@ -3016,12 +2993,11 @@ ${panelHtml}
 
   const NOVA_TIMEOUT_HOURS = Number(settingsQueries.get('approval_nova_timeout_hours')) || 4;
 
-  setInterval(async () => {
-    try {
-      const pending = await approvalQueries.getAll('pending');
-      const now = new Date();
-      const queueItems = pending.filter(item => item.id > 0);
-      const novaItems = pending.filter(item => item.id < 0);
+  jobRegistry.register('approval-sla-check', 'Approval SLA/expiry check', async () => {
+    const pending = await approvalQueries.getAll('pending');
+    const now = new Date();
+    const queueItems = pending.filter(item => item.id > 0);
+    const novaItems = pending.filter(item => item.id < 0);
 
       // 1a. SLA warning — alert when ≤30 min remaining (queue items only, NOVA has no expires_at)
       for (const item of queueItems) {
@@ -3137,106 +3113,89 @@ ${panelHtml}
           } catch { /* skip, try next */ }
         }
       }
-    } catch (err) {
-      console.error('[Approvals] Expiry check error:', err instanceof Error ? err.message : err);
-    }
-  }, 60_000); // Check every minute
+  }, 60_000);
 
 
   // Weekly training matrix reminder — check hourly, send on Mondays at 9am
   let lastTrainingReminderDate = '';
-  const trainingReminderTimer = setInterval(async () => {
-    try {
-      const now = new Date();
-      if (now.getDay() !== 1) return; // Monday only
-      if (now.getHours() < 9) return; // After 9am
-      const today = now.toISOString().split('T')[0];
-      if (lastTrainingReminderDate === today) return; // Already sent today
-      lastTrainingReminderDate = today;
-      console.log('[TrainingReminder] Monday 9am — sending weekly reminders...');
-      await sendTrainingReminders(trainingQueries, userQueries, settingsQueries);
-    } catch (err) {
-      console.error('[TrainingReminder] Error:', err instanceof Error ? err.message : err);
-    }
-  }, 60 * 60 * 1000); // Check hourly
+  jobRegistry.register('training-reminder', 'Training matrix weekly reminder', async () => {
+    const now = new Date();
+    if (now.getDay() !== 1) return;
+    if (now.getHours() < 9) return;
+    const today = now.toISOString().split('T')[0];
+    if (lastTrainingReminderDate === today) return;
+    lastTrainingReminderDate = today;
+    console.log('[TrainingReminder] Monday 9am — sending weekly reminders...');
+    await sendTrainingReminders(trainingQueries, userQueries, settingsQueries);
+  }, 60 * 60 * 1000);
 
   // Auto-prep scheduling: daily at 18:00, generate 1-2-1 prep for agents with meetings tomorrow
-  const autoPrepTimer = setInterval(async () => {
-    try {
-      const now = new Date();
-      if (now.getHours() !== 18 || now.getMinutes() >= 10) return;
+  jobRegistry.register('auto-prep-121', 'Auto-prep 1-2-1 scheduling', async () => {
+    const now = new Date();
+    if (now.getHours() !== 18 || now.getMinutes() >= 10) return;
 
-      const tools = mcpManager.getServerTools('msgraph');
-      const hasCalendarView = tools.includes('get-calendar-view') || tools.includes('list-calendar-events');
-      if (!hasCalendarView) return;
+    const tools = mcpManager.getServerTools('msgraph');
+    const hasCalendarView = tools.includes('get-calendar-view') || tools.includes('list-calendar-events');
+    if (!hasCalendarView) return;
 
-      const tomorrow = new Date(now.getTime() + 86400000);
-      const tomorrowStart = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate());
-      const tomorrowEnd = new Date(tomorrowStart.getTime() + 86400000);
+    const tomorrow = new Date(now.getTime() + 86400000);
+    const tomorrowStart = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate());
+    const tomorrowEnd = new Date(tomorrowStart.getTime() + 86400000);
 
-      const toolName = tools.includes('get-calendar-view') ? 'get-calendar-view' : 'list-calendar-events';
-      const result = await mcpManager.callTool('msgraph', toolName, {
-        startDateTime: tomorrowStart.toISOString(),
-        endDateTime: tomorrowEnd.toISOString(),
-      });
+    const toolName = tools.includes('get-calendar-view') ? 'get-calendar-view' : 'list-calendar-events';
+    const result = await mcpManager.callTool('msgraph', toolName, {
+      startDateTime: tomorrowStart.toISOString(),
+      endDateTime: tomorrowEnd.toISOString(),
+    });
 
-      const text = (result as any)?.content?.[0]?.text;
-      let events: any[] = [];
-      if (text) {
-        try { const parsed = JSON.parse(text); events = Array.isArray(parsed) ? parsed : (parsed?.value ?? []); } catch { /* */ }
-      }
-
-      const agents = await query<{ agent_name: string }>(`
-        SELECT agent_name FROM agent_development_plans WHERE status IN ('active', 'deferred')
-      `);
-
-      const today = now.toISOString().slice(0, 10);
-      const adminUser = await queryOne<{ id: number }>(`SELECT TOP 1 id FROM users WHERE role = 'admin'`);
-      let generated = 0;
-
-      for (const agent of agents) {
-        const firstName = agent.agent_name.split(' ')[0].toLowerCase();
-        const match = events.find((e: any) => {
-          const subject = (e.subject ?? e.Subject ?? '').toLowerCase();
-          return subject.includes(firstName) && (
-            subject.includes('1-2-1') || subject.includes('121') ||
-            subject.includes('one to one') || subject.includes('1:1') ||
-            subject.includes('catch up') || subject.includes('catchup')
-          );
-        });
-        if (!match) continue;
-
-        const existing = await queryOne<{ id: number }>(`
-          SELECT TOP 1 id FROM agent_121_snapshots
-          WHERE agent_name = ? AND snapshot_date = ? AND prep_json IS NOT NULL
-        `, [agent.agent_name, today]);
-        if (existing) continue;
-
-        try {
-          await generatePrepForAgent(agent.agent_name, settingsQueries, notificationQueries, adminUser?.id);
-          generated++;
-          console.log(`[auto-prep] Generated prep for ${agent.agent_name}`);
-        } catch (err) {
-          console.warn(`[auto-prep] Failed for ${agent.agent_name}:`, err instanceof Error ? err.message : err);
-        }
-      }
-
-      if (generated > 0) console.log(`[auto-prep] Generated ${generated} prep(s) for tomorrow's 1-2-1s`);
-    } catch (err) {
-      console.warn('[auto-prep] Error:', err instanceof Error ? err.message : err);
+    const text = (result as any)?.content?.[0]?.text;
+    let events: any[] = [];
+    if (text) {
+      try { const parsed = JSON.parse(text); events = Array.isArray(parsed) ? parsed : (parsed?.value ?? []); } catch { /* */ }
     }
+
+    const agents = await query<{ agent_name: string }>(`
+      SELECT agent_name FROM agent_development_plans WHERE status IN ('active', 'deferred')
+    `);
+
+    const today = now.toISOString().slice(0, 10);
+    const adminUser = await queryOne<{ id: number }>(`SELECT TOP 1 id FROM users WHERE role = 'admin'`);
+    let generated = 0;
+
+    for (const agent of agents) {
+      const firstName = agent.agent_name.split(' ')[0].toLowerCase();
+      const match = events.find((e: any) => {
+        const subject = (e.subject ?? e.Subject ?? '').toLowerCase();
+        return subject.includes(firstName) && (
+          subject.includes('1-2-1') || subject.includes('121') ||
+          subject.includes('one to one') || subject.includes('1:1') ||
+          subject.includes('catch up') || subject.includes('catchup')
+        );
+      });
+      if (!match) continue;
+
+      const existing = await queryOne<{ id: number }>(`
+        SELECT TOP 1 id FROM agent_121_snapshots
+        WHERE agent_name = ? AND snapshot_date = ? AND prep_json IS NOT NULL
+      `, [agent.agent_name, today]);
+      if (existing) continue;
+
+      try {
+        await generatePrepForAgent(agent.agent_name, settingsQueries, notificationQueries, adminUser?.id);
+        generated++;
+        console.log(`[auto-prep] Generated prep for ${agent.agent_name}`);
+      } catch (err) {
+        console.warn(`[auto-prep] Failed for ${agent.agent_name}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    if (generated > 0) console.log(`[auto-prep] Generated ${generated} prep(s) for tomorrow's 1-2-1s`);
   }, 10 * 60 * 1000);
 
   // Graceful shutdown
   const shutdown = async () => {
     console.log('[N.O.V.A] Shutting down...');
-    clearInterval(workflowTimer);
-    if (ptScanTimer) clearInterval(ptScanTimer);
-    clearInterval(portalCleanupTimer);
-    clearInterval(surveyTimer);
-    clearInterval(trainingReminderTimer);
-    clearInterval(autoPrepTimer);
-    if (aiScanTimer) clearInterval(aiScanTimer);
+    jobRegistry.pauseAll();
     for (const timer of syncTimers.values()) clearInterval(timer);
     agentLoop?.stop();
     await mcpManager.disconnectAll();

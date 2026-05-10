@@ -3,7 +3,11 @@ import type { PortalChatSession, PortalChatMessage } from '../../../shared/porta
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
-export default function PortalChat() {
+interface Props {
+  onNavigateToTicket?: (ticketKey: string) => void;
+}
+
+export default function PortalChat({ onNavigateToTicket }: Props = {}) {
   const [sessions, setSessions] = useState<PortalChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const [messages, setMessages] = useState<PortalChatMessage[]>([]);
@@ -99,6 +103,26 @@ export default function PortalChat() {
       setMessages([]);
     } catch (err) {
       console.error('Failed to end session:', err);
+    }
+  };
+
+  const handleHandoff = async () => {
+    if (!activeSessionId) return;
+    if (!confirm('This will create a support ticket with our conversation history. Continue?')) return;
+    try {
+      const res = await pf(`/api/portal/chat/sessions/${activeSessionId}/end`, {
+        method: 'POST',
+        body: JSON.stringify({ handoff: true }),
+      });
+      const data = await res.json();
+      setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, status: 'escalated' as const } : s));
+      setActiveSessionId(null);
+      setMessages([]);
+      if (data.ok && data.data?.jira_issue_key && onNavigateToTicket) {
+        onNavigateToTicket(data.data.jira_issue_key);
+      }
+    } catch (err) {
+      console.error('Failed to create handoff ticket:', err);
     }
   };
 
@@ -245,6 +269,17 @@ export default function PortalChat() {
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                   </svg>
+                </button>
+              </div>
+              <div className="mt-2 text-center">
+                <button
+                  onClick={handleHandoff}
+                  className="text-xs text-gray-400 hover:text-blue-600 transition-colors inline-flex items-center gap-1"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                  Talk to a human
                 </button>
               </div>
             </div>

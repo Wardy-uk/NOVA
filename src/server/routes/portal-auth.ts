@@ -49,7 +49,23 @@ export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
   });
 
   router.post('/refresh', async (req: Request, res: Response) => {
-    res.status(501).json({ ok: false, error: 'Token refresh not yet implemented' });
+    if (isInternalMode(settings)) {
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith('Bearer ')) {
+        res.status(401).json({ ok: false, error: 'Session expired' });
+        return;
+      }
+      try {
+        const jwt = await import('jsonwebtoken');
+        const secret = settings.get('jwt_secret') || 'nova-secret';
+        jwt.default.verify(authHeader.slice(7), secret);
+        res.json({ ok: true });
+      } catch {
+        res.status(401).json({ ok: false, error: 'Session expired' });
+      }
+      return;
+    }
+    res.status(501).json({ ok: false, error: 'OIDC token refresh not yet implemented' });
   });
 
   router.post('/logout', (req: Request, res: Response) => {

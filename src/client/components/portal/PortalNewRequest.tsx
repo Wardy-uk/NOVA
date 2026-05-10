@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 
 interface Props {
   onCreated: (ticketKey: string) => void;
@@ -10,7 +10,25 @@ interface Category {
   children: Array<{ id: string; name: string }>;
 }
 
+interface UploadedFile {
+  file: File;
+  preview?: string;
+}
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ACCEPTED_TYPES = '.png,.jpg,.jpeg,.gif,.pdf,.doc,.docx,.xlsx,.csv,.txt,.zip,.log';
+
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageFile(file: File): boolean {
+  return file.type.startsWith('image/');
+}
 
 export default function PortalNewRequest({ onCreated }: Props) {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -28,6 +46,9 @@ export default function PortalNewRequest({ onCreated }: Props) {
   const [success, setSuccess] = useState<string | null>(null);
   const [kbSuggestions, setKbSuggestions] = useState<Array<{ id: number; title: string; excerpt: string }>>([]);
   const [showKbSuggestions, setShowKbSuggestions] = useState(false);
+  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     pf('/api/portal/categories')
@@ -40,9 +61,38 @@ export default function PortalNewRequest({ onCreated }: Props) {
   const showUrl = ['website', 'crm', 'portal'].includes(category);
   const showBrowser = ['website', 'portal'].includes(category);
 
-  // Auto-detect browser info
   const browserInfo = `${navigator.userAgent.match(/Chrome\/[\d.]+|Firefox\/[\d.]+|Safari\/[\d.]+|Edge\/[\d.]+/)?.[0] || 'Unknown'}`;
   const osInfo = navigator.platform;
+
+  const addFiles = useCallback((newFiles: FileList | File[]) => {
+    const toAdd: UploadedFile[] = [];
+    for (const file of Array.from(newFiles)) {
+      if (file.size > MAX_FILE_SIZE) {
+        setError(`${file.name} exceeds 10MB limit`);
+        continue;
+      }
+      const entry: UploadedFile = { file };
+      if (isImageFile(file)) {
+        entry.preview = URL.createObjectURL(file);
+      }
+      toAdd.push(entry);
+    }
+    setFiles(prev => [...prev, ...toAdd]);
+  }, []);
+
+  const removeFile = (index: number) => {
+    setFiles(prev => {
+      const removed = prev[index];
+      if (removed.preview) URL.revokeObjectURL(removed.preview);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
+  }, [addFiles]);
 
   const handlePreSubmitKbCheck = async () => {
     if (subject.length < 5 && description.length < 10) return;
@@ -58,16 +108,30 @@ export default function PortalNewRequest({ onCreated }: Props) {
     } catch { /* ignore */ }
   };
 
+  const uploadAttachments = async (ticketKey: string) => {
+    for (const { file } of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        await pf(`/api/portal/tickets/${ticketKey}/attachments`, {
+          method: 'POST',
+          body: formData,
+        });
+      } catch {
+        console.warn(`Failed to upload ${file.name}`);
+      }
+    }
+  };
+
   const handleSubmit = async () => {
     if (!subject || !category || !description) {
       setError('Please fill in all required fields.');
       return;
     }
 
-    // Check KB first if we haven't already
     if (!showKbSuggestions && kbSuggestions.length === 0) {
       await handlePreSubmitKbCheck();
-      if (kbSuggestions.length > 0) return; // Will show suggestions
+      if (kbSuggestions.length > 0) return;
     }
 
     setSubmitting(true);
@@ -92,6 +156,9 @@ export default function PortalNewRequest({ onCreated }: Props) {
       });
       const data = await res.json();
       if (data.ok) {
+        if (files.length > 0) {
+          await uploadAttachments(data.data.ticketKey);
+        }
         setSuccess(data.data.ticketKey);
       } else {
         setError(data.error || 'Failed to create ticket');
@@ -252,6 +319,64 @@ export default function PortalNewRequest({ onCreated }: Props) {
             placeholder="Copy and paste the error message"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
           />
+        </div>
+
+        {/* File Upload */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Screenshots / Files</label>
+          <div
+            onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+              isDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+            }`}
+          >
+            <svg className="w-8 h-8 mx-auto text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <p className="text-sm text-gray-600">Drop files here or click to browse</p>
+            <p className="text-xs text-gray-400 mt-1">Max 10MB per file</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_TYPES}
+              onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }}
+              className="hidden"
+            />
+          </div>
+
+          {files.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {files.map((f, i) => (
+                <div key={i} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
+                  {f.preview ? (
+                    <img src={f.preview} alt="" className="w-10 h-10 object-cover rounded" />
+                  ) : (
+                    <div className="w-10 h-10 rounded bg-gray-200 flex items-center justify-center">
+                      <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-gray-700 truncate">{f.file.name}</div>
+                    <div className="text-xs text-gray-400">{formatFileSize(f.file.size)}</div>
+                  </div>
+                  <button
+                    onClick={e => { e.stopPropagation(); removeFile(i); }}
+                    className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Urgency + Contact Preference */}

@@ -1852,6 +1852,271 @@ server.tool('nova_feedback', 'Get internal feedback records. "list" returns all 
     }
 });
 // ═════════════════════════════════════════════════════════════════════
+// PART 5 — AI AGENT EXTENDED TOOLS (12)
+// ═════════════════════════════════════════════════════════════════════
+server.tool('nova_agent_pipeline_health', 'Returns pipeline monitor data: per-pipeline output counts, zero-output alerts, last-run timestamps.', { days: z.number().default(7).describe('Lookback days') }, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/pipeline-health');
+        return toolResult(`Pipeline health (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_drift', 'Returns drift detection snapshots: segments, severity, delta arrows, latest drift check result.', { days: z.number().default(7).describe('Lookback days') }, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/drift', { days });
+        return toolResult(`Drift detection (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_eval_results', 'Returns eval suite results: last run, sample size, accept-rate delta, pass/fail.', { days: z.number().default(7).describe('Lookback days') }, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/eval', { days });
+        return toolResult(`Eval results (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_critic_log', 'Returns critic gate decisions: ticket_key, original action, critic verdict, overridden, timestamp.', { days: z.number().default(7).describe('Lookback days') }, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/critic-log', { days });
+        return toolResult(`Critic log (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_ab_results', 'Returns A/B framework results: active experiments, variant traffic split, accept-rate by variant.', { days: z.number().default(7).describe('Lookback days') }, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/ab-tests', { days });
+        return toolResult(`A/B results (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_patterns', 'Returns pattern library: top-K patterns, match count, last matched.', { days: z.number().default(7).describe('Lookback days'), limit: z.number().default(20).describe('Max patterns') }, async ({ days, limit }) => {
+    try {
+        const data = await api('/api/agent/patterns', { days, limit });
+        return toolResult(`Pattern library (${days}d, top ${limit})`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_shadow_model', 'Returns shadow model comparison: agreement rate, disagreement samples, model pair.', { days: z.number().default(7).describe('Lookback days') }, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/shadow-model', { days });
+        return toolResult(`Shadow model (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_replay', 'Returns results of the last replay run.', { days: z.number().default(7).describe('Lookback days') }, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/replay', { days });
+        return toolResult(`Replay results (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_chase_log', 'Returns chase automation activity: tickets chased, chase type, timestamps.', { days: z.number().default(7).describe('Lookback days') }, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/chase-log', { days });
+        return toolResult(`Chase log (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_quick_wins', 'Returns quick win detection stats: by type, confidence distribution, auto-closed count.', { days: z.number().default(7).describe('Lookback days') }, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/quick-wins', { days });
+        return toolResult(`Quick wins (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_impact', 'Returns business impact metrics: autonomous resolution rate, deflection rate, queue hours saved, approval/reversal rates.', { days: z.number().default(7).describe('Lookback days') }, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/impact', { days });
+        return toolResult(`Impact metrics (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_ownership', 'Returns ownership registry: which action classes NOVA owns vs shared with n8n.', {}, async () => {
+    try {
+        const data = await api('/api/agent/ownership');
+        return toolResult('Ownership registry', data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+// ═════════════════════════════════════════════════════════════════════
+// PART 8 — P5/P6 Feature Tools
+// ═════════════════════════════════════════════════════════════════════
+server.tool('nova_agent_predictions', 'Returns current escalation predictions — ticket key, probability, features, accuracy history.', {
+    days: z.number().default(7).describe('Lookback days (default 7)'),
+    min_probability: z.number().default(0.5).describe('Minimum probability threshold (default 0.5)'),
+}, async ({ days, min_probability }) => {
+    try {
+        const data = await api('/api/agent/predictions', { days, min_probability });
+        return toolResult(`Escalation predictions (${days}d, min prob ${min_probability})`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_incidents', 'Returns active and recent incidents — summary, ticket count, linked tickets, status.', {
+    status: z.enum(['open', 'investigating', 'resolved', 'all']).default('all').describe('Incident status filter'),
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+}, async ({ status, days }) => {
+    try {
+        const data = await api('/api/agent/incidents', { status, days });
+        return toolResult(`Incidents (${status}, ${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_sla_interventions', 'Returns proactive SLA interventions — ticket key, minutes remaining, intervention type, outcome.', {
+    days: z.number().default(7).describe('Lookback days (default 7)'),
+}, async ({ days }) => {
+    try {
+        const data = await api('/api/agent/sla-management', { days });
+        return toolResult(`SLA interventions (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_kb_health', 'Returns KB article health stats — current/stale/unused/drifted counts, coverage heatmap, closure rate.', {
+    view: z.enum(['summary', 'articles', 'coverage', 'closure']).default('summary').describe('View mode'),
+}, async ({ view }) => {
+    try {
+        const data = await api('/api/kb-health', { view });
+        return toolResult(`KB health (${view})`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_training_signals', 'Returns per-agent weakness analysis — signal type, metric vs team average, recommendation, example tickets.', {
+    agent_id: z.string().optional().describe('Agent ID (omit for all agents)'),
+    actioned: z.enum(['true', 'false', 'all']).default('all').describe('Filter by actioned status'),
+}, async ({ agent_id, actioned }) => {
+    try {
+        const params = { actioned };
+        if (agent_id)
+            params.agent_id = agent_id;
+        const data = await api('/api/training-signals', params);
+        return toolResult(`Training signals${agent_id ? ` (agent ${agent_id})` : ' (all agents)'}`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_121_brief', 'Generates a 1-2-1 prep brief — performance, trends, coaching signals, talking points.', {
+    agent_id: z.string().describe('Agent ID (required)'),
+    period_days: z.number().default(30).describe('Period in days (default 30)'),
+}, async ({ agent_id, period_days }) => {
+    try {
+        const data = await apiPost(`/api/briefing/121/${agent_id}`, { period_days });
+        return toolResult(`1-2-1 brief for agent ${agent_id} (${period_days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_ops_pack', 'Returns or generates the weekly operational meeting pack — queue health, SLA, team performance, decisions needed.', {
+    action: z.enum(['latest', 'generate']).default('latest').describe('Get latest or generate new'),
+}, async ({ action }) => {
+    try {
+        const data = action === 'generate'
+            ? await apiPost('/api/ops-pack/generate', {})
+            : await api('/api/ops-pack/latest');
+        return toolResult(`Ops pack (${action})`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_capacity_forecast', 'Returns 14-day volume prediction with staffing surplus/deficit and historical accuracy.', {
+    days: z.number().default(14).describe('Forecast horizon in days (default 14)'),
+}, async ({ days }) => {
+    try {
+        const data = await api('/api/capacity/forecast', { days });
+        return toolResult(`Capacity forecast (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_cross_functional', 'Returns cross-functional intelligence — bug impact analysis, feature demand clusters, recurring issues.', {
+    signal_type: z.enum(['bug_impact', 'feature_demand', 'recurring_issue', 'all']).default('all').describe('Signal type filter'),
+}, async ({ signal_type }) => {
+    try {
+        const data = await api('/api/cross-functional', { signal_type });
+        return toolResult(`Cross-functional intelligence (${signal_type})`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_agent_learning_status', 'Returns novel ticket types encountered, learning acquisition rate, autonomy expansion candidates.', {
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+}, async ({ days }) => {
+    try {
+        const data = await api('/api/learning', { days });
+        return toolResult(`Learning status (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_admin_jobs', 'Returns all registered background jobs — name, interval, last run, error count, enabled status.', {}, async () => {
+    try {
+        const data = await api('/api/admin/jobs');
+        return toolResult('Background jobs', data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_admin_job_control', 'Start, stop, or trigger a background job by ID.', {
+    job_id: z.string().describe('Job ID (required)'),
+    action: z.enum(['start', 'stop', 'run']).describe('Action to perform'),
+}, async ({ job_id, action }) => {
+    try {
+        const data = await apiPost(`/api/admin/jobs/${job_id}/${action}`, {});
+        return toolResult(`Job ${job_id}: ${action}`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+server.tool('nova_portal_analytics', 'Returns portal usage metrics — deflection rate, chat sessions, ticket creation, KB searches, user count.', {
+    days: z.number().default(30).describe('Lookback days (default 30)'),
+}, async ({ days }) => {
+    try {
+        const data = await api('/api/portal/admin/metrics', { days });
+        return toolResult(`Portal analytics (${days}d)`, data);
+    }
+    catch (err) {
+        return toolError(err.message);
+    }
+});
+// ═════════════════════════════════════════════════════════════════════
 // Server startup
 // ═════════════════════════════════════════════════════════════════════
 async function main() {
