@@ -62,8 +62,8 @@ const OpsHeadlineSchema = z.object({
     title: z.string(),
     context: z.string(),
     recommendation: z.string(),
-  })).max(3),
-  next_week_outlook: z.string(),
+  })).max(3).default([]),
+  next_week_outlook: z.string().default('No outlook generated.'),
 });
 
 export class OpsPackService {
