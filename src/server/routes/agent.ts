@@ -161,6 +161,17 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.get('/decisions/ticket-comments/:ticketKey', async (req, res) => {
+    try {
+      const cache = deps?.jiraCache;
+      if (!cache) { res.status(503).json({ ok: false, error: 'Jira cache not available' }); return; }
+      const comments = await cache.getComments(req.params.ticketKey as string, 20);
+      res.json({ ok: true, data: comments });
+    } catch (err: any) {
+      res.json({ ok: false, error: err.message });
+    }
+  });
+
   router.get('/decisions/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -3462,6 +3473,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
           `SELECT ticket_id, output, shadow_mode, action FROM agent_decisions WHERE id = ?`, [id],
         );
         if (fullDecision) {
+          agentLoop.getObserver().recordLearningAcquisition(fullDecision.ticket_id).catch(() => {});
           let output: any = {};
           try { output = JSON.parse(fullDecision.output || '{}'); } catch { /* best effort */ }
           const category = output.classification?.category ?? 'unknown';

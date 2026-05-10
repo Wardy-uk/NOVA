@@ -1189,6 +1189,7 @@ async function main() {
     const briefing121 = new Briefing121Service(llmService, settingsQueries);
     const opsPack = new OpsPackService(llmService, settingsQueries);
     const selfDirectedLearning = new SelfDirectedLearning(settingsQueries);
+    agentLoop.getObserver().setLearning(selfDirectedLearning);
     const capacityPlanner = new CapacityPlanner(settingsQueries);
     const crossFunctional = new CrossFunctionalIntelligence(llmService, settingsQueries);
 

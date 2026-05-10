@@ -60,26 +60,30 @@ export class AbuseReportExecutor {
         console.warn(`[abuse-report] Failed to insert abuse log for ${ticketKey} (non-blocking):`, err instanceof Error ? err.message : err);
       }
 
-      // 2. Call stored procedure on Admin DB (retry once with pool reset on connection failure)
-      for (let attempt = 1; attempt <= 2; attempt++) {
+      // 2. Call stored procedure on Admin DB (retry up to 3 times with pool reset + backoff)
+      for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           const adminPool = await this.externalDb.getAdminPool();
-          await adminPool.request()
+          const request = adminPool.request();
+          (request as any).timeout = 60000;
+          await request
             .input('ContactID', parseInt(contactId, 10))
             .input('InstanceID', parseInt(instanceId, 10))
             .input('UserName', 'bym\\AbuseReport')
             .execute('dbo.ProcessAbuseReport');
-          console.log(`[abuse-report] Stored procedure executed for ${ticketKey}`);
+          console.log(`[abuse-report] Stored procedure executed for ${ticketKey} (attempt ${attempt})`);
           break;
         } catch (err) {
-          if (attempt < 2) {
-            console.warn(`[abuse-report] Stored procedure attempt ${attempt} failed for ${ticketKey}, resetting pool and retrying:`, err instanceof Error ? err.message : err);
+          if (attempt < 3) {
+            const delay = attempt === 1 ? 2000 : 5000;
+            console.warn(`[abuse-report] Stored procedure attempt ${attempt}/3 failed for ${ticketKey}, retrying in ${delay / 1000}s:`, err instanceof Error ? err.message : err);
             await this.externalDb.resetAdminPool();
+            await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
-          console.error(`[abuse-report] Stored procedure failed for ${ticketKey} (attempt ${attempt}):`, err);
+          console.error(`[abuse-report] Stored procedure failed for ${ticketKey} after 3 attempts:`, err);
           await this.updateExternalLog(logId, 'sql_error', err);
-          return this.fail(ticketKey, 'ProcessAbuseReport stored procedure failed', err);
+          return this.fail(ticketKey, 'ProcessAbuseReport stored procedure failed after 3 attempts', err);
         }
       }
 

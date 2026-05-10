@@ -1,13 +1,47 @@
-import { executeAndGetId, query } from './database.js';
+import { executeAndGetId, query, execute } from './database.js';
 import type { AgentDecision, ActionResult } from './agent-types.js';
+import type { SelfDirectedLearning } from './self-directed-learning.js';
 
 export class Observer {
+  private learning: SelfDirectedLearning | null = null;
+
+  setLearning(learning: SelfDirectedLearning): void {
+    this.learning = learning;
+  }
+
+  async checkAndMarkNovelty(decisionId: number, classification: { category?: string; sub_category?: string } | null): Promise<void> {
+    if (!this.learning || !classification) return;
+    try {
+      const requestType = classification.category ?? null;
+      const component = classification.sub_category ?? null;
+      const novelty = await this.learning.checkNovelty(requestType, component);
+      if (novelty.is_novel) {
+        await execute(
+          `UPDATE agent_decisions SET is_novel_type = 1 WHERE id = ?`,
+          [decisionId],
+        );
+        console.log(`[observer] Novel ticket type detected for decision #${decisionId} (${requestType}/${component}, prior count: ${novelty.prior_count})`);
+      }
+    } catch (err) {
+      console.warn(`[observer] Novelty check failed for decision #${decisionId}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  async recordLearningAcquisition(ticketKey: string): Promise<void> {
+    if (!this.learning) return;
+    try {
+      await this.learning.recordLearning(ticketKey);
+    } catch (err) {
+      console.warn(`[observer] Learning acquisition failed for ${ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
   async logDecision(decision: AgentDecision): Promise<number> {
     const qw = decision.output?.quick_win as { type?: string; confidence?: number } | undefined;
     const qwType = (qw?.type && qw.type !== 'none') ? qw.type : null;
     const qwConf = qwType ? (qw?.confidence ?? null) : null;
 
-    return executeAndGetId(
+    const decisionId = await executeAndGetId(
       `INSERT INTO agent_decisions
          (ticket_id, event_type, inputs, reasoning, output, action, confidence,
           provider, model, approval_required, shadow_mode, latency_ms, prompt_version, call_type,
@@ -32,6 +66,11 @@ export class Observer {
         qwConf,
       ],
     );
+
+    const classification = decision.output?.classification as { category?: string; sub_category?: string } | undefined;
+    this.checkAndMarkNovelty(decisionId, classification ?? null).catch(() => {});
+
+    return decisionId;
   }
 
   async logOutcome(decisionId: number, result: ActionResult): Promise<void> {

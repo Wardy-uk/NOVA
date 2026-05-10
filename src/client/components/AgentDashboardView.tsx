@@ -1078,6 +1078,20 @@ function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decisio
   const [declineReason, setDeclineReason] = useState('');
   const [showDeclineInput, setShowDeclineInput] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [comments, setComments] = useState<Array<{ jira_comment_id: string; author_display: string | null; body_text: string | null; is_public: boolean; jira_created: string }>>([]);
+  const [commentsExpanded, setCommentsExpanded] = useState(false);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+
+  const loadComments = async () => {
+    if (comments.length > 0) return;
+    setCommentsLoading(true);
+    try {
+      const r = await fetch(`/api/agent/decisions/ticket-comments/${encodeURIComponent(d.ticket_id)}`);
+      const data = await r.json();
+      if (data.ok) setComments(data.data ?? []);
+    } catch { /* ignore */ }
+    setCommentsLoading(false);
+  };
 
   useEffect(() => {
     if (!isAnyPending) return;
@@ -1357,6 +1371,37 @@ function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decisio
           <Section title="Reasoning Trace">
             <pre className="text-xs text-neutral-300 whitespace-pre-wrap font-mono leading-relaxed">{d.reasoning}</pre>
           </Section>
+
+          {/* Comment History */}
+          <div className="px-6 py-3 border-t border-[#3a424d]">
+            <button
+              onClick={() => { setCommentsExpanded(!commentsExpanded); if (!commentsExpanded) loadComments(); }}
+              className="text-xs font-medium text-neutral-400 hover:text-neutral-200 transition-colors flex items-center gap-1"
+            >
+              <span className="text-[10px]">{commentsExpanded ? '▼' : '▶'}</span>
+              Ticket Comments {comments.length > 0 ? `(${comments.length})` : ''}
+            </button>
+            {commentsExpanded && (
+              <div className="mt-2 space-y-2 max-h-64 overflow-y-auto">
+                {commentsLoading && <div className="text-xs text-neutral-500 animate-pulse">Loading comments...</div>}
+                {!commentsLoading && comments.length === 0 && (
+                  <div className="text-xs text-neutral-500">No comments found in cache</div>
+                )}
+                {comments.map(c => (
+                  <div key={c.jira_comment_id} className="p-2 bg-[#272C33] rounded text-xs border border-[#3a424d]/50">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-neutral-200">{c.author_display ?? 'Unknown'}</span>
+                      <div className="flex items-center gap-2">
+                        {!c.is_public && <span className="text-[9px] px-1.5 py-0.5 bg-amber-900/40 text-amber-400 rounded">Internal</span>}
+                        <span className="text-neutral-500">{new Date(c.jira_created).toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <div className="text-neutral-300 whitespace-pre-wrap break-words">{c.body_text ?? '(empty)'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Outcome */}
           {outcome && (
