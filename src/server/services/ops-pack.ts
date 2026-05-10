@@ -90,11 +90,11 @@ export class OpsPackService {
     ]);
 
     // Get flagged tickets needing decisions
-    const flagged = await query<{ ticket_key: string; summary: string; reason: string }>(
-      `SELECT TOP 5 ticket_key, summary, reason
+    const flagged = await query<{ ticket_key: string; summary: string; risk_score: number }>(
+      `SELECT TOP 5 ticket_key, summary, risk_score
        FROM agent_flagged_tickets
-       WHERE status = 'active'
-       ORDER BY created_at DESC`,
+       WHERE status = 'pending'
+       ORDER BY risk_score DESC`,
     );
 
     // LLM generates headline, decisions, outlook
@@ -106,7 +106,7 @@ SLA: FRT ${sla.frt_rate !== null ? (sla.frt_rate * 100).toFixed(0) + '%' : 'N/A'
 Shift-left: ${(shiftLeft.cc_resolved_pct * 100).toFixed(0)}% resolved at CC
 AI: ${aiImpact.decisions_count} decisions, ${aiImpact.autonomous_rate !== null ? (aiImpact.autonomous_rate * 100).toFixed(0) + '% autonomous' : 'N/A'}
 Incidents: ${incidents.length} this week
-Flagged for attention: ${flagged.map(f => `${f.ticket_key}: ${f.summary} (${f.reason})`).join('; ') || 'None'}
+Flagged for attention: ${flagged.map(f => `${f.ticket_key}: ${f.summary} (score: ${f.risk_score})`).join('; ') || 'None'}
 Team: ${teamPerf.map(a => `${a.agent_name}: ${a.volume} tickets, QA ${a.qa_avg?.toFixed(0) ?? 'N/A'}`).join('; ')}
 
 Generate a brief headline, up to 3 key decisions needing attention (with context and recommendation), and a next-week outlook paragraph.`,
@@ -156,7 +156,7 @@ Generate a brief headline, up to 3 key decisions needing attention (with context
     const prevVol = prevTotal[0]?.cnt ?? 0;
 
     const avgHandle = await query<{ avg_hours: number | null }>(
-      `SELECT AVG(DATEDIFF(HOUR, jira_created, COALESCE(resolved_date, GETUTCDATE()))) AS avg_hours
+      `SELECT AVG(DATEDIFF(HOUR, jira_created, COALESCE(jira_updated, GETUTCDATE()))) AS avg_hours
        FROM jira_issue_cache WHERE project_key = ? AND status_category = 'Done' AND jira_updated >= ?`,
       [project, since],
     );
@@ -236,14 +236,14 @@ Generate a brief headline, up to 3 key decisions needing attention (with context
       agent_name: string; volume: number; qa_avg: number | null;
     }>(
       `SELECT
-         jic.assignee_display_name AS agent_name,
+         jic.assignee_display AS agent_name,
          COUNT(*) AS volume,
          AVG(CAST(JSON_VALUE(ac.golden_rule_scores, '$.overall') AS FLOAT)) AS qa_avg
        FROM jira_issue_cache jic
        LEFT JOIN agent_coaching ac ON ac.ticket_id = jic.issue_key AND ac.golden_rule_scores IS NOT NULL
        WHERE jic.project_key = ? AND jic.jira_updated >= ?
-         AND jic.assignee_display_name IS NOT NULL
-       GROUP BY jic.assignee_display_name
+         AND jic.assignee_display IS NOT NULL
+       GROUP BY jic.assignee_display
        ORDER BY volume DESC`,
       [project, since],
     );

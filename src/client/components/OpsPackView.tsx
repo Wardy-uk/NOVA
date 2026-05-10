@@ -29,6 +29,7 @@ export function OpsPackView() {
   const [pack, setPack] = useState<OpsPack | null>(null);
   const [history, setHistory] = useState<Array<{ id: number; period_start: string; period_end: string; generated_at: string }>>([]);
   const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     const [l, h] = await Promise.all([api('/latest'), api('/history')]);
@@ -40,8 +41,17 @@ export function OpsPackView() {
 
   const generate = async () => {
     setGenerating(true);
-    const r = await api('/generate', 'POST');
-    if (r.ok) setPack(r.data);
+    setError(null);
+    try {
+      const r = await api('/generate', 'POST');
+      if (r.ok) {
+        setPack(r.data);
+      } else {
+        setError(r.error ?? 'Failed to generate ops pack');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error');
+    }
     setGenerating(false);
     load();
   };
@@ -75,6 +85,12 @@ export function OpsPackView() {
           {generating ? 'Generating...' : 'Generate Pack'}
         </button>
       </div>
+
+      {error && (
+        <div className="bg-red-950/40 border border-red-800/40 rounded-lg px-4 py-2 text-xs text-red-400">
+          {error}
+        </div>
+      )}
 
       {c ? (
         <>
