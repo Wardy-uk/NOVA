@@ -1536,21 +1536,19 @@ async function main() {
       }
     }, 4 * 60 * 60 * 1000);
 
-    // Check persisted agent running state — honours manual stop across restarts
-    let agentEnabled = settingsQueries.get('agent_enabled') === 'true';
+    // Always auto-start the agent on boot unless explicitly disabled via agent_disabled setting.
+    // Manual stop (POST /agent/stop) only applies to the current process — deploys always restart the agent.
+    let agentDisabled = false;
     try {
-      const row = await queryOne<{ config_value: string }>(`SELECT config_value FROM agent_config WHERE config_key = 'agent_enabled'`);
-      if (row) agentEnabled = row.config_value === 'true';
+      const row = await queryOne<{ config_value: string }>(`SELECT config_value FROM agent_config WHERE config_key = 'agent_disabled'`);
+      if (row) agentDisabled = row.config_value === 'true';
     } catch {}
-    const persistedState = settingsQueries.get('agent_running_state');
+    if (!agentDisabled) agentDisabled = settingsQueries.get('agent_disabled') === 'true';
     const persistedMode = settingsQueries.get('agent_running_mode');
-    const shouldAutoStart = persistedState === 'running' || (!persistedState && agentEnabled);
-    const wasExplicitlyStopped = persistedState === 'stopped';
-    if (shouldAutoStart && !wasExplicitlyStopped) {
+    if (!agentDisabled) {
       setTimeout(() => {
         agentLoop!.start(persistedMode || undefined);
-        const reason = persistedState === 'running' ? 'was running before restart' : 'agent_enabled=true, first boot';
-        console.log(`[N.O.V.A] Agent auto-started (${reason}, delayed 60s for startup stagger)`);
+        console.log(`[N.O.V.A] Agent auto-started on boot (delayed 60s for startup stagger)`);
 
         if (fullSyncPromise) {
           fullSyncPromise.then(async () => {
@@ -1568,8 +1566,8 @@ async function main() {
           });
         }
       }, 60_000);
-    } else if (wasExplicitlyStopped) {
-      console.log('[N.O.V.A] Agent not started (was manually stopped before restart)');
+    } else {
+      console.log('[N.O.V.A] Agent not started (agent_disabled=true — use POST /api/agent/start to re-enable)');
     }
     // SOP-003: Day 10 auto-close backstop — runs once per hour during working hours
     const backstopClock = createWorkingDayClock();

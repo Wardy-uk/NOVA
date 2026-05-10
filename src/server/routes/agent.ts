@@ -100,16 +100,24 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
   router.post('/start', requireSuperAdmin(), async (_req, res) => {
     agentLoop.start();
-    deps?.settingsQueries?.set('agent_enabled', 'true');
-    try { await execute(`MERGE agent_config AS t USING (SELECT 'agent_enabled' AS config_key) AS s ON t.config_key = s.config_key WHEN MATCHED THEN UPDATE SET config_value = 'true', updated_at = GETUTCDATE() WHEN NOT MATCHED THEN INSERT (config_key, config_value) VALUES ('agent_enabled', 'true');`); } catch {}
+    // Clear any permanent disable flag
+    deps?.settingsQueries?.set('agent_disabled', 'false');
+    try { await execute(`MERGE agent_config AS t USING (SELECT 'agent_disabled' AS config_key) AS s ON t.config_key = s.config_key WHEN MATCHED THEN UPDATE SET config_value = 'false', updated_at = GETUTCDATE() WHEN NOT MATCHED THEN INSERT (config_key, config_value) VALUES ('agent_disabled', 'false');`); } catch {}
     res.json({ ok: true, data: agentLoop.status });
   });
 
   router.post('/stop', requireSuperAdmin(), async (_req, res) => {
     agentLoop.stop();
-    deps?.settingsQueries?.set('agent_enabled', 'false');
-    try { await execute(`MERGE agent_config AS t USING (SELECT 'agent_enabled' AS config_key) AS s ON t.config_key = s.config_key WHEN MATCHED THEN UPDATE SET config_value = 'false', updated_at = GETUTCDATE() WHEN NOT MATCHED THEN INSERT (config_key, config_value) VALUES ('agent_enabled', 'false');`); } catch {}
+    // Stop only affects this process — agent will auto-start on next deploy/restart.
+    // To prevent auto-start across restarts, use POST /disable instead.
     res.json({ ok: true, data: agentLoop.status });
+  });
+
+  router.post('/disable', requireSuperAdmin(), async (_req, res) => {
+    agentLoop.stop();
+    deps?.settingsQueries?.set('agent_disabled', 'true');
+    try { await execute(`MERGE agent_config AS t USING (SELECT 'agent_disabled' AS config_key) AS s ON t.config_key = s.config_key WHEN MATCHED THEN UPDATE SET config_value = 'true', updated_at = GETUTCDATE() WHEN NOT MATCHED THEN INSERT (config_key, config_value) VALUES ('agent_disabled', 'true');`); } catch {}
+    res.json({ ok: true, data: { ...agentLoop.status, disabled: true } });
   });
 
   router.post('/pause', requireSuperAdmin(), (_req, res) => {
