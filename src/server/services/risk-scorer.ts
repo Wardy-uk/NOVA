@@ -51,6 +51,9 @@ interface TicketRiskInput {
   hasStrongEscalation: boolean;
   hasModerateEscalation: boolean;
   reporterOpenTicketCount: number;
+  statusName: string | null;
+  jiraUpdated: Date | null;
+  descriptionText: string | null;
 }
 
 const STRONG_ESCALATION = /\b(formal\s+complaint|lawyer|solicitor|legal\s+action|trading\s+standards|ombudsman|ICO|GDPR\s+breach|data\s+protection)\b/i;
@@ -64,17 +67,29 @@ export class RiskScorer {
   }
 
   async runStartupCleanup(): Promise<void> {
-    const guard = this.settings.get('agent_retune_v2_applied');
-    if (guard) return;
+    const guard2 = this.settings.get('agent_retune_v2_applied');
+    if (!guard2) {
+      console.log('[risk] Running one-time retune v2 stale flag dismissal...');
+      await execute(
+        `UPDATE agent_flagged_tickets
+         SET status = 'dismissed', reviewed_by = 'system-retune', reviewed_at = GETUTCDATE()
+         WHERE status = 'pending'`,
+      );
+      console.log('[risk] Dismissed all pending flagged tickets for retune v2');
+      this.settings.set('agent_retune_v2_applied', 'true');
+    }
 
-    console.log('[risk] Running one-time retune v2 stale flag dismissal...');
-    const result = await execute(
-      `UPDATE agent_flagged_tickets
-       SET status = 'dismissed', reviewed_by = 'system-retune', reviewed_at = GETUTCDATE()
-       WHERE status = 'pending'`,
-    );
-    console.log(`[risk] Dismissed all pending flagged tickets for retune v2`);
-    this.settings.set('agent_retune_v2_applied', 'true');
+    const guard3 = this.settings.get('agent_retune_v3_applied');
+    if (!guard3) {
+      console.log('[risk] Running one-time retune v3 — flushing old-model flags...');
+      await execute(
+        `UPDATE agent_flagged_tickets
+         SET status = 'dismissed', reviewed_by = 'system-retune-v3', reviewed_at = GETUTCDATE()
+         WHERE status = 'pending'`,
+      );
+      console.log('[risk] Dismissed all pending flagged tickets for retune v3');
+      this.settings.set('agent_retune_v3_applied', 'true');
+    }
   }
 
   private getThreshold(): number {
@@ -102,7 +117,7 @@ export class RiskScorer {
       factors.push({ id: 'escalation_moderate', label: 'Customer frustration', score: 15 });
     }
 
-    // 3. Age + activity — ONLY flag if combined with other signals (age alone is NOT flagworthy)
+    // 3. Age + activity — tiered thresholds, lower bar for very old tickets
     if (input.jiraCreated) {
       const ageDays = (now - input.jiraCreated.getTime()) / 86_400_000;
       if (ageDays >= 7 && input.commentCount >= 15) {
@@ -111,8 +126,9 @@ export class RiskScorer {
         factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 15 });
       } else if (ageDays >= 10 && input.commentCount >= 5) {
         factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 10 });
+      } else if (ageDays >= 30 && input.commentCount >= 2) {
+        factors.push({ id: 'age_activity', label: `${Math.round(ageDays)}d old, ${input.commentCount} comments`, score: 10 });
       }
-      // Note: old tickets with few comments are NOT scored — age alone is not a signal
     }
 
     // 4. Bounce detection
@@ -123,7 +139,7 @@ export class RiskScorer {
       factors.push({ id: 'many_hands', label: `${input.uniqueInternalCommenters} internal commenters`, score: 15 });
     }
 
-    // 5. Agent inaction
+    // 5. Agent inaction — with fallback for pre-agent tickets
     if (input.lastCustomerReplyAt && input.lastAgentActionAt) {
       const customerWaitHours = (now - input.lastCustomerReplyAt.getTime()) / 3_600_000;
       const agentLastHours = (now - input.lastAgentActionAt.getTime()) / 3_600_000;
@@ -135,6 +151,11 @@ export class RiskScorer {
       const customerWaitHours = (now - input.lastCustomerReplyAt.getTime()) / 3_600_000;
       if (customerWaitHours > 24) {
         factors.push({ id: 'agent_inactive', label: `No agent reply in ${Math.round(customerWaitHours)}h`, score: 20 });
+      }
+    } else if (!input.lastCustomerReplyAt && !input.lastAgentActionAt && input.jiraUpdated) {
+      const staleDays = (now - input.jiraUpdated.getTime()) / 86_400_000;
+      if (staleDays >= 14) {
+        factors.push({ id: 'agent_inactive', label: `No agent data, last Jira update ${Math.round(staleDays)}d ago`, score: 10 });
       }
     }
 
@@ -151,6 +172,72 @@ export class RiskScorer {
     // 7. Customer importance — repeat reporter
     if (input.reporterOpenTicketCount >= 5) {
       factors.push({ id: 'repeat_reporter', label: `Reporter has ${input.reporterOpenTicketCount} open tickets`, score: 10 });
+    }
+
+    // 8. Unassigned ticket — severity scales with age
+    if (!input.assignee || input.assignee.trim() === '') {
+      if (input.jiraCreated) {
+        const ageDays = (now - input.jiraCreated.getTime()) / 86_400_000;
+        if (ageDays >= 30) {
+          factors.push({ id: 'unassigned', label: `Unassigned for ${Math.round(ageDays)}d`, score: 30 });
+        } else if (ageDays >= 14) {
+          factors.push({ id: 'unassigned', label: `Unassigned for ${Math.round(ageDays)}d`, score: 20 });
+        } else if (ageDays >= 3) {
+          factors.push({ id: 'unassigned', label: `Unassigned for ${Math.round(ageDays)}d`, score: 10 });
+        }
+      } else {
+        factors.push({ id: 'unassigned', label: 'Unassigned (unknown age)', score: 15 });
+      }
+    }
+
+    // 9. Stale in Jira — no updates from anyone
+    if (input.jiraUpdated) {
+      const staleDays = (now - input.jiraUpdated.getTime()) / 86_400_000;
+      const waitingStatuses = ['waiting on customer', 'waiting for customer', 'waiting on requestor', 'pending customer'];
+      const isWaiting = input.statusName && waitingStatuses.includes(input.statusName.toLowerCase());
+      if (!isWaiting) {
+        if (staleDays >= 60) {
+          factors.push({ id: 'stale_jira', label: `No Jira update in ${Math.round(staleDays)}d`, score: 25 });
+        } else if (staleDays >= 30) {
+          factors.push({ id: 'stale_jira', label: `No Jira update in ${Math.round(staleDays)}d`, score: 15 });
+        } else if (staleDays >= 14) {
+          factors.push({ id: 'stale_jira', label: `No Jira update in ${Math.round(staleDays)}d`, score: 10 });
+        }
+      }
+    }
+
+    // 10. Untriaged — ticket still in Open/New status
+    if (input.statusName) {
+      const openStatuses = ['open', 'new', 'to do', 'backlog'];
+      if (openStatuses.includes(input.statusName.toLowerCase()) && input.jiraCreated) {
+        const ageDays = (now - input.jiraCreated.getTime()) / 86_400_000;
+        if (ageDays >= 14) {
+          factors.push({ id: 'untriaged', label: `Still "${input.statusName}" after ${Math.round(ageDays)}d`, score: 20 });
+        } else if (ageDays >= 3) {
+          factors.push({ id: 'untriaged', label: `Still "${input.statusName}" after ${Math.round(ageDays)}d`, score: 10 });
+        }
+      }
+    }
+
+    // 11. Priority severity — Critical/Blocker tickets need attention
+    if (input.priority) {
+      const p = input.priority.toLowerCase();
+      if (p === 'blocker' || p === 'highest') {
+        factors.push({ id: 'priority_severe', label: `Priority: ${input.priority}`, score: 25 });
+      } else if (p === 'critical' || p === 'high') {
+        factors.push({ id: 'priority_severe', label: `Priority: ${input.priority}`, score: 15 });
+      }
+    }
+
+    // 12. Parked too long — stuck in waiting/customer status
+    if (input.statusName && input.jiraUpdated) {
+      const waitingStatuses = ['waiting on customer', 'waiting for customer', 'waiting on requestor', 'pending customer'];
+      if (waitingStatuses.includes(input.statusName.toLowerCase())) {
+        const parkedDays = (now - input.jiraUpdated.getTime()) / 86_400_000;
+        if (parkedDays >= 30) {
+          factors.push({ id: 'parked_too_long', label: `Parked in "${input.statusName}" for ${Math.round(parkedDays)}d`, score: 15 });
+        }
+      }
     }
 
     const score = Math.min(100, factors.reduce((s, f) => s + f.score, 0));
@@ -200,10 +287,12 @@ export class RiskScorer {
       issue_key: string; summary: string; assignee_display: string; assignee_account_id: string;
       reporter_display: string; reporter_account_id: string; priority_name: string;
       jira_created: string; sla_breach_time: string | null; sla_breached: number;
+      status_name: string; jira_updated: string; description_text: string | null;
     }>(
       `SELECT issue_key, summary, assignee_display, assignee_account_id,
               reporter_display, reporter_account_id, priority_name,
-              jira_created, sla_breach_time, sla_breached
+              jira_created, sla_breach_time, sla_breached,
+              status_name, jira_updated, description_text
        FROM jira_issue_cache
        WHERE project_key IN (${projectPlaceholders}) AND status_category != 'done'`,
       projects,
@@ -296,6 +385,9 @@ export class RiskScorer {
         hasStrongEscalation: (comments?.has_strong_escalation ?? 0) === 1,
         hasModerateEscalation: (comments?.has_moderate_escalation ?? 0) === 1,
         reporterOpenTicketCount: ticket.reporter_account_id ? (reporterCountMap.get(ticket.reporter_account_id) ?? 0) : 0,
+        statusName: ticket.status_name,
+        jiraUpdated: ticket.jira_updated ? new Date(ticket.jira_updated) : null,
+        descriptionText: ticket.description_text,
       };
 
       const { score, factors } = this.scoreTicket(input);
@@ -460,10 +552,12 @@ export class RiskScorer {
       issue_key: string; summary: string; assignee_display: string; assignee_account_id: string;
       reporter_display: string; reporter_account_id: string; priority_name: string;
       jira_created: string; sla_breach_time: string | null; sla_breached: number;
+      status_name: string; jira_updated: string; description_text: string | null;
     }>(
       `SELECT issue_key, summary, assignee_display, assignee_account_id,
               reporter_display, reporter_account_id, priority_name,
-              jira_created, sla_breach_time, sla_breached
+              jira_created, sla_breach_time, sla_breached,
+              status_name, jira_updated, description_text
        FROM jira_issue_cache WHERE issue_key = ?`, [ticketKey],
     );
 
@@ -524,6 +618,9 @@ export class RiskScorer {
       hasStrongEscalation: (commentRow?.has_strong_escalation ?? 0) === 1,
       hasModerateEscalation: (commentRow?.has_moderate_escalation ?? 0) === 1,
       reporterOpenTicketCount: reporterRow?.open_count ?? 0,
+      statusName: ticket.status_name,
+      jiraUpdated: ticket.jira_updated ? new Date(ticket.jira_updated) : null,
+      descriptionText: ticket.description_text,
     };
 
     const { score, factors } = this.scoreTicket(input);
