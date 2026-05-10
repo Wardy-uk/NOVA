@@ -1755,6 +1755,10 @@ async function runMigrations(): Promise<void> {
     // Gap 4: Portal chat session metadata column
     `IF COL_LENGTH('portal_chat_sessions', 'metadata') IS NULL
      ALTER TABLE portal_chat_sessions ADD metadata NVARCHAR(MAX) NULL;`,
+
+    // Per-decision time saved tracking
+    `IF COL_LENGTH('agent_decisions', 'estimated_minutes_saved') IS NULL
+     ALTER TABLE agent_decisions ADD estimated_minutes_saved FLOAT NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

@@ -3951,6 +3951,16 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.get('/impact/time-saved', requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const days = parseInt(req.query.days as string, 10) || 30;
+      const data = await agentLoop.getObserver().getTimeSavedStats(days);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get time saved stats' });
+    }
+  });
+
   // ── Flagged Ticket Auto-Dismiss (M1) ──
   router.post('/flagged/sweep', requireRole('admin', 'super_admin'), async (_req, res) => {
     try {

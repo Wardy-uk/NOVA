@@ -97,6 +97,7 @@ export class AgentLoop {
     this.actor = new Actor(jiraClient, new EscalationLogService(), settings);
     this.actor.setLlmService(llmService);
     this.observer = new Observer();
+    this.observer.setSettings(settings);
     this.alertService = new AlertService(settings);
     llmService.setAlertService(this.alertService);
     this.lifecycleManager = new LifecycleManager(

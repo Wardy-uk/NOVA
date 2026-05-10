@@ -1,12 +1,45 @@
 import { executeAndGetId, query, execute } from './database.js';
 import type { AgentDecision, ActionResult } from './agent-types.js';
 import type { SelfDirectedLearning } from './self-directed-learning.js';
+import type { SettingsQueries } from '../db/settings-store.js';
+
+const DEFAULT_MINUTES_PER_ACTION: Record<string, number> = {
+  no_action: 0,
+  respond: 15,
+  draft_response: 10,
+  escalate: 5,
+  gather_context: 8,
+  assign: 3,
+  chase: 5,
+  transition: 2,
+  comment: 5,
+  update_fields: 2,
+  bug_redirect: 5,
+  quick_win_close: 8,
+  close: 5,
+};
 
 export class Observer {
   private learning: SelfDirectedLearning | null = null;
+  private settings: SettingsQueries | null = null;
 
   setLearning(learning: SelfDirectedLearning): void {
     this.learning = learning;
+  }
+
+  setSettings(settings: SettingsQueries): void {
+    this.settings = settings;
+  }
+
+  private getMinutesSaved(action: string): number {
+    const overrides = this.settings?.get('agent_minutes_per_action');
+    if (overrides) {
+      try {
+        const parsed = JSON.parse(overrides) as Record<string, number>;
+        if (parsed[action] !== undefined) return parsed[action];
+      } catch { /* use defaults */ }
+    }
+    return DEFAULT_MINUTES_PER_ACTION[action] ?? 5;
   }
 
   async checkAndMarkNovelty(decisionId: number, classification: { category?: string; sub_category?: string } | null): Promise<void> {
@@ -40,13 +73,14 @@ export class Observer {
     const qw = decision.output?.quick_win as { type?: string; confidence?: number } | undefined;
     const qwType = (qw?.type && qw.type !== 'none') ? qw.type : null;
     const qwConf = qwType ? (qw?.confidence ?? null) : null;
+    const minutesSaved = this.getMinutesSaved(decision.action);
 
     const decisionId = await executeAndGetId(
       `INSERT INTO agent_decisions
          (ticket_id, event_type, inputs, reasoning, output, action, confidence,
           provider, model, approval_required, shadow_mode, latency_ms, prompt_version, call_type,
-          quick_win_type, quick_win_confidence)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          quick_win_type, quick_win_confidence, estimated_minutes_saved)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         decision.ticketKey,
         decision.eventType,
@@ -64,6 +98,7 @@ export class Observer {
         decision.callType ?? decision.action,
         qwType,
         qwConf,
+        minutesSaved,
       ],
     );
 
@@ -418,6 +453,54 @@ export class Observer {
       totalToday,
       executedToday: execRows[0]?.cnt ?? 0,
       undoRate30d: executed30d > 0 ? undone30d / executed30d : 0,
+    };
+  }
+
+  async getTimeSavedStats(days = 30): Promise<{
+    total_minutes: number;
+    today_minutes: number;
+    by_action: Array<{ action: string; minutes: number; count: number }>;
+    daily_trend: Array<{ day: string; minutes: number; count: number }>;
+  }> {
+    const [totalRows, todayRows, byActionRows, dailyRows] = await Promise.all([
+      query<{ mins: number }>(
+        `SELECT ISNULL(SUM(estimated_minutes_saved), 0) AS mins
+         FROM agent_decisions
+         WHERE estimated_minutes_saved > 0 AND shadow_mode = 0
+           AND created_at >= DATEADD(day, -?, GETUTCDATE())`,
+        [days],
+      ),
+      query<{ mins: number }>(
+        `SELECT ISNULL(SUM(estimated_minutes_saved), 0) AS mins
+         FROM agent_decisions
+         WHERE estimated_minutes_saved > 0 AND shadow_mode = 0
+           AND created_at >= CAST(GETUTCDATE() AS DATE)`,
+      ),
+      query<{ action: string; minutes: number; count: number }>(
+        `SELECT action, SUM(estimated_minutes_saved) AS minutes, COUNT(*) AS count
+         FROM agent_decisions
+         WHERE estimated_minutes_saved > 0 AND shadow_mode = 0
+           AND created_at >= DATEADD(day, -?, GETUTCDATE())
+         GROUP BY action ORDER BY minutes DESC`,
+        [days],
+      ),
+      query<{ day: string; minutes: number; count: number }>(
+        `SELECT CONVERT(VARCHAR(10), created_at, 120) AS day,
+                SUM(estimated_minutes_saved) AS minutes, COUNT(*) AS count
+         FROM agent_decisions
+         WHERE estimated_minutes_saved > 0 AND shadow_mode = 0
+           AND created_at >= DATEADD(day, -?, GETUTCDATE())
+         GROUP BY CONVERT(VARCHAR(10), created_at, 120)
+         ORDER BY day`,
+        [days],
+      ),
+    ]);
+
+    return {
+      total_minutes: totalRows[0]?.mins ?? 0,
+      today_minutes: todayRows[0]?.mins ?? 0,
+      by_action: byActionRows,
+      daily_trend: dailyRows,
     };
   }
 

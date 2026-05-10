@@ -13,6 +13,13 @@ interface ImpactMetrics {
   escalation_accuracy: number;
 }
 
+interface TimeSavedStats {
+  total_minutes: number;
+  today_minutes: number;
+  by_action: Array<{ action: string; minutes: number; count: number }>;
+  daily_trend: Array<{ day: string; minutes: number; count: number }>;
+}
+
 interface PolicyStats {
   total: number;
   blocked: number;
@@ -61,26 +68,30 @@ export function AgentImpactView() {
   const [metrics, setMetrics] = useState<ImpactMetrics | null>(null);
   const [history, setHistory] = useState<ImpactMetrics[]>([]);
   const [policyStats, setPolicyStats] = useState<PolicyStats | null>(null);
+  const [timeSaved, setTimeSaved] = useState<TimeSavedStats | null>(null);
   const [computing, setComputing] = useState(false);
   const [lastComputed, setLastComputed] = useState<string | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<keyof ImpactMetrics>('autonomous_resolution_rate');
 
   const fetchData = useCallback(async () => {
     try {
-      const [mRes, hRes, pRes] = await Promise.all([
+      const [mRes, hRes, pRes, tsRes] = await Promise.all([
         fetch('/api/agent/impact'),
         fetch('/api/agent/impact/history'),
         fetch('/api/agent/escalation-policy/stats'),
+        fetch('/api/agent/impact/time-saved?days=30'),
       ]);
       const mData = await mRes.json();
       const hData = await hRes.json();
       const pData = await pRes.json();
+      const tsData = await tsRes.json();
       if (mData.ok) {
         setMetrics(mData.data);
         setLastComputed(mData.data?.period_end ?? null);
       }
       if (hData.ok) setHistory(hData.data ?? []);
       if (pData.ok) setPolicyStats(pData.data ?? null);
+      if (tsData.ok) setTimeSaved(tsData.data ?? null);
     } catch (err) {
       console.error('Failed to fetch impact data:', err);
     }
@@ -152,6 +163,77 @@ export function AgentImpactView() {
           );
         })}
       </div>
+
+      {/* Time Saved */}
+      {timeSaved && (
+        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
+          <h3 className="text-sm font-medium text-white mb-3">Time Saved by AI Agent</h3>
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div>
+              <div className="text-xs text-zinc-400">Today</div>
+              <div className="text-2xl font-bold text-green-400">
+                {timeSaved.today_minutes >= 60
+                  ? `${(timeSaved.today_minutes / 60).toFixed(1)}h`
+                  : `${Math.round(timeSaved.today_minutes)}m`}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-zinc-400">Last 30 Days</div>
+              <div className="text-2xl font-bold text-white">
+                {(timeSaved.total_minutes / 60).toFixed(1)}h
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-zinc-400">Equivalent FTE Days</div>
+              <div className="text-2xl font-bold text-white">
+                {(timeSaved.total_minutes / 480).toFixed(1)}
+              </div>
+            </div>
+          </div>
+          {timeSaved.by_action.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-xs text-zinc-400 mb-1">By Action Type</div>
+              {timeSaved.by_action.map(a => {
+                const pct = timeSaved.total_minutes > 0 ? (a.minutes / timeSaved.total_minutes) * 100 : 0;
+                return (
+                  <div key={a.action} className="flex items-center gap-2 text-xs">
+                    <span className="w-28 text-zinc-300 truncate">{a.action}</span>
+                    <div className="flex-1 h-3 bg-zinc-700 rounded overflow-hidden">
+                      <div className="h-full bg-green-600 rounded" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="w-14 text-right text-zinc-400 font-mono">
+                      {a.minutes >= 60 ? `${(a.minutes / 60).toFixed(1)}h` : `${Math.round(a.minutes)}m`}
+                    </span>
+                    <span className="w-12 text-right text-zinc-500 font-mono">{a.count}x</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {timeSaved.daily_trend.length > 1 && (
+            <div className="mt-4">
+              <div className="text-xs text-zinc-400 mb-2">Daily Trend (30d)</div>
+              <div className="h-24 flex items-end gap-px">
+                {timeSaved.daily_trend.map(d => {
+                  const max = Math.max(...timeSaved.daily_trend.map(t => t.minutes), 1);
+                  const heightPct = (d.minutes / max) * 100;
+                  return (
+                    <div key={d.day} className="flex-1 flex flex-col items-center justify-end"
+                      title={`${d.day}: ${Math.round(d.minutes)}min (${d.count} actions)`}>
+                      <div className="w-full bg-green-600/70 rounded-t min-h-[2px]"
+                        style={{ height: `${Math.max(heightPct, 2)}%` }} />
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-between text-[9px] text-zinc-500 mt-1">
+                <span>{timeSaved.daily_trend[0]?.day.slice(5)}</span>
+                <span>{timeSaved.daily_trend[timeSaved.daily_trend.length - 1]?.day.slice(5)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Trend Chart */}
       {history.length > 1 && (
