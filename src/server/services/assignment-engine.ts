@@ -14,6 +14,8 @@ export interface RosterAgent {
   pool: Pool;
   skills: string[] | null;
   max_capacity: number;
+  max_tickets_cc: number | null;
+  max_tickets_t2t3: number | null;
   active: boolean;
   is_current_agent: boolean;
   last_assigned_at: Date | null;
@@ -29,6 +31,13 @@ interface AgentLoad {
   agent: RosterAgent;
   openCount: number;
   capacityRatio: number;
+}
+
+export interface WorkloadBuckets {
+  total: number;
+  cc: number;
+  t2t3: number;
+  tpj: number;
 }
 
 interface ProjectPoolConfig {
@@ -96,36 +105,92 @@ export class AssignmentEngine {
     const available = await this.getAvailableAgents(pool);
     if (available.length === 0) return null;
 
-    const loads = await this.getAgentLoads(available, options?.complexity);
-    let ranked = this.rankByCapacity(loads);
-    let assignmentReason: string = 'capacity_best';
+    const allBuckets = await this.getAgentLoadsBatch(available);
 
-    // Customer continuity: boost agent who previously resolved for this reporter
-    const continuityEnabled = this.settingsQueries.get('assignment_customer_continuity_enabled') !== 'false';
-    if (continuityEnabled && options?.reporterEmail) {
-      const continuityResult = await this.boostByCustomerContinuity(ranked, options.reporterEmail);
-      if (continuityResult.boosted) {
-        ranked = continuityResult.ranked;
-        assignmentReason = 'customer_continuity';
+    // TPJ stickiness: domain-based, overrides caps (n8n parity)
+    if (pool === 'tpj' && options?.reporterEmail) {
+      const sticky = await this.findStickyAgent(options.reporterEmail, available);
+      if (sticky) {
+        const buckets = allBuckets.get(sticky.jira_account_id) || { total: 0, cc: 0, t2t3: 0, tpj: 0 };
+        const result: AssignmentResult = {
+          agent: sticky,
+          reason: `customer stickiness | ${buckets.total}/${sticky.max_capacity} tickets`,
+          openTicketCount: buckets.total,
+        };
+        try { await this.recordAssignment(ticketKey, pool, { agent: sticky, openCount: buckets.total, capacityRatio: 0 }, project, 'customer_stickiness'); }
+        catch (err) { console.error(`[assignment] recordAssignment failed for ${ticketKey}:`, err instanceof Error ? err.message : err); }
+        try { await this.updateLastAssigned(sticky.id); }
+        catch (err) { console.error(`[assignment] updateLastAssigned failed for agent ${sticky.id}:`, err instanceof Error ? err.message : err); }
+        return result;
       }
     }
 
-    if (preferredSkills?.length) {
-      ranked = this.boostBySkills(ranked, preferredSkills);
-      if (assignmentReason === 'capacity_best') assignmentReason = 'skill_match';
+    // Build eligible list with dual-cap check (overall + pool-specific)
+    const eligible = available
+      .map(agent => ({
+        agent,
+        buckets: allBuckets.get(agent.jira_account_id) || { total: 0, cc: 0, t2t3: 0, tpj: 0 },
+      }))
+      .filter(({ agent, buckets }) => this.isEligible(agent, buckets, pool));
+
+    if (eligible.length === 0) return null;
+
+    // Rank by lowest absolute count (n8n parity)
+    const ranked = this.rankByWorkload(eligible, pool);
+    let assignmentReason: string = 'capacity_best';
+
+    // Customer continuity for non-TPJ pools (NOVA addition, kept for CC/T2)
+    const continuityEnabled = this.settingsQueries.get('assignment_customer_continuity_enabled') !== 'false';
+    if (continuityEnabled && pool !== 'tpj' && options?.reporterEmail) {
+      const loads = ranked.map(({ agent, buckets }) => ({ agent, openCount: buckets.total, capacityRatio: agent.max_capacity > 0 ? buckets.total / agent.max_capacity : 1 }));
+      const continuityResult = await this.boostByCustomerContinuity(loads, options.reporterEmail);
+      if (continuityResult.boosted) {
+        const chosen = continuityResult.ranked[0];
+        assignmentReason = 'customer_continuity';
+        const chosenBuckets = allBuckets.get(chosen.agent.jira_account_id) || { total: 0, cc: 0, t2t3: 0, tpj: 0 };
+        const result: AssignmentResult = {
+          agent: chosen.agent,
+          reason: this.buildReasonFromBuckets(chosen.agent, chosenBuckets, pool),
+          openTicketCount: chosenBuckets.total,
+        };
+        try { await this.recordAssignment(ticketKey, pool, chosen, project, assignmentReason); }
+        catch (err) { console.error(`[assignment] recordAssignment failed for ${ticketKey}:`, err instanceof Error ? err.message : err); }
+        try { await this.updateLastAssigned(chosen.agent.id); }
+        catch (err) { console.error(`[assignment] updateLastAssigned failed for agent ${chosen.agent.id}:`, err instanceof Error ? err.message : err); }
+        return result;
+      }
     }
 
     const chosen = ranked[0];
-    if (!chosen) return null;
+    const chosenBuckets = chosen.buckets;
 
-    const result = {
+    if (preferredSkills?.length) {
+      const loads = ranked.map(({ agent, buckets }) => ({ agent, openCount: buckets.total, capacityRatio: agent.max_capacity > 0 ? buckets.total / agent.max_capacity : 1 }));
+      const skillRanked = this.boostBySkills(loads, preferredSkills);
+      if (skillRanked[0]?.agent.jira_account_id !== chosen.agent.jira_account_id) {
+        assignmentReason = 'skill_match';
+        const skillChosen = skillRanked[0];
+        const skillBuckets = allBuckets.get(skillChosen.agent.jira_account_id) || { total: 0, cc: 0, t2t3: 0, tpj: 0 };
+        const result: AssignmentResult = {
+          agent: skillChosen.agent,
+          reason: this.buildReasonFromBuckets(skillChosen.agent, skillBuckets, pool),
+          openTicketCount: skillBuckets.total,
+        };
+        try { await this.recordAssignment(ticketKey, pool, skillChosen, project, assignmentReason); }
+        catch (err) { console.error(`[assignment] recordAssignment failed for ${ticketKey}:`, err instanceof Error ? err.message : err); }
+        try { await this.updateLastAssigned(skillChosen.agent.id); }
+        catch (err) { console.error(`[assignment] updateLastAssigned failed for agent ${skillChosen.agent.id}:`, err instanceof Error ? err.message : err); }
+        return result;
+      }
+    }
+
+    const result: AssignmentResult = {
       agent: chosen.agent,
-      reason: this.buildReason(chosen, preferredSkills),
-      openTicketCount: chosen.openCount,
+      reason: this.buildReasonFromBuckets(chosen.agent, chosenBuckets, pool),
+      openTicketCount: chosenBuckets.total,
     };
 
-    // Bookkeeping is best-effort — never block the actual assignment
-    try { await this.recordAssignment(ticketKey, pool, chosen, project, assignmentReason); }
+    try { await this.recordAssignment(ticketKey, pool, { agent: chosen.agent, openCount: chosenBuckets.total, capacityRatio: 0 }, project, assignmentReason); }
     catch (err) { console.error(`[assignment] recordAssignment failed for ${ticketKey}:`, err instanceof Error ? err.message : err); }
     try { await this.updateLastAssigned(chosen.agent.id); }
     catch (err) { console.error(`[assignment] updateLastAssigned failed for agent ${chosen.agent.id}:`, err instanceof Error ? err.message : err); }
@@ -248,9 +313,9 @@ export class AssignmentEngine {
     if (pool) { conditions.push('pool = ?'); params.push(pool); }
     const rows = await query<{
       id: number; jira_account_id: string; display_name: string; email: string | null;
-      pool: string; skills: string | null; max_capacity: number; active: number;
+      pool: string; skills: string | null; max_capacity: number; max_tickets_cc: number | null; max_tickets_t2t3: number | null; active: number;
     }>(
-      `SELECT id, jira_account_id, display_name, email, pool, skills, max_capacity, active
+      `SELECT id, jira_account_id, display_name, email, pool, skills, max_capacity, max_tickets_cc, max_tickets_t2t3, active
        FROM agent_roster WHERE ${conditions.join(' AND ')}
        ORDER BY pool, display_name`,
       params,
@@ -277,6 +342,8 @@ export class AssignmentEngine {
         pool: normalizePool(row.pool),
         skills: parsedSkills,
         max_capacity: row.max_capacity ?? 15,
+        max_tickets_cc: row.max_tickets_cc ?? null,
+        max_tickets_t2t3: row.max_tickets_t2t3 ?? null,
         active: !!row.active,
         is_current_agent: !!(state?.is_current_agent),
         last_assigned_at: state?.last_assigned_at ? new Date(state.last_assigned_at) : null,
@@ -288,7 +355,8 @@ export class AssignmentEngine {
     const p = await this.getKpiPool();
     const result = await p.request().query(`
       SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
-             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets
+             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
+             MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
       WHERE Department = 'NT'
       ORDER BY Team, AgentName
@@ -309,8 +377,8 @@ export class AssignmentEngine {
     // Try agent_roster first
     const rosterRow = await queryOne<{
       id: number; jira_account_id: string; display_name: string; email: string | null;
-      pool: string; skills: string | null; max_capacity: number; active: number;
-    }>(`SELECT id, jira_account_id, display_name, email, pool, skills, max_capacity, active FROM agent_roster WHERE id = ?`, [id]);
+      pool: string; skills: string | null; max_capacity: number; max_tickets_cc: number | null; max_tickets_t2t3: number | null; active: number;
+    }>(`SELECT id, jira_account_id, display_name, email, pool, skills, max_capacity, max_tickets_cc, max_tickets_t2t3, active FROM agent_roster WHERE id = ?`, [id]);
 
     if (rosterRow) {
       const stateRow = await queryOne<{
@@ -322,7 +390,10 @@ export class AssignmentEngine {
         id: rosterRow.id, jira_account_id: rosterRow.jira_account_id,
         display_name: rosterRow.display_name, email: rosterRow.email,
         pool: normalizePool(rosterRow.pool), skills: parsedSkills,
-        max_capacity: rosterRow.max_capacity ?? 15, active: !!rosterRow.active,
+        max_capacity: rosterRow.max_capacity ?? 15,
+        max_tickets_cc: rosterRow.max_tickets_cc ?? null,
+        max_tickets_t2t3: rosterRow.max_tickets_t2t3 ?? null,
+        active: !!rosterRow.active,
         is_current_agent: !!(stateRow?.is_current_agent),
         last_assigned_at: stateRow?.last_assigned_at ? new Date(stateRow.last_assigned_at) : null,
       };
@@ -334,7 +405,8 @@ export class AssignmentEngine {
     req.input('agentId', sql.Int, id);
     const result = await req.query(`
       SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
-             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets
+             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
+             MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
       WHERE AgentId = @agentId
     `);
@@ -354,8 +426,8 @@ export class AssignmentEngine {
     // Try agent_roster first
     const rosterRow = await queryOne<{
       id: number; jira_account_id: string; display_name: string; email: string | null;
-      pool: string; skills: string | null; max_capacity: number; active: number;
-    }>(`SELECT id, jira_account_id, display_name, email, pool, skills, max_capacity, active FROM agent_roster WHERE jira_account_id = ?`, [jiraAccountId]);
+      pool: string; skills: string | null; max_capacity: number; max_tickets_cc: number | null; max_tickets_t2t3: number | null; active: number;
+    }>(`SELECT id, jira_account_id, display_name, email, pool, skills, max_capacity, max_tickets_cc, max_tickets_t2t3, active FROM agent_roster WHERE jira_account_id = ?`, [jiraAccountId]);
 
     if (rosterRow) {
       const stateRow = await queryOne<{
@@ -367,7 +439,10 @@ export class AssignmentEngine {
         id: rosterRow.id, jira_account_id: rosterRow.jira_account_id,
         display_name: rosterRow.display_name, email: rosterRow.email,
         pool: normalizePool(rosterRow.pool), skills: parsedSkills,
-        max_capacity: rosterRow.max_capacity ?? 15, active: !!rosterRow.active,
+        max_capacity: rosterRow.max_capacity ?? 15,
+        max_tickets_cc: rosterRow.max_tickets_cc ?? null,
+        max_tickets_t2t3: rosterRow.max_tickets_t2t3 ?? null,
+        active: !!rosterRow.active,
         is_current_agent: !!(stateRow?.is_current_agent),
         last_assigned_at: stateRow?.last_assigned_at ? new Date(stateRow.last_assigned_at) : null,
       };
@@ -379,7 +454,8 @@ export class AssignmentEngine {
     req.input('accountId', sql.NVarChar, jiraAccountId);
     const result = await req.query(`
       SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
-             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets
+             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
+             MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
       WHERE AccountId = @accountId
     `);
@@ -461,32 +537,63 @@ export class AssignmentEngine {
 
   // --- Private helpers ---
 
-  private async getAgentLoads(agents: RosterAgent[], complexityWeight: number = 1): Promise<AgentLoad[]> {
-    const loads: AgentLoad[] = [];
+  private async getAgentLoadsBatch(agents: RosterAgent[]): Promise<Map<string, WorkloadBuckets>> {
     const projects = this.getConfiguredProjects();
-    const projectJql = projects.length === 1 ? `project = ${projects[0]}` : `project IN (${projects.join(', ')})`;
+    const projectPlaceholders = projects.map(() => '?').join(', ');
 
+    const rows = await query<{
+      assignee_account_id: string;
+      project_key: string;
+      current_tier: string | null;
+      cnt: number;
+    }>(
+      `SELECT assignee_account_id, project_key, current_tier, COUNT(*) as cnt
+       FROM jira_issue_cache
+       WHERE assignee_account_id IS NOT NULL
+         AND status_category != 'done'
+         AND project_key IN (${projectPlaceholders})
+         AND (current_tier IS NULL OR current_tier != 'Development')
+       GROUP BY assignee_account_id, project_key, current_tier`,
+      projects,
+    );
+
+    const buckets = new Map<string, WorkloadBuckets>();
     for (const agent of agents) {
-      let openCount = 0;
-      try {
-        const jql = `${projectJql} AND assignee = "${agent.jira_account_id}" AND resolution = EMPTY`;
-        openCount = await this.jiraClient.jqlCount(jql);
-        if (openCount < 0) openCount = 0;
-      } catch {
-        openCount = 0;
-      }
-
-      // Complexity-aware: effective slots = openCount + (complexityWeight - 1) for the incoming ticket
-      const effectiveLoad = openCount + Math.max(0, complexityWeight - 1);
-
-      loads.push({
-        agent,
-        openCount,
-        capacityRatio: agent.max_capacity > 0 ? effectiveLoad / agent.max_capacity : 1,
-      });
+      buckets.set(agent.jira_account_id, { total: 0, cc: 0, t2t3: 0, tpj: 0 });
     }
 
-    return loads;
+    for (const row of rows) {
+      const b = buckets.get(row.assignee_account_id);
+      if (!b) continue;
+      b.total += row.cnt;
+
+      if (row.project_key === 'NTPJ') {
+        b.tpj += row.cnt;
+      } else {
+        const tier = (row.current_tier || '').trim();
+        if (tier === 'Customer Care' || tier === 'T1' || tier === '') {
+          b.cc += row.cnt;
+        } else if (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier)) {
+          b.t2t3 += row.cnt;
+        }
+      }
+    }
+
+    return buckets;
+  }
+
+  // Legacy method kept for getPoolStats() compatibility
+  private async getAgentLoads(agents: RosterAgent[], complexityWeight: number = 1): Promise<AgentLoad[]> {
+    const allBuckets = await this.getAgentLoadsBatch(agents);
+    return agents.map(agent => {
+      const b = allBuckets.get(agent.jira_account_id) || { total: 0, cc: 0, t2t3: 0, tpj: 0 };
+      const effectiveLoad = b.total + Math.max(0, complexityWeight - 1);
+      return {
+        agent,
+        openCount: b.total,
+        capacityRatio: agent.max_capacity > 0 ? effectiveLoad / agent.max_capacity : 1,
+      };
+    });
   }
 
   private async boostByCustomerContinuity(
@@ -515,6 +622,88 @@ export class AssignmentEngine {
     const boosted = [agent, ...ranked.filter((_, i) => i !== idx)];
     console.log(`[assignment] Customer continuity: boosting ${previous.assignee_name} for repeat reporter ${reporterEmail}`);
     return { ranked: boosted, boosted: true };
+  }
+
+  private isEligible(agent: RosterAgent, buckets: WorkloadBuckets, pool: Pool): boolean {
+    const maxTotal = agent.max_capacity || 15;
+    if (buckets.total >= maxTotal) return false;
+
+    switch (pool) {
+      case 'cc': {
+        const maxCC = agent.max_tickets_cc ?? maxTotal;
+        const effectiveCc = Math.max(0, buckets.cc);
+        return effectiveCc < maxCC;
+      }
+      case 't2': {
+        const maxT2 = agent.max_tickets_t2t3 ?? maxTotal;
+        return buckets.t2t3 < maxT2;
+      }
+      case 'tpj': {
+        const maxTPJ = agent.max_tickets_t2t3 ?? maxTotal;
+        return buckets.tpj < maxTPJ;
+      }
+      default:
+        return buckets.total < maxTotal;
+    }
+  }
+
+  private rankByWorkload(
+    agents: Array<{ agent: RosterAgent; buckets: WorkloadBuckets }>,
+    pool: Pool,
+  ): Array<{ agent: RosterAgent; buckets: WorkloadBuckets }> {
+    return [...agents].sort((a, b) => {
+      if (a.buckets.total !== b.buckets.total) return a.buckets.total - b.buckets.total;
+      const aPool = this.getPoolCount(a.buckets, pool);
+      const bPool = this.getPoolCount(b.buckets, pool);
+      if (aPool !== bPool) return aPool - bPool;
+      return (a.agent.display_name || '').localeCompare(b.agent.display_name || '');
+    });
+  }
+
+  private getPoolCount(b: WorkloadBuckets, pool: Pool): number {
+    switch (pool) {
+      case 'cc': return b.cc;
+      case 't2': return b.t2t3;
+      case 'tpj': return b.tpj;
+      default: return b.total;
+    }
+  }
+
+  private async findStickyAgent(
+    reporterEmail: string,
+    tpjAgents: RosterAgent[],
+  ): Promise<RosterAgent | null> {
+    const atIdx = reporterEmail.lastIndexOf('@');
+    if (atIdx < 0) return null;
+    const domain = reporterEmail.slice(atIdx + 1).trim().toLowerCase();
+    if (!domain || domain === 'nurtur.tech') return null;
+
+    const match = await queryOne<{ assignee_account_id: string }>(
+      `SELECT TOP 1 c.assignee_account_id
+       FROM jira_issue_cache c
+       WHERE c.project_key = 'NTPJ'
+         AND c.status_category != 'done'
+         AND c.assignee_account_id IS NOT NULL
+         AND c.reporter_email LIKE ?
+       ORDER BY c.jira_updated DESC, c.jira_created DESC`,
+      [`%@${domain}`],
+    );
+
+    if (!match?.assignee_account_id) return null;
+
+    const agent = tpjAgents.find(a => a.jira_account_id === match.assignee_account_id);
+    if (!agent || !agent.active) return null;
+
+    console.log(`[assignment] TPJ stickiness: domain ${domain} → ${agent.display_name}`);
+    return agent;
+  }
+
+  private buildReasonFromBuckets(agent: RosterAgent, buckets: WorkloadBuckets, pool: Pool): string {
+    const poolCount = this.getPoolCount(buckets, pool);
+    const poolCap = pool === 'cc'
+      ? (agent.max_tickets_cc ?? agent.max_capacity)
+      : (agent.max_tickets_t2t3 ?? agent.max_capacity);
+    return `capacity ${buckets.total}/${agent.max_capacity} | pool ${poolCount}/${poolCap}`;
   }
 
   private rankByCapacity(loads: AgentLoad[]): AgentLoad[] {
@@ -578,6 +767,8 @@ export class AssignmentEngine {
       pool: normalizePool(row.Team),
       skills: null,
       max_capacity: row.MaxTickets ?? 10,
+      max_tickets_cc: row.MaxTicketsCustomerCare ?? null,
+      max_tickets_t2t3: row.MaxTicketsT2T3 ?? null,
       active: !!row.IsActive,
       is_current_agent: !!(state?.is_current_agent),
       last_assigned_at: state?.last_assigned_at ? new Date(state.last_assigned_at) : null,
@@ -626,5 +817,36 @@ export class AssignmentEngine {
       return config.defaultPool;
     }
     return pool;
+  }
+
+  async seedPoolCapsFromKpi(): Promise<number> {
+    try {
+      const p = await this.getKpiPool();
+      const result = await p.request().query(`
+        SELECT AccountId, MaxTicketsCustomerCare, MaxTicketsT2T3
+        FROM dbo.Agent
+        WHERE IsActive = 1 AND AccountId IS NOT NULL
+      `);
+
+      let updated = 0;
+      for (const row of result.recordset) {
+        const { AccountId, MaxTicketsCustomerCare, MaxTicketsT2T3 } = row;
+        if (MaxTicketsCustomerCare == null && MaxTicketsT2T3 == null) continue;
+        const res = await execute(
+          `UPDATE agent_roster SET max_tickets_cc = ?, max_tickets_t2t3 = ?, updated_at = GETUTCDATE()
+           WHERE jira_account_id = ? AND (max_tickets_cc IS NULL OR max_tickets_t2t3 IS NULL)`,
+          [MaxTicketsCustomerCare ?? null, MaxTicketsT2T3 ?? null, AccountId],
+        );
+        if (res.rowsAffected > 0) updated++;
+      }
+
+      if (updated > 0) {
+        console.log(`[assignment] Seeded per-pool caps from KPI for ${updated} agents`);
+      }
+      return updated;
+    } catch (err) {
+      console.warn('[assignment] Failed to seed pool caps from KPI:', err instanceof Error ? err.message : err);
+      return 0;
+    }
   }
 }

@@ -340,14 +340,32 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
   }
 
   private async escalate(decision: AgentDecision): Promise<ActionResult> {
+    const targetTier = (decision.output?.targetTier as string) ?? this.settings.get('agent_escalation_tier_value') ?? 'Tier 2';
     const briefText = `[AI Agent Escalation]\n\nTicket: ${decision.ticketKey}\nConfidence: ${decision.confidence}\nReasoning: ${decision.reasoning}`;
     await this.jiraClient.addComment(decision.ticketKey, briefText, { internal: true });
+
+    // Update Current Tier in Jira (customfield_12981)
+    const tierIds: Record<string, string> = {
+      'Customer Care': '13061', 'Tier 2': '13062', 'Tier 3': '13063',
+      'Development': '13064', 'Production': '13700',
+    };
+    const tierId = tierIds[targetTier];
+    if (tierId) {
+      try {
+        await this.jiraClient.updateFields(decision.ticketKey, {
+          customfield_12981: { id: tierId },
+        });
+        console.log(`[actor] Updated Current Tier to "${targetTier}" on ${decision.ticketKey}`);
+      } catch (err) {
+        console.warn(`[actor] Failed to update Current Tier on ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
 
     try {
       await this.escalationLog?.log({
         ticket_key: decision.ticketKey,
         escalation_type: 'ai_agent',
-        to_tier: (decision.output?.targetTier as string) ?? 'T2',
+        to_tier: targetTier,
         reason_code: (decision.output?.reasonCode as string) ?? undefined,
         reason_label: decision.reasoning?.slice(0, 200),
         escalated_by: 'ai_agent',
@@ -358,7 +376,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       console.warn('[actor] Failed to log escalation:', e instanceof Error ? e.message : e);
     }
 
-    return { success: true, action: 'escalate', ticketKey: decision.ticketKey, detail: 'Escalation brief posted as internal comment.' };
+    return { success: true, action: 'escalate', ticketKey: decision.ticketKey, detail: `Escalation brief posted + tier set to ${targetTier}.` };
   }
 
   private async bugRedirect(decision: AgentDecision): Promise<ActionResult> {

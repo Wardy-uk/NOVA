@@ -91,8 +91,8 @@ export class QuickWinExecutor {
       // Set resolution type using configurable mapping
       const resMapRaw = this.settings.get('agent_resolution_type_map');
       let resMap: Record<string, string> = {
-        spam: 'Cancelled', thank_you: 'No Fault Found', kba_match: 'Tech Services Fix',
-        stale_no_response: 'Cancelled', duplicate: 'Duplicate', auto_resolved: 'No Fault Found',
+        spam: 'Request Cancelled / Withdrawn', thank_you: 'No Fault Found', kba_match: 'Fix By Tech Services',
+        stale_no_response: 'Request Cancelled / Withdrawn', duplicate: 'Duplicate', auto_resolved: 'No Fault Found',
       };
       try { if (resMapRaw) resMap = { ...resMap, ...JSON.parse(resMapRaw) }; } catch {}
 
@@ -107,7 +107,9 @@ export class QuickWinExecutor {
           await this.jiraClient.transitionIssue(ticketKey, transitionId, { fields, comment: resolveComment });
         } catch (err) {
           console.warn(`[quick-win] Failed to set resolve fields on ${ticketKey}:`, err instanceof Error ? err.message : err);
-          await this.jiraClient.transitionIssue(ticketKey, transitionId);
+          await this.jiraClient.transitionIssue(ticketKey, transitionId, {
+            fields: { resolution: { name: 'Done' } },
+          });
         }
       } else {
         await this.jiraClient.transitionIssue(ticketKey, transitionId);

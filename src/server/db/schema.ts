@@ -236,6 +236,12 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_roster_pool_active')
      CREATE INDEX IX_agent_roster_pool_active ON agent_roster (pool, active) INCLUDE (jira_account_id, display_name, max_capacity, last_assigned_at);`,
 
+    // Per-pool capacity columns (n8n parity: MaxTicketsCustomerCare, MaxTicketsT2T3)
+    `IF COL_LENGTH('agent_roster', 'max_tickets_cc') IS NULL
+     ALTER TABLE agent_roster ADD max_tickets_cc INT NULL;`,
+    `IF COL_LENGTH('agent_roster', 'max_tickets_t2t3') IS NULL
+     ALTER TABLE agent_roster ADD max_tickets_t2t3 INT NULL;`,
+
     // WP-19: Assignment state — round-robin state per agent (keyed by dbo.Agent.AgentId from KPI DB)
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_assignment_state') AND type = 'U')
      CREATE TABLE agent_assignment_state (

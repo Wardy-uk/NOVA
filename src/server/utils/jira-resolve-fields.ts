@@ -46,6 +46,7 @@ export function buildResolveFields(ctx: ResolveContext): {
     [CF_TLDR]: textToAdf(ctx.tldr),
     [CF_NURTUR_PRODUCT]: { id: NURTUR_PRODUCT_NOT_APPLICABLE_ID },
     [CF_PRODUCT_SUB_CATEGORY]: ctx.subCategory ?? 'N/A',
+    resolution: { name: 'Done' },
   };
 
   if (resolutionId) {
