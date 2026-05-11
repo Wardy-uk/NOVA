@@ -1024,6 +1024,7 @@ async function main() {
     agentLoop.getAutoRulesEngine().setOverrideQueries(autoRuleOverrideQueries);
 
     const assignmentEngine = new AssignmentEngine(agentJiraClient, settingsQueries, 'NT');
+    assignmentEngine.seedPoolCapsFromKpi().catch(() => {});
     agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
     agentLoop.setAssignmentEngine(assignmentEngine);
     const availabilityService = new AgentAvailabilityService(settingsQueries);
@@ -3123,17 +3124,20 @@ ${panelHtml}
         for (const item of stillPending) {
           try {
             const resp = await fetch(
-              `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${item.ticket_id}?fields=status`,
+              `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${item.ticket_id}?fields=status,resolution`,
               { headers: { Authorization: auth, Accept: 'application/json' } }
             );
             if (!resp.ok) continue;
-            const data = await resp.json() as { fields?: { status?: { statusCategory?: { key?: string } } } };
+            const data = await resp.json() as { fields?: { status?: { name?: string; statusCategory?: { key?: string } }; resolution?: { name?: string } } };
             if (data.fields?.status?.statusCategory?.key === 'done') {
+              const statusName = data.fields.status?.name ?? 'unknown';
+              const resolution = data.fields.resolution?.name ?? 'none';
+              const ageMins = Math.round((now.getTime() - new Date(item.created_at).getTime()) / 60_000);
               await approvalQueries.decide(item.id, 'cancelled', 'system');
               if (item.resume_url) {
                 try { await fetch(`${item.resume_url}?action=decline`, { method: 'GET' }); } catch { /* ignore */ }
               }
-              console.log(`[Approvals] Auto-cancelled approval ${item.id} (${item.ticket_id}) — already resolved in Jira`);
+              console.log(`[Approvals] Auto-cancelled approval ${item.id} (${item.ticket_id}) — Jira status: ${statusName}, resolution: ${resolution}, approval age: ${ageMins}min`);
             }
           } catch { /* skip, try next */ }
         }
