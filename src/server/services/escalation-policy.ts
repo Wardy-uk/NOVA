@@ -138,7 +138,7 @@ export class EscalationPolicy {
   private async getResponseCount(ticketKey: string): Promise<number> {
     try {
       const rows = await query<{ cnt: number }>(
-        `SELECT COUNT(*) AS cnt FROM jira_comment_cache WHERE issue_key = ? AND is_internal = 0`,
+        `SELECT COUNT(*) AS cnt FROM jira_comment_cache WHERE issue_key = ? AND is_public = 1`,
         [ticketKey],
       );
       return rows[0]?.cnt ?? 0;

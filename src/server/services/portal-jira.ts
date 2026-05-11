@@ -143,13 +143,13 @@ export class PortalJiraService {
 
     // Get public comments from comment cache
     const comments = await query<{
-      comment_id: string;
-      author_display_name: string;
-      body: string;
+      jira_comment_id: string;
+      author_display: string;
+      body_text: string;
       jira_created: string;
       is_public: number;
     }>(
-      `SELECT comment_id, author_display_name, body, jira_created, is_public
+      `SELECT jira_comment_id, author_display, body_text, jira_created, is_public
        FROM jira_comment_cache
        WHERE issue_key = ? AND is_public = 1
        ORDER BY jira_created DESC`,
@@ -157,9 +157,9 @@ export class PortalJiraService {
     );
 
     const publicComments: PortalTicketComment[] = comments.map(c => ({
-      id: c.comment_id,
-      author: c.author_display_name || 'Unknown',
-      body: c.body || '',
+      id: c.jira_comment_id,
+      author: c.author_display || 'Unknown',
+      body: c.body_text || '',
       created: c.jira_created,
       isInternal: false,
     }));

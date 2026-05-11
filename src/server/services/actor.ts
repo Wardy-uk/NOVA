@@ -3,6 +3,7 @@ import type { AgentDecision, ActionResult } from './agent-types.js';
 import type { EscalationLogService } from './escalation-log-service.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { LlmService } from './llm-service.js';
+import type { AssignmentEngine } from './assignment-engine.js';
 import { query, executeAndGetId } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 
@@ -13,6 +14,7 @@ export class Actor {
   private escalationLog?: EscalationLogService;
   private settings: SettingsQueries;
   private llmService?: LlmService;
+  private assignmentEngine?: AssignmentEngine;
 
   static looksLikeStructuredPayload(text: string): boolean {
     const trimmed = text.trim();
@@ -34,6 +36,10 @@ export class Actor {
 
   setLlmService(llmService: LlmService): void {
     this.llmService = llmService;
+  }
+
+  setAssignmentEngine(engine: AssignmentEngine): void {
+    this.assignmentEngine = engine;
   }
 
   private async assignToNovaServiceAccount(ticketKey: string): Promise<void> {
@@ -105,7 +111,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
 
     const internalComments = await query<{ cnt: number }>(
       `SELECT COUNT(*) as cnt FROM jira_comment_cache
-       WHERE issue_key = ? AND is_internal = 1 AND author_display_name != 'NOVA AI'`,
+       WHERE issue_key = ? AND is_public = 0 AND author_display != 'NOVA AI'`,
       [decision.ticketKey],
     );
     if (!internalComments[0] || internalComments[0].cnt === 0) missing.push('No troubleshooting documented (no internal comments from agent)');
@@ -281,12 +287,26 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
   }
 
   private async assignTicket(decision: AgentDecision): Promise<ActionResult> {
-    const accountId = decision.output.assigneeAccountId as string;
-    if (!accountId) {
-      return { success: false, action: 'assign', ticketKey: decision.ticketKey, detail: 'No assigneeAccountId in decision output.' };
+    // If LLM provided an explicit accountId, use it directly
+    const accountId = decision.output.assigneeAccountId as string | undefined;
+    if (accountId) {
+      await this.jiraClient.updateFields(decision.ticketKey, { assignee: { accountId } });
+      return { success: true, action: 'assign', ticketKey: decision.ticketKey, detail: `Assigned to ${accountId}.` };
     }
-    await this.jiraClient.updateFields(decision.ticketKey, { assignee: { accountId } });
-    return { success: true, action: 'assign', ticketKey: decision.ticketKey, detail: `Assigned to ${accountId}.` };
+
+    // Delegate to round-robin assignment engine
+    if (!this.assignmentEngine) {
+      return { success: false, action: 'assign', ticketKey: decision.ticketKey, detail: 'No AssignmentEngine configured and no assigneeAccountId in decision output.' };
+    }
+
+    const project = this.assignmentEngine.resolveProjectFromTicketKey(decision.ticketKey);
+    const pool = (decision.output.pool as string as import('./assignment-engine.js').Pool) || 'cc';
+    const result = await this.assignmentEngine.assignWithFallback(decision.ticketKey, pool, project);
+    if (result) {
+      await this.assignmentEngine.postAssignmentComment(decision.ticketKey, result);
+      return { success: true, action: 'assign', ticketKey: decision.ticketKey, detail: `Round-robin assigned to ${result.agent.display_name} (${result.reason}).` };
+    }
+    return { success: false, action: 'assign', ticketKey: decision.ticketKey, detail: 'Round-robin exhausted — no available agents in any pool.' };
   }
 
   private async updateFields(decision: AgentDecision): Promise<ActionResult> {

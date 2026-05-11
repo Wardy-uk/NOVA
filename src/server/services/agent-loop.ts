@@ -134,6 +134,7 @@ export class AgentLoop {
 
   setAssignmentEngine(engine: AssignmentEngine): void {
     this.assignmentEngine = engine;
+    this.actor.setAssignmentEngine(engine);
   }
 
   getSettings(): SettingsQueries { return this.settings; }
@@ -1051,13 +1052,13 @@ export class AgentLoop {
 
       for (const ticket of resolved) {
         try {
-          const comments = await query<{ body: string; author_display_name: string }>(
-            `SELECT TOP 5 body, author_display_name FROM jira_comment_cache
+          const comments = await query<{ body_text: string; author_display: string }>(
+            `SELECT TOP 5 body_text, author_display FROM jira_comment_cache
              WHERE issue_key = ? ORDER BY jira_created DESC`,
             [ticket.issue_key],
           );
 
-          const resolutionComments = comments.map(c => `${c.author_display_name}: ${c.body?.slice(0, 300)}`).join('\n');
+          const resolutionComments = comments.map(c => `${c.author_display}: ${c.body_text?.slice(0, 300)}`).join('\n');
           const symptom = ticket.summary;
           const resolution = resolutionComments.slice(0, 1000) || ticket.description_text?.slice(0, 500) || 'No resolution details';
 
@@ -1192,11 +1193,6 @@ export class AgentLoop {
 
     // Lifecycle: transition to 'triaged' on new ticket triage
     if (decision.eventType === 'ticket_created' && decision.action !== 'no_action') {
-      // Auto-assign via Round Robin if ticket is unassigned
-      if (!decision.inputs.assignee && this.assignmentEngine && !decision.shadowMode) {
-        await this.tryAutoAssign(decision);
-      }
-
       try {
         const assignee = decision.inputs.assignee as string | null;
         const assigneeName = (decision.inputs.assigneeName as string) ?? (decision.inputs.assignee as string | null);
@@ -1323,6 +1319,11 @@ export class AgentLoop {
         this.errorCount++;
         console.warn(`[agent] Action failed for ${decision.ticketKey}: ${result.error}`);
       }
+    }
+
+    // Auto-assign via Round Robin if ticket is still unassigned after action
+    if (!decision.inputs.assignee && this.assignmentEngine && !decision.shadowMode) {
+      await this.tryAutoAssign(decision);
     }
 
     this.ticketsProcessed++;
