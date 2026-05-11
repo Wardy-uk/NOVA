@@ -26,6 +26,7 @@ import { QuickWinExecutor } from './quick-win-executor.js';
 import { ExternalDbService } from './external-db.js';
 import { query, execute, executeAndGetId } from './database.js';
 import { EscalationLogService } from './escalation-log-service.js';
+import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 import { createHash } from 'crypto';
 import type { AssignmentEngine, Pool } from './assignment-engine.js';
@@ -1614,6 +1615,27 @@ export class AgentLoop {
       if (this.isShadowMode()) {
         console.log(`[agent] Enhanced hybrid: executing ${ticketKey} despite shadow mode — human override by ${decidedBy}`);
       }
+
+      // Resolve the action type so we know if this is a close/resolve (needs transition) or just a comment
+      let actionType: string | null = null;
+      if (approvalId && this.approvalQueries) {
+        const approval = await this.approvalQueries.getById(approvalId);
+        actionType = approval?.action_type ?? null;
+      }
+      if (!actionType) {
+        // Fall back to agent_decisions
+        const decRow = await query<{ action: string; output: string }>(
+          `SELECT TOP 1 action, output FROM agent_decisions WHERE ticket_id = ? ORDER BY created_at DESC`,
+          [ticketKey],
+        ).then(rows => rows[0] ?? null);
+        if (decRow) {
+          try {
+            const out = JSON.parse(decRow.output || '{}');
+            actionType = out.recommended_action ?? decRow.action ?? null;
+          } catch { actionType = decRow.action ?? null; }
+        }
+      }
+
       let responseText = editedResponse || '';
       if (responseText) {
         // Recovery: if responseText is a JSON blob, extract draft_response from it
@@ -1664,7 +1686,7 @@ export class AgentLoop {
           if (decisionId) {
             await this.observer.logOutcome(decisionId, {
               success: true, action: 'draft_response', ticketKey,
-              detail: `Approved and posted. Edited: ${editedResponse ? 'yes' : 'no'}`,
+              detail: `Approved and posted (${actionType ?? 'draft_response'}). Edited: ${editedResponse ? 'yes' : 'no'}`,
             });
           }
         } catch (err) {
@@ -1675,6 +1697,26 @@ export class AgentLoop {
               detail: 'Approved but failed to post.', error: err instanceof Error ? err.message : String(err),
             });
           }
+        }
+      }
+
+      // Close/resolve actions: transition the Jira ticket after posting the comment
+      if (actionType && ['close', 'quick_win_close', 'resolve', 'transition'].includes(actionType)) {
+        try {
+          const RESOLVE_TRANSITION_ID = '17';
+          const resMapRaw = this.settings.get('agent_resolution_type_map');
+          let resMap: Record<string, string> = {};
+          try { if (resMapRaw) resMap = JSON.parse(resMapRaw); } catch { /* use empty */ }
+          const resolution = resMap[actionType] || 'No Fault Found';
+          const { fields, comment } = buildResolveFields({
+            tldr: `Approved for ${actionType} by ${decidedBy ?? 'unknown'}`,
+            resolution,
+            comment: `Ticket resolved — approved by ${decidedBy ?? 'unknown'} via NOVA.`,
+          });
+          await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, { fields, comment });
+          console.log(`[agent] Transitioned ${ticketKey} to Resolved after approved ${actionType}`);
+        } catch (err) {
+          console.error(`[agent] Failed to transition ${ticketKey} after approved ${actionType}:`, err instanceof Error ? err.message : err);
         }
       }
     } else if (action === 'decline' || action === 'declined') {

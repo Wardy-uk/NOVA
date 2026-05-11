@@ -3513,22 +3513,20 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
             );
           } catch { /* best effort */ }
 
-          // Execute the Jira action for approve/execute (post reply to Jira)
+          // Execute the Jira action for approve/execute (post reply + transition if close/resolve)
           if (action === 'approve' || action === 'execute') {
             const draftResponse = output.draft_response || '';
-            if (draftResponse) {
-              try {
-                await agentLoop.handleApprovalCallback(
-                  'approve',
-                  fullDecision.ticket_id,
-                  undefined,
-                  editedResponse || draftResponse,
-                  user.username,
-                );
-                console.log(`[agent] Decision ${action}: posted reply for ${fullDecision.ticket_id} by ${user.username}`);
-              } catch (err) {
-                console.warn(`[agent] Approval callback failed for ${fullDecision.ticket_id}:`, err instanceof Error ? err.message : err);
-              }
+            try {
+              await agentLoop.handleApprovalCallback(
+                'approve',
+                fullDecision.ticket_id,
+                undefined,
+                editedResponse || draftResponse,
+                user.username,
+              );
+              console.log(`[agent] Decision ${action}: executed for ${fullDecision.ticket_id} by ${user.username}`);
+            } catch (err) {
+              console.warn(`[agent] Approval callback failed for ${fullDecision.ticket_id}:`, err instanceof Error ? err.message : err);
             }
           }
         }
