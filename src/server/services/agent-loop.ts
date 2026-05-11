@@ -1283,6 +1283,7 @@ export class AgentLoop {
 
     // Quick-win auto-close (only reached in non-shadow mode)
     const qw = decision.output.quick_win as { type?: string; confidence?: number } | undefined;
+    const closableQwTypes = ['spam', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate'];
     if (qw?.type && qw.type !== 'none') {
       const shouldClose = await this.quickWinExecutor.shouldAutoClose(decision, decisionId);
       if (shouldClose) {
@@ -1291,6 +1292,17 @@ export class AgentLoop {
         if (!qwResult.success) {
           console.warn(`[agent] Quick-win auto-close failed for ${decision.ticketKey}: ${qwResult.error}`);
         }
+        this.ticketsProcessed++;
+        return;
+      }
+
+      // Quick win detected but auto-close not enabled/allowed — still prevent conflicting draft_response
+      if (closableQwTypes.includes(qw.type) && (qw.confidence ?? 0) >= 0.85 && decision.action === 'draft_response') {
+        console.log(`[agent] Quick win ${qw.type} (${(qw.confidence ?? 0).toFixed(2)}) detected but auto-close disabled — skipping draft_response to avoid conflict`);
+        await this.observer.logOutcome(decisionId, {
+          success: true, action: 'quick_win_close', ticketKey: decision.ticketKey,
+          detail: `Quick win ${qw.type} detected (confidence: ${(qw.confidence ?? 0).toFixed(2)}) but auto-close not enabled. No draft response created.`,
+        });
         this.ticketsProcessed++;
         return;
       }
@@ -1567,18 +1579,38 @@ export class AgentLoop {
       if (this.isShadowMode()) {
         console.log(`[agent] Enhanced hybrid: executing ${ticketKey} despite shadow mode — human override by ${decidedBy}`);
       }
-      const responseText = editedResponse || '';
+      let responseText = editedResponse || '';
       if (responseText) {
+        // Recovery: if responseText is a JSON blob, extract draft_response from it
         if (looksLikeStructuredPayload(responseText)) {
-          console.error(`[agent] BLOCKED public comment on ${ticketKey}: response looks like structured/JSON data`);
-          if (decisionId) {
-            await this.observer.logOutcome(decisionId, {
-              success: false, action: 'draft_response', ticketKey,
-              detail: 'Blocked: response contained structured/JSON data — refusing to post publicly.',
-              error: 'STRUCTURED_PAYLOAD_BLOCKED',
-            });
+          try {
+            const parsed = JSON.parse(responseText.trim());
+            const extracted = parsed.draft_response ?? parsed.response ?? '';
+            if (extracted && !looksLikeStructuredPayload(extracted)) {
+              console.warn(`[agent] Recovered draft_response from structured payload for ${ticketKey}`);
+              responseText = extracted;
+            } else {
+              console.error(`[agent] BLOCKED public comment on ${ticketKey}: response is structured/JSON data with no extractable draft`);
+              if (decisionId) {
+                await this.observer.logOutcome(decisionId, {
+                  success: false, action: 'draft_response', ticketKey,
+                  detail: 'Blocked: response contained structured/JSON data — refusing to post publicly.',
+                  error: 'STRUCTURED_PAYLOAD_BLOCKED',
+                });
+              }
+              return;
+            }
+          } catch {
+            console.error(`[agent] BLOCKED public comment on ${ticketKey}: response looks like structured data but failed to parse`);
+            if (decisionId) {
+              await this.observer.logOutcome(decisionId, {
+                success: false, action: 'draft_response', ticketKey,
+                detail: 'Blocked: response contained structured/JSON data — refusing to post publicly.',
+                error: 'STRUCTURED_PAYLOAD_BLOCKED',
+              });
+            }
+            return;
           }
-          return;
         }
         try {
           await this.jiraClient.addComment(ticketKey, responseText, { internal: false });

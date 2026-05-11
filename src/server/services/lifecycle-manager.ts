@@ -8,6 +8,7 @@ import type { TicketLifecycle, AssignedTicketMode, AgentDecision } from './agent
 import { TicketStateStore } from './ticket-state.js';
 import { query } from './database.js';
 import { LlmService } from './llm-service.js';
+import { Actor } from './actor.js';
 import { ChaseResultSchema, type ChaseResult } from './chase-schema.js';
 import { loadPrompt } from './prompt-loader.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
@@ -153,10 +154,17 @@ export class LifecycleManager {
 
           const responseText = approval.edited_response_adf || approval.ai_response_adf || '';
           if (responseText) {
-            try {
-              await this.jiraClient.addComment(approval.ticket_id, responseText, { internal: false });
-            } catch (err) {
-              console.warn(`[lifecycle] Failed to post auto-approved response on ${approval.ticket_id}:`, err instanceof Error ? err.message : err);
+            const trimmed = responseText.trim();
+            const looksLikeJson = ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) && (() => { try { JSON.parse(trimmed); return true; } catch { return false; } })();
+            const structuredKeyCount = ['"recommended_action"', '"draft_response"', '"internal_note"', '"classification"', '"confidence"', '"kb_gap"', '"priority_assessment"'].filter(k => trimmed.includes(k)).length;
+            if (looksLikeJson || structuredKeyCount >= 2) {
+              console.error(`[lifecycle] BLOCKED auto-approve public post on ${approval.ticket_id}: response looks like structured/JSON data`);
+            } else {
+              try {
+                await this.jiraClient.addComment(approval.ticket_id, responseText, { internal: false });
+              } catch (err) {
+                console.warn(`[lifecycle] Failed to post auto-approved response on ${approval.ticket_id}:`, err instanceof Error ? err.message : err);
+              }
             }
           }
 
@@ -312,12 +320,14 @@ export class LifecycleManager {
           chaseDecision.shadowMode = shadow;
           if (!shadow) {
             const draftResponse = chaseDecision.output.draft_response as string | undefined;
-            if (draftResponse) {
+            if (draftResponse && !Actor.looksLikeStructuredPayload(draftResponse)) {
               try {
                 await this.jiraClient.addComment(ticket.ticketId, draftResponse, { internal: false });
               } catch (err) {
                 console.warn(`[lifecycle] Failed to post chase on ${ticket.ticketId}:`, err instanceof Error ? err.message : err);
               }
+            } else if (draftResponse) {
+              console.error(`[lifecycle] BLOCKED chase on ${ticket.ticketId}: response looks like structured/JSON data`);
             }
           }
 

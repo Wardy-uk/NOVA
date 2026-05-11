@@ -172,7 +172,17 @@ export function createApprovalRoutes(
     // For draft_response approvals: post reply to Jira via agent callback
     if (item.action_type !== 'abuse_report' && action !== 'cancel' && item.ticket_id && onApprovalCallback) {
       try {
-        const responseText = editedResponse || item.ai_response_adf || '';
+        let responseText = editedResponse || item.ai_response_adf || '';
+        // Safety: extract draft_response if the stored value is a full JSON blob
+        if (responseText && responseText.trim().startsWith('{') && responseText.includes('"draft_response"')) {
+          try {
+            const parsed = JSON.parse(responseText.trim());
+            if (parsed.draft_response) {
+              console.warn(`[Approvals] Extracted draft_response from JSON blob for ${item.ticket_id}`);
+              responseText = parsed.draft_response;
+            }
+          } catch { /* not valid JSON, use as-is */ }
+        }
         await onApprovalCallback(action, item.ticket_id, id, responseText, user.username);
       } catch (err) {
         console.error(`[Approvals] Agent callback failed for ${item.ticket_id}:`, err instanceof Error ? err.message : err);

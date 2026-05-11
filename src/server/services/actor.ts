@@ -217,8 +217,12 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
   }
 
   private async postComment(decision: AgentDecision): Promise<ActionResult> {
-    const text = (decision.output.response as string) ?? (decision.output.comment as string) ?? decision.reasoning;
+    const text = (decision.output.draft_response as string) ?? (decision.output.response as string) ?? (decision.output.comment as string) ?? decision.reasoning;
     // GUARDRAIL: Actor must NEVER post public comments. Public replies go through approval callback only.
+    if (Actor.looksLikeStructuredPayload(text)) {
+      console.error(`[actor] BLOCKED internal postComment on ${decision.ticketKey}: text looks like structured/JSON data`);
+      return { success: false, action: decision.action, ticketKey: decision.ticketKey, detail: 'Blocked: comment text contained structured/JSON data.' };
+    }
     await this.jiraClient.addComment(decision.ticketKey, text, { internal: true });
 
     // Prefix subject with [Action Required] when AI is requesting customer info
