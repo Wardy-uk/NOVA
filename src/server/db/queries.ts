@@ -2588,7 +2588,9 @@ function agentDecisionToApproval(row: Record<string, unknown>): ApprovalItem {
 
 export class ApprovalQueries {
   private async getNovaDecisions(status?: string): Promise<ApprovalItem[]> {
-    let where = 'WHERE d.approval_required = 1';
+    let where = 'WHERE d.approval_required = 1 AND d.shadow_mode = 0';
+    // Exclude agent_decisions that have ANY matching approval_queue entry — queue is authoritative
+    where += ` AND NOT EXISTS (SELECT 1 FROM approval_queue q WHERE q.ticket_id = d.ticket_id)`;
     if (status === 'pending') where += ` AND (d.approval_status IS NULL OR d.approval_status = 'pending')`;
     else if (status === 'approved') where += ` AND d.approval_status IN ('approved', 'confirmed', 'executed')`;
     else if (status === 'declined') where += ` AND d.approval_status = 'declined'`;
@@ -2610,16 +2612,10 @@ export class ApprovalQueries {
     if (status) { sql += ` WHERE status = ?`; params.push(status); }
     sql += ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`;
     const queueItems = await query<ApprovalItem>(sql, params);
+    // getNovaDecisions already excludes tickets that have any approval_queue entry
     const novaItems = await this.getNovaDecisions(status);
 
-    // Deduplicate: exclude agent_decisions entries where ANY approval_queue entry exists
-    // for that ticket (not just ones matching the current status filter). This prevents
-    // ghost entries after approve/decline moves the approval_queue row out of 'pending'.
-    const allQueueTicketRows = await query<{ ticket_id: string }>(`SELECT DISTINCT ticket_id FROM approval_queue`);
-    const allQueueTicketIds = new Set(allQueueTicketRows.map(r => r.ticket_id));
-    const dedupedNova = novaItems.filter(n => !allQueueTicketIds.has(n.ticket_id));
-
-    const merged = [...queueItems, ...dedupedNova];
+    const merged = [...queueItems, ...novaItems];
     merged.sort((a, b) => {
       const aPending = a.status === 'pending' ? 0 : 1;
       const bPending = b.status === 'pending' ? 0 : 1;
@@ -2651,10 +2647,11 @@ export class ApprovalQueries {
       `SELECT id, ticket_id, event_type, inputs, output, action,
               confidence, reasoning, approval_required, approval_status,
               shadow_mode, created_at, resolved_at
-       FROM agent_decisions
-       WHERE ticket_id = ? AND approval_required = 1
-         AND (approval_status IS NULL OR approval_status = 'pending')
-       ORDER BY created_at DESC`, [ticketId],
+       FROM agent_decisions d
+       WHERE d.ticket_id = ? AND d.approval_required = 1 AND d.shadow_mode = 0
+         AND (d.approval_status IS NULL OR d.approval_status = 'pending')
+         AND NOT EXISTS (SELECT 1 FROM approval_queue q WHERE q.ticket_id = d.ticket_id)
+       ORDER BY d.created_at DESC`, [ticketId],
     );
     return novaRows.length ? agentDecisionToApproval(novaRows[0]) : undefined;
   }
@@ -2692,6 +2689,8 @@ export class ApprovalQueries {
             AND decided_by IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as system_expired_today
       FROM approval_queue
     `);
+    // Only count agent_decisions that have NO matching approval_queue entry (any status).
+    // approval_queue is authoritative; agent_decisions are fallback for items that never queued.
     const nRow = await queryOne<Record<string, unknown>>(`
       SELECT
         SUM(CASE WHEN approval_status IS NULL OR approval_status = 'pending' THEN 1 ELSE 0 END) as pending,
@@ -2705,7 +2704,9 @@ export class ApprovalQueries {
             AND resolved_by IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as system_approved_today,
         SUM(CASE WHEN approval_status = 'timed_out' AND resolved_at >= CAST(GETUTCDATE() AS DATE)
             AND resolved_by IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as system_expired_today
-      FROM agent_decisions WHERE approval_required = 1
+      FROM agent_decisions d
+      WHERE d.approval_required = 1
+        AND NOT EXISTS (SELECT 1 FROM approval_queue q WHERE q.ticket_id = d.ticket_id)
     `);
     return {
       pending: ((qRow?.pending as number) || 0) + ((nRow?.pending as number) || 0),
