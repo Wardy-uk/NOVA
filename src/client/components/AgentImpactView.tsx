@@ -13,11 +13,20 @@ interface ImpactMetrics {
   escalation_accuracy: number;
 }
 
+interface TimeSavedBucket {
+  total_minutes: number;
+  today_minutes: number;
+  by_action: Array<{ action: string; minutes: number; count: number }>;
+}
+
 interface TimeSavedStats {
   total_minutes: number;
   today_minutes: number;
   by_action: Array<{ action: string; minutes: number; count: number }>;
   daily_trend: Array<{ day: string; minutes: number; count: number }>;
+  actual?: TimeSavedBucket;
+  potential?: TimeSavedBucket;
+  daily_trend_split?: Array<{ day: string; actual_minutes: number; potential_minutes: number }>;
 }
 
 interface PolicyStats {
@@ -165,32 +174,87 @@ export function AgentImpactView() {
       </div>
 
       {/* Time Saved */}
-      {timeSaved && (
+      {timeSaved && (() => {
+        const act = timeSaved.actual;
+        const pot = timeSaved.potential;
+        const hasSplit = !!(act && pot);
+        const fmtMins = (m: number) => m >= 60 ? `${(m / 60).toFixed(1)}h` : `${Math.round(m)}m`;
+
+        // Merge by_action from actual + potential for dual-bar display
+        const actionMap = new Map<string, { actual: number; actualCount: number; potential: number; potentialCount: number }>();
+        if (hasSplit) {
+          for (const a of act.by_action) actionMap.set(a.action, { actual: a.minutes, actualCount: a.count, potential: 0, potentialCount: 0 });
+          for (const a of pot.by_action) {
+            const existing = actionMap.get(a.action) ?? { actual: 0, actualCount: 0, potential: 0, potentialCount: 0 };
+            existing.potential = a.minutes;
+            existing.potentialCount = a.count;
+            actionMap.set(a.action, existing);
+          }
+        }
+        const mergedActions = [...actionMap.entries()].sort((a, b) => (b[1].actual + b[1].potential) - (a[1].actual + a[1].potential));
+        const maxActionMins = mergedActions.length > 0 ? Math.max(...mergedActions.map(([, v]) => v.actual + v.potential), 1) : 1;
+
+        const dailySplit = timeSaved.daily_trend_split;
+
+        return (
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
           <h3 className="text-sm font-medium text-white mb-3">Time Saved by AI Agent</h3>
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div>
               <div className="text-xs text-zinc-400">Today</div>
               <div className="text-2xl font-bold text-green-400">
-                {timeSaved.today_minutes >= 60
-                  ? `${(timeSaved.today_minutes / 60).toFixed(1)}h`
-                  : `${Math.round(timeSaved.today_minutes)}m`}
+                {fmtMins(hasSplit ? act.today_minutes : timeSaved.today_minutes)}
               </div>
+              {hasSplit && pot.today_minutes > 0 && (
+                <div className="text-xs text-amber-400/70 mt-0.5">+{fmtMins(pot.today_minutes)} potential</div>
+              )}
             </div>
             <div>
               <div className="text-xs text-zinc-400">Last 30 Days</div>
               <div className="text-2xl font-bold text-white">
-                {(timeSaved.total_minutes / 60).toFixed(1)}h
+                {fmtMins(hasSplit ? act.total_minutes : timeSaved.total_minutes)}
               </div>
+              {hasSplit && pot.total_minutes > 0 && (
+                <div className="text-xs text-amber-400/70 mt-0.5">+{fmtMins(pot.total_minutes)} potential</div>
+              )}
             </div>
             <div>
               <div className="text-xs text-zinc-400">Equivalent FTE Days</div>
               <div className="text-2xl font-bold text-white">
-                {(timeSaved.total_minutes / 480).toFixed(1)}
+                {((hasSplit ? act.total_minutes : timeSaved.total_minutes) / 480).toFixed(1)}
               </div>
+              <div className="text-[10px] text-zinc-500 mt-0.5">actual only</div>
             </div>
           </div>
-          {timeSaved.by_action.length > 0 && (
+
+          {/* By Action — dual bars when split available */}
+          {hasSplit && mergedActions.length > 0 ? (
+            <div className="space-y-1.5">
+              <div className="text-xs text-zinc-400 mb-1">By Action Type</div>
+              {mergedActions.map(([action, v]) => {
+                const totalMins = v.actual + v.potential;
+                const actualPct = (v.actual / maxActionMins) * 100;
+                const potentialPct = (v.potential / maxActionMins) * 100;
+                return (
+                  <div key={action} className="flex items-center gap-2 text-xs">
+                    <span className="w-28 text-zinc-300 truncate">{action}</span>
+                    <div className="flex-1 h-3 bg-zinc-700 rounded overflow-hidden flex">
+                      <div className="h-full bg-green-600" style={{ width: `${actualPct}%` }} />
+                      <div className="h-full bg-amber-600/50" style={{ width: `${potentialPct}%` }} />
+                    </div>
+                    <span className="w-14 text-right text-zinc-400 font-mono">{fmtMins(totalMins)}</span>
+                    <span className="w-20 text-right text-zinc-500 font-mono text-[10px]">
+                      {v.actualCount + v.potentialCount}x ({v.actualCount} done)
+                    </span>
+                  </div>
+                );
+              })}
+              <div className="flex gap-4 text-[10px] text-zinc-500 mt-2">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-green-600 inline-block" /> Executed</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-600/50 inline-block" /> Pending/Declined</span>
+              </div>
+            </div>
+          ) : timeSaved.by_action.length > 0 && (
             <div className="space-y-1.5">
               <div className="text-xs text-zinc-400 mb-1">By Action Type</div>
               {timeSaved.by_action.map(a => {
@@ -201,16 +265,40 @@ export function AgentImpactView() {
                     <div className="flex-1 h-3 bg-zinc-700 rounded overflow-hidden">
                       <div className="h-full bg-green-600 rounded" style={{ width: `${pct}%` }} />
                     </div>
-                    <span className="w-14 text-right text-zinc-400 font-mono">
-                      {a.minutes >= 60 ? `${(a.minutes / 60).toFixed(1)}h` : `${Math.round(a.minutes)}m`}
-                    </span>
+                    <span className="w-14 text-right text-zinc-400 font-mono">{fmtMins(a.minutes)}</span>
                     <span className="w-12 text-right text-zinc-500 font-mono">{a.count}x</span>
                   </div>
                 );
               })}
             </div>
           )}
-          {timeSaved.daily_trend.length > 1 && (
+
+          {/* Daily Trend — stacked when split available */}
+          {dailySplit && dailySplit.length > 1 ? (
+            <div className="mt-4">
+              <div className="text-xs text-zinc-400 mb-2">Daily Trend (30d)</div>
+              <div className="h-24 flex items-end gap-px">
+                {dailySplit.map(d => {
+                  const max = Math.max(...dailySplit.map(t => t.actual_minutes + t.potential_minutes), 1);
+                  const actualH = (d.actual_minutes / max) * 100;
+                  const potentialH = (d.potential_minutes / max) * 100;
+                  return (
+                    <div key={d.day} className="flex-1 flex flex-col items-center justify-end"
+                      title={`${d.day}: ${Math.round(d.actual_minutes)}min actual, ${Math.round(d.potential_minutes)}min potential`}>
+                      <div className="w-full bg-amber-600/40 rounded-t min-h-0"
+                        style={{ height: `${potentialH}%` }} />
+                      <div className="w-full bg-green-600/70 min-h-[2px]"
+                        style={{ height: `${Math.max(actualH, 2)}%` }} />
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-between text-[9px] text-zinc-500 mt-1">
+                <span>{dailySplit[0]?.day.slice(5)}</span>
+                <span>{dailySplit[dailySplit.length - 1]?.day.slice(5)}</span>
+              </div>
+            </div>
+          ) : timeSaved.daily_trend.length > 1 && (
             <div className="mt-4">
               <div className="text-xs text-zinc-400 mb-2">Daily Trend (30d)</div>
               <div className="h-24 flex items-end gap-px">
@@ -233,7 +321,8 @@ export function AgentImpactView() {
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* Trend Chart */}
       {history.length > 1 && (

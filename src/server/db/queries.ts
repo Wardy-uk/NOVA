@@ -2660,11 +2660,11 @@ export class ApprovalQueries {
   async getPendingCount(): Promise<number> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
     const queueRow = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
-    // Only count agent_decisions that DON'T have a matching approval_queue entry
+    // Only count distinct tickets in agent_decisions that DON'T have a matching pending approval_queue entry
     const novaRow = await queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM agent_decisions d
+      `SELECT COUNT(DISTINCT d.ticket_id) as count FROM agent_decisions d
        WHERE d.approval_required = 1 AND (d.approval_status IS NULL OR d.approval_status = 'pending')
-         AND NOT EXISTS (SELECT 1 FROM approval_queue q WHERE q.ticket_id = d.ticket_id)`,
+         AND NOT EXISTS (SELECT 1 FROM approval_queue q WHERE q.ticket_id = d.ticket_id AND q.status = 'pending')`,
     );
     return (queueRow?.count ?? 0) + (novaRow?.count ?? 0);
   }

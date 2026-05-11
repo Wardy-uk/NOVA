@@ -229,7 +229,7 @@ export class AssignmentEngine {
   }
 
   private async getAllAgentsFromRoster(pool?: Pool): Promise<RosterAgent[]> {
-    const poolFilter = pool ? `AND pool = ?` : '';
+    const poolFilter = pool ? `WHERE pool = ?` : '';
     const params: unknown[] = pool ? [pool] : [];
     const rows = await query<{
       id: number; jira_account_id: string; display_name: string; email: string | null;

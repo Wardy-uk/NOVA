@@ -13,7 +13,10 @@ const path = require('path');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..');
 const settingsPath = path.join(DATA_DIR, 'settings.json');
 
+const DRY_RUN = process.argv.includes('--dry-run');
+
 async function main() {
+  if (DRY_RUN) console.log('🔍 DRY RUN — no rows will be deleted\n');
   let settings;
   try {
     settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -60,21 +63,41 @@ async function main() {
     console.log(`  ${row.ticket_id}: ${row.cnt} entries (keeping id=${row.keep_id})`);
   }
 
-  // Delete duplicates — keep lowest ID per ticket
-  const result = await pool.request().query(`
-    DELETE q
-    FROM approval_queue q
-    INNER JOIN (
-      SELECT ticket_id, MIN(id) as keep_id
-      FROM approval_queue
-      WHERE status = 'pending'
-      GROUP BY ticket_id
-      HAVING COUNT(*) > 1
-    ) d ON q.ticket_id = d.ticket_id AND q.id > d.keep_id
-    WHERE q.status = 'pending'
-  `);
-
-  console.log(`Deleted ${result.rowsAffected[0]} duplicate pending approval rows.`);
+  if (DRY_RUN) {
+    // Show which rows would be deleted
+    const toDelete = await pool.request().query(`
+      SELECT q.id, q.ticket_id, q.created_at
+      FROM approval_queue q
+      INNER JOIN (
+        SELECT ticket_id, MIN(id) as keep_id
+        FROM approval_queue
+        WHERE status = 'pending'
+        GROUP BY ticket_id
+        HAVING COUNT(*) > 1
+      ) d ON q.ticket_id = d.ticket_id AND q.id > d.keep_id
+      WHERE q.status = 'pending'
+    `);
+    console.log(`Would delete ${toDelete.recordset.length} rows:`);
+    for (const row of toDelete.recordset) {
+      console.log(`  id=${row.id}  ticket=${row.ticket_id}  created=${row.created_at}`);
+    }
+    console.log('\nRe-run without --dry-run to execute.');
+  } else {
+    // Delete duplicates — keep lowest ID per ticket
+    const result = await pool.request().query(`
+      DELETE q
+      FROM approval_queue q
+      INNER JOIN (
+        SELECT ticket_id, MIN(id) as keep_id
+        FROM approval_queue
+        WHERE status = 'pending'
+        GROUP BY ticket_id
+        HAVING COUNT(*) > 1
+      ) d ON q.ticket_id = d.ticket_id AND q.id > d.keep_id
+      WHERE q.status = 'pending'
+    `);
+    console.log(`Deleted ${result.rowsAffected[0]} duplicate pending approval rows.`);
+  }
   await pool.close();
 }
 

@@ -300,6 +300,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
 
     // Delegate to round-robin assignment engine
     if (!this.assignmentEngine) {
+      console.warn(`[actor] AssignmentEngine is null for ${decision.ticketKey} — cannot delegate assign action. Was setAssignmentEngine() called?`);
       return { success: false, action: 'assign', ticketKey: decision.ticketKey, detail: 'No AssignmentEngine configured and no assigneeAccountId in decision output.' };
     }
 

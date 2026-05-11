@@ -1334,8 +1334,13 @@ export class AgentLoop {
     }
 
     // Auto-assign via Round Robin if ticket is still unassigned after action
-    if (!decision.inputs.assignee && this.assignmentEngine && !decision.shadowMode) {
-      await this.tryAutoAssign(decision);
+    if (!decision.inputs.assignee && !decision.shadowMode) {
+      if (this.assignmentEngine) {
+        console.log(`[agent] Auto-assign check for ${decision.ticketKey}: unassigned, attempting round-robin`);
+        await this.tryAutoAssign(decision);
+      } else {
+        console.warn(`[agent] Auto-assign skipped for ${decision.ticketKey}: assignmentEngine not initialised`);
+      }
     }
 
     this.ticketsProcessed++;

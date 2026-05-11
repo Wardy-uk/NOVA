@@ -468,39 +468,40 @@ export class Observer {
     today_minutes: number;
     by_action: Array<{ action: string; minutes: number; count: number }>;
     daily_trend: Array<{ day: string; minutes: number; count: number }>;
+    actual: { total_minutes: number; today_minutes: number; by_action: Array<{ action: string; minutes: number; count: number }> };
+    potential: { total_minutes: number; today_minutes: number; by_action: Array<{ action: string; minutes: number; count: number }> };
+    daily_trend_split: Array<{ day: string; actual_minutes: number; potential_minutes: number }>;
   }> {
-    const [totalRows, todayRows, byActionRows, dailyRows] = await Promise.all([
-      query<{ mins: number }>(
-        `SELECT ISNULL(SUM(estimated_minutes_saved), 0) AS mins
-         FROM agent_decisions
-         WHERE estimated_minutes_saved > 0 AND shadow_mode = 0
-           AND created_at >= DATEADD(day, -?, GETUTCDATE())`,
-        [days],
-      ),
-      query<{ mins: number }>(
-        `SELECT ISNULL(SUM(estimated_minutes_saved), 0) AS mins
-         FROM agent_decisions
-         WHERE estimated_minutes_saved > 0 AND shadow_mode = 0
-           AND created_at >= CAST(GETUTCDATE() AS DATE)`,
-      ),
-      query<{ action: string; minutes: number; count: number }>(
-        `SELECT action, SUM(estimated_minutes_saved) AS minutes, COUNT(*) AS count
-         FROM agent_decisions
-         WHERE estimated_minutes_saved > 0 AND shadow_mode = 0
-           AND created_at >= DATEADD(day, -?, GETUTCDATE())
-         GROUP BY action ORDER BY minutes DESC`,
-        [days],
-      ),
-      query<{ day: string; minutes: number; count: number }>(
+    const ACTUAL_FILTER = `AND (approval_required = 0 OR approval_status IN ('approved', 'confirmed', 'executed'))`;
+    const POTENTIAL_FILTER = `AND approval_required = 1 AND (approval_status IS NULL OR approval_status = 'pending' OR approval_status = 'declined')`;
+    const BASE = `FROM agent_decisions WHERE estimated_minutes_saved > 0 AND shadow_mode = 0`;
+
+    const [
+      totalRows, todayRows, byActionRows, dailyRows,
+      actualTotal, actualToday, actualByAction,
+      potentialTotal, potentialToday, potentialByAction,
+      dailySplit,
+    ] = await Promise.all([
+      // Backwards-compat totals
+      query<{ mins: number }>(`SELECT ISNULL(SUM(estimated_minutes_saved), 0) AS mins ${BASE} AND created_at >= DATEADD(day, -?, GETUTCDATE())`, [days]),
+      query<{ mins: number }>(`SELECT ISNULL(SUM(estimated_minutes_saved), 0) AS mins ${BASE} AND created_at >= CAST(GETUTCDATE() AS DATE)`),
+      query<{ action: string; minutes: number; count: number }>(`SELECT action, SUM(estimated_minutes_saved) AS minutes, COUNT(*) AS count ${BASE} AND created_at >= DATEADD(day, -?, GETUTCDATE()) GROUP BY action ORDER BY minutes DESC`, [days]),
+      query<{ day: string; minutes: number; count: number }>(`SELECT CONVERT(VARCHAR(10), created_at, 120) AS day, SUM(estimated_minutes_saved) AS minutes, COUNT(*) AS count ${BASE} AND created_at >= DATEADD(day, -?, GETUTCDATE()) GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY day`, [days]),
+      // Actual (executed)
+      query<{ mins: number }>(`SELECT ISNULL(SUM(estimated_minutes_saved), 0) AS mins ${BASE} ${ACTUAL_FILTER} AND created_at >= DATEADD(day, -?, GETUTCDATE())`, [days]),
+      query<{ mins: number }>(`SELECT ISNULL(SUM(estimated_minutes_saved), 0) AS mins ${BASE} ${ACTUAL_FILTER} AND created_at >= CAST(GETUTCDATE() AS DATE)`),
+      query<{ action: string; minutes: number; count: number }>(`SELECT action, SUM(estimated_minutes_saved) AS minutes, COUNT(*) AS count ${BASE} ${ACTUAL_FILTER} AND created_at >= DATEADD(day, -?, GETUTCDATE()) GROUP BY action ORDER BY minutes DESC`, [days]),
+      // Potential (not realised)
+      query<{ mins: number }>(`SELECT ISNULL(SUM(estimated_minutes_saved), 0) AS mins ${BASE} ${POTENTIAL_FILTER} AND created_at >= DATEADD(day, -?, GETUTCDATE())`, [days]),
+      query<{ mins: number }>(`SELECT ISNULL(SUM(estimated_minutes_saved), 0) AS mins ${BASE} ${POTENTIAL_FILTER} AND created_at >= CAST(GETUTCDATE() AS DATE)`),
+      query<{ action: string; minutes: number; count: number }>(`SELECT action, SUM(estimated_minutes_saved) AS minutes, COUNT(*) AS count ${BASE} ${POTENTIAL_FILTER} AND created_at >= DATEADD(day, -?, GETUTCDATE()) GROUP BY action ORDER BY minutes DESC`, [days]),
+      // Daily split
+      query<{ day: string; actual_minutes: number; potential_minutes: number }>(
         `SELECT CONVERT(VARCHAR(10), created_at, 120) AS day,
-                SUM(estimated_minutes_saved) AS minutes, COUNT(*) AS count
-         FROM agent_decisions
-         WHERE estimated_minutes_saved > 0 AND shadow_mode = 0
-           AND created_at >= DATEADD(day, -?, GETUTCDATE())
-         GROUP BY CONVERT(VARCHAR(10), created_at, 120)
-         ORDER BY day`,
-        [days],
-      ),
+                ISNULL(SUM(CASE WHEN approval_required = 0 OR approval_status IN ('approved', 'confirmed', 'executed') THEN estimated_minutes_saved ELSE 0 END), 0) AS actual_minutes,
+                ISNULL(SUM(CASE WHEN approval_required = 1 AND (approval_status IS NULL OR approval_status = 'pending' OR approval_status = 'declined') THEN estimated_minutes_saved ELSE 0 END), 0) AS potential_minutes
+         ${BASE} AND created_at >= DATEADD(day, -?, GETUTCDATE())
+         GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY day`, [days]),
     ]);
 
     return {
@@ -508,6 +509,17 @@ export class Observer {
       today_minutes: todayRows[0]?.mins ?? 0,
       by_action: byActionRows,
       daily_trend: dailyRows,
+      actual: {
+        total_minutes: actualTotal[0]?.mins ?? 0,
+        today_minutes: actualToday[0]?.mins ?? 0,
+        by_action: actualByAction,
+      },
+      potential: {
+        total_minutes: potentialTotal[0]?.mins ?? 0,
+        today_minutes: potentialToday[0]?.mins ?? 0,
+        by_action: potentialByAction,
+      },
+      daily_trend_split: dailySplit,
     };
   }
 
