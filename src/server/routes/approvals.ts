@@ -8,10 +8,16 @@ import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 
 const QUICK_RESOLVE_TRANSITION_ID = '17';
 
+export type ApprovalCallbackFn = (
+  action: string, ticketKey: string, approvalId?: number,
+  editedResponse?: string, decidedBy?: string,
+) => Promise<void>;
+
 export function createApprovalRoutes(
   approvalQueries: ApprovalQueries,
   settingsQueries: FileSettingsQueries,
   jiraClient?: JiraRestClient,
+  onApprovalCallback?: ApprovalCallbackFn,
 ): Router {
   const router = Router();
 
@@ -131,8 +137,7 @@ export function createApprovalRoutes(
       return;
     }
 
-    // Hit the n8n resume URL to continue the workflow
-    // Skip for: cancel (ticket resolved externally), NOVA AI decisions (no resume URL)
+    // Hit the n8n resume URL to continue the workflow (n8n-sourced approvals only)
     if (action !== 'cancel' && item.resume_url) {
       try {
         const resumeUrl = `${item.resume_url}${item.resume_url.includes('?') ? '&' : '?'}action=${action}&approvalId=${id}&decidedBy=${encodeURIComponent(user.username)}`;
@@ -146,7 +151,7 @@ export function createApprovalRoutes(
     }
 
     // For abuse report approvals: transition the Jira ticket to Resolved
-    if (action === 'approve' && item.ticket_id && jiraClient) {
+    if (item.action_type === 'abuse_report' && action === 'approve' && item.ticket_id && jiraClient) {
       try {
         const novaAccountId = settingsQueries.get('nova_ai_jira_account_id');
         if (novaAccountId) {
@@ -161,6 +166,18 @@ export function createApprovalRoutes(
         console.log(`[Approvals] Resolved Jira ticket ${item.ticket_id} after abuse report approval`);
       } catch (err) {
         console.error(`[Approvals] Failed to resolve Jira ticket ${item.ticket_id}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    // For draft_response approvals: post reply to Jira via agent callback
+    if (item.action_type !== 'abuse_report' && action !== 'cancel' && item.ticket_id && onApprovalCallback) {
+      try {
+        const responseText = editedResponse || item.ai_response_adf || '';
+        await onApprovalCallback(action, item.ticket_id, id, responseText, user.username);
+      } catch (err) {
+        console.error(`[Approvals] Agent callback failed for ${item.ticket_id}:`, err instanceof Error ? err.message : err);
+        res.status(500).json({ ok: false, error: `Approval saved but Jira action failed: ${err instanceof Error ? err.message : 'unknown error'}` });
+        return;
       }
     }
 
