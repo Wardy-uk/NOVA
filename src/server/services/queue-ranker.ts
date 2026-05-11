@@ -188,10 +188,10 @@ export class QueueRanker {
 
     // Also check approval_queue for pending items not already in agent_decisions
     const approvalQueueRows = await query<{
-      ticket_id: string; id: number; action_type: string | null; confidence: number | null;
+      ticket_id: string; id: number; action_type: string | null;
       draft_preview: string | null; created_at: string;
     }>(
-      `SELECT q.ticket_id, q.id, q.action_type, q.confidence,
+      `SELECT q.ticket_id, q.id, q.action_type,
               LEFT(q.ai_response_adf, 200) as draft_preview,
               q.created_at
        FROM approval_queue q
@@ -203,7 +203,7 @@ export class QueueRanker {
         pendingByTicket.set(row.ticket_id, {
           id: row.id,
           action: row.action_type ?? 'draft_response',
-          confidence: row.confidence ?? 0,
+          confidence: 0,
           shadowMode: false,
           draftPreview: row.draft_preview ?? null,
           category: null,
