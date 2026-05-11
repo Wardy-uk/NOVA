@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import type { AiLearningService } from '../services/ai-learning-service.js';
+import { isAdmin } from '../utils/role-helpers.js';
 
-function isAdmin(req: any): boolean {
-  return req.user?.role === 'admin';
+function checkAdmin(req: any): boolean {
+  return isAdmin(req.user?.role ?? '');
 }
 
 export function createAiLearningRoutes(service: AiLearningService): Router {
@@ -108,7 +109,7 @@ export function createAiLearningRoutes(service: AiLearningService): Router {
 
   router.delete('/:id', async (req, res) => {
     try {
-      if (!isAdmin(req)) return res.status(403).json({ ok: false, error: 'Admin only' });
+      if (!checkAdmin(req)) return res.status(403).json({ ok: false, error: 'Admin only' });
       await service.delete(parseInt(req.params.id, 10));
       res.json({ ok: true, data: { deleted: true } });
     } catch (err: any) {

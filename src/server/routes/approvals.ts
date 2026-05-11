@@ -25,7 +25,7 @@ export function createApprovalRoutes(
   function isApprover(req: Request): boolean {
     const user = (req as any).user;
     if (!user) return false;
-    if (user.role === 'admin') return true;
+    if ((user.role || '').split(',').some((r: string) => r.trim() === 'admin' || r.trim() === 'super_admin')) return true;
 
     const rolesRaw = settingsQueries.get('custom_roles');
     if (!rolesRaw) return false;
