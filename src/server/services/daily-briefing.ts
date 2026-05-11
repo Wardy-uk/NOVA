@@ -87,7 +87,7 @@ export class DailyBriefingService {
     const today = new Date().toISOString().slice(0, 10);
 
     const [myTickets, breached, atRisk, recentDecisions, coaching] = await Promise.all([
-      this.cache.getByAssignee(agentEmail, [project]),
+      this.cache.getByAssignee(agentEmail, [project], 'email'),
       this.cache.getSlaBreach(project),
       this.cache.getSlaAtRisk(project, 60 * 60 * 1000),
       query<{ ticket_id: string; action: string; confidence: number; created_at: string }>(

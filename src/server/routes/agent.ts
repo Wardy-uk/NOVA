@@ -1166,7 +1166,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       const user = userQueries ? (await userQueries.getAll()).find(u => u.username === username) : null;
       const agentEmail = user?.email ?? username;
 
-      const tickets = await cache.getByAssignee(agentEmail, ['NT']);
+      const tickets = await cache.getByAssignee(agentEmail, ['NT'], 'email');
       const agentAccountId = tickets[0]?.assignee_account_id ?? '';
       if (tickets.length === 0) {
         res.json({ ok: true, data: { agentId: username, hourBlock: new Date().toISOString().slice(0, 13) + ':00', startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), ticketCount: 0, failedTickets: [], passedCount: 0 } });

@@ -12,6 +12,7 @@ import type { UserQueries } from '../db/queries.js';
 import { DeferService, isValidDeferReason, DEFER_REASONS, type DeferReason } from '../services/defer-service.js';
 import { JIRA_FIELDS } from '../../shared/jira-fields.js';
 import { createWorkingDayClock } from '../../shared/utils/workingDayClock.js';
+import { queryOne } from '../services/database.js';
 
 interface MyTicketsRouteDeps {
   jiraClient: JiraRestClient | null;
@@ -77,11 +78,34 @@ export function createMyTicketsRoutes(deps: MyTicketsRouteDeps): Router {
     try {
       const agentId = req.params.agentId as string;
       const user = await userQueries.getByUsername(agentId);
-      if (!user?.email) {
-        res.status(404).json({ ok: false, error: `Agent ${agentId} not found or has no email` });
+      if (!user) {
+        res.status(404).json({ ok: false, error: `User ${agentId} not found` });
         return;
       }
-      const data = await queueRanker.computeQueue(agentId, user.email);
+
+      // Resolve Jira identity: try agent_roster (has jira_account_id), fall back to users table fields
+      let roster = user.email
+        ? await queryOne<{ jira_account_id: string; email: string | null; display_name: string }>(
+            `SELECT jira_account_id, email, display_name FROM agent_roster WHERE email = ? AND active = 1`,
+            [user.email],
+          )
+        : null;
+      if (!roster && user.display_name) {
+        roster = await queryOne<{ jira_account_id: string; email: string | null; display_name: string }>(
+          `SELECT jira_account_id, email, display_name FROM agent_roster WHERE display_name = ? AND active = 1`,
+          [user.display_name],
+        );
+      }
+      const jiraIdentity = roster
+        ? { accountId: roster.jira_account_id, email: roster.email ?? undefined, displayName: roster.display_name }
+        : { email: user.email ?? undefined, displayName: user.display_name ?? user.username };
+
+      if (!jiraIdentity.accountId && !jiraIdentity.email && !jiraIdentity.displayName) {
+        res.status(404).json({ ok: false, error: `No Jira identity found for ${agentId}` });
+        return;
+      }
+
+      const data = await queueRanker.computeQueue(agentId, jiraIdentity);
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to compute queue' });

@@ -121,13 +121,23 @@ export class QueueRanker {
     return { ...DEFAULT_WEIGHTS };
   }
 
-  async computeQueue(agentId: string, agentEmail: string): Promise<QueueResult> {
+  async computeQueue(agentId: string, jiraIdentity: { accountId?: string; email?: string; displayName?: string }): Promise<QueueResult> {
     const cached = this.cache.get(agentId);
     if (cached && Date.now() < cached.expiresAt) {
       return cached.result;
     }
 
-    const issues = await this.jiraCache.getByAssignee(agentEmail, ['NT']);
+    const projects = (this.settings.get('assignment_projects') || this.settings.get('agent_jira_project') || 'NT')
+      .split(',').map((p: string) => p.trim()).filter(Boolean);
+
+    let issues: import('./jira-cache-queries.js').CachedIssue[] = [];
+    if (jiraIdentity.accountId) {
+      issues = await this.jiraCache.getByAssignee(jiraIdentity.accountId, projects, 'account_id');
+    } else if (jiraIdentity.email) {
+      issues = await this.jiraCache.getByAssignee(jiraIdentity.email, projects, 'email');
+    } else if (jiraIdentity.displayName) {
+      issues = await this.jiraCache.getByAssignee(jiraIdentity.displayName, projects, 'display');
+    }
 
     // Load deferred ticket keys
     const deferredRows = await query<{ ticket_key: string; reason: string; resurface_at: Date }>(

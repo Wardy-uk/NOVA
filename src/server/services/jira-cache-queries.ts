@@ -154,15 +154,18 @@ export class JiraCacheQueries {
 
   // ── Assignee queries ──
 
-  async getByAssignee(email: string, projects: string[]): Promise<CachedIssue[]> {
+  async getByAssignee(identifier: string, projects: string[], matchField: 'account_id' | 'email' | 'display' = 'account_id'): Promise<CachedIssue[]> {
+    const col = matchField === 'account_id' ? 'assignee_account_id'
+      : matchField === 'display' ? 'assignee_display'
+      : 'assignee_email';
     const placeholders = projects.map(() => '?').join(',');
     return query<CachedIssue>(
       `SELECT * FROM jira_issue_cache
-       WHERE assignee_email = ?
+       WHERE ${col} = ?
          AND project_key IN (${placeholders})
          AND status_category != 'done'
        ORDER BY priority_name ASC, jira_updated DESC`,
-      [email, ...projects],
+      [identifier, ...projects],
     );
   }
 
