@@ -24,7 +24,7 @@ import { AbuseReportExecutor } from './abuse-report-executor.js';
 import { AutoRulesEngine } from './auto-rules-engine.js';
 import { QuickWinExecutor } from './quick-win-executor.js';
 import { ExternalDbService } from './external-db.js';
-import { query, execute, executeAndGetId } from './database.js';
+import { query, queryOne, execute, executeAndGetId } from './database.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
@@ -575,9 +575,27 @@ export class AgentLoop {
 
       const llmEvents = deduped.filter(e => !autoRuleHandledKeys.has(e.ticketKey));
 
+      // DB-level dedup: skip ticket_created/backfill if already triaged in last 30 min
+      const dedupedLlmEvents: typeof llmEvents = [];
+      for (const event of llmEvents) {
+        if (event.eventType === 'ticket_created' || event.eventType === 'backfill') {
+          const recentTriage = await query<{ cnt: number }>(
+            `SELECT COUNT(*) AS cnt FROM agent_decisions
+             WHERE ticket_id = ? AND action != 'no_action' AND shadow_mode = 0
+               AND created_at >= DATEADD(MINUTE, -30, GETUTCDATE())`,
+            [event.ticketKey],
+          );
+          if (recentTriage[0]?.cnt > 0) {
+            console.log(`[agent] Skipping duplicate triage for ${event.ticketKey} (${event.eventType}) — already triaged in last 30 min`);
+            continue;
+          }
+        }
+        dedupedLlmEvents.push(event);
+      }
+
       // 2. REASON
       const shadowMode = this.getShadowMode();
-      const decisions = await this.reasoner.decideMultiple(llmEvents);
+      const decisions = await this.reasoner.decideMultiple(dedupedLlmEvents);
       for (const d of decisions) {
         if (shadowMode === 'full_shadow') {
           d.shadowMode = true;
@@ -931,8 +949,22 @@ export class AgentLoop {
   // ── C2: Auto-assign after triage ──
   private async tryAutoAssign(decision: import('./agent-types.js').AgentDecision): Promise<void> {
     if (!this.assignmentEngine) return;
+
+    // Check exclusion filters before assigning (n8n parity)
+    const ticket = await queryOne<{
+      request_type: string | null; labels: string | null; current_tier: string | null;
+    }>(
+      `SELECT request_type, labels, current_tier FROM jira_issue_cache WHERE issue_key = ?`,
+      [decision.ticketKey],
+    );
+    if (ticket) {
+      const excludedTypes = ['AI Request', 'Escalation', 'Franchise Hub', 'New Products Launch'];
+      if (ticket.request_type && excludedTypes.includes(ticket.request_type)) return;
+      if (ticket.labels && ticket.labels.includes('TPJ_Feed')) return;
+    }
+
     const project = this.assignmentEngine.resolveProjectFromTicketKey(decision.ticketKey);
-    const pool = this.determinePool(decision, project);
+    const pool = this.determinePool(decision, project, ticket);
 
     try {
       const assignment = await this.assignmentEngine.assignWithFallback(
@@ -960,9 +992,24 @@ export class AgentLoop {
     }
   }
 
-  private determinePool(decision: import('./agent-types.js').AgentDecision, project: string): Pool {
+  private determinePool(
+    decision: import('./agent-types.js').AgentDecision,
+    project: string,
+    ticket?: { current_tier?: string | null; labels?: string | null } | null,
+  ): Pool {
     if (project === 'NTPJ') return 'tpj';
 
+    // int_setup label → TPJ (n8n parity)
+    if (ticket?.labels && ticket.labels.includes('int_setup')) return 'tpj';
+
+    // Tier-based routing takes priority (matches n8n's customfield_12981)
+    if (ticket?.current_tier) {
+      const tier = ticket.current_tier.trim();
+      if (tier === 'Customer Care' || tier === 'T1') return 'cc';
+      if (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier)) return 't2';
+    }
+
+    // Fallback: AI decision action/category
     const action = decision.action || (decision.output?.recommended_action as string);
     if (action === 'escalate') return 't2';
 
@@ -996,8 +1043,11 @@ export class AgentLoop {
       const unassigned = await query<{
         issue_key: string; summary: string; status_name: string;
         request_type: string | null; current_tier: string | null;
+        labels: string | null; jira_created: string | null;
+        reporter_email: string | null;
       }>(
-        `SELECT TOP (${limit}) c.issue_key, c.summary, c.status_name, c.request_type, c.current_tier
+        `SELECT TOP (${limit}) c.issue_key, c.summary, c.status_name, c.request_type,
+                c.current_tier, c.labels, c.jira_created, c.reporter_email
          FROM jira_issue_cache c
          WHERE c.assignee_account_id IS NULL
            AND c.status_category != 'done'
@@ -1005,6 +1055,8 @@ export class AgentLoop {
            AND c.created_at < DATEADD(minute, -5, GETUTCDATE())
            AND c.created_at >= DATEADD(hour, -${maxAgeHours}, GETUTCDATE())
            AND c.project_key IN (${projectPlaceholders})
+           AND (c.request_type IS NULL OR c.request_type NOT IN ('AI Request', 'Escalation', 'Franchise Hub', 'New Products Launch'))
+           AND (c.labels IS NULL OR c.labels NOT LIKE '%TPJ_Feed%')
          ORDER BY c.created_at ASC`,
         projects,
       );
@@ -1012,11 +1064,30 @@ export class AgentLoop {
       if (unassigned.length === 0) return { assigned: 0, failed: 0, total: 0 };
       console.log(`[agent] Unassigned sweep (${maxAgeHours}h window): ${unassigned.length} tickets found`);
 
+      const maxPerPool: Record<string, number> = {
+        cc: this.getNumber('assignment_max_per_run_cc', 10),
+        t2: this.getNumber('assignment_max_per_run_t2', 10),
+        tpj: this.getNumber('assignment_max_per_run_tpj', 10),
+        digital: 10,
+      };
+      const assignedPerPool: Record<string, number> = {};
+      const tpjMaxAgeDays = this.getNumber('assignment_tpj_max_age_days', 24);
+
       let assigned = 0;
       let failed = 0;
       for (const ticket of unassigned) {
         const project = this.assignmentEngine.resolveProjectFromTicketKey(ticket.issue_key);
         const pool = this.determinePoolFromTicket(ticket, project);
+
+        // Per-pool max-per-run cap
+        const poolCount = assignedPerPool[pool] || 0;
+        if (poolCount >= (maxPerPool[pool] || 10)) continue;
+
+        // TPJ max-age filter
+        if (pool === 'tpj' && ticket.jira_created) {
+          const maxAge = tpjMaxAgeDays * 24 * 60 * 60 * 1000;
+          if (Date.now() - new Date(ticket.jira_created).getTime() > maxAge) continue;
+        }
 
         try {
           const assignment = await this.assignmentEngine.assignWithFallback(
@@ -1026,6 +1097,7 @@ export class AgentLoop {
             await this.assignmentEngine.postAssignmentComment(ticket.issue_key, assignment);
             console.log(`[agent] Sweep: assigned ${ticket.issue_key} → ${assignment.agent.display_name}`);
             assigned++;
+            assignedPerPool[pool] = poolCount + 1;
           }
         } catch (err) {
           console.warn(`[agent] Sweep: failed ${ticket.issue_key}:`, err instanceof Error ? err.message : err);
@@ -1039,9 +1111,23 @@ export class AgentLoop {
     }
   }
 
-  private determinePoolFromTicket(ticket: { issue_key: string; current_tier?: string | null }, project: string): Pool {
+  private determinePoolFromTicket(
+    ticket: { issue_key: string; current_tier?: string | null; labels?: string | null },
+    project: string,
+  ): Pool {
     if (project === 'NTPJ') return 'tpj';
-    if (ticket.current_tier === 'T2' || ticket.current_tier === 'T3') return 't2';
+
+    // int_setup label → TPJ pool (matches n8n routing)
+    const labels = ticket.labels || '';
+    if (labels.includes('int_setup')) return 'tpj';
+
+    const tier = (ticket.current_tier || '').trim();
+    if (tier === 'Customer Care' || tier === 'T1') return 'cc';
+    if (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier)) return 't2';
+
+    if (tier && tier !== '' && tier !== 'Development') {
+      console.warn(`[agent] Unknown tier "${tier}" for ${ticket.issue_key}, defaulting to CC`);
+    }
     return 'cc';
   }
 
@@ -1618,6 +1704,7 @@ export class AgentLoop {
 
       // Resolve the action type so we know if this is a close/resolve (needs transition) or just a comment
       let actionType: string | null = null;
+      let quickWinType: string | null = null;
       if (approvalId && this.approvalQueries) {
         const approval = await this.approvalQueries.getById(approvalId);
         actionType = approval?.action_type ?? null;
@@ -1632,11 +1719,13 @@ export class AgentLoop {
           try {
             const out = JSON.parse(decRow.output || '{}');
             actionType = out.recommended_action ?? decRow.action ?? null;
+            quickWinType = out.quick_win?.type ?? null;
           } catch { actionType = decRow.action ?? null; }
         }
       }
 
       let responseText = editedResponse || '';
+      let commentPosted = false;
       if (responseText) {
         // Recovery: if responseText is a JSON blob, extract draft_response from it
         if (looksLikeStructuredPayload(responseText)) {
@@ -1647,31 +1736,20 @@ export class AgentLoop {
               console.warn(`[agent] Recovered draft_response from structured payload for ${ticketKey}`);
               responseText = extracted;
             } else {
-              console.error(`[agent] BLOCKED public comment on ${ticketKey}: response is structured/JSON data with no extractable draft`);
-              if (decisionId) {
-                await this.observer.logOutcome(decisionId, {
-                  success: false, action: 'draft_response', ticketKey,
-                  detail: 'Blocked: response contained structured/JSON data — refusing to post publicly.',
-                  error: 'STRUCTURED_PAYLOAD_BLOCKED',
-                });
-              }
-              return;
+              console.warn(`[agent] Skipping public comment on ${ticketKey}: response is structured/JSON data with no extractable draft`);
+              responseText = '';
             }
           } catch {
-            console.error(`[agent] BLOCKED public comment on ${ticketKey}: response looks like structured data but failed to parse`);
-            if (decisionId) {
-              await this.observer.logOutcome(decisionId, {
-                success: false, action: 'draft_response', ticketKey,
-                detail: 'Blocked: response contained structured/JSON data — refusing to post publicly.',
-                error: 'STRUCTURED_PAYLOAD_BLOCKED',
-              });
-            }
-            return;
+            console.warn(`[agent] Skipping public comment on ${ticketKey}: response looks like structured data but failed to parse`);
+            responseText = '';
           }
         }
+      }
+      if (responseText && quickWinType !== 'spam') {
         try {
           await this.jiraClient.addComment(ticketKey, responseText, { internal: false });
           console.log(`[agent] Posted approved response on ${ticketKey}`);
+          commentPosted = true;
 
           // Lifecycle: move to response_sent → awaiting_customer
           try {
@@ -1700,7 +1778,7 @@ export class AgentLoop {
         }
       }
 
-      // Close/resolve actions: transition the Jira ticket after posting the comment
+      // Close/resolve actions: transition the Jira ticket (runs even if comment was blocked/skipped)
       if (actionType && ['close', 'quick_win_close', 'resolve', 'transition'].includes(actionType)) {
         try {
           const RESOLVE_TRANSITION_ID = '17';
@@ -1713,10 +1791,28 @@ export class AgentLoop {
             resolution,
             comment: `Ticket resolved — approved by ${decidedBy ?? 'unknown'} via NOVA.`,
           });
-          await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, { fields, comment });
+          await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, { fields, comment: { ...comment, internal: true } });
           console.log(`[agent] Transitioned ${ticketKey} to Resolved after approved ${actionType}`);
         } catch (err) {
           console.error(`[agent] Failed to transition ${ticketKey} after approved ${actionType}:`, err instanceof Error ? err.message : err);
+        }
+      }
+
+      // Escalation actions: update Current Tier in Jira
+      if (actionType === 'escalate') {
+        const targetTier = this.settings.get('agent_escalation_tier_value') ?? 'Tier 2';
+        const tierIds: Record<string, string> = {
+          'Customer Care': '13061', 'Tier 2': '13062', 'Tier 3': '13063',
+          'Development': '13064', 'Production': '13700',
+        };
+        const tierId = tierIds[targetTier];
+        if (tierId) {
+          try {
+            await this.jiraClient.updateFields(ticketKey, { customfield_12981: { id: tierId } });
+            console.log(`[agent] Updated Current Tier to "${targetTier}" on ${ticketKey} after approved escalation`);
+          } catch (err) {
+            console.warn(`[agent] Failed to update Current Tier on ${ticketKey}:`, err instanceof Error ? err.message : err);
+          }
         }
       }
     } else if (action === 'decline' || action === 'declined') {

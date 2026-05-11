@@ -2454,6 +2454,11 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: diag });
   });
 
+  router.post('/llm-reset-budget', requireSuperAdmin(), (_req, res) => {
+    const cleared = agentLoop.getLlmService().resetBudgetSuppression();
+    res.json({ ok: true, data: { cleared } });
+  });
+
   // ── Suggestions ──
 
   const suggestionEngine = deps?.suggestionEngine;

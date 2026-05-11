@@ -40,6 +40,10 @@ export class ResolutionReviewer {
 
     for (const issue of result.issues) {
       if (await this.alreadyReviewed(issue.key)) continue;
+      if (await this.wasAgentResolved(issue.key)) {
+        console.log(`[resolution-reviewer] Skipping ${issue.key} — agent resolved it`);
+        continue;
+      }
 
       try {
         const decision = await this.reviewTicket(issue);
@@ -87,6 +91,7 @@ export class ResolutionReviewer {
       {
         ticketId: issue.key,
         callType: 'resolution_review',
+        tier: 'cheap',
         temperature: 0.2,
       },
     );
@@ -172,6 +177,15 @@ export class ResolutionReviewer {
       [ticketKey],
     );
     return rows.length > 0;
+  }
+
+  private async wasAgentResolved(ticketKey: string): Promise<boolean> {
+    const rows = await query<{ cnt: number }>(
+      `SELECT COUNT(*) AS cnt FROM agent_decisions
+       WHERE ticket_id = ? AND shadow_mode = 0 AND quick_win_executed = 1`,
+      [ticketKey],
+    );
+    return (rows[0]?.cnt ?? 0) > 0;
   }
 }
 

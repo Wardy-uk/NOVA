@@ -103,12 +103,12 @@ const DEFAULT_TIER_CONFIG: Record<LlmTier, TierConfig> = {
 };
 
 const CALL_TYPE_TIER_MAP: Record<string, LlmTier> = {
-  triage: 'reasoning',
+  triage: 'standard',
   respond: 'reasoning',
   coaching: 'reasoning',
   qa_scoring: 'reasoning',
   gr_comment_scoring: 'standard',
-  resolution_review: 'reasoning',
+  resolution_review: 'cheap',
   brief: 'reasoning',
   chase: 'standard',
   trend_analysis: 'standard',
@@ -347,10 +347,23 @@ export class LlmService {
 
   constructor(settings: SettingsQueries) {
     this.settings = settings;
+    this.logEffectiveBudgets();
   }
 
   setAlertService(alertService: AlertService): void {
     this.alertService = alertService;
+  }
+
+  private logEffectiveBudgets(): void {
+    const budgetTypes = Object.keys(DEFAULT_TOKEN_BUDGETS);
+    const lines = budgetTypes.map(ct => {
+      const settingKey = `agent_token_budget_daily_${ct}`;
+      const dbVal = this.settings.get(settingKey)?.trim();
+      const effective = dbVal ? (parseInt(dbVal, 10) || 0) : (DEFAULT_TOKEN_BUDGETS[ct] ?? 0);
+      const source = dbVal ? 'DB' : 'default';
+      return `  ${ct}: ${effective.toLocaleString()} (${source}${dbVal ? `, raw="${dbVal}"` : ''})`;
+    });
+    console.log(`[llm-budget] Effective daily token budgets:\n${lines.join('\n')}`);
   }
 
   private async checkTokenBudget(callType: string): Promise<void> {
@@ -358,6 +371,7 @@ export class LlmService {
 
     if (budgetSuppressed.get(callType)) {
       const budget = this.getTokenBudget(callType);
+      console.warn(`[llm-budget] BLOCKED ${callType} — suppressed flag set (budget=${budget.toLocaleString()})`);
       throw new TokenBudgetExceededError(callType, budget, budget);
     }
 
@@ -374,7 +388,7 @@ export class LlmService {
 
     if (used >= budget) {
       budgetSuppressed.set(callType, true);
-      console.warn(`[llm-service] Token budget exceeded for ${callType}: ${used}/${budget}`);
+      console.warn(`[llm-budget] Token budget exceeded for ${callType}: ${used.toLocaleString()}/${budget.toLocaleString()} — suppressed until midnight UTC`);
 
       if (this.alertService) {
         await this.alertService.createAlert({
@@ -392,8 +406,14 @@ export class LlmService {
   private getTokenBudget(callType: string): number {
     const settingKey = `agent_token_budget_daily_${callType}`;
     const val = this.settings.get(settingKey)?.trim();
-    if (val) return parseInt(val, 10) || 0;
-    return DEFAULT_TOKEN_BUDGETS[callType] ?? 0;
+    if (val) {
+      const parsed = parseInt(val, 10) || 0;
+      console.log(`[llm-budget] ${callType} budget from DB settings: ${parsed.toLocaleString()}`);
+      return parsed;
+    }
+    const fallback = DEFAULT_TOKEN_BUDGETS[callType] ?? 0;
+    console.log(`[llm-budget] ${callType} budget from hardcoded default: ${fallback.toLocaleString()}`);
+    return fallback;
   }
 
   private getApiKey(provider: LlmProvider): string {
@@ -622,12 +642,36 @@ export class LlmService {
     circuits.clear();
   }
 
+  resetBudgetSuppression(): string[] {
+    const cleared = [...budgetSuppressed.keys()].filter(k => budgetSuppressed.get(k));
+    budgetSuppressed.clear();
+    if (cleared.length > 0) {
+      console.log(`[llm-budget] Cleared suppression for: ${cleared.join(', ')}`);
+    }
+    return cleared;
+  }
+
+  getBudgetStatus(): Record<string, { budget: number; suppressed: boolean; source: string }> {
+    const result: Record<string, { budget: number; suppressed: boolean; source: string }> = {};
+    for (const ct of Object.keys(DEFAULT_TOKEN_BUDGETS)) {
+      const settingKey = `agent_token_budget_daily_${ct}`;
+      const dbVal = this.settings.get(settingKey)?.trim();
+      result[ct] = {
+        budget: dbVal ? (parseInt(dbVal, 10) || 0) : (DEFAULT_TOKEN_BUDGETS[ct] ?? 0),
+        suppressed: budgetSuppressed.get(ct) === true,
+        source: dbVal ? 'db' : 'default',
+      };
+    }
+    return result;
+  }
+
   getDiagnostics(): {
     primaryProvider: string; primaryModel: string; primaryKeyPrefix: string; primaryAvailable: boolean;
     failoverProvider: string; failoverModel: string; failoverKeyPrefix: string; failoverAvailable: boolean;
     anthropicCircuit: string; openaiCircuit: string; openrouterCircuit: string;
     tierRouting: Record<LlmTier, TierConfig>;
     callTypeTiers: Record<string, LlmTier>;
+    budgetStatus: Record<string, { budget: number; suppressed: boolean; source: string }>;
   } {
     const reasoningCfgs = this.getConfigsForTier('reasoning');
     const primary = reasoningCfgs[0] ?? null;
@@ -651,6 +695,7 @@ export class LlmService {
         cheap: this.getTierConfig('cheap'),
       },
       callTypeTiers: { ...CALL_TYPE_TIER_MAP },
+      budgetStatus: this.getBudgetStatus(),
     };
   }
 }

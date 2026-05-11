@@ -78,6 +78,21 @@ export class Reasoner {
     return this.triageNewTicket(event);
   }
 
+  private shouldUseCheapTier(event: TicketEvent): boolean {
+    const summary = (event.summary || '').toLowerCase();
+    const patterns = [
+      /^(re|fw|fwd):\s/i,
+      /test\s*ticket/i,
+      /please\s*ignore/i,
+      /out\s*of\s*office/i,
+      /unsubscribe/i,
+      /auto[- ]?reply/i,
+      /delivery\s*(status|failure)\s*notification/i,
+      /mail\s*delivery\s*(failed|subsystem)/i,
+    ];
+    return patterns.some(p => p.test(summary));
+  }
+
   private async triageNewTicket(event: TicketEvent): Promise<AgentDecision> {
     const kbMatches = await this.kbSearch.search(`${event.summary} ${event.description.slice(0, 200)}`);
     const kbText = this.kbSearch.formatForPrompt(kbMatches);
@@ -127,6 +142,11 @@ export class Reasoner {
       if (useB && abTest.variant_b) effectivePrompt = abTest.variant_b;
     }
 
+    const triageTier = this.shouldUseCheapTier(event) ? 'cheap' as const : undefined;
+    if (triageTier) {
+      console.log(`[reasoner] Downgrading triage to cheap tier for ${event.ticketKey} — trivial pattern match`);
+    }
+
     const result = await this.llmService.call<TriageResult>(
       effectivePrompt,
       userMessage,
@@ -134,6 +154,7 @@ export class Reasoner {
       {
         ticketId: event.ticketKey,
         callType: 'triage',
+        tier: triageTier,
         temperature: 0.2,
       },
     );
