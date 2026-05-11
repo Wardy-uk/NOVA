@@ -3,6 +3,7 @@ import type { TaskQueries, UserSettingsQueries } from '../db/queries.js';
 import { JiraRestClient, JiraApiError } from '../services/jira-client.js';
 import type { JiraUserClientFactory } from '../services/jira-user-client.js';
 import { getLastJiraSearchText } from '../services/aggregator.js';
+import { normalizeJiraStatus } from '../utils/jira-locale.js';
 
 // Jira option-type custom fields — REST API requires { value: "..." } wrapping
 const OPTION_FIELDS = new Set([
@@ -252,7 +253,16 @@ export function createJiraRoutes(
 
       console.log(`[Jira] final fieldOptions for ${key}: ${JSON.stringify(Object.keys(fieldOptions))}`);
 
-      res.json({ ok: true, data: { transitions }, fieldOptions, transitionFields });
+      const normalizedTransitions = transitions.map(t => {
+        const to = t.to as Record<string, unknown> | undefined;
+        return {
+          ...t,
+          name: normalizeJiraStatus((t.name as string) ?? ''),
+          to: to ? { ...to, name: normalizeJiraStatus((to.name as string) ?? '') } : t.to,
+        };
+      });
+
+      res.json({ ok: true, data: { transitions: normalizedTransitions }, fieldOptions, transitionFields });
     } catch (err) {
       res.status(500).json({
         ok: false,

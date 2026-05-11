@@ -147,7 +147,7 @@ export class QueueRanker {
     );
     const hygieneKeys = new Set(hygieneRows.map(r => r.ticket_key));
 
-    // Load pending AI decisions for all tickets in one query
+    // Load pending AI decisions from agent_decisions
     const pendingDecisionRows = await query<{
       ticket_id: string; id: number; action: string; confidence: number;
       shadow_mode: number; draft_preview: string | null; category: string | null; created_at: string;
@@ -171,6 +171,32 @@ export class QueueRanker {
           shadowMode: !!row.shadow_mode,
           draftPreview: row.draft_preview?.slice(0, 200) ?? null,
           category: row.category,
+          createdAt: row.created_at,
+        });
+      }
+    }
+
+    // Also check approval_queue for pending items not already in agent_decisions
+    const approvalQueueRows = await query<{
+      ticket_id: string; id: number; action_type: string | null; confidence: number | null;
+      draft_preview: string | null; created_at: string;
+    }>(
+      `SELECT q.ticket_id, q.id, q.action_type, q.confidence,
+              LEFT(q.ai_response_adf, 200) as draft_preview,
+              q.created_at
+       FROM approval_queue q
+       WHERE q.status = 'pending'
+       ORDER BY q.created_at DESC`,
+    );
+    for (const row of approvalQueueRows) {
+      if (!pendingByTicket.has(row.ticket_id)) {
+        pendingByTicket.set(row.ticket_id, {
+          id: row.id,
+          action: row.action_type ?? 'draft_response',
+          confidence: row.confidence ?? 0,
+          shadowMode: false,
+          draftPreview: row.draft_preview ?? null,
+          category: null,
           createdAt: row.created_at,
         });
       }
