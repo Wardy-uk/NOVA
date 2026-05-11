@@ -8,7 +8,7 @@ const DEFAULT_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
   'assignee', 'reporter', 'created', 'updated', 'customfield_10020', // request type
   'customfield_10010', // SLA
-  'labels', 'resolution',
+  'labels', 'resolution', 'attachment',
 ];
 
 const KNOWN_AUTOMATION_NAMES = [
@@ -17,6 +17,15 @@ const KNOWN_AUTOMATION_NAMES = [
   'n8n',
   'nova',
 ];
+
+function extractAttachments(field: unknown): Array<{ filename: string; size: number; mimeType: string }> {
+  if (!Array.isArray(field)) return [];
+  return field.map((a: any) => ({
+    filename: a.filename ?? 'unknown',
+    size: a.size ?? 0,
+    mimeType: a.mimeType ?? 'application/octet-stream',
+  }));
+}
 
 function toTicketEvent(issue: JiraIssue, eventType: TicketEvent['eventType']): TicketEvent {
   const f = issue.fields;
@@ -36,11 +45,13 @@ function toTicketEvent(issue: JiraIssue, eventType: TicketEvent['eventType']): T
     created: (f.created as string) ?? '',
     updated: (f.updated as string) ?? '',
     slaBreachTime: extractSlaBreachTime(f.customfield_10010),
+    attachments: extractAttachments(f.attachment),
     fields: f,
   };
 }
 
 function cachedToTicketEvent(ci: CachedIssue, eventType: TicketEvent['eventType']): TicketEvent {
+  const fields = ci.fields_json ? JSON.parse(ci.fields_json) : {};
   return {
     ticketId: ci.jira_id,
     ticketKey: ci.issue_key,
@@ -57,7 +68,8 @@ function cachedToTicketEvent(ci: CachedIssue, eventType: TicketEvent['eventType'
     created: ci.jira_created?.toISOString() ?? '',
     updated: ci.jira_updated?.toISOString() ?? '',
     slaBreachTime: ci.sla_breach_time?.toISOString() ?? null,
-    fields: ci.fields_json ? JSON.parse(ci.fields_json) : {},
+    attachments: extractAttachments(fields.attachment),
+    fields,
   };
 }
 

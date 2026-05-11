@@ -96,6 +96,10 @@ export class Reasoner {
       } catch { /* non-critical */ }
     }
 
+    const attachmentsText = event.attachments?.length
+      ? event.attachments.map(a => `- ${a.filename} (${a.mimeType}, ${(a.size / 1024).toFixed(1)}KB)`).join('\n')
+      : 'None';
+
     const systemPrompt = loadPrompt('triage', {
       ticket_key: event.ticketKey,
       summary: event.summary,
@@ -105,6 +109,7 @@ export class Reasoner {
       reporter: event.reporter ?? 'Unknown',
       organisation: event.organisation ?? 'Unknown',
       created: event.created,
+      attachments: attachmentsText,
       customer_context: customerContext,
       kb_matches: kbText,
       learnings: learningsCtx.text + (patternsCtx ? `\n\n${patternsCtx}` : '') + (tuningSignalsCtx ? `\n\n## Historical Tuning Signals\n\n${tuningSignalsCtx}` : ''),

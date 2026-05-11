@@ -2611,7 +2611,13 @@ export class ApprovalQueries {
     sql += ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`;
     const queueItems = await query<ApprovalItem>(sql, params);
     const novaItems = await this.getNovaDecisions(status);
-    const merged = [...queueItems, ...novaItems];
+
+    // Deduplicate: if a ticket has both an approval_queue entry (positive ID, has resume_url)
+    // and an agent_decisions entry (negative ID), keep only the approval_queue one.
+    const queueTicketIds = new Set(queueItems.map(q => q.ticket_id));
+    const dedupedNova = novaItems.filter(n => !queueTicketIds.has(n.ticket_id));
+
+    const merged = [...queueItems, ...dedupedNova];
     merged.sort((a, b) => {
       const aPending = a.status === 'pending' ? 0 : 1;
       const bPending = b.status === 'pending' ? 0 : 1;
@@ -2654,8 +2660,11 @@ export class ApprovalQueries {
   async getPendingCount(): Promise<number> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
     const queueRow = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
+    // Only count agent_decisions that DON'T have a matching approval_queue entry
     const novaRow = await queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM agent_decisions WHERE approval_required = 1 AND (approval_status IS NULL OR approval_status = 'pending')`,
+      `SELECT COUNT(*) as count FROM agent_decisions d
+       WHERE d.approval_required = 1 AND (d.approval_status IS NULL OR d.approval_status = 'pending')
+         AND NOT EXISTS (SELECT 1 FROM approval_queue q WHERE q.ticket_id = d.ticket_id)`,
     );
     return (queueRow?.count ?? 0) + (novaRow?.count ?? 0);
   }

@@ -15,6 +15,9 @@ Reporter: {{reporter}}
 Organisation: {{organisation}}
 Created: {{created}}
 
+Attachments:
+{{attachments}}
+
 ## Customer Context
 
 {{customer_context}}

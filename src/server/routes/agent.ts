@@ -3475,8 +3475,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         );
       } catch { /* approval_queue may not have a matching entry */ }
 
-      // Enhanced hybrid: feed learning loop for confirm/execute
-      if (action === 'confirm' || action === 'execute') {
+      // Enhanced hybrid: feed learning loop + execute Jira action
+      if (action === 'approve' || action === 'confirm' || action === 'execute') {
         const fullDecision = await queryOne<{ ticket_id: string; output: string; shadow_mode: number; action: string }>(
           `SELECT ticket_id, output, shadow_mode, action FROM agent_decisions WHERE id = ?`, [id],
         );
@@ -3496,14 +3496,14 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
                 (output.draft_response ?? '').slice(0, 2000),
                 action === 'confirm'
                   ? `Shadow decision confirmed as correct. Action: ${fullDecision.action}. Category: ${category}.`
-                  : `Shadow decision executed by human override. Action: ${fullDecision.action}. Category: ${category}.`,
+                  : `Decision ${action}d by human. Action: ${fullDecision.action}. Category: ${category}.`,
                 user.username,
               ],
             );
           } catch { /* best effort */ }
 
-          // Execute the Jira action only for 'execute'
-          if (action === 'execute') {
+          // Execute the Jira action for approve/execute (post reply to Jira)
+          if (action === 'approve' || action === 'execute') {
             const draftResponse = output.draft_response || '';
             if (draftResponse) {
               try {
@@ -3514,9 +3514,9 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
                   editedResponse || draftResponse,
                   user.username,
                 );
-                console.log(`[agent] Enhanced hybrid execute: ${fullDecision.ticket_id} by ${user.username}`);
+                console.log(`[agent] Decision ${action}: posted reply for ${fullDecision.ticket_id} by ${user.username}`);
               } catch (err) {
-                console.warn(`[agent] Execute callback failed for ${fullDecision.ticket_id}:`, err instanceof Error ? err.message : err);
+                console.warn(`[agent] Approval callback failed for ${fullDecision.ticket_id}:`, err instanceof Error ? err.message : err);
               }
             }
           }
