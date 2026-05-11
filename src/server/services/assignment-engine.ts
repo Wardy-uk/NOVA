@@ -118,14 +118,19 @@ export class AssignmentEngine {
     const chosen = ranked[0];
     if (!chosen) return null;
 
-    await this.recordAssignment(ticketKey, pool, chosen, project, assignmentReason);
-    await this.updateLastAssigned(chosen.agent.id);
-
-    return {
+    const result = {
       agent: chosen.agent,
       reason: this.buildReason(chosen, preferredSkills),
       openTicketCount: chosen.openCount,
     };
+
+    // Bookkeeping is best-effort — never block the actual assignment
+    try { await this.recordAssignment(ticketKey, pool, chosen, project, assignmentReason); }
+    catch (err) { console.error(`[assignment] recordAssignment failed for ${ticketKey}:`, err instanceof Error ? err.message : err); }
+    try { await this.updateLastAssigned(chosen.agent.id); }
+    catch (err) { console.error(`[assignment] updateLastAssigned failed for agent ${chosen.agent.id}:`, err instanceof Error ? err.message : err); }
+
+    return result;
   }
 
   async assignToJira(ticketKey: string, pool: Pool = 'cc', preferredSkills?: string[], projectKey?: string): Promise<AssignmentResult | null> {
@@ -398,7 +403,7 @@ export class AssignmentEngine {
       `MERGE agent_assignment_state AS target
        USING (SELECT ? AS agent_id) AS source ON target.agent_id = source.agent_id
        WHEN MATCHED THEN UPDATE SET is_current_agent = 1, updated_at = GETUTCDATE()
-       WHEN NOT MATCHED THEN INSERT (agent_id, is_current_agent) VALUES (?, 1)`,
+       WHEN NOT MATCHED THEN INSERT (agent_id, is_current_agent) VALUES (?, 1);`,
       [next.id, next.id],
     );
 
@@ -533,7 +538,7 @@ export class AssignmentEngine {
       `MERGE agent_assignment_state AS target
        USING (SELECT ? AS agent_id) AS source ON target.agent_id = source.agent_id
        WHEN MATCHED THEN UPDATE SET last_assigned_at = GETUTCDATE(), updated_at = GETUTCDATE()
-       WHEN NOT MATCHED THEN INSERT (agent_id, last_assigned_at) VALUES (?, GETUTCDATE())`,
+       WHEN NOT MATCHED THEN INSERT (agent_id, last_assigned_at) VALUES (?, GETUTCDATE());`,
       [agentId, agentId],
     );
   }
