@@ -1270,6 +1270,15 @@ export class AgentLoop {
   }
 
   private async executeDecision(decision: AgentDecision): Promise<void> {
+    // Don't log or track error-sourced no_action decisions — they pollute state
+    // and prevent the perceiver from re-emitting the ticket on the next tick
+    const isErrorNoAction = decision.action === 'no_action'
+      && decision.reasoning?.startsWith('Error:');
+    if (isErrorNoAction) {
+      console.warn(`[agent] Skipping state write for error no_action on ${decision.ticketKey}: ${decision.reasoning}`);
+      return;
+    }
+
     const decisionId = await this.observer.logDecision(decision);
     const ticketState = this.lifecycleManager.getTicketState();
 

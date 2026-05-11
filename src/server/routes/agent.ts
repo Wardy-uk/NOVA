@@ -2459,6 +2459,24 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: { cleared } });
   });
 
+  router.post('/retriage', requireSuperAdmin(), async (req, res) => {
+    try {
+      const { ticketKeys } = req.body as { ticketKeys?: string[] };
+      if (!ticketKeys?.length) {
+        res.status(400).json({ ok: false, error: 'ticketKeys[] required' });
+        return;
+      }
+      const placeholders = ticketKeys.map(() => '?').join(',');
+      await execute(
+        `DELETE FROM agent_ticket_state WHERE ticket_id IN (${placeholders})`,
+        ticketKeys,
+      );
+      res.json({ ok: true, data: { cleared: ticketKeys.length, tickets: ticketKeys } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
   // ── Suggestions ──
 
   const suggestionEngine = deps?.suggestionEngine;
