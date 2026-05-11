@@ -225,7 +225,12 @@ export class AssignmentEngine {
         .map(r => r.roster_id),
     );
 
-    return active.filter(a => !unavailableIds.has(a.id));
+    const available = active.filter(a => !unavailableIds.has(a.id));
+    if (unavailableIds.size > 0) {
+      const excluded = active.filter(a => unavailableIds.has(a.id)).map(a => a.display_name);
+      console.log(`[assignment] Pool ${pool}: ${available.length} available, excluded ${excluded.length} unavailable: ${excluded.join(', ')}`);
+    }
+    return available;
   }
 
   async getAllAgents(pool?: Pool): Promise<RosterAgent[]> {
@@ -238,14 +243,15 @@ export class AssignmentEngine {
   }
 
   private async getAllAgentsFromRoster(pool?: Pool): Promise<RosterAgent[]> {
-    const poolFilter = pool ? `WHERE pool = ?` : '';
-    const params: unknown[] = pool ? [pool] : [];
+    const conditions = ['active = 1'];
+    const params: unknown[] = [];
+    if (pool) { conditions.push('pool = ?'); params.push(pool); }
     const rows = await query<{
       id: number; jira_account_id: string; display_name: string; email: string | null;
       pool: string; skills: string | null; max_capacity: number; active: number;
     }>(
       `SELECT id, jira_account_id, display_name, email, pool, skills, max_capacity, active
-       FROM agent_roster ${poolFilter}
+       FROM agent_roster WHERE ${conditions.join(' AND ')}
        ORDER BY pool, display_name`,
       params,
     );
