@@ -55,6 +55,9 @@ export function AINextActionCard({ ticketKey, compact, pendingDecision, onDecisi
   const [decisionResult, setDecisionResult] = useState<string | null>(null);
   const [showDeclineInput, setShowDeclineInput] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
+  const [editMode, setEditMode] = useState(false);
+  const [editDraft, setEditDraft] = useState('');
+  const [loadingDraft, setLoadingDraft] = useState(false);
 
   useEffect(() => {
     if (!ticketKey) return;
@@ -81,6 +84,47 @@ export function AINextActionCard({ ticketKey, compact, pendingDecision, onDecisi
       </div>
     );
   }
+
+  const handleOpenEdit = async () => {
+    if (!pendingDecision) return;
+    setLoadingDraft(true);
+    try {
+      const r = await fetch(`/api/agent/decisions/${pendingDecision.id}`, { headers: authHeaders() });
+      const json = await r.json();
+      if (json.ok) {
+        const output = json.data?.output ?? {};
+        setEditDraft(output.draft_response ?? pendingDecision.draftPreview ?? '');
+      } else {
+        setEditDraft(pendingDecision.draftPreview ?? '');
+      }
+    } catch {
+      setEditDraft(pendingDecision.draftPreview ?? '');
+    } finally {
+      setLoadingDraft(false);
+      setEditMode(true);
+    }
+  };
+
+  const handleEditApprove = async () => {
+    if (!pendingDecision || !editDraft.trim()) return;
+    setDecisionActing(true);
+    try {
+      const r = await fetch(`/api/agent/decisions/${pendingDecision.id}/decide`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'execute', editedResponse: editDraft.trim() }),
+      });
+      const json = await r.json();
+      if (!json.ok) throw new Error(json.error || 'Failed');
+      setDecisionResult('Executed (edited)');
+      setEditMode(false);
+      if (onDecisionActioned) setTimeout(onDecisionActioned, 800);
+    } catch {
+      setDecisionResult('Error');
+    } finally {
+      setDecisionActing(false);
+    }
+  };
 
   const handleDecisionAction = async (action: 'confirm' | 'execute' | 'decline') => {
     if (!pendingDecision) return;
@@ -214,14 +258,23 @@ export function AINextActionCard({ ticketKey, compact, pendingDecision, onDecisi
                   </button>
                 </>
               ) : (
-                <button
-                  onClick={() => handleDecisionAction('execute')}
-                  disabled={decisionActing}
-                  className="px-3 py-1.5 text-[11px] rounded-lg font-bold transition-colors disabled:opacity-40 text-[#0f172a]"
-                  style={{ background: '#10b981', boxShadow: '0 2px 8px rgba(16,185,129,0.4)' }}
-                >
-                  {decisionActing ? 'Processing…' : 'Approve'}
-                </button>
+                <>
+                  <button
+                    onClick={() => handleDecisionAction('execute')}
+                    disabled={decisionActing}
+                    className="px-3 py-1.5 text-[11px] rounded-lg font-bold transition-colors disabled:opacity-40 text-[#0f172a]"
+                    style={{ background: '#10b981', boxShadow: '0 2px 8px rgba(16,185,129,0.4)' }}
+                  >
+                    {decisionActing ? 'Processing…' : 'Approve'}
+                  </button>
+                  <button
+                    onClick={handleOpenEdit}
+                    disabled={decisionActing || loadingDraft}
+                    className="px-3 py-1.5 text-[11px] rounded-lg font-semibold text-[#5ec1ca] border border-[#5ec1ca]/30 hover:bg-[#5ec1ca]/10 transition-colors disabled:opacity-40"
+                  >
+                    {loadingDraft ? 'Loading…' : 'Edit & Approve'}
+                  </button>
+                </>
               )}
               <button
                 onClick={() => setShowDeclineInput(true)}
@@ -249,6 +302,33 @@ export function AINextActionCard({ ticketKey, compact, pendingDecision, onDecisi
                 </button>
                 <button
                   onClick={() => { setShowDeclineInput(false); setDeclineReason(''); }}
+                  className="px-3 py-1.5 text-[11px] rounded-lg font-semibold text-neutral-400 hover:text-neutral-200 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Edit draft panel */}
+          {editMode && (
+            <div className="mt-3 space-y-2">
+              <div className="text-[10px] uppercase tracking-wider font-bold text-[#5ec1ca]">Edit Draft Response</div>
+              <textarea
+                value={editDraft}
+                onChange={e => setEditDraft(e.target.value)}
+                className="w-full bg-[#272C33] border border-[#3a424d] text-neutral-200 text-[12px] rounded-lg p-3 resize-y min-h-[120px] focus:outline-none focus:border-[#5ec1ca]/50 leading-relaxed"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleEditApprove}
+                  disabled={decisionActing || !editDraft.trim()}
+                  className="px-4 py-1.5 text-[11px] rounded-lg font-bold text-[#0f172a] disabled:opacity-40 transition-colors"
+                  style={{ background: '#10b981', boxShadow: '0 2px 8px rgba(16,185,129,0.4)' }}
+                >
+                  {decisionActing ? 'Sending…' : 'Approve with Edits'}
+                </button>
+                <button
+                  onClick={() => setEditMode(false)}
                   className="px-3 py-1.5 text-[11px] rounded-lg font-semibold text-neutral-400 hover:text-neutral-200 transition-colors"
                 >
                   Cancel

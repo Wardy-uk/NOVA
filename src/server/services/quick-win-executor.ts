@@ -74,9 +74,10 @@ export class QuickWinExecutor {
         await this.jiraClient.addComment(ticketKey, comment, { internal: false });
       }
 
-      // Find and execute transition
+      // Find and execute transition — try primary name, then fallbacks
       const targetTransition = qw.type === 'spam' ? 'cancel' : qw.type === 'kba_match' ? 'waiting' : 'resolve';
-      const transitionId = await this.findTransitionId(ticketKey, targetTransition);
+      const transitionId = await this.findTransitionId(ticketKey, targetTransition)
+        || (targetTransition !== 'resolve' ? await this.findTransitionId(ticketKey, 'resolve') : null);
 
       if (!transitionId) {
         console.warn(`[quick-win] No ${targetTransition} transition found for ${ticketKey}`);
@@ -95,7 +96,7 @@ export class QuickWinExecutor {
       };
       try { if (resMapRaw) resMap = { ...resMap, ...JSON.parse(resMapRaw) }; } catch {}
 
-      if (targetTransition === 'resolve' || targetTransition === 'cancel') {
+      if (['resolve', 'cancel'].includes(targetTransition)) {
         try {
           const resolution = resMap[qw.type] || 'No Fault Found';
           const { fields, comment: resolveComment } = buildResolveFields({
