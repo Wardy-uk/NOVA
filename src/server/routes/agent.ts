@@ -291,6 +291,17 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.post('/sweep-unassigned', requireRole('admin'), async (req, res) => {
+    try {
+      const maxAgeHours = parseInt(req.body?.maxAgeHours, 10) || 168;
+      const limit = parseInt(req.body?.limit, 10) || 50;
+      const result = await agentLoop.runUnassignedSweep({ maxAgeHours, limit, skipWorkingHoursCheck: true });
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unassigned sweep failed' });
+    }
+  });
+
   router.get('/stats', async (_req, res) => {
     try {
       const stats = await agentLoop.getObserver().getStats();

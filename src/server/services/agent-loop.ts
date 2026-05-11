@@ -981,8 +981,12 @@ export class AgentLoop {
   // ── C3: Unassigned ticket sweep (48-hour catch-up) ──
   // Catches tickets missed by event-driven assignment: pool resolution failures,
   // downtime gaps, restarts, or any silent assignment failures.
-  private async runUnassignedSweep(): Promise<void> {
-    if (!this.assignmentEngine || !this.assignmentEngine.isWorkingTime()) return;
+  async runUnassignedSweep(options?: { maxAgeHours?: number; limit?: number; skipWorkingHoursCheck?: boolean }): Promise<{ assigned: number; failed: number; total: number }> {
+    if (!this.assignmentEngine) return { assigned: 0, failed: 0, total: 0 };
+    if (!options?.skipWorkingHoursCheck && !this.assignmentEngine.isWorkingTime()) return { assigned: 0, failed: 0, total: 0 };
+
+    const maxAgeHours = options?.maxAgeHours ?? this.getNumber('agent_sweep_max_age_hours', 168);
+    const limit = options?.limit ?? 30;
 
     try {
       const projects = this.assignmentEngine.getConfiguredProjects();
@@ -992,35 +996,45 @@ export class AgentLoop {
         issue_key: string; summary: string; status_name: string;
         request_type: string | null; current_tier: string | null;
       }>(
-        `SELECT TOP (20) c.issue_key, c.summary, c.status_name, c.request_type, c.current_tier
+        `SELECT TOP (${limit}) c.issue_key, c.summary, c.status_name, c.request_type, c.current_tier
          FROM jira_issue_cache c
          WHERE c.assignee_account_id IS NULL
            AND c.status_category != 'done'
            AND (c.current_tier IS NULL OR c.current_tier != 'Development')
            AND c.created_at < DATEADD(minute, -5, GETUTCDATE())
-           AND c.created_at >= DATEADD(hour, -48, GETUTCDATE())
+           AND c.created_at >= DATEADD(hour, -${maxAgeHours}, GETUTCDATE())
            AND c.project_key IN (${projectPlaceholders})
          ORDER BY c.created_at ASC`,
         projects,
       );
 
-      if (unassigned.length === 0) return;
-      console.log(`[agent] Unassigned sweep (48h catch-up): ${unassigned.length} tickets found`);
+      if (unassigned.length === 0) return { assigned: 0, failed: 0, total: 0 };
+      console.log(`[agent] Unassigned sweep (${maxAgeHours}h window): ${unassigned.length} tickets found`);
 
+      let assigned = 0;
+      let failed = 0;
       for (const ticket of unassigned) {
         const project = this.assignmentEngine.resolveProjectFromTicketKey(ticket.issue_key);
         const pool = this.determinePoolFromTicket(ticket, project);
 
-        const assignment = await this.assignmentEngine.assignWithFallback(
-          ticket.issue_key, pool, project,
-        );
-        if (assignment) {
-          await this.assignmentEngine.postAssignmentComment(ticket.issue_key, assignment);
-          console.log(`[agent] Sweep: assigned ${ticket.issue_key} → ${assignment.agent.display_name}`);
+        try {
+          const assignment = await this.assignmentEngine.assignWithFallback(
+            ticket.issue_key, pool, project,
+          );
+          if (assignment) {
+            await this.assignmentEngine.postAssignmentComment(ticket.issue_key, assignment);
+            console.log(`[agent] Sweep: assigned ${ticket.issue_key} → ${assignment.agent.display_name}`);
+            assigned++;
+          }
+        } catch (err) {
+          console.warn(`[agent] Sweep: failed ${ticket.issue_key}:`, err instanceof Error ? err.message : err);
+          failed++;
         }
       }
+      return { assigned, failed, total: unassigned.length };
     } catch (err) {
       console.warn('[agent] Unassigned sweep failed:', err instanceof Error ? err.message : err);
+      return { assigned: 0, failed: 0, total: 0 };
     }
   }
 
