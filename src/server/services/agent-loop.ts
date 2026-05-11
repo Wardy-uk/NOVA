@@ -24,7 +24,7 @@ import { AbuseReportExecutor } from './abuse-report-executor.js';
 import { AutoRulesEngine } from './auto-rules-engine.js';
 import { QuickWinExecutor } from './quick-win-executor.js';
 import { ExternalDbService } from './external-db.js';
-import { query, executeAndGetId } from './database.js';
+import { query, execute, executeAndGetId } from './database.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 import { createHash } from 'crypto';
@@ -1579,6 +1579,22 @@ export class AgentLoop {
     // Find the agent decision ID from the most recent decision for this ticket
     const decisions = await this.observer.getDecisionsByTicket(ticketKey, 1) as Array<{ id: number }>;
     const decisionId = decisions[0]?.id;
+
+    // Sync agent_decisions.approval_status so the row doesn't ghost back as pending
+    const approvalStatus = (action === 'approve' || action === 'approved') ? 'approved'
+      : (action === 'decline' || action === 'declined') ? 'declined'
+      : action === 'cancel' || action === 'cancelled' ? 'cancelled' : null;
+    if (approvalStatus) {
+      try {
+        await execute(
+          `UPDATE agent_decisions SET approval_status = ?, resolved_at = GETUTCDATE(), resolved_by = ?
+           WHERE ticket_id = ? AND approval_required = 1 AND (approval_status IS NULL OR approval_status = 'pending')`,
+          [approvalStatus, decidedBy ?? 'unknown', ticketKey],
+        );
+      } catch (err) {
+        console.warn(`[agent] Failed to sync agent_decisions approval_status for ${ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
 
     if (action === 'approve' || action === 'approved') {
       if (this.isShadowMode()) {

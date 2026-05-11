@@ -2612,10 +2612,12 @@ export class ApprovalQueries {
     const queueItems = await query<ApprovalItem>(sql, params);
     const novaItems = await this.getNovaDecisions(status);
 
-    // Deduplicate: if a ticket has both an approval_queue entry (positive ID, has resume_url)
-    // and an agent_decisions entry (negative ID), keep only the approval_queue one.
-    const queueTicketIds = new Set(queueItems.map(q => q.ticket_id));
-    const dedupedNova = novaItems.filter(n => !queueTicketIds.has(n.ticket_id));
+    // Deduplicate: exclude agent_decisions entries where ANY approval_queue entry exists
+    // for that ticket (not just ones matching the current status filter). This prevents
+    // ghost entries after approve/decline moves the approval_queue row out of 'pending'.
+    const allQueueTicketRows = await query<{ ticket_id: string }>(`SELECT DISTINCT ticket_id FROM approval_queue`);
+    const allQueueTicketIds = new Set(allQueueTicketRows.map(r => r.ticket_id));
+    const dedupedNova = novaItems.filter(n => !allQueueTicketIds.has(n.ticket_id));
 
     const merged = [...queueItems, ...dedupedNova];
     merged.sort((a, b) => {
@@ -2660,11 +2662,11 @@ export class ApprovalQueries {
   async getPendingCount(): Promise<number> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
     const queueRow = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
-    // Only count distinct tickets in agent_decisions that DON'T have a matching pending approval_queue entry
+    // Only count distinct tickets in agent_decisions that DON'T have ANY matching approval_queue entry
     const novaRow = await queryOne<{ count: number }>(
       `SELECT COUNT(DISTINCT d.ticket_id) as count FROM agent_decisions d
        WHERE d.approval_required = 1 AND (d.approval_status IS NULL OR d.approval_status = 'pending')
-         AND NOT EXISTS (SELECT 1 FROM approval_queue q WHERE q.ticket_id = d.ticket_id AND q.status = 'pending')`,
+         AND NOT EXISTS (SELECT 1 FROM approval_queue q WHERE q.ticket_id = d.ticket_id)`,
     );
     return (queueRow?.count ?? 0) + (novaRow?.count ?? 0);
   }
