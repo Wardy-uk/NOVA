@@ -977,7 +977,9 @@ export class AgentLoop {
     return 'cc';
   }
 
-  // ── C3: Unassigned ticket sweep ──
+  // ── C3: Unassigned ticket sweep (48-hour catch-up) ──
+  // Catches tickets missed by event-driven assignment: pool resolution failures,
+  // downtime gaps, restarts, or any silent assignment failures.
   private async runUnassignedSweep(): Promise<void> {
     if (!this.assignmentEngine || !this.assignmentEngine.isWorkingTime()) return;
 
@@ -989,19 +991,20 @@ export class AgentLoop {
         issue_key: string; summary: string; status_name: string;
         request_type: string | null; current_tier: string | null;
       }>(
-        `SELECT TOP (10) c.issue_key, c.summary, c.status_name, c.request_type, c.current_tier
+        `SELECT TOP (20) c.issue_key, c.summary, c.status_name, c.request_type, c.current_tier
          FROM jira_issue_cache c
          WHERE c.assignee_account_id IS NULL
            AND c.status_category != 'done'
            AND (c.current_tier IS NULL OR c.current_tier != 'Development')
            AND c.created_at < DATEADD(minute, -5, GETUTCDATE())
+           AND c.created_at >= DATEADD(hour, -48, GETUTCDATE())
            AND c.project_key IN (${projectPlaceholders})
          ORDER BY c.created_at ASC`,
         projects,
       );
 
       if (unassigned.length === 0) return;
-      console.log(`[agent] Unassigned sweep: ${unassigned.length} tickets found`);
+      console.log(`[agent] Unassigned sweep (48h catch-up): ${unassigned.length} tickets found`);
 
       for (const ticket of unassigned) {
         const project = this.assignmentEngine.resolveProjectFromTicketKey(ticket.issue_key);

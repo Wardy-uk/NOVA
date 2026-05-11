@@ -109,15 +109,22 @@ export class Observer {
   }
 
   async logOutcome(decisionId: number, result: ActionResult): Promise<void> {
-    await executeAndGetId(
-      `UPDATE agent_decisions
-       SET outcome = ?, resolved_at = GETUTCDATE()
-       WHERE id = ?`,
-      [
-        JSON.stringify({ success: result.success, detail: result.detail, error: result.error }),
-        decisionId,
-      ],
-    );
+    const outcomeJson = JSON.stringify({ success: result.success, detail: result.detail, error: result.error });
+    if (result.success) {
+      await executeAndGetId(
+        `UPDATE agent_decisions
+         SET outcome = ?, resolved_at = GETUTCDATE(), resolved_by = 'system'
+         WHERE id = ?`,
+        [outcomeJson, decisionId],
+      );
+    } else {
+      await executeAndGetId(
+        `UPDATE agent_decisions
+         SET outcome = ?
+         WHERE id = ?`,
+        [outcomeJson, decisionId],
+      );
+    }
   }
 
   async getDecisionsCount(): Promise<number> {

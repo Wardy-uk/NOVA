@@ -38,14 +38,40 @@ const DEFAULT_CUSTOM_ROLES: CustomRole[] = [
   { id: 'design', name: 'Design', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'edit', accounts: 'view', people: 'view', azdo_push: 'edit', kpis: 'view', training: 'edit' } },
   { id: 'viewer', name: 'Viewer', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', training: 'edit' } },
   { id: 'report_viewer', name: 'Report Viewer', areas: { command: 'view', nova_features: 'hidden', servicedesk: 'view', sales: 'hidden', onboarding: 'hidden', accounts: 'hidden', people: 'hidden', kpis: 'view', training: 'view' } },
+  { id: 'support', name: 'Support', areas: { command: 'view', servicedesk: 'view', people: 'view', nova_features: 'view', qa: 'view', training: 'view' } },
 ];
+
+const SUPPORT_ROLE_REQUIRED_AREAS: Record<string, 'hidden' | 'view' | 'edit'> = {
+  nova_features: 'view',
+  qa: 'view',
+  training: 'view',
+};
 
 function getCustomRoles(settingsQueries: FileSettingsQueries): CustomRole[] {
   const raw = settingsQueries.get('custom_roles');
+  let roles: CustomRole[];
   try {
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return DEFAULT_CUSTOM_ROLES;
+    roles = raw ? JSON.parse(raw) : DEFAULT_CUSTOM_ROLES;
+  } catch {
+    roles = DEFAULT_CUSTOM_ROLES;
+  }
+
+  // Auto-patch: ensure Support role has required areas for AI agent visibility
+  const support = roles.find(r => r.id === 'support');
+  if (support) {
+    let patched = false;
+    for (const [area, level] of Object.entries(SUPPORT_ROLE_REQUIRED_AREAS)) {
+      if (!support.areas[area] || support.areas[area] === 'hidden') {
+        support.areas[area] = level;
+        patched = true;
+      }
+    }
+    if (patched && raw) {
+      try { settingsQueries.set('custom_roles', JSON.stringify(roles)); } catch { /* best effort */ }
+    }
+  }
+
+  return roles;
 }
 
 // Default access for areas not explicitly set in custom roles.

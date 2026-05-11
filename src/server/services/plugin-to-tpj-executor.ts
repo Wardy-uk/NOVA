@@ -28,14 +28,20 @@ export class PluginToTpjExecutor {
         if (novaAccountId) {
           await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
         }
-        const { fields, comment } = buildResolveFields({
-          tldr: 'Plugin notification received outside business hours — closed automatically by NOVA',
-          resolution: 'No Fault Found',
-          comment: 'This plugin notification was received outside business hours. It has been closed automatically. If the issue persists, a new ticket will be created on the next business day.',
-        });
-        await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment });
-        if (novaAccountId) {
-          await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
+        const check = await this.validateTransition(ticketKey, QUICK_RESOLVE_TRANSITION_ID);
+        if (!check.valid) {
+          console.warn(`[plugin-to-tpj] Cannot close ${ticketKey} on non-business day: ${check.error}`);
+          await this.jiraClient.addComment(ticketKey, `⚠️ NOVA tried to close this ticket (non-business day) but the transition is not available. Needs manual action.`, { internal: true });
+        } else {
+          const { fields, comment } = buildResolveFields({
+            tldr: 'Plugin notification received outside business hours — closed automatically by NOVA',
+            resolution: 'No Fault Found',
+            comment: 'This plugin notification was received outside business hours. It has been closed automatically. If the issue persists, a new ticket will be created on the next business day.',
+          });
+          await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment });
+          if (novaAccountId) {
+            await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
+          }
         }
       } catch (err) {
         console.error(`[plugin-to-tpj] Failed to close ${ticketKey} on non-business day:`, err instanceof Error ? err.message : err);
@@ -105,6 +111,10 @@ export class PluginToTpjExecutor {
         if (novaAccountId) {
           await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
         }
+        const check = await this.validateTransition(ticketKey, QUICK_RESOLVE_TRANSITION_ID);
+        if (!check.valid) {
+          throw new Error(check.error || `Transition ${QUICK_RESOLVE_TRANSITION_ID} not available`);
+        }
         const { fields, comment } = buildResolveFields({
           tldr: `Plugin ticket cloned to ${newKey} — automated by NOVA`,
           resolution: 'Third-Party / External Resolution',
@@ -167,6 +177,20 @@ export class PluginToTpjExecutor {
       } catch { /* best effort */ }
 
       return { success: false, actionId: 'plugin_to_tpj', ticketKey, detail: 'Plugin redirect failed', error: msg };
+    }
+  }
+
+  private async validateTransition(ticketKey: string, transitionId: string): Promise<{ valid: boolean; error?: string }> {
+    try {
+      const result = await this.jiraClient.getTransitionsWithFields(ticketKey);
+      const available = (result as any)?.transitions as Array<{ id: string; name: string }> | undefined;
+      if (available && !available.some(t => t.id === transitionId)) {
+        const availableNames = available.map(t => `${t.name} (${t.id})`).join(', ');
+        return { valid: false, error: `Transition ${transitionId} not available. Available: ${availableNames}` };
+      }
+      return { valid: true };
+    } catch {
+      return { valid: true }; // Can't verify — proceed anyway
     }
   }
 

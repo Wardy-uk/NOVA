@@ -395,6 +395,8 @@ export class AutoRulesEngine {
         await this.handleAbuseReport(match, event);
       } else if (action.type === 'assign') {
         await this.handleAssign(match, event, action as { type: 'assign'; team: string; comment: string; note?: string });
+      } else if (action.type === 'tag') {
+        await this.handleTag(ticketKey, action as { type: 'tag'; note: string; sub_category?: string }, rule);
       }
 
       await this.observer.logOutcome(decisionId, {
@@ -453,6 +455,19 @@ export class AutoRulesEngine {
     const novaAccountId = this.settings.get('nova_ai_jira_account_id');
     if (novaAccountId) {
       await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
+    }
+
+    // Validate transition is available before attempting
+    try {
+      const transResult = await this.jiraClient.getTransitionsWithFields(ticketKey);
+      const available = (transResult as any)?.transitions as Array<{ id: string; name: string }> | undefined;
+      if (available && !available.some(t => t.id === QUICK_RESOLVE_TRANSITION_ID)) {
+        const availableNames = available.map(t => `${t.name} (${t.id})`).join(', ');
+        throw new Error(`Transition ${QUICK_RESOLVE_TRANSITION_ID} not available for ${ticketKey}. Available: ${availableNames}`);
+      }
+    } catch (err) {
+      if ((err as Error).message?.includes('not available for')) throw err;
+      console.warn(`[auto-rules] Could not verify transitions for ${ticketKey}, proceeding:`, err instanceof Error ? err.message : err);
     }
 
     // Transition to resolved with all required fields in one call
@@ -578,6 +593,28 @@ export class AutoRulesEngine {
         `\u{1F916} Auto-actioned by NOVA rule '${match.rule.id}'. ${note}\nAssigned to: ${result.agent.display_name}`,
         { internal: true },
       );
+    }
+  }
+
+  private async handleTag(
+    ticketKey: string,
+    action: { type: 'tag'; note: string; sub_category?: string },
+    rule: AutoRule,
+  ): Promise<void> {
+    await this.jiraClient.addComment(
+      ticketKey,
+      `\u{1F916} Auto-tagged by NOVA rule '${rule.id}'. ${action.note}`,
+      { internal: true },
+    );
+
+    if (action.sub_category) {
+      try {
+        await executeAndGetId(
+          `INSERT INTO ticket_classifications (ticket_key, classification_type, category, sub_category, confidence, provider)
+           VALUES (?, 'auto_rule', 'Email', ?, 1.0, 'deterministic')`,
+          [ticketKey, action.sub_category],
+        );
+      } catch { /* best effort — table may not exist yet */ }
     }
   }
 

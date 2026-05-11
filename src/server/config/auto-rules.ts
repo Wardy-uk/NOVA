@@ -67,7 +67,13 @@ const AssignAction = z.object({
   note: z.string().optional(),
 });
 
-const RuleAction = z.discriminatedUnion('type', [CloseAction, SetTierAction, PluginToTpjAction, AbuseReportAction, AssignAction]);
+const TagAction = z.object({
+  type: z.literal('tag'),
+  note: z.string(),
+  sub_category: z.string().optional(),
+});
+
+const RuleAction = z.discriminatedUnion('type', [CloseAction, SetTierAction, PluginToTpjAction, AbuseReportAction, AssignAction, TagAction]);
 
 // ── Rule Schema ──
 
@@ -211,6 +217,30 @@ const RULES_RAW: unknown[] = [
       note: 'Auto-assigned by NOVA — CIA Letter Alerting ticket, routed to Customer Care for CIA instance verification.',
     },
   },
+  // ── Supplier / Vendor invoice routing (Bug 1 — NT-18458) ──
+  {
+    id: 'supplier-invoice-domain',
+    match: {
+      reporter_email: { regex: '@(?:heartinternet\\.co\\.uk|heart\\.co\\.uk)$' },
+    },
+    action: {
+      type: 'tag',
+      note: '📋 Supplier / Vendor invoice detected (matched sender domain). Leaving open for manual routing to finance.',
+      sub_category: 'Supplier / Vendor',
+    },
+  },
+  {
+    id: 'supplier-invoice-subject',
+    match: {
+      subject: { regex: '\\b(?:invoice|payment confirmation|payment received|statement of account|remittance advice)\\b' },
+    },
+    action: {
+      type: 'tag',
+      note: '📋 Supplier / Vendor invoice detected (matched subject keywords). Leaving open for manual routing to finance.',
+      sub_category: 'Supplier / Vendor',
+    },
+  },
+
   {
     id: 'product-cancellation',
     match: {

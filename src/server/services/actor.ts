@@ -239,6 +239,20 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
     if (!transitionId) {
       return { success: false, action: 'transition', ticketKey: decision.ticketKey, detail: 'No transitionId in decision output.' };
     }
+
+    // Validate transition is available for current ticket status
+    try {
+      const transResult = await this.jiraClient.getTransitionsWithFields(decision.ticketKey);
+      const available = (transResult as any)?.transitions as Array<{ id: string; name: string }> | undefined;
+      if (available && !available.some(t => t.id === transitionId)) {
+        const availableNames = available.map(t => `${t.name} (${t.id})`).join(', ');
+        console.warn(`[actor] Transition ${transitionId} not available for ${decision.ticketKey}. Available: ${availableNames}`);
+        return { success: false, action: 'transition', ticketKey: decision.ticketKey, detail: `Transition ${transitionId} not available. Available: ${availableNames}`, error: 'TRANSITION_NOT_FOUND' };
+      }
+    } catch (err) {
+      console.warn(`[actor] Could not verify transitions for ${decision.ticketKey}, proceeding anyway:`, err instanceof Error ? err.message : err);
+    }
+
     if (transitionId === '17') {
       const existingFields = (decision.output.fields as Record<string, unknown>) ?? {};
       if (!existingFields['customfield_14494']) {

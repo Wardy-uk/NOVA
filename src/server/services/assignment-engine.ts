@@ -140,19 +140,34 @@ export class AssignmentEngine {
   }
 
   async assignWithFallback(ticketKey: string, pool: Pool, project: string, preferredSkills?: string[]): Promise<AssignmentResult | null> {
-    let result = await this.assignToJira(ticketKey, pool, preferredSkills, project);
-    if (result) return result;
+    const config = this.getProjectPoolConfig(project);
+    const fallbackChain: Pool[] = [pool];
 
-    if (pool !== 'cc') {
-      console.log(`[assignment] No agents in ${pool} for ${project}, falling back to cc`);
-      result = await this.assignToJira(ticketKey, 'cc', preferredSkills, project);
-      if (result) return result;
+    if (config) {
+      for (const p of config.allowedPools) {
+        if (!fallbackChain.includes(p)) fallbackChain.push(p);
+      }
+    } else {
+      if (pool !== 'cc') fallbackChain.push('cc');
+      if (pool !== 't2') fallbackChain.push('t2');
     }
 
-    if (pool !== 't2') {
-      console.log(`[assignment] No agents in cc for ${project}, falling back to t2`);
-      result = await this.assignToJira(ticketKey, 't2', preferredSkills, project);
+    for (const tryPool of fallbackChain) {
+      const result = await this.assignToJira(ticketKey, tryPool, preferredSkills, project);
       if (result) return result;
+      console.log(`[assignment] No agents in ${tryPool} for ${project}, trying next pool`);
+    }
+
+    // All pools exhausted — post internal note so it's visible in the queue
+    console.warn(`[assignment] All pools exhausted for ${ticketKey} (tried: ${fallbackChain.join(', ')})`);
+    try {
+      await this.jiraClient.addComment(
+        ticketKey,
+        `⚠️ Assignment failed — no agents available in any pool (tried: ${fallbackChain.join(', ')}). This ticket needs manual assignment.`,
+        { internal: true },
+      );
+    } catch (err) {
+      console.warn(`[assignment] Failed to post exhaustion note on ${ticketKey}:`, err instanceof Error ? err.message : err);
     }
 
     return null;
@@ -205,6 +220,56 @@ export class AssignmentEngine {
   }
 
   async getAllAgents(pool?: Pool): Promise<RosterAgent[]> {
+    // Primary source: agent_roster (local NOVA DB, managed by Agent Admin UI)
+    const rosterAgents = await this.getAllAgentsFromRoster(pool);
+    if (rosterAgents.length > 0) return rosterAgents;
+
+    // Fallback: KPI dbo.Agent (legacy path for pools not yet in agent_roster)
+    return this.getAllAgentsFromKpi(pool);
+  }
+
+  private async getAllAgentsFromRoster(pool?: Pool): Promise<RosterAgent[]> {
+    const poolFilter = pool ? `AND pool = ?` : '';
+    const params: unknown[] = pool ? [pool] : [];
+    const rows = await query<{
+      id: number; jira_account_id: string; display_name: string; email: string | null;
+      pool: string; skills: string | null; max_capacity: number; active: number;
+    }>(
+      `SELECT id, jira_account_id, display_name, email, pool, skills, max_capacity, active
+       FROM agent_roster ${poolFilter}
+       ORDER BY pool, display_name`,
+      params,
+    );
+
+    if (rows.length === 0) return [];
+
+    const stateRows = await query<{
+      agent_id: number; is_current_agent: number; last_assigned_at: string | null;
+    }>(`SELECT agent_id, is_current_agent, last_assigned_at FROM agent_assignment_state`);
+    const stateMap = new Map(stateRows.map(r => [r.agent_id, r]));
+
+    return rows.map(row => {
+      const state = stateMap.get(row.id);
+      let parsedSkills: string[] | null = null;
+      if (row.skills) {
+        try { parsedSkills = JSON.parse(row.skills); } catch { /* ignore */ }
+      }
+      return {
+        id: row.id,
+        jira_account_id: row.jira_account_id,
+        display_name: row.display_name,
+        email: row.email,
+        pool: normalizePool(row.pool),
+        skills: parsedSkills,
+        max_capacity: row.max_capacity ?? 15,
+        active: !!row.active,
+        is_current_agent: !!(state?.is_current_agent),
+        last_assigned_at: state?.last_assigned_at ? new Date(state.last_assigned_at) : null,
+      };
+    });
+  }
+
+  private async getAllAgentsFromKpi(pool?: Pool): Promise<RosterAgent[]> {
     const p = await this.getKpiPool();
     const result = await p.request().query(`
       SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
@@ -226,6 +291,29 @@ export class AssignmentEngine {
   }
 
   async getAgent(id: number): Promise<RosterAgent | undefined> {
+    // Try agent_roster first
+    const rosterRow = await queryOne<{
+      id: number; jira_account_id: string; display_name: string; email: string | null;
+      pool: string; skills: string | null; max_capacity: number; active: number;
+    }>(`SELECT id, jira_account_id, display_name, email, pool, skills, max_capacity, active FROM agent_roster WHERE id = ?`, [id]);
+
+    if (rosterRow) {
+      const stateRow = await queryOne<{
+        agent_id: number; is_current_agent: number; last_assigned_at: string | null;
+      }>(`SELECT agent_id, is_current_agent, last_assigned_at FROM agent_assignment_state WHERE agent_id = ?`, [id]);
+      let parsedSkills: string[] | null = null;
+      if (rosterRow.skills) { try { parsedSkills = JSON.parse(rosterRow.skills); } catch { /* ignore */ } }
+      return {
+        id: rosterRow.id, jira_account_id: rosterRow.jira_account_id,
+        display_name: rosterRow.display_name, email: rosterRow.email,
+        pool: normalizePool(rosterRow.pool), skills: parsedSkills,
+        max_capacity: rosterRow.max_capacity ?? 15, active: !!rosterRow.active,
+        is_current_agent: !!(stateRow?.is_current_agent),
+        last_assigned_at: stateRow?.last_assigned_at ? new Date(stateRow.last_assigned_at) : null,
+      };
+    }
+
+    // Fallback: KPI dbo.Agent
     const p = await this.getKpiPool();
     const req = p.request();
     req.input('agentId', sql.Int, id);
@@ -238,16 +326,39 @@ export class AssignmentEngine {
     const row = result.recordset[0];
     if (!row) return undefined;
 
-    const stateRow = await queryOne<{
+    const stateRow2 = await queryOne<{
       agent_id: number; is_current_agent: number; last_assigned_at: string | null;
     }>(`SELECT agent_id, is_current_agent, last_assigned_at FROM agent_assignment_state WHERE agent_id = ?`, [id]);
 
     const stateMap = new Map<number, any>();
-    if (stateRow) stateMap.set(stateRow.agent_id, stateRow);
+    if (stateRow2) stateMap.set(stateRow2.agent_id, stateRow2);
     return this.mapAgentRow(row, stateMap);
   }
 
   async getAgentByJiraId(jiraAccountId: string): Promise<RosterAgent | undefined> {
+    // Try agent_roster first
+    const rosterRow = await queryOne<{
+      id: number; jira_account_id: string; display_name: string; email: string | null;
+      pool: string; skills: string | null; max_capacity: number; active: number;
+    }>(`SELECT id, jira_account_id, display_name, email, pool, skills, max_capacity, active FROM agent_roster WHERE jira_account_id = ?`, [jiraAccountId]);
+
+    if (rosterRow) {
+      const stateRow = await queryOne<{
+        agent_id: number; is_current_agent: number; last_assigned_at: string | null;
+      }>(`SELECT agent_id, is_current_agent, last_assigned_at FROM agent_assignment_state WHERE agent_id = ?`, [rosterRow.id]);
+      let parsedSkills: string[] | null = null;
+      if (rosterRow.skills) { try { parsedSkills = JSON.parse(rosterRow.skills); } catch { /* ignore */ } }
+      return {
+        id: rosterRow.id, jira_account_id: rosterRow.jira_account_id,
+        display_name: rosterRow.display_name, email: rosterRow.email,
+        pool: normalizePool(rosterRow.pool), skills: parsedSkills,
+        max_capacity: rosterRow.max_capacity ?? 15, active: !!rosterRow.active,
+        is_current_agent: !!(stateRow?.is_current_agent),
+        last_assigned_at: stateRow?.last_assigned_at ? new Date(stateRow.last_assigned_at) : null,
+      };
+    }
+
+    // Fallback: KPI dbo.Agent
     const p = await this.getKpiPool();
     const req = p.request();
     req.input('accountId', sql.NVarChar, jiraAccountId);
@@ -260,12 +371,12 @@ export class AssignmentEngine {
     const row = result.recordset[0];
     if (!row) return undefined;
 
-    const stateRow = await queryOne<{
+    const stateRow2 = await queryOne<{
       agent_id: number; is_current_agent: number; last_assigned_at: string | null;
     }>(`SELECT agent_id, is_current_agent, last_assigned_at FROM agent_assignment_state WHERE agent_id = ?`, [row.AgentId]);
 
     const stateMap = new Map<number, any>();
-    if (stateRow) stateMap.set(stateRow.agent_id, stateRow);
+    if (stateRow2) stateMap.set(stateRow2.agent_id, stateRow2);
     return this.mapAgentRow(row, stateMap);
   }
 
