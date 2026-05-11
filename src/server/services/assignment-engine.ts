@@ -199,7 +199,11 @@ export class AssignmentEngine {
   }
 
   getConfiguredProjects(): string[] {
-    const raw = this.settingsQueries.get('agent_jira_project') || 'NT';
+    // assignment_projects is the dedicated setting for round-robin scope.
+    // Falls back to agent_jira_project so existing setups work unchanged.
+    const raw = this.settingsQueries.get('assignment_projects')
+      || this.settingsQueries.get('agent_jira_project')
+      || 'NT';
     return raw.split(',').map(p => p.trim()).filter(Boolean);
   }
 

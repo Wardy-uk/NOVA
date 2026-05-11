@@ -65,13 +65,20 @@ export class JiraSyncService {
   }
 
   private buildProjectFilter(): string {
-    const raw = this.settings.get('agent_jira_project') || 'NT';
-    return raw.split(',').map(p => p.trim()).filter(Boolean).join(', ');
+    // Merge agent_jira_project (AI triage) + assignment_projects (round-robin)
+    // so the cache contains tickets from both scopes.
+    const agentRaw = this.settings.get('agent_jira_project') || 'NT';
+    const assignRaw = this.settings.get('assignment_projects') || '';
+    const all = new Set([
+      ...agentRaw.split(',').map(p => p.trim()).filter(Boolean),
+      ...assignRaw.split(',').map(p => p.trim()).filter(Boolean),
+    ]);
+    return [...all].join(', ');
   }
 
   private buildProjectJql(): string {
     const projects = this.buildProjectFilter();
-    if (!projects) throw new Error('agent_jira_project not configured — cannot build JQL');
+    if (!projects) throw new Error('No projects configured — cannot build JQL');
     if (!projects.includes(',')) return `project = ${projects}`;
     return `project IN (${projects})`;
   }

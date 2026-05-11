@@ -56,6 +56,7 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'jira_ob_email', label: 'Email', type: 'text', placeholder: 'you@company.com', required: true },
       { key: 'jira_ob_token', label: 'API Token', type: 'password', placeholder: 'From id.atlassian.com/manage-profile/security/api-tokens', required: true },
       { key: 'jira_ob_project', label: 'Project Key', type: 'text', placeholder: 'NT', required: false },
+      { key: 'assignment_projects', label: 'Round-Robin Projects', type: 'text', placeholder: 'NT,NTPJ — projects for auto-assignment (comma-separated)', required: false },
       { key: 'jira_ob_issue_type', label: 'Issue Type', type: 'text', placeholder: 'Service Request', required: false },
       { key: 'jira_ob_request_type_field', label: 'Request Type Field ID', type: 'text', placeholder: 'customfield_10010', required: false },
       { key: 'jira_ob_rt_qa_id', label: 'Delivery QA Request Type ID', type: 'text', placeholder: 'Request type ID for QA parent', required: false },
