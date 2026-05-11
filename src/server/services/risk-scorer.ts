@@ -29,6 +29,8 @@ export interface FlaggedTicket {
   last_customer_comment_at: string | null;
   last_agent_comment: string | null;
   last_agent_comment_at: string | null;
+  conversation_json: string | null;
+  dismiss_reason: string | null;
 }
 
 interface TicketRiskInput {
@@ -650,8 +652,10 @@ export class RiskScorer {
     const params = status ? [status] : [];
     const rows = await query<Record<string, unknown>>(
       `SELECT f.*, j.status_name AS ticket_status, j.sla_breach_time, j.sla_breached,
+              j.summary AS jira_summary, j.description_text,
               cc.body_text AS last_customer_comment, cc.jira_created AS last_customer_comment_at,
-              ac.body_text AS last_agent_comment, ac.jira_created AS last_agent_comment_at
+              ac.body_text AS last_agent_comment, ac.jira_created AS last_agent_comment_at,
+              conv.conversation_json
        FROM agent_flagged_tickets f
        JOIN jira_issue_cache j ON j.issue_key = f.ticket_key
        OUTER APPLY (
@@ -664,6 +668,17 @@ export class RiskScorer {
          WHERE issue_key = f.ticket_key AND is_public = 0
          ORDER BY jira_created DESC
        ) ac
+       OUTER APPLY (
+         SELECT (
+           SELECT author_display AS author, body_text AS body,
+                  CASE WHEN is_public = 1 THEN 'customer' ELSE 'agent' END AS role,
+                  jira_created AS created_at
+           FROM jira_comment_cache
+           WHERE issue_key = f.ticket_key
+           ORDER BY jira_created ASC
+           FOR JSON PATH
+         ) AS conversation_json
+       ) conv
        ${where} ORDER BY f.risk_score DESC`, params,
     );
     return rows.map(this.rowToFlagged);
@@ -698,21 +713,26 @@ export class RiskScorer {
     return { count, highestRisk, avgScore };
   }
 
-  async reviewTicket(ticketKey: string, reviewedBy: string, dismiss: boolean): Promise<void> {
-    await execute(
-      `UPDATE agent_flagged_tickets SET status = ?, reviewed_at = GETUTCDATE(), reviewed_by = ?
-       WHERE ticket_key = ? AND status = 'pending'`,
-      [dismiss ? 'dismissed' : 'reviewed', reviewedBy, ticketKey],
-    );
+  async reviewTicket(ticketKey: string, reviewedBy: string, dismiss: boolean, dismissReason?: string): Promise<void> {
+    if (dismiss) {
+      await execute(
+        `UPDATE agent_flagged_tickets SET status = 'dismissed', reviewed_at = GETUTCDATE(), reviewed_by = ?,
+                dismiss_reason = ?, dismissed_at = GETUTCDATE()
+         WHERE ticket_key = ? AND status = 'pending'`,
+        [reviewedBy, dismissReason ?? null, ticketKey],
+      );
+    } else {
+      await execute(
+        `UPDATE agent_flagged_tickets SET status = 'reviewed', reviewed_at = GETUTCDATE(), reviewed_by = ?
+         WHERE ticket_key = ? AND status = 'pending'`,
+        [reviewedBy, ticketKey],
+      );
+    }
   }
 
   private rowToFlagged(row: Record<string, unknown>): FlaggedTicket {
     let factors: RiskFactor[] = [];
     try { factors = JSON.parse(row.risk_factors as string); } catch {}
-    const truncate = (s: unknown, len = 200) => {
-      if (!s || typeof s !== 'string') return null;
-      return s.length > len ? s.slice(0, len) + '...' : s;
-    };
     return {
       id: row.id as number,
       ticket_key: row.ticket_key as string,
@@ -730,10 +750,12 @@ export class RiskScorer {
       ticket_status: (row.ticket_status as string) ?? null,
       sla_breach_at: (row.sla_breach_time as string) ?? null,
       sla_breached: (row.sla_breached as number) === 1,
-      last_customer_comment: truncate(row.last_customer_comment),
+      last_customer_comment: (row.last_customer_comment as string) ?? null,
       last_customer_comment_at: (row.last_customer_comment_at as string) ?? null,
-      last_agent_comment: truncate(row.last_agent_comment),
+      last_agent_comment: (row.last_agent_comment as string) ?? null,
       last_agent_comment_at: (row.last_agent_comment_at as string) ?? null,
+      conversation_json: (row.conversation_json as string) ?? null,
+      dismiss_reason: (row.dismiss_reason as string) ?? null,
     };
   }
 }

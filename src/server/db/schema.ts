@@ -767,6 +767,12 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_flagged_tickets_key')
      CREATE UNIQUE INDEX IX_agent_flagged_tickets_key ON agent_flagged_tickets (ticket_key) WHERE status != 'dismissed';`,
 
+    // ── Flagged tickets: dismiss_reason + dismissed_at (May 2026) ──
+    `IF COL_LENGTH('agent_flagged_tickets', 'dismiss_reason') IS NULL
+     ALTER TABLE agent_flagged_tickets ADD dismiss_reason NVARCHAR(200) NULL;`,
+    `IF COL_LENGTH('agent_flagged_tickets', 'dismissed_at') IS NULL
+     ALTER TABLE agent_flagged_tickets ADD dismissed_at DATETIME2 NULL;`,
+
     // ── Performance indexes (audit Apr 2026) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_ticket_created')
      CREATE INDEX IX_agent_decisions_ticket_created ON agent_decisions (ticket_id, created_at DESC)

@@ -13,7 +13,7 @@ import {
 } from 'chart.js';
 import { Chart } from 'react-chartjs-2';
 import { TeamAvailabilityWidget } from './TeamAvailabilityWidget.js';
-import { FlaggedQueueView } from './FlaggedQueueView.js';
+import { FlaggedQueueView, type FlaggedTicket } from './FlaggedQueueView.js';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 
@@ -142,28 +142,7 @@ interface RiskFactor {
   detail?: string;
 }
 
-interface FlaggedTicket {
-  id: number;
-  ticket_key: string;
-  risk_score: number;
-  risk_factors: RiskFactor[];
-  summary: string | null;
-  assignee: string | null;
-  reporter: string | null;
-  priority: string | null;
-  flagged_at: string;
-  reviewed_at: string | null;
-  reviewed_by: string | null;
-  status: 'pending' | 'reviewed' | 'dismissed';
-  last_notified_score: number;
-  ticket_status: string | null;
-  sla_breach_at: string | null;
-  sla_breached: boolean;
-  last_customer_comment: string | null;
-  last_customer_comment_at: string | null;
-  last_agent_comment: string | null;
-  last_agent_comment_at: string | null;
-}
+// FlaggedTicket type imported from FlaggedQueueView
 
 interface FlaggedSummary {
   count: number;

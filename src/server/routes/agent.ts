@@ -421,12 +421,28 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     if (!deps?.riskScorer) return res.status(503).json({ ok: false, error: 'Risk scorer not available' });
     const { key } = req.params;
     const dismiss = req.body?.dismiss === true;
+    const dismissReason = typeof req.body?.dismiss_reason === 'string' ? req.body.dismiss_reason.trim() : undefined;
     const username = (req as any).user?.username ?? 'unknown';
     try {
-      await deps.riskScorer.reviewTicket(key, username, dismiss);
+      await deps.riskScorer.reviewTicket(key, username, dismiss, dismissReason);
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to review ticket' });
+    }
+  });
+
+  router.post('/flagged/bulk-review', async (req, res) => {
+    if (!deps?.riskScorer) return res.status(503).json({ ok: false, error: 'Risk scorer not available' });
+    const { keys, dismiss, dismiss_reason } = req.body ?? {};
+    if (!Array.isArray(keys) || keys.length === 0) return res.status(400).json({ ok: false, error: 'keys[] required' });
+    const username = (req as any).user?.username ?? 'unknown';
+    const isDismiss = dismiss === true;
+    const reason = typeof dismiss_reason === 'string' ? dismiss_reason.trim() : undefined;
+    try {
+      await Promise.all(keys.map((k: string) => deps.riskScorer!.reviewTicket(k, username, isDismiss, reason)));
+      res.json({ ok: true, data: { processed: keys.length } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Bulk review failed' });
     }
   });
 
