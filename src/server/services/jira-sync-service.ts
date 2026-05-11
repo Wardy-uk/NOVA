@@ -5,7 +5,7 @@ import { query, queryOne, execute } from './database.js';
 const ALL_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
   'assignee', 'reporter', 'created', 'updated', 'duedate',
-  'resolution', 'labels', 'issuelinks',
+  'resolution', 'labels', 'issuelinks', 'attachment',
   'customfield_10010', // SLA
   'customfield_10020', // Request type
   'customfield_12981', // Current Tier
