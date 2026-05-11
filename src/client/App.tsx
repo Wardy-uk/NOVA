@@ -22,7 +22,7 @@ import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
 import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
 import { ServiceDeskDashboard } from './components/ServiceDeskDashboard.js';
-import { AIApprovalQueue } from './components/AIApprovalQueue.js';
+const ApprovalQueueView = lazy(() => import('./components/ApprovalQueueView.js').then(m => ({ default: m.ApprovalQueueView })));
 const KpiDashboardView = lazy(() => import('./components/KpiDashboardView.js').then(m => ({ default: m.KpiDashboardView })));
 const KpiDataView = lazy(() => import('./components/KpiDataView.js').then(m => ({ default: m.KpiDataView })));
 const KpiComparisonView = lazy(() => import('./components/KpiComparisonView.js').then(m => ({ default: m.KpiComparisonView })));
@@ -49,9 +49,9 @@ const EscalationReportView = lazy(() => import('./components/EscalationReportVie
 const TrainingMatrixView = lazy(() => import('./components/TrainingMatrixView.js').then(m => ({ default: m.TrainingMatrixView })));
 const TrainingSummaryView = lazy(() => import('./components/TrainingSummaryView.js').then(m => ({ default: m.TrainingSummaryView })));
 const BoardMiView = lazy(() => import('./components/BoardMiView.js').then(m => ({ default: m.BoardMiView })));
-const DevReviewView = lazy(() => import('./components/DevReviewView.js').then(m => ({ default: m.DevReviewView })));
+const DevReviewQueueView = lazy(() => import('./components/DevReviewQueueView.js').then(m => ({ default: m.DevReviewQueueView })));
 const DevReviewDashboard = lazy(() => import('./components/DevReviewDashboard.js').then(m => ({ default: m.DevReviewDashboard })));
-const MyTicketsView = lazy(() => import('./components/MyTicketsView.js').then(m => ({ default: m.MyTicketsView })));
+const MyTicketsQueueView = lazy(() => import('./components/MyTicketsQueueView.js').then(m => ({ default: m.MyTicketsQueueView })));
 const AgentKpisView = lazy(() => import('./components/AgentKpisView.js').then(m => ({ default: m.AgentKpisView })));
 const CalyxQueueView = lazy(() => import('./components/CalyxQueueView.js').then(m => ({ default: m.CalyxQueueView })));
 const CalyxDashboardView = lazy(() => import('./components/CalyxDashboardView.js').then(m => ({ default: m.CalyxDashboardView })));
@@ -1255,7 +1255,9 @@ export function App() {
 
           {/* Dev Review Queue — developer + admin */}
           {view === 'dev-review' && canSeeArea('devreview') && (
-            <DevReviewView />
+            <div className="h-[calc(100vh-120px)] -mx-6 -my-6 overflow-hidden">
+              <DevReviewQueueView />
+            </div>
           )}
           {view === 'dev-review-dashboard' && canSeeArea('devreview') && (
             <DevReviewDashboard />
@@ -1304,19 +1306,23 @@ export function App() {
 
           {/* NOVA AI Agent */}
           {view === 'tickets' && canSeeArea('ai-agent') && auth.user && (
-            <MyTicketsView
-              tasks={filteredSdTasks}
-              loading={sdLoading}
-              onUpdateTask={updateTask}
-              agentUsername={auth.user.username}
-              agentDisplayName={auth.user.display_name ?? auth.user.username}
-            />
+            <div className="h-[calc(100vh-120px)] -mx-6 -my-6 overflow-hidden">
+              <MyTicketsQueueView
+                tasks={filteredSdTasks}
+                loading={sdLoading}
+                onUpdateTask={updateTask}
+                agentUsername={auth.user.username}
+                agentDisplayName={auth.user.display_name ?? auth.user.username}
+              />
+            </div>
           )}
           {view === 'ai-approvals' && canSeeArea('ai-agent') && (
-            <AIApprovalQueue canInteract={(areaAccess['ai_approvals'] || 'hidden') === 'edit'} onNavigateToAgent={(ticketId) => {
-              sessionStorage.setItem('agent_pending_ticket', ticketId);
-              setView('agent-dashboard');
-            }} />
+            <div className="h-[calc(100vh-120px)] -mx-6 -my-6 overflow-hidden">
+              <ApprovalQueueView canInteract={(areaAccess['ai_approvals'] || 'hidden') === 'edit'} onNavigateToAgent={(ticketId) => {
+                sessionStorage.setItem('agent_pending_ticket', ticketId);
+                setView('agent-dashboard');
+              }} />
+            </div>
           )}
           {view === 'agent-workspace' && canSeeArea('ai-agent') && (
             <AgentWorkspaceView />

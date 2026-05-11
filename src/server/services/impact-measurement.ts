@@ -23,6 +23,13 @@ export class ImpactMeasurement {
     const periodEnd = new Date().toISOString();
     const periodStart = new Date(Date.now() - days * 86400_000).toISOString();
 
+    const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
+      try { return await fn(); } catch (err) {
+        console.error('[ImpactMeasurement] Metric computation failed:', err);
+        return fallback;
+      }
+    };
+
     const [
       autonomousRate,
       deflectionRate,
@@ -31,17 +38,17 @@ export class ImpactMeasurement {
       kbDelta,
       escalationAcc,
     ] = await Promise.all([
-      this.computeAutonomousResolutionRate(days),
-      this.computeDeflectionRate(days),
-      this.computeApprovalStats(days),
-      this.computeAssignmentAutomationRate(days),
-      this.computeKbCoverageDelta(days),
-      this.computeEscalationAccuracy(days),
+      safe(() => this.computeAutonomousResolutionRate(days), 0),
+      safe(() => this.computeDeflectionRate(days), 0),
+      safe(() => this.computeApprovalStats(days), { approvalRate: 0, reversalRate: 0 }),
+      safe(() => this.computeAssignmentAutomationRate(days), 0),
+      safe(() => this.computeKbCoverageDelta(days), 0),
+      safe(() => this.computeEscalationAccuracy(days), 0),
     ]);
 
     const avgHandleMinutes = parseInt(this.settings.get('agent_avg_handle_time_minutes') ?? '12', 10);
-    const autonomousResolved = await this.countAutonomousResolved(days);
-    const autoClosed = await this.countAutoClosed(days);
+    const autonomousResolved = await safe(() => this.countAutonomousResolved(days), 0);
+    const autoClosed = await safe(() => this.countAutoClosed(days), 0);
     const queueHoursSaved = (autonomousResolved + autoClosed) * avgHandleMinutes / 60;
 
     return {
@@ -122,55 +129,89 @@ export class ImpactMeasurement {
   }
 
   private async computeDeflectionRate(days: number): Promise<number> {
-    const rows = await query<{ deflected: number; total: number }>(
-      `SELECT
-         SUM(CASE WHEN type IN ('spam','thank_you','duplicate','stale_no_response','kba_match','auto_resolved') THEN 1 ELSE 0 END) AS deflected,
-         COUNT(*) AS total
-       FROM agent_auto_rule_log
-       WHERE created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
+    const qwRows = await query<CountRow>(
+      `SELECT COUNT(*) AS cnt FROM agent_decisions
+       WHERE shadow_mode = 0
+         AND quick_win_type IS NOT NULL
+         AND quick_win_executed = 1
+         AND created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
     );
-    const r = rows[0];
-    if (!r || r.total === 0) return 0;
-    return Math.round((r.deflected / r.total) * 10000) / 10000;
+    const arRows = await query<CountRow>(
+      `SELECT COUNT(*) AS cnt FROM hybrid_action_log
+       WHERE action_id = 'close'
+         AND status = 'completed'
+         AND created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
+    );
+    const totalRows = await query<CountRow>(
+      `SELECT COUNT(*) AS cnt FROM agent_decisions
+       WHERE shadow_mode = 0
+         AND action != 'no_action'
+         AND created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
+    );
+    const deflected = (qwRows[0]?.cnt ?? 0) + (arRows[0]?.cnt ?? 0);
+    const total = totalRows[0]?.cnt ?? 0;
+    if (total === 0) return 0;
+    return Math.round((deflected / total) * 10000) / 10000;
   }
 
   private async countAutoClosed(days: number): Promise<number> {
-    const rows = await query<CountRow>(
-      `SELECT COUNT(*) AS cnt FROM agent_auto_rule_log
-       WHERE type IN ('spam','thank_you','duplicate','stale_no_response','kba_match','auto_resolved')
+    const qwRows = await query<CountRow>(
+      `SELECT COUNT(*) AS cnt FROM agent_decisions
+       WHERE shadow_mode = 0
+         AND quick_win_type IS NOT NULL
+         AND quick_win_executed = 1
          AND created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
     );
-    return rows[0]?.cnt ?? 0;
+    const arRows = await query<CountRow>(
+      `SELECT COUNT(*) AS cnt FROM hybrid_action_log
+       WHERE action_id = 'close'
+         AND status = 'completed'
+         AND created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
+    );
+    return (qwRows[0]?.cnt ?? 0) + (arRows[0]?.cnt ?? 0);
   }
 
   private async computeApprovalStats(days: number): Promise<{ approvalRate: number; reversalRate: number }> {
-    const rows = await query<{ approved: number; overridden: number; total: number }>(
+    const rows = await query<{ approved: number; total: number }>(
       `SELECT
          SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved,
-         SUM(CASE WHEN status = 'overridden' THEN 1 ELSE 0 END) AS overridden,
          COUNT(*) AS total
-       FROM agent_approvals
-       WHERE created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
+       FROM approval_queue
+       WHERE status NOT IN ('pending', 'cancelled')
+         AND created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
     );
     const r = rows[0];
     if (!r || r.total === 0) return { approvalRate: 0, reversalRate: 0 };
     const approvalRate = Math.round((r.approved / r.total) * 10000) / 10000;
-    const totalApproved = r.approved;
-    const reversalRate = totalApproved === 0 ? 0 : Math.round((r.overridden / totalApproved) * 10000) / 10000;
+
+    const revRows = await query<{ overridden: number; total_approved: number }>(
+      `SELECT
+         SUM(CASE WHEN approval_status = 'overridden' THEN 1 ELSE 0 END) AS overridden,
+         SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) AS total_approved
+       FROM agent_decisions
+       WHERE approval_required = 1
+         AND shadow_mode = 0
+         AND created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
+    );
+    const rv = revRows[0];
+    const reversalRate = (!rv || rv.total_approved === 0) ? 0
+      : Math.round((rv.overridden / rv.total_approved) * 10000) / 10000;
+
     return { approvalRate, reversalRate };
   }
 
   private async computeAssignmentAutomationRate(days: number): Promise<number> {
-    const rows = await query<{ auto_assigned: number; total_new: number }>(
+    const rows = await query<{ auto_assigned: number; total_actions: number }>(
       `SELECT
-         SUM(CASE WHEN action = 'assign' THEN 1 ELSE 0 END) AS auto_assigned,
-         COUNT(*) AS total_new
-       FROM agent_auto_rule_log
-       WHERE created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
+         SUM(CASE WHEN action_id = 'assign' AND status = 'completed' THEN 1 ELSE 0 END) AS auto_assigned,
+         COUNT(*) AS total_actions
+       FROM hybrid_action_log
+       WHERE status IN ('completed', 'failed', 'failed_permanent')
+         AND created_at >= DATEADD(DAY, -${days}, GETUTCDATE())`
     );
     const r = rows[0];
-    if (!r || r.total_new === 0) return 0;
-    return Math.round((r.auto_assigned / r.total_new) * 10000) / 10000;
+    if (!r || r.total_actions === 0) return 0;
+    return Math.round((r.auto_assigned / r.total_actions) * 10000) / 10000;
   }
 
   private async computeKbCoverageDelta(days: number): Promise<number> {

@@ -13,6 +13,7 @@ import {
 } from 'chart.js';
 import { Chart } from 'react-chartjs-2';
 import { TeamAvailabilityWidget } from './TeamAvailabilityWidget.js';
+import { FlaggedQueueView } from './FlaggedQueueView.js';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 
@@ -534,7 +535,11 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       {tab === 'ai-improvement' && <AiImprovementTab />}
       {tab === 'quick-actions' && <QuickActionsTab />}
       {tab === 'providers' && <ProvidersTab providers={providers} confHistory={confHistory} />}
-      {tab === 'flagged' && <FlaggedTab tickets={flaggedTickets} onRefresh={() => { api('/flagged').then(r => { if (r.ok) setFlaggedTickets(r.data); }); api('/flagged/summary').then(r => { if (r.ok) setFlaggedSummary(r.data); }); }} />}
+      {tab === 'flagged' && (
+        <div className="h-[calc(100vh-180px)] -mx-4 rounded-lg overflow-hidden border border-[#2f353d]">
+          <FlaggedQueueView tickets={flaggedTickets} onRefresh={() => { api('/flagged').then(r => { if (r.ok) setFlaggedTickets(r.data); }); api('/flagged/summary').then(r => { if (r.ok) setFlaggedSummary(r.data); }); }} />
+        </div>
+      )}
       {tab === 'assignment' && <AssignmentTab isSuperAdmin={isSuperAdmin} />}
       {tab === 'predictions' && <PredictionsTab />}
       {tab === 'incidents' && <IncidentsTab />}
