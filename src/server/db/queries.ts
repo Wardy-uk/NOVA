@@ -2659,10 +2659,10 @@ export class ApprovalQueries {
   async getPendingCount(): Promise<number> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
     const queueRow = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
-    // Only count distinct tickets in agent_decisions that DON'T have ANY matching approval_queue entry
     const novaRow = await queryOne<{ count: number }>(
       `SELECT COUNT(DISTINCT d.ticket_id) as count FROM agent_decisions d
-       WHERE d.approval_required = 1 AND (d.approval_status IS NULL OR d.approval_status = 'pending')
+       WHERE d.approval_required = 1 AND d.shadow_mode = 0
+         AND (d.approval_status IS NULL OR d.approval_status = 'pending')
          AND NOT EXISTS (SELECT 1 FROM approval_queue q WHERE q.ticket_id = d.ticket_id)`,
     );
     return (queueRow?.count ?? 0) + (novaRow?.count ?? 0);
@@ -2705,7 +2705,7 @@ export class ApprovalQueries {
         SUM(CASE WHEN approval_status = 'timed_out' AND resolved_at >= CAST(GETUTCDATE() AS DATE)
             AND resolved_by IN ('system', 'system-sla', 'system-cleanup') THEN 1 ELSE 0 END) as system_expired_today
       FROM agent_decisions d
-      WHERE d.approval_required = 1
+      WHERE d.approval_required = 1 AND d.shadow_mode = 0
         AND NOT EXISTS (SELECT 1 FROM approval_queue q WHERE q.ticket_id = d.ticket_id)
     `);
     return {
