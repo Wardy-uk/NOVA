@@ -1419,7 +1419,20 @@ export class AgentLoop {
     }
 
     // Route based on action + approval requirement
-    if (decision.approvalRequired && (decision.action === 'draft_response')) {
+    const autoApproveThreshold = parseFloat(this.settings.get('agent_auto_approve_threshold') || '0.85');
+    if (decision.approvalRequired && decision.action === 'draft_response'
+        && decision.confidence >= autoApproveThreshold) {
+      console.log(`[agent] Auto-approved at submission: ${decision.ticketKey} (confidence ${decision.confidence.toFixed(2)} >= ${autoApproveThreshold})`);
+      await this.observer.logOutcome(decisionId, {
+        success: true, action: 'draft_response', ticketKey: decision.ticketKey,
+        detail: `Auto-approved at submission (confidence ${(decision.confidence * 100).toFixed(0)}% >= threshold ${(autoApproveThreshold * 100).toFixed(0)}%). Executing immediately.`,
+      });
+      const result = await this.actor.execute(decision);
+      if (!result.success) {
+        this.errorCount++;
+        console.warn(`[agent] Auto-approved action failed for ${decision.ticketKey}: ${result.error}`);
+      }
+    } else if (decision.approvalRequired && (decision.action === 'draft_response')) {
       await this.submitToApprovalQueue(decision, decisionId);
     } else {
       // Autonomous execution — log alert for visibility
