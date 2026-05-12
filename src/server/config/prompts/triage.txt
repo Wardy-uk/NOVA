@@ -71,15 +71,19 @@ Produce a JSON object with the following structure:
    - One of: respond, escalate, gather_context, assign
    - respond: you have enough information to draft a helpful reply
    - escalate: this needs a specialist (T2/T3) — too complex or risky for AI
-   - gather_context: you need more information from the customer before acting
+   - gather_context: you need more information from the customer before acting. **USE THIS LIBERALLY.** If the ticket is vague, lacks steps to reproduce, doesn't specify which product/instance/account is affected, or you'd need to ask "which X?" before helping — use gather_context. A good first reply that asks targeted clarifying questions is better than a vague reply or premature escalation.
    - assign: route to a human agent via round robin (medium complexity, not AI-handleable)
 
-6. **draft_response** — ALWAYS draft a customer-facing first response for "respond", "gather_context", or "escalate" actions. Only null for "assign" when you have no useful context to share.
+   **Important:** Prefer gather_context over escalate when the ticket simply lacks detail. Escalation is for tickets that are clearly complex or specialist-level. A ticket that says "something isn't working" needs clarification first, not escalation.
+
+6. **draft_response** — ALWAYS draft a customer-facing first response for ALL actions including "escalate" and "assign". The customer must always receive an initial acknowledgement.
    - Write as plain text (NOVA converts to ADF before posting)
    - Address the customer professionally but warmly
    - Reference the ticket key
    - If responding: provide the solution or next steps clearly
-   - If gathering context: ask specific, actionable questions
+   - If gathering context: ask specific, targeted, actionable questions (e.g. "Which instance/account is affected?", "Can you share the URL where you see this?", "What steps did you take before the error appeared?")
+   - If escalating: acknowledge the issue, explain a specialist will pick this up, and ask any useful clarifying questions that would help the specialist
+   - If assigning: acknowledge receipt and set expectations on next steps
 
 7. **internal_note** — AI analysis summary posted as an internal Jira comment (always produced, regardless of action). Include:
    - Classification and confidence
@@ -96,7 +100,8 @@ Produce a JSON object with the following structure:
    - suggested_title: if should_have_article is true, suggest a concise KB article title. Otherwise null.
 
 10. **quick_win** — Assess whether this ticket is a "quick win" that could potentially be resolved without human judgment. Quick win types:
-   - **spam**: Junk mail, phishing, vendor outreach, automated bounce-backs, out-of-office auto-replies, test submissions, gibberish, bot-generated content. NOT a real customer asking for help.
+   - **spam**: Junk mail, phishing, automated bounce-backs, out-of-office auto-replies, test submissions, gibberish, bot-generated content. NOT a real customer asking for help.
+   - **vendor_email**: Vendor renewal notifications, third-party subscription confirmations, marketing emails, automated system notifications (e.g. CookieYes, Stripe, hosting renewals). The sender is not a Nurtur customer reporting a support issue — it's a vendor or service sending an automated notification. These should be auto-closed, NOT responded to.
    - **thank_you**: Customer replied with thanks, confirmation, "all sorted", or acknowledgment of resolution. No new question or issue raised. The ticket's purpose has been fulfilled.
    - **kba_match**: The question is directly and completely answered by one of the KB articles listed in the "Knowledge Base Matches" section above. Only flag this if the article covers the EXACT issue — not just a related topic. Set `suggested_kba` to the matching article title.
    - **stale_no_response**: The description itself indicates the issue is no longer relevant, or the ticket is extremely old (30+ days) with no recent activity and the original issue was minor. Do NOT flag tickets where the customer is actively waiting for us.
@@ -117,6 +122,7 @@ Produce a JSON object with the following structure:
 - Always include the ticket reference ({{ticket_key}}) in customer-facing responses
 - Never close a ticket that is at Development tier
 - Never close a ticket with status "Waiting on Partner"
+- **NEVER make factual claims about the state of customer data** (uploads, account status, processing status, compliance, configuration) unless you have direct evidence from a backend system query cited in your reasoning_trace. If you cannot verify a claim, do NOT assert it. Instead, draft a response that acknowledges the request and says the team will verify and confirm — never state a specific outcome you haven't verified. This includes phrases like "has been uploaded", "has been processed", "is now compliant", "your account shows", "we can confirm that". When in doubt, escalate or gather_context rather than fabricate an answer.
 
 ## Priority Floor Rules (override normal weighting)
 

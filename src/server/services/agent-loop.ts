@@ -1393,7 +1393,7 @@ export class AgentLoop {
 
     // Quick-win auto-close (only reached in non-shadow mode)
     const qw = decision.output.quick_win as { type?: string; confidence?: number } | undefined;
-    const closableQwTypes = ['spam', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate'];
+    const closableQwTypes = ['spam', 'vendor_email', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate'];
     if (qw?.type && qw.type !== 'none') {
       const shouldClose = await this.quickWinExecutor.shouldAutoClose(decision, decisionId);
       if (shouldClose) {
@@ -1822,7 +1822,8 @@ export class AgentLoop {
 
       // Escalation actions: update Current Tier in Jira
       if (actionType === 'escalate') {
-        const targetTier = this.settings.get('agent_escalation_tier_value') ?? 'Tier 2';
+        // Hard rule: NOVA always routes to Customer Care, never direct to T2/T3
+        const targetTier = 'Customer Care';
         const tierIds: Record<string, string> = {
           'Customer Care': '13061', 'Tier 2': '13062', 'Tier 3': '13063',
           'Development': '13064', 'Production': '13700',
@@ -1836,6 +1837,41 @@ export class AgentLoop {
             console.warn(`[agent] Failed to update Current Tier on ${ticketKey}:`, err instanceof Error ? err.message : err);
           }
         }
+      }
+
+      // Change Request Type from "AI Request" on any handoff (respond, escalate, assign)
+      // This ensures the ticket appears in agent queues with the correct type
+      try {
+        const decRow = await query<{ output: string }>(
+          `SELECT TOP 1 output FROM agent_decisions WHERE ticket_id = ? ORDER BY created_at DESC`,
+          [ticketKey],
+        ).then(rows => rows[0] ?? null);
+        if (decRow) {
+          const out = JSON.parse(decRow.output || '{}');
+          const classification = out.classification as { category?: string; ticket_type?: string } | undefined;
+          const category = classification?.category?.toLowerCase().replace(/\s+/g, '_') ?? '';
+          const ticketType = classification?.ticket_type ?? '';
+          const categoryMap: Record<string, string> = {
+            email: 'Emailed request', email_delivery: 'Emailed request',
+            gdpr: 'GDPR', data_protection: 'GDPR', incident: 'Incident',
+            integration: 'Incident', integration_issue: 'Incident', api_error: 'Incident',
+            server_error: 'Incident', database_issue: 'Incident', feed_issue: 'Incident',
+            data_feed: 'Incident', website: 'Incident', portal: 'Incident', crm: 'Incident',
+            reporting: 'Service Request', user_management: 'Service Request',
+            onboarding: 'Onboarding', delivery: 'Delivery QA', delivery_qa: 'Delivery QA',
+            franchise: 'Franchise Hub', chat: 'Chat',
+          };
+          const requestType = categoryMap[category]
+            ?? (ticketType === 'incident' ? 'Incident' : null)
+            ?? (ticketType === 'change' ? 'Service Request' : null)
+            ?? 'Emailed request';
+          await this.jiraClient.updateFields(ticketKey, {
+            customfield_10020: { requestType: { name: requestType } },
+          });
+          console.log(`[agent] Updated Request Type to "${requestType}" on ${ticketKey} after approval`);
+        }
+      } catch (err) {
+        console.warn(`[agent] Failed to update Request Type on ${ticketKey}:`, err instanceof Error ? err.message : err);
       }
     } else if (action === 'decline' || action === 'declined') {
       console.log(`[agent] Approval declined for ${ticketKey} — ticket remains in queue for human handling.`);

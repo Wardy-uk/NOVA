@@ -9,6 +9,35 @@ import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 
 const HIGH_STAKES_ACTIONS = ['close', 'resolve', 'draft_response', 'escalate', 'quick_win_close', 'transition'];
 
+const CF_REQUEST_TYPE = 'customfield_10020';
+
+// Maps triage classification categories to JSM Request Types.
+// Fallback: "Emailed request" for email-originated tickets, "Service Request" otherwise.
+const CATEGORY_TO_REQUEST_TYPE: Record<string, string> = {
+  'email': 'Emailed request',
+  'email_delivery': 'Emailed request',
+  'gdpr': 'GDPR',
+  'data_protection': 'GDPR',
+  'incident': 'Incident',
+  'integration': 'Incident',
+  'integration_issue': 'Incident',
+  'api_error': 'Incident',
+  'server_error': 'Incident',
+  'database_issue': 'Incident',
+  'feed_issue': 'Incident',
+  'data_feed': 'Incident',
+  'website': 'Incident',
+  'portal': 'Incident',
+  'crm': 'Incident',
+  'reporting': 'Service Request',
+  'user_management': 'Service Request',
+  'onboarding': 'Onboarding',
+  'delivery': 'Delivery QA',
+  'delivery_qa': 'Delivery QA',
+  'franchise': 'Franchise Hub',
+  'chat': 'Chat',
+};
+
 export class Actor {
   private jiraClient: JiraRestClient;
   private escalationLog?: EscalationLogService;
@@ -84,6 +113,7 @@ Guardrails to check:
 - Response addresses the customer's actual issue (if responding)
 - Tone is professional and warm (Nurtur voice)
 - Escalation has documented reasoning
+- **CRITICAL: No unverifiable factual claims about customer data.** If the draft states something "has been uploaded", "has been processed", "is now compliant", "your account shows X", or makes any assertion about the state of the customer's data/account/system — and there is no evidence in the reasoning that a backend system was queried to verify this — this MUST be blocked. The AI must never fabricate facts about customer data state.
 
 Should this action proceed? Reply with JSON only: { "approved": true/false, "reason": "..." }`;
 
@@ -291,6 +321,9 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
   }
 
   private async assignTicket(decision: AgentDecision): Promise<ActionResult> {
+    // Change Request Type from "AI Request" before assigning to a human
+    await this.updateRequestTypeOnHandoff(decision.ticketKey, decision);
+
     // If LLM provided an explicit accountId, use it directly
     const accountId = decision.output.assigneeAccountId as string | undefined;
     if (accountId) {
@@ -339,10 +372,54 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
     return { success: true, action: 'chase', ticketKey, detail: `Sent chase message (${daysWaiting} days waiting).` };
   }
 
+  /**
+   * Resolve the appropriate JSM Request Type based on the triage classification.
+   * "AI Request" must NEVER remain on a ticket being handed to a human.
+   */
+  private resolveRequestType(decision: AgentDecision): string {
+    const classification = decision.output?.classification as { category?: string; ticket_type?: string } | undefined;
+    const category = classification?.category?.toLowerCase().replace(/\s+/g, '_') ?? '';
+    const ticketType = classification?.ticket_type ?? '';
+
+    if (CATEGORY_TO_REQUEST_TYPE[category]) return CATEGORY_TO_REQUEST_TYPE[category];
+    if (ticketType === 'incident') return 'Incident';
+    if (ticketType === 'change') return 'Service Request';
+
+    return 'Emailed request';
+  }
+
+  /**
+   * Change Request Type from "AI Request" to the correct type.
+   * Called on every handoff (escalate, assign, approval callback).
+   */
+  private async updateRequestTypeOnHandoff(ticketKey: string, decision: AgentDecision): Promise<void> {
+    const requestType = this.resolveRequestType(decision);
+    try {
+      await this.jiraClient.updateFields(ticketKey, {
+        [CF_REQUEST_TYPE]: { requestType: { name: requestType } },
+      });
+      console.log(`[actor] Updated Request Type to "${requestType}" on ${ticketKey}`);
+    } catch (err) {
+      console.warn(`[actor] Failed to update Request Type on ${ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
   private async escalate(decision: AgentDecision): Promise<ActionResult> {
-    const targetTier = (decision.output?.targetTier as string) ?? this.settings.get('agent_escalation_tier_value') ?? 'Tier 2';
+    // Hard rule: NOVA must ALWAYS hand off to Customer Care, never direct to T2/T3.
+    const targetTier = 'Customer Care';
     const briefText = `[AI Agent Escalation]\n\nTicket: ${decision.ticketKey}\nConfidence: ${decision.confidence}\nReasoning: ${decision.reasoning}`;
     await this.jiraClient.addComment(decision.ticketKey, briefText, { internal: true });
+
+    // Post customer-facing acknowledgement if a draft was provided
+    const draftResponse = decision.output.draft_response as string | undefined;
+    if (draftResponse && !Actor.looksLikeStructuredPayload(draftResponse)) {
+      try {
+        await this.jiraClient.addComment(decision.ticketKey, draftResponse, { internal: false });
+        console.log(`[actor] Posted escalation acknowledgement to customer on ${decision.ticketKey}`);
+      } catch (err) {
+        console.warn(`[actor] Failed to post escalation acknowledgement on ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
 
     // Update Current Tier in Jira (customfield_12981)
     const tierIds: Record<string, string> = {
@@ -361,6 +438,9 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       }
     }
 
+    // Change Request Type from "AI Request" to correct type
+    await this.updateRequestTypeOnHandoff(decision.ticketKey, decision);
+
     try {
       await this.escalationLog?.log({
         ticket_key: decision.ticketKey,
@@ -376,7 +456,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       console.warn('[actor] Failed to log escalation:', e instanceof Error ? e.message : e);
     }
 
-    return { success: true, action: 'escalate', ticketKey: decision.ticketKey, detail: `Escalation brief posted + tier set to ${targetTier}.` };
+    return { success: true, action: 'escalate', ticketKey: decision.ticketKey, detail: `Escalation brief posted + tier set to ${targetTier}, request type updated.` };
   }
 
   private async bugRedirect(decision: AgentDecision): Promise<ActionResult> {

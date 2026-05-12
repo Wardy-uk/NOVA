@@ -157,8 +157,7 @@ const RULES_RAW: unknown[] = [
   {
     id: 'triggers-not-firing',
     match: {
-      reporter_email: { equals: 'trigger@briefyourmarket.com' },
-      subject: { equals: 'Triggers Not Firing Report' },
+      subject: { contains: 'Triggers Not Firing Report' },
       description: { contains: 'All triggers across BYM look to be working' },
     },
     action: { type: 'close', resolution: 'No Fault Found', note: 'Automated monitoring confirmation — all triggers reported working.' },
@@ -217,7 +216,48 @@ const RULES_RAW: unknown[] = [
       note: 'Auto-assigned by NOVA — CIA Letter Alerting ticket, routed to Customer Care for CIA instance verification.',
     },
   },
+  // ── Vendor / spam / non-support email auto-close (Snag 1 — NT-18602) ──
+  // These catch automated vendor emails, subscription notifications, marketing,
+  // and system notifications that are not customer support requests.
+  {
+    id: 'vendor-subscription-notification',
+    match: {
+      subject: { regex: '\\b(?:subscription|renewal|billing|payment|receipt|invoice)\\s+(?:confirmation|notification|reminder|update|receipt|processed|successful|renewed|auto-renewed)\\b' },
+    },
+    matchMode: 'all',
+    action: {
+      type: 'close',
+      resolution: 'No Fault Found',
+      note: 'Vendor/subscription notification — not a support request. Auto-closed by NOVA.',
+    },
+  },
+  {
+    id: 'vendor-domain-autoclose',
+    match: {
+      reporter_email: { regex: '@(?:cookieyes\\.com|stripe\\.com|sendgrid\\.(?:com|net)|mailchimp\\.com|hubspot\\.com|intercom\\.io|zendesk\\.com|freshdesk\\.com|wpengine\\.com|cloudflare\\.com|github\\.com|azure(?:comm)?\\.com|noreply\\..*|no-reply\\..*)$' },
+      subject: { regex: '\\b(?:subscription|renewal|billing|payment|receipt|invoice|notification|alert|update|reminder|newsletter|digest|summary|report|usage)\\b' },
+    },
+    matchMode: 'any',
+    action: {
+      type: 'close',
+      resolution: 'No Fault Found',
+      note: 'Non-support email from known vendor/automated domain. Auto-closed by NOVA.',
+    },
+  },
+  {
+    id: 'noreply-automated-email',
+    match: {
+      reporter_email: { regex: '^(?:noreply|no-reply|donotreply|do-not-reply|mailer-daemon|postmaster)@' },
+    },
+    action: {
+      type: 'close',
+      resolution: 'No Fault Found',
+      note: 'Automated system email (noreply/mailer-daemon). Auto-closed by NOVA.',
+    },
+  },
+
   // ── Supplier / Vendor invoice routing (Bug 1 — NT-18458) ──
+  // These remain as tag-only for finance routing (invoices need human review)
   {
     id: 'supplier-invoice-domain',
     match: {
@@ -225,7 +265,7 @@ const RULES_RAW: unknown[] = [
     },
     action: {
       type: 'tag',
-      note: '📋 Supplier / Vendor invoice detected (matched sender domain). Leaving open for manual routing to finance.',
+      note: 'Supplier / Vendor invoice detected (matched sender domain). Leaving open for manual routing to finance.',
       sub_category: 'Supplier / Vendor',
     },
   },
@@ -236,7 +276,7 @@ const RULES_RAW: unknown[] = [
     },
     action: {
       type: 'tag',
-      note: '📋 Supplier / Vendor invoice detected (matched subject keywords). Leaving open for manual routing to finance.',
+      note: 'Supplier / Vendor invoice detected (matched subject keywords). Leaving open for manual routing to finance.',
       sub_category: 'Supplier / Vendor',
     },
   },

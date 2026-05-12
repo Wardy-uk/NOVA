@@ -81,7 +81,7 @@ export const TriageResultSchema = z.object({
     suggested_title: flexNullableString,
   }),
   quick_win: z.object({
-    type: flexEnum(['spam', 'thank_you', 'kba_match', 'stale_no_response', 'duplicate', 'auto_resolved', 'none'] as const),
+    type: flexEnum(['spam', 'vendor_email', 'thank_you', 'kba_match', 'stale_no_response', 'duplicate', 'auto_resolved', 'none'] as const),
     confidence: flexConfidence,
     reasoning: flexString,
     suggested_kba: flexNullableString,
