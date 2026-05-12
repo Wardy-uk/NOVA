@@ -572,14 +572,17 @@ async function main() {
   const jiraOAuthService = new JiraOAuthService(() => settingsQueries.getAll());
   const jiraUserClientFactory = new JiraUserClientFactory(userSettingsQueries, jiraOAuthService);
 
-  // Area access guard for custom role-based route protection
-  const requireAreaAccess = createAreaAccessGuard(() => {
+  // Shared custom role loader — used by area access guard and portal auth
+  const getRoles = (): CustomRole[] => {
     const raw = settingsQueries.get('custom_roles');
     try {
       if (raw) return JSON.parse(raw) as CustomRole[];
     } catch { /* ignore */ }
     return [];
-  });
+  };
+
+  // Area access guard for custom role-based route protection
+  const requireAreaAccess = createAreaAccessGuard(getRoles);
 
   // Public API routes (no auth required)
   app.post('/api/auth/login', loginLimiter);
@@ -2434,7 +2437,7 @@ ${panelHtml}
     app.use('/api/portal/kb', createPortalKbRoutes(portalKb));
 
     // Authenticated portal routes
-    const portalAuth = portalAuthMiddleware(settingsQueries);
+    const portalAuth = portalAuthMiddleware(settingsQueries, getRoles);
     app.use('/api/portal', portalAuth, createPortalTicketRoutes(portalJira, portalIntake));
     app.use('/api/portal', portalAuth, createPortalChatRoutes(portalChat));
     app.use('/api/portal', portalAuth, createPortalEventsRoutes());

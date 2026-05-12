@@ -1,7 +1,9 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import type { PortalAuthPayload } from '../../shared/portal-types.js';
+import type { PortalAuthPayload, PortalUserRole } from '../../shared/portal-types.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
+import type { CustomRole } from './auth.js';
+import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 import { queryOne, execute } from '../services/database.js';
 
 declare global {
@@ -34,6 +36,7 @@ async function upsertInternalPortalUser(
   email: string,
   displayName: string,
   orgId: number,
+  portalRole: PortalUserRole,
 ): Promise<number> {
   const externalId = `nova-user-${novaUserId}`;
   const existing = await queryOne<{ id: number }>(
@@ -43,8 +46,8 @@ async function upsertInternalPortalUser(
 
   if (existing) {
     await execute(
-      `UPDATE portal_users SET email = ?, display_name = ?, last_login = GETUTCDATE() WHERE id = ?`,
-      [email, displayName, existing.id],
+      `UPDATE portal_users SET email = ?, display_name = ?, role = ?, last_login = GETUTCDATE() WHERE id = ?`,
+      [email, displayName, portalRole, existing.id],
     );
     return existing.id;
   }
@@ -52,37 +55,60 @@ async function upsertInternalPortalUser(
   const inserted = await queryOne<{ id: number }>(
     `INSERT INTO portal_users (external_id, org_id, email, display_name, role)
      OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?)`,
-    [externalId, orgId, email, displayName, 'admin'],
+    [externalId, orgId, email, displayName, portalRole],
   );
   return inserted!.id;
+}
+
+const ACCESS_RANK: Record<string, number> = { hidden: 0, view: 1, edit: 2 };
+const PORTAL_AREAS = ['servicedesk', 'calyx'];
+
+function hasPortalAreaAccess(roleStr: string, allRoles: CustomRole[]): boolean {
+  const userRoleIds = parseRoles(roleStr);
+  const matched = allRoles.filter(r => userRoleIds.includes(r.id));
+  if (matched.length === 0) return false;
+  for (const area of PORTAL_AREAS) {
+    let best = 0;
+    for (const role of matched) {
+      if (area in role.areas) {
+        best = Math.max(best, ACCESS_RANK[role.areas[area] || 'hidden'] ?? 0);
+      }
+    }
+    if (best >= 1) return true;
+  }
+  return false;
+}
+
+function mapPortalRole(roleStr: string): PortalUserRole {
+  if (isAdmin(roleStr)) return 'admin';
+  return 'org_admin';
 }
 
 function isInternalMode(settings: FileSettingsQueries): boolean {
   return (settings.get('portal_auth_mode') || 'internal') === 'internal';
 }
 
-export function portalAuthMiddleware(settingsQueries: FileSettingsQueries) {
+export function portalAuthMiddleware(settingsQueries: FileSettingsQueries, getRoles?: () => CustomRole[]) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (isInternalMode(settingsQueries)) {
-      // Internal mode: accept NOVA JWT (already validated by NOVA auth middleware on req.user)
       if (!req.user) {
         res.status(401).json({ ok: false, error: 'Not authenticated — log in to NOVA first' });
         return;
       }
 
-      // Check for support/admin role
-      const roles = req.user.role.split(',').map(r => r.trim().toLowerCase());
-      const allowed = roles.some(r => ['admin', 'super_admin', 'support'].includes(r));
+      const allRoles = getRoles?.() ?? [];
+      const allowed = isAdmin(req.user.role) || hasPortalAreaAccess(req.user.role, allRoles);
       if (!allowed) {
-        res.status(403).json({ ok: false, error: 'Portal access requires Support or Admin role' });
+        res.status(403).json({ ok: false, error: 'Portal access requires Service Desk or Admin role' });
         return;
       }
+
+      const portalRole = mapPortalRole(req.user.role);
 
       try {
         const orgId = await getOrCreateInternalOrg();
         const email = req.user.username + '@nurtur.tech';
 
-        // Look up actual email from users table
         const userRecord = await queryOne<{ email: string | null; display_name: string | null }>(
           `SELECT email, display_name FROM users WHERE id = ?`,
           [req.user.id],
@@ -90,14 +116,14 @@ export function portalAuthMiddleware(settingsQueries: FileSettingsQueries) {
         const actualEmail = userRecord?.email || email;
         const displayName = userRecord?.display_name || req.user.username;
 
-        const portalUserId = await upsertInternalPortalUser(req.user.id, actualEmail, displayName, orgId);
+        const portalUserId = await upsertInternalPortalUser(req.user.id, actualEmail, displayName, orgId, portalRole);
 
         req.portalUser = {
           userId: portalUserId,
           email: actualEmail,
           orgId,
           orgName: INTERNAL_ORG_NAME,
-          role: 'admin',
+          role: portalRole,
         };
         next();
       } catch (err) {
