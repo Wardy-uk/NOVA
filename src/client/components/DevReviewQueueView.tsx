@@ -730,6 +730,7 @@ export function DevReviewQueueView() {
     keyboardShortcuts: [
       { key: 'c', label: 'claim' },
     ],
+    onSelect: (key) => setSelectedKey(key),
   }), [filter, items, filtered, counts, detail, detailLoading, busy, currentUserId, isAdminUser, showAll, teamFilter, teamOptions, queueMeta, jumpKey, selectedKey]);
 
   return (

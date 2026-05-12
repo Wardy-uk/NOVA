@@ -57,6 +57,7 @@ export interface UnifiedQueueConfig<T> {
 
   selectable?: boolean;
   extraToolbar?: ReactNode;
+  onSelect?: (key: string | null) => void;
 }
 
 export interface QueueActions {
@@ -124,6 +125,8 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
     const interval = setInterval(refresh, config.pollIntervalMs ?? 30000);
     return () => clearInterval(interval);
   }, [refresh, config.pollIntervalMs, externalItems]);
+
+  useEffect(() => { config.onSelect?.(selectedKey); }, [selectedKey]);
 
   // ── Filter + Search ──────────────────────────────────────────────────
   const filtered = useMemo(() => {
