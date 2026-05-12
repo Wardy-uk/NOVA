@@ -8,6 +8,7 @@ interface ApprovalItem {
   ticket_summary: string;
   reporter_name: string | null;
   reporter_email: string | null;
+  assignee_name: string | null;
   ai_response_adf: string | null;
   conversation_json: string | null;
   kb_sources: string | null;
@@ -525,6 +526,10 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
                     {item.priority || 'Normal'}
                   </span>
                 </div>
+              </div>
+              <div>
+                <span className="text-neutral-500 text-[11px]">Assignee</span>
+                <div className="text-neutral-300">{item.assignee_name || <span className="text-neutral-600 italic">Unassigned</span>}</div>
               </div>
               <div>
                 <span className="text-neutral-500 text-[11px]">Created</span>

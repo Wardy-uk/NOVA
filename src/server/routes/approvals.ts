@@ -5,6 +5,7 @@ import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { CustomRole } from '../middleware/auth.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+import { query } from '../services/database.js';
 
 const QUICK_RESOLVE_TRANSITION_ID = '17';
 
@@ -45,6 +46,23 @@ export function createApprovalRoutes(
   router.get('/', async (req: Request, res: Response) => {
     const status = req.query.status as string | undefined;
     const items = await approvalQueries.getAll(status);
+
+    // Enrich with assignee from Jira cache
+    const ticketKeys = items.map(i => i.ticket_id).filter(Boolean);
+    if (ticketKeys.length > 0) {
+      try {
+        const placeholders = ticketKeys.map(() => '?').join(',');
+        const rows = await query<{ issue_key: string; assignee_display: string | null }>(
+          `SELECT issue_key, assignee_display FROM jira_issue_cache WHERE issue_key IN (${placeholders})`,
+          ticketKeys,
+        );
+        const assigneeMap = new Map(rows.map(r => [r.issue_key, r.assignee_display]));
+        for (const item of items) {
+          (item as any).assignee_name = assigneeMap.get(item.ticket_id) ?? null;
+        }
+      } catch { /* cache miss is fine — assignee stays null */ }
+    }
+
     const canInteract = isApprover(req);
     res.json({ ok: true, data: { items, canInteract } });
   });
