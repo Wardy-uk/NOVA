@@ -222,9 +222,11 @@ export class AutoRulesEngine {
 
     if (rule.match.reporter_email) {
       checkedCount++;
-      // Resolve reporter email from multiple possible sources (WP-49 fix)
+      if (!event.reporterEmail && event.reporter) {
+        console.debug(`[auto-rules] reporter_email null for ${event.ticketKey}, falling back to displayName: ${event.reporter}`);
+      }
       const email = event.reporterEmail
-        ?? (event.fields?.reporter as { emailAddress?: string } | undefined)?.emailAddress
+        ?? event.reporter
         ?? '';
       const pass = this.matchOperator(rule.match.reporter_email, email, ci);
       fields.reporter_email = pass;
@@ -282,18 +284,20 @@ export class AutoRulesEngine {
     if (!rule.conditional) return true;
 
     if (rule.conditional.type === 'duplicate_open_ticket' && rule.conditional.sameSubject) {
-      // Use JQL ~  (contains) instead of = (exact) for more reliable matching
       const summary = event.summary.replace(/[\\"\[\](){}]/g, ' ').trim();
-      const jql = `project = NT AND statusCategory IN ("To Do", "In Progress") AND summary ~ "${summary}" AND key != ${event.ticketKey} ORDER BY created DESC`;
+      let jql = `project = NT AND statusCategory IN ("To Do", "In Progress") AND summary ~ "${summary}" AND key != ${event.ticketKey}`;
+      if (rule.conditional.sameReporter && event.reporterEmail) {
+        jql += ` AND reporter = "${event.reporterEmail}"`;
+      }
+      jql += ' ORDER BY created DESC';
       try {
         const result = await this.jiraClient.searchJql(jql, ['summary'], 5);
-        // Verify at least one result has the exact same summary (contains match may be broad)
         const exactMatch = result.issues.some((issue: { fields?: { summary?: string } }) => {
           const issueSummary = issue.fields?.summary ?? '';
           return issueSummary.toLowerCase().trim() === event.summary.toLowerCase().trim();
         });
         if (exactMatch) {
-          console.log(`[auto-rules] Conditional '${rule.id}': found ${result.issues.length} sibling(s) for "${event.summary}" — condition met`);
+          console.log(`[auto-rules] Conditional '${rule.id}': found ${result.issues.length} sibling(s) for "${event.summary}"${rule.conditional.sameReporter ? ` from ${event.reporterEmail}` : ''} — condition met`);
         } else {
           console.log(`[auto-rules] Conditional '${rule.id}': JQL returned ${result.issues.length} result(s) but no exact summary match for "${event.summary}"`);
         }

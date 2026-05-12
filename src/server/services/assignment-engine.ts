@@ -228,14 +228,22 @@ export class AssignmentEngine {
       console.log(`[assignment] No agents in ${tryPool} for ${project}, trying next pool`);
     }
 
-    // All pools exhausted — post internal note so it's visible in the queue
+    // All pools exhausted — post internal note (but avoid duplicates from sweep retries)
     console.warn(`[assignment] All pools exhausted for ${ticketKey} (tried: ${fallbackChain.join(', ')})`);
     try {
-      await this.jiraClient.addComment(
-        ticketKey,
-        `⚠️ Assignment failed — no agents available in any pool (tried: ${fallbackChain.join(', ')}). This ticket needs manual assignment.`,
-        { internal: true },
+      const comments = await this.jiraClient.getComments(ticketKey, 10);
+      const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+      const alreadyNoted = comments.some(c =>
+        JSON.stringify(c.body).includes('Assignment failed') &&
+        new Date(c.created).getTime() > twoHoursAgo
       );
+      if (!alreadyNoted) {
+        await this.jiraClient.addComment(
+          ticketKey,
+          `⚠️ Assignment failed — no agents available in any pool (tried: ${fallbackChain.join(', ')}). Will retry on next sweep cycle.`,
+          { internal: true },
+        );
+      }
     } catch (err) {
       console.warn(`[assignment] Failed to post exhaustion note on ${ticketKey}:`, err instanceof Error ? err.message : err);
     }

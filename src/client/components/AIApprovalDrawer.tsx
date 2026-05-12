@@ -179,21 +179,25 @@ const URGENCY_COLORS: Record<string, string> = {
   expired: 'text-neutral-600',
 };
 
-const ACTION_LABELS: Record<string, { label: string; icon: string; color: string }> = {
-  draft_response: { label: 'Draft Response', icon: 'fa-reply', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-  plugin_to_tpj: { label: 'Route to TPJ', icon: 'fa-share', color: 'bg-violet-500/20 text-violet-400 border-violet-500/30' },
-  escalate: { label: 'Escalate', icon: 'fa-arrow-up', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
-  abuse_report: { label: 'Abuse Report', icon: 'fa-shield-halved', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
-  auto_close: { label: 'Auto-close', icon: 'fa-check-circle', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
-  close: { label: 'Close', icon: 'fa-check-circle', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
-  respond: { label: 'Respond', icon: 'fa-reply', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-  request_info: { label: 'Request Info', icon: 'fa-question-circle', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-  no_action: { label: 'No Action', icon: 'fa-minus-circle', color: 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30' },
+const ACTION_LABELS: Record<string, { label: string; summary: string; icon: string; color: string }> = {
+  draft_response: { label: 'Send Reply', summary: 'Send the draft response below to the customer', icon: 'fa-reply', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  plugin_to_tpj: { label: 'Route to TPJ', summary: 'Move this ticket to the TPJ project for third-party processing', icon: 'fa-share', color: 'bg-violet-500/20 text-violet-400 border-violet-500/30' },
+  escalate: { label: 'Escalate', summary: 'Escalate to Customer Care for human triage', icon: 'fa-arrow-up', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+  abuse_report: { label: 'Abuse Report', summary: 'Process this abuse report (disable instance)', icon: 'fa-shield-halved', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
+  auto_close: { label: 'Auto-close', summary: 'Close this ticket as resolved (no action needed)', icon: 'fa-check-circle', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  quick_win_close: { label: 'Quick Close', summary: 'Close this ticket — detected as spam, thank-you, or already resolved', icon: 'fa-check-circle', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  close: { label: 'Close Ticket', summary: 'Close this ticket as resolved', icon: 'fa-check-circle', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  transition: { label: 'Change Status', summary: 'Transition this ticket to a new workflow status', icon: 'fa-exchange-alt', color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' },
+  respond: { label: 'Send Reply', summary: 'Send a response to the customer', icon: 'fa-reply', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  assign: { label: 'Assign', summary: 'Assign this ticket to an agent via round-robin', icon: 'fa-user-plus', color: 'bg-teal-500/20 text-teal-400 border-teal-500/30' },
+  chase: { label: 'Chase Customer', summary: 'Send a follow-up message to the customer', icon: 'fa-clock', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+  request_info: { label: 'Request Info', summary: 'Ask the customer for more information', icon: 'fa-question-circle', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+  no_action: { label: 'No Action', summary: 'No action required — this decision is informational only', icon: 'fa-minus-circle', color: 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30' },
 };
 
 function getActionInfo(action: string | null) {
   if (!action) return null;
-  return ACTION_LABELS[action] || { label: action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), icon: 'fa-bolt', color: 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30' };
+  return ACTION_LABELS[action] || { label: action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), summary: '', icon: 'fa-bolt', color: 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30' };
 }
 
 function confidenceStyle(c: number): { color: string; bg: string; label: string } {
@@ -426,6 +430,34 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
                 )}
               </div>
 
+              {/* Action summary — tells the reviewer what will happen */}
+              {item.action_type && (() => {
+                const info = getActionInfo(item.action_type);
+                if (!info?.summary) return null;
+                return (
+                  <div className="text-[13px] text-neutral-300 bg-[#1f242b] rounded px-3 py-2 border border-[#3a424d]">
+                    <i className="fas fa-arrow-right text-[10px] text-neutral-500 mr-2" />
+                    <span className="font-medium">If approved:</span> {info.summary}
+                  </div>
+                );
+              })()}
+
+              {/* Low confidence warning */}
+              {item.confidence != null && item.confidence < 0.6 && (
+                <div className="text-[12px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded px-3 py-2">
+                  <i className="fas fa-exclamation-triangle mr-1.5" />
+                  Low confidence ({Math.round(item.confidence * 100)}%) — review carefully before approving
+                </div>
+              )}
+
+              {/* No action info banner */}
+              {item.action_type === 'no_action' && (
+                <div className="text-[12px] text-neutral-400 bg-neutral-500/10 border border-neutral-500/20 rounded px-3 py-2">
+                  <i className="fas fa-info-circle mr-1.5" />
+                  NOVA determined no action is needed. This is informational only — there is nothing to approve or execute.
+                </div>
+              )}
+
               {/* Action-specific context */}
               {item.action_type === 'plugin_to_tpj' && (
                 <div className="text-[12px] text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded px-3 py-2">
@@ -444,14 +476,17 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
                 );
               })()}
 
-              {/* Reasoning */}
+              {/* Reasoning (collapsible) */}
               {item.reasoning && (
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">Reasoning</div>
-                  <div className="text-[13px] text-neutral-300 whitespace-pre-wrap bg-[#1f242b] rounded px-3 py-2 border border-[#3a424d]">
+                <details className="group">
+                  <summary className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 cursor-pointer select-none hover:text-neutral-400 list-none flex items-center gap-1.5">
+                    <i className="fas fa-chevron-right text-[8px] transition-transform group-open:rotate-90" />
+                    AI Reasoning
+                  </summary>
+                  <div className="text-[13px] text-neutral-300 whitespace-pre-wrap bg-[#1f242b] rounded px-3 py-2 border border-[#3a424d] mt-1">
                     {item.reasoning}
                   </div>
-                </div>
+                </details>
               )}
 
               {/* Draft response preview */}
@@ -635,7 +670,7 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
                 >
                   {showDeclineForm ? 'Cancel' : 'Dismiss'}
                 </button>
-                {canInteract && (
+                {canInteract && item.action_type !== 'no_action' && (
                   <>
                     <button
                       onClick={handleDecline}

@@ -24,6 +24,7 @@ const MatchBlock = z.object({
 const DuplicateConditional = z.object({
   type: z.literal('duplicate_open_ticket'),
   sameSubject: z.literal(true),
+  sameReporter: z.literal(true).optional(),
 });
 
 const PreEmptionConditional = z.object({
@@ -203,6 +204,14 @@ const RULES_RAW: unknown[] = [
     },
     conditional: { type: 'duplicate_open_ticket', sameSubject: true },
     action: { type: 'close', resolution: 'Duplicate', note: 'Auto-closed — duplicate of an existing open CIA Letter Alerting ticket.' },
+  },
+  {
+    id: 'general-same-reporter-dedup',
+    match: {
+      subject: { regex: '.{10,}' },
+    },
+    conditional: { type: 'duplicate_open_ticket', sameSubject: true, sameReporter: true },
+    action: { type: 'close', resolution: 'Duplicate', note: 'Auto-closed — same reporter already has an open ticket with an identical subject.' },
   },
   {
     id: 'cia-letter-assign',

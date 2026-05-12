@@ -193,20 +193,6 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
         }
       }
 
-      // Remove [Action Required] prefix when a new action is taken (customer replied or ticket progressed)
-      const recAction = decision.output.recommended_action as string | undefined;
-      if (recAction !== 'gather_context' && decision.eventType === 'comment_added') {
-        try {
-          const issue = await this.jiraClient.getIssue(decision.ticketKey, ['summary']);
-          const summary = (issue?.fields?.summary as string) || '';
-          if (summary.startsWith('[Action Required] ')) {
-            await this.jiraClient.updateFields(decision.ticketKey, {
-              summary: summary.replace('[Action Required] ', ''),
-            });
-          }
-        } catch { /* best effort */ }
-      }
-
       // Assign to NOVA service account before any ticket-modifying action
       if (decision.action !== 'no_action' && decision.action !== 'assign') {
         await this.assignToNovaServiceAccount(decision.ticketKey);
@@ -257,22 +243,6 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       return { success: false, action: decision.action, ticketKey: decision.ticketKey, detail: 'Blocked: comment text contained structured/JSON data.' };
     }
     await this.jiraClient.addComment(decision.ticketKey, text, { internal: true });
-
-    // Prefix subject with [Action Required] when AI is requesting customer info
-    const recAction = decision.output.recommended_action as string | undefined;
-    if (recAction === 'gather_context') {
-      try {
-        const issue = await this.jiraClient.getIssue(decision.ticketKey, ['summary']);
-        const currentSummary = (issue?.fields?.summary as string) || '';
-        if (!currentSummary.startsWith('[Action Required]')) {
-          await this.jiraClient.updateFields(decision.ticketKey, {
-            summary: `[Action Required] ${currentSummary}`,
-          });
-        }
-      } catch (err) {
-        console.warn(`[actor] Failed to add [Action Required] prefix to ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
-      }
-    }
 
     return { success: true, action: decision.action, ticketKey: decision.ticketKey, detail: 'Posted internal comment.' };
   }
