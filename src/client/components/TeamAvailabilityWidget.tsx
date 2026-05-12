@@ -1,26 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
 
-interface AvailableAgent {
-  name: string;
+interface AgentEntry {
+  display_name: string;
   pool: string;
   status: string;
-}
-
-interface UnavailableAgent {
-  name: string;
-  team: string;
-  type: string;
-  isHalfDay: boolean;
-  halfDayPeriod: string | null;
+  reason: string | null;
 }
 
 interface AvailabilityData {
   date: string;
   totalRoster: number;
   availableCount: number;
-  unavailableCount: number;
-  available: AvailableAgent[];
-  unavailable: UnavailableAgent[];
+  available: AgentEntry[];
+  unavailable: AgentEntry[];
 }
 
 function absenceLabel(type: string): string {
@@ -50,7 +42,7 @@ export function TeamAvailabilityWidget() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch(`/api/calendar/availability?date=${date}`);
+      const res = await fetch(`/api/agent/availability/snapshot?date=${date}`);
       const json = await res.json();
       if (json.ok) setData(json.data);
     } catch { /* ignore */ }
@@ -60,7 +52,7 @@ export function TeamAvailabilityWidget() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   if (loading) return <div className="text-neutral-500 text-sm p-4">Loading availability...</div>;
-  if (!data) return <div className="text-neutral-500 text-sm p-4">Calendar sync not configured</div>;
+  if (!data) return <div className="text-neutral-500 text-sm p-4">Availability data unavailable</div>;
 
   const capacityPct = data.totalRoster > 0
     ? Math.round(data.availableCount / data.totalRoster * 100) : 0;
@@ -84,7 +76,7 @@ export function TeamAvailabilityWidget() {
           <div className="text-xs text-neutral-500">Available</div>
         </div>
         <div className="text-center">
-          <div className="text-2xl font-bold font-mono text-neutral-400">{data.unavailableCount}</div>
+          <div className="text-2xl font-bold font-mono text-neutral-400">{data.unavailable.length}</div>
           <div className="text-xs text-neutral-500">Away</div>
         </div>
         <div className="text-center">
@@ -98,9 +90,9 @@ export function TeamAvailabilityWidget() {
           <div className="text-xs text-neutral-500 font-medium">Away Today</div>
           {data.unavailable.map((a, i) => (
             <div key={i} className="flex items-center justify-between text-xs">
-              <span className="text-neutral-300">{a.name}</span>
-              <span className={`px-1.5 py-0.5 text-xs border rounded ${absenceColor(a.type)}`}>
-                {absenceLabel(a.type)}{a.isHalfDay ? ` (${a.halfDayPeriod ?? 'half'})` : ''}
+              <span className="text-neutral-300">{a.display_name}</span>
+              <span className={`px-1.5 py-0.5 text-xs border rounded ${absenceColor(a.status)}`}>
+                {absenceLabel(a.status)}
               </span>
             </div>
           ))}
@@ -113,7 +105,7 @@ export function TeamAvailabilityWidget() {
           <div className="flex flex-wrap gap-1">
             {data.available.map((a, i) => (
               <span key={i} className="px-1.5 py-0.5 text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">
-                {a.name}
+                {a.display_name}
               </span>
             ))}
           </div>
