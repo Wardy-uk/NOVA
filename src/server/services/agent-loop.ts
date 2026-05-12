@@ -1841,7 +1841,7 @@ export class AgentLoop {
             resolution,
             comment: `Ticket resolved — approved by ${decidedBy ?? 'unknown'} via NOVA.`,
           });
-          await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, { fields, comment: { ...comment, internal: true } });
+          await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, { fields, comment });
           console.log(`[agent] Transitioned ${ticketKey} to Resolved after approved ${actionType}`);
         } catch (err) {
           console.error(`[agent] Failed to transition ${ticketKey} after approved ${actionType}:`, err instanceof Error ? err.message : err);

@@ -409,22 +409,24 @@ export class JiraRestClient {
         comment: [{ add: commentAdd }],
       };
     }
-    try {
-      await this.request<void>('POST', `issue/${issueKey}/transitions`, payload);
-    } catch (err) {
-      // Retry: strip fields that Jira says aren't on the transition screen
-      const msg = err instanceof Error ? err.message : String(err);
-      const fieldMatch = msg.match(/Field '([^']+)' cannot be set/);
-      if (fieldMatch && payload.fields && typeof payload.fields === 'object') {
-        const badField = fieldMatch[1];
-        const fields = { ...(payload.fields as Record<string, unknown>) };
-        delete fields[badField];
-        console.warn(`[JiraClient] Retrying transition on ${issueKey} without rejected field '${badField}'`);
-        payload.fields = Object.keys(fields).length > 0 ? fields : undefined;
+    // Retry loop: strip fields Jira rejects as "not on the appropriate screen"
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
         await this.request<void>('POST', `issue/${issueKey}/transitions`, payload);
         return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const fieldMatch = msg.match(/Field '([^']+)' cannot be set/);
+        if (fieldMatch && payload.fields && typeof payload.fields === 'object') {
+          const badField = fieldMatch[1];
+          const fields = { ...(payload.fields as Record<string, unknown>) };
+          delete fields[badField];
+          console.warn(`[JiraClient] Retrying transition on ${issueKey} without rejected field '${badField}'`);
+          payload.fields = Object.keys(fields).length > 0 ? fields : undefined;
+          continue;
+        }
+        throw err;
       }
-      throw err;
     }
   }
 
