@@ -325,6 +325,14 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
     if (!fields || Object.keys(fields).length === 0) {
       return { success: false, action: 'update_fields', ticketKey: decision.ticketKey, detail: 'No fields to update.' };
     }
+    // Guardrail: AI must never modify ticket summary
+    if ('summary' in fields) {
+      console.warn(`[actor] BLOCKED summary modification on ${decision.ticketKey} — AI must not change ticket subjects`);
+      delete fields.summary;
+      if (Object.keys(fields).length === 0) {
+        return { success: false, action: 'update_fields', ticketKey: decision.ticketKey, detail: 'Blocked: only field was summary (not allowed).' };
+      }
+    }
     await this.jiraClient.updateFields(decision.ticketKey, fields);
     return { success: true, action: 'update_fields', ticketKey: decision.ticketKey, detail: `Updated ${Object.keys(fields).length} field(s).` };
   }

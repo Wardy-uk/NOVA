@@ -51,6 +51,7 @@ const SetTierAction = z.object({
   note: z.string(),
   requestType: z.string().optional(),
   priority: z.string().optional(),
+  assignToPool: z.string().optional(),
 });
 
 const PluginToTpjAction = z.object({
@@ -264,6 +265,17 @@ const RULES_RAW: unknown[] = [
       note: 'Automated system email (noreply/mailer-daemon). Auto-closed by NOVA.',
     },
   },
+  {
+    id: 'auto-reply-out-of-office',
+    match: {
+      subject: { regex: '^(?:Automatic reply|Auto:|AutoReply|Out of [Oo]ffice|OOO:|I am out of the office|Away from the office|On annual leave|On holiday|Absence|Abwesenheit|Réponse automatique)\\b' },
+    },
+    action: {
+      type: 'close',
+      resolution: 'No Fault Found',
+      note: 'Auto-reply / out-of-office email. Auto-closed by NOVA — no support action required.',
+    },
+  },
 
   // ── Supplier / Vendor invoice routing (Bug 1 — NT-18458) ──
   // These remain as tag-only for finance routing (invoices need human review)
@@ -300,6 +312,7 @@ const RULES_RAW: unknown[] = [
       type: 'set_tier',
       tier: 'Production',
       requestType: 'Service Request',
+      assignToPool: 'production',
       note: 'Template/design change request detected — routed to Production team (Kayleigh/Isabel).',
     },
   },
@@ -314,6 +327,7 @@ const RULES_RAW: unknown[] = [
       type: 'set_tier',
       tier: 'Production',
       requestType: 'Service Request',
+      assignToPool: 'production',
       note: 'Template/design change request detected (hex colours or design keywords in description) — routed to Production team (Kayleigh/Isabel).',
     },
   },

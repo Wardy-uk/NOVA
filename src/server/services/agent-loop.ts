@@ -1480,10 +1480,17 @@ export class AgentLoop {
 
     const conversationJson = JSON.stringify({
       agent_decision_id: decisionId,
+      action_type: decision.action,
+      action_label: decision.action === 'draft_response' ? 'Send response to customer'
+        : decision.action === 'escalate' ? 'Escalate to Customer Care'
+        : decision.action === 'assign' ? 'Assign to human agent'
+        : decision.action === 'transition' ? 'Close/resolve ticket'
+        : decision.action,
       classification,
       sentiment: decision.inputs.sentiment,
       sla_risk: decision.inputs.sla_risk,
       reasoning: decision.reasoning,
+      internal_note: decision.output.internal_note ?? null,
       provider: decision.provider,
       model: decision.model,
     });
@@ -1502,6 +1509,7 @@ export class AgentLoop {
         resume_url: `${this.baseUrl}/api/public/agent/approval-callback?ticketKey=${encodeURIComponent(decision.ticketKey)}`,
         priority: (decision.inputs.priority as string) ?? undefined,
         expires_at: expiresAt,
+        action_type: decision.action,
         source: 'nova_ai',
       });
 
@@ -1867,6 +1875,34 @@ export class AgentLoop {
         }
       }
 
+      // Assign actions: run round-robin assignment when an assign decision is approved
+      if (actionType === 'assign' && this.assignmentEngine) {
+        try {
+          const decRow2 = await query<{ output: string }>(
+            `SELECT TOP 1 output FROM agent_decisions WHERE ticket_id = ? ORDER BY created_at DESC`,
+            [ticketKey],
+          ).then(rows => rows[0] ?? null);
+          const pool = (decRow2 ? (JSON.parse(decRow2.output || '{}').pool as string) : null) ?? 'cc';
+          const project = this.assignmentEngine.resolveProjectFromTicketKey(ticketKey);
+          const assignment = await this.assignmentEngine.assignWithFallback(
+            ticketKey, pool as import('./assignment-engine.js').Pool, project,
+          );
+          if (assignment) {
+            await this.assignmentEngine.postAssignmentComment(ticketKey, assignment);
+            console.log(`[agent] Assigned ${ticketKey} to ${assignment.agent.display_name} after approved assign action`);
+          } else {
+            console.warn(`[agent] No available agents for ${ticketKey} after approved assign action`);
+            await this.alertService.createAlert({
+              alertType: 'error', severity: 'warning',
+              title: `Approved assign but no agent available: ${ticketKey}`,
+              detail: `Approved by ${decidedBy ?? 'unknown'}, but round-robin found no agents in pool '${pool}'. Manual assignment required.`,
+            });
+          }
+        } catch (err) {
+          console.error(`[agent] Failed to assign ${ticketKey} after approval:`, err instanceof Error ? err.message : err);
+        }
+      }
+
       // Change Request Type from "AI Request" on any handoff (respond, escalate, assign)
       // This ensures the ticket appears in agent queues with the correct type
       try {
@@ -1901,6 +1937,17 @@ export class AgentLoop {
         }
       } catch (err) {
         console.warn(`[agent] Failed to update Request Type on ${ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+
+      // Safety net: warn if action type didn't match any known execution path
+      const knownActionTypes = ['draft_response', 'respond', 'gather_context', 'comment', 'close', 'quick_win_close', 'resolve', 'transition', 'escalate', 'assign', 'chase', 'no_action'];
+      if (actionType && !knownActionTypes.includes(actionType)) {
+        console.warn(`[agent] Unhandled action type '${actionType}' for ${ticketKey} — ticket may need manual intervention`);
+        await this.alertService.createAlert({
+          alertType: 'error', severity: 'warning',
+          title: `Approved with unknown action type: ${ticketKey}`,
+          detail: `Action type '${actionType}' was approved by ${decidedBy ?? 'unknown'} but has no execution handler. Manual action required.`,
+        });
       }
     } else if (action === 'decline' || action === 'declined') {
       console.log(`[agent] Approval declined for ${ticketKey} — ticket remains in queue for human handling.`);

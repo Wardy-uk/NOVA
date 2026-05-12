@@ -222,6 +222,14 @@ export class Reasoner {
       promptVersion: result.promptVersion,
     };
 
+    // Guardrail: if ticket has unreadable attachments that look critical, force escalation
+    if (this.hasUnreadableCriticalAttachments(event) && decision.action !== 'escalate') {
+      console.log(`[reasoner] Overriding ${decision.action} → escalate on ${event.ticketKey}: critical attachments AI cannot read`);
+      decision.action = 'escalate';
+      decision.reasoning += '\n[Guardrail: ticket has attachments (images/PDFs/spreadsheets) that AI cannot read — escalating to human for review]';
+      decision.approvalRequired = true;
+    }
+
     decision.approvalRequired = await this.needsApproval(triage, decision);
 
     // E1: Tag with A/B test variant
@@ -233,6 +241,17 @@ export class Reasoner {
     await this.trackLearningCitations(triage.reasoning_trace, learningsCtx.learnings);
 
     return decision;
+  }
+
+  private hasUnreadableCriticalAttachments(event: TicketEvent): boolean {
+    if (!event.attachments || event.attachments.length === 0) return false;
+    const criticalTypes = ['image/', 'application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats', 'text/csv'];
+    const criticalExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.pdf', '.xlsx', '.xls', '.csv', '.doc', '.docx'];
+    return event.attachments.some(a => {
+      const mimeMatch = criticalTypes.some(t => a.mimeType.startsWith(t));
+      const extMatch = criticalExtensions.some(ext => a.filename.toLowerCase().endsWith(ext));
+      return mimeMatch || extMatch;
+    });
   }
 
   private async handleComment(event: TicketEvent): Promise<AgentDecision> {
@@ -341,6 +360,14 @@ export class Reasoner {
       model: result.model,
       promptVersion: result.promptVersion,
     };
+
+    // Guardrail: attachment escalation for comment-triggered re-evaluation too
+    if (this.hasUnreadableCriticalAttachments(event) && decision.action !== 'escalate' && decision.action !== 'no_action') {
+      console.log(`[reasoner] Overriding ${decision.action} → escalate on ${event.ticketKey}: critical attachments AI cannot read`);
+      decision.action = 'escalate';
+      decision.reasoning += '\n[Guardrail: ticket has attachments (images/PDFs/spreadsheets) that AI cannot read — escalating to human for review]';
+      decision.approvalRequired = true;
+    }
 
     decision.approvalRequired = await this.needsRespondApproval(respond, decision);
 

@@ -6,6 +6,7 @@ import type { JiraRestClient } from '../services/jira-client.js';
 import type { CustomRole } from '../middleware/auth.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import { query } from '../services/database.js';
+import { buildBcClient } from '../services/bc-client.js';
 
 const QUICK_RESOLVE_TRANSITION_ID = '17';
 
@@ -250,6 +251,55 @@ export function createApprovalRoutes(
     }
 
     res.json({ ok: true, data: { newApprovalId: result.newApprovalId } });
+  });
+
+  // GET /api/approvals/bc/lookup/:accountNumber — look up BC customer by account number
+  router.get('/bc/lookup/:accountNumber', async (req: Request, res: Response) => {
+    const settings = settingsQueries.getAll();
+    const bc = buildBcClient(settings);
+    if (!bc) { res.json({ ok: false, error: 'Business Central integration not configured' }); return; }
+
+    try {
+      const customer = await bc.getCustomerByNumber(req.params.accountNumber);
+      if (!customer) { res.json({ ok: true, data: null }); return; }
+      res.json({ ok: true, data: { number: customer.number, displayName: customer.displayName, email: customer.email, phoneNumber: customer.phoneNumber, city: customer.city, balance: customer.balance, blocked: customer.blocked } });
+    } catch (err) {
+      console.error('[approvals/bc] Lookup failed:', err instanceof Error ? err.message : err);
+      res.json({ ok: false, error: 'BC lookup failed' });
+    }
+  });
+
+  // GET /api/approvals/bc/search?q=... — search BC customers by name/email/number
+  router.get('/bc/search', async (req: Request, res: Response) => {
+    const q = (String(req.query.q ?? '') || '').trim();
+    if (!q || q.length < 2) { res.json({ ok: false, error: 'Search query too short (min 2 chars)' }); return; }
+
+    const settings = settingsQueries.getAll();
+    const bc = buildBcClient(settings);
+    if (!bc) { res.json({ ok: false, error: 'Business Central integration not configured' }); return; }
+
+    try {
+      const results = await bc.searchCustomers(q);
+      res.json({ ok: true, data: results.map(c => ({ number: c.number, displayName: c.displayName, email: c.email, phoneNumber: c.phoneNumber, city: c.city, blocked: c.blocked })) });
+    } catch (err) {
+      console.error('[approvals/bc] Search failed:', err instanceof Error ? err.message : err);
+      res.json({ ok: false, error: 'BC search failed' });
+    }
+  });
+
+  // POST /api/approvals/bc/link — link a BC account number to a Jira ticket
+  router.post('/bc/link', async (req: Request, res: Response) => {
+    const { ticketKey, accountNumber } = req.body as { ticketKey?: string; accountNumber?: string };
+    if (!ticketKey || !accountNumber) { res.status(400).json({ ok: false, error: 'ticketKey and accountNumber required' }); return; }
+    if (!jiraClient) { res.status(500).json({ ok: false, error: 'Jira client not available' }); return; }
+
+    try {
+      await jiraClient.updateFields(ticketKey, { customfield_14626: accountNumber });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error(`[approvals/bc] Failed to link BC account to ${ticketKey}:`, err instanceof Error ? err.message : err);
+      res.status(500).json({ ok: false, error: 'Failed to update Jira ticket' });
+    }
   });
 
   return router;

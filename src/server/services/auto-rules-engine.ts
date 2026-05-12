@@ -485,7 +485,7 @@ export class AutoRulesEngine {
 
   private async handleSetTier(
     ticketKey: string,
-    action: { type: 'set_tier'; tier: string; note: string; requestType?: string; priority?: string },
+    action: { type: 'set_tier'; tier: string; note: string; requestType?: string; priority?: string; assignToPool?: string },
     rule: AutoRule,
   ): Promise<void> {
     const tierId = TIER_IDS[action.tier];
@@ -499,16 +499,26 @@ export class AutoRulesEngine {
       updatePayload.priority = { name: action.priority };
     }
 
+    if (action.requestType) {
+      updatePayload['customfield_10020'] = { requestType: { name: action.requestType } };
+    }
+
     await this.jiraClient.updateFields(ticketKey, updatePayload);
 
-    // Request type in JSM is set via a separate field (customfield_10010)
-    if (action.requestType) {
+    // Assign via round-robin if a pool is specified
+    if (action.assignToPool && this.assignmentEngine) {
       try {
-        await this.jiraClient.updateFields(ticketKey, {
-          issuetype: { name: action.requestType },
-        });
+        const pool = action.assignToPool as import('./assignment-engine.js').Pool;
+        const project = this.assignmentEngine.resolveProjectFromTicketKey(ticketKey);
+        const result = await this.assignmentEngine.assignWithFallback(ticketKey, pool, project);
+        if (result) {
+          await this.assignmentEngine.postAssignmentComment(ticketKey, result);
+          console.log(`[auto-rules] Assigned ${ticketKey} to ${result.agent.display_name} (pool: ${action.assignToPool})`);
+        } else {
+          console.warn(`[auto-rules] No available agents in pool '${action.assignToPool}' for ${ticketKey}`);
+        }
       } catch (err) {
-        console.warn(`[auto-rules] Failed to set request type '${action.requestType}' on ${ticketKey}:`, err instanceof Error ? err.message : err);
+        console.warn(`[auto-rules] Failed to assign ${ticketKey} via pool '${action.assignToPool}':`, err instanceof Error ? err.message : err);
       }
     }
 

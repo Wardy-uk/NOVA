@@ -474,6 +474,8 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Summary</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Source</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Reporter</th>
+                  <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Assignee</th>
+                  <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">BC Account</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Priority</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Age</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-neutral-500">Expires</th>
@@ -526,6 +528,12 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
                       </td>
                       <td className="px-3 py-3 text-[13px] text-neutral-400">
                         {item.reporter_name || item.reporter_email || 'Unknown'}
+                      </td>
+                      <td className="px-3 py-3 text-[13px] text-neutral-400">
+                        {item.assignee_name || <span className="text-neutral-600">Unassigned</span>}
+                      </td>
+                      <td className="px-3 py-3 text-[13px] text-neutral-400 font-mono">
+                        {item.bc_account_number || <span className="text-neutral-600">&mdash;</span>}
                       </td>
                       <td className="px-3 py-3">
                         <span className={`inline-block px-2 py-0.5 text-[11px] font-semibold rounded border ${priStyle}`}>

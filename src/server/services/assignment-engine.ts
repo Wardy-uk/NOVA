@@ -4,7 +4,7 @@ import type { JiraRestClient } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { createWorkingDayClock, type WorkingDayClock } from '../../shared/utils/workingDayClock.js';
 
-export type Pool = 'cc' | 't2' | 'tpj' | 'digital';
+export type Pool = 'cc' | 't2' | 'tpj' | 'digital' | 'production';
 
 export interface RosterAgent {
   id: number;

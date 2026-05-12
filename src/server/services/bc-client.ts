@@ -134,6 +134,26 @@ export class BusinessCentralClient {
     return data.value ?? [];
   }
 
+  async getCustomerByNumber(customerNumber: string): Promise<BcRawCustomer | null> {
+    const filter = `number eq '${customerNumber.replace(/'/g, "''")}'`;
+    const data = await this.request<{ value: BcRawCustomer[] }>('/customers', {
+      '$filter': filter,
+      '$top': '1',
+    });
+    return data.value?.[0] ?? null;
+  }
+
+  async searchCustomers(query: string): Promise<BcRawCustomer[]> {
+    const escaped = query.replace(/'/g, "''");
+    const filter = `contains(displayName, '${escaped}') or contains(email, '${escaped}') or contains(number, '${escaped}')`;
+    const data = await this.request<{ value: BcRawCustomer[] }>('/customers', {
+      '$filter': filter,
+      '$top': '20',
+      '$select': 'id,number,displayName,email,phoneNumber,addressLine1,city,country,balance,blocked',
+    });
+    return data.value ?? [];
+  }
+
   async getSalesOrders(customerNumber: string): Promise<BcRawOrder[]> {
     const filter = `customerNumber eq '${customerNumber.replace(/'/g, "''")}'`;
     const data = await this.request<{ value: BcRawOrder[] }>('/salesOrders', {
