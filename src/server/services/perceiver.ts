@@ -92,21 +92,57 @@ function cachedCommentToSnapshot(c: CachedComment): CommentSnapshot {
   };
 }
 
+function extractTextFromInlineNodes(nodes: any[]): string {
+  return nodes.map((c: any) => {
+    if (c.type === 'text') return c.text ?? '';
+    if (c.type === 'hardBreak') return '\n';
+    if (c.type === 'mention') return c.attrs?.text ?? `@${c.attrs?.id ?? 'unknown'}`;
+    if (c.type === 'inlineCard' && c.attrs?.url) return c.attrs.url;
+    if (c.type === 'emoji') return c.attrs?.shortName ?? '';
+    return c.text ?? '';
+  }).join('');
+}
+
+function extractTextFromNode(node: any): string {
+  if (node.type === 'paragraph' || node.type === 'heading') {
+    return Array.isArray(node.content) ? extractTextFromInlineNodes(node.content) : '';
+  }
+  if (node.type === 'bulletList' || node.type === 'orderedList') {
+    return (node.content ?? []).map((li: any) =>
+      `- ${(li.content ?? []).map(extractTextFromNode).join(' ').trim()}`
+    ).join('\n');
+  }
+  if (node.type === 'blockquote') {
+    return (node.content ?? []).map(extractTextFromNode).join('\n');
+  }
+  if (node.type === 'codeBlock') {
+    return (node.content ?? []).map((c: any) => c.text ?? '').join('');
+  }
+  if (node.type === 'mediaSingle' || node.type === 'mediaGroup') {
+    return (node.content ?? []).map((m: any) =>
+      m.attrs?.alt ?? m.attrs?.url ?? '[attachment]'
+    ).join(' ');
+  }
+  if (node.type === 'blockCard' && node.attrs?.url) return node.attrs.url;
+  if (node.type === 'embedCard' && node.attrs?.url) return node.attrs.url;
+  if (node.type === 'table') {
+    return (node.content ?? []).map((row: any) =>
+      (row.content ?? []).map((cell: any) =>
+        (cell.content ?? []).map(extractTextFromNode).join(' ')
+      ).join(' | ')
+    ).join('\n');
+  }
+  if (Array.isArray(node.content)) return node.content.map(extractTextFromNode).join('\n');
+  return node.text ?? '';
+}
+
 function extractText(adf: unknown): string {
   if (!adf || typeof adf !== 'object') return '';
   if (typeof adf === 'string') return adf;
   try {
     const content = (adf as any).content;
-    if (!Array.isArray(content)) return JSON.stringify(adf).slice(0, 500);
-    return content
-      .flatMap((node: any) => {
-        if (node.type === 'paragraph' && Array.isArray(node.content)) {
-          return node.content.map((c: any) => c.text ?? '').join('');
-        }
-        return node.text ?? '';
-      })
-      .join('\n')
-      .trim();
+    if (!Array.isArray(content)) return JSON.stringify(adf).slice(0, 2000);
+    return content.map(extractTextFromNode).join('\n').trim();
   } catch {
     return '';
   }

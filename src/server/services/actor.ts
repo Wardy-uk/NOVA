@@ -36,6 +36,9 @@ const CATEGORY_TO_REQUEST_TYPE: Record<string, string> = {
   'delivery_qa': 'Delivery QA',
   'franchise': 'Franchise Hub',
   'chat': 'Chat',
+  'template': 'Service Request',
+  'design': 'Service Request',
+  'branding': 'Service Request',
 };
 
 export class Actor {

@@ -281,6 +281,34 @@ const RULES_RAW: unknown[] = [
     },
   },
 
+  // ── Template change routing to Production (Snag 8 — NT-18609) ──
+  {
+    id: 'template-change-subject',
+    match: {
+      subject: { regex: '\\b(?:template|campaign\\s+template|email\\s+template|design\\s+amend|colour\\s+change|color\\s+change|header\\s+change|footer\\s+change|font\\s+change|layout\\s+change|html\\s+template|test\\s+of\\s+html)\\b' },
+    },
+    action: {
+      type: 'set_tier',
+      tier: 'Production',
+      requestType: 'Service Request',
+      note: 'Template/design change request detected — routed to Production team (Kayleigh/Isabel).',
+    },
+  },
+  {
+    id: 'template-change-description',
+    match: {
+      description: { regex: '#[0-9a-fA-F]{3,8}|\\b(?:template\\s+(?:change|update|amend|edit|modif)|design\\s+(?:change|update|amend)|brand(?:ing)?\\s+(?:change|update)|colour\\s+scheme|color\\s+scheme)\\b' },
+      subject: { regex: '\\b(?:template|design|brand|html|campaign)\\b' },
+    },
+    matchMode: 'all',
+    action: {
+      type: 'set_tier',
+      tier: 'Production',
+      requestType: 'Service Request',
+      note: 'Template/design change request detected (hex colours or design keywords in description) — routed to Production team (Kayleigh/Isabel).',
+    },
+  },
+
   {
     id: 'product-cancellation',
     match: {

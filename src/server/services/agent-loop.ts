@@ -1746,6 +1746,17 @@ export class AgentLoop {
         }
       }
 
+      if (!actionType) {
+        const errMsg = `No action type found for ${ticketKey} — no approval record or agent decision to execute`;
+        console.error(`[agent] APPROVAL EXECUTION FAILED: ${errMsg}`);
+        await this.alertService.createAlert({
+          alertType: 'error', severity: 'critical',
+          title: `Approved but not executed: ${ticketKey}`,
+          detail: `${errMsg}. Approved by ${decidedBy ?? 'unknown'}. Manual action required.`,
+        });
+        throw new Error(errMsg);
+      }
+
       let responseText = editedResponse || '';
       let commentPosted = false;
       if (responseText) {
@@ -1790,14 +1801,31 @@ export class AgentLoop {
             });
           }
         } catch (err) {
-          console.error(`[agent] Failed to post approved response on ${ticketKey}:`, err instanceof Error ? err.message : err);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.error(`[agent] APPROVAL EXECUTION FAILED: Failed to post approved response on ${ticketKey}: ${errMsg}`);
           if (decisionId) {
             await this.observer.logOutcome(decisionId, {
               success: false, action: 'draft_response', ticketKey,
-              detail: 'Approved but failed to post.', error: err instanceof Error ? err.message : String(err),
+              detail: 'Approved but failed to post.', error: errMsg,
             });
           }
+          await this.alertService.createAlert({
+            alertType: 'error', severity: 'critical',
+            title: `Approved but failed to post: ${ticketKey}`,
+            detail: `Jira API error: ${errMsg}. Approved by ${decidedBy ?? 'unknown'}. Response text was ${responseText.length} chars. Manual action required.`,
+          });
+          throw err;
         }
+      }
+
+      // If we had a response to post but nothing was posted (empty after extraction), alert
+      if (!commentPosted && editedResponse && !responseText) {
+        console.warn(`[agent] Approval for ${ticketKey}: response was provided but extracted to empty — no comment posted`);
+        await this.alertService.createAlert({
+          alertType: 'error', severity: 'warning',
+          title: `Approved response not posted: ${ticketKey}`,
+          detail: `Response provided but was empty after JSON extraction. Approved by ${decidedBy ?? 'unknown'}. Check if the draft was stored as structured JSON.`,
+        });
       }
 
       // Close/resolve actions: transition the Jira ticket (runs even if comment was blocked/skipped)
@@ -1860,6 +1888,7 @@ export class AgentLoop {
             reporting: 'Service Request', user_management: 'Service Request',
             onboarding: 'Onboarding', delivery: 'Delivery QA', delivery_qa: 'Delivery QA',
             franchise: 'Franchise Hub', chat: 'Chat',
+            template: 'Service Request', design: 'Service Request', branding: 'Service Request',
           };
           const requestType = categoryMap[category]
             ?? (ticketType === 'incident' ? 'Incident' : null)

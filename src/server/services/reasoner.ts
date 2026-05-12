@@ -232,9 +232,19 @@ export class Reasoner {
     const customerContext = this.buildCustomerContext(event);
     const learningsCtx = await this.buildLearningsContext(event);
 
-    const conversationThread = (event.comments ?? [])
-      .map(c => `[${c.created}] ${c.author}${c.isPublic ? '' : ' (internal)'}:\n${c.body}`)
-      .join('\n\n---\n\n');
+    const publicComments = (event.comments ?? []).filter(c => c.isPublic);
+    const internalComments = (event.comments ?? []).filter(c => !c.isPublic);
+
+    const publicThread = publicComments.length > 0
+      ? publicComments.map(c => `[${c.created}] ${c.author} (CUSTOMER-VISIBLE):\n${c.body}`).join('\n\n---\n\n')
+      : '(No customer-visible replies have been sent yet)';
+
+    const internalThread = internalComments.length > 0
+      ? internalComments.map(c => `[${c.created}] ${c.author} (INTERNAL NOTE — not visible to customer):\n${c.body}`).join('\n\n---\n\n')
+      : '';
+
+    const conversationThread = `## Customer-Visible Conversation\n\n${publicThread}`
+      + (internalThread ? `\n\n## Internal Notes (NOT sent to customer — do NOT reference these as prior responses)\n\n${internalThread}` : '');
 
     // Decision continuity: load prior decisions for this ticket
     let priorDecisionText = 'No prior AI decisions for this ticket.';
