@@ -1528,6 +1528,7 @@ export function AdminView() {
                     : integTestResult[integ.id]?.status === 'error' ? 'Error'
                     : integTestResult[integ.id]?.status === 'testing' ? 'Testing...'
                     : integ.mcpStatus === 'connected' ? 'Configured'
+                    : integ.enabled ? 'Enabled'
                     : 'Not configured'}
                 </span>
               ) : undefined}

@@ -735,9 +735,22 @@ export class AgentLoop {
     try {
       console.log(`[agent] Running ticket classification...`);
       const results = await this.ticketClassifier.classifyResolved(24);
-      console.log(`[agent] Classification complete — ${results.length} tickets classified`);
+      if (results.length > 0) {
+        console.log(`[agent] Classification complete — ${results.length} tickets classified`);
+      } else {
+        console.log(`[agent] Classification complete — 0 tickets classified (all resolved tickets already classified or none found)`);
+      }
     } catch (err) {
-      console.warn(`[agent] Ticket classification failed:`, err instanceof Error ? err.message : err);
+      console.error(`[agent] Ticket classification failed:`, err instanceof Error ? err.message : err);
+      // Surface classification failures as alerts so pipeline health check isn't the only signal
+      try {
+        await this.alertService.createAlert({
+          alertType: 'error',
+          severity: 'warning',
+          title: 'Classification pipeline error',
+          detail: `Ticket classification failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      } catch { /* best effort */ }
     }
   }
 
@@ -753,12 +766,26 @@ export class AgentLoop {
         const assignee = (issue.fields as any)?.assignee?.accountId;
         if (!assignee) continue;
 
-        const nudges = await this.coachingEngine.checkTicketHealth(issue.key, assignee);
-        if (nudges.length > 0) {
-          console.log(`[agent] Coaching health check: ${issue.key} — ${nudges.join(', ')}`);
-          nudgeCount += nudges.length;
+        try {
+          const nudges = await this.coachingEngine.checkTicketHealth(issue.key, assignee);
+          if (nudges.length > 0) {
+            console.log(`[agent] Coaching health check: ${issue.key} — ${nudges.join(', ')}`);
+            nudgeCount += nudges.length;
+            // Persist nudges to agent_coaching so the pipeline health check sees output
+            for (const nudge of nudges) {
+              try {
+                await executeAndGetId(
+                  `INSERT INTO agent_coaching (ticket_id, agent_user_id, nudge_type, message, delivered, delivery_method)
+                   VALUES (?, ?, ?, ?, 0, 'health_check')`,
+                  [issue.key, 0, nudge, `Health check nudge: ${nudge}`],
+                );
+              } catch { /* best effort — avoid duplicates breaking the loop */ }
+            }
+          }
+          checked++;
+        } catch (err) {
+          console.warn(`[agent] Coaching health check failed for ${issue.key}:`, err instanceof Error ? err.message : err);
         }
-        checked++;
       }
       console.log(`[agent] Coaching health checks complete — ${checked} tickets checked, ${nudgeCount} nudges generated`);
     } catch (err) {
@@ -958,7 +985,10 @@ export class AgentLoop {
       [decision.ticketKey],
     );
     if (ticket) {
-      const excludedTypes = ['AI Request', 'Escalation', 'Franchise Hub', 'New Products Launch'];
+      // "AI Request" is NOT excluded here — after triage, NOVA needs to assign even
+      // while the ticket is still typed as "AI Request". The request type gets updated
+      // to the classified type immediately after assignment (see below).
+      const excludedTypes = ['Escalation', 'Franchise Hub', 'New Products Launch'];
       if (ticket.request_type && excludedTypes.includes(ticket.request_type)) return;
       if (ticket.labels && ticket.labels.includes('TPJ_Feed')) return;
     }
@@ -976,6 +1006,13 @@ export class AgentLoop {
         decision.inputs.assignee = assignment.agent.jira_account_id;
         decision.inputs.assigneeName = assignment.agent.display_name;
         await this.assignmentEngine.postAssignmentComment(decision.ticketKey, assignment);
+
+        // Update request type from "AI Request" to classified type on handoff
+        try {
+          await this.updateRequestTypeAfterAssign(decision);
+        } catch (rtErr) {
+          console.warn(`[agent] Request type update failed for ${decision.ticketKey}:`, rtErr instanceof Error ? rtErr.message : rtErr);
+        }
       } else if (this.assignmentEngine.isWorkingTime()) {
         console.warn(`[agent] No available agents for ${decision.ticketKey} in pool ${pool}`);
         await this.alertService.createAlert({
@@ -990,6 +1027,33 @@ export class AgentLoop {
     } catch (err) {
       console.error(`[agent] Assignment failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
     }
+  }
+
+  private async updateRequestTypeAfterAssign(decision: import('./agent-types.js').AgentDecision): Promise<void> {
+    const CF_REQUEST_TYPE = 'customfield_10020';
+    const CATEGORY_MAP: Record<string, string> = {
+      email: 'Emailed request', email_delivery: 'Emailed request',
+      gdpr: 'GDPR', data_protection: 'GDPR', incident: 'Incident',
+      integration: 'Incident', integration_issue: 'Incident', api_error: 'Incident',
+      server_error: 'Incident', database_issue: 'Incident', feed_issue: 'Incident',
+      data_feed: 'Incident', website: 'Incident', portal: 'Incident', crm: 'Incident',
+      reporting: 'Service Request', user_management: 'Service Request',
+      onboarding: 'Onboarding', delivery: 'Delivery QA', delivery_qa: 'Delivery QA',
+      franchise: 'Franchise Hub', chat: 'Chat',
+      template: 'Service Request', design: 'Service Request', branding: 'Service Request',
+    };
+    const classification = decision.output?.classification as { category?: string; ticket_type?: string } | undefined;
+    const category = classification?.category?.toLowerCase().replace(/\s+/g, '_') ?? '';
+    const ticketType = classification?.ticket_type ?? '';
+    const requestType = CATEGORY_MAP[category]
+      ?? (ticketType === 'incident' ? 'Incident' : null)
+      ?? (ticketType === 'change' ? 'Service Request' : null)
+      ?? 'Emailed request';
+
+    await this.jiraClient.updateFields(decision.ticketKey, {
+      [CF_REQUEST_TYPE]: { requestType: { name: requestType } },
+    });
+    console.log(`[agent] Updated Request Type to "${requestType}" on ${decision.ticketKey} after assignment`);
   }
 
   private determinePool(
@@ -1055,7 +1119,7 @@ export class AgentLoop {
            AND c.created_at < DATEADD(minute, -5, GETUTCDATE())
            AND c.created_at >= DATEADD(hour, -${maxAgeHours}, GETUTCDATE())
            AND c.project_key IN (${projectPlaceholders})
-           AND (c.request_type IS NULL OR c.request_type NOT IN ('AI Request', 'Escalation', 'Franchise Hub', 'New Products Launch'))
+           AND (c.request_type IS NULL OR c.request_type NOT IN ('Escalation', 'Franchise Hub', 'New Products Launch'))
            AND (c.labels IS NULL OR c.labels NOT LIKE '%TPJ_Feed%')
          ORDER BY c.created_at ASC`,
         projects,
@@ -1393,7 +1457,7 @@ export class AgentLoop {
 
     // Quick-win auto-close (only reached in non-shadow mode)
     const qw = decision.output.quick_win as { type?: string; confidence?: number } | undefined;
-    const closableQwTypes = ['spam', 'vendor_email', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate'];
+    const closableQwTypes = ['spam', 'vendor_email', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
     if (qw?.type && qw.type !== 'none') {
       const shouldClose = await this.quickWinExecutor.shouldAutoClose(decision, decisionId);
       if (shouldClose) {
@@ -1419,6 +1483,7 @@ export class AgentLoop {
     }
 
     // Route based on action + approval requirement
+    let pendingApproval = false;
     const autoApproveThreshold = parseFloat(this.settings.get('agent_auto_approve_threshold') || '0.85');
     if (decision.approvalRequired && decision.action === 'draft_response'
         && decision.confidence >= autoApproveThreshold) {
@@ -1434,6 +1499,7 @@ export class AgentLoop {
       }
     } else if (decision.approvalRequired && (decision.action === 'draft_response')) {
       await this.submitToApprovalQueue(decision, decisionId);
+      pendingApproval = true;
     } else {
       // Autonomous execution — log alert for visibility
       const autonomyCheck = this.reasoner.getLastAutonomyCheck();
@@ -1456,14 +1522,18 @@ export class AgentLoop {
       }
     }
 
-    // Auto-assign via Round Robin if ticket is still unassigned after action
-    if (!decision.inputs.assignee && !decision.shadowMode) {
+    // Auto-assign via Round Robin if ticket is still unassigned after action.
+    // Skip when decision is pending approval — NOVA hasn't replied yet, so the
+    // human agent would see the ticket with no first response (Snag 18).
+    if (!decision.inputs.assignee && !decision.shadowMode && !pendingApproval) {
       if (this.assignmentEngine) {
         console.log(`[agent] Auto-assign check for ${decision.ticketKey}: unassigned, attempting round-robin`);
         await this.tryAutoAssign(decision);
       } else {
         console.warn(`[agent] Auto-assign skipped for ${decision.ticketKey}: assignmentEngine not initialised`);
       }
+    } else if (pendingApproval) {
+      console.log(`[agent] Auto-assign deferred for ${decision.ticketKey}: awaiting approval before assignment`);
     }
 
     this.ticketsProcessed++;
@@ -1732,15 +1802,19 @@ export class AgentLoop {
         console.log(`[agent] Enhanced hybrid: executing ${ticketKey} despite shadow mode — human override by ${decidedBy}`);
       }
 
-      // Resolve the action type so we know if this is a close/resolve (needs transition) or just a comment
+      // Resolve the action type so we know if this is a close/resolve (needs transition) or just a comment.
+      // The approval_queue stores the decision's action (usually 'draft_response'), but the
+      // decision output may contain a more specific recommended_action (e.g. 'close', 'resolve').
+      // We always check agent_decisions for the real action type.
       let actionType: string | null = null;
       let quickWinType: string | null = null;
       if (approvalId && this.approvalQueries) {
         const approval = await this.approvalQueries.getById(approvalId);
         actionType = approval?.action_type ?? null;
       }
-      if (!actionType) {
-        // Fall back to agent_decisions
+      // Always check agent_decisions for recommended_action — the approval_queue action_type
+      // is often just 'draft_response' even for close/resolve recommendations (Snag 17 fix).
+      {
         const decRow = await query<{ action: string; output: string }>(
           `SELECT TOP 1 action, output FROM agent_decisions WHERE ticket_id = ? ORDER BY created_at DESC`,
           [ticketKey],
@@ -1748,9 +1822,17 @@ export class AgentLoop {
         if (decRow) {
           try {
             const out = JSON.parse(decRow.output || '{}');
-            actionType = out.recommended_action ?? decRow.action ?? null;
+            const recommended = out.recommended_action ?? null;
             quickWinType = out.quick_win?.type ?? null;
-          } catch { actionType = decRow.action ?? null; }
+            // Prefer recommended_action over the generic approval action_type
+            if (recommended && recommended !== 'draft_response') {
+              actionType = recommended;
+            } else if (!actionType) {
+              actionType = decRow.action ?? null;
+            }
+          } catch {
+            if (!actionType) actionType = decRow.action ?? null;
+          }
         }
       }
 
@@ -1937,6 +2019,31 @@ export class AgentLoop {
         }
       } catch (err) {
         console.warn(`[agent] Failed to update Request Type on ${ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+
+      // Auto-assign after approval — the initial triage deferred assignment while
+      // the ticket was pending approval (Snag 18). Now that the response is posted,
+      // assign to a human agent via round-robin.
+      const noAssignActionTypes = ['close', 'quick_win_close', 'resolve', 'transition', 'escalate', 'assign'];
+      if (this.assignmentEngine && actionType && !noAssignActionTypes.includes(actionType)) {
+        try {
+          const ticket = await queryOne<{ assignee_account_id: string | null }>(
+            `SELECT assignee_account_id FROM jira_issue_cache WHERE issue_key = ?`, [ticketKey],
+          );
+          const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+          const isUnassignedOrNova = !ticket?.assignee_account_id || ticket.assignee_account_id === novaAccountId;
+          if (isUnassignedOrNova) {
+            const project = this.assignmentEngine.resolveProjectFromTicketKey(ticketKey);
+            const pool = 'cc' as import('./assignment-engine.js').Pool;
+            const assignment = await this.assignmentEngine.assignWithFallback(ticketKey, pool, project);
+            if (assignment) {
+              await this.assignmentEngine.postAssignmentComment(ticketKey, assignment);
+              console.log(`[agent] Post-approval assignment: ${ticketKey} → ${assignment.agent.display_name}`);
+            }
+          }
+        } catch (err) {
+          console.warn(`[agent] Post-approval auto-assign failed for ${ticketKey}:`, err instanceof Error ? err.message : err);
+        }
       }
 
       // Safety net: warn if action type didn't match any known execution path
