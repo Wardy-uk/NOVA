@@ -14,11 +14,16 @@ export type ApprovalCallbackFn = (
   editedResponse?: string, decidedBy?: string,
 ) => Promise<void>;
 
+export type ReReviewFn = (
+  approvalId: number, declineReason: string, requestedBy: string,
+) => Promise<{ ok: boolean; newApprovalId?: number; error?: string }>;
+
 export function createApprovalRoutes(
   approvalQueries: ApprovalQueries,
   settingsQueries: FileSettingsQueries,
   jiraClient?: JiraRestClient,
   onApprovalCallback?: ApprovalCallbackFn,
+  onReReview?: ReReviewFn,
 ): Router {
   const router = Router();
 
@@ -210,6 +215,39 @@ export function createApprovalRoutes(
     }
 
     res.json({ ok: true, data: { id, status: newStatus } });
+  });
+
+  // POST /api/approvals/:id/re-review — re-run AI triage with decline feedback
+  router.post('/:id/re-review', async (req: Request, res: Response) => {
+    if (!isApprover(req)) {
+      res.status(403).json({ ok: false, error: 'You do not have AI Approver permissions' });
+      return;
+    }
+    if (!onReReview) {
+      res.status(501).json({ ok: false, error: 'Re-review not available — agent loop not running' });
+      return;
+    }
+
+    const id = parseInt(req.params.id as string, 10);
+    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid ID' }); return; }
+
+    const item = await approvalQueries.getById(id);
+    if (!item) { res.status(404).json({ ok: false, error: 'Not found' }); return; }
+    if (item.status !== 'declined') {
+      res.status(409).json({ ok: false, error: 'Can only re-review declined approvals' });
+      return;
+    }
+
+    const user = (req as any).user;
+    const declineReason = item.decline_reason || 'No reason provided';
+
+    const result = await onReReview(id, declineReason, user.username);
+    if (!result.ok) {
+      res.status(500).json({ ok: false, error: result.error });
+      return;
+    }
+
+    res.json({ ok: true, data: { newApprovalId: result.newApprovalId } });
   });
 
   return router;

@@ -920,6 +920,9 @@ async function main() {
   app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries, buildOnboardingJiraClient() ?? undefined, async (action, ticketKey, approvalId, editedResponse, decidedBy) => {
     if (!agentLoop) throw new Error('Agent loop not available');
     await agentLoop.handleApprovalCallback(action, ticketKey, approvalId, editedResponse, decidedBy);
+  }, async (approvalId, declineReason, requestedBy) => {
+    if (!agentLoop) return { ok: false, error: 'Agent loop not available' };
+    return agentLoop.reReviewTicket(approvalId, declineReason, requestedBy);
   }));
   app.use('/api/training', createTrainingRoutes(trainingQueries, userQueries, requireAreaAccess, settingsQueries));
 

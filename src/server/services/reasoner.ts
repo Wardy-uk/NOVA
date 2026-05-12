@@ -78,6 +78,10 @@ export class Reasoner {
     return this.triageNewTicket(event);
   }
 
+  async reReview(event: TicketEvent, feedback: { reason: string; previousAction: string; previousResponse: string }): Promise<AgentDecision> {
+    return this.triageNewTicket(event, feedback);
+  }
+
   private shouldUseCheapTier(event: TicketEvent): boolean {
     const summary = (event.summary || '').toLowerCase();
     const patterns = [
@@ -93,7 +97,7 @@ export class Reasoner {
     return patterns.some(p => p.test(summary));
   }
 
-  private async triageNewTicket(event: TicketEvent): Promise<AgentDecision> {
+  private async triageNewTicket(event: TicketEvent, priorFeedback?: { reason: string; previousAction: string; previousResponse: string }): Promise<AgentDecision> {
     const kbMatches = await this.kbSearch.search(`${event.summary} ${event.description.slice(0, 200)}`);
     const kbText = this.kbSearch.formatForPrompt(kbMatches);
 
@@ -115,6 +119,11 @@ export class Reasoner {
       ? event.attachments.map(a => `- ${a.filename} (${a.mimeType}, ${(a.size / 1024).toFixed(1)}KB)`).join('\n')
       : 'None';
 
+    let priorFeedbackSection = '';
+    if (priorFeedback) {
+      priorFeedbackSection = `\n\n## Prior Review Feedback\n\nA human reviewer DECLINED your previous recommendation for this ticket. You MUST produce a meaningfully different approach.\n\nPrevious action: ${priorFeedback.previousAction}\nPrevious draft response (rejected):\n${priorFeedback.previousResponse}\n\nReviewer's feedback:\n${priorFeedback.reason}\n\nUse this feedback to produce a better recommendation. Do NOT repeat the same action or response — the reviewer has explicitly rejected it.`;
+    }
+
     const systemPrompt = loadPrompt('triage', {
       ticket_key: event.ticketKey,
       summary: event.summary,
@@ -127,7 +136,7 @@ export class Reasoner {
       attachments: attachmentsText,
       customer_context: customerContext,
       kb_matches: kbText,
-      learnings: learningsCtx.text + (patternsCtx ? `\n\n${patternsCtx}` : '') + (tuningSignalsCtx ? `\n\n## Historical Tuning Signals\n\n${tuningSignalsCtx}` : ''),
+      learnings: learningsCtx.text + (patternsCtx ? `\n\n${patternsCtx}` : '') + (tuningSignalsCtx ? `\n\n## Historical Tuning Signals\n\n${tuningSignalsCtx}` : '') + priorFeedbackSection,
     });
 
     const userMessage = `Analyse this ticket and produce the structured JSON assessment.`;

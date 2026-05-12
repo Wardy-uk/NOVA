@@ -222,6 +222,31 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
     }
   }
 
+  async function handleReReview(id: number) {
+    try {
+      const res = await fetch(`${API_BASE}/${id}/re-review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const json = await res.json();
+      if (json.ok) {
+        fetchItems();
+        fetchStats();
+        if (json.data?.newApprovalId) {
+          setTimeout(() => {
+            const newItem = items.find(i => i.id === json.data.newApprovalId);
+            if (newItem) setDrawerItem(newItem);
+          }, 500);
+        } else {
+          setDrawerItem(null);
+        }
+      }
+      return json;
+    } catch {
+      return { ok: false, error: 'Network error' };
+    }
+  }
+
   async function handleBulkDecide(action: 'approve' | 'decline') {
     const promises = Array.from(selected).map(id => handleDecide(id, action));
     await Promise.all(promises);
@@ -566,6 +591,7 @@ export function AIApprovalQueue({ canInteract, onNavigateToAgent }: AIApprovalQu
           canInteract={canInteract}
           onClose={() => setDrawerItem(null)}
           onDecide={handleDecide}
+          onReReview={handleReReview}
           onPrev={() => navigateDrawer(-1)}
           onNext={() => navigateDrawer(1)}
           hasPrev={focusIndex > 0}

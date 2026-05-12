@@ -1914,6 +1914,101 @@ export class AgentLoop {
     // 'cancel' / 'cancelled' — no action needed
   }
 
+  async reReviewTicket(
+    approvalId: number,
+    declineReason: string,
+    requestedBy: string,
+  ): Promise<{ ok: boolean; newApprovalId?: number; error?: string }> {
+    if (!this.approvalQueries) return { ok: false, error: 'Approval system not available' };
+
+    const original = await this.approvalQueries.getById(approvalId);
+    if (!original) return { ok: false, error: 'Original approval not found' };
+    if (original.status !== 'declined') return { ok: false, error: 'Can only re-review declined approvals' };
+
+    const ticketKey = original.ticket_id;
+
+    // Reconstruct TicketEvent from jira_issue_cache
+    const cached = await queryOne<{
+      jira_id: string; issue_key: string; summary: string; description_text: string;
+      status_name: string; priority_name: string; request_type: string;
+      assignee_display: string | null; reporter_display: string | null;
+      reporter_email: string | null; jira_created: Date | null; jira_updated: Date | null;
+      sla_breach_time: Date | null; fields_json: string | null;
+    }>(`SELECT jira_id, issue_key, summary, description_text, status_name, priority_name,
+              request_type, assignee_display, reporter_display, reporter_email,
+              jira_created, jira_updated, sla_breach_time, fields_json
+        FROM jira_issue_cache WHERE issue_key = ?`, [ticketKey]);
+
+    if (!cached) return { ok: false, error: `Ticket ${ticketKey} not found in Jira cache` };
+
+    const fields = cached.fields_json ? JSON.parse(cached.fields_json) : {};
+    const attachments = Array.isArray(fields.attachment)
+      ? fields.attachment.map((a: any) => ({ filename: a.filename ?? '', mimeType: a.mimeType ?? '', size: a.size ?? 0 }))
+      : [];
+
+    const event = {
+      ticketId: cached.jira_id,
+      ticketKey: cached.issue_key,
+      eventType: 'ticket_created' as const,
+      summary: cached.summary ?? '',
+      description: cached.description_text ?? '',
+      status: cached.status_name ?? 'Unknown',
+      priority: cached.priority_name ?? 'Medium',
+      requestType: cached.request_type ?? '',
+      assignee: cached.assignee_display ?? null,
+      reporter: cached.reporter_display ?? null,
+      reporterEmail: cached.reporter_email ?? null,
+      organisation: cached.reporter_email?.split('@')[1] ?? null,
+      created: cached.jira_created?.toISOString() ?? '',
+      updated: cached.jira_updated?.toISOString() ?? '',
+      slaBreachTime: cached.sla_breach_time?.toISOString() ?? null,
+      attachments,
+      fields,
+    };
+
+    // Extract what the previous recommendation was
+    const previousAction = original.action_type ?? 'draft_response';
+    const previousResponse = original.ai_response_adf ?? '';
+
+    console.log(`[agent] Re-reviewing ${ticketKey} after decline by ${requestedBy}: "${declineReason}"`);
+
+    try {
+      const decision = await this.reasoner.reReview(event, {
+        reason: declineReason,
+        previousAction,
+        previousResponse,
+      });
+
+      // Store the new decision
+      const decisionId = await executeAndGetId(
+        `INSERT INTO agent_decisions (ticket_id, event_type, inputs, output, action, confidence, reasoning, approval_required, shadow_mode, provider, model)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
+        [ticketKey, 'ticket_created', JSON.stringify(decision.inputs), JSON.stringify(decision.output),
+         decision.action, decision.confidence, decision.reasoning,
+         decision.provider ?? null, decision.model ?? null],
+      );
+
+      // Supersede the old approval
+      await execute(
+        `UPDATE approval_queue SET status = 'superseded' WHERE id = ? AND status = 'declined'`,
+        [approvalId],
+      );
+
+      // Submit the new decision to the approval queue
+      await this.submitToApprovalQueue(decision, decisionId);
+
+      // Find the new approval ID
+      const newApproval = await this.approvalQueries.getPendingByTicket(ticketKey);
+
+      console.log(`[agent] Re-review complete for ${ticketKey} — new approval #${newApproval?.id ?? '?'} (action: ${decision.action}, confidence: ${decision.confidence.toFixed(2)})`);
+      return { ok: true, newApprovalId: newApproval?.id };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[agent] Re-review failed for ${ticketKey}:`, errMsg);
+      return { ok: false, error: errMsg };
+    }
+  }
+
   async runBackfillSweep(): Promise<{ processed: number; skipped: number; errors: number }> {
     const batchSize = this.getNumber('agent_backfill_batch_size', 10);
     const agentProject = this.settings.get('agent_jira_project') || 'NT';

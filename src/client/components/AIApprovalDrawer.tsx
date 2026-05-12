@@ -34,6 +34,7 @@ interface AIApprovalDrawerProps {
   canInteract: boolean;
   onClose: () => void;
   onDecide: (id: number, action: 'approve' | 'decline' | 'cancel' | 'confirm' | 'execute', editedResponse?: string, declineReason?: string) => void;
+  onReReview?: (id: number) => Promise<{ ok: boolean; error?: string }>;
   onPrev?: () => void;
   onNext?: () => void;
   hasPrev?: boolean;
@@ -236,10 +237,12 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: 'bg-neutral-500/20 text-neutral-400',
 };
 
-export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev, onNext, hasPrev, hasNext }: AIApprovalDrawerProps) {
+export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onReReview, onPrev, onNext, hasPrev, hasNext }: AIApprovalDrawerProps) {
   const [editing, setEditing] = useState(false);
   const [editedText, setEditedText] = useState('');
   const [expiryDisplay, setExpiryDisplay] = useState(timeRemaining(item.expires_at));
+  const [reReviewLoading, setReReviewLoading] = useState(false);
+  const [reReviewError, setReReviewError] = useState<string | null>(null);
 
   // Re-initialize when item changes
   useEffect(() => {
@@ -750,6 +753,41 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onPrev,
             {item.status === 'declined' && item.decline_reason && (
               <div className="mt-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 text-[12px] text-red-300">
                 <span className="font-semibold text-red-400">Reason: </span>{item.decline_reason}
+              </div>
+            )}
+            {item.status === 'declined' && canInteract && onReReview && (
+              <div className="mt-3 flex flex-col gap-2">
+                <button
+                  onClick={async () => {
+                    setReReviewLoading(true);
+                    setReReviewError(null);
+                    const result = await onReReview(item.id);
+                    setReReviewLoading(false);
+                    if (!result.ok) setReReviewError(result.error ?? 'Re-review failed');
+                  }}
+                  disabled={reReviewLoading}
+                  className="w-full bg-[#5ec1ca]/15 hover:bg-[#5ec1ca]/25 text-[#5ec1ca] border border-[#5ec1ca]/30 px-4 py-2 rounded-lg font-semibold text-[13px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {reReviewLoading ? (
+                    <>
+                      <i className="fas fa-spinner fa-spin text-[11px]" />
+                      AI is re-reviewing...
+                    </>
+                  ) : (
+                    <>
+                      <i className="fas fa-rotate text-[11px]" />
+                      Re-review with AI feedback
+                    </>
+                  )}
+                </button>
+                <p className="text-[11px] text-neutral-500 text-center">
+                  The AI will re-analyse this ticket using your decline reason as guidance
+                </p>
+                {reReviewError && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded px-3 py-2 text-[12px] text-red-300">
+                    {reReviewError}
+                  </div>
+                )}
               </div>
             )}
           </div>
