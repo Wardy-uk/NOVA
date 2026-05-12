@@ -19,6 +19,7 @@ export interface TicketFields {
   slaBreachTime: string | null;
   slaBreached: boolean;
   agentNextUpdate: string | null;
+  bcAccountNumber: string | null;
 }
 
 export interface PendingDecision {

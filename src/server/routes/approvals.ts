@@ -57,13 +57,15 @@ export function createApprovalRoutes(
     if (ticketKeys.length > 0) {
       try {
         const placeholders = ticketKeys.map(() => '?').join(',');
-        const rows = await query<{ issue_key: string; assignee_display: string | null }>(
-          `SELECT issue_key, assignee_display FROM jira_issue_cache WHERE issue_key IN (${placeholders})`,
+        const rows = await query<{ issue_key: string; assignee_display: string | null; bc_account_number: string | null }>(
+          `SELECT issue_key, assignee_display, bc_account_number FROM jira_issue_cache WHERE issue_key IN (${placeholders})`,
           ticketKeys,
         );
-        const assigneeMap = new Map(rows.map(r => [r.issue_key, r.assignee_display]));
+        const cacheMap = new Map(rows.map(r => [r.issue_key, r]));
         for (const item of items) {
-          (item as any).assignee_name = assigneeMap.get(item.ticket_id) ?? null;
+          const cached = cacheMap.get(item.ticket_id);
+          (item as any).assignee_name = cached?.assignee_display ?? null;
+          (item as any).bc_account_number = cached?.bc_account_number ?? null;
         }
       } catch { /* cache miss is fine — assignee stays null */ }
     }

@@ -22,6 +22,7 @@ const ALL_FIELDS = [
   'customfield_14185', // Agent Next Update
   'customfield_14494', // Resolution type
   'customfield_14527', // Problem ticket field
+  'customfield_14626', // BC Account Number
 ];
 
 export class JiraSyncService {
@@ -259,6 +260,7 @@ export class JiraSyncService {
     const issueEnvironmentText = extractText(f.customfield_13213);
     const developmentDetailsText = extractText(f.customfield_13215);
     const resolutionType = (f.customfield_14494 as any)?.value ?? null;
+    const bcAccountNumber = (f.customfield_14626 as string) ?? null;
     const agentNextUpdate = f.customfield_14185 ? new Date(f.customfield_14185 as string) : null;
     const agentLastUpdated = f.customfield_14081 ? new Date(f.customfield_14081 as string) : null;
     const organisationName = (() => {
@@ -294,7 +296,7 @@ export class JiraSyncService {
         development_details_text = ?, resolution_type = ?,
         agent_next_update = ?, agent_last_updated = ?,
         sla_breach_time = ?, sla_breached = ?, no_reply = ?, labels = ?,
-        issue_links_json = ?, fields_json = ?, organisation_name = ?, synced_at = GETUTCDATE()
+        issue_links_json = ?, fields_json = ?, organisation_name = ?, bc_account_number = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
         issue_key, jira_id, project_key, summary, description_text, description_adf,
         status_name, status_category, priority_name, issuetype_name,
@@ -307,7 +309,7 @@ export class JiraSyncService {
         development_details_text, resolution_type,
         agent_next_update, agent_last_updated,
         sla_breach_time, sla_breached, no_reply, labels,
-        issue_links_json, fields_json, organisation_name
+        issue_links_json, fields_json, organisation_name, bc_account_number
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
@@ -320,7 +322,7 @@ export class JiraSyncService {
         ?, ?,
         ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?
+        ?, ?, ?, ?
       );`,
       [
         // Source key
@@ -342,7 +344,7 @@ export class JiraSyncService {
         developmentDetailsText || null, resolutionType,
         agentNextUpdate, agentLastUpdated,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
-        issueLinksJson, fieldsJson, organisationName,
+        issueLinksJson, fieldsJson, organisationName, bcAccountNumber,
         // INSERT values (same order as columns)
         issue.key, issue.id, issue.key.split('-')[0], f.summary as string ?? null,
         descriptionText || null, descriptionAdf,
@@ -360,7 +362,7 @@ export class JiraSyncService {
         developmentDetailsText || null, resolutionType,
         agentNextUpdate, agentLastUpdated,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
-        issueLinksJson, fieldsJson, organisationName,
+        issueLinksJson, fieldsJson, organisationName, bcAccountNumber,
       ],
     );
   }

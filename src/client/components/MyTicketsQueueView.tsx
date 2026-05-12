@@ -88,6 +88,9 @@ function MyTicketRow({ ticket, selected, focused }: { ticket: RankedTicket; sele
           {fields.product && fields.product !== 'Unassigned' && (
             <span className="text-neutral-500">{fields.product}</span>
           )}
+          {fields.bcAccountNumber && (
+            <span className="text-amber-300/70 font-mono">{fields.bcAccountNumber}</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {fields.slaBreached && (
@@ -298,6 +301,8 @@ function MyTicketDetail({ ticket, actions, onDefer }: {
             </h2>
             <div className="flex items-center gap-3 mt-1.5 text-[11px] text-neutral-300">
               <span>Reporter: <span className="text-neutral-100 font-semibold">{(detail.issue?.reporter as any)?.displayName ?? ticket.fields.reporter ?? '—'}</span></span>
+              <span className="text-neutral-600">·</span>
+              <span>BC Account: {ticket.fields.bcAccountNumber ? <span className="text-amber-300 font-mono font-semibold">{ticket.fields.bcAccountNumber}</span> : <span className="text-red-400 italic">Not set</span>}</span>
               <span className="text-neutral-600">·</span>
               <span>Updated <span className="text-neutral-100">{timeAgo(detail.issue?.updated as string ?? ticket.fields.updated)}</span> ago</span>
               <span className="text-neutral-600">·</span>

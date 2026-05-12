@@ -11,4 +11,5 @@ export const JIRA_FIELDS = {
   AGENT_NEXT_UPDATE: 'customfield_14185',
   AGENT_LAST_UPDATED: 'customfield_14081',
   RESOLUTION_TYPE: 'customfield_14494',
+  BC_ACCOUNT_NUMBER: 'customfield_14626',
 } as const;

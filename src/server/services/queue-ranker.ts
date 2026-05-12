@@ -31,6 +31,7 @@ export interface TicketFields {
   slaBreachTime: string | null;
   slaBreached: boolean;
   agentNextUpdate: string | null;
+  bcAccountNumber: string | null;
 }
 
 export interface PendingDecision {
@@ -385,6 +386,7 @@ function issueToFields(issue: CachedIssue): TicketFields {
     slaBreachTime: issue.sla_breach_time?.toISOString() ?? null,
     slaBreached: issue.sla_breached,
     agentNextUpdate: issue.agent_next_update?.toISOString() ?? null,
+    bcAccountNumber: issue.bc_account_number,
   };
 }
 
@@ -394,6 +396,6 @@ function emptyFields(): TicketFields {
     tier: null, product: null, tldr: null, agentSummary: null,
     escalationReason: null, reporter: null, assignee: null,
     updated: null, created: null, slaBreachTime: null, slaBreached: false,
-    agentNextUpdate: null,
+    agentNextUpdate: null, bcAccountNumber: null,
   };
 }

@@ -8,6 +8,7 @@ interface ApprovalItem {
   reporter_name: string | null;
   reporter_email: string | null;
   assignee_name: string | null;
+  bc_account_number: string | null;
   ai_response_adf: string | null;
   conversation_json: string | null;
   kb_sources: string | null;

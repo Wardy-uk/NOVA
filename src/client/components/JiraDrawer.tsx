@@ -314,6 +314,10 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
               <div className="text-neutral-200">{fields.assigneeLabel || 'Unassigned'}</div>
             </div>
             <div>
+              <div className="text-[10px] uppercase tracking-widest mb-1">BC Account</div>
+              <div>{(issue as any)?.customfield_14626 || (issue as any)?.bc_account_number ? <span className="text-amber-300 font-mono font-semibold">{(issue as any).customfield_14626 ?? (issue as any).bc_account_number}</span> : <span className="text-red-400 italic text-[11px]">Not set</span>}</div>
+            </div>
+            <div>
               <div className="text-[10px] uppercase tracking-widest mb-1">Priority</div>
               <input
                 value={priority}

@@ -1771,6 +1771,10 @@ async function runMigrations(): Promise<void> {
     // Per-decision time saved tracking
     `IF COL_LENGTH('agent_decisions', 'estimated_minutes_saved') IS NULL
      ALTER TABLE agent_decisions ADD estimated_minutes_saved FLOAT NULL;`,
+
+    // BC Account Number on jira_issue_cache
+    `IF COL_LENGTH('jira_issue_cache', 'bc_account_number') IS NULL
+     ALTER TABLE jira_issue_cache ADD bc_account_number NVARCHAR(100) NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

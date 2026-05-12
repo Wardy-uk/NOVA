@@ -113,7 +113,8 @@ export function TicketBriefCard({ ticketKey, fields, tier, compact }: TicketBrie
       : (rawEsc && typeof rawEsc === 'object') ? ((rawEsc as any).value ?? (rawEsc as any).name ?? null)
       : null;
     const description = adfToText(fields.description);
-    return { tldr, agentSummary, troubleshooting, expectedOutcome, environment, escalationReason, description };
+    const bcAccountNumber = (fields.customfield_14626 as string) ?? (fields as any).bc_account_number ?? null;
+    return { tldr, agentSummary, troubleshooting, expectedOutcome, environment, escalationReason, description, bcAccountNumber };
   }, [fields]);
 
   const visibleFields = getBriefFieldsForTier(tier);
@@ -149,6 +150,16 @@ export function TicketBriefCard({ ticketKey, fields, tier, compact }: TicketBrie
           <span className="text-[10px] text-neutral-500">
             · {typeof fields.status === 'string' ? fields.status : fields.status.name}
           </span>
+        )}
+      </div>
+
+      {/* BC Account Number — always shown */}
+      <div className="mb-4 flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold">BC Account</span>
+        {resolved.bcAccountNumber ? (
+          <span className="text-[13px] text-amber-300 font-mono font-semibold">{resolved.bcAccountNumber}</span>
+        ) : (
+          <span className="text-[11px] text-red-400 italic">Not set</span>
         )}
       </div>
 

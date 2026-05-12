@@ -39,6 +39,7 @@ export interface CachedIssue {
   labels: string | null;
   issue_links_json: string | null;
   fields_json: string | null;
+  bc_account_number: string | null;
   synced_at: Date;
 }
 

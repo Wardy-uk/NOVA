@@ -9,6 +9,7 @@ interface ApprovalItem {
   reporter_name: string | null;
   reporter_email: string | null;
   assignee_name: string | null;
+  bc_account_number: string | null;
   ai_response_adf: string | null;
   conversation_json: string | null;
   kb_sources: string | null;
@@ -533,6 +534,10 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onReRev
               <div>
                 <span className="text-neutral-500 text-[11px]">Assignee</span>
                 <div className="text-neutral-300">{item.assignee_name || <span className="text-neutral-600 italic">Unassigned</span>}</div>
+              </div>
+              <div>
+                <span className="text-neutral-500 text-[11px]">BC Account</span>
+                <div>{item.bc_account_number ? <span className="text-amber-300 font-mono font-semibold">{item.bc_account_number}</span> : <span className="text-red-400 italic text-[11px]">Not set</span>}</div>
               </div>
               <div>
                 <span className="text-neutral-500 text-[11px]">Created</span>
