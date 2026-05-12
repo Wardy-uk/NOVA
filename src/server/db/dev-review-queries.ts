@@ -652,15 +652,15 @@ export class DevReviewQueries {
          WHERE t.kind IN ('accept','return')
          GROUP BY COALESCE(s.team, 'Unassigned'), t.kind`,
       ),
-      this.rows<{ jira_key: string; first_seen_at: string; team: string | null; status: string }>(
-        `SELECT jira_key, first_seen_at, team, status
+      this.rows<{ jira_key: string; first_seen_at: string; team: string | null; status: string; claimed_at: string | null }>(
+        `SELECT jira_key, first_seen_at, team, status, claimed_at
          FROM dev_review_state
          WHERE status != 'archived' AND first_seen_at IS NOT NULL`,
       ),
       this.rows<{ jira_key: string; first_action_at: string }>(
         `SELECT jira_key, MIN(created_at) AS first_action_at
          FROM dev_review_thread
-         WHERE kind IN ('comment','accept','return')
+         WHERE kind IN ('accept','return')
          GROUP BY jira_key`,
       ),
     ]);
@@ -765,9 +765,10 @@ export class DevReviewQueries {
     );
 
     // ── Unpicked KPI (data already fetched above) ──────────────────────
-    const firstPickupMap = new Map<string, number>();
+    // "Picked up" = someone claimed it OR accepted/returned it (not just commented)
+    const firstDecisionMap = new Map<string, number>();
     for (const r of firstPickupRows) {
-      firstPickupMap.set(r.jira_key, new Date(r.first_action_at).getTime());
+      firstDecisionMap.set(r.jira_key, new Date(r.first_action_at).getTime());
     }
 
     const now = Date.now();
@@ -779,8 +780,12 @@ export class DevReviewQueries {
       const deadlineMs = deadline.getTime();
       if (deadlineMs > now) continue; // still within window
 
-      // If first pickup happened before the deadline, no breach
-      const pickupMs = firstPickupMap.get(state.jira_key);
+      // Pickup = claimed_at or first accept/return, whichever came first
+      const claimedMs = state.claimed_at ? new Date(state.claimed_at).getTime() : undefined;
+      const decisionMs = firstDecisionMap.get(state.jira_key);
+      const pickupMs = claimedMs !== undefined && decisionMs !== undefined
+        ? Math.min(claimedMs, decisionMs)
+        : claimedMs ?? decisionMs;
       if (pickupMs !== undefined && pickupMs <= deadlineMs) continue;
 
       // Bucket by the calendar date the deadline fell on
