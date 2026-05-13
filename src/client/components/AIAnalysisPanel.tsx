@@ -12,11 +12,18 @@ interface AIDecision {
   created_at: string;
 }
 
+interface PendingApproval {
+  id: number;
+  status: string;
+}
+
 interface AIAnalysisPanelProps {
   ticketKey: string;
   decision?: AIDecision | null;
   onUseDraft?: (draft: string) => void;
   hideDraft?: boolean;
+  pendingApproval?: PendingApproval | null;
+  onApprovalActioned?: () => void;
 }
 
 function confidenceBar(c: number): string {
@@ -49,9 +56,17 @@ function parseJson(raw: string | null | undefined): any {
   try { return typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return null; }
 }
 
-export function AIAnalysisPanel({ ticketKey, decision: propDecision, onUseDraft, hideDraft }: AIAnalysisPanelProps) {
+function authHeaders(): Record<string, string> {
+  return { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` };
+}
+
+export function AIAnalysisPanel({ ticketKey, decision: propDecision, onUseDraft, hideDraft, pendingApproval, onApprovalActioned }: AIAnalysisPanelProps) {
   const [fetched, setFetched] = useState<AIDecision | null>(null);
   const [loading, setLoading] = useState(!propDecision);
+  const [approvalBusy, setApprovalBusy] = useState(false);
+  const [approvalResult, setApprovalResult] = useState<string | null>(null);
+  const [showDecline, setShowDecline] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
 
   useEffect(() => {
     if (propDecision !== undefined) return;
@@ -159,6 +174,90 @@ export function AIAnalysisPanel({ ticketKey, decision: propDecision, onUseDraft,
             <div className="text-[10px] text-neutral-400 bg-[#2f353d] rounded p-2 max-h-20 overflow-y-auto leading-relaxed">
               {draftResponse.slice(0, 300)}{draftResponse.length > 300 ? '...' : ''}
             </div>
+          </div>
+        )}
+
+        {/* Approve / Decline buttons */}
+        {pendingApproval && pendingApproval.status === 'pending' && !approvalResult && (
+          <div className="pt-2 border-t border-[#3a424d]">
+            {!showDecline ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    setApprovalBusy(true);
+                    try {
+                      const r = await fetch(`/api/agent/decisions/${pendingApproval.id}/decide`, {
+                        method: 'POST',
+                        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'execute' }),
+                      });
+                      const json = await r.json();
+                      if (!json.ok) throw new Error(json.error || 'Failed');
+                      setApprovalResult('Approved');
+                      if (onApprovalActioned) setTimeout(onApprovalActioned, 800);
+                    } catch { setApprovalResult('Error'); }
+                    finally { setApprovalBusy(false); }
+                  }}
+                  disabled={approvalBusy}
+                  className="px-3 py-1.5 text-[11px] rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
+                  style={{ background: '#10b981', boxShadow: '0 2px 8px rgba(16,185,129,0.4)' }}
+                >
+                  {approvalBusy ? 'Processing…' : 'Approve'}
+                </button>
+                <button
+                  onClick={() => setShowDecline(true)}
+                  disabled={approvalBusy}
+                  className="px-3 py-1.5 text-[11px] rounded-lg font-semibold text-red-400 border border-red-600/30 hover:bg-red-600/20 disabled:opacity-40"
+                >
+                  Decline
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <input
+                  value={declineReason}
+                  onChange={e => setDeclineReason(e.target.value)}
+                  placeholder="Reason for declining…"
+                  className="w-full bg-[#272C33] border border-[#3a424d] text-neutral-200 text-[11px] rounded p-2 focus:outline-none focus:border-red-500/50"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!declineReason.trim()) return;
+                      setApprovalBusy(true);
+                      try {
+                        const r = await fetch(`/api/agent/decisions/${pendingApproval.id}/decide`, {
+                          method: 'POST',
+                          headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'decline', declineReason: declineReason.trim() }),
+                        });
+                        const json = await r.json();
+                        if (!json.ok) throw new Error(json.error || 'Failed');
+                        setApprovalResult('Declined');
+                        setShowDecline(false);
+                        if (onApprovalActioned) setTimeout(onApprovalActioned, 800);
+                      } catch { setApprovalResult('Error'); }
+                      finally { setApprovalBusy(false); }
+                    }}
+                    disabled={approvalBusy || !declineReason.trim()}
+                    className="px-3 py-1.5 text-[11px] rounded-lg font-bold bg-red-600/20 text-red-400 border border-red-600/30 disabled:opacity-40"
+                  >
+                    {approvalBusy ? 'Processing…' : 'Confirm Decline'}
+                  </button>
+                  <button
+                    onClick={() => { setShowDecline(false); setDeclineReason(''); }}
+                    className="px-3 py-1.5 text-[11px] rounded-lg font-semibold text-neutral-400 hover:text-neutral-200"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {approvalResult && (
+          <div className={`text-[11px] font-semibold text-center py-1.5 rounded ${approvalResult === 'Declined' ? 'text-red-400' : approvalResult === 'Error' ? 'text-amber-400' : 'text-green-400'}`}>
+            {approvalResult}
           </div>
         )}
 

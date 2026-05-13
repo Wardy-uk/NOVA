@@ -492,6 +492,8 @@ function TicketDetailPanel({ ticketKey, ticket, onDefer, onRefreshQueue }: {
           <AINextActionCard ticketKey={ticketKey} pendingDecision={ticket.pendingDecision} onDecisionActioned={onRefreshQueue} />
           <AIAnalysisPanel
             ticketKey={ticketKey}
+            pendingApproval={ticket.pendingDecision ? { id: ticket.pendingDecision.id, status: 'pending' } : null}
+            onApprovalActioned={onRefreshQueue}
             onUseDraft={(draft) => {
               setCommentDraft(draft);
               setCommentType('public');

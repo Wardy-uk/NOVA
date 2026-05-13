@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { JiraRestClient } from './jira-client.js';
 import type { AgentDecision, ActionResult } from './agent-types.js';
 import type { EscalationLogService } from './escalation-log-service.js';
@@ -6,6 +7,11 @@ import type { LlmService } from './llm-service.js';
 import type { AssignmentEngine } from './assignment-engine.js';
 import { query, executeAndGetId } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+
+const CriticResultSchema = z.object({
+  approved: z.boolean(),
+  reason: z.string(),
+});
 
 const HIGH_STAKES_ACTIONS = ['close', 'resolve', 'draft_response', 'escalate', 'quick_win_close', 'transition'];
 
@@ -123,7 +129,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       const result = await this.llmService.call<{ approved: boolean; reason: string }>(
         prompt,
         'Evaluate this action and return your verdict as JSON.',
-        undefined as any,
+        CriticResultSchema,
         { callType: 'critic', temperature: 0.1, tier: 'cheap' as any },
       );
 

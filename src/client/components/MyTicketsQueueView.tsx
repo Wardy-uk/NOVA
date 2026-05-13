@@ -338,6 +338,8 @@ function MyTicketDetail({ ticket, actions, onDefer }: {
           <AINextActionCard ticketKey={ticketKey} pendingDecision={ticket.pendingDecision} onDecisionActioned={() => actions.refresh()} />
           <AIAnalysisPanel
             ticketKey={ticketKey}
+            pendingApproval={ticket.pendingDecision ? { id: ticket.pendingDecision.id, status: 'pending' } : null}
+            onApprovalActioned={() => actions.refresh()}
             onUseDraft={(draft) => {
               setCommentDraft(draft);
               setCommentType('public');

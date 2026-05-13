@@ -41,6 +41,8 @@ interface ApprovalItem {
   reasoning: string | null;
   shadow_mode: boolean;
   decision_id: number | null;
+  assignee_name: string | null;
+  bc_account_number: string | null;
 }
 
 interface ApprovalStats {
@@ -313,8 +315,10 @@ function ApprovalDetail({
       <GlassCard className="p-4">
         <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-3">Ticket Details</div>
         <div className="grid grid-cols-2 gap-3 text-[13px]">
+          <div><span className="text-neutral-500 text-[11px]">Assignee</span><div className="text-neutral-300">{item.assignee_name ?? 'Unassigned'}</div></div>
           <div><span className="text-neutral-500 text-[11px]">Reporter</span><div className="text-neutral-300">{item.reporter_name || 'Unknown'}{item.reporter_email && <span className="text-neutral-500 text-[11px] ml-1">({item.reporter_email})</span>}</div></div>
           <div><span className="text-neutral-500 text-[11px]">Priority</span><div><span className={`inline-block px-2 py-0.5 text-[11px] font-semibold rounded border ${priStyle}`}>{item.priority || 'Normal'}</span></div></div>
+          {item.bc_account_number && <div><span className="text-neutral-500 text-[11px]">BC Account</span><div className="text-amber-300 font-mono font-semibold">{item.bc_account_number}</div></div>}
           <div><span className="text-neutral-500 text-[11px]">Created</span><div className="text-neutral-300">{timeAgo(item.created_at)}</div></div>
           <div><span className="text-neutral-500 text-[11px]">Expires</span><div className={URGENCY_COLORS[expiryDisplay.urgency]}>{expiryDisplay.text}</div></div>
           {item.decided_by && <>

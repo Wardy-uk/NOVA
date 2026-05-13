@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { TicketBriefCard, type BriefFields } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
+import { AIAnalysisPanel } from './AIAnalysisPanel.js';
 import {
   UnifiedQueue,
   type UnifiedQueueConfig,
@@ -276,6 +277,9 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
       {/* AI Suggested Next Action */}
       <AINextActionCard ticketKey={ticket.ticket_key} compact />
 
+      {/* AI Analysis */}
+      <AIAnalysisPanel ticketKey={ticket.ticket_key} />
+
       {/* Risk Factors */}
       <GlassCard className="p-4" accentGradient="#ef4444 30%, #f59e0b 70%" accent>
         <div className="flex items-center justify-between mb-2">
@@ -318,6 +322,10 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
           <div><span className="text-neutral-500 text-[11px]">Assignee</span><div className="text-neutral-300">{ticket.assignee ?? 'Unassigned'}</div></div>
           <div><span className="text-neutral-500 text-[11px]">Reporter</span><div className="text-neutral-300">{ticket.reporter ?? '—'}</div></div>
           <div><span className="text-neutral-500 text-[11px]">Priority</span><div><span className={`inline-block px-2 py-0.5 text-[11px] font-semibold rounded border ${PRIORITY_STYLES[(ticket.priority || 'normal').toLowerCase()] || PRIORITY_STYLES.normal}`}>{ticket.priority || 'Normal'}</span></div></div>
+          {(() => {
+            const bc = (briefFields?.customfield_14626 as string) ?? (briefFields as any)?.bc_account_number ?? null;
+            return bc ? <div><span className="text-neutral-500 text-[11px]">BC Account</span><div className="text-amber-300 font-mono font-semibold">{bc}</div></div> : null;
+          })()}
           <div><span className="text-neutral-500 text-[11px]">Flagged</span><div className="text-neutral-300">{timeAgo(ticket.flagged_at)}</div></div>
           {ticket.reviewed_by && (
             <>
