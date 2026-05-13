@@ -129,7 +129,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       const result = await this.llmService.call<{ approved: boolean; reason: string }>(
         prompt,
         'Evaluate this action and return your verdict as JSON.',
-        CriticResultSchema,
+        CriticResultSchema as z.ZodType<{ approved: boolean; reason: string }>,
         { callType: 'critic', temperature: 0.1, tier: 'cheap' as any },
       );
 
