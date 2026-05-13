@@ -266,7 +266,7 @@ export function createApprovalRoutes(
     if (!bc) { res.json({ ok: false, error: 'Business Central integration not configured' }); return; }
 
     try {
-      const customer = await bc.getCustomerByNumber(req.params.accountNumber);
+      const customer = await bc.getCustomerByNumber(req.params.accountNumber as string);
       if (!customer) { res.json({ ok: true, data: null }); return; }
       res.json({ ok: true, data: { number: customer.number, displayName: customer.displayName, email: customer.email, phoneNumber: customer.phoneNumber, city: customer.city, balance: customer.balance, blocked: customer.blocked } });
     } catch (err) {

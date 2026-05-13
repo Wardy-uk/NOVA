@@ -8,7 +8,7 @@ import type { AssignmentEngine } from './assignment-engine.js';
 import { query, executeAndGetId } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 
-const CriticResultSchema = z.object({
+const CriticResultSchema: z.ZodType<{ approved: boolean; reason: string }> = z.object({
   approved: z.boolean(),
   reason: z.string(),
 });
