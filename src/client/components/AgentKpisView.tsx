@@ -1,3 +1,6 @@
+// TODO: Remove — duplicated by unified scorecard in QA dashboard (GET /api/kpi-data/agent-scorecard/:name)
+// This view's QA/GR agent-level scores overlap with QAView Overview tab and AgentCoachingView.
+// Consider replacing the QA/GR score columns with a link to the unified scorecard.
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
 /* ------------------------------------------------------------------ */

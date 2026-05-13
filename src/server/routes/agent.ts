@@ -3063,6 +3063,31 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.get('/coaching/synthesis', async (req, res) => {
+    const days = Math.min(parseInt(req.query.days as string, 10) || 30, 90);
+    const agent = req.query.agent as string | undefined;
+    try {
+      const agentFilter = agent ? `AND u.display_name = '${agent.replace(/'/g, "''")}'` : '';
+      const rows = await query<any>(`
+        SELECT
+          ac.id, ac.ticket_id, ac.agent_user_id, ac.nudge_type,
+          ac.message, ac.delivery_method,
+          CONVERT(VARCHAR(23), ac.created_at, 126) AS created_at,
+          u.display_name AS agent_name
+        FROM agent_coaching ac
+        LEFT JOIN users u ON u.id = ac.agent_user_id
+        WHERE ac.created_at >= DATEADD(day, -${days}, GETUTCDATE())
+          AND ac.delivery_method = 'synthesis'
+          ${agentFilter}
+        ORDER BY ac.created_at DESC
+        OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY
+      `);
+      res.json({ ok: true, data: rows });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get coaching synthesis' });
+    }
+  });
+
   // ── Roster & Assignment (WP-19) ──
 
   router.get('/roster', async (req, res) => {

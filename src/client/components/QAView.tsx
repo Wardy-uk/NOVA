@@ -510,6 +510,49 @@ export function QAView() {
               })}
             </div>
           )}
+
+          {/* Unified Agent Scorecard Summary */}
+          {agents.length > 0 && (
+            <>
+              <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Agent Scorecard</div>
+              <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden', marginBottom: '1.25rem' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                  <thead>
+                    <tr>
+                      {['Agent', 'QA Avg', 'Grade', 'GR Pass %', 'Tickets', ''].map(h => (
+                        <th key={h} style={{ ...th, fontSize: '0.72rem' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {agents.map(a => {
+                      const gr = grAgents.find((g: any) => g.agent?.toLowerCase() === a.assigneeName?.toLowerCase());
+                      const grPassPct = gr && gr.total > 0 ? Math.round(((gr.rule1Pass + gr.rule2Pass + gr.rule3Pass) / (gr.total * 3)) * 100) : null;
+                      const majorGrade = a.green >= a.amber && a.green >= a.red ? 'GREEN' : a.amber >= a.red ? 'AMBER' : 'RED';
+                      return (
+                        <tr key={a.assigneeName} style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <td style={{ padding: '0.5rem 0.75rem', color: C.text1, fontWeight: 500 }}>{a.assigneeName}</td>
+                          <td style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: scoreColour(Number(a.avgScore)) }}>{Number(a.avgScore).toFixed(1)}</td>
+                          <td style={{ padding: '0.5rem 0.75rem' }}>
+                            <span style={{ padding: '0.15rem 0.5rem', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600, color: majorGrade === 'GREEN' ? C.green : majorGrade === 'AMBER' ? C.amber : C.red, background: majorGrade === 'GREEN' ? 'rgba(34,197,94,0.1)' : majorGrade === 'AMBER' ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)' }}>{majorGrade}</span>
+                          </td>
+                          <td style={{ padding: '0.5rem 0.75rem', color: grPassPct != null ? (grPassPct >= 70 ? C.green : grPassPct >= 50 ? C.amber : C.red) : C.text3 }}>{grPassPct != null ? `${grPassPct}%` : '—'}</td>
+                          <td style={{ padding: '0.5rem 0.75rem', color: C.text2 }}>{a.total}</td>
+                          <td style={{ padding: '0.5rem 0.75rem' }}>
+                            <a
+                              href={`#scorecard-${encodeURIComponent(a.assigneeName)}`}
+                              onClick={(e) => { e.preventDefault(); setSection('agents'); }}
+                              style={{ color: C.blue, fontSize: '0.72rem', textDecoration: 'none' }}
+                            >Details →</a>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </>
       )}
 

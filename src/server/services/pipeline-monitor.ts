@@ -191,6 +191,8 @@ export class PipelineMonitor {
       `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'ticketType') ALTER TABLE dbo.jira_qa_resultsUAT ADD ticketType NVARCHAR(50);`,
       `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'ticketPriority') ALTER TABLE dbo.jira_qa_resultsUAT ADD ticketPriority NVARCHAR(50);`,
       `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'processedAt') ALTER TABLE dbo.jira_qa_resultsUAT ADD processedAt DATETIME;`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_resultsUAT') AND name = 'resolutionChecks') ALTER TABLE dbo.jira_qa_resultsUAT ADD resolutionChecks NVARCHAR(MAX);`,
+      `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_qa_results') AND name = 'resolutionChecks') ALTER TABLE dbo.jira_qa_results ADD resolutionChecks NVARCHAR(MAX);`,
       // Jira_QA_GoldenRulesUAT
       `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'CommentId') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD CommentId NVARCHAR(50);`,
       `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Jira_QA_GoldenRulesUAT') AND name = 'SuggestedRewrite') ALTER TABLE dbo.Jira_QA_GoldenRulesUAT ADD SuggestedRewrite NVARCHAR(2000);`,

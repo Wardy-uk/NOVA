@@ -6,6 +6,8 @@ import type { JiraRestClient } from './jira-client.js';
 import { loadPrompt } from './prompt-loader.js';
 import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
 import { tableSuffix } from './pipeline-monitor.js';
+import { extractText } from './shared/adf-utils.js';
+import type { CoachingEngine } from './coach.js';
 
 let pool: sql.ConnectionPool | null = null;
 
@@ -33,6 +35,19 @@ async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool
 
 const BOT_PATTERNS = ['nurtur', 'automation', 'jira service', 'servicedesk', 'bot'];
 
+const CLOSURE_PATTERNS = [
+  'issue has been resolved',
+  'closing this ticket',
+  'please don\'t hesitate to contact us',
+  'this has now been resolved',
+  'marking as resolved',
+  'this ticket has been resolved',
+  'we are closing this',
+  'resolved and closing',
+  'this is now resolved',
+  'please feel free to reopen',
+];
+
 const GrResultSchema = z.object({
   issueKey: z.string(),
   commentId: z.string(),
@@ -46,6 +61,8 @@ const GrResultSchema = z.object({
 type GrResult = z.infer<typeof GrResultSchema>;
 
 export class GrPipeline {
+  private coachingEngine: CoachingEngine | null = null;
+
   constructor(
     private settings: SettingsQueries,
     private llmService: LlmService,
@@ -53,6 +70,8 @@ export class GrPipeline {
     private jiraProject: string = 'NT',
     private monitor?: PipelineMonitor,
   ) {}
+
+  setCoachingEngine(engine: CoachingEngine): void { this.coachingEngine = engine; }
 
   private get target(): PipelineTarget {
     const val = this.settings.get('qa_pipeline_target');
@@ -93,7 +112,8 @@ export class GrPipeline {
       const agentLookup = await this.getAgentKeys(p);
       console.log(`[gr-pipeline] Loaded ${agentLookup.keys.size} agent keys, ${agentLookup.displayNames.size} display names`);
 
-      let skippedNoId = 0, skippedDate = 0, skippedInternal = 0, skippedCustomer = 0, skippedBot = 0, skippedNotAgent = 0, skippedAlready = 0, skippedEmpty = 0, eligible = 0;
+      let skippedNoId = 0, skippedDate = 0, skippedInternal = 0, skippedCustomer = 0, skippedBot = 0, skippedNotAgent = 0, skippedAlready = 0, skippedEmpty = 0, skippedClosure = 0, eligible = 0;
+      const scoredAgentNames = new Set<string>();
 
       for (const issue of issues) {
         const fields = issue.fields as any;
@@ -101,6 +121,7 @@ export class GrPipeline {
         const assignee = fields.assignee?.displayName ?? 'Unassigned';
         const priority = fields.priority?.name ?? 'Unknown';
         const issueType = fields.issuetype?.name ?? 'Unknown';
+        const ticketDone = fields.status?.statusCategory?.key === 'done';
 
         for (const comment of comments) {
           try {
@@ -120,11 +141,19 @@ export class GrPipeline {
               continue;
             }
 
+            const commentBody = extractText(comment.body);
+            if (!commentBody.trim()) { skippedEmpty++; continue; }
+
+            if (ticketDone && this.isClosureComment(commentBody)) {
+              if (skippedClosure < 3) {
+                console.log(`[gr-pipeline] Skipping closure comment ${issue.key}/${comment.id}: "${commentBody.slice(0, 80)}…"`);
+              }
+              skippedClosure++;
+              continue;
+            }
+
             const alreadyScored = await this.isAlreadyScored(p, s, issue.key, comment.id);
             if (alreadyScored) { skippedAlready++; continue; }
-
-            const commentBody = this.extractText(comment.body);
-            if (!commentBody.trim()) { skippedEmpty++; continue; }
 
             const agentEmail = await this.lookupAgentEmail(p, comment.author?.accountId);
 
@@ -146,15 +175,32 @@ export class GrPipeline {
             });
             eligible++;
             rowsAffected++;
+            const scoredAgentName = comment.author?.displayName;
+            if (scoredAgentName) scoredAgentNames.add(scoredAgentName);
           } catch (err) {
             console.warn(`[gr-pipeline] Failed to score ${issue.key}/${comment.id}:`, err instanceof Error ? err.message : err);
           }
         }
       }
 
-      const totalComments = skippedNoId + skippedDate + skippedInternal + skippedCustomer + skippedBot + skippedNotAgent + skippedAlready + skippedEmpty + eligible;
-      console.log(`[gr-pipeline] Comment filter stats: ${totalComments} total, ${eligible} eligible, skipped: noId=${skippedNoId} date=${skippedDate} internal=${skippedInternal} customer=${skippedCustomer} bot=${skippedBot} notAgent=${skippedNotAgent} already=${skippedAlready} empty=${skippedEmpty}`);
+      const totalComments = skippedNoId + skippedDate + skippedInternal + skippedCustomer + skippedBot + skippedNotAgent + skippedAlready + skippedEmpty + skippedClosure + eligible;
+      console.log(`[gr-pipeline] Comment filter stats: ${totalComments} total, ${eligible} eligible, skipped: noId=${skippedNoId} date=${skippedDate} internal=${skippedInternal} customer=${skippedCustomer} bot=${skippedBot} notAgent=${skippedNotAgent} already=${skippedAlready} empty=${skippedEmpty} closure=${skippedClosure}`);
+      const totalAgentPublicComments = eligible + skippedAlready + skippedClosure;
+      const scoredTotal = eligible + skippedAlready;
+      const coveragePct = totalAgentPublicComments > 0 ? Math.round(scoredTotal / totalAgentPublicComments * 100) : 0;
+      console.log(`[gr-pipeline] Coverage: ${scoredTotal} of ${totalAgentPublicComments} agent public comments scored (${coveragePct}%)`);
       console.log(`[gr-pipeline] Scored ${rowsAffected} comments from ${issues.length} issues → ${s || 'live'}`);
+
+      if (this.coachingEngine && scoredAgentNames.size > 0) {
+        console.log(`[gr-pipeline] Triggering coaching synthesis for ${scoredAgentNames.size} agents: ${[...scoredAgentNames].join(', ')}`);
+        try {
+          const synthesised = await this.coachingEngine.synthesiseForAgents([...scoredAgentNames]);
+          console.log(`[gr-pipeline] Coaching synthesis complete: ${synthesised}/${scoredAgentNames.size} agents`);
+        } catch (err) {
+          console.warn(`[gr-pipeline] Coaching synthesis failed:`, err instanceof Error ? err.message : err);
+        }
+      }
+
       await this.logRun(started, 'success', rowsAffected);
       return rowsAffected;
     } catch (err) {
@@ -344,6 +390,11 @@ export class GrPipeline {
     `);
   }
 
+  private isClosureComment(text: string): boolean {
+    const lower = text.toLowerCase();
+    return CLOSURE_PATTERNS.some(pattern => lower.includes(pattern));
+  }
+
   private async logRun(started: Date, status: 'success' | 'error', rowsAffected: number, errorMessage?: string): Promise<void> {
     await this.monitor?.logRun({
       pipeline_name: 'gr-comment-scoring',
@@ -356,14 +407,4 @@ export class GrPipeline {
     });
   }
 
-  private extractText(adf: any): string {
-    if (!adf) return '';
-    if (typeof adf === 'string') return adf;
-    if (adf.content) {
-      return adf.content.map((block: any) =>
-        block.content?.map((node: any) => node.text ?? '').join('') ?? ''
-      ).join('\n');
-    }
-    return '';
-  }
 }

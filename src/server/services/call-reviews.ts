@@ -2,36 +2,21 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { LlmService } from './llm-service.js';
 import { execute, query, executeAndGetId } from './database.js';
 import { z } from 'zod';
-
-const flexStr = z.any().transform((val): string => {
-  if (typeof val === 'string') return val;
-  if (val && typeof val === 'object') return val.description ?? val.summary ?? val.value ?? val.text ?? JSON.stringify(val);
-  return String(val ?? '');
-});
-
-const flexScore = z.any().transform((val): number => {
-  if (typeof val === 'number') return Math.max(1, Math.min(10, Math.round(val)));
-  if (typeof val === 'string') { const n = parseInt(val, 10); return isNaN(n) ? 5 : Math.max(1, Math.min(10, n)); }
-  if (val && typeof val === 'object') {
-    const c = val.score ?? val.value;
-    if (typeof c === 'number') return Math.max(1, Math.min(10, Math.round(c)));
-  }
-  return 5;
-});
+import { flexString, flexScore } from './shared/flex-schemas.js';
 
 const CallReviewSchema = z.object({
-  summary: flexStr,
+  summary: flexString,
   sentiment: z.any().transform((val): 'positive' | 'neutral' | 'negative' => {
     const s = String(val?.value ?? val ?? '').toLowerCase();
     if (s === 'positive') return 'positive';
     if (s === 'negative') return 'negative';
     return 'neutral';
   }),
-  keyTopics: z.array(flexStr),
-  actionItems: z.array(flexStr),
-  customerSatisfaction: flexScore,
-  agentPerformance: flexScore,
-  concerns: z.array(flexStr),
+  keyTopics: z.array(flexString),
+  actionItems: z.array(flexString),
+  customerSatisfaction: flexScore(1, 10),
+  agentPerformance: flexScore(1, 10),
+  concerns: z.array(flexString),
 });
 type CallReview = z.infer<typeof CallReviewSchema>;
 

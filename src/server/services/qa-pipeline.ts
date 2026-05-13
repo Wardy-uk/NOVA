@@ -6,6 +6,8 @@ import { QaTicketResultSchema, type QaTicketResult } from './qa-schemas.js';
 import { loadPrompt } from './prompt-loader.js';
 import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
 import { tableSuffix } from './pipeline-monitor.js';
+import { extractText } from './shared/adf-utils.js';
+import { execute } from './database.js';
 
 
 let pool: sql.ConnectionPool | null = null;
@@ -130,12 +132,12 @@ export class QaPipeline {
   async scoreSingle(issue: any): Promise<QaTicketResult | null> {
     const fields = issue.fields as any ?? issue;
     const summary = fields.summary ?? '';
-    const description = this.extractText(fields.description);
+    const description = extractText(fields.description);
     const assignee = fields.assignee?.displayName ?? 'Unassigned';
 
     const comments = fields.comment?.comments ?? [];
     const thread = comments.slice(-15).map((c: any) => {
-      const body = this.extractText(c.body);
+      const body = extractText(c.body);
       const isInternal = c.properties?.some((p: any) =>
         p.key === 'sd.public.comment' && p.value?.internal === true
       ) ?? false;
@@ -246,6 +248,8 @@ export class QaPipeline {
       (qa.accuracyScore * 0.35 + qa.clarityScore * 0.25 + qa.toneScore * 0.20 + qa.closureScore * 0.20) * 100
     ) / 100;
 
+    const resolutionChecksJson = JSON.stringify(qa.resolutionChecks ?? {});
+
     const request = p.request();
     request.input('issueKey', sql.NVarChar, issue.key);
     request.input('assigneeName', sql.NVarChar, assignee);
@@ -262,11 +266,12 @@ export class QaPipeline {
     request.input('severity', sql.NVarChar, qa.severity ?? null);
     request.input('category', sql.NVarChar, qa.category);
     request.input('issues', sql.NVarChar(2000), (qa.issues ?? '').slice(0, 2000));
-    request.input('coachingPoints', sql.NVarChar(2000), (qa.coachingPoints ?? '').slice(0, 2000));
-    request.input('suggestedReply', sql.NVarChar(2000), (qa.suggestedReply ?? '').slice(0, 2000));
+    request.input('coachingPoints', sql.NVarChar(2000), null);
+    request.input('suggestedReply', sql.NVarChar(2000), null);
     request.input('customerSentiment', sql.NVarChar(20), qa.customerSentiment ?? 'neutral');
     request.input('ticketType', sql.NVarChar(50), (fields.issuetype?.name ?? '').slice(0, 50));
     request.input('ticketPriority', sql.NVarChar(50), (fields.priority?.name ?? '').slice(0, 50));
+    request.input('resolutionChecks', sql.NVarChar(sql.MAX), resolutionChecksJson);
 
     await request.query(`
       INSERT INTO dbo.jira_qa_results${s}
@@ -274,26 +279,53 @@ export class QaPipeline {
          accuracyScore, clarityScore, toneScore, closureScore,
          grade, isConcerning, severity, category,
          issues, coachingPoints, suggestedReply, customerSentiment,
-         ticketType, ticketPriority, processedAt, CreatedAt)
+         ticketType, ticketPriority, resolutionChecks, processedAt, CreatedAt)
       VALUES
         (@issueKey, @assigneeName, @statusName, @ticketSummary, @qaType, @overallScore,
          @accuracyScore, @clarityScore, @toneScore, @closureScore,
          @grade, @isConcerning, @severity, @category,
          @issues, @coachingPoints, @suggestedReply, @customerSentiment,
-         @ticketType, @ticketPriority, SYSUTCDATETIME(), GETUTCDATE())
+         @ticketType, @ticketPriority, @resolutionChecks, SYSUTCDATETIME(), GETUTCDATE())
     `);
 
-    // Golden rules table is the GR pipeline's responsibility — QA pipeline only writes to jira_qa_results
+    await this.writeResolutionDecision(issue, qa, assignee);
   }
 
-  private extractText(adf: any): string {
-    if (!adf) return '';
-    if (typeof adf === 'string') return adf;
-    if (adf.content) {
-      return adf.content.map((block: any) =>
-        block.content?.map((node: any) => node.text ?? '').join('') ?? ''
-      ).join('\n');
+  private async writeResolutionDecision(issue: any, qa: QaTicketResult, assignee: string): Promise<void> {
+    const rc = qa.resolutionChecks;
+    if (!rc) return;
+
+    const checks = [
+      { name: 'Clarity', ...rc.clarity },
+      { name: 'Customer communication', ...rc.customerCommunication },
+      { name: 'Completeness', ...rc.completeness },
+      { name: 'Resolution type', ...rc.resolutionTypeMatch },
+    ];
+    const failedChecks = checks.filter(c => !c.passed);
+    const allPassed = failedChecks.length === 0;
+
+    const internalNote = allPassed
+      ? `🤖 Resolution Review — All checks passed.\n\n` +
+        checks.map(c => `✅ ${c.name}: ${c.detail}`).join('\n')
+      : `🤖 Resolution Review — ${failedChecks.length} check(s) failed\n\n` +
+        checks.map(c => `${c.passed ? '✅' : '❌'} ${c.name}: ${c.detail}`).join('\n') +
+        `\n\n@${assignee} — please review and update the resolution notes on this ticket.`;
+
+    try {
+      await execute(
+        `INSERT INTO agent_decisions
+          (ticket_id, event_type, action, confidence, reasoning, approval_required, shadow_mode, inputs, output)
+         VALUES (?, 'resolution_review', ?, 1.0, 'QA pipeline resolution check', 0, 0, ?, ?)`,
+        [
+          issue.key,
+          allPassed ? 'no_action' : 'comment',
+          JSON.stringify({ assignee, checks: qa.resolutionChecks }),
+          JSON.stringify({ overall_pass: allPassed, failed_checks: failedChecks.map(c => c.name), internal_note: internalNote }),
+        ],
+      );
+    } catch (err) {
+      console.warn(`[qa-pipeline] Failed to write resolution decision for ${issue.key}:`, err instanceof Error ? err.message : err);
     }
-    return '';
   }
+
 }

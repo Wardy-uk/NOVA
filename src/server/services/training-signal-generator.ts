@@ -1,7 +1,10 @@
+import sql from 'mssql';
 import { z } from 'zod';
 import type { LlmService } from './llm-service.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, execute, executeAndGetId } from './database.js';
+import type { PipelineTarget } from './pipeline-monitor.js';
+import { tableSuffix } from './pipeline-monitor.js';
 
 export interface TrainingSignal {
   id: number;
@@ -24,11 +27,44 @@ const RecommendationSchema = z.object({
   severity: z.enum(['low', 'medium', 'high']),
 });
 
+let pool: sql.ConnectionPool | null = null;
+
+async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool> {
+  if (pool?.connected) return pool;
+
+  const all = settings.getAll();
+  const server = all.kpi_sql_server;
+  const database = all.kpi_sql_database;
+  const user = all.kpi_sql_user;
+  const password = all.kpi_sql_password;
+
+  if (!server || !database || !user || !password) {
+    throw new Error('KPI SQL Server not configured');
+  }
+
+  pool = await new sql.ConnectionPool({
+    server, database, user, password,
+    options: { encrypt: true, trustServerCertificate: true },
+    requestTimeout: 30000,
+  }).connect();
+
+  return pool;
+}
+
 export class TrainingSignalGenerator {
   constructor(
     private llm: LlmService,
     private settings: SettingsQueries,
   ) {}
+
+  private get target(): PipelineTarget {
+    const val = this.settings.get('qa_pipeline_target');
+    return val === 'live' ? 'live' : 'uat';
+  }
+
+  private get s(): string {
+    return tableSuffix(this.target);
+  }
 
   async generateWeeklySignals(): Promise<number> {
     const agents = await query<{ assignee_account_id: string; assignee_display_name: string }>(
@@ -49,7 +85,7 @@ export class TrainingSignalGenerator {
   private async analyseAgent(agentId: string, agentName: string): Promise<number> {
     let signalCount = 0;
 
-    // 1. Escalation rate by request type
+    // 1. Escalation rate by request type (unchanged — reads from agent_decisions + jira_issue_cache)
     const escalationRates = await query<{
       request_type: string;
       total: number;
@@ -71,7 +107,6 @@ export class TrainingSignalGenerator {
       [agentId],
     );
 
-    // Get team averages for comparison
     const teamEscRates = await query<{ request_type: string; team_rate: number }>(
       `SELECT
          jic.request_type,
@@ -99,88 +134,114 @@ export class TrainingSignalGenerator {
       }
     }
 
-    // 2. QA scores by request type
-    const qaScores = await query<{
-      request_type: string;
-      avg_score: number;
-      ticket_count: number;
-    }>(
-      `SELECT
-         jic.request_type,
-         AVG(CAST(JSON_VALUE(ac.golden_rule_scores, '$.overall') AS FLOAT)) AS avg_score,
-         COUNT(*) AS ticket_count
-       FROM agent_coaching ac
-       JOIN jira_issue_cache jic ON jic.issue_key = ac.ticket_id
-       WHERE jic.assignee_account_id = ?
-         AND ac.created_at >= DATEADD(day, -30, GETUTCDATE())
-         AND ac.golden_rule_scores IS NOT NULL
-         AND jic.request_type IS NOT NULL
-       GROUP BY jic.request_type
-       HAVING COUNT(*) >= 3`,
-      [agentId],
-    );
+    // 2. GR scores from Jira_QA_GoldenRules (KPI SQL)
+    try {
+      const p = await getKpiPool(this.settings);
+      const s = this.s;
+      const safeName = agentName.replace(/'/g, "''");
 
-    const teamQaScores = await query<{ request_type: string; team_avg: number }>(
-      `SELECT
-         jic.request_type,
-         AVG(CAST(JSON_VALUE(ac.golden_rule_scores, '$.overall') AS FLOAT)) AS team_avg
-       FROM agent_coaching ac
-       JOIN jira_issue_cache jic ON jic.issue_key = ac.ticket_id
-       WHERE ac.created_at >= DATEADD(day, -30, GETUTCDATE())
-         AND ac.golden_rule_scores IS NOT NULL
-         AND jic.request_type IS NOT NULL
-       GROUP BY jic.request_type
-       HAVING COUNT(*) >= 5`,
-    );
-    const teamQaMap = new Map(teamQaScores.map(r => [r.request_type, r.team_avg]));
+      const grScores = await p.request().query(`
+        SELECT
+          AVG(CAST(Rule1Score AS FLOAT)) AS avg_ownership,
+          AVG(CAST(Rule2Score AS FLOAT)) AS avg_next_action,
+          AVG(CAST(Rule3Score AS FLOAT)) AS avg_timeframe,
+          AVG(CAST(OverallScore AS FLOAT)) AS avg_overall,
+          COUNT(*) AS total
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE (Assignee = '${safeName}' OR Updater = '${safeName}')
+          AND CreatedAt >= DATEADD(day, -30, GETUTCDATE())
+      `);
 
-    for (const score of qaScores) {
-      const teamAvg = teamQaMap.get(score.request_type) ?? 0;
-      if (score.avg_score < teamAvg * 0.8 && score.avg_score < 70) {
+      const teamGr = await p.request().query(`
+        SELECT
+          AVG(CAST(OverallScore AS FLOAT)) AS team_avg
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE CreatedAt >= DATEADD(day, -30, GETUTCDATE())
+      `);
+
+      const gr = grScores.recordset[0];
+      const teamGrAvg = teamGr.recordset[0]?.team_avg ?? 0;
+
+      if (gr?.total >= 3 && gr.avg_overall < teamGrAvg * 0.8 && gr.avg_overall < 2.0) {
         const rec = await this.generateRecommendation(
-          agentName, 'low_qa_score', score.request_type,
-          `Agent QA score is ${score.avg_score.toFixed(0)} on ${score.request_type} vs team average ${teamAvg.toFixed(0)}`,
+          agentName, 'low_gr_score', null,
+          `Agent GR overall score is ${gr.avg_overall.toFixed(1)} vs team average ${teamGrAvg.toFixed(1)} (scale 1-3). Ownership: ${gr.avg_ownership?.toFixed(1)}, Next Action: ${gr.avg_next_action?.toFixed(1)}, Timeframe: ${gr.avg_timeframe?.toFixed(1)}`,
         );
-        await this.saveSignal(agentId, agentName, 'low_qa_score', score.request_type, null,
-          score.avg_score, teamAvg, rec, null);
+        await this.saveSignal(agentId, agentName, 'low_gr_score', null, null,
+          gr.avg_overall, teamGrAvg, rec, null);
         signalCount++;
       }
-    }
 
-    // 3. Coaching nudge frequency
-    const nudgeCounts = await query<{ nudge_type: string; cnt: number }>(
-      `SELECT ac.nudge_type, COUNT(*) AS cnt
-       FROM agent_coaching ac
-       JOIN jira_issue_cache jic ON jic.issue_key = ac.ticket_id
-       WHERE jic.assignee_account_id = ?
-         AND ac.created_at >= DATEADD(day, -30, GETUTCDATE())
-         AND ac.nudge_type IS NOT NULL
-       GROUP BY ac.nudge_type
-       HAVING COUNT(*) >= 3`,
-      [agentId],
-    );
+      // 3. QA scores from jira_qa_results (KPI SQL)
+      const qaScores = await p.request().query(`
+        SELECT
+          AVG(CAST(overallScore AS FLOAT)) AS avg_overall,
+          SUM(CASE WHEN grade = 'RED' THEN 1 ELSE 0 END) AS red_count,
+          SUM(CASE WHEN grade = 'GREEN' THEN 1 ELSE 0 END) AS green_count,
+          COUNT(*) AS total
+        FROM dbo.jira_qa_results${s}
+        WHERE assigneeName = '${safeName}'
+          AND CreatedAt >= DATEADD(day, -30, GETUTCDATE())
+          AND ISNULL(qaType, '') <> 'excluded'
+      `);
 
-    const teamNudgeCounts = await query<{ nudge_type: string; team_avg: number }>(
-      `SELECT ac.nudge_type, CAST(COUNT(*) AS FLOAT) / NULLIF(COUNT(DISTINCT jic.assignee_account_id), 0) AS team_avg
-       FROM agent_coaching ac
-       JOIN jira_issue_cache jic ON jic.issue_key = ac.ticket_id
-       WHERE ac.created_at >= DATEADD(day, -30, GETUTCDATE())
-         AND ac.nudge_type IS NOT NULL
-       GROUP BY ac.nudge_type`,
-    );
-    const teamNudgeMap = new Map(teamNudgeCounts.map(r => [r.nudge_type, r.team_avg]));
+      const teamQa = await p.request().query(`
+        SELECT AVG(CAST(overallScore AS FLOAT)) AS team_avg
+        FROM dbo.jira_qa_results${s}
+        WHERE CreatedAt >= DATEADD(day, -30, GETUTCDATE())
+          AND ISNULL(qaType, '') <> 'excluded'
+      `);
 
-    for (const nudge of nudgeCounts) {
-      const teamAvg = teamNudgeMap.get(nudge.nudge_type) ?? 0;
-      if (nudge.cnt > teamAvg * 2 && nudge.cnt >= 5) {
+      const qa = qaScores.recordset[0];
+      const teamQaAvg = teamQa.recordset[0]?.team_avg ?? 0;
+
+      if (qa?.total >= 3 && qa.avg_overall < teamQaAvg * 0.8) {
         const rec = await this.generateRecommendation(
-          agentName, 'frequent_nudge', null,
-          `Agent received ${nudge.cnt} "${nudge.nudge_type}" nudges in 30 days vs team average ${teamAvg.toFixed(1)}`,
+          agentName, 'low_qa_score', null,
+          `Agent QA score is ${qa.avg_overall.toFixed(1)} vs team average ${teamQaAvg.toFixed(1)} (scale 1-10). ${qa.red_count} Red tickets out of ${qa.total} total.`,
         );
-        await this.saveSignal(agentId, agentName, 'frequent_nudge', null, nudge.nudge_type,
-          nudge.cnt, teamAvg, rec, null);
+        await this.saveSignal(agentId, agentName, 'low_qa_score', null, null,
+          qa.avg_overall, teamQaAvg, rec, null);
         signalCount++;
       }
+
+      // 4. Resolution check failure rate from jira_qa_results (KPI SQL)
+      const rcResults = await p.request().query(`
+        SELECT
+          resolutionChecks,
+          issueKey
+        FROM dbo.jira_qa_results${s}
+        WHERE assigneeName = '${safeName}'
+          AND CreatedAt >= DATEADD(day, -30, GETUTCDATE())
+          AND ISNULL(qaType, '') <> 'excluded'
+          AND resolutionChecks IS NOT NULL
+      `);
+
+      let rcFailCount = 0;
+      let rcTotalCount = 0;
+      for (const row of rcResults.recordset) {
+        try {
+          const checks = typeof row.resolutionChecks === 'string' ? JSON.parse(row.resolutionChecks) : row.resolutionChecks;
+          if (checks) {
+            rcTotalCount++;
+            const anyFail = Object.values(checks).some((c: any) => c && !c.passed);
+            if (anyFail) rcFailCount++;
+          }
+        } catch {}
+      }
+
+      if (rcTotalCount >= 3 && rcFailCount / rcTotalCount > 0.3) {
+        const failRate = rcFailCount / rcTotalCount;
+        const rec = await this.generateRecommendation(
+          agentName, 'high_resolution_fail_rate', null,
+          `Agent has ${(failRate * 100).toFixed(0)}% resolution check failure rate (${rcFailCount} of ${rcTotalCount} tickets). Tickets are being closed without meeting quality checks.`,
+        );
+        await this.saveSignal(agentId, agentName, 'high_resolution_fail_rate', null, null,
+          failRate, 0.1, rec, null);
+        signalCount++;
+      }
+    } catch (err) {
+      console.warn(`[training-signals] KPI query failed for ${agentName}:`, err instanceof Error ? err.message : err);
     }
 
     return signalCount;
@@ -225,7 +286,6 @@ Provide a specific, actionable recommendation in 1-2 sentences. Focus on what th
     metricValue: number | null, teamAverage: number | null,
     recommendation: string, exampleTickets: string | null,
   ): Promise<void> {
-    // Check for KB article coverage
     let kbLink: string | null = null;
     if (requestType) {
       const articles = await query<{ article_url: string }>(
@@ -236,7 +296,6 @@ Provide a specific, actionable recommendation in 1-2 sentences. Focus on what th
       if (articles.length > 0) {
         kbLink = articles[0].article_url;
       } else {
-        // Auto-log a KB gap if no article exists for this topic
         await execute(
           `INSERT INTO kb_gap_log (ticket_id, category, suggested_title, reason, status)
            VALUES (?, ?, ?, ?, 'open')`,

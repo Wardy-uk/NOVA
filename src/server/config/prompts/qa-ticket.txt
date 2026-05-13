@@ -33,12 +33,38 @@ Score this ticket across multiple quality dimensions:
 9. **category**: The primary quality dimension that drives the overall score
 10. **summary**: 1-2 sentence summary of the QA assessment
 11. **issues**: Key issues identified in this ticket (1-2 sentences, or empty string if none)
-12. **coachingPoints**: Specific coaching advice for the agent (1-2 actionable sentences)
-13. **suggestedReply**: Rewritten ideal response the agent could have sent (2-4 sentences)
-14. **customerSentiment**: "positive", "neutral", or "negative" — the customer's apparent sentiment
-15. **firstReplyAssessment**: Score the first agent reply specifically — was it timely, relevant, helpful?
-16. **closureAssessment**: Score the closure — was the resolution communicated clearly? Was the customer informed?
-17. **issuesFound**: Array of specific quality issues found (empty if none)
+12. **customerSentiment**: "positive", "neutral", or "negative" — the customer's apparent sentiment
+13. **firstReplyAssessment**: Score the first agent reply specifically — was it timely, relevant, helpful?
+14. **closureAssessment**: Score the closure — was the resolution communicated clearly? Was the customer informed?
+15. **issuesFound**: Array of specific quality issues found (empty if none)
+
+## Resolution Quality Checks
+
+In addition to the QA scores above, assess the resolution against four pass/fail checks:
+
+16. **resolutionChecks.clarity** — Is the resolution clearly documented? Can someone understand what was done?
+    - passed: true/false
+    - detail: one sentence explaining why it passed or failed
+    - A one-word close ("sorted", "fixed", "done") with no explanation FAILS this check
+    - A clear description of what was done and why PASSES
+
+17. **resolutionChecks.customerCommunication** — Was the customer informed of the resolution?
+    - passed: true/false
+    - detail: one sentence
+    - If the ticket was closed with only internal comments (no public reply explaining the resolution), this FAILS
+    - If the last public comment explains what was resolved and what to expect, this PASSES
+
+18. **resolutionChecks.completeness** — Were all reported issues addressed?
+    - passed: true/false
+    - detail: one sentence
+    - If the customer mentioned multiple issues and only some were addressed, this FAILS
+    - If all issues were addressed (or unaddressed ones were explicitly noted as separate tickets), this PASSES
+
+19. **resolutionChecks.resolutionTypeMatch** — Does the Jira resolution type match what actually happened?
+    - passed: true/false
+    - detail: one sentence
+    - If the resolution type is vague or wrong ("No Fault Found" on a ticket with a clear fault, or "Done" with no context), this FAILS
+    - suggestedType: what the resolution type should be, or null if it's correct
 
 ## Scoring Guide
 - 9-10: Exemplary — could be used as training material
@@ -47,95 +73,14 @@ Score this ticket across multiple quality dimensions:
 - 3-4: Below standard — significant issues that need coaching
 - 1-2: Poor — fundamental problems with the interaction
 
-## Golden Rules (scored separately, 0-3 each)
-
-In addition to the QA scores above, assess the agent's adherence to three "Golden Rules":
-
-13. **goldenRules.ownership** (0-3): Did the agent take clear ownership of the issue?
-    - 3 = Fully owned — proactively drove resolution, kept customer informed, followed up
-    - 2 = Mostly owned — handled the issue but missed some proactive steps
-    - 1 = Partially owned — reactive, customer had to chase or follow up
-    - 0 = No ownership — passed the buck, left customer hanging, no follow-through
-
-14. **goldenRules.nextAction** (0-3): Was the next action clearly communicated in every response?
-    - 3 = Every reply states what happens next, who does it, and when
-    - 2 = Most replies include next steps but occasionally vague
-    - 1 = Next action mentioned inconsistently or unclearly
-    - 0 = Customer left guessing what happens next
-
-15. **goldenRules.timeframe** (0-3): Were timeframes set and met?
-    - 3 = Clear timeframes given and met (or updated proactively if delayed)
-    - 2 = Timeframes given but occasionally missed without update
-    - 1 = Vague or missing timeframes in most responses
-    - 0 = No timeframes given, no sense of urgency communicated
-
-## Golden Rules — Calibration Examples
-
-These examples anchor how borderline cases should be scored. Use them to stay consistent over time.
-
-### Ownership (Rule 1)
-
-**Score 3 — PASS:**
-"Hi Jane, I've picked this up and I'm looking into it now. I'll update you within the hour once I've checked the config."
-→ Named themselves as owner, set expectation, proactive.
-
-**Score 2 — PASS:**
-"We're looking into this and will update you shortly."
-→ Implies ownership even without naming themselves. Acceptable.
-
-**Score 1 — FAIL:**
-"This has been forwarded to the relevant team."
-→ No personal ownership, passed to unnamed team, no follow-through promised.
-
-**Score 0 — FAIL:**
-(No response for 3 days, customer chases, different agent picks it up)
-→ Complete absence of ownership.
-
-### Next Action (Rule 2)
-
-**Score 3 — PASS:**
-"I've applied the fix. Please clear your browser cache and try logging in again. If it's still not working, reply here and I'll escalate to the dev team."
-→ Clear what customer should do, what happens if it fails, who acts next.
-
-**Score 2 — PASS:**
-"I've made the change on our end. Can you try again and let me know?"
-→ Next step is clear, but no fallback plan stated. Still acceptable.
-
-**Score 1 — FAIL:**
-"This should be sorted now."
-→ No next action for the customer. Are they meant to test? Confirm? Unclear.
-
-**Score 0 — FAIL:**
-"Closing this ticket."
-→ No explanation of what was done or what the customer should do.
-
-### Timeframe (Rule 3)
-
-**Score 3 — PASS:**
-"I need to check with the dev team on this. I'll have an update for you by end of day tomorrow (Wednesday)."
-→ Specific timeframe, named the day.
-
-**Score 2 — PASS:**
-"I'll look into this and get back to you as soon as I can."
-→ Vague but acknowledges urgency. Acceptable if they do follow up promptly.
-
-**Score 1 — FAIL:**
-"We'll get back to you."
-→ No sense of when. Customer left waiting indefinitely.
-
-**Score 0 — FAIL:**
-(Agent responds after 4 days with no acknowledgement of the delay)
-→ No timeframe given or met, no urgency.
-
-### Key calibration principle
-A ticket with a simple one-reply fix ("cleared cache, working now") should score 2+ on all three rules if the agent communicated clearly. Don't penalise brevity — penalise ambiguity. The baseline pass rate should be ~65-75% across all tickets.
-
 ## Rules
 - Score based on what actually happened, not what you'd have done differently
 - If the ticket was resolved quickly and correctly, that matters more than perfect prose
 - A simple fix done well deserves a good score — don't penalise simplicity
 - Flag concerning behaviour only for genuine issues (rude tone, wrong fix, security risk)
 - If the ticket was resolved by an automated process, score the process appropriately
-- Golden Rules are about agent behaviour, not ticket complexity — a simple ticket can still score 3/3 on all rules
+- For resolution checks: be fair but firm. Don't fail for minor style issues — focus on whether the customer would understand what happened
+- If the ticket was auto-closed (e.g. no reply from customer), the resolution may legitimately be brief — judge accordingly
+- Consider the ticket type: a simple how-to may not need a detailed resolution, but an incident or bug should document root cause
 
 Respond with valid JSON matching the schema. No markdown fencing.

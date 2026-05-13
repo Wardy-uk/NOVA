@@ -37,6 +37,14 @@ interface AgentDetail {
   }>;
 }
 
+interface SynthesisEntry {
+  id: number;
+  nudge_type: string | null;
+  message: string | null;
+  agent_name: string | null;
+  created_at: string;
+}
+
 interface ConcernEntry {
   issue_key: string;
   agent_name: string;
@@ -114,23 +122,33 @@ function GradeBar({ green, amber, red }: { green: number; amber: number; red: nu
   );
 }
 
+function severityColor(type: string | null): string {
+  if (!type) return 'text-neutral-400';
+  if (type.includes('critical') || type.includes('red')) return 'text-red-400';
+  if (type.includes('warning') || type.includes('weak') || type.includes('missing')) return 'text-amber-400';
+  return 'text-blue-400';
+}
+
 export function AgentCoachingView() {
   const [days, setDays] = useState(30);
   const [teamScores, setTeamScores] = useState<TeamScore[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [agentDetail, setAgentDetail] = useState<AgentDetail | null>(null);
   const [concerns, setConcerns] = useState<ConcernEntry[]>([]);
+  const [synthesis, setSynthesis] = useState<SynthesisEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadTeamData = useCallback(async () => {
     setLoading(true);
     try {
-      const [teamRes, concernRes] = await Promise.all([
+      const [teamRes, concernRes, synthRes] = await Promise.all([
         api(`/coaching/team?days=${days}`),
         api('/coaching/nudges?limit=100'),
+        api(`/coaching/synthesis?days=${days}`),
       ]);
       if (teamRes.ok) setTeamScores(teamRes.data ?? []);
       if (concernRes.ok) setConcerns(concernRes.data ?? []);
+      if (synthRes.ok) setSynthesis(synthRes.data ?? []);
     } finally {
       setLoading(false);
     }
@@ -150,12 +168,16 @@ export function AgentCoachingView() {
   const totalAssessments = teamScores.reduce((s, t) => s + t.assessments, 0);
   const totalConcerning = teamScores.reduce((s, t) => s + t.concerning_count, 0);
 
+  const agentSynthesis = selectedAgent
+    ? synthesis.filter(s => s.agent_name?.toLowerCase() === selectedAgent.toLowerCase())
+    : [];
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 border-b border-[#2f353d] bg-[#1a1d23]">
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-semibold text-neutral-200">Coaching Dashboard</h2>
-          <span className="text-[10px] text-neutral-500">Sourced from QA Pipeline</span>
+          <span className="text-[10px] text-neutral-500">Based on {totalAssessments} QA scores &amp; GR pipeline results</span>
         </div>
         <select
           value={days}
@@ -189,9 +211,9 @@ export function AgentCoachingView() {
                 <div className="text-[10px] text-neutral-500">active</div>
               </div>
               <div className="bg-[#1e2228] border border-[#2f353d] rounded-lg p-3">
-                <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Total Assessments</div>
-                <div className="text-2xl font-bold text-neutral-200">{totalAssessments}</div>
-                <div className="text-[10px] text-neutral-500">{days}d period</div>
+                <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Coaching Nudges</div>
+                <div className="text-2xl font-bold text-blue-400">{synthesis.length}</div>
+                <div className="text-[10px] text-neutral-500">{days}d synthesis</div>
               </div>
               <div className="bg-[#1e2228] border border-[#2f353d] rounded-lg p-3">
                 <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Concerning</div>
@@ -290,6 +312,28 @@ export function AgentCoachingView() {
                       <div className="text-xs text-neutral-500">No QA assessments in this period</div>
                     )}
 
+                    {/* Coaching Nudges for selected agent */}
+                    {agentSynthesis.length > 0 && (
+                      <div className="pt-1 border-t border-[#2f353d]">
+                        <div className="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Coaching Nudges</div>
+                        <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                          {agentSynthesis.map(s => (
+                            <div key={s.id} className="flex items-start gap-2 text-xs">
+                              <span className={`text-[10px] font-mono ${severityColor(s.nudge_type)}`}>
+                                {s.nudge_type ?? 'synthesis'}
+                              </span>
+                              <div className="flex-1 min-w-0 text-neutral-300 text-[11px]">
+                                {s.message?.slice(0, 200)}
+                              </div>
+                              <span className="text-[10px] text-neutral-500 shrink-0">
+                                {new Date(s.created_at).toLocaleDateString()}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {agentDetail.trend.length > 0 && (
                       <div>
                         <div className="text-[10px] text-neutral-500 uppercase tracking-wide mb-1">Daily Trend</div>
@@ -318,8 +362,8 @@ export function AgentCoachingView() {
                               <GradePill grade={t.grade} />
                               <div className="flex-1 min-w-0">
                                 <span className="text-neutral-300 font-mono">{t.issue_key}</span>
-                                {t.coaching_points && (
-                                  <div className="text-[10px] text-neutral-500 truncate">{t.coaching_points}</div>
+                                {t.category && (
+                                  <span className="text-[10px] text-neutral-500 ml-1">{t.category}</span>
                                 )}
                               </div>
                               <span className="text-[10px] text-neutral-500">{new Date(t.processed_at).toLocaleDateString()}</span>
@@ -333,7 +377,31 @@ export function AgentCoachingView() {
               </div>
             </div>
 
-            {/* Recent Concerns */}
+            {/* Recent Coaching Synthesis */}
+            {synthesis.length > 0 && (
+              <div className="bg-[#1e2228] border border-[#2f353d] rounded-lg overflow-hidden">
+                <div className="px-3 py-2 border-b border-[#2f353d]">
+                  <span className="text-xs font-semibold text-neutral-300">Recent Coaching Synthesis</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto divide-y divide-[#2f353d]">
+                  {synthesis.slice(0, 30).map((s) => (
+                    <div key={s.id} className="px-3 py-2 flex items-start gap-2">
+                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border border-[#3a424d] ${severityColor(s.nudge_type)}`}>
+                        {s.nudge_type ?? 'coaching'}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-neutral-300">{s.message?.slice(0, 300)}</div>
+                        <div className="text-[10px] text-neutral-500">
+                          {s.agent_name ?? 'Unknown'} · {new Date(s.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Recent QA Concerns */}
             <div className="bg-[#1e2228] border border-[#2f353d] rounded-lg overflow-hidden">
               <div className="px-3 py-2 border-b border-[#2f353d]">
                 <span className="text-xs font-semibold text-neutral-300">Recent QA Concerns</span>
@@ -347,10 +415,10 @@ export function AgentCoachingView() {
                     <div className="flex-1 min-w-0">
                       <div className="text-xs text-neutral-300">
                         <span className="font-mono">{c.issue_key}</span>
-                        {c.coaching_points && <span className="text-neutral-500"> — {c.coaching_points}</span>}
+                        {c.category && <span className="text-neutral-500"> — {c.category}</span>}
                       </div>
                       <div className="text-[10px] text-neutral-500">
-                        {c.agent_name} · {c.category ?? 'Uncategorised'} · {new Date(c.processed_at).toLocaleDateString()}
+                        {c.agent_name} · {new Date(c.processed_at).toLocaleDateString()}
                       </div>
                     </div>
                     <span className={`text-[10px] font-mono ${scoreColor(c.overall_score, 100)}`}>

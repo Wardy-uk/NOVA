@@ -10,7 +10,7 @@ import { Actor } from './actor.js';
 import { Observer } from './observer.js';
 import { KbSearchService } from './kb-search.js';
 import { LifecycleManager } from './lifecycle-manager.js';
-import { ResolutionReviewer } from './resolution-reviewer.js';
+
 import type { JiraCacheQueries } from './jira-cache-queries.js';
 import { Guardrails, type GuardrailResult } from './guardrails.js';
 import { QueueMonitor } from './queue-monitor.js';
@@ -63,7 +63,7 @@ export class AgentLoop {
   private actor: Actor;
   private observer: Observer;
   private lifecycleManager: LifecycleManager;
-  private resolutionReviewer: ResolutionReviewer;
+
   private guardrails: Guardrails;
   private queueMonitor: QueueMonitor;
   private autonomyEngine: AutonomyEngine;
@@ -106,13 +106,13 @@ export class AgentLoop {
       approvalQueries, cache, llmService,
     );
     this.reasoner.setLifecycleManager(this.lifecycleManager);
-    this.resolutionReviewer = new ResolutionReviewer(jiraClient, settings, llmService);
+
     this.guardrails = new Guardrails(settings);
     this.queueMonitor = new QueueMonitor(jiraClient, settings);
     const agentProject = settings.get('agent_jira_project') || 'NT';
     const primaryProject = agentProject.split(',')[0].trim();
     this.ticketClassifier = new TicketClassifier(llmService, jiraClient, primaryProject);
-    this.coachingEngine = new CoachingEngine(llmService, jiraClient, primaryProject);
+    this.coachingEngine = new CoachingEngine(llmService, jiraClient, primaryProject, settings);
     this.riskScorer = new RiskScorer(settings);
     this.pluginExecutor = new PluginToTpjExecutor(jiraClient, settings);
     this.autoRulesEngine = new AutoRulesEngine(jiraClient, this.pluginExecutor, this.observer, settings);
@@ -478,7 +478,6 @@ export class AgentLoop {
       const catchUpShadow = this.getShadowMode() === 'full_shadow';
       console.log(`[agent] Running catch-up sweep after hours...`);
       await this.runLifecycleSweep(catchUpShadow);
-      await this.runResolutionReview(catchUpShadow);
       await this.runTicketClassification();
       await this.runCoachingHealthChecks();
       await this.runRiskSweep();
@@ -658,7 +657,6 @@ export class AgentLoop {
 
         // These only run during working hours
         if (this.currentMode === 'full') {
-          await this.runResolutionReview(shadowMode === 'full_shadow');
           await this.runTicketClassification();
           await this.runCoachingHealthChecks();
           await this.runRiskSweep();
@@ -768,20 +766,6 @@ export class AgentLoop {
     }
   }
 
-  private async runResolutionReview(shadow: boolean): Promise<void> {
-    try {
-      console.log(`[agent] Running resolution review...`);
-      const decisions = await this.resolutionReviewer.reviewRecentResolutions();
-      for (const d of decisions) d.shadowMode = shadow;
-      for (const decision of decisions) {
-        await this.executeDecision(decision);
-      }
-      console.log(`[agent] Resolution review complete — ${decisions.length} reviewed`);
-    } catch (err) {
-      this.errorCount++;
-      console.error(`[agent] Resolution review failed:`, err instanceof Error ? err.message : err);
-    }
-  }
 
   private async runTicketClassification(): Promise<void> {
     try {

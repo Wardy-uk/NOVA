@@ -114,7 +114,6 @@ const CALL_TYPE_TIER_MAP: Record<string, LlmTier> = {
   coaching: 'reasoning',
   qa_scoring: 'reasoning',
   gr_comment_scoring: 'standard',
-  resolution_review: 'cheap',
   brief: 'reasoning',
   chase: 'standard',
   trend_analysis: 'standard',

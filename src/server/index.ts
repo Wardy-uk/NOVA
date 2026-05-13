@@ -141,6 +141,7 @@ import { createKbAdminRoutes } from './routes/kb-admin.js';
 import { KpiPipeline } from './services/kpi-pipeline.js';
 import { QaPipeline } from './services/qa-pipeline.js';
 import { GrPipeline } from './services/gr-pipeline.js';
+import { CoachingEngine } from './services/coach.js';
 import { QaDigest } from './services/qa-digest.js';
 import { PipelineMonitor } from './services/pipeline-monitor.js';
 import { DriftDetector } from './services/drift-detector.js';
@@ -1101,6 +1102,8 @@ async function main() {
     const kpiPipeline = new KpiPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor, jiraCacheQueries);
     const qaPipeline = new QaPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
     const grPipeline = new GrPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
+    const grCoachingEngine = new CoachingEngine(llmService, agentJiraClient, 'NT', settingsQueries);
+    grPipeline.setCoachingEngine(grCoachingEngine);
     const qaDigest = new QaDigest(settingsQueries, pipelineMonitor);
     const driftDetector = new DriftDetector(settingsQueries, agentLoop.getAlertService());
 

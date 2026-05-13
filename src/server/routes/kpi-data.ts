@@ -3,6 +3,7 @@ import sql from 'mssql';
 
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { UserQueries } from '../db/queries.js';
+import { query } from '../services/database.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import { ssoLogger } from '../services/sso-logger.js';
 import { TEAM_AGENTS } from './trends.js';
@@ -1319,6 +1320,166 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       res.json({ ok: true, data: result.recordset });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  // ─── Unified Agent Scorecard ──────────────────────────────────────── //
+  router.get('/agent-scorecard/:agentName', async (req, res) => {
+    try {
+      const agentName = decodeURIComponent(req.params.agentName);
+      const days = Math.min(Math.max(parseInt(req.query.days as string) || 30, 7), 90);
+      const env = parseEnv(req);
+      const s = suffix(env);
+      const p = await getPool();
+      const safeName = agentName.replace(/'/g, "''");
+      const jiraBaseUrl = (settingsQueries.getAll().jira_url || 'https://nurturtech.atlassian.net').replace(/\/$/, '');
+
+      // GR scores
+      const grResult = await p.request().query(`
+        SELECT
+          AVG(CAST(Rule1Score AS FLOAT)) AS avgOwnership,
+          AVG(CAST(Rule2Score AS FLOAT)) AS avgNextAction,
+          AVG(CAST(Rule3Score AS FLOAT)) AS avgTimeframe,
+          AVG(CAST(OverallScore AS FLOAT)) AS avgOverall,
+          SUM(CASE WHEN CAST(OverallScore AS FLOAT) >= 2.0 THEN 1 ELSE 0 END) AS passCount,
+          COUNT(*) AS total
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE (Assignee = '${safeName}' OR Updater = '${safeName}')
+          AND CreatedAt >= DATEADD(day, -${days}, GETUTCDATE())
+      `);
+      const gr = grResult.recordset[0];
+
+      const grLowest = await p.request().query(`
+        SELECT TOP 5
+          IssueKey, CommentId, Assignee, Updater,
+          CAST(Rule1Score AS FLOAT) AS rule1,
+          CAST(Rule2Score AS FLOAT) AS rule2,
+          CAST(Rule3Score AS FLOAT) AS rule3,
+          CAST(OverallScore AS FLOAT) AS overall,
+          CreatedAt
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE (Assignee = '${safeName}' OR Updater = '${safeName}')
+          AND CreatedAt >= DATEADD(day, -${days}, GETUTCDATE())
+        ORDER BY OverallScore ASC
+      `);
+      const lowestComments = grLowest.recordset.map((r: any) => ({
+        issueKey: r.IssueKey,
+        commentId: r.CommentId,
+        commentUrl: `${jiraBaseUrl}/browse/${r.IssueKey}?focusedId=${r.CommentId}`,
+        scores: { ownership: r.rule1, nextAction: r.rule2, timeframe: r.rule3, overall: r.overall },
+        createdAt: r.CreatedAt,
+      }));
+
+      // QA scores
+      const qaResult = await p.request().query(`
+        SELECT
+          AVG(CAST(overallScore AS FLOAT)) AS avgOverall,
+          SUM(CASE WHEN grade = 'GREEN' THEN 1 ELSE 0 END) AS greenCount,
+          SUM(CASE WHEN grade = 'AMBER' THEN 1 ELSE 0 END) AS amberCount,
+          SUM(CASE WHEN grade = 'RED' THEN 1 ELSE 0 END) AS redCount,
+          COUNT(*) AS total
+        FROM dbo.jira_qa_results${s}
+        WHERE assigneeName = '${safeName}'
+          AND CreatedAt >= DATEADD(day, -${days}, GETUTCDATE())
+          AND ISNULL(qaType, '') <> 'excluded'
+      `);
+      const qa = qaResult.recordset[0];
+
+      // Resolution check fail rate
+      const rcResult = await p.request().query(`
+        SELECT resolutionChecks
+        FROM dbo.jira_qa_results${s}
+        WHERE assigneeName = '${safeName}'
+          AND CreatedAt >= DATEADD(day, -${days}, GETUTCDATE())
+          AND ISNULL(qaType, '') <> 'excluded'
+          AND resolutionChecks IS NOT NULL
+      `);
+      let rcFail = 0, rcTotal = 0;
+      for (const row of rcResult.recordset) {
+        try {
+          const checks = typeof row.resolutionChecks === 'string' ? JSON.parse(row.resolutionChecks) : row.resolutionChecks;
+          if (checks) {
+            rcTotal++;
+            if (Object.values(checks).some((c: any) => c && !c.passed)) rcFail++;
+          }
+        } catch { /* skip malformed */ }
+      }
+
+      // Call QA (n8n.dbo.SupportCallAnalysis — same SQL Server)
+      let callQa: any = null;
+      try {
+        const tblCheck = await p.request().query(`SELECT OBJECT_ID('n8n.dbo.SupportCallAnalysis') AS oid`);
+        if (tblCheck.recordset[0]?.oid) {
+          const callResult = await p.request().query(`
+            SELECT
+              AVG(CAST(OverallScore AS FLOAT)) AS avgOverall,
+              AVG(CAST(ToneScore AS FLOAT)) AS avgTone,
+              AVG(CAST(ConfidenceScore AS FLOAT)) AS avgConfidence,
+              AVG(CAST(KnowledgeScore AS FLOAT)) AS avgKnowledge,
+              AVG(CAST(FlowScore AS FLOAT)) AS avgFlow,
+              AVG(CAST(SatisfactionScore AS FLOAT)) AS avgSatisfaction,
+              COUNT(*) AS total
+            FROM n8n.dbo.SupportCallAnalysis
+            WHERE AgentName = '${safeName}'
+              AND CAST(CallEndTime AS DATE) >= DATEADD(day, -${days}, GETUTCDATE())
+          `);
+          const c = callResult.recordset[0];
+          if (c?.total > 0) {
+            callQa = {
+              avgOverall: c.avgOverall, avgTone: c.avgTone, avgConfidence: c.avgConfidence,
+              avgKnowledge: c.avgKnowledge, avgFlow: c.avgFlow, avgSatisfaction: c.avgSatisfaction,
+              total: c.total,
+            };
+          }
+        }
+      } catch { /* Call QA table may not exist */ }
+
+      // Coaching nudges (local MSSQL)
+      let coaching: any = null;
+      try {
+        const coachRows = await query<any>(
+          `SELECT TOP 5 id, coaching_points, delivery_method, created_at
+           FROM agent_coaching
+           WHERE agent_name = ? AND delivery_method = 'synthesis'
+           ORDER BY created_at DESC`,
+          [agentName],
+        );
+        if (coachRows.length > 0) {
+          const nudges: any[] = [];
+          for (const row of coachRows) {
+            try {
+              const parsed = JSON.parse(row.coaching_points);
+              if (parsed?.nudges) nudges.push(...parsed.nudges);
+            } catch { /* skip malformed */ }
+          }
+          coaching = { recentSyntheses: coachRows.length, nudges: nudges.slice(0, 10) };
+        }
+      } catch { /* coaching table may not exist */ }
+
+      res.json({
+        ok: true,
+        data: {
+          agent: agentName,
+          period: { days },
+          goldenRules: gr?.total > 0 ? {
+            avgOwnership: gr.avgOwnership, avgNextAction: gr.avgNextAction,
+            avgTimeframe: gr.avgTimeframe, avgOverall: gr.avgOverall,
+            passRate: gr.total > 0 ? gr.passCount / gr.total : null,
+            total: gr.total,
+            lowestComments,
+          } : null,
+          ticketQa: qa?.total > 0 ? {
+            avgOverall: qa.avgOverall,
+            grades: { green: qa.greenCount, amber: qa.amberCount, red: qa.redCount },
+            total: qa.total,
+            resolutionCheckFailRate: rcTotal > 0 ? rcFail / rcTotal : null,
+          } : null,
+          callQa,
+          coaching,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Scorecard query failed' });
     }
   });
 

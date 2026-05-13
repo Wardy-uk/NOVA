@@ -4,6 +4,7 @@ import type { KbSearchService } from './kb-search.js';
 import { BriefResultSchema, type BriefResult } from './brief-schema.js';
 import { loadPrompt } from './prompt-loader.js';
 import { query } from './database.js';
+import { extractText } from './shared/adf-utils.js';
 
 export class BriefEngine {
   constructor(
@@ -24,13 +25,13 @@ export class BriefEngine {
 
     const fields = issue.fields as any;
     const summary = fields.summary ?? '';
-    const description = this.extractText(fields.description);
+    const description = extractText(fields.description);
     const reporter = fields.reporter;
     const org = fields.customfield_10002?.name ?? 'Unknown';
 
     const comments = fields.comment?.comments ?? [];
     const thread = comments.slice(-10).map((c: any) => {
-      const body = this.extractText(c.body);
+      const body = extractText(c.body);
       return `[${c.author?.displayName}]: ${body.slice(0, 500)}`;
     }).join('\n\n');
 
@@ -172,14 +173,4 @@ export class BriefEngine {
     }
   }
 
-  private extractText(adf: any): string {
-    if (!adf) return '';
-    if (typeof adf === 'string') return adf;
-    if (adf.content) {
-      return adf.content.map((block: any) =>
-        block.content?.map((node: any) => node.text ?? '').join('') ?? ''
-      ).join('\n');
-    }
-    return '';
-  }
 }

@@ -1,3 +1,5 @@
+// TODO: Remove — duplicated by unified scorecard in QA dashboard (GET /api/kpi-data/agent-scorecard/:name)
+// The QA/GR quality columns in this leaderboard overlap with the QA Dashboard unified agent scorecard.
 import { useState, useEffect, useCallback } from 'react';
 
 /* ------------------------------------------------------------------ */
