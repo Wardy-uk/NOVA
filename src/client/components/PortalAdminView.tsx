@@ -230,7 +230,7 @@ function SettingsPanel() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch(`${API}/settings`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+    fetch(`${API}/settings`)
       .then(r => r.json())
       .then(d => { if (d.ok) setSettings(d.data || {}); })
       .catch(console.error)
@@ -242,10 +242,7 @@ function SettingsPanel() {
     try {
       await fetch(`${API}/settings`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
     } catch { /* ignore */ }
