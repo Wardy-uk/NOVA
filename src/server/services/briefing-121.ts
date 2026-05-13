@@ -1,7 +1,30 @@
+import sql from 'mssql';
 import { z } from 'zod';
 import type { LlmService } from './llm-service.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, execute, executeAndGetId } from './database.js';
+import type { PipelineTarget } from './pipeline-monitor.js';
+import { tableSuffix } from './pipeline-monitor.js';
+
+let kpiPool: sql.ConnectionPool | null = null;
+
+async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool> {
+  if (kpiPool?.connected) return kpiPool;
+  const all = settings.getAll();
+  const server = all.kpi_sql_server;
+  const database = all.kpi_sql_database;
+  const user = all.kpi_sql_user;
+  const password = all.kpi_sql_password;
+  if (!server || !database || !user || !password) {
+    throw new Error('KPI SQL Server not configured');
+  }
+  kpiPool = await new sql.ConnectionPool({
+    server, database, user, password,
+    options: { encrypt: true, trustServerCertificate: true },
+    requestTimeout: 30000,
+  }).connect();
+  return kpiPool;
+}
 
 export interface OneToOneBrief {
   id: number;
@@ -63,7 +86,7 @@ export class Briefing121Service {
     const [ticketPerf, escalations, qaData, coachingSignals, autonomyData] = await Promise.all([
       this.getTicketPerformance(agentId, periodStart),
       this.getEscalationAnalysis(agentId, periodStart),
-      this.getQaData(agentId, periodStart),
+      this.getQaData(agentName, periodStart),
       this.getCoachingSignals(agentId),
       this.getAutonomyInteraction(agentId, periodStart),
     ]);
@@ -185,45 +208,58 @@ Generate: a brief headline summarising performance, and 2-3 specific evidence-ba
     };
   }
 
-  private async getQaData(agentId: string, since: Date): Promise<{
+  private get grSuffix(): string {
+    const val = this.settings.get('qa_pipeline_target');
+    return tableSuffix(val === 'live' ? 'live' : 'uat');
+  }
+
+  private async getQaData(agentName: string, since: Date): Promise<{
     average: number | null;
     best: Array<{ ticket_key: string; score: number; summary: string }>;
     worst: Array<{ ticket_key: string; score: number; summary: string }>;
   }> {
-    const avg = await query<{ avg_score: number | null }>(
-      `SELECT AVG(CAST(JSON_VALUE(golden_rule_scores, '$.overall') AS FLOAT)) AS avg_score
-       FROM agent_coaching
-       WHERE golden_rule_scores IS NOT NULL
-         AND created_at >= ?
-         AND ticket_id IN (SELECT issue_key FROM jira_issue_cache WHERE assignee_account_id = ?)`,
-      [since, agentId],
-    );
+    try {
+      const p = await getKpiPool(this.settings);
+      const s = this.grSuffix;
+      const safeName = agentName.replace(/'/g, "''");
+      const sinceStr = since.toISOString().split('T')[0];
 
-    const best = await query<{ ticket_key: string; score: number; summary: string }>(
-      `SELECT TOP 3 ac.ticket_id AS ticket_key,
-         CAST(JSON_VALUE(ac.golden_rule_scores, '$.overall') AS FLOAT) AS score,
-         jic.summary
-       FROM agent_coaching ac
-       JOIN jira_issue_cache jic ON jic.issue_key = ac.ticket_id
-       WHERE ac.golden_rule_scores IS NOT NULL AND ac.created_at >= ?
-         AND jic.assignee_account_id = ?
-       ORDER BY score DESC`,
-      [since, agentId],
-    );
+      const avg = await p.request().query(`
+        SELECT AVG(CAST(OverallScore AS FLOAT)) AS avg_score
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE (Assignee = '${safeName}' OR Updater = '${safeName}')
+          AND CreatedAt >= '${sinceStr}'
+      `);
 
-    const worst = await query<{ ticket_key: string; score: number; summary: string }>(
-      `SELECT TOP 3 ac.ticket_id AS ticket_key,
-         CAST(JSON_VALUE(ac.golden_rule_scores, '$.overall') AS FLOAT) AS score,
-         jic.summary
-       FROM agent_coaching ac
-       JOIN jira_issue_cache jic ON jic.issue_key = ac.ticket_id
-       WHERE ac.golden_rule_scores IS NOT NULL AND ac.created_at >= ?
-         AND jic.assignee_account_id = ?
-       ORDER BY score ASC`,
-      [since, agentId],
-    );
+      const bestResult = await p.request().query(`
+        SELECT TOP 3 gr.IssueKey AS ticket_key,
+          CAST(gr.OverallScore AS FLOAT) AS score,
+          gr.Summary AS summary
+        FROM dbo.Jira_QA_GoldenRules${s} gr
+        WHERE (gr.Assignee = '${safeName}' OR gr.Updater = '${safeName}')
+          AND gr.CreatedAt >= '${sinceStr}'
+        ORDER BY gr.OverallScore DESC
+      `);
 
-    return { average: avg[0]?.avg_score ?? null, best, worst };
+      const worstResult = await p.request().query(`
+        SELECT TOP 3 gr.IssueKey AS ticket_key,
+          CAST(gr.OverallScore AS FLOAT) AS score,
+          gr.Summary AS summary
+        FROM dbo.Jira_QA_GoldenRules${s} gr
+        WHERE (gr.Assignee = '${safeName}' OR gr.Updater = '${safeName}')
+          AND gr.CreatedAt >= '${sinceStr}'
+        ORDER BY gr.OverallScore ASC
+      `);
+
+      return {
+        average: avg.recordset[0]?.avg_score ?? null,
+        best: bestResult.recordset,
+        worst: worstResult.recordset,
+      };
+    } catch (err) {
+      console.warn('[briefing-121] KPI query failed for GR data:', err instanceof Error ? err.message : err);
+      return { average: null, best: [], worst: [] };
+    }
   }
 
   private async getCoachingSignals(agentId: string): Promise<Array<{ signal_type: string; detail: string; request_type: string | null }>> {

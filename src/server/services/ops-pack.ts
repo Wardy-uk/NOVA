@@ -1,7 +1,29 @@
+import sql from 'mssql';
 import { z } from 'zod';
 import type { LlmService } from './llm-service.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, executeAndGetId } from './database.js';
+import { tableSuffix } from './pipeline-monitor.js';
+
+let kpiPool: sql.ConnectionPool | null = null;
+
+async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool> {
+  if (kpiPool?.connected) return kpiPool;
+  const all = settings.getAll();
+  const server = all.kpi_sql_server;
+  const database = all.kpi_sql_database;
+  const user = all.kpi_sql_user;
+  const password = all.kpi_sql_password;
+  if (!server || !database || !user || !password) {
+    throw new Error('KPI SQL Server not configured');
+  }
+  kpiPool = await new sql.ConnectionPool({
+    server, database, user, password,
+    options: { encrypt: true, trustServerCertificate: true },
+    requestTimeout: 30000,
+  }).connect();
+  return kpiPool;
+}
 
 export interface OpsPack {
   id: number;
@@ -232,15 +254,11 @@ Generate a brief headline, up to 3 key decisions needing attention (with context
   }
 
   private async getTeamPerformance(project: string, since: Date): Promise<OpsPackContent['team_performance']> {
-    const agents = await query<{
-      agent_name: string; volume: number; qa_avg: number | null;
-    }>(
+    const agents = await query<{ agent_name: string; volume: number }>(
       `SELECT
          jic.assignee_display AS agent_name,
-         COUNT(*) AS volume,
-         AVG(CAST(JSON_VALUE(ac.golden_rule_scores, '$.overall') AS FLOAT)) AS qa_avg
+         COUNT(*) AS volume
        FROM jira_issue_cache jic
-       LEFT JOIN agent_coaching ac ON ac.ticket_id = jic.issue_key AND ac.golden_rule_scores IS NOT NULL
        WHERE jic.project_key = ? AND jic.jira_updated >= ?
          AND jic.assignee_display IS NOT NULL
        GROUP BY jic.assignee_display
@@ -248,12 +266,30 @@ Generate a brief headline, up to 3 key decisions needing attention (with context
       [project, since],
     );
 
+    const grMap = new Map<string, number>();
+    try {
+      const p = await getKpiPool(this.settings);
+      const s = tableSuffix(this.settings.get('qa_pipeline_target') === 'live' ? 'live' : 'uat');
+      const sinceStr = since.toISOString().split('T')[0];
+      const grResult = await p.request().query(`
+        SELECT Assignee, AVG(CAST(OverallScore AS FLOAT)) AS avg_score
+        FROM dbo.Jira_QA_GoldenRules${s}
+        WHERE CreatedAt >= '${sinceStr}'
+        GROUP BY Assignee
+      `);
+      for (const row of grResult.recordset) {
+        if (row.Assignee) grMap.set(row.Assignee, row.avg_score);
+      }
+    } catch (err) {
+      console.warn('[ops-pack] KPI query failed for GR averages:', err instanceof Error ? err.message : err);
+    }
+
     const avgVolume = agents.length > 0 ? agents.reduce((s, a) => s + a.volume, 0) / agents.length : 0;
 
     return agents.map(a => ({
       agent_name: a.agent_name,
       volume: a.volume,
-      qa_avg: a.qa_avg,
+      qa_avg: grMap.get(a.agent_name) ?? null,
       status: (a.volume < avgVolume * 0.7 ? 'needs_support' : a.volume > avgVolume * 1.3 ? 'ahead' : 'on_track') as 'ahead' | 'on_track' | 'needs_support',
     }));
   }
