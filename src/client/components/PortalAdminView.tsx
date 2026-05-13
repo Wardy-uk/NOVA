@@ -7,7 +7,7 @@ function useFetch<T>(path: string, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    fetch(path, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+    fetch(path)
       .then(r => r.json())
       .then(d => { if (d.ok) setData(d.data); })
       .catch(console.error)
