@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 
 interface Props {
-  breachAt: string;
+  breachAt: string | null | undefined;
 }
 
 export function SLATimer({ breachAt }: Props) {
@@ -9,6 +9,12 @@ export function SLATimer({ breachAt }: Props) {
   const [urgency, setUrgency] = useState<'ok' | 'warning' | 'danger'>('ok');
 
   useEffect(() => {
+    if (!breachAt || isNaN(new Date(breachAt).getTime())) {
+      setRemaining('—');
+      setUrgency('ok');
+      return;
+    }
+
     const update = () => {
       const diff = new Date(breachAt).getTime() - Date.now();
 

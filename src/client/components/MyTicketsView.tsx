@@ -502,6 +502,58 @@ function TicketDetailPanel({ ticketKey, ticket, onDefer, onRefreshQueue }: {
               }, 100);
             }}
           />
+
+          {/* Ticket Details grid */}
+          <GlassCard className="p-4">
+            <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-3">Ticket Details</div>
+            <div className="grid grid-cols-2 gap-3 text-[13px]">
+              <div>
+                <span className="text-neutral-500 text-[11px]">Assignee</span>
+                <div className="text-neutral-300">
+                  {(detail.issue?.assignee && isObj(detail.issue.assignee) ? (detail.issue.assignee as any).displayName : null)
+                    ?? ticket.fields.assignee ?? 'Unassigned'}
+                </div>
+              </div>
+              <div>
+                <span className="text-neutral-500 text-[11px]">Reporter</span>
+                <div className="text-neutral-300">
+                  {(detail.issue?.reporter && isObj(detail.issue.reporter) ? (detail.issue.reporter as any).displayName : null)
+                    ?? ticket.fields.reporter ?? '—'}
+                </div>
+              </div>
+              <div>
+                <span className="text-neutral-500 text-[11px]">Priority</span>
+                <div className="text-neutral-300">
+                  {(detail.issue?.priority && isObj(detail.issue.priority) ? (detail.issue.priority as any).name : null)
+                    ?? ticket.fields.priority ?? 'Normal'}
+                </div>
+              </div>
+              <div>
+                <span className="text-neutral-500 text-[11px]">Created</span>
+                <div className="text-neutral-300">{timeAgo(ticket.fields.created ?? (detail.issue?.created as string))} ago</div>
+              </div>
+              {ticket.fields.slaBreachTime && (
+                <div className="col-span-2">
+                  <span className="text-neutral-500 text-[11px]">SLA</span>
+                  <div className={ticket.fields.slaBreached ? 'text-red-400 font-semibold' : 'text-neutral-300'}>
+                    {ticket.fields.slaBreached ? 'BREACHED' : `Breach at ${new Date(ticket.fields.slaBreachTime).toLocaleString()}`}
+                  </div>
+                </div>
+              )}
+              {ticket.fields.product && (
+                <div>
+                  <span className="text-neutral-500 text-[11px]">Product</span>
+                  <div className="text-neutral-300">{ticket.fields.product}</div>
+                </div>
+              )}
+              {ticket.fields.bcAccountNumber && (
+                <div>
+                  <span className="text-neutral-500 text-[11px]">BC Account</span>
+                  <div className="text-neutral-300">{ticket.fields.bcAccountNumber}</div>
+                </div>
+              )}
+            </div>
+          </GlassCard>
         </div>
 
         {/* Right: Activity + Comments + Actions */}

@@ -111,7 +111,7 @@ export class AutoRulesEngine {
     event: TicketEvent,
     shadowMode: AgentShadowMode,
   ): Promise<boolean> {
-    if (event.eventType !== 'ticket_created') return false;
+    if (event.eventType !== 'ticket_created' && event.eventType !== 'backfill') return false;
 
     const match = await this.evaluate(event);
     if (!match) return false;

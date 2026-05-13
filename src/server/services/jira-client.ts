@@ -367,8 +367,8 @@ export class JiraRestClient {
     if (options?.visibility) {
       payload.visibility = options.visibility;
     }
-    if (options?.internal) {
-      payload.properties = [{ key: 'sd.public.comment', value: { internal: true } }];
+    if (options?.internal !== undefined) {
+      payload.properties = [{ key: 'sd.public.comment', value: { internal: options.internal } }];
     }
     return this.request<unknown>('POST', `issue/${issueKey}/comment`, payload);
   }
@@ -402,15 +402,15 @@ export class JiraRestClient {
     if (options?.comment) {
       const commentAdd: Record<string, unknown> = { body: options.comment.body };
       if (options.comment.visibility) commentAdd.visibility = options.comment.visibility;
-      if (options.comment.internal) {
-        commentAdd.properties = [{ key: 'sd.public.comment', value: { internal: true } }];
+      if (options.comment.internal !== undefined) {
+        commentAdd.properties = [{ key: 'sd.public.comment', value: { internal: options.comment.internal } }];
       }
       payload.update = {
         comment: [{ add: commentAdd }],
       };
     }
     // Retry loop: strip fields Jira rejects as "not on the appropriate screen"
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 6; attempt++) {
       try {
         await this.request<void>('POST', `issue/${issueKey}/transitions`, payload);
         return;
