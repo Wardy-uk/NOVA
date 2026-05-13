@@ -2429,45 +2429,47 @@ ${panelHtml}
     }
   });
 
-  // ── P6: Customer Portal routes ──
-  if (settingsQueries.get('portal_enabled') === 'true') {
-    console.log('[N.O.V.A] Portal enabled — wiring portal routes');
+  // ── P6: Customer Portal routes (always wired, gated by portal_enabled setting) ──
+  const portalGate: import('express').RequestHandler = (_req, res, next) => {
+    if (settingsQueries.get('portal_enabled') === 'true') return next();
+    res.status(503).json({ ok: false, error: 'Customer portal is disabled' });
+  };
 
-    const portalJiraClient = buildOnboardingJiraClient();
-    const portalJira = new PortalJiraService(settingsQueries, portalJiraClient);
-    const portalIntake = new PortalIntakeService(settingsQueries, portalJira);
-    const portalChat = new PortalChatService(settingsQueries, typeof llmService !== 'undefined' ? llmService : null, portalJira);
-    const portalKb = new PortalKbService(settingsQueries, mcpManager);
+  const portalJiraClient = buildOnboardingJiraClient();
+  const portalJira = new PortalJiraService(settingsQueries, portalJiraClient);
+  const portalIntake = new PortalIntakeService(settingsQueries, portalJira);
+  const portalChat = new PortalChatService(settingsQueries, typeof llmService !== 'undefined' ? llmService : null, portalJira);
+  const portalKb = new PortalKbService(settingsQueries, mcpManager);
 
-    // Gap 5: Playbook service
-    const { PortalPlaybookService } = await import('./services/portal-playbooks.js');
-    portalChat.setPlaybookService(new PortalPlaybookService(settingsQueries));
+  // Gap 5: Playbook service
+  const { PortalPlaybookService } = await import('./services/portal-playbooks.js');
+  portalChat.setPlaybookService(new PortalPlaybookService(settingsQueries));
 
-    // Start KB sync timer
-    portalKb.startSync();
+  // Start KB sync timer (checks portal_enabled internally)
+  portalKb.startSync();
 
-    // Refresh portal categories from Jira daily
-    jobRegistry.register('portal-category-refresh', 'Portal intake category refresh', async () => {
-      await portalIntake.refreshCategories();
-    }, 24 * 60 * 60 * 1000);
+  // Refresh portal categories from Jira daily
+  jobRegistry.register('portal-category-refresh', 'Portal intake category refresh', async () => {
+    if (settingsQueries.get('portal_enabled') !== 'true') return;
+    await portalIntake.refreshCategories();
+  }, 24 * 60 * 60 * 1000);
 
-    // Auth routes (no portal auth middleware — these handle login/callback)
-    app.use('/api/portal/auth', createPortalAuthRoutes(settingsQueries));
+  // Auth routes (no portal auth middleware — these handle login/callback)
+  app.use('/api/portal/auth', portalGate, createPortalAuthRoutes(settingsQueries));
 
-    // KB routes (public — no auth required for read)
-    app.use('/api/portal/kb', createPortalKbRoutes(portalKb));
+  // KB routes (public — no auth required for read)
+  app.use('/api/portal/kb', portalGate, createPortalKbRoutes(portalKb));
 
-    // Authenticated portal routes
-    const portalAuth = portalAuthMiddleware(settingsQueries, getRoles);
-    app.use('/api/portal', portalAuth, createPortalTicketRoutes(portalJira, portalIntake));
-    app.use('/api/portal', portalAuth, createPortalChatRoutes(portalChat));
-    app.use('/api/portal', portalAuth, createPortalEventsRoutes());
+  // Authenticated portal routes
+  const portalAuth = portalAuthMiddleware(settingsQueries, getRoles);
+  app.use('/api/portal', portalGate, portalAuth, createPortalTicketRoutes(portalJira, portalIntake));
+  app.use('/api/portal', portalGate, portalAuth, createPortalChatRoutes(portalChat));
+  app.use('/api/portal', portalGate, portalAuth, createPortalEventsRoutes());
 
-    // Portal admin (requires internal NOVA auth + admin role)
-    app.use('/api/portal/admin', requireRole('admin', 'super_admin'), createPortalAdminRoutes(settingsQueries));
-  } else {
-    console.log('[N.O.V.A] Portal disabled (set portal_enabled=true to activate)');
-  }
+  // Portal admin (requires internal NOVA auth + admin role)
+  app.use('/api/portal/admin', requireRole('admin', 'super_admin'), createPortalAdminRoutes(settingsQueries));
+
+  console.log(`[N.O.V.A] Portal routes wired (currently ${settingsQueries.get('portal_enabled') === 'true' ? 'enabled' : 'disabled'} — toggle via Admin > Feature Flags)`);
 
   // Serve portal SPA (always serve even if portal disabled — shows login page)
   app.get('/portal', (_req, res) => {

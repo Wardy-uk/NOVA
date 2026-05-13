@@ -2122,15 +2122,12 @@ export function AdminView() {
             <div className="space-y-2">
               {[
                 { key: 'feature_instance_setup', label: 'Instance Setup Tracking', desc: 'Show setup checklist on delivery entries' },
-                { key: 'portal_enabled', label: 'Customer Portal', desc: 'Enable the customer portal and its API routes. Requires restart.', restart: true },
+                { key: 'portal_enabled', label: 'Customer Portal', desc: 'Enable the customer portal and its API routes. Takes effect immediately.' },
               ].map(flag => (
                 <div key={flag.key} className="flex items-center justify-between px-3 py-2 rounded bg-[#272C33] border border-[#3a424d]">
                   <div>
                     <span className="text-xs text-neutral-200">{flag.label}</span>
                     <span className="text-[10px] text-neutral-500 ml-2">{flag.desc}</span>
-                    {flag.restart && featureFlags[flag.key] !== undefined && (
-                      <span className="text-[10px] text-amber-400 ml-2">⚠ Restart NOVA after changing</span>
-                    )}
                   </div>
                   <button
                     onClick={() => toggleFeatureFlag(flag.key, !featureFlags[flag.key])}
