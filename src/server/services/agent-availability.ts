@@ -22,10 +22,11 @@ export interface DaySnapshot {
   availableCount: number;
 }
 
-interface KpiAgent {
+export interface KpiAgent {
   AgentId: number;
   display_name: string;
   pool: string;
+  PeopleHrId: string | null;
 }
 
 export class AgentAvailabilityService {
@@ -62,7 +63,8 @@ export class AgentAvailabilityService {
     const result = await p.request().query(`
       SELECT AgentId,
              LTRIM(RTRIM(AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(AgentSurname, ''))) AS display_name,
-             LOWER(Team) AS pool
+             LOWER(Team) AS pool,
+             PeopleHrId
       FROM dbo.Agent WHERE IsActive = 1 AND Department = 'NT'
       ORDER BY AgentName
     `);
