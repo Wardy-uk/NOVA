@@ -94,7 +94,7 @@ export function createSettingsRoutes(
   });
 
   // PUT /api/settings/:key — Update a global setting (admin/editor only)
-  router.put('/:key', requireRole('admin', 'editor'), (req, res) => {
+  router.put('/:key', requireRole('admin', 'super_admin', 'editor'), (req, res) => {
     const parsed = SettingUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ ok: false, error: parsed.error.message });
