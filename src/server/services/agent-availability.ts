@@ -52,6 +52,10 @@ export class AgentAvailabilityService {
     } catch { return null; }
   }
 
+  async getAgentsFromKpiPublic(): Promise<KpiAgent[]> {
+    return this.getAgentsFromKpi();
+  }
+
   private async getAgentsFromKpi(): Promise<KpiAgent[]> {
     const p = await this.getKpiPool();
     if (!p) return [];

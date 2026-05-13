@@ -126,6 +126,7 @@ import { JiraCacheQueries } from './services/jira-cache-queries.js';
 import { LlmService } from './services/llm-service.js';
 import { AssignmentEngine } from './services/assignment-engine.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
+import { syncPeopleHR } from './services/people-hr-sync.js';
 import { TicketClassifier } from './services/ticket-classifier.js';
 import { BriefEngine } from './services/brief-engine.js';
 
@@ -1034,6 +1035,23 @@ async function main() {
     agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
     agentLoop.setAssignmentEngine(assignmentEngine);
     const availabilityService = new AgentAvailabilityService(settingsQueries);
+
+    // People HR → agent_availability sync (every 2 hours, initial run after 30s)
+    jobRegistry.register('people-hr-sync', 'People HR leave sync', async () => {
+      try {
+        const agents = await availabilityService.getAgentsFromKpiPublic();
+        await syncPeopleHR(settingsQueries, availabilityService, agents);
+      } catch (err) {
+        console.warn('[people-hr-sync] error:', err instanceof Error ? err.message : err);
+      }
+    }, 2 * 60 * 60 * 1000);
+    setTimeout(async () => {
+      try {
+        const agents = await availabilityService.getAgentsFromKpiPublic();
+        await syncPeopleHR(settingsQueries, availabilityService, agents);
+      } catch (err) { console.warn('[people-hr-sync] initial sync error:', err instanceof Error ? err.message : err); }
+    }, 30_000);
+
     const ticketClassifier = new TicketClassifier(llmService, agentJiraClient, 'NT');
     const kbEmbedder = new KbEmbedder(settingsQueries);
     agentLoop.setKbEmbedder(kbEmbedder);

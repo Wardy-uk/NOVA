@@ -3222,6 +3222,19 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.post('/availability/sync-peoplehr', async (_req, res) => {
+    try {
+      const svc = deps?.availabilityService;
+      if (!svc) { res.json({ ok: false, error: 'Availability service not available' }); return; }
+      const { syncPeopleHR } = await import('../services/people-hr-sync.js');
+      const agents = await svc.getAgentsFromKpiPublic();
+      const result = await syncPeopleHR(deps.settingsQueries!, svc, agents);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Sync failed' });
+    }
+  });
+
   // ── KPI Pipeline (WP-16) ──
 
   router.post('/kpi/snapshot', async (_req, res) => {
