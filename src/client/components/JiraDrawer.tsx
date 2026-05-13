@@ -95,6 +95,11 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
   const [description, setDescription] = useState(fields.description);
   const [priority, setPriority] = useState(fields.priority);
   const [dueDate, setDueDate] = useState(fields.dueDate);
+  const [bcSearchOpen, setBcSearchOpen] = useState(false);
+  const [bcSearchQuery, setBcSearchQuery] = useState('');
+  const [bcSearchResults, setBcSearchResults] = useState<Array<{ number: string; displayName: string; email: string; city: string; blocked: string }>>([]);
+  const [bcSearchLoading, setBcSearchLoading] = useState(false);
+  const [bcLinkedNumber, setBcLinkedNumber] = useState<string | null>(null);
 
   useEffect(() => {
     setSummary(fields.summary);
@@ -151,6 +156,35 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
   const canUpdate = tools.some((t) => t.includes('jira_update_issue'));
   const canComment = tools.some((t) => t.includes('jira_add_comment') || t.includes('jira_create_comment'));
   const canTransition = tools.some((t) => t.includes('jira_transition_issue') || t.includes('jira_do_transition'));
+
+  const bcAccountNumber = bcLinkedNumber || (issue as any)?.customfield_14626 || (issue as any)?.bc_account_number || null;
+
+  const handleBcSearch = async () => {
+    if (bcSearchQuery.trim().length < 2) return;
+    setBcSearchLoading(true);
+    const token = localStorage.getItem('nova_auth_token') || '';
+    try {
+      const res = await fetch(`/api/approvals/bc/search?q=${encodeURIComponent(bcSearchQuery.trim())}`, { headers: { Authorization: `Bearer ${token}` } });
+      const json = await res.json();
+      if (json.ok) setBcSearchResults(json.data);
+    } catch { /* ignore */ }
+    setBcSearchLoading(false);
+  };
+
+  const handleBcLink = async (accountNumber: string) => {
+    const token = localStorage.getItem('nova_auth_token') || '';
+    try {
+      await fetch('/api/approvals/bc/link', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticketKey: issueKey, accountNumber }),
+      });
+      setBcLinkedNumber(accountNumber);
+      setBcSearchOpen(false);
+      setBcSearchResults([]);
+      setBcSearchQuery('');
+    } catch { /* ignore */ }
+  };
 
   // Filter to only allowed transitions
   const allowedTransitions = transitions.filter((t) => t.name && findAllowedTransition(t.name));
@@ -315,7 +349,13 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-widest mb-1">BC Account</div>
-              <div>{(issue as any)?.customfield_14626 || (issue as any)?.bc_account_number ? <span className="text-amber-300 font-mono font-semibold">{(issue as any).customfield_14626 ?? (issue as any).bc_account_number}</span> : <span className="text-red-400 italic text-[11px]">Not set</span>}</div>
+              <div>{bcAccountNumber
+                ? <span className="text-amber-300 font-mono font-semibold">{bcAccountNumber}</span>
+                : <span className="flex items-center gap-1">
+                    <span className="text-red-400 italic text-[11px]">Not set</span>
+                    <button onClick={() => setBcSearchOpen(true)} className="text-[10px] text-blue-400 hover:text-blue-300 underline">Search BC</button>
+                  </span>
+              }</div>
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-widest mb-1">Priority</div>
@@ -575,6 +615,47 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
                 Transition
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Search BC Modal */}
+      {bcSearchOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setBcSearchOpen(false)}>
+          <div className="bg-[#1e2228] border border-[#3a424d] rounded-lg w-[480px] max-h-[70vh] overflow-y-auto p-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-neutral-200">Search Business Central</h3>
+              <button onClick={() => setBcSearchOpen(false)} className="text-neutral-500 hover:text-neutral-300 text-lg">&times;</button>
+            </div>
+            <div className="flex gap-2 mb-3">
+              <input
+                value={bcSearchQuery}
+                onChange={e => setBcSearchQuery(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleBcSearch()}
+                placeholder="Account name, reg number, or email domain"
+                className="flex-1 bg-[#2f353d] text-neutral-200 rounded px-2 py-1.5 text-xs border border-[#3a424d]"
+                autoFocus
+              />
+              <button onClick={handleBcSearch} disabled={bcSearchLoading || bcSearchQuery.trim().length < 2} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded">
+                {bcSearchLoading ? '...' : 'Search'}
+              </button>
+            </div>
+            {bcSearchResults.length > 0 && (
+              <div className="space-y-1">
+                {bcSearchResults.map(r => (
+                  <div key={r.number} className="flex items-center justify-between bg-[#2a2f37] rounded px-3 py-2 text-xs">
+                    <div>
+                      <div className="text-neutral-200 font-medium">{r.displayName}</div>
+                      <div className="text-neutral-500">{r.number} · {r.city}{r.blocked && r.blocked !== ' ' ? ` · Blocked: ${r.blocked}` : ''}</div>
+                    </div>
+                    <button onClick={() => handleBcLink(r.number)} className="text-blue-400 hover:text-blue-300 text-[11px] font-medium">Link</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {bcSearchResults.length === 0 && bcSearchQuery && !bcSearchLoading && (
+              <div className="text-neutral-500 text-xs text-center py-4">No results — try a different search term</div>
+            )}
           </div>
         </div>
       )}

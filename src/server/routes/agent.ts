@@ -2745,15 +2745,16 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
-  router.post('/classifications/run', async (_req, res) => {
+  router.post('/classifications/run', async (req, res) => {
     try {
       const classifier = deps?.ticketClassifier;
       if (!classifier) {
         res.status(503).json({ ok: false, error: 'Classifier not available' });
         return;
       }
-      const results = await classifier.classifyResolved();
-      res.json({ ok: true, data: { classified: results.length } });
+      const hours = Math.min(parseInt(req.query.hours as string, 10) || 24, 168);
+      const results = await classifier.classifyResolved(hours);
+      res.json({ ok: true, data: { classified: results.length, lookbackHours: hours } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Classification run failed' });
     }
@@ -3169,6 +3170,25 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to set availability' });
+    }
+  });
+
+  router.delete('/availability', async (req, res) => {
+    const { rosterId, date } = req.body;
+    if (!rosterId || !date) {
+      res.status(400).json({ ok: false, error: 'rosterId and date are required' });
+      return;
+    }
+    try {
+      const svc = deps?.availabilityService;
+      if (!svc) {
+        res.status(503).json({ ok: false, error: 'Availability service not available' });
+        return;
+      }
+      await svc.clearAvailability(rosterId, date);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to clear availability' });
     }
   });
 

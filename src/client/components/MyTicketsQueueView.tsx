@@ -547,8 +547,14 @@ const BAND_COLLAPSED: TicketBand[] = ['DEFERRED', 'HYGIENE', 'WAITING'];
 export function MyTicketsQueueView({ tasks, loading, onUpdateTask, agentUsername, agentDisplayName, teamName }: Props) {
   const { queue, loading: queueLoading, refresh } = useMyTicketsQueue(agentUsername);
   const [deferTicketKey, setDeferTicketKey] = useState<string | null>(null);
+  const [showDevTickets, setShowDevTickets] = useState(() => localStorage.getItem('nova_show_dev_tickets') === 'true');
 
-  const tickets = queue?.tickets ?? [];
+  const allTickets = queue?.tickets ?? [];
+  const tickets = useMemo(() =>
+    showDevTickets ? allTickets : allTickets.filter(t => t.fields.tier !== 'Development'),
+    [allTickets, showDevTickets],
+  );
+  const devCount = useMemo(() => allTickets.filter(t => t.fields.tier === 'Development').length, [allTickets]);
   const isLoading = loading || queueLoading;
 
   const counts = useMemo(() => ({
@@ -625,8 +631,30 @@ export function MyTicketsQueueView({ tasks, loading, onUpdateTask, agentUsername
     },
   }), [agentDisplayName, counts, setDeferTicketKey]);
 
+  const toggleDevTickets = () => {
+    const next = !showDevTickets;
+    setShowDevTickets(next);
+    localStorage.setItem('nova_show_dev_tickets', String(next));
+  };
+
   return (
     <>
+      {devCount > 0 && (
+        <div className="flex items-center justify-end px-4 py-1.5 border-b border-neutral-700/30">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <span className="text-[11px] text-neutral-400">
+              Show Development tickets
+              <span className="ml-1 text-neutral-500">({devCount})</span>
+            </span>
+            <button
+              onClick={toggleDevTickets}
+              className={`relative w-8 h-4 rounded-full transition-colors ${showDevTickets ? 'bg-[#5ec1ca]' : 'bg-neutral-600'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform ${showDevTickets ? 'translate-x-4' : ''}`} />
+            </button>
+          </label>
+        </div>
+      )}
       <UnifiedQueue config={config} items={tickets} loading={isLoading} />
       {deferTicketKey && (
         <DeferReasonModal

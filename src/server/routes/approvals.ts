@@ -53,6 +53,12 @@ export function createApprovalRoutes(
     const status = req.query.status as string | undefined;
     const items = await approvalQueries.getAll(status);
 
+    // Ensure assignee_name and bc_account_number are always present
+    for (const item of items) {
+      (item as any).assignee_name = null;
+      (item as any).bc_account_number = null;
+    }
+
     // Enrich with assignee from Jira cache
     const ticketKeys = items.map(i => i.ticket_id).filter(Boolean);
     if (ticketKeys.length > 0) {

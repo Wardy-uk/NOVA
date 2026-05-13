@@ -116,8 +116,13 @@ export class Reasoner {
     }
 
     const attachmentsText = event.attachments?.length
-      ? event.attachments.map(a => `- ${a.filename} (${a.mimeType}, ${(a.size / 1024).toFixed(1)}KB)`).join('\n')
+      ? event.attachments.map(a => {
+        const contentNote = a.base64Content ? ' [content provided as image below]' : '';
+        return `- ${a.filename} (${a.mimeType}, ${(a.size / 1024).toFixed(1)}KB)${contentNote}`;
+      }).join('\n')
       : 'None';
+
+    const images = this.extractImageContent(event);
 
     let priorFeedbackSection = '';
     if (priorFeedback) {
@@ -165,6 +170,7 @@ export class Reasoner {
         callType: 'triage',
         tier: triageTier,
         temperature: 0.2,
+        images,
       },
     );
 
@@ -243,13 +249,22 @@ export class Reasoner {
     return decision;
   }
 
+  private extractImageContent(event: TicketEvent): import('./llm-service.js').LlmImageContent[] {
+    if (!event.attachments) return [];
+    return event.attachments
+      .filter(a => a.base64Content && a.mimeType.startsWith('image/'))
+      .map(a => ({ base64: a.base64Content!, mimeType: a.mimeType }));
+  }
+
   private hasUnreadableCriticalAttachments(event: TicketEvent): boolean {
     if (!event.attachments || event.attachments.length === 0) return false;
-    const criticalTypes = ['image/', 'application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats', 'text/csv'];
-    const criticalExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.pdf', '.xlsx', '.xls', '.csv', '.doc', '.docx'];
+    const unreadableTypes = ['application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats', 'text/csv'];
+    const unreadableExtensions = ['.pdf', '.xlsx', '.xls', '.csv', '.doc', '.docx', '.zip', '.rar', '.7z', '.exe'];
     return event.attachments.some(a => {
-      const mimeMatch = criticalTypes.some(t => a.mimeType.startsWith(t));
-      const extMatch = criticalExtensions.some(ext => a.filename.toLowerCase().endsWith(ext));
+      // Images with downloaded content are readable — skip them
+      if (a.mimeType.startsWith('image/') && a.base64Content) return false;
+      const mimeMatch = unreadableTypes.some(t => a.mimeType.startsWith(t));
+      const extMatch = unreadableExtensions.some(ext => a.filename.toLowerCase().endsWith(ext));
       return mimeMatch || extMatch;
     });
   }
@@ -303,6 +318,8 @@ export class Reasoner {
       learnings: learningsCtx.text,
     });
 
+    const respondImages = this.extractImageContent(event);
+
     const result = await this.llmService.call<RespondResult>(
       systemPrompt,
       `Analyse the latest comment on this ticket and produce the structured JSON assessment.`,
@@ -311,6 +328,7 @@ export class Reasoner {
         ticketId: event.ticketKey,
         callType: 'respond',
         temperature: 0.2,
+        images: respondImages,
       },
     );
 

@@ -160,6 +160,7 @@ export interface PortalTicketSummary {
 
 export interface PortalTicketDetail extends PortalTicketSummary {
   description: string | null;
+  bcAccountNumber: string | null;
   comments: PortalTicketComment[];
   attachments: PortalTicketAttachment[];
   statusHistory: PortalStatusChange[];

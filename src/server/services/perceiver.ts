@@ -18,9 +18,10 @@ const KNOWN_AUTOMATION_NAMES = [
   'nova',
 ];
 
-function extractAttachments(field: unknown): Array<{ filename: string; size: number; mimeType: string }> {
+function extractAttachments(field: unknown): Array<{ id?: string; filename: string; size: number; mimeType: string }> {
   if (!Array.isArray(field)) return [];
   return field.map((a: any) => ({
+    id: a.id ?? undefined,
     filename: a.filename ?? 'unknown',
     size: a.size ?? 0,
     mimeType: a.mimeType ?? 'application/octet-stream',

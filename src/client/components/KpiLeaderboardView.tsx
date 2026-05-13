@@ -333,7 +333,7 @@ export function KpiLeaderboardView() {
       if (slaPercent != null) scores.push(slaPercent);
       if (qa != null) scores.push(qa * 20); // assume 0-5 scale → 0-100
       if (csat != null) scores.push(csat * 20); // 1-5 scale → 0-100
-      if (gr != null) scores.push(gr * 20); // 1-5 scale → 0-100
+      if (gr != null) scores.push((gr / 3) * 100); // 1-3 scale → 0-100
 
       const compositeScore = scores.length > 0
         ? scores.reduce((s, v) => s + v, 0) / scores.length
@@ -535,7 +535,7 @@ export function KpiLeaderboardView() {
       case 'Golden Rules':
         return (
           <td key={header} style={cellStyle()}>
-            <span style={{ fontWeight: 700, color: scoreColor(agent.goldenRulesScore, [4, 3]) }}>
+            <span style={{ fontWeight: 700, color: scoreColor(agent.goldenRulesScore, [2.5, 2]) }}>
               {fmt1(agent.goldenRulesScore)}
             </span>
           </td>

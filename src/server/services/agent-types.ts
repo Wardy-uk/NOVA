@@ -101,7 +101,7 @@ export interface TicketEvent {
   created: string;
   updated: string;
   slaBreachTime: string | null;
-  attachments?: Array<{ filename: string; size: number; mimeType: string }>;
+  attachments?: Array<{ id?: string; filename: string; size: number; mimeType: string; base64Content?: string }>;
   fields: Record<string, unknown>;
   comments?: CommentSnapshot[];
 }

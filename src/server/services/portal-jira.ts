@@ -7,6 +7,7 @@ import type {
   PortalTicketComment,
   PortalTicketAttachment,
   PortalStatusChange,
+  PortalSlaStatus,
 } from '../../shared/portal-types.js';
 
 interface TicketQueryOptions {
@@ -93,7 +94,7 @@ export class PortalJiraService {
       reporter_email: string | null;
     }>(
       `SELECT jic.issue_key, jic.summary, jic.status, ISNULL(jic.priority, 'Medium') AS priority,
-              jic.created_at, jic.updated_at, jic.assignee, jic.reporter_email
+              jic.created_at, jic.updated_at, jic.assignee_display AS assignee, jic.reporter_email
        FROM jira_issue_cache jic
        WHERE jic.reporter_email LIKE ? ${statusFilter} ${searchFilter}
        ORDER BY jic.updated_at DESC
@@ -131,9 +132,12 @@ export class PortalJiraService {
       assignee: string | null;
       reporter_email: string | null;
       description: string | null;
+      bc_account_number: string | null;
+      sla_breach_time: string | null;
     }>(
       `SELECT issue_key, summary, status, ISNULL(priority, 'Medium') AS priority,
-              created_at, updated_at, assignee, reporter_email, description
+              created_at, updated_at, assignee_display AS assignee, reporter_email, description,
+              bc_account_number, sla_breach_time
        FROM jira_issue_cache
        WHERE issue_key = ? AND reporter_email LIKE ?`,
       [ticketKey, `%@${domain}`],
@@ -164,6 +168,22 @@ export class PortalJiraService {
       isInternal: false,
     }));
 
+    let slaStatus: PortalSlaStatus | null = null;
+    if (ticket.sla_breach_time) {
+      const breachTime = new Date(ticket.sla_breach_time).getTime();
+      const now = Date.now();
+      const diffMs = breachTime - now;
+      const breached = diffMs <= 0;
+      const absDiff = Math.abs(diffMs);
+      const hours = Math.floor(absDiff / 3_600_000);
+      const minutes = Math.floor((absDiff % 3_600_000) / 60_000);
+      slaStatus = {
+        name: 'Time to resolution',
+        remaining: breached ? `Breached by ${hours}h ${minutes}m` : `${hours}h ${minutes}m`,
+        breached,
+      };
+    }
+
     return {
       key: ticket.issue_key,
       summary: ticket.summary || '',
@@ -175,10 +195,11 @@ export class PortalJiraService {
       reporter: ticket.reporter_email,
       latestComment: publicComments.length > 0 ? publicComments[0].body.slice(0, 200) : null,
       description: ticket.description,
+      bcAccountNumber: ticket.bc_account_number,
       comments: publicComments,
       attachments: [],
       statusHistory: [],
-      slaStatus: null,
+      slaStatus,
     };
   }
 

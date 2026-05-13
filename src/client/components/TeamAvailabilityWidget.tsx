@@ -91,9 +91,24 @@ export function TeamAvailabilityWidget() {
           {data.unavailable.map((a, i) => (
             <div key={i} className="flex items-center justify-between text-xs">
               <span className="text-neutral-300">{a.display_name}</span>
-              <span className={`px-1.5 py-0.5 text-xs border rounded ${absenceColor(a.status)}`}>
-                {absenceLabel(a.status)}
-              </span>
+              <div className="flex items-center gap-1">
+                <span className={`px-1.5 py-0.5 text-xs border rounded ${absenceColor(a.status)}`}>
+                  {absenceLabel(a.status)}
+                </span>
+                <button
+                  onClick={async () => {
+                    const token = localStorage.getItem('nova_auth_token') || '';
+                    await fetch('/api/agent/availability', {
+                      method: 'DELETE',
+                      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ rosterId: (a as any).roster_id ?? (a as any).id, date }),
+                    });
+                    fetchData();
+                  }}
+                  className="text-neutral-600 hover:text-neutral-400 text-[10px]"
+                  title="Clear this absence"
+                >&times;</button>
+              </div>
             </div>
           ))}
         </div>

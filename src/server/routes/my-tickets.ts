@@ -96,12 +96,19 @@ export function createMyTicketsRoutes(deps: MyTicketsRouteDeps): Router {
           [user.display_name],
         );
       }
+      // Fallback: try username as part of display name (e.g., "sebastian" matches "Sebastian Smith")
+      if (!roster) {
+        roster = await queryOne<{ jira_account_id: string; email: string | null; display_name: string }>(
+          `SELECT jira_account_id, email, display_name FROM agent_roster WHERE LOWER(display_name) LIKE ? AND active = 1`,
+          [`%${agentId.toLowerCase()}%`],
+        );
+      }
       const jiraIdentity = roster
         ? { accountId: roster.jira_account_id, email: roster.email ?? undefined, displayName: roster.display_name }
         : { email: user.email ?? undefined, displayName: user.display_name ?? user.username };
 
       if (!jiraIdentity.accountId && !jiraIdentity.email && !jiraIdentity.displayName) {
-        res.status(404).json({ ok: false, error: `No Jira identity found for ${agentId}` });
+        res.status(404).json({ ok: false, error: `No Jira identity found for ${agentId}. Check that this user has a matching entry in agent_roster with a jira_account_id, or that their email/display_name matches their Jira profile.` });
         return;
       }
 

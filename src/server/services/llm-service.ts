@@ -12,12 +12,18 @@ import { sanitise, type RedactionEntry } from './pii-sanitiser.js';
 export type LlmTier = 'reasoning' | 'standard' | 'cheap';
 export type LlmProvider = 'anthropic' | 'openai' | 'openrouter';
 
+export interface LlmImageContent {
+  base64: string;
+  mimeType: string;
+}
+
 export interface LlmCallOptions {
   tier?: LlmTier;
   ticketId?: string | null;
   callType: string;
   maxTokens?: number;
   temperature?: number;
+  images?: LlmImageContent[];
 }
 
 export interface LlmResult<T = unknown> {
@@ -223,14 +229,27 @@ async function callAnthropic(
   apiKey: string,
   maxTokens: number,
   temperature: number,
+  images?: LlmImageContent[],
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
   const client = new Anthropic({ apiKey });
+
+  const contentParts: Anthropic.MessageCreateParams['messages'][0]['content'] = [];
+  if (images && images.length > 0) {
+    for (const img of images) {
+      contentParts.push({
+        type: 'image',
+        source: { type: 'base64', media_type: img.mimeType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp', data: img.base64 },
+      });
+    }
+  }
+  contentParts.push({ type: 'text', text: userMessage });
+
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
     temperature,
     system: systemPrompt,
-    messages: [{ role: 'user', content: userMessage }],
+    messages: [{ role: 'user', content: contentParts }],
   });
 
   const textBlock = response.content.find(b => b.type === 'text');
@@ -250,15 +269,27 @@ async function callOpenAI(
   temperature: number,
   baseURL?: string,
   defaultHeaders?: Record<string, string>,
+  images?: LlmImageContent[],
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
   const client = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}), ...(defaultHeaders ? { defaultHeaders } : {}) });
+
+  let userContent: string | Array<{ type: string; text?: string; image_url?: { url: string } }> = userMessage;
+  if (images && images.length > 0) {
+    const parts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+    for (const img of images) {
+      parts.push({ type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.base64}` } });
+    }
+    parts.push({ type: 'text', text: userMessage });
+    userContent = parts;
+  }
+
   const response = await client.chat.completions.create({
     model,
     temperature,
     max_tokens: maxTokens,
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: userMessage },
+      { role: 'user', content: userContent as any },
     ],
   });
 
@@ -277,20 +308,22 @@ async function callProvider(
   apiKey: string,
   maxTokens: number,
   temperature: number,
+  images?: LlmImageContent[],
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
   try {
     if (provider === 'anthropic') {
-      return await callAnthropic(systemPrompt, userMessage, model, apiKey, maxTokens, temperature);
+      return await callAnthropic(systemPrompt, userMessage, model, apiKey, maxTokens, temperature, images);
     } else if (provider === 'openrouter') {
       return await callOpenAI(systemPrompt, userMessage, model, apiKey, maxTokens, temperature,
         'https://openrouter.ai/api/v1',
         { 'HTTP-Referer': 'https://nova.nurtur.tech', 'X-Title': 'N.O.V.A' },
+        images,
       );
     } else {
-      return await callOpenAI(systemPrompt, userMessage, model, apiKey, maxTokens, temperature);
+      return await callOpenAI(systemPrompt, userMessage, model, apiKey, maxTokens, temperature, undefined, undefined, images);
     }
   } finally {
     clearTimeout(timeout);
@@ -535,7 +568,7 @@ export class LlmService {
 
         try {
           const result = await callProvider(
-            config.provider, fullSystem, sanitisedUser, config.model, config.apiKey, maxTokens, temperature,
+            config.provider, fullSystem, sanitisedUser, config.model, config.apiKey, maxTokens, temperature, options.images,
           );
           rawContent = result.content;
           inputTokens = result.inputTokens;

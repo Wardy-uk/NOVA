@@ -15,20 +15,24 @@ export class TicketClassifier {
     const since = new Date(Date.now() - lookbackHours * 3600000).toISOString().replace('T', ' ').slice(0, 19);
 
     const jql = `project = ${this.jiraProject} AND status IN (Done, Closed, Resolved) AND resolved >= "${since}" ORDER BY resolved DESC`;
+    console.log(`[Classifier] JQL: ${jql}`);
     const result = await this.jiraClient.searchJql(jql, [
       'summary', 'description', 'issuetype', 'priority', 'status',
       'resolution', 'labels', 'assignee', 'reporter', 'comment',
     ], 50);
     const issues = result?.issues ?? [];
+    console.log(`[Classifier] Found ${issues.length} resolved tickets in last ${lookbackHours}h`);
 
     if (issues.length === 0) return [];
 
     const alreadyClassified = await this.getAlreadyClassified(issues.map((i: any) => i.key));
     const toClassify = issues.filter((i: any) => !alreadyClassified.has(i.key));
+    console.log(`[Classifier] ${alreadyClassified.size} already classified, ${toClassify.length} to classify`);
 
     if (toClassify.length === 0) return [];
 
     const results: ClassificationResult[] = [];
+    let errors = 0;
 
     for (const issue of toClassify) {
       try {
@@ -38,11 +42,15 @@ export class TicketClassifier {
           results.push(result);
         }
       } catch (err) {
+        errors++;
         console.warn(`[Classifier] Failed to classify ${issue.key}:`, err instanceof Error ? err.message : err);
       }
     }
 
-    console.log(`[Classifier] Classified ${results.length}/${toClassify.length} resolved tickets`);
+    console.log(`[Classifier] Classified ${results.length}/${toClassify.length} resolved tickets (${errors} errors)`);
+    if (errors > 0 && results.length === 0) {
+      throw new Error(`All ${errors} classification attempts failed — check LLM provider`);
+    }
     return results;
   }
 

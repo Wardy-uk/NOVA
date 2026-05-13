@@ -152,6 +152,12 @@ export default function PortalTicketDetail({ ticketKey, onBack }: Props) {
                 <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Updated</div>
                 <div className="text-sm text-gray-900">{new Date(ticket.updated).toLocaleDateString()}</div>
               </div>
+              {ticket.bcAccountNumber && (
+                <div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">BC Account</div>
+                  <div className="text-sm text-gray-900">{ticket.bcAccountNumber}</div>
+                </div>
+              )}
             </div>
 
             {/* Description */}

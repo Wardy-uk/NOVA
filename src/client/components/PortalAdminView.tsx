@@ -211,6 +211,19 @@ function SessionsPanel() {
   );
 }
 
+const KNOWN_PORTAL_SETTINGS: Array<{ key: string; placeholder: string; sensitive?: boolean; group: string }> = [
+  { key: 'portal_auth_mode', placeholder: 'internal | oidc', group: 'Authentication' },
+  { key: 'portal_oidc_issuer', placeholder: 'https://login.microsoftonline.com/tenant-id/v2.0', group: 'Authentication' },
+  { key: 'portal_oidc_client_id', placeholder: 'Application (client) ID', group: 'Authentication' },
+  { key: 'portal_oidc_client_secret', placeholder: 'Client secret value', sensitive: true, group: 'Authentication' },
+  { key: 'portal_oidc_redirect_uri', placeholder: 'https://nova.nurtur.local/api/portal/auth/callback', group: 'Authentication' },
+  { key: 'portal_jira_project_nt', placeholder: 'NT', group: 'Jira' },
+  { key: 'portal_widget_brand_color', placeholder: '#1e40af', group: 'Widget' },
+  { key: 'portal_widget_greeting', placeholder: 'Hi! How can we help you today?', group: 'Widget' },
+];
+
+const KNOWN_KEYS = new Set(KNOWN_PORTAL_SETTINGS.map(s => s.key));
+
 function SettingsPanel() {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -241,21 +254,48 @@ function SettingsPanel() {
 
   if (loading) return <div className="animate-pulse h-48 bg-gray-800 rounded-lg" />;
 
-  const keys = Object.keys(settings).sort();
+  const extraKeys = Object.keys(settings).filter(k => !KNOWN_KEYS.has(k)).sort();
+
+  const renderRow = (key: string, placeholder: string, sensitive?: boolean) => (
+    <div key={key} className="flex items-center gap-3">
+      <label className="text-xs text-gray-400 w-64 flex-shrink-0 font-mono">{key}</label>
+      <input
+        type={sensitive ? 'password' : 'text'}
+        placeholder={placeholder}
+        value={settings[key] || ''}
+        onChange={e => setSettings(prev => ({ ...prev, [key]: e.target.value }))}
+        className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+      />
+    </div>
+  );
+
+  const groups: Array<{ label: string; items: typeof KNOWN_PORTAL_SETTINGS }> = [];
+  for (const s of KNOWN_PORTAL_SETTINGS) {
+    const existing = groups.find(g => g.label === s.group);
+    if (existing) existing.items.push(s);
+    else groups.push({ label: s.group, items: [s] });
+  }
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 space-y-3">
-      {keys.map(key => (
-        <div key={key} className="flex items-center gap-3">
-          <label className="text-xs text-gray-400 w-64 flex-shrink-0 font-mono">{key}</label>
-          <input
-            type="text"
-            value={settings[key] || ''}
-            onChange={e => setSettings(prev => ({ ...prev, [key]: e.target.value }))}
-            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-gray-200 focus:outline-none focus:border-blue-500"
-          />
+    <div className="bg-gray-800 rounded-lg p-4 space-y-1">
+      {groups.map(g => (
+        <div key={g.label}>
+          <h4 className="text-xs text-gray-500 uppercase tracking-wide mt-4 mb-2">{g.label}</h4>
+          <div className="space-y-3">
+            {g.items.map(s => renderRow(s.key, s.placeholder, s.sensitive))}
+          </div>
         </div>
       ))}
+
+      {extraKeys.length > 0 && (
+        <div>
+          <h4 className="text-xs text-gray-500 uppercase tracking-wide mt-4 mb-2">Other</h4>
+          <div className="space-y-3">
+            {extraKeys.map(key => renderRow(key, '', false))}
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-end pt-2">
         <button
           onClick={save}
