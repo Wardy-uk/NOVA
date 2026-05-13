@@ -2454,6 +2454,9 @@ ${panelHtml}
     await portalIntake.refreshCategories();
   }, 24 * 60 * 60 * 1000);
 
+  // Portal admin (requires internal NOVA auth + admin role — no portalGate so admins can configure before enabling)
+  app.use('/api/portal/admin', requireRole('admin', 'super_admin'), createPortalAdminRoutes(settingsQueries));
+
   // Auth routes (no portal auth middleware — these handle login/callback)
   app.use('/api/portal/auth', portalGate, createPortalAuthRoutes(settingsQueries));
 
@@ -2465,9 +2468,6 @@ ${panelHtml}
   app.use('/api/portal', portalGate, portalAuth, createPortalTicketRoutes(portalJira, portalIntake));
   app.use('/api/portal', portalGate, portalAuth, createPortalChatRoutes(portalChat));
   app.use('/api/portal', portalGate, portalAuth, createPortalEventsRoutes());
-
-  // Portal admin (requires internal NOVA auth + admin role)
-  app.use('/api/portal/admin', requireRole('admin', 'super_admin'), createPortalAdminRoutes(settingsQueries));
 
   console.log(`[N.O.V.A] Portal routes wired (currently ${settingsQueries.get('portal_enabled') === 'true' ? 'enabled' : 'disabled'} — toggle via Admin > Feature Flags)`);
 
