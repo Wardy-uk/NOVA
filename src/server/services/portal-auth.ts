@@ -52,6 +52,7 @@ function base64UrlEncode(buffer: Buffer): string {
 
 export function generateAuthUrl(settings: FileSettingsQueries): { url: string; state: string } {
   const config = getOidcConfig(settings);
+  console.log('[portal-auth] generateAuthUrl config:', JSON.stringify(config));
   if (!config.issuer || !config.clientId) {
     throw new Error('Portal OIDC not configured — set portal_oidc_issuer and portal_oidc_client_id');
   }
