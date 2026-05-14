@@ -2448,12 +2448,6 @@ ${panelHtml}
   // Start KB sync timer (checks portal_enabled internally)
   portalKb.startSync();
 
-  // Refresh portal categories from Jira daily
-  jobRegistry.register('portal-category-refresh', 'Portal intake category refresh', async () => {
-    if (settingsQueries.get('portal_enabled') !== 'true') return;
-    await portalIntake.refreshCategories();
-  }, 24 * 60 * 60 * 1000);
-
   // Portal admin (requires internal NOVA auth + admin role — no portalGate so admins can configure before enabling)
   app.use('/api/portal/admin', requireRole('admin', 'super_admin'), createPortalAdminRoutes(settingsQueries));
 

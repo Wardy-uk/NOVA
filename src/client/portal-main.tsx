@@ -138,7 +138,7 @@ function PortalApp() {
 
   if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 to-cyan-100">
         <div className="animate-pulse text-gray-400">Loading...</div>
       </div>
     );

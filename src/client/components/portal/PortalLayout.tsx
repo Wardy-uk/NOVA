@@ -27,10 +27,9 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white text-sm font-bold">
-                N
-              </div>
-              <span className="text-lg font-semibold text-gray-900">Support Portal</span>
+              <span className="text-xl font-heading font-extrabold tracking-tight text-brand">nurtur</span>
+              <span className="text-sm font-medium text-gray-400">|</span>
+              <span className="text-sm font-medium text-gray-500">Support Portal</span>
             </div>
 
             <div className="flex items-center gap-4">
@@ -57,7 +56,7 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
                 onClick={() => onNavigate(item.view)}
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                   currentView === item.view || (item.view === 'tickets' && currentView === 'ticket-detail')
-                    ? 'border-blue-600 text-blue-600'
+                    ? 'border-brand text-brand'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >

@@ -11,82 +11,123 @@ const URGENCY_TO_PRIORITY: Record<string, string> = {
 };
 
 const CATEGORY_TO_PROJECT: Record<string, string> = {
-  website: 'NT',
-  email: 'NT',
-  crm: 'NT',
-  portal: 'NT',
-  onboarding: 'NTPJ',
-  setup: 'NTPJ',
-  training: 'NTPJ',
+  website: 'NTPJ',
+  website_content: 'NTPJ',
+  website_broken: 'NTPJ',
+  website_new_page: 'NTPJ',
+  website_design: 'NTPJ',
+  account: 'NT',
+  email_marketing: 'NT',
+  leadpro: 'NT',
+  data_feeds: 'NT',
+  listings: 'NT',
+  onboarding: 'NT',
+  billing: 'NT',
+  other: 'NT',
 };
 
-const DEFAULT_CATEGORIES: Array<{ id: string; name: string; children: Array<{ id: string; name: string }> }> = [
+interface CategoryDef {
+  id: string;
+  name: string;
+  description?: string;
+  children: Array<{ id: string; name: string }>;
+}
+
+const DEFAULT_CATEGORIES: CategoryDef[] = [
   {
     id: 'website',
-    name: 'Website',
+    name: 'My Website',
+    description: 'Content updates, page changes, or something isn\'t working',
     children: [
-      { id: 'website_content', name: 'Content Issue' },
-      { id: 'website_technical', name: 'Technical Issue' },
-      { id: 'website_design', name: 'Design Change' },
+      { id: 'website_content', name: 'Update my website content' },
+      { id: 'website_broken', name: 'Something on my website isn\'t working' },
+      { id: 'website_new_page', name: 'New page or restructure' },
+      { id: 'website_design', name: 'Design change' },
     ],
   },
   {
-    id: 'email',
+    id: 'account',
+    name: 'My Account',
+    description: 'Login, passwords, new users, or permissions',
+    children: [
+      { id: 'account_login', name: 'Login or password problem' },
+      { id: 'account_new_user', name: 'New user setup' },
+      { id: 'account_permissions', name: 'Permissions or access change' },
+      { id: 'account_details', name: 'Update account details' },
+    ],
+  },
+  {
+    id: 'email_marketing',
     name: 'Email Marketing',
+    description: 'Campaigns, triggers, templates, or sending issues',
     children: [
-      { id: 'email_template', name: 'Template Issue' },
-      { id: 'email_delivery', name: 'Delivery Problem' },
-      { id: 'email_setup', name: 'Campaign Setup' },
+      { id: 'email_campaign', name: 'Campaign or sending issue' },
+      { id: 'email_triggers', name: 'Triggers or automation' },
+      { id: 'email_template', name: 'Template or approval' },
     ],
   },
   {
-    id: 'crm',
-    name: 'CRM / LeadPro',
+    id: 'leadpro',
+    name: 'LeadPro & CRM',
+    description: 'Leads, contacts, or CRM system issues',
     children: [
-      { id: 'crm_access', name: 'Access / Login' },
-      { id: 'crm_data', name: 'Data Issue' },
-      { id: 'crm_integration', name: 'Integration' },
+      { id: 'leadpro_missing', name: 'Missing or duplicate leads' },
+      { id: 'leadpro_setup', name: 'Setup or configuration' },
+      { id: 'leadpro_access', name: 'Access issue' },
     ],
   },
   {
-    id: 'portal',
-    name: 'Portal / Valuation Tool',
+    id: 'data_feeds',
+    name: 'Data Feeds & Integrations',
+    description: 'Property feeds, third-party connections, or API issues',
     children: [
-      { id: 'portal_access', name: 'Access Issue' },
-      { id: 'portal_bug', name: 'Bug Report' },
-      { id: 'portal_feature', name: 'Feature Request' },
+      { id: 'feeds_property', name: 'Property feed issue' },
+      { id: 'feeds_integration', name: 'Third-party connection' },
+      { id: 'feeds_reporting', name: 'Reporting or analytics' },
+    ],
+  },
+  {
+    id: 'listings',
+    name: 'Property Listings',
+    description: 'Virtual tours, property media, or listing management',
+    children: [
+      { id: 'listings_tours', name: 'Virtual tours' },
+      { id: 'listings_media', name: 'Property images or media' },
+      { id: 'listings_management', name: 'Listing management' },
     ],
   },
   {
     id: 'onboarding',
-    name: 'Onboarding',
+    name: 'Onboarding & Setup',
+    description: 'New branch, new product, or getting started',
     children: [
-      { id: 'onboarding_setup', name: 'Setup Query' },
-      { id: 'onboarding_training', name: 'Training' },
+      { id: 'onboarding_branch', name: 'New branch setup' },
+      { id: 'onboarding_product', name: 'New product setup' },
+      { id: 'onboarding_training', name: 'Training request' },
+    ],
+  },
+  {
+    id: 'billing',
+    name: 'Billing & Contracts',
+    description: 'Cancellations, service changes, or account queries',
+    children: [
+      { id: 'billing_cancel', name: 'Cancellation or notice' },
+      { id: 'billing_change', name: 'Service change' },
+      { id: 'billing_query', name: 'Billing query' },
     ],
   },
   {
     id: 'other',
-    name: 'Other',
+    name: 'Something Else',
+    description: 'General enquiry',
     children: [
-      { id: 'other_general', name: 'General Query' },
-      { id: 'other_billing', name: 'Billing' },
-      { id: 'other_feedback', name: 'Feedback' },
+      { id: 'other_general', name: 'General query' },
+      { id: 'other_feedback', name: 'Feedback or suggestion' },
     ],
   },
 ];
 
-interface JiraComponent {
-  id: string;
-  name: string;
-  description?: string;
-}
-
 export class PortalIntakeService {
-  private categoryCache: Array<{ id: string; name: string; children: Array<{ id: string; name: string }> }> | null = null;
-  private categoryCacheTime = 0;
-  private static CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
   constructor(
     private settings: FileSettingsQueries,
     private portalJira: PortalJiraService,
@@ -119,15 +160,20 @@ export class PortalIntakeService {
     if (input.browser) internalParts.push(`*Browser:* ${input.browser}`);
     if (input.os) internalParts.push(`*OS:* ${input.os}`);
 
-    const ticketKey = await this.portalJira.createTicket({
-      projectKey,
-      summary: input.subject,
-      description: descParts.join('\n'),
-      priority,
-      components: input.category ? [input.category] : undefined,
-      reporterEmail: userEmail,
-      internalNote: internalParts.join('\n'),
-    });
+    let ticketKey: string;
+    try {
+      ticketKey = await this.portalJira.createTicket({
+        projectKey,
+        summary: input.subject,
+        description: descParts.join('\n'),
+        priority,
+        reporterEmail: userEmail,
+        internalNote: internalParts.join('\n'),
+      });
+    } catch (err) {
+      console.error('[portal-intake] Jira ticket creation failed:', err);
+      throw new Error('We couldn\'t create your ticket right now. Please try again, or contact us directly at support@nurtur.tech.');
+    }
 
     await execute(
       `INSERT INTO portal_form_submissions (portal_user_id, jira_issue_key, form_data, category)
@@ -149,80 +195,16 @@ export class PortalIntakeService {
     return CATEGORY_TO_PROJECT[category.toLowerCase()] || this.settings.get('portal_jira_project_nt') || 'NT';
   }
 
-  async getCategories(): Promise<Array<{ id: string; name: string; children: Array<{ id: string; name: string }> }>> {
-    // Return cached if still fresh
-    if (this.categoryCache && (Date.now() - this.categoryCacheTime) < PortalIntakeService.CACHE_TTL_MS) {
-      return this.categoryCache;
-    }
-
-    try {
-      const categories = await this.fetchCategoriesFromJira();
-      if (categories.length > 0) {
-        this.categoryCache = categories;
-        this.categoryCacheTime = Date.now();
-        return categories;
-      }
-    } catch (err) {
-      console.warn('[portal-intake] Failed to fetch Jira components, using defaults:', err instanceof Error ? err.message : err);
-    }
-
-    return DEFAULT_CATEGORIES;
-  }
-
-  async refreshCategories(): Promise<void> {
-    this.categoryCache = null;
-    this.categoryCacheTime = 0;
-    await this.getCategories();
-  }
-
-  private async fetchCategoriesFromJira(): Promise<Array<{ id: string; name: string; children: Array<{ id: string; name: string }> }>> {
-    const s = this.settings.getAll();
-    if (s.jira_enabled !== 'true' || !s.jira_username || !s.jira_token) return [];
-
-    const auth = 'Basic ' + Buffer.from(`${s.jira_username}:${s.jira_token}`).toString('base64');
-    const cloudId = s.jira_cloud_id || '9357a1ba-0ad9-4ff0-964d-fad84dd30f96';
-    const projects = ['NT', 'NTPJ'];
-    const allComponents: Array<{ project: string; component: JiraComponent }> = [];
-
-    for (const project of projects) {
+  async getCategories(): Promise<CategoryDef[]> {
+    const customJson = this.settings.get('portal_categories');
+    if (customJson) {
       try {
-        const resp = await fetch(
-          `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/project/${project}/components`,
-          { headers: { Authorization: auth, Accept: 'application/json' } },
-        );
-        if (!resp.ok) continue;
-        const components = await resp.json() as JiraComponent[];
-        for (const c of components) {
-          allComponents.push({ project, component: c });
-        }
-      } catch { /* skip project */ }
-    }
-
-    if (allComponents.length === 0) return [];
-
-    // Group components into categories (top-level = components without '/')
-    // Components named "Category/Subcategory" become parent/child
-    const categoryMap = new Map<string, { id: string; name: string; children: Array<{ id: string; name: string }> }>();
-
-    for (const { component } of allComponents) {
-      const parts = component.name.split('/').map(p => p.trim());
-      const parentName = parts[0];
-      const parentId = parentName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-
-      if (!categoryMap.has(parentId)) {
-        categoryMap.set(parentId, { id: parentId, name: parentName, children: [] });
-      }
-
-      if (parts.length > 1) {
-        const childName = parts.slice(1).join(' / ');
-        const childId = `${parentId}_${childName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
-        const cat = categoryMap.get(parentId)!;
-        if (!cat.children.some(c => c.id === childId)) {
-          cat.children.push({ id: childId, name: childName });
-        }
+        const parsed = JSON.parse(customJson) as CategoryDef[];
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (err) {
+        console.warn('[portal-intake] Invalid portal_categories JSON, using defaults:', err instanceof Error ? err.message : err);
       }
     }
-
-    return [...categoryMap.values()];
+    return DEFAULT_CATEGORIES;
   }
 }

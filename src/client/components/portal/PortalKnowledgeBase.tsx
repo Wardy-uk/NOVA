@@ -81,7 +81,7 @@ export default function PortalKnowledgeBase() {
 
         <div className="bg-white rounded-xl border border-gray-200 p-8">
           {selectedArticle.category && (
-            <span className="inline-block text-xs px-2.5 py-1 rounded-full bg-blue-100 text-blue-700 mb-3">
+            <span className="inline-block text-xs px-2.5 py-1 rounded-full bg-brand/15 text-brand mb-3">
               {selectedArticle.category}
             </span>
           )}
@@ -132,7 +132,7 @@ export default function PortalKnowledgeBase() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search articles..."
-            className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+            className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand text-sm"
             autoFocus
           />
         </div>
@@ -161,7 +161,7 @@ export default function PortalKnowledgeBase() {
                 <button
                   key={a.id}
                   onClick={() => openArticle(a.id)}
-                  className="w-full text-left bg-white rounded-lg p-4 border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all"
+                  className="w-full text-left bg-white rounded-lg p-4 border border-gray-200 hover:border-brand/40 hover:shadow-sm transition-all"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -190,7 +190,7 @@ export default function PortalKnowledgeBase() {
               <button
                 key={c.category}
                 onClick={() => setSearch(c.category)}
-                className="bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-blue-300 hover:shadow-sm transition-all"
+                className="bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-brand/40 hover:shadow-sm transition-all"
               >
                 <div className="text-sm font-medium text-gray-900">{c.category}</div>
                 <div className="text-xs text-gray-500 mt-1">{c.count} article{c.count !== 1 ? 's' : ''}</div>

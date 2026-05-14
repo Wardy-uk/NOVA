@@ -89,10 +89,15 @@ export class PortalChatService {
 
     let responseContent: string;
 
-    if (userMessages >= maxExchanges) {
+    // Check if user is affirming a handoff offer (e.g. "yes", "please do")
+    const lastAssistant = [...history].reverse().find(m => m.role === 'assistant')?.content || '';
+    const isHandoffAccepted = lastAssistant.includes('create a support ticket') &&
+      /^(yes|yeah|yep|please|ok|okay|sure|go ahead|do it|please do)\b/i.test(content.trim());
+
+    if (userMessages >= maxExchanges || isHandoffAccepted) {
       responseContent = await this.handleHandoff(sessionId, context, history);
     } else {
-      // Gap 5: Check playbooks before generic LLM response
+      // Check playbooks before generic LLM response
       if (this.playbookService) {
         const pbResult = await this.playbookService.tryMatch(content, sessionId, context);
         if (pbResult) {
@@ -163,7 +168,16 @@ export class PortalChatService {
 
       return result.data.response;
     } catch (err) {
-      console.error('[portal-chat] LLM error:', err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errStack = err instanceof Error ? err.stack : undefined;
+      console.error(`[portal-chat] LLM call failed for session. Error: ${errMsg}`);
+      if (errStack) console.error(`[portal-chat] Stack: ${errStack}`);
+
+      if (errMsg.includes('No LLM providers configured') || errMsg.includes('api_key')) {
+        console.error('[portal-chat] No LLM API key configured — chat AI is non-functional. Set openai_api_key or anthropic_api_key in Settings.');
+        return 'Our chat assistant is currently being set up. In the meantime, please use the **New Request** form to submit your issue and our team will get back to you.';
+      }
+
       return "I'm having trouble processing your request right now. Would you like me to create a support ticket so our team can help you directly?";
     }
   }

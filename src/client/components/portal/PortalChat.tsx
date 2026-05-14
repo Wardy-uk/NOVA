@@ -141,7 +141,7 @@ export default function PortalChat({ onNavigateToTicket }: Props = {}) {
           <button
             onClick={startNewSession}
             disabled={loading}
-            className="w-full px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="w-full px-3 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 transition-colors"
           >
             New Conversation
           </button>
@@ -158,7 +158,7 @@ export default function PortalChat({ onNavigateToTicket }: Props = {}) {
                   key={s.id}
                   onClick={() => loadSession(s.id)}
                   className={`w-full px-3 py-3 text-left hover:bg-gray-50 transition-colors ${
-                    s.id === activeSessionId ? 'bg-blue-50' : ''
+                    s.id === activeSessionId ? 'bg-brand/5' : ''
                   }`}
                 >
                   <div className="text-xs text-gray-500">{new Date(s.started_at).toLocaleDateString()}</div>
@@ -166,7 +166,7 @@ export default function PortalChat({ onNavigateToTicket }: Props = {}) {
                     {s.status === 'active' ? 'Active' : s.status === 'resolved' ? 'Resolved' : s.status}
                   </div>
                   {s.jira_issue_key && (
-                    <div className="text-xs text-blue-600 mt-0.5">{s.jira_issue_key}</div>
+                    <div className="text-xs text-brand mt-0.5">{s.jira_issue_key}</div>
                   )}
                 </button>
               ))}
@@ -180,8 +180,8 @@ export default function PortalChat({ onNavigateToTicket }: Props = {}) {
         {!activeSessionId ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <div className="w-16 h-16 mx-auto rounded-full bg-blue-100 flex items-center justify-center mb-4">
-                <svg className="w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="w-16 h-16 mx-auto rounded-full bg-brand/15 flex items-center justify-center mb-4">
+                <svg className="w-8 h-8 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                     d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
@@ -193,7 +193,7 @@ export default function PortalChat({ onNavigateToTicket }: Props = {}) {
               <button
                 onClick={startNewSession}
                 disabled={loading}
-                className="px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                className="px-6 py-2.5 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 transition-colors"
               >
                 Start a conversation
               </button>
@@ -226,11 +226,11 @@ export default function PortalChat({ onNavigateToTicket }: Props = {}) {
                 <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${
                     msg.role === 'user'
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-brand text-white'
                       : 'bg-gray-100 text-gray-900'
                   }`}>
                     <div className="whitespace-pre-wrap">{msg.content}</div>
-                    <div className={`text-xs mt-1 ${msg.role === 'user' ? 'text-blue-200' : 'text-gray-400'}`}>
+                    <div className={`text-xs mt-1 ${msg.role === 'user' ? 'text-white/60' : 'text-gray-400'}`}>
                       {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
                   </div>
@@ -259,12 +259,12 @@ export default function PortalChat({ onNavigateToTicket }: Props = {}) {
                   onKeyDown={handleKeyDown}
                   placeholder="Type your message..."
                   rows={1}
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none"
                 />
                 <button
                   onClick={sendMessage}
                   disabled={!input.trim() || sending}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -274,7 +274,7 @@ export default function PortalChat({ onNavigateToTicket }: Props = {}) {
               <div className="mt-2 text-center">
                 <button
                   onClick={handleHandoff}
-                  className="text-xs text-gray-400 hover:text-blue-600 transition-colors inline-flex items-center gap-1"
+                  className="text-xs text-gray-400 hover:text-brand transition-colors inline-flex items-center gap-1"
                 >
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />

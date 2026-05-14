@@ -37,7 +37,7 @@ export interface PortalAuthPayload {
 
 // ── Chat ──
 
-export type ChatSessionStatus = 'active' | 'resolved' | 'abandoned' | 'handed_off';
+export type ChatSessionStatus = 'active' | 'resolved' | 'abandoned' | 'handed_off' | 'escalated';
 export type ChatMessageRole = 'user' | 'assistant' | 'system';
 
 export interface PortalChatSession {
@@ -243,6 +243,7 @@ export interface PortalKbSearchResponse {
 export interface PortalCategoryTree {
   id: string;
   name: string;
+  description?: string;
   children: PortalCategoryTree[];
 }
 

@@ -99,7 +99,7 @@ export default function PortalTicketDetail({ ticketKey, onBack }: Props) {
     return (
       <div className="text-center py-16">
         <p className="text-lg text-gray-600">Ticket not found</p>
-        <button onClick={onBack} className="mt-4 text-blue-600 hover:text-blue-700">Back to tickets</button>
+        <button onClick={onBack} className="mt-4 text-brand hover:text-brand-dark">Back to tickets</button>
       </div>
     );
   }
@@ -187,16 +187,16 @@ export default function PortalTicketDetail({ ticketKey, onBack }: Props) {
                     rel="noopener noreferrer"
                     className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors group"
                   >
-                    <div className="w-8 h-8 rounded bg-blue-50 flex items-center justify-center flex-shrink-0">
-                      <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="w-8 h-8 rounded bg-brand/10 flex items-center justify-center flex-shrink-0">
+                      <svg className="w-4 h-4 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                       </svg>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm text-gray-900 truncate group-hover:text-blue-600">{att.filename}</div>
+                      <div className="text-sm text-gray-900 truncate group-hover:text-brand">{att.filename}</div>
                       <div className="text-xs text-gray-400">{formatFileSize(att.size)}</div>
                     </div>
-                    <svg className="w-4 h-4 text-gray-300 group-hover:text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="w-4 h-4 text-gray-300 group-hover:text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
                   </a>
@@ -220,7 +220,7 @@ export default function PortalTicketDetail({ ticketKey, onBack }: Props) {
                 {ticket.comments.map(comment => (
                   <div key={comment.id} className="px-6 py-4">
                     <div className="flex items-center gap-2 mb-2">
-                      <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-medium">
+                      <div className="w-7 h-7 rounded-full bg-brand/15 flex items-center justify-center text-brand text-xs font-medium">
                         {comment.author.charAt(0).toUpperCase()}
                       </div>
                       <span className="text-sm font-medium text-gray-900">{comment.author}</span>
@@ -242,13 +242,13 @@ export default function PortalTicketDetail({ ticketKey, onBack }: Props) {
                 onChange={e => setCommentText(e.target.value)}
                 placeholder="Add a comment..."
                 rows={3}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand resize-none"
               />
               <div className="mt-2 flex justify-end">
                 <button
                   onClick={handleAddComment}
                   disabled={!commentText.trim() || submitting}
-                  className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-4 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {submitting ? 'Posting...' : 'Add Comment'}
                 </button>
@@ -266,7 +266,7 @@ export default function PortalTicketDetail({ ticketKey, onBack }: Props) {
                   {ticket.statusHistory.map((change, i) => (
                     <div key={i} className="flex gap-4 relative">
                       <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
-                        i === 0 ? 'bg-blue-500' : 'bg-gray-300'
+                        i === 0 ? 'bg-brand' : 'bg-gray-300'
                       }`}>
                         <div className={`w-2 h-2 rounded-full ${i === 0 ? 'bg-white' : 'bg-white'}`} />
                       </div>

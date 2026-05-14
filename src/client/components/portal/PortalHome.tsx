@@ -68,21 +68,21 @@ export default function PortalHome({ onNavigate, onViewTicket }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <button
           onClick={() => onNavigate('new-request')}
-          className="bg-blue-600 text-white rounded-xl p-6 text-left hover:bg-blue-700 transition-colors group"
+          className="bg-brand text-white rounded-xl p-6 text-left hover:bg-brand-dark transition-colors group"
         >
           <div className="text-lg font-semibold mb-1">Report an issue</div>
-          <div className="text-blue-200 text-sm">Submit a new support request</div>
+          <div className="text-white/60 text-sm">Submit a new support request</div>
         </button>
         <button
           onClick={() => onNavigate('chat')}
-          className="bg-white border border-gray-200 rounded-xl p-6 text-left hover:border-blue-300 hover:shadow-sm transition-all"
+          className="bg-white border border-gray-200 rounded-xl p-6 text-left hover:border-brand/40 hover:shadow-sm transition-all"
         >
           <div className="text-lg font-semibold text-gray-900 mb-1">Ask a question</div>
           <div className="text-gray-500 text-sm">Chat with our AI assistant</div>
         </button>
         <button
           onClick={() => onNavigate('tickets')}
-          className="bg-white border border-gray-200 rounded-xl p-6 text-left hover:border-blue-300 hover:shadow-sm transition-all"
+          className="bg-white border border-gray-200 rounded-xl p-6 text-left hover:border-brand/40 hover:shadow-sm transition-all"
         >
           <div className="text-lg font-semibold text-gray-900 mb-1">Check ticket status</div>
           <div className="text-gray-500 text-sm">{ticketCount} open ticket{ticketCount !== 1 ? 's' : ''}</div>
@@ -93,7 +93,7 @@ export default function PortalHome({ onNavigate, onViewTicket }: Props) {
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">Recent Tickets</h2>
-          <button onClick={() => onNavigate('tickets')} className="text-sm text-blue-600 hover:text-blue-700">
+          <button onClick={() => onNavigate('tickets')} className="text-sm text-brand hover:text-brand-dark">
             View all
           </button>
         </div>
@@ -133,7 +133,7 @@ export default function PortalHome({ onNavigate, onViewTicket }: Props) {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Popular Articles</h2>
-            <button onClick={() => onNavigate('kb')} className="text-sm text-blue-600 hover:text-blue-700">
+            <button onClick={() => onNavigate('kb')} className="text-sm text-brand hover:text-brand-dark">
               Browse all
             </button>
           </div>

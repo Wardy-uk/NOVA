@@ -7,6 +7,7 @@ interface Props {
 interface Category {
   id: string;
   name: string;
+  description?: string;
   children: Array<{ id: string; name: string }>;
 }
 
@@ -58,8 +59,8 @@ export default function PortalNewRequest({ onCreated }: Props) {
   }, []);
 
   const selectedCategory = categories.find(c => c.id === category);
-  const showUrl = ['website', 'crm', 'portal'].includes(category);
-  const showBrowser = ['website', 'portal'].includes(category);
+  const showUrl = ['website', 'leadpro', 'data_feeds', 'listings'].includes(category);
+  const showBrowser = ['website'].includes(category);
 
   const browserInfo = `${navigator.userAgent.match(/Chrome\/[\d.]+|Firefox\/[\d.]+|Safari\/[\d.]+|Edge\/[\d.]+/)?.[0] || 'Unknown'}`;
   const osInfo = navigator.platform;
@@ -180,12 +181,12 @@ export default function PortalNewRequest({ onCreated }: Props) {
         </div>
         <h2 className="text-2xl font-bold text-gray-900 mb-2">Request Submitted</h2>
         <p className="text-gray-600 mb-6">
-          Your ticket <span className="font-mono font-medium text-blue-600">{success}</span> has been created.
+          Your ticket <span className="font-mono font-medium text-brand">{success}</span> has been created.
           Our team will review it shortly.
         </p>
         <button
           onClick={() => onCreated(success)}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="px-6 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors"
         >
           View Ticket
         </button>
@@ -199,13 +200,13 @@ export default function PortalNewRequest({ onCreated }: Props) {
 
       {/* KB Suggestions */}
       {showKbSuggestions && kbSuggestions.length > 0 && (
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-          <h3 className="text-sm font-medium text-blue-800 mb-3">
+        <div className="mb-6 p-4 bg-teal-50 border border-teal-200 rounded-xl">
+          <h3 className="text-sm font-medium text-teal-800 mb-3">
             We found some articles that might help:
           </h3>
           <div className="space-y-2">
             {kbSuggestions.map(a => (
-              <div key={a.id} className="bg-white rounded-lg p-3 border border-blue-100">
+              <div key={a.id} className="bg-white rounded-lg p-3 border border-teal-100">
                 <div className="text-sm font-medium text-gray-900">{a.title}</div>
                 <div className="text-xs text-gray-500 mt-1 line-clamp-2">{a.excerpt}</div>
               </div>
@@ -214,7 +215,7 @@ export default function PortalNewRequest({ onCreated }: Props) {
           <div className="mt-3 flex gap-3">
             <button
               onClick={() => { setShowKbSuggestions(false); setKbSuggestions([]); }}
-              className="text-sm text-blue-700 font-medium hover:text-blue-800"
+              className="text-sm text-teal-700 font-medium hover:text-teal-800"
             >
               No, I still need help
             </button>
@@ -235,41 +236,48 @@ export default function PortalNewRequest({ onCreated }: Props) {
             value={subject}
             onChange={e => setSubject(e.target.value)}
             placeholder="Brief summary of your issue"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
           />
         </div>
 
         {/* Category */}
-        <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">What do you need help with? *</label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {categories.map(c => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => { setCategory(c.id); setSubcategory(''); }}
+                className={`text-left p-3 rounded-lg border transition-all text-sm ${
+                  category === c.id
+                    ? 'border-brand bg-brand/5 ring-1 ring-brand'
+                    : 'border-gray-200 hover:border-brand/40 hover:bg-gray-50'
+                }`}
+              >
+                <div className="font-medium text-gray-900">{c.name}</div>
+                {c.description && (
+                  <div className="text-xs text-gray-500 mt-0.5">{c.description}</div>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+        {selectedCategory && selectedCategory.children.length > 0 && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">More specifically</label>
             <select
-              value={category}
-              onChange={e => { setCategory(e.target.value); setSubcategory(''); }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              value={subcategory}
+              onChange={e => setSubcategory(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
             >
-              <option value="">Select category</option>
-              {categories.map(c => (
+              <option value="">Select an option</option>
+              {selectedCategory.children.map(c => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
           </div>
-          {selectedCategory && selectedCategory.children.length > 0 && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Sub-category</label>
-              <select
-                value={subcategory}
-                onChange={e => setSubcategory(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              >
-                <option value="">Select sub-category</option>
-                {selectedCategory.children.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
+        )}
 
         {/* Account */}
         <div>
@@ -279,7 +287,7 @@ export default function PortalNewRequest({ onCreated }: Props) {
             value={account}
             onChange={e => setAccount(e.target.value)}
             placeholder="Which account or site is affected?"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
           />
         </div>
 
@@ -291,7 +299,7 @@ export default function PortalNewRequest({ onCreated }: Props) {
             onChange={e => setDescription(e.target.value)}
             placeholder="What should be happening vs what is happening?"
             rows={5}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none"
           />
         </div>
 
@@ -304,7 +312,7 @@ export default function PortalNewRequest({ onCreated }: Props) {
               value={url}
               onChange={e => setUrl(e.target.value)}
               placeholder="https://..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
             />
           </div>
         )}
@@ -317,7 +325,7 @@ export default function PortalNewRequest({ onCreated }: Props) {
             value={errorMessage}
             onChange={e => setErrorMessage(e.target.value)}
             placeholder="Copy and paste the error message"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
           />
         </div>
 
@@ -330,7 +338,7 @@ export default function PortalNewRequest({ onCreated }: Props) {
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
             className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
-              isDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+              isDragging ? 'border-brand bg-brand/5' : 'border-gray-300 hover:border-gray-400'
             }`}
           >
             <svg className="w-8 h-8 mx-auto text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -386,7 +394,7 @@ export default function PortalNewRequest({ onCreated }: Props) {
             <select
               value={urgency}
               onChange={e => setUrgency(e.target.value as 'Normal' | 'High' | 'Critical')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
             >
               <option value="Normal">Normal</option>
               <option value="High">High</option>
@@ -398,7 +406,7 @@ export default function PortalNewRequest({ onCreated }: Props) {
             <select
               value={contactPreference}
               onChange={e => setContactPreference(e.target.value as 'portal' | 'email' | 'phone')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
             >
               <option value="portal">Portal reply</option>
               <option value="email">Email</option>
@@ -418,7 +426,7 @@ export default function PortalNewRequest({ onCreated }: Props) {
           <button
             onClick={handleSubmit}
             disabled={submitting || !subject || !category || !description}
-            className="px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-6 py-2.5 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {submitting ? 'Submitting...' : 'Submit Request'}
           </button>

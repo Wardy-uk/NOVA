@@ -16,13 +16,13 @@ export default function PortalLogin({ onInternalAuth }: PortalLoginProps) {
   }, []);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 to-cyan-100 px-4">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
         <div className="mb-6">
-          <div className="w-16 h-16 mx-auto rounded-xl bg-blue-600 flex items-center justify-center text-white text-2xl font-bold">
-            N
+          <div className="mt-2">
+            <span className="text-3xl font-heading font-extrabold tracking-tight text-brand">nurtur</span>
           </div>
-          <h1 className="mt-4 text-2xl font-bold text-gray-900">Nurtur Support Portal</h1>
+          <h1 className="mt-4 text-2xl font-bold text-gray-900">Support Portal</h1>
           <p className="mt-2 text-gray-600">Sign in to manage your support requests and access the knowledge base.</p>
         </div>
 
@@ -39,7 +39,7 @@ export default function PortalLogin({ onInternalAuth }: PortalLoginProps) {
         ) : authMode === 'internal' ? (
           <button
             onClick={onInternalAuth}
-            className="inline-flex items-center justify-center w-full px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="inline-flex items-center justify-center w-full px-6 py-3 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
           >
             Access Portal
           </button>
@@ -54,7 +54,7 @@ export default function PortalLogin({ onInternalAuth }: PortalLoginProps) {
                 }
               } catch { /* ignore */ }
             }}
-            className="inline-flex items-center justify-center w-full px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="inline-flex items-center justify-center w-full px-6 py-3 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
           >
             Sign in with Nurtur
           </button>
