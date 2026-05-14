@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type { PortalKbArticle } from '../../../shared/portal-types.js';
 
+type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 'chat';
+
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
 interface ArticleResult {
@@ -12,14 +14,18 @@ interface ArticleResult {
   helpfulScore: number;
 }
 
-export default function PortalKnowledgeBase() {
+interface Props {
+  onNavigate?: (view: PortalView) => void;
+}
+
+export default function PortalKnowledgeBase({ onNavigate }: Props) {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<ArticleResult[]>([]);
   const [categories, setCategories] = useState<Array<{ category: string; count: number }>>([]);
   const [selectedArticle, setSelectedArticle] = useState<PortalKbArticle | null>(null);
   const [relatedArticles, setRelatedArticles] = useState<Array<{ id: number; title: string; excerpt: string; category: string | null }>>([]);
   const [loading, setLoading] = useState(false);
-  const [feedbackGiven, setFeedbackGiven] = useState<Record<number, boolean>>({});
+  const [feedbackGiven, setFeedbackGiven] = useState<Record<number, 'yes' | 'no'>>({});
 
   useEffect(() => {
     pf('/api/portal/kb/categories')
@@ -66,7 +72,7 @@ export default function PortalKnowledgeBase() {
         method: 'POST',
         body: JSON.stringify({ helpful }),
       });
-      setFeedbackGiven(prev => ({ ...prev, [id]: true }));
+      setFeedbackGiven(prev => ({ ...prev, [id]: helpful ? 'yes' : 'no' }));
     } catch { /* ignore */ }
   };
 
@@ -97,8 +103,10 @@ export default function PortalKnowledgeBase() {
 
           {/* Helpfulness */}
           <div className="mt-8 pt-6 border-t border-gray-100">
-            {feedbackGiven[selectedArticle.id] ? (
+            {feedbackGiven[selectedArticle.id] === 'yes' ? (
               <p className="text-sm text-gray-500">Thanks for your feedback!</p>
+            ) : feedbackGiven[selectedArticle.id] === 'no' ? (
+              <StillNeedHelpCta onNavigate={onNavigate} />
             ) : (
               <div className="flex items-center gap-4">
                 <span className="text-sm text-gray-600">Was this article helpful?</span>
@@ -146,6 +154,11 @@ export default function PortalKnowledgeBase() {
             </div>
           </div>
         )}
+
+        {/* Still need help CTA — article detail */}
+        <div className="mt-6">
+          <StillNeedHelpCta onNavigate={onNavigate} />
+        </div>
       </div>
     );
   }
@@ -231,6 +244,31 @@ export default function PortalKnowledgeBase() {
           </div>
         </div>
       )}
+
+      {/* Still need help CTA — browse view */}
+      <div className="max-w-2xl mx-auto">
+        <StillNeedHelpCta onNavigate={onNavigate} />
+      </div>
+    </div>
+  );
+}
+
+function StillNeedHelpCta({ onNavigate }: { onNavigate?: (view: PortalView) => void }) {
+  if (!onNavigate) return null;
+  return (
+    <div className="bg-brand/5 border border-brand/20 rounded-xl p-6 text-center">
+      <h3 className="text-base font-semibold text-gray-900">Still need help?</h3>
+      <p className="text-sm text-gray-500 mt-1">Chat with our support assistant</p>
+      <button
+        onClick={() => onNavigate('chat')}
+        className="mt-3 inline-flex items-center gap-2 px-5 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark transition-colors"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+        </svg>
+        Get help
+      </button>
     </div>
   );
 }

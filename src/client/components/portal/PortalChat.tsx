@@ -367,6 +367,35 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                   );
                 }
 
+                if (meta?.type === 'kb_suggestions' && meta.articles && Array.isArray(meta.articles)) {
+                  return (
+                    <div key={msg.id} className="flex justify-start">
+                      <div className="max-w-[80%]">
+                        <div className="bg-gray-100 rounded-2xl px-4 py-2.5 text-sm text-gray-900 mb-2">
+                          <div className="whitespace-pre-wrap">{msg.content}</div>
+                        </div>
+                        <div className="space-y-2 ml-1">
+                          {meta.articles.map((article: { id: number; title: string; excerpt: string }) => (
+                            <div key={article.id} className="bg-white border border-gray-200 rounded-lg p-3 hover:border-brand/40 hover:shadow-sm transition-all">
+                              <div className="text-sm font-medium text-gray-900">{article.title}</div>
+                              <div className="text-xs text-gray-500 mt-1 line-clamp-2">{article.excerpt}</div>
+                            </div>
+                          ))}
+                          <button
+                            onClick={() => { setInput("These articles don't answer my question"); }}
+                            className="text-xs text-gray-500 hover:text-brand transition-colors mt-1"
+                          >
+                            None of these help
+                          </button>
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1 ml-1">
+                          {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
                   <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${

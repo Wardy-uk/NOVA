@@ -276,7 +276,7 @@ function PortalApp() {
           <PortalTicketDetail ticketKey={selectedTicketKey} onBack={() => setView('tickets')} onRefreshRef={ticketRefreshRef} />
         )}
         {view === 'new-request' && <PortalNewRequest onCreated={(key) => { handleViewTicket(key); }} onNavigate={setView} />}
-        {view === 'kb' && <PortalKnowledgeBase />}
+        {view === 'kb' && <PortalKnowledgeBase onNavigate={setView} />}
         {view === 'chat' && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
       </Suspense>
       <PortalToastContainer onViewTicket={handleViewTicket} />

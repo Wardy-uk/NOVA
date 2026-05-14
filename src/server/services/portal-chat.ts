@@ -396,9 +396,12 @@ Also extract any fields already mentioned. Return JSON.`,
         if (kbResult.length > 0) {
           meta.stage = 'kb_check';
           meta.kbSuggested = true;
-          const articleList = kbResult.map(a => `- **${a.title}**: ${a.excerpt}`).join('\n');
           return {
-            response: `I found some articles that might help:\n\n${articleList}\n\nDo any of these answer your question? If not, I can help you raise a support request.`,
+            response: 'I found some articles that might help:',
+            messageMeta: {
+              type: 'kb_suggestions' as const,
+              articles: kbResult.map(a => ({ id: 0, title: a.title, excerpt: a.excerpt })),
+            },
           };
         }
         // No KB results — log the gap
@@ -699,9 +702,12 @@ Return JSON with only the fields present in the message.`,
       if (articles.length > 0) {
         meta.stage = 'kb_check';
         meta.kbSuggested = true;
-        const articleList = articles.map(a => `- **${a.title}**: ${a.excerpt}`).join('\n');
         return {
-          response: `Before I create a ticket, I found an article that might help:\n\n${articleList}\n\nDoes this solve your issue?`,
+          response: 'Before I create a ticket, I found an article that might help:',
+          messageMeta: {
+            type: 'kb_suggestions' as const,
+            articles: articles.map(a => ({ id: 0, title: a.title, excerpt: a.excerpt })),
+          },
         };
       }
       // No KB match — log the gap

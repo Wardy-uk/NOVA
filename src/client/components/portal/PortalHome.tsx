@@ -123,31 +123,6 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
         </button>
       </div>
 
-      {/* Secondary links */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <button
-          onClick={() => onNavigate('kb')}
-          className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-brand/40 hover:shadow-sm transition-all"
-        >
-          <div className="text-sm font-semibold text-gray-900">Browse knowledge base</div>
-          <div className="text-xs text-gray-500 mt-0.5">Find answers in our help articles</div>
-        </button>
-        <button
-          onClick={() => onNavigate('tickets')}
-          className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-brand/40 hover:shadow-sm transition-all"
-        >
-          <div className="text-sm font-semibold text-gray-900">View my tickets</div>
-          <div className="text-xs text-gray-500 mt-0.5">{ticketCount} open ticket{ticketCount !== 1 ? 's' : ''}</div>
-        </button>
-        <button
-          onClick={() => onNavigate('new-request')}
-          className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-brand/40 hover:shadow-sm transition-all"
-        >
-          <div className="text-sm font-semibold text-gray-900">Submit a form</div>
-          <div className="text-xs text-gray-500 mt-0.5">Use the traditional request form</div>
-        </button>
-      </div>
-
       {/* Recent Tickets */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
