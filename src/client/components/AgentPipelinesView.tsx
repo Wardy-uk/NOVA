@@ -46,6 +46,7 @@ interface CompareResult {
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return 'Never';
   const diff = Date.now() - new Date(dateStr).getTime();
+  if (isNaN(diff)) return '—';
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'Just now';
   if (mins < 60) return `${mins}m ago`;

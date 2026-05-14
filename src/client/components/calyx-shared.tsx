@@ -113,6 +113,7 @@ export function SlaCountdown({ dueAt, isPaused, metAt, isFrt }: { dueAt: string 
   if (isPaused) return <span style={{ color: C.purple, fontSize: 12 }}>Paused</span>;
 
   const due = new Date(dueAt.replace(' ', 'T') + (dueAt.includes('Z') || dueAt.includes('+') ? '' : 'Z')).getTime();
+  if (isNaN(due)) return <span style={{ color: C.text3, fontSize: 12 }}>--</span>;
   const diff = due - now;
   if (diff <= 0) {
     const m = Math.floor(Math.abs(diff) / 60000);

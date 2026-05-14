@@ -70,6 +70,7 @@ const PRIORITY_STYLES: Record<string, string> = {
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
+  if (isNaN(diff)) return '—';
   const mins = Math.floor(diff / 60000);
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
@@ -80,6 +81,7 @@ function timeAgo(dateStr: string): string {
 
 function timeRemaining(expiresAt: string): { text: string; urgency: 'normal' | 'warning' | 'critical' | 'expired' } {
   const diff = new Date(expiresAt).getTime() - Date.now();
+  if (isNaN(diff)) return { text: '—', urgency: 'normal' };
   if (diff <= 0) return { text: 'Expired', urgency: 'expired' };
   const mins = Math.floor(diff / 60000);
   if (mins < 10) return { text: `${mins}m`, urgency: 'critical' };
