@@ -346,7 +346,7 @@ export function AIApprovalDrawer({ item, canInteract, onClose, onDecide, onReRev
         onDecide(item.id, 'execute');
       }
     } else if (hasEdits) {
-      onDecide(item.id, 'approve', textToAdf(editedText));
+      onDecide(item.id, 'approve', editedText);
     } else {
       onDecide(item.id, 'approve');
     }

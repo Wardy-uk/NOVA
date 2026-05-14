@@ -231,7 +231,7 @@ function ApprovalDetail({
 
   const handleApprove = () => {
     if (isShadow) { onDecide(item.id, 'execute', hasEdits ? editedText : undefined); }
-    else if (hasEdits) { onDecide(item.id, 'approve', textToAdf(editedText)); }
+    else if (hasEdits) { onDecide(item.id, 'approve', editedText); }
     else { onDecide(item.id, 'approve'); }
     actions.toast('Approved', 'ok');
   };
