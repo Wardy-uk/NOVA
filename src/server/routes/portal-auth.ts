@@ -20,7 +20,7 @@ export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
 
     try {
       const { url } = generateAuthUrl(settings);
-      res.redirect(url);
+      res.json({ ok: true, data: { url } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'OIDC not configured' });
     }
