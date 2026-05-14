@@ -1543,7 +1543,7 @@ export class AgentLoop {
     }
 
     // Quick-win auto-close (only reached in non-shadow mode)
-    const qw = decision.output.quick_win as { type?: string; confidence?: number } | undefined;
+    const qw = decision.output.quick_win as { type?: string; confidence?: number; reasoning?: string } | undefined;
     const closableQwTypes = ['spam', 'vendor_email', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
     // Auto-reply and out-of-office are unambiguous — always auto-close at high confidence
     const alwaysAutoCloseTypes = ['auto_reply', 'out_of_office'];
