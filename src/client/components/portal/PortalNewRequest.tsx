@@ -1,7 +1,10 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 
+type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 'chat';
+
 interface Props {
   onCreated: (ticketKey: string) => void;
+  onNavigate?: (view: PortalView) => void;
 }
 
 interface Category {
@@ -21,6 +24,47 @@ const ACCEPTED_TYPES = '.png,.jpg,.jpeg,.gif,.pdf,.doc,.docx,.xlsx,.csv,.txt,.zi
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
+interface FieldConfig {
+  url: boolean;
+  browser: boolean;
+  errorMessage: boolean;
+  account: boolean;
+  description_hint: string;
+}
+
+const ALL_FIELDS: FieldConfig = { url: true, browser: true, errorMessage: true, account: true, description_hint: 'What should be happening vs what is happening?' };
+
+const CATEGORY_FIELD_CONFIG: Record<string, FieldConfig> = {
+  website_content:  { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'What content needs changing? Please include the page URL and the exact text or image to update.' },
+  website_broken:   { url: true,  browser: true,  errorMessage: true,  account: true,  description_hint: 'What should be happening vs what is happening? Include any error messages you see.' },
+  website_new_page: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Describe the new page you need — what content should it include and where should it sit in the navigation?' },
+  website_design:   { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'What design changes do you need? Attach any reference images or mockups.' },
+  account_login:       { url: false, browser: true,  errorMessage: true,  account: true,  description_hint: 'Which login are you having trouble with? What happens when you try to log in?' },
+  account_new_user:    { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Name and email of the new user. Which systems do they need access to?' },
+  account_permissions: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which user needs permissions changed? What access do they need?' },
+  account_details:     { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What account details need updating?' },
+  email_campaign: { url: false, browser: false, errorMessage: true,  account: true,  description_hint: 'Which campaign is affected? What went wrong with the send?' },
+  email_triggers: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which trigger or automation needs attention? What should it be doing?' },
+  email_template: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which template? Attach the content or describe the changes needed.' },
+  leadpro_missing: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'When did the lead come in? Which source/portal? Include any reference numbers.' },
+  leadpro_setup:   { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What needs setting up or configuring in LeadPro?' },
+  leadpro_access:  { url: false, browser: true,  errorMessage: true,  account: true,  description_hint: 'What happens when you try to access LeadPro?' },
+  feeds_property:    { url: false, browser: false, errorMessage: true,  account: true,  description_hint: 'Which feed is affected? When did it last work? Include any error messages from your CRM.' },
+  feeds_integration: { url: false, browser: false, errorMessage: true,  account: true,  description_hint: 'Which integration? What system is it connecting to?' },
+  feeds_reporting:   { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'Which report or analytics view is affected?' },
+  listings_tours:      { url: true,  browser: true,  errorMessage: false, account: true,  description_hint: 'Which property? Include the property address or listing reference.' },
+  listings_media:      { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'Which property and what images need attention?' },
+  listings_management: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which listings are affected? What action do you need?' },
+  onboarding_branch:   { url: false, browser: false, errorMessage: false, account: false, description_hint: 'Branch name, address, and which products they need.' },
+  onboarding_product:  { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which product do you need set up?' },
+  onboarding_training: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What training do you need? How many attendees?' },
+  billing_cancel: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which service are you cancelling? Any specific date?' },
+  billing_change: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What service change do you need?' },
+  billing_query:  { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What is your billing question?' },
+  other_general:  { url: false, browser: false, errorMessage: false, account: false, description_hint: 'How can we help?' },
+  other_feedback: { url: false, browser: false, errorMessage: false, account: false, description_hint: 'What feedback or suggestion do you have?' },
+};
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -31,7 +75,7 @@ function isImageFile(file: File): boolean {
   return file.type.startsWith('image/');
 }
 
-export default function PortalNewRequest({ onCreated }: Props) {
+export default function PortalNewRequest({ onCreated, onNavigate }: Props) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [subject, setSubject] = useState('');
   const [category, setCategory] = useState('');
@@ -49,7 +93,16 @@ export default function PortalNewRequest({ onCreated }: Props) {
   const [showKbSuggestions, setShowKbSuggestions] = useState(false);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [deflected, setDeflected] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const formStartedRef = useRef(false);
+
+  const trackAnalytics = useCallback((event_type: string, metadata?: Record<string, unknown>) => {
+    pf('/api/portal/analytics', {
+      method: 'POST',
+      body: JSON.stringify({ event_type, metadata }),
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     pf('/api/portal/categories')
@@ -59,8 +112,8 @@ export default function PortalNewRequest({ onCreated }: Props) {
   }, []);
 
   const selectedCategory = categories.find(c => c.id === category);
-  const showUrl = ['website', 'leadpro', 'data_feeds', 'listings'].includes(category);
-  const showBrowser = ['website'].includes(category);
+  const fieldConfig = subcategory ? (CATEGORY_FIELD_CONFIG[subcategory] ?? ALL_FIELDS) : ALL_FIELDS;
+  const hasSubcategorySelected = !!subcategory;
 
   const browserInfo = `${navigator.userAgent.match(/Chrome\/[\d.]+|Firefox\/[\d.]+|Safari\/[\d.]+|Edge\/[\d.]+/)?.[0] || 'Unknown'}`;
   const osInfo = navigator.platform;
@@ -146,13 +199,13 @@ export default function PortalNewRequest({ onCreated }: Props) {
           category,
           subcategory: subcategory || undefined,
           description,
-          account: account || undefined,
-          url: url || undefined,
-          errorMessage: errorMessage || undefined,
+          account: fieldConfig.account && account ? account : undefined,
+          url: fieldConfig.url && url ? url : undefined,
+          errorMessage: fieldConfig.errorMessage && errorMessage ? errorMessage : undefined,
           urgency,
           contactPreference,
-          browser: showBrowser ? browserInfo : undefined,
-          os: showBrowser ? osInfo : undefined,
+          browser: fieldConfig.browser ? browserInfo : undefined,
+          os: fieldConfig.browser ? osInfo : undefined,
         }),
       });
       const data = await res.json();
@@ -170,6 +223,28 @@ export default function PortalNewRequest({ onCreated }: Props) {
       setSubmitting(false);
     }
   };
+
+  if (deflected) {
+    return (
+      <div className="max-w-2xl mx-auto text-center py-16">
+        <div className="w-16 h-16 mx-auto rounded-full bg-teal-100 flex items-center justify-center mb-6">
+          <svg className="w-8 h-8 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Glad we could help!</h2>
+        <p className="text-gray-600 mb-6">
+          If you still need assistance, you can always come back.
+        </p>
+        <button
+          onClick={() => { setDeflected(false); setShowKbSuggestions(false); setKbSuggestions([]); }}
+          className="px-6 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors"
+        >
+          Start a new request
+        </button>
+      </div>
+    );
+  }
 
   if (success) {
     return (
@@ -209,6 +284,15 @@ export default function PortalNewRequest({ onCreated }: Props) {
               <div key={a.id} className="bg-white rounded-lg p-3 border border-teal-100">
                 <div className="text-sm font-medium text-gray-900">{a.title}</div>
                 <div className="text-xs text-gray-500 mt-1 line-clamp-2">{a.excerpt}</div>
+                <button
+                  onClick={() => {
+                    trackAnalytics('deflection', { article_id: a.id, source: 'form', category });
+                    setDeflected(true);
+                  }}
+                  className="mt-2 text-xs text-teal-700 font-medium hover:text-teal-800"
+                >
+                  Yes, this answers my question
+                </button>
               </div>
             ))}
           </div>
@@ -248,7 +332,13 @@ export default function PortalNewRequest({ onCreated }: Props) {
               <button
                 key={c.id}
                 type="button"
-                onClick={() => { setCategory(c.id); setSubcategory(''); }}
+                onClick={() => {
+                  if (!formStartedRef.current) {
+                    formStartedRef.current = true;
+                    trackAnalytics('form_started', { category: c.id });
+                  }
+                  setCategory(c.id); setSubcategory('');
+                }}
                 className={`text-left p-3 rounded-lg border transition-all text-sm ${
                   category === c.id
                     ? 'border-brand bg-brand/5 ring-1 ring-brand'
@@ -279,8 +369,11 @@ export default function PortalNewRequest({ onCreated }: Props) {
           </div>
         )}
 
-        {/* Account */}
-        <div>
+        {/* Account — conditional */}
+        <div
+          className="transition-all duration-300 ease-in-out overflow-hidden"
+          style={{ maxHeight: (!hasSubcategorySelected || fieldConfig.account) ? '120px' : '0', opacity: (!hasSubcategorySelected || fieldConfig.account) ? 1 : 0 }}
+        >
           <label className="block text-sm font-medium text-gray-700 mb-1">Account / Site</label>
           <input
             type="text"
@@ -291,34 +384,38 @@ export default function PortalNewRequest({ onCreated }: Props) {
           />
         </div>
 
-        {/* Description */}
+        {/* Description — always shown, placeholder changes */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
           <textarea
             value={description}
             onChange={e => setDescription(e.target.value)}
-            placeholder="What should be happening vs what is happening?"
+            placeholder={fieldConfig.description_hint}
             rows={5}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none"
           />
         </div>
 
-        {/* URL */}
-        {showUrl && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">URL / Page</label>
-            <input
-              type="text"
-              value={url}
-              onChange={e => setUrl(e.target.value)}
-              placeholder="https://..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
-            />
-          </div>
-        )}
+        {/* URL — conditional */}
+        <div
+          className="transition-all duration-300 ease-in-out overflow-hidden"
+          style={{ maxHeight: (!hasSubcategorySelected || fieldConfig.url) ? '120px' : '0', opacity: (!hasSubcategorySelected || fieldConfig.url) ? 1 : 0 }}
+        >
+          <label className="block text-sm font-medium text-gray-700 mb-1">URL / Page</label>
+          <input
+            type="text"
+            value={url}
+            onChange={e => setUrl(e.target.value)}
+            placeholder="https://..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
+          />
+        </div>
 
-        {/* Error message */}
-        <div>
+        {/* Error message — conditional */}
+        <div
+          className="transition-all duration-300 ease-in-out overflow-hidden"
+          style={{ maxHeight: (!hasSubcategorySelected || fieldConfig.errorMessage) ? '120px' : '0', opacity: (!hasSubcategorySelected || fieldConfig.errorMessage) ? 1 : 0 }}
+        >
           <label className="block text-sm font-medium text-gray-700 mb-1">Error message (if any)</label>
           <input
             type="text"
@@ -415,14 +512,31 @@ export default function PortalNewRequest({ onCreated }: Props) {
           </div>
         </div>
 
-        {/* Browser info (auto-detected) */}
-        {showBrowser && (
+        {/* Browser info (auto-detected) — conditional */}
+        <div
+          className="transition-all duration-300 ease-in-out overflow-hidden"
+          style={{ maxHeight: (!hasSubcategorySelected || fieldConfig.browser) ? '60px' : '0', opacity: (!hasSubcategorySelected || fieldConfig.browser) ? 1 : 0 }}
+        >
           <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-500">
             Detected: {browserInfo} on {osInfo}
           </div>
-        )}
+        </div>
 
-        <div className="flex justify-end pt-2">
+        <div className="flex items-center justify-between pt-2">
+          <div>
+            {onNavigate && (
+              <button
+                type="button"
+                onClick={() => onNavigate('chat')}
+                className="text-sm text-brand hover:text-brand-dark flex items-center gap-1.5"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+                Prefer to chat? Talk to our AI assistant
+              </button>
+            )}
+          </div>
           <button
             onClick={handleSubmit}
             disabled={submitting || !subject || !category || !description}

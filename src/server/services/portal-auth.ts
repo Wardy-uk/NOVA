@@ -16,6 +16,7 @@ interface OidcTokenResponse {
   id_token: string;
   token_type: string;
   expires_in: number;
+  refresh_token?: string;
 }
 
 interface OidcUserClaims {
@@ -125,6 +126,15 @@ export async function handleCallback(
   // Upsert user
   const userId = await upsertUser(claims.sub, orgId, claims.email, claims.name);
 
+  // Store refresh token if provided by IdP
+  if (tokens.refresh_token) {
+    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+    await execute(
+      `UPDATE portal_users SET refresh_token = ?, token_expires_at = ? WHERE id = ?`,
+      [tokens.refresh_token, expiresAt, userId],
+    );
+  }
+
   // Issue portal JWT
   const payload: PortalAuthPayload = {
     userId,
@@ -201,6 +211,77 @@ async function upsertUser(
     [externalId, orgId, email, displayName],
   );
   return result!.id;
+}
+
+export async function refreshOidcToken(
+  userId: number,
+  settings: FileSettingsQueries,
+): Promise<{ token: string; user: PortalAuthPayload }> {
+  const config = getOidcConfig(settings);
+  if (!config.issuer || !config.clientId) {
+    throw new Error('OIDC not configured');
+  }
+
+  const row = await queryOne<{
+    id: number; refresh_token: string | null; email: string; display_name: string;
+    org_id: number; role: string;
+  }>(
+    `SELECT u.id, u.refresh_token, u.email, u.display_name, u.org_id, u.role
+     FROM portal_users u WHERE u.id = ?`,
+    [userId],
+  );
+  if (!row?.refresh_token) {
+    throw new Error('No refresh token available — re-authentication required');
+  }
+
+  const org = await queryOne<{ name: string }>(
+    `SELECT name FROM portal_organisations WHERE id = ?`,
+    [row.org_id],
+  );
+
+  const tokenBody = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: row.refresh_token,
+    client_id: config.clientId,
+    ...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+  });
+
+  const tokenRes = await fetch(`${config.issuer}/connect/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: tokenBody.toString(),
+  });
+
+  if (!tokenRes.ok) {
+    // Refresh token expired or revoked — clear it
+    await execute(`UPDATE portal_users SET refresh_token = NULL, token_expires_at = NULL WHERE id = ?`, [userId]);
+    throw new Error('Refresh token expired — re-authentication required');
+  }
+
+  const tokens: OidcTokenResponse = await tokenRes.json();
+
+  // Update refresh token if rotated
+  if (tokens.refresh_token) {
+    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+    await execute(
+      `UPDATE portal_users SET refresh_token = ?, token_expires_at = ? WHERE id = ?`,
+      [tokens.refresh_token, expiresAt, userId],
+    );
+  }
+
+  // Issue fresh portal JWT
+  const payload: PortalAuthPayload = {
+    userId: row.id,
+    email: row.email,
+    orgId: row.org_id,
+    orgName: org?.name || 'Unknown',
+    role: (row.role as PortalAuthPayload['role']) || 'requester',
+  };
+
+  const secret = process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET || 'portal-default-secret';
+  const token = jwt.sign(payload, secret, { expiresIn: '8h' });
+
+  return { token, user: payload };
 }
 
 export function generateLogoutUrl(settings: FileSettingsQueries): string {

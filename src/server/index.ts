@@ -2498,7 +2498,7 @@ ${panelHtml}
 
   // Authenticated portal routes
   const portalAuth = portalAuthMiddleware(settingsQueries, getRoles);
-  app.use('/api/portal', portalGate, portalAuth, createPortalTicketRoutes(portalJira, portalIntake));
+  app.use('/api/portal', portalGate, portalAuth, createPortalTicketRoutes(portalJira, portalIntake, settingsQueries));
   app.use('/api/portal', portalGate, portalAuth, createPortalChatRoutes(portalChat, portalJira));
   app.use('/api/portal', portalGate, portalAuth, createPortalEventsRoutes());
 

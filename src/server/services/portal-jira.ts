@@ -1,6 +1,7 @@
 import { query, queryOne } from './database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { JiraRestClient } from './jira-client.js';
+import { broadcastPortalEvent } from '../routes/portal-events.js';
 import type {
   PortalTicketSummary,
   PortalTicketDetail,
@@ -15,6 +16,8 @@ interface TicketQueryOptions {
   userId?: number;
   status?: 'open' | 'resolved' | 'all';
   search?: string;
+  priority?: string;
+  dateRange?: 'today' | 'week' | 'month' | 'all';
   page?: number;
   pageSize?: number;
 }
@@ -103,6 +106,8 @@ export class PortalJiraService {
     }
 
     let searchFilter = '';
+    let priorityFilter = '';
+    let dateFilter = '';
     const countParams: unknown[] = [`%@${domain}`];
     const queryParams: unknown[] = [`%@${domain}`];
 
@@ -110,6 +115,27 @@ export class PortalJiraService {
       searchFilter = `AND (jic.summary LIKE ? OR jic.issue_key LIKE ?)`;
       countParams.push(`%${opts.search}%`, `%${opts.search}%`);
       queryParams.push(`%${opts.search}%`, `%${opts.search}%`);
+    }
+
+    if (opts.priority && opts.priority !== 'all') {
+      priorityFilter = `AND jic.priority = ?`;
+      countParams.push(opts.priority);
+      queryParams.push(opts.priority);
+    }
+
+    if (opts.dateRange && opts.dateRange !== 'all') {
+      const now = new Date();
+      let cutoff: Date;
+      if (opts.dateRange === 'today') {
+        cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      } else if (opts.dateRange === 'week') {
+        cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      } else {
+        cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+      dateFilter = `AND jic.created_at >= ?`;
+      countParams.push(cutoff.toISOString());
+      queryParams.push(cutoff.toISOString());
     }
 
     if (opts.userId) {
@@ -123,7 +149,7 @@ export class PortalJiraService {
 
     const countResult = await queryOne<{ total: number }>(
       `SELECT COUNT(*) AS total FROM jira_issue_cache jic
-       WHERE jic.reporter_email LIKE ? ${statusFilter} ${searchFilter}`,
+       WHERE jic.reporter_email LIKE ? ${statusFilter} ${searchFilter} ${priorityFilter} ${dateFilter}`,
       countParams,
     );
 
@@ -142,7 +168,7 @@ export class PortalJiraService {
       `SELECT jic.issue_key, jic.summary, jic.status, ISNULL(jic.priority, 'Medium') AS priority,
               jic.created_at, jic.updated_at, jic.assignee_display AS assignee, jic.reporter_email
        FROM jira_issue_cache jic
-       WHERE jic.reporter_email LIKE ? ${statusFilter} ${searchFilter}
+       WHERE jic.reporter_email LIKE ? ${statusFilter} ${searchFilter} ${priorityFilter} ${dateFilter}
        ORDER BY jic.updated_at DESC
        OFFSET ? ROWS FETCH NEXT ? ROWS ONLY`,
       queryParams,
@@ -161,6 +187,19 @@ export class PortalJiraService {
     }));
 
     return { tickets, total: countResult?.total || 0 };
+  }
+
+  async getOrgOpenTicketCount(orgId: number): Promise<number> {
+    const domain = await this.getOrgEmailDomain(orgId);
+    if (!domain) return 0;
+
+    const result = await queryOne<{ total: number }>(
+      `SELECT COUNT(*) AS total FROM jira_issue_cache jic
+       WHERE jic.reporter_email LIKE ?
+         AND jic.status NOT IN ('Closed', 'Resolved', 'Done', 'Cancelled')`,
+      [`%@${domain}`],
+    );
+    return result?.total || 0;
   }
 
   async getTicketDetail(ticketKey: string, orgId: number): Promise<PortalTicketDetail | null> {
@@ -303,6 +342,12 @@ export class PortalJiraService {
     if (!this.jiraClient) throw new Error('Jira client not configured');
 
     await this.jiraClient.addComment(ticketKey, `[Portal - ${authorName}]\n\n${body}`);
+
+    broadcastPortalEvent(orgId, {
+      type: 'ticket:comment',
+      ticketKey,
+      data: { author: authorName, summary: body.slice(0, 200) },
+    });
   }
 
   async createTicket(params: {

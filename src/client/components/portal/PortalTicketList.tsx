@@ -15,6 +15,8 @@ export default function PortalTicketList({ onViewTicket }: Props) {
   const [status, setStatus] = useState<'all' | 'open' | 'resolved'>('all');
   const [search, setSearch] = useState('');
   const [mine, setMine] = useState(false);
+  const [priority, setPriority] = useState('all');
+  const [dateRange, setDateRange] = useState<'all' | 'today' | 'week' | 'month'>('all');
   const pageSize = 20;
 
   const load = useCallback(async () => {
@@ -26,6 +28,8 @@ export default function PortalTicketList({ onViewTicket }: Props) {
         pageSize: String(pageSize),
         ...(search ? { search } : {}),
         ...(mine ? { mine: 'true' } : {}),
+        ...(priority !== 'all' ? { priority } : {}),
+        ...(dateRange !== 'all' ? { dateRange } : {}),
       });
       const res = await pf(`/api/portal/tickets?${params}`);
       const data = await res.json();
@@ -38,7 +42,7 @@ export default function PortalTicketList({ onViewTicket }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [page, status, search, mine]);
+  }, [page, status, search, mine, priority, dateRange]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -82,6 +86,29 @@ export default function PortalTicketList({ onViewTicket }: Props) {
             className="rounded border-gray-300 text-brand focus:ring-brand" />
           My tickets only
         </label>
+
+        <select
+          value={priority}
+          onChange={e => { setPriority(e.target.value); setPage(1); }}
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand"
+        >
+          <option value="all">All priorities</option>
+          <option value="Highest">Highest</option>
+          <option value="High">High</option>
+          <option value="Medium">Medium</option>
+          <option value="Low">Low</option>
+        </select>
+
+        <select
+          value={dateRange}
+          onChange={e => { setDateRange(e.target.value as typeof dateRange); setPage(1); }}
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand"
+        >
+          <option value="all">All time</option>
+          <option value="today">Today</option>
+          <option value="week">This week</option>
+          <option value="month">This month</option>
+        </select>
 
         <div className="flex-1" />
 

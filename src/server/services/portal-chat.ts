@@ -39,6 +39,8 @@ const FieldExtractSchema = z.object({
 
 const ChatResponseSchema = z.object({ response: z.string() });
 
+const FRUSTRATION_PATTERNS = /\b(this is ridiculous|speak to someone|talk to a human|this is useless|waste of time|you're useless|what a joke|fed up|sick of this|absolutely terrible|disgusting|incompetent)\b|[A-Z\s!]{20,}|[!?]{3,}/i;
+
 // ── Category Field Config ──
 
 const CATEGORY_FIELD_CONFIG: Record<string, { url: boolean; browser: boolean; errorMessage: boolean; account: boolean; description_hint: string }> = {
@@ -224,10 +226,21 @@ export class PortalChatService {
     let responseContent: string;
     let messageMeta: ChatMessageMetadata | null = null;
 
+    // Frustration detection — skip thresholds and offer handoff immediately
+    if (FRUSTRATION_PATTERNS.test(content)) {
+      meta.frustrationDetected = true;
+      console.log(`[portal-chat] Frustration detected in session ${sessionId}`);
+    }
+
     try {
       const result = await this.processStage(meta, content, history, context, sessionId);
       responseContent = result.response;
       messageMeta = result.messageMeta ?? null;
+      if (messageMeta) {
+        messageMeta.intent = meta.intent;
+      } else {
+        messageMeta = { intent: meta.intent };
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       const errStack = err instanceof Error ? err.stack : undefined;
@@ -282,6 +295,14 @@ export class PortalChatService {
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
     const stage = meta.stage;
     console.log(`[portal-chat] session=${sessionId} stage=${stage} intent=${meta.intent} category=${meta.category}`);
+
+    // Frustration override — offer handoff immediately from any stage except confirmed
+    if (meta.frustrationDetected && stage !== 'confirmed' && stage !== 'summary') {
+      meta.frustrationDetected = false; // consume the flag
+      return {
+        response: "I can see this is frustrating — I'm sorry. Would you like me to create a ticket so a member of our team can help you directly? Or if you'd prefer, you can use the **New Request** form to submit details at your own pace.",
+      };
+    }
 
     switch (stage) {
       case 'intent':
@@ -380,6 +401,8 @@ Also extract any fields already mentioned. Return JSON.`,
             response: `I found some articles that might help:\n\n${articleList}\n\nDo any of these answer your question? If not, I can help you raise a support request.`,
           };
         }
+        // No KB results — log the gap
+        await this.logKbGap(content, meta.category, sessionId);
       } catch (err) {
         console.warn('[portal-chat] KB search failed, falling through to category:', err instanceof Error ? err.message : err);
       }
@@ -545,6 +568,16 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     context: ChatContext,
     sessionId: number,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
+    // Track exchanges for "other" intent — offer handoff after 2
+    if (meta.intent === 'question' && (meta.category === 'other' || !meta.category)) {
+      meta.otherExchangeCount = (meta.otherExchangeCount || 0) + 1;
+      if (meta.otherExchangeCount >= 2) {
+        return {
+          response: "I'm not sure I'm able to resolve this through chat. Would you like me to **create a support ticket** so a team member can help? Or you can use the **New Request** form if you'd prefer.",
+        };
+      }
+    }
+
     // Extract fields from the user's message
     await this.extractFields(meta, content);
 
@@ -671,6 +704,8 @@ Return JSON with only the fields present in the message.`,
           response: `Before I create a ticket, I found an article that might help:\n\n${articleList}\n\nDoes this solve your issue?`,
         };
       }
+      // No KB match — log the gap
+      await this.logKbGap(searchQuery, meta.category, sessionId);
     } catch (err) {
       console.warn('[portal-chat] KB deflection search failed:', err instanceof Error ? err.message : err);
     }
@@ -912,6 +947,18 @@ Return JSON with only the fields present in the message.`,
       title: a.title,
       excerpt: a.body_text.slice(0, 300),
     }));
+  }
+
+  private async logKbGap(queryText: string, category: string | null, sessionId: number): Promise<void> {
+    try {
+      await execute(
+        `INSERT INTO kb_gap_log (ticket_id, category, reason, source, query_text)
+         VALUES (?, ?, 'No KB article matched portal chat query', 'portal_chat', ?)`,
+        [`session-${sessionId}`, category || 'unknown', queryText.slice(0, 1000)],
+      );
+    } catch (err) {
+      console.warn('[portal-chat] Failed to log KB gap:', err instanceof Error ? err.message : err);
+    }
   }
 
   // ── Legacy Handoff (kept for old sessions) ──

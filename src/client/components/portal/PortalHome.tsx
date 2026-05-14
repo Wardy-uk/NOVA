@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import type { PortalAuthPayload } from '../../../shared/portal-types.js';
 
 type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 'chat';
 
 interface Props {
   onNavigate: (view: PortalView) => void;
   onViewTicket: (key: string) => void;
+  portalUser?: PortalAuthPayload | null;
 }
 
 interface TicketSummary {
@@ -23,22 +25,34 @@ interface KbArticle {
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
-export default function PortalHome({ onNavigate, onViewTicket }: Props) {
+export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Props) {
   const [recentTickets, setRecentTickets] = useState<TicketSummary[]>([]);
   const [popularArticles, setPopularArticles] = useState<KbArticle[]>([]);
   const [ticketCount, setTicketCount] = useState(0);
+  const [orgOpenCount, setOrgOpenCount] = useState(0);
+  const [announcement, setAnnouncement] = useState<string | null>(null);
+  const [announcementDismissed, setAnnouncementDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  const displayName = portalUser?.orgName
+    ? (portalUser.email?.split('@')[0] || 'there')
+    : 'there';
 
   useEffect(() => {
     Promise.all([
       pf('/api/portal/tickets?status=open&pageSize=3').then(r => r.json()),
       pf('/api/portal/kb/popular').then(r => r.json()),
-    ]).then(([ticketsRes, kbRes]) => {
+      pf('/api/portal/home-summary').then(r => r.json()),
+    ]).then(([ticketsRes, kbRes, summaryRes]) => {
       if (ticketsRes.ok) {
         setRecentTickets(ticketsRes.data.tickets || []);
         setTicketCount(ticketsRes.data.total || 0);
       }
       if (kbRes.ok) setPopularArticles(kbRes.data || []);
+      if (summaryRes.ok) {
+        setOrgOpenCount(summaryRes.data.orgOpenCount || 0);
+        setAnnouncement(summaryRes.data.announcement || null);
+      }
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
 
@@ -64,6 +78,34 @@ export default function PortalHome({ onNavigate, onViewTicket }: Props) {
 
   return (
     <div className="space-y-8">
+      {/* Announcement Banner */}
+      {announcement && !announcementDismissed && (
+        <div className="bg-brand/10 border border-brand/30 rounded-xl p-4 flex items-start gap-3 relative">
+          <svg className="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
+          </svg>
+          <div className="flex-1 text-sm text-gray-800" dangerouslySetInnerHTML={{ __html: announcement }} />
+          <button
+            onClick={() => setAnnouncementDismissed(true)}
+            className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* Greeting */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Welcome back, {displayName}</h1>
+        {orgOpenCount > 0 && (
+          <p className="text-sm text-gray-500 mt-1">
+            Your organisation has {orgOpenCount} open ticket{orgOpenCount !== 1 ? 's' : ''}
+          </p>
+        )}
+      </div>
+
       {/* Primary CTA */}
       <div className="text-center py-2">
         <button

@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles/globals.css';
 import type { PortalAuthPayload } from '../shared/portal-types.js';
 import PortalLayout from './components/portal/PortalLayout.js';
 import PortalLogin from './components/portal/PortalLogin.js';
+import PortalToastContainer, { showPortalToast } from './components/portal/PortalToast.js';
 
 const PortalHome = lazy(() => import('./components/portal/PortalHome.js'));
 const PortalTicketList = lazy(() => import('./components/portal/PortalTicketList.js'));
@@ -21,11 +22,58 @@ function getNovaToken(): string | null {
   return localStorage.getItem(NOVA_TOKEN_KEY);
 }
 
-function portalFetch(path: string, opts: RequestInit = {}): Promise<Response> {
-  // In internal mode, use NOVA JWT; in OIDC mode, use portal token
+let refreshInFlight: Promise<string | null> | null = null;
+
+function getTokenExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp ? payload.exp * 1000 : null;
+  } catch { return null; }
+}
+
+async function ensureFreshToken(): Promise<string | null> {
   const portalToken = localStorage.getItem(PORTAL_TOKEN_KEY);
   const novaToken = getNovaToken();
   const token = portalToken || novaToken;
+  if (!token) return null;
+
+  const expiry = getTokenExpiry(token);
+  if (!expiry || expiry - Date.now() > 10 * 60 * 1000) return token;
+
+  // Token expires within 10 minutes — refresh it
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch('/api/portal/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) {
+        localStorage.removeItem(PORTAL_TOKEN_KEY);
+        return null;
+      }
+      const body = await res.json();
+      if (body.data?.token) {
+        localStorage.setItem(PORTAL_TOKEN_KEY, body.data.token);
+        return body.data.token as string;
+      }
+      return token;
+    } catch {
+      return token;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
+async function portalFetch(path: string, opts: RequestInit = {}): Promise<Response> {
+  const token = await ensureFreshToken();
   return fetch(path, {
     ...opts,
     headers: {
@@ -136,6 +184,67 @@ function PortalApp() {
     setView('ticket-detail');
   }, []);
 
+  // SSE connection for real-time portal events
+  const sseRef = useRef<EventSource | null>(null);
+  const sseRetryRef = useRef(1000);
+  const ticketRefreshRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let closed = false;
+
+    const connect = () => {
+      if (closed) return;
+      const token = localStorage.getItem(PORTAL_TOKEN_KEY) || localStorage.getItem(NOVA_TOKEN_KEY);
+      if (!token) return;
+
+      const es = new EventSource(`/api/portal/events?token=${encodeURIComponent(token)}`);
+      sseRef.current = es;
+
+      es.onopen = () => { sseRetryRef.current = 1000; };
+
+      es.onmessage = (evt) => {
+        try {
+          const event = JSON.parse(evt.data);
+          if (event.type === 'connected') return;
+
+          const key = event.ticketKey;
+          if (event.type === 'ticket:status_change') {
+            showPortalToast(`Ticket ${key}: status changed to ${event.data?.to || 'Unknown'}`, key);
+          } else if (event.type === 'ticket:assignment_change') {
+            showPortalToast(`Ticket ${key}: assigned to ${event.data?.to || 'Unassigned'}`, key);
+          } else if (event.type === 'ticket:comment') {
+            showPortalToast(`New comment on ${key} by ${event.data?.author || 'someone'}`, key);
+          }
+
+          // If viewing the affected ticket, trigger a refresh
+          if (ticketRefreshRef.current && key === selectedTicketKey) {
+            ticketRefreshRef.current();
+          }
+        } catch { /* ignore malformed events */ }
+      };
+
+      es.onerror = () => {
+        es.close();
+        sseRef.current = null;
+        if (!closed) {
+          const delay = Math.min(sseRetryRef.current, 30000);
+          sseRetryRef.current = delay * 2;
+          setTimeout(connect, delay);
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      closed = true;
+      sseRef.current?.close();
+      sseRef.current = null;
+    };
+  }, [user, selectedTicketKey]);
+
   if (checking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 to-cyan-100">
@@ -160,15 +269,16 @@ function PortalApp() {
   return (
     <PortalLayout user={user} currentView={view} onNavigate={setView} onLogout={handleLogout}>
       <Suspense fallback={fallback}>
-        {view === 'home' && <PortalHome onNavigate={setView} onViewTicket={handleViewTicket} />}
+        {view === 'home' && <PortalHome onNavigate={setView} onViewTicket={handleViewTicket} portalUser={user} />}
         {view === 'tickets' && <PortalTicketList onViewTicket={handleViewTicket} />}
         {view === 'ticket-detail' && selectedTicketKey && (
-          <PortalTicketDetail ticketKey={selectedTicketKey} onBack={() => setView('tickets')} />
+          <PortalTicketDetail ticketKey={selectedTicketKey} onBack={() => setView('tickets')} onRefreshRef={ticketRefreshRef} />
         )}
-        {view === 'new-request' && <PortalNewRequest onCreated={(key) => { handleViewTicket(key); }} />}
+        {view === 'new-request' && <PortalNewRequest onCreated={(key) => { handleViewTicket(key); }} onNavigate={setView} />}
         {view === 'kb' && <PortalKnowledgeBase />}
         {view === 'chat' && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
       </Suspense>
+      <PortalToastContainer onViewTicket={handleViewTicket} />
     </PortalLayout>
   );
 }

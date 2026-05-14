@@ -224,10 +224,13 @@ export interface IntakeSessionMetadata {
   collectedFields: IntakeCollectedFields;
   kbSuggested: boolean;
   deflected: boolean;
+  otherExchangeCount?: number;
+  frustrationDetected?: boolean;
 }
 
 export interface ChatMessageMetadata {
   type?: 'summary_card';
+  intent?: IntakeIntent | null;
   fields?: IntakeCollectedFields & {
     category: string | null;
     subcategory: string | null;

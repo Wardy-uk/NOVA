@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import type { FileSettingsQueries } from '../db/settings-store.js';
-import { generateAuthUrl, handleCallback, generateLogoutUrl } from '../services/portal-auth.js';
+import { generateAuthUrl, handleCallback, generateLogoutUrl, refreshOidcToken } from '../services/portal-auth.js';
 import { isInternalMode } from '../middleware/portal-auth-middleware.js';
 
 export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
@@ -65,7 +65,40 @@ export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
       }
       return;
     }
-    res.status(501).json({ ok: false, error: 'OIDC token refresh not yet implemented' });
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      res.status(401).json({ ok: false, error: 'No token provided' });
+      return;
+    }
+
+    try {
+      const jwt = await import('jsonwebtoken');
+      const secrets = [
+        process.env.PORTAL_JWT_SECRET,
+        process.env.JWT_SECRET,
+        'portal-default-secret',
+      ].filter(Boolean) as string[];
+
+      let userId: number | null = null;
+      for (const secret of secrets) {
+        try {
+          const payload = jwt.default.verify(authHeader.slice(7), secret) as Record<string, unknown>;
+          if (payload.userId) { userId = payload.userId as number; break; }
+        } catch { /* try next secret */ }
+      }
+
+      if (!userId) {
+        // Token fully invalid — can't even decode userId
+        res.status(401).json({ ok: false, error: 'Invalid token' });
+        return;
+      }
+
+      const result = await refreshOidcToken(userId, settings);
+      res.json({ ok: true, data: { token: result.token, user: result.user } });
+    } catch (err) {
+      console.error('[portal-auth] OIDC refresh failed:', err);
+      res.status(401).json({ ok: false, error: err instanceof Error ? err.message : 'Refresh failed' });
+    }
   });
 
   router.post('/logout', (req: Request, res: Response) => {

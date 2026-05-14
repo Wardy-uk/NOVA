@@ -17,6 +17,7 @@ export default function PortalKnowledgeBase() {
   const [results, setResults] = useState<ArticleResult[]>([]);
   const [categories, setCategories] = useState<Array<{ category: string; count: number }>>([]);
   const [selectedArticle, setSelectedArticle] = useState<PortalKbArticle | null>(null);
+  const [relatedArticles, setRelatedArticles] = useState<Array<{ id: number; title: string; excerpt: string; category: string | null }>>([]);
   const [loading, setLoading] = useState(false);
   const [feedbackGiven, setFeedbackGiven] = useState<Record<number, boolean>>({});
 
@@ -48,9 +49,12 @@ export default function PortalKnowledgeBase() {
 
   const openArticle = async (id: number) => {
     try {
-      const res = await pf(`/api/portal/kb/articles/${id}`);
-      const data = await res.json();
-      if (data.ok) setSelectedArticle(data.data);
+      const [articleRes, relatedRes] = await Promise.all([
+        pf(`/api/portal/kb/articles/${id}`).then(r => r.json()),
+        pf(`/api/portal/kb/articles/${id}/related`).then(r => r.json()),
+      ]);
+      if (articleRes.ok) setSelectedArticle(articleRes.data);
+      setRelatedArticles(relatedRes.ok ? relatedRes.data : []);
     } catch (err) {
       console.error('Failed to load article:', err);
     }
@@ -70,7 +74,7 @@ export default function PortalKnowledgeBase() {
     return (
       <div className="max-w-3xl mx-auto">
         <button
-          onClick={() => setSelectedArticle(null)}
+          onClick={() => { setSelectedArticle(null); setRelatedArticles([]); }}
           className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -114,6 +118,34 @@ export default function PortalKnowledgeBase() {
             )}
           </div>
         </div>
+
+        {/* Related Articles */}
+        {relatedArticles.length > 0 && (
+          <div className="mt-6 bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Related Articles</h2>
+            <div className="space-y-3">
+              {relatedArticles.map(a => (
+                <button
+                  key={a.id}
+                  onClick={() => openArticle(a.id)}
+                  className="w-full text-left p-3 rounded-lg border border-gray-100 hover:border-brand/40 hover:bg-gray-50 transition-all"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">{a.title}</div>
+                      <div className="text-xs text-gray-500 mt-1 line-clamp-2">{a.excerpt}</div>
+                    </div>
+                    {a.category && (
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">
+                        {a.category}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }

@@ -212,14 +212,28 @@ function SessionsPanel() {
 }
 
 const KNOWN_PORTAL_SETTINGS: Array<{ key: string; placeholder: string; sensitive?: boolean; group: string }> = [
+  // Authentication
   { key: 'portal_auth_mode', placeholder: 'internal | oidc', group: 'Authentication' },
-  { key: 'portal_oidc_issuer', placeholder: 'https://login.microsoftonline.com/tenant-id/v2.0', group: 'Authentication' },
-  { key: 'portal_oidc_client_id', placeholder: 'Application (client) ID', group: 'Authentication' },
-  { key: 'portal_oidc_client_secret', placeholder: 'Client secret value', sensitive: true, group: 'Authentication' },
+  { key: 'portal_oidc_issuer', placeholder: 'https://identity.nurtur.com', group: 'Authentication' },
+  { key: 'portal_oidc_client_id', placeholder: 'Application client ID', group: 'Authentication' },
+  { key: 'portal_oidc_client_secret', placeholder: 'Client secret', sensitive: true, group: 'Authentication' },
   { key: 'portal_oidc_redirect_uri', placeholder: 'https://nova.nurtur.local/api/portal/auth/callback', group: 'Authentication' },
+  // General
+  { key: 'portal_enabled', placeholder: 'true | false', group: 'General' },
+  { key: 'portal_announcement_html', placeholder: 'HTML for announcement banner', group: 'General' },
+  // Jira
   { key: 'portal_jira_project_nt', placeholder: 'NT', group: 'Jira' },
-  { key: 'portal_widget_brand_color', placeholder: '#1e40af', group: 'Widget' },
+  { key: 'portal_jira_project_ntpj', placeholder: 'NTPJ', group: 'Jira' },
+  // Chat
+  { key: 'portal_chat_max_exchanges', placeholder: '10', group: 'Chat' },
+  { key: 'portal_chat_handoff_threshold', placeholder: '3', group: 'Chat' },
+  // Widget
+  { key: 'portal_widget_enabled', placeholder: 'true | false', group: 'Widget' },
+  { key: 'portal_widget_allowed_origins', placeholder: 'https://app1.nurtur.com,https://app2.nurtur.com', group: 'Widget' },
   { key: 'portal_widget_greeting', placeholder: 'Hi! How can we help you today?', group: 'Widget' },
+  { key: 'portal_widget_brand_color', placeholder: '#1e40af', group: 'Widget' },
+  // KB
+  { key: 'portal_kb_sync_interval_minutes', placeholder: '30', group: 'KB' },
 ];
 
 const KNOWN_KEYS = new Set(KNOWN_PORTAL_SETTINGS.map(s => s.key));

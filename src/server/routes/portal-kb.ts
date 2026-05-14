@@ -36,6 +36,15 @@ export function createPortalKbRoutes(kbService: PortalKbService): Router {
     }
   });
 
+  router.get('/articles/:id/related', async (req: Request, res: Response) => {
+    try {
+      const related = await kbService.getRelatedArticles(parseInt(req.params.id as string, 10));
+      res.json({ ok: true, data: related });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get related articles' });
+    }
+  });
+
   router.post('/articles/:id/feedback', async (req: Request, res: Response) => {
     const { helpful } = req.body;
     if (typeof helpful !== 'boolean') {

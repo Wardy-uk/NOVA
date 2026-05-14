@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { PortalTicketDetail as TicketDetail, PortalTicketComment, PortalTicketAttachment, PortalSlaStatus, PortalStatusChange } from '../../../shared/portal-types.js';
 
 interface Props {
   ticketKey: string;
   onBack: () => void;
+  onRefreshRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
@@ -35,14 +36,17 @@ function formatTimeRemaining(remaining: string | null, breached: boolean): { tex
   return { text: remaining, color: 'text-green-700 bg-green-50' };
 }
 
-export default function PortalTicketDetail({ ticketKey, onBack }: Props) {
+export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: Props) {
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [commentText, setCommentText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [commentFiles, setCommentFiles] = useState<File[]>([]);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const commentFileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  const fetchTicket = useCallback(() => {
     pf(`/api/portal/tickets/${ticketKey}`)
       .then(r => r.json())
       .then(data => { if (data.ok) setTicket(data.data); })
@@ -50,29 +54,66 @@ export default function PortalTicketDetail({ ticketKey, onBack }: Props) {
       .finally(() => setLoading(false));
   }, [ticketKey]);
 
+  useEffect(() => {
+    if (onRefreshRef) onRefreshRef.current = fetchTicket;
+    return () => { if (onRefreshRef) onRefreshRef.current = null; };
+  }, [fetchTicket, onRefreshRef]);
+
+  useEffect(() => {
+    fetchTicket();
+  }, [ticketKey]);
+
   const handleAddComment = async () => {
-    if (!commentText.trim()) return;
+    const body = editorRef.current?.innerText?.trim() || commentText.trim();
+    if (!body && commentFiles.length === 0) return;
     setSubmitting(true);
     setError(null);
     try {
-      const res = await pf(`/api/portal/tickets/${ticketKey}/comments`, {
-        method: 'POST',
-        body: JSON.stringify({ body: commentText }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setCommentText('');
-        const refreshRes = await pf(`/api/portal/tickets/${ticketKey}`);
-        const refreshData = await refreshRes.json();
-        if (refreshData.ok) setTicket(refreshData.data);
-      } else {
-        setError(data.error || 'Failed to add comment');
+      // Upload attachments first
+      for (const file of commentFiles) {
+        const formData = new FormData();
+        formData.append('file', file);
+        await fetch(`/api/portal/tickets/${ticketKey}/attachments`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('portal_token') || localStorage.getItem('token') || ''}`,
+          },
+          body: formData,
+        });
       }
+
+      if (body) {
+        const res = await pf(`/api/portal/tickets/${ticketKey}/comments`, {
+          method: 'POST',
+          body: JSON.stringify({ body }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          setError(data.error || 'Failed to add comment');
+          setSubmitting(false);
+          return;
+        }
+      }
+
+      setCommentText('');
+      setCommentFiles([]);
+      if (editorRef.current) editorRef.current.innerHTML = '';
+      fetchTicket();
     } catch {
       setError('Failed to add comment');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const execCommand = (cmd: string, value?: string) => {
+    document.execCommand(cmd, false, value);
+    editorRef.current?.focus();
+  };
+
+  const handleInsertLink = () => {
+    const url = prompt('Enter URL:');
+    if (url) execCommand('createLink', url);
   };
 
   const statusColor = (s: string) => {
@@ -237,17 +278,81 @@ export default function PortalTicketDetail({ ticketKey, onBack }: Props) {
               {error && (
                 <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>
               )}
-              <textarea
-                value={commentText}
-                onChange={e => setCommentText(e.target.value)}
-                placeholder="Add a comment..."
-                rows={3}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand resize-none"
+              {/* Toolbar */}
+              <div className="flex items-center gap-1 mb-1 border border-gray-300 border-b-0 rounded-t-lg bg-white px-2 py-1">
+                <button
+                  type="button"
+                  onClick={() => execCommand('bold')}
+                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 font-bold text-sm"
+                  title="Bold"
+                >
+                  B
+                </button>
+                <button
+                  type="button"
+                  onClick={() => execCommand('italic')}
+                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 italic text-sm"
+                  title="Italic"
+                >
+                  I
+                </button>
+                <button
+                  type="button"
+                  onClick={handleInsertLink}
+                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 text-sm"
+                  title="Insert link"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                </button>
+                <div className="w-px h-5 bg-gray-200 mx-1" />
+                <button
+                  type="button"
+                  onClick={() => commentFileRef.current?.click()}
+                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 text-sm"
+                  title="Attach file"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  </svg>
+                </button>
+                <input
+                  ref={commentFileRef}
+                  type="file"
+                  multiple
+                  accept=".png,.jpg,.jpeg,.gif,.pdf,.doc,.docx,.xlsx,.csv,.txt,.zip,.log"
+                  onChange={e => { if (e.target.files) setCommentFiles(prev => [...prev, ...Array.from(e.target.files!)]); e.target.value = ''; }}
+                  className="hidden"
+                />
+              </div>
+              {/* Editable area */}
+              <div
+                ref={editorRef}
+                contentEditable
+                onInput={() => setCommentText(editorRef.current?.innerText || '')}
+                data-placeholder="Add a comment..."
+                className="w-full min-h-[80px] px-3 py-2 text-sm border border-gray-300 rounded-b-lg focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand bg-white empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
               />
+              {/* Attached files */}
+              {commentFiles.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {commentFiles.map((f, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded-full px-2.5 py-1 text-gray-700">
+                      {f.name}
+                      <button onClick={() => setCommentFiles(prev => prev.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-500">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="mt-2 flex justify-end">
                 <button
                   onClick={handleAddComment}
-                  disabled={!commentText.trim() || submitting}
+                  disabled={(!commentText.trim() && commentFiles.length === 0) || submitting}
                   className="px-4 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {submitting ? 'Posting...' : 'Add Comment'}

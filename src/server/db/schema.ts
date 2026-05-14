@@ -1604,6 +1604,12 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('kb_gap_log', 'article_title') IS NULL
      ALTER TABLE kb_gap_log ADD article_title NVARCHAR(500) NULL;`,
 
+    `IF COL_LENGTH('kb_gap_log', 'source') IS NULL
+     ALTER TABLE kb_gap_log ADD source NVARCHAR(50) NULL;`,
+
+    `IF COL_LENGTH('kb_gap_log', 'query_text') IS NULL
+     ALTER TABLE kb_gap_log ADD query_text NVARCHAR(1000) NULL;`,
+
     // kb_article_health — add article_url for linking
     `IF COL_LENGTH('kb_article_health', 'article_url') IS NULL
      ALTER TABLE kb_article_health ADD article_url NVARCHAR(500) NULL;`,
@@ -1632,6 +1638,12 @@ async function runMigrations(): Promise<void> {
        last_login DATETIME2 DEFAULT GETUTCDATE(),
        created_at DATETIME2 DEFAULT GETUTCDATE()
      );`,
+
+    `IF COL_LENGTH('portal_users', 'refresh_token') IS NULL
+     ALTER TABLE portal_users ADD refresh_token NVARCHAR(2000) NULL;`,
+
+    `IF COL_LENGTH('portal_users', 'token_expires_at') IS NULL
+     ALTER TABLE portal_users ADD token_expires_at DATETIME2 NULL;`,
 
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_chat_sessions') AND type = 'U')
      CREATE TABLE portal_chat_sessions (

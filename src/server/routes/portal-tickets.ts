@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import Busboy from 'busboy';
 import type { PortalJiraService } from '../services/portal-jira.js';
 import type { PortalIntakeService } from '../services/portal-intake.js';
+import type { FileSettingsQueries } from '../db/settings-store.js';
 import { PortalTicketCreateSchema } from '../../shared/portal-types.js';
 import { trackEvent } from '../services/portal-analytics.js';
 
@@ -13,18 +14,32 @@ const ALLOWED_EXTENSIONS = new Set([
 export function createPortalTicketRoutes(
   portalJira: PortalJiraService,
   intakeService: PortalIntakeService,
+  settings?: FileSettingsQueries,
 ): Router {
   const router = Router();
+
+  router.get('/home-summary', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    try {
+      const orgOpenCount = await portalJira.getOrgOpenTicketCount(req.portalUser.orgId);
+      const announcement = settings?.get('portal_announcement_html') || null;
+      res.json({ ok: true, data: { orgOpenCount, announcement } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get summary' });
+    }
+  });
 
   router.get('/tickets', async (req: Request, res: Response) => {
     if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
     try {
-      const { status, page, pageSize, search } = req.query as Record<string, string>;
+      const { status, page, pageSize, search, priority, dateRange } = req.query as Record<string, string>;
       const result = await portalJira.listTickets({
         orgId: req.portalUser.orgId,
         userId: req.query.mine === 'true' ? req.portalUser.userId : undefined,
         status: (status as 'open' | 'resolved' | 'all') || 'all',
         search: search || undefined,
+        priority: priority || undefined,
+        dateRange: (dateRange as 'today' | 'week' | 'month' | 'all') || undefined,
         page: parseInt(page, 10) || 1,
         pageSize: parseInt(pageSize, 10) || 20,
       });

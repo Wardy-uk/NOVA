@@ -1,6 +1,7 @@
 import type { JiraRestClient, JiraIssue, JiraComment } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, queryOne, execute } from './database.js';
+import { broadcastPortalEvent } from '../routes/portal-events.js';
 
 const PRIORITY_NORMALIZE: Record<string, string> = {
   '最高': 'Highest', '高': 'High', '中': 'Medium', '低': 'Low', '最低': 'Lowest',
@@ -294,6 +295,12 @@ export class JiraSyncService {
     const issueLinksJson = f.issuelinks ? JSON.stringify(f.issuelinks) : null;
     const fieldsJson = JSON.stringify(f);
 
+    // Detect changes for portal SSE broadcast
+    const oldRow = await queryOne<{ status_name: string | null; assignee_display: string | null; reporter_email: string | null }>(
+      `SELECT status_name, assignee_display, reporter_email FROM jira_issue_cache WHERE issue_key = ?`,
+      [issue.key],
+    );
+
     await execute(`
       MERGE jira_issue_cache AS target
       USING (SELECT ? AS issue_key) AS source ON target.issue_key = source.issue_key
@@ -378,6 +385,37 @@ export class JiraSyncService {
         issueLinksJson, fieldsJson, organisationName, bcAccountNumber,
       ],
     );
+
+    // Broadcast portal SSE events on detected changes
+    if (oldRow) {
+      const reporterEmail = reporter?.emailAddress as string | null;
+      if (reporterEmail) {
+        const orgRow = await queryOne<{ org_id: number }>(
+          `SELECT o.id AS org_id FROM portal_organisations o
+           JOIN portal_users u ON u.org_id = o.id
+           WHERE u.email = ?`,
+          [reporterEmail],
+        ).catch(() => null);
+
+        if (orgRow) {
+          if (oldRow.status_name !== statusName) {
+            broadcastPortalEvent(orgRow.org_id, {
+              type: 'ticket:status_change',
+              ticketKey: issue.key,
+              data: { from: oldRow.status_name, to: statusName },
+            });
+          }
+          const newAssignee = assignee?.displayName ?? null;
+          if (oldRow.assignee_display !== newAssignee) {
+            broadcastPortalEvent(orgRow.org_id, {
+              type: 'ticket:assignment_change',
+              ticketKey: issue.key,
+              data: { from: oldRow.assignee_display, to: newAssignee },
+            });
+          }
+        }
+      }
+    }
   }
 
   private async upsertComment(issueKey: string, comment: JiraComment): Promise<void> {

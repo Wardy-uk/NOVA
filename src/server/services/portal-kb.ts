@@ -342,6 +342,47 @@ export class PortalKbService {
        FROM portal_kb_articles ORDER BY view_count DESC`,
     );
   }
+
+  async getRelatedArticles(articleId: number, limit: number = 3): Promise<Array<{ id: number; title: string; excerpt: string; category: string | null }>> {
+    const article = await queryOne<{ category: string | null; labels: string | null; body_text: string }>(
+      `SELECT category, labels, body_text FROM portal_kb_articles WHERE id = ?`,
+      [articleId],
+    );
+    if (!article) return [];
+
+    const params: unknown[] = [articleId];
+    const conditions: string[] = [];
+
+    if (article.category) {
+      conditions.push(`category = ?`);
+      params.push(article.category);
+    }
+
+    if (article.labels) {
+      const labelList = article.labels.split(',').map(l => l.trim()).filter(Boolean);
+      for (const label of labelList.slice(0, 3)) {
+        conditions.push(`labels LIKE ?`);
+        params.push(`%${label}%`);
+      }
+    }
+
+    if (conditions.length === 0) return [];
+
+    const rows = await query<{ id: number; title: string; body_text: string; category: string | null }>(
+      `SELECT TOP (${limit}) id, title, body_text, category
+       FROM portal_kb_articles
+       WHERE id != ? AND (${conditions.join(' OR ')})
+       ORDER BY view_count DESC`,
+      params,
+    );
+
+    return rows.map(r => ({
+      id: r.id,
+      title: r.title,
+      excerpt: (r.body_text || '').slice(0, 150).trim() + (r.body_text && r.body_text.length > 150 ? '...' : ''),
+      category: r.category,
+    }));
+  }
 }
 
 function stripHtml(html: string): string {
