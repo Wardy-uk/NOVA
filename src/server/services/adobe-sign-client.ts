@@ -29,7 +29,9 @@ export interface AdobeSignAgreementInput {
   ccEmails?: string[];
   message?: string;
   transientDocumentId?: string;
-  libraryDocumentId?: string;
+  // Adobe concatenates documents in array order into one signable agreement.
+  // Field names that match across templates are auto-linked (fill once, all instances populate).
+  libraryDocumentIds?: string[];
   signatureType?: 'ESIGN' | 'WRITTEN';
   expirationDays?: number;
   mergeFields?: Array<{ fieldName: string; defaultValue: string }>;
@@ -315,8 +317,10 @@ export class AdobeSignClient {
     const fileInfos: Array<Record<string, unknown>> = [];
     if (input.transientDocumentId) {
       fileInfos.push({ transientDocumentId: input.transientDocumentId });
-    } else if (input.libraryDocumentId) {
-      fileInfos.push({ libraryDocumentId: input.libraryDocumentId });
+    } else if (input.libraryDocumentIds?.length) {
+      for (const id of input.libraryDocumentIds) {
+        fileInfos.push({ libraryDocumentId: id });
+      }
     }
 
     const participantSetsInfo = input.signerEmails.map((email, i) => ({

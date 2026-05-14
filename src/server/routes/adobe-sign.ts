@@ -154,7 +154,8 @@ export function createAdobeSignRoutes(
     res.json({ ok: true, data: agreement });
   });
 
-  // POST /api/adobe-sign/agreements — create + send new agreement from an Adobe library document
+  // POST /api/adobe-sign/agreements — create + send new agreement from one or more Adobe library documents.
+  // Multiple library_document_ids are concatenated by Adobe in array order into a single signable agreement.
   router.post('/agreements', async (req, res) => {
     const client = getClient();
     if (!client) {
@@ -162,8 +163,17 @@ export function createAdobeSignRoutes(
       return;
     }
 
-    const { library_document_id, contract_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days } = req.body;
-    if (!library_document_id?.trim()) { res.status(400).json({ ok: false, error: 'library_document_id is required' }); return; }
+    const { library_document_ids, contract_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days } = req.body;
+    if (!Array.isArray(library_document_ids) || library_document_ids.length === 0) {
+      res.status(400).json({ ok: false, error: 'library_document_ids must be a non-empty array' });
+      return;
+    }
+    const cleanIds = (library_document_ids as unknown[])
+      .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+    if (cleanIds.length === 0) {
+      res.status(400).json({ ok: false, error: 'library_document_ids must contain at least one non-empty string' });
+      return;
+    }
     if (!name?.trim()) { res.status(400).json({ ok: false, error: 'name is required' }); return; }
     if (!signer_emails?.length) { res.status(400).json({ ok: false, error: 'At least one signer email is required' }); return; }
 
@@ -173,7 +183,7 @@ export function createAdobeSignRoutes(
         signerEmails: signer_emails,
         ccEmails: cc_emails,
         message,
-        libraryDocumentId: library_document_id,
+        libraryDocumentIds: cleanIds,
         mergeFields: merge_fields,
         expirationDays: expiration_days,
       });

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { AdobeSignLibraryDocument, AdobeSignFormField } from '../../shared/types.js';
 
 interface Props {
@@ -7,7 +7,7 @@ interface Props {
 
 type Step = 'template' | 'fields' | 'recipients' | 'review';
 const STEPS: { key: Step; label: string }[] = [
-  { key: 'template', label: 'Select Template' },
+  { key: 'template', label: 'Select Templates' },
   { key: 'fields', label: 'Fill Fields' },
   { key: 'recipients', label: 'Recipients' },
   { key: 'review', label: 'Review & Send' },
@@ -30,17 +30,13 @@ function normaliseType(s: string | undefined): string {
 }
 
 function inputTypeFor(field: AdobeSignFormField): InputKind {
-  // Multi-line flags (Adobe variants)
   if (field.multiLine === true || field.isMultiLine === true) return 'textarea';
 
   const ct = normaliseType(field.contentType);
   const it = normaliseType(field.inputType);
   const both = `${ct} ${it}`;
 
-  // Multi-line text variants — check first since these often share the TEXT prefix
   if (both.includes('MULTILINE') || both.includes('TEXTAREA') || both.includes('PARAGRAPH')) return 'textarea';
-
-  // Then specific kinds (use includes() so FIELD/ENUM/etc. suffixes don't matter)
   if (both.includes('CHECKBOX') || both.includes('CHECKMARK')) return 'checkbox';
   if (both.includes('RADIO')) return 'radio';
   if (both.includes('DROPDOWN') || both.includes('COMBOBOX') || both.includes('LIST')) return 'select';
@@ -51,14 +47,20 @@ function inputTypeFor(field: AdobeSignFormField): InputKind {
   return 'text';
 }
 
+// A form field aggregated across the selected templates. originNames captures which
+// templates contributed this field (Adobe links fields with the same name across docs).
+type MergedField = AdobeSignFormField & { originNames: string[] };
+
 export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [step, setStep] = useState<Step>('template');
   const [templates, setTemplates] = useState<AdobeSignLibraryDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [selectedTemplate, setSelectedTemplate] = useState<AdobeSignLibraryDocument | null>(null);
-  const [formFields, setFormFields] = useState<AdobeSignFormField[]>([]);
+  // Multi-select: order matters — Adobe concatenates the bundle in this order.
+  const [selectedTemplates, setSelectedTemplates] = useState<AdobeSignLibraryDocument[]>([]);
+  // Cache form fields per template ID — fetched on first selection, kept across reorders/deselects.
+  const [templateFields, setTemplateFields] = useState<Map<string, AdobeSignFormField[]>>(new Map());
   const [fieldsLoading, setFieldsLoading] = useState(false);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
 
@@ -70,6 +72,23 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [sending, setSending] = useState(false);
   const [sentId, setSentId] = useState<string | null>(null);
   const [templateSearch, setTemplateSearch] = useState('');
+
+  // Merged field list — union of all selected templates' fields, deduped by name, with origin tracking.
+  const mergedFields = useMemo<MergedField[]>(() => {
+    const map = new Map<string, MergedField>();
+    for (const t of selectedTemplates) {
+      const fields = templateFields.get(t.id) ?? [];
+      for (const f of fields) {
+        const existing = map.get(f.name);
+        if (existing) {
+          if (!existing.originNames.includes(t.name)) existing.originNames.push(t.name);
+        } else {
+          map.set(f.name, { ...f, originNames: [t.name] });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [selectedTemplates, templateFields]);
 
   const fetchTemplates = useCallback(async (force = false) => {
     setLoading(true);
@@ -101,8 +120,8 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
 
   const canProceed = (s: Step): boolean => {
     switch (s) {
-      case 'template': return selectedTemplate !== null;
-      case 'fields': return formFields.filter(f => f.required).every(f => (fieldValues[f.name] ?? '').trim());
+      case 'template': return selectedTemplates.length > 0;
+      case 'fields': return mergedFields.filter(f => f.required).every(f => (fieldValues[f.name] ?? '').trim());
       case 'recipients': return contractName.trim() !== '' && signers.some(s => s.email.trim());
       case 'review': return true;
       default: return false;
@@ -113,33 +132,71 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const goNext = () => { if (stepIdx < STEPS.length - 1) setStep(STEPS[stepIdx + 1].key); };
   const goBack = () => { if (stepIdx > 0) setStep(STEPS[stepIdx - 1].key); };
 
-  const handleSelectTemplate = async (t: AdobeSignLibraryDocument) => {
-    setSelectedTemplate(t);
-    setContractName(t.name);
-    setFieldValues({});
-    setFormFields([]);
-    setFieldsLoading(true);
+  const fetchTemplateFields = useCallback(async (templateId: string): Promise<AdobeSignFormField[]> => {
     try {
-      const res = await fetch(`/api/adobe-sign/library-documents/${encodeURIComponent(t.id)}/form-fields`);
+      const res = await fetch(`/api/adobe-sign/library-documents/${encodeURIComponent(templateId)}/form-fields`);
       const json = await res.json();
-      if (json.ok) {
-        const fields: AdobeSignFormField[] = json.data ?? [];
-        setFormFields(fields);
-        const defaults: Record<string, string> = {};
+      if (json.ok) return json.data ?? [];
+    } catch { /* Step 2 will fall back to empty state */ }
+    return [];
+  }, []);
+
+  const toggleTemplate = useCallback(async (t: AdobeSignLibraryDocument) => {
+    const wasSelected = selectedTemplates.some(s => s.id === t.id);
+    if (wasSelected) {
+      setSelectedTemplates(prev => prev.filter(s => s.id !== t.id));
+      return;
+    }
+    // Adding: append to ordered list
+    const newSelection = [...selectedTemplates, t];
+    setSelectedTemplates(newSelection);
+    // Auto-populate contract name from the first template (user can still edit)
+    if (!contractName.trim() && newSelection.length === 1) setContractName(t.name);
+
+    // Fetch this template's fields if not already cached
+    if (!templateFields.has(t.id)) {
+      setFieldsLoading(true);
+      const fields = await fetchTemplateFields(t.id);
+      setTemplateFields(prev => new Map(prev).set(t.id, fields));
+      // Seed any default values for newly-discovered fields (don't overwrite user input)
+      setFieldValues(prev => {
+        const next = { ...prev };
         for (const f of fields) {
-          if (f.defaultValue) defaults[f.name] = f.defaultValue;
+          if (f.defaultValue && next[f.name] === undefined) next[f.name] = f.defaultValue;
         }
-        setFieldValues(defaults);
-      }
-    } catch { /* ignore — Step 2 will show empty state */ }
-    setFieldsLoading(false);
+        return next;
+      });
+      setFieldsLoading(false);
+    }
+  }, [selectedTemplates, templateFields, contractName, fetchTemplateFields]);
+
+  const moveTemplateUp = (idx: number) => {
+    if (idx <= 0) return;
+    setSelectedTemplates(prev => {
+      const next = [...prev];
+      [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+      return next;
+    });
+  };
+
+  const moveTemplateDown = (idx: number) => {
+    setSelectedTemplates(prev => {
+      if (idx >= prev.length - 1) return prev;
+      const next = [...prev];
+      [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+      return next;
+    });
+  };
+
+  const removeFromSelection = (idx: number) => {
+    setSelectedTemplates(prev => prev.filter((_, i) => i !== idx));
   };
 
   const handleSend = async () => {
     setSending(true);
     try {
-      const mergeFields = formFields.length > 0
-        ? formFields
+      const mergeFields = mergedFields.length > 0
+        ? mergedFields
             .filter(f => (fieldValues[f.name] ?? '').trim())
             .map(f => ({ fieldName: f.name, defaultValue: fieldValues[f.name] }))
         : undefined;
@@ -148,7 +205,7 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          library_document_id: selectedTemplate?.id,
+          library_document_ids: selectedTemplates.map(t => t.id),
           name: contractName,
           signer_emails: signers.filter(s => s.email.trim()).map(s => s.email.trim()),
           cc_emails: ccEmails.split(',').map(e => e.trim()).filter(Boolean),
@@ -175,6 +232,19 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
     setSigners(signers.map((s, i) => i === idx ? { ...s, ...updates } : s));
   };
 
+  const resetWizard = () => {
+    setSentId(null);
+    setStep('template');
+    setSelectedTemplates([]);
+    setTemplateFields(new Map());
+    setFieldValues({});
+    setSigners([{ email: '', name: '' }]);
+    setContractName('');
+    setCcEmails('');
+    setMessage('');
+    setExpirationDays('');
+  };
+
   if (sentId) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -193,15 +263,7 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
             <button onClick={onNavigateToAgreements} className={btnPrimary}>
               View Agreements
             </button>
-            <button onClick={() => {
-              setSentId(null);
-              setStep('template');
-              setSelectedTemplate(null);
-              setFormFields([]);
-              setFieldValues({});
-              setSigners([{ email: '', name: '' }]);
-              setContractName('');
-            }} className={btnSecondary}>
+            <button onClick={resetWizard} className={btnSecondary}>
               Send Another
             </button>
           </div>
@@ -209,6 +271,10 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
       </div>
     );
   }
+
+  const selectedCount = selectedTemplates.length;
+  const isSelected = (t: AdobeSignLibraryDocument) => selectedTemplates.some(s => s.id === t.id);
+  const orderIndex = (t: AdobeSignLibraryDocument) => selectedTemplates.findIndex(s => s.id === t.id);
 
   return (
     <div className="flex flex-col h-full">
@@ -245,8 +311,10 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-[14px] font-semibold text-neutral-100">Select a Template</h2>
-                <p className="text-[11px] text-neutral-500 mt-0.5">Templates are pulled live from Adobe Sign. To add a new template, create it in Adobe Sign.</p>
+                <h2 className="text-[14px] font-semibold text-neutral-100">Select Templates</h2>
+                <p className="text-[11px] text-neutral-500 mt-0.5">
+                  Pick one or more templates. They'll be bundled into a single agreement in the order shown below.
+                </p>
               </div>
               <button onClick={() => fetchTemplates(true)} className={btnSecondary} disabled={loading}>
                 {loading ? 'Refreshing...' : 'Refresh'}
@@ -260,6 +328,40 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
               onChange={(e) => setTemplateSearch(e.target.value)}
               className={`${inputCls} max-w-sm mb-4`}
             />
+
+            {/* Selected templates — ordered bundle list with reorder controls */}
+            {selectedCount > 0 && (
+              <div className="mb-5 rounded-lg border border-[#5ec1ca]/30 bg-[#5ec1ca]/5 p-3">
+                <div className="text-[10px] text-[#5ec1ca] uppercase tracking-wider mb-2">
+                  Bundle order — {selectedCount} {selectedCount === 1 ? 'template' : 'templates'}
+                </div>
+                <div className="space-y-1">
+                  {selectedTemplates.map((t, idx) => (
+                    <div key={t.id} className="flex items-center gap-2 bg-[#1e2228] rounded px-2 py-1.5 border border-[#3a424d]">
+                      <span className="text-[10px] text-neutral-500 font-mono w-5">{idx + 1}.</span>
+                      <span className="text-[11px] text-neutral-200 flex-1 truncate">{t.name}</span>
+                      <button
+                        onClick={() => moveTemplateUp(idx)}
+                        disabled={idx === 0}
+                        className="text-neutral-500 hover:text-[#5ec1ca] disabled:opacity-20 disabled:hover:text-neutral-500 text-[12px] leading-none px-1"
+                        title="Move up"
+                      >▲</button>
+                      <button
+                        onClick={() => moveTemplateDown(idx)}
+                        disabled={idx === selectedCount - 1}
+                        className="text-neutral-500 hover:text-[#5ec1ca] disabled:opacity-20 disabled:hover:text-neutral-500 text-[12px] leading-none px-1"
+                        title="Move down"
+                      >▼</button>
+                      <button
+                        onClick={() => removeFromSelection(idx)}
+                        className="text-neutral-500 hover:text-red-400 text-sm leading-none px-1"
+                        title="Remove from bundle"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {loading ? (
               <div className="text-neutral-500 text-[12px] py-8 text-center">Loading templates from Adobe Sign...</div>
@@ -278,48 +380,62 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {filteredTemplates.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => handleSelectTemplate(t)}
-                    className={`text-left p-4 rounded-lg border transition-colors ${
-                      selectedTemplate?.id === t.id
-                        ? 'bg-[#5ec1ca]/10 border-[#5ec1ca]/40'
-                        : 'bg-[#1e2228] border-[#3a424d] hover:border-[#5ec1ca]/30'
-                    }`}
-                  >
-                    <div className="text-[12px] font-medium text-neutral-200 mb-1">{t.name}</div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {(t.templateTypes ?? []).map((tt) => (
-                        <span key={tt} className="text-[9px] px-1.5 py-0.5 rounded bg-[#2f353d] text-neutral-400">
-                          {tt.replace(/_/g, ' ').toLowerCase()}
+                {filteredTemplates.map((t) => {
+                  const sel = isSelected(t);
+                  const order = orderIndex(t);
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => toggleTemplate(t)}
+                      className={`text-left p-4 rounded-lg border transition-colors relative ${
+                        sel
+                          ? 'bg-[#5ec1ca]/10 border-[#5ec1ca]/40'
+                          : 'bg-[#1e2228] border-[#3a424d] hover:border-[#5ec1ca]/30'
+                      }`}
+                    >
+                      {sel && (
+                        <span className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[#5ec1ca] text-[#272C33] text-[10px] font-bold flex items-center justify-center">
+                          {order + 1}
                         </span>
-                      ))}
-                    </div>
-                    <div className="text-[10px] text-neutral-600 mt-2">Modified {fmtDate(t.modifiedDate)}</div>
-                  </button>
-                ))}
+                      )}
+                      <div className="text-[12px] font-medium text-neutral-200 mb-1 pr-7">{t.name}</div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {(t.templateTypes ?? []).map((tt) => (
+                          <span key={tt} className="text-[9px] px-1.5 py-0.5 rounded bg-[#2f353d] text-neutral-400">
+                            {tt.replace(/_/g, ' ').toLowerCase()}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="text-[10px] text-neutral-600 mt-2">Modified {fmtDate(t.modifiedDate)}</div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
         )}
 
-        {step === 'fields' && selectedTemplate && (
+        {step === 'fields' && selectedCount > 0 && (
           <div className="max-w-lg">
             <h2 className="text-[14px] font-semibold text-neutral-100 mb-1">Fill in Contract Details</h2>
-            <p className="text-[11px] text-neutral-500 mb-4">Template: {selectedTemplate.name}</p>
+            <p className="text-[11px] text-neutral-500 mb-4">
+              {selectedCount === 1
+                ? `Template: ${selectedTemplates[0].name}`
+                : `Bundle of ${selectedCount} templates — fields with the same name across templates are linked.`}
+            </p>
 
             {fieldsLoading ? (
               <div className="text-[12px] text-neutral-500 py-4">Loading fields from Adobe Sign...</div>
-            ) : formFields.length === 0 ? (
+            ) : mergedFields.length === 0 ? (
               <div className="text-[12px] text-neutral-500 py-4">
-                This template has no sender-fillable merge fields. Signers will fill any fields directly when signing.
+                No sender-fillable merge fields across the selected templates. Signers will fill any fields directly when signing.
               </div>
             ) : (
               <div className="space-y-3">
-                {formFields.map((f) => {
+                {mergedFields.map((f) => {
                   const inputType = inputTypeFor(f);
                   const value = fieldValues[f.name] ?? '';
+                  const showOrigins = selectedCount > 1;
                   return (
                     <div key={f.name}>
                       <label className={labelCls}>
@@ -392,6 +508,11 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                           onChange={(e) => setFieldValues({ ...fieldValues, [f.name]: e.target.value })}
                           placeholder={f.defaultValue ?? ''}
                         />
+                      )}
+                      {showOrigins && (
+                        <div className="text-[9px] text-neutral-600 mt-1">
+                          in: {f.originNames.join(', ')}
+                        </div>
                       )}
                     </div>
                   );
@@ -486,8 +607,16 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
 
             <div className="space-y-4 bg-[#1e2228] rounded-lg border border-[#3a424d] p-4">
               <div>
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-0.5">Template</span>
-                <span className="text-[12px] text-neutral-200">{selectedTemplate?.name}</span>
+                <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">
+                  {selectedCount === 1 ? 'Template' : `Bundle (${selectedCount} templates, in order)`}
+                </span>
+                <div className="space-y-0.5">
+                  {selectedTemplates.map((t, i) => (
+                    <div key={t.id} className="text-[11px] text-neutral-200">
+                      <span className="text-neutral-500 font-mono mr-2">{i + 1}.</span>{t.name}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div>
@@ -495,11 +624,11 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                 <span className="text-[12px] text-neutral-200">{contractName}</span>
               </div>
 
-              {formFields.length > 0 && (
+              {mergedFields.length > 0 && (
                 <div>
                   <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Merge Fields</span>
                   <div className="space-y-1">
-                    {formFields.map((f) => (
+                    {mergedFields.map((f) => (
                       <div key={f.name} className="flex items-baseline gap-2 text-[11px]">
                         <span className="text-neutral-500 min-w-[120px]">{f.displayLabel || f.name}:</span>
                         <span className="text-neutral-200">{fieldValues[f.name] || '—'}</span>
