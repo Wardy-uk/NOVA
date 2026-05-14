@@ -39,7 +39,7 @@ const FieldExtractSchema = z.object({
 
 const ChatResponseSchema = z.object({ response: z.string() });
 
-const FRUSTRATION_PATTERNS = /\b(this is ridiculous|speak to someone|talk to a human|this is useless|waste of time|you're useless|what a joke|fed up|sick of this|absolutely terrible|disgusting|incompetent)\b|[A-Z\s!]{20,}|[!?]{3,}/i;
+const FRUSTRATION_PATTERNS = /\b(this is ridiculous|speak to someone|talk to a human|this is useless|waste of time|you'?re useless|what a joke|fed up|sick of this|absolutely terrible|disgusting service|incompetent|get me a manager|escalate this|I('m| am) furious)\b|[!?]{4,}/i;
 
 // ── Category Field Config ──
 
@@ -300,7 +300,7 @@ export class PortalChatService {
     if (meta.frustrationDetected && stage !== 'confirmed' && stage !== 'summary') {
       meta.frustrationDetected = false; // consume the flag
       return {
-        response: "I can see this is frustrating — I'm sorry. Would you like me to create a ticket so a member of our team can help you directly? Or if you'd prefer, you can use the **New Request** form to submit details at your own pace.",
+        response: "I can see this is frustrating — I'm sorry. Would you like me to create a ticket right now so a member of our team can help you directly? Just say yes and I'll put one together for you.",
       };
     }
 
@@ -341,7 +341,8 @@ export class PortalChatService {
     if (!this.llm) {
       meta.stage = 'category';
       meta.intent = 'problem';
-      return { response: this.buildCategoryQuestion() };
+      const q = this.buildCategoryQuestion();
+      return { response: q.text, messageMeta: q.messageMeta };
     }
 
     try {
@@ -419,7 +420,8 @@ Also extract any fields already mentioned. Return JSON.`,
         ? "I couldn't find a direct answer in our knowledge base, but let me help you get in touch with the right team."
         : "Sorry to hear you're having trouble — let me help you get this sorted.";
 
-    return { response: `${prefix}\n\n${this.buildCategoryQuestion()}` };
+    const q = this.buildCategoryQuestion();
+    return { response: `${prefix}\n\n${q.text}`, messageMeta: q.messageMeta };
   }
 
   // ── Status Intent ──
@@ -428,12 +430,13 @@ Also extract any fields already mentioned. Return JSON.`,
     meta: IntakeSessionMetadata,
     content: string,
     context: ChatContext,
-  ): Promise<{ response: string }> {
+  ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
     // Try to find tickets for this user's org
     const domain = await this.portalJira.getOrgEmailDomain(context.orgId);
     if (!domain) {
       meta.stage = 'category';
-      return { response: "I couldn't find your organisation's tickets. Would you like to raise a new request instead?\n\n" + this.buildCategoryQuestion() };
+      const q = this.buildCategoryQuestion();
+      return { response: "I couldn't find your organisation's tickets. Would you like to raise a new request instead?\n\n" + q.text, messageMeta: q.messageMeta };
     }
 
     // Look for a ticket reference in the message
@@ -470,7 +473,8 @@ Also extract any fields already mentioned. Return JSON.`,
     }
 
     meta.stage = 'category';
-    return { response: "I couldn't find any recent tickets for your organisation. Would you like to raise a new request?\n\n" + this.buildCategoryQuestion() };
+    const q = this.buildCategoryQuestion();
+    return { response: "I couldn't find any recent tickets for your organisation. Would you like to raise a new request?\n\n" + q.text, messageMeta: q.messageMeta };
   }
 
   // ── Stage 2: Category Selection ──
@@ -525,7 +529,8 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     }
 
     // Fallback: re-ask
-    return { response: `I didn't quite catch that. ${this.buildCategoryQuestion()}` };
+    const q = this.buildCategoryQuestion();
+    return { response: `I didn't quite catch that. ${q.text}`, messageMeta: q.messageMeta };
   }
 
   private handleSubcategoryPick(
@@ -550,7 +555,7 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     return { response: this.buildFirstDetailQuestion(meta) };
   }
 
-  private askSubcategory(meta: IntakeSessionMetadata, catId: string): { response: string } {
+  private askSubcategory(meta: IntakeSessionMetadata, catId: string): { response: string; messageMeta?: ChatMessageMetadata } {
     const subs = Object.entries(SUBCATEGORY_NAMES).filter(([id]) => id.startsWith(catId + '_') || id.startsWith(catId.replace('_marketing', '') + '_'));
     if (subs.length === 0) {
       meta.subcategory = `${catId}_general`;
@@ -558,8 +563,11 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
       return { response: this.buildFirstDetailQuestion(meta) };
     }
 
-    const options = subs.map(([, name]) => name).join(', ');
-    return { response: `Can you be more specific? Is it about: ${options}?` };
+    const categories = subs.map(([id, name]) => ({ id, name, description: '' }));
+    return {
+      response: 'Can you be more specific?',
+      messageMeta: { type: 'subcategory_picker', categories },
+    };
   }
 
   // ── Stage 3: Detail Gathering ──
@@ -576,7 +584,7 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
       meta.otherExchangeCount = (meta.otherExchangeCount || 0) + 1;
       if (meta.otherExchangeCount >= 2) {
         return {
-          response: "I'm not sure I'm able to resolve this through chat. Would you like me to **create a support ticket** so a team member can help? Or you can use the **New Request** form if you'd prefer.",
+          response: "I'm not sure I'm able to resolve this through chat. Would you like me to **create a support ticket** so a team member can help?",
         };
       }
     }
@@ -918,17 +926,27 @@ Return JSON with only the fields present in the message.`,
 
   // ── Helpers ──
 
-  private buildCategoryQuestion(): string {
-    return "Which area does this relate to?\n\n" +
-      "1. **Website** — content updates or something not working\n" +
-      "2. **Account** — login, passwords, users, permissions\n" +
-      "3. **Email Marketing** — campaigns, triggers, templates\n" +
-      "4. **LeadPro & CRM** — leads, contacts, CRM issues\n" +
-      "5. **Data Feeds** — property feeds, integrations, reporting\n" +
-      "6. **Listings** — virtual tours, property media\n" +
-      "7. **Onboarding** — new branch, product, or training\n" +
-      "8. **Billing** — cancellations, service changes, queries\n" +
-      "9. **Something else**";
+  private buildCategoryQuestion(): { text: string; messageMeta: ChatMessageMetadata } {
+    const descriptions: Record<string, string> = {
+      website: 'Content updates or something not working',
+      account: 'Login, passwords, users, permissions',
+      email_marketing: 'Campaigns, triggers, templates',
+      leadpro: 'Leads, contacts, CRM issues',
+      data_feeds: 'Property feeds, integrations, reporting',
+      listings: 'Virtual tours, property media',
+      onboarding: 'New branch, product, or training',
+      billing: 'Cancellations, service changes, queries',
+      other: 'Something else',
+    };
+    const categories = Object.entries(CATEGORY_NAMES).map(([id, name]) => ({
+      id,
+      name,
+      description: descriptions[id] || '',
+    }));
+    return {
+      text: 'Which area does this relate to?',
+      messageMeta: { type: 'category_picker', categories },
+    };
   }
 
   private async searchKb(searchQuery: string): Promise<Array<{ title: string; excerpt: string }>> {
@@ -1000,7 +1018,7 @@ Return JSON with only the fields present in the message.`,
       return `I've created support ticket **${ticketKey}** and a team member will follow up with you. You can track the progress of this ticket in your portal under "My Tickets".\n\nIs there anything else I can help with?`;
     } catch (err) {
       console.error('[portal-chat] Handoff failed:', err);
-      return "I wasn't able to create a ticket automatically. Please use the **New Request** form to submit your issue, and our team will get back to you as soon as possible.";
+      return "I wasn't able to create a ticket automatically. Please try starting a new conversation and I'll help you get this logged.";
     }
   }
 

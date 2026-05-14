@@ -34,6 +34,58 @@ const CATEGORY_LABELS: Record<string, string> = {
   other: 'Something Else',
 };
 
+function renderMarkdown(text: string): React.ReactNode {
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let listItems: React.ReactNode[] = [];
+
+  const flushList = () => {
+    if (listItems.length > 0) {
+      elements.push(<ul key={`ul-${elements.length}`} className="list-disc list-inside space-y-1 my-1">{listItems}</ul>);
+      listItems = [];
+    }
+  };
+
+  lines.forEach((line, i) => {
+    const listMatch = line.match(/^[-•]\s+(.+)/);
+    if (listMatch) {
+      listItems.push(<li key={i}>{inlineMarkdown(listMatch[1])}</li>);
+      return;
+    }
+    flushList();
+    if (line.trim() === '') {
+      elements.push(<br key={i} />);
+    } else {
+      elements.push(<span key={i}>{inlineMarkdown(line)}{i < lines.length - 1 ? '\n' : ''}</span>);
+    }
+  });
+  flushList();
+
+  return <span className="whitespace-pre-wrap">{elements}</span>;
+}
+
+function inlineMarkdown(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  const regex = /\*\*(.+?)\*\*|\*(.+?)\*/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    if (match[1]) {
+      parts.push(<strong key={match.index}>{match[1]}</strong>);
+    } else if (match[2]) {
+      parts.push(<em key={match.index}>{match[2]}</em>);
+    }
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts.length === 1 ? parts[0] : <>{parts}</>;
+}
+
 export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
   const [sessions, setSessions] = useState<PortalChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
@@ -109,11 +161,12 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
     }
   };
 
-  const sendMessage = async () => {
-    if (!input.trim() || !activeSessionId || sending) return;
+  const sendMessage = async (overrideText?: string) => {
+    const text = overrideText || input.trim();
+    if (!text || !activeSessionId || sending) return;
 
-    const userMessage = input.trim();
-    setInput('');
+    const userMessage = text;
+    if (!overrideText) setInput('');
     setSending(true);
 
     const tempMsg: PortalChatMessage = {
@@ -367,12 +420,45 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                   );
                 }
 
+                if ((meta?.type === 'category_picker' || meta?.type === 'subcategory_picker') && meta.categories) {
+                  const handlePickerClick = (name: string) => {
+                    sendMessage(name);
+                  };
+                  return (
+                    <div key={msg.id} className="flex justify-start">
+                      <div className="max-w-[85%]">
+                        <div className="bg-gray-100 rounded-2xl px-4 py-2.5 text-sm text-gray-900 mb-2">
+                          {renderMarkdown(msg.content)}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 ml-1">
+                          {meta.categories.map((cat: { id: string; name: string; description: string }) => (
+                            <button
+                              key={cat.id}
+                              onClick={() => handlePickerClick(cat.name)}
+                              disabled={sending}
+                              className="text-left bg-white border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/50 hover:shadow-sm transition-all disabled:opacity-50"
+                            >
+                              <div className="text-sm font-medium text-gray-900">{cat.name}</div>
+                              {cat.description && (
+                                <div className="text-xs text-gray-500 mt-0.5">{cat.description}</div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-2 ml-1">
+                          {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
                 if (meta?.type === 'kb_suggestions' && meta.articles && Array.isArray(meta.articles)) {
                   return (
                     <div key={msg.id} className="flex justify-start">
                       <div className="max-w-[80%]">
                         <div className="bg-gray-100 rounded-2xl px-4 py-2.5 text-sm text-gray-900 mb-2">
-                          <div className="whitespace-pre-wrap">{msg.content}</div>
+                          {renderMarkdown(msg.content)}
                         </div>
                         <div className="space-y-2 ml-1">
                           {meta.articles.map((article: { id: number; title: string; excerpt: string }) => (
@@ -403,7 +489,9 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                         ? 'bg-brand text-white'
                         : 'bg-gray-100 text-gray-900'
                     }`}>
-                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                      <div className="whitespace-pre-wrap">
+                        {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
+                      </div>
                       <div className={`text-xs mt-1 ${msg.role === 'user' ? 'text-white/60' : 'text-gray-400'}`}>
                         {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
@@ -437,7 +525,7 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none"
                 />
                 <button
-                  onClick={sendMessage}
+                  onClick={() => sendMessage()}
                   disabled={!input.trim() || sending}
                   className="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >

@@ -229,13 +229,14 @@ export interface IntakeSessionMetadata {
 }
 
 export interface ChatMessageMetadata {
-  type?: 'summary_card' | 'kb_suggestions';
+  type?: 'summary_card' | 'kb_suggestions' | 'category_picker' | 'subcategory_picker';
   intent?: IntakeIntent | null;
   fields?: IntakeCollectedFields & {
     category: string | null;
     subcategory: string | null;
   };
   articles?: Array<{ id: number; title: string; excerpt: string }>;
+  categories?: Array<{ id: string; name: string; description: string }>;
 }
 
 // ── Chat Widget Config ──
