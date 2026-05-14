@@ -1037,20 +1037,57 @@ async function main() {
     agentLoop.setAssignmentEngine(assignmentEngine);
     const availabilityService = new AgentAvailabilityService(settingsQueries);
 
-    // People HR → agent_availability sync (every 2 hours, initial run after 30s)
-    jobRegistry.register('people-hr-sync', 'People HR leave sync', async () => {
+    // People HR → agent_availability sync (variable schedule matching workday pattern)
+    const runPeopleHrSync = async () => {
       try {
         const agents = await availabilityService.getAgentsFromKpiPublic();
         await syncPeopleHR(settingsQueries, availabilityService, agents);
       } catch (err) {
         console.warn('[people-hr-sync] error:', err instanceof Error ? err.message : err);
       }
-    }, 2 * 60 * 60 * 1000);
+    };
+
+    const getNextPeopleHrSyncTime = (now: Date): Date => {
+      const h = now.getHours();
+      const m = now.getMinutes();
+      const mins = h * 60 + m;
+      const at = (hour: number, minute: number, tomorrow = false): Date => {
+        const d = new Date(now);
+        if (tomorrow) d.setDate(d.getDate() + 1);
+        d.setHours(hour, minute, 0, 0);
+        return d;
+      };
+      if (mins < 450) return at(7, 30);                                      // 00:00–07:29 → 07:30
+      if (mins < 540) {                                                       // 07:30–08:59 → every 30m
+        const next30 = Math.ceil((mins + 1) / 30) * 30;
+        return next30 < 540 ? at(Math.floor(next30 / 60), next30 % 60) : at(9, 0);
+      }
+      if (mins < 600) {                                                       // 09:00–09:59 → every 10m
+        const next10 = Math.ceil((mins + 1) / 10) * 10;
+        return next10 < 600 ? at(Math.floor(next10 / 60), next10 % 60) : at(10, 5);
+      }
+      if (mins < 1020) {                                                      // 10:00–16:59 → at :05 and :35
+        if (m < 5) return at(h, 5);
+        if (m < 35) return at(h, 35);
+        return h < 16 ? at(h + 1, 5) : at(7, 30, true);
+      }
+      return at(7, 30, true);                                                 // 17:00–23:59 → tomorrow 07:30
+    };
+
+    const schedulePeopleHrSync = () => {
+      const next = getNextPeopleHrSyncTime(new Date());
+      const delayMs = Math.max(60_000, next.getTime() - Date.now());
+      console.log(`[people-hr-sync] Next run: ${next.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} (in ${Math.round(delayMs / 60_000)}m)`);
+      setTimeout(async () => {
+        await runPeopleHrSync();
+        schedulePeopleHrSync();
+      }, delayMs);
+    };
+
+    jobRegistry.register('people-hr-sync', 'People HR leave sync', runPeopleHrSync, 0);
     setTimeout(async () => {
-      try {
-        const agents = await availabilityService.getAgentsFromKpiPublic();
-        await syncPeopleHR(settingsQueries, availabilityService, agents);
-      } catch (err) { console.warn('[people-hr-sync] initial sync error:', err instanceof Error ? err.message : err); }
+      await runPeopleHrSync();
+      schedulePeopleHrSync();
     }, 30_000);
 
     const ticketClassifier = new TicketClassifier(llmService, agentJiraClient, 'NT');

@@ -6,6 +6,7 @@ import type { LifecycleManager } from './lifecycle-manager.js';
 import type { AiLearningService } from './ai-learning-service.js';
 import type { EscalationPolicy } from './escalation-policy.js';
 import type { TriageTuningFeedback } from './triage-tuning-feedback.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import { TriageResultSchema, type TriageResult } from './triage-schema.js';
 import { RespondResultSchema, type RespondResult } from './respond-schema.js';
 import { loadPrompt } from './prompt-loader.js';
@@ -23,6 +24,7 @@ export class Reasoner {
   private learningService: AiLearningService | null = null;
   private escalationPolicy: EscalationPolicy | null = null;
   private tuningFeedback: TriageTuningFeedback | null = null;
+  private settings: SettingsQueries | null = null;
 
   constructor(llmService: LlmService, kbSearch: KbSearchService, autonomyEngine?: AutonomyEngine) {
     this.llmService = llmService;
@@ -44,6 +46,10 @@ export class Reasoner {
 
   setTuningFeedback(feedback: TriageTuningFeedback): void {
     this.tuningFeedback = feedback;
+  }
+
+  setSettings(settings: SettingsQueries): void {
+    this.settings = settings;
   }
 
   getLastAutonomyCheck(): AutonomyCheck | null {
@@ -101,6 +107,8 @@ export class Reasoner {
     const kbMatches = await this.kbSearch.search(`${event.summary} ${event.description.slice(0, 200)}`);
     const kbText = this.kbSearch.formatForPrompt(kbMatches);
 
+    const confluenceMatches = await this.searchConfluence(event.summary);
+
     const customerContext = this.buildCustomerContext(event);
     const learningsCtx = await this.buildLearningsContext(event);
     const patternsCtx = await this.buildPatternsContext(event);
@@ -141,6 +149,7 @@ export class Reasoner {
       attachments: attachmentsText,
       customer_context: customerContext,
       kb_matches: kbText,
+      confluence_matches: confluenceMatches,
       learnings: learningsCtx.text + (patternsCtx ? `\n\n${patternsCtx}` : '') + (tuningSignalsCtx ? `\n\n## Historical Tuning Signals\n\n${tuningSignalsCtx}` : '') + priorFeedbackSection,
     });
 
@@ -222,6 +231,7 @@ export class Reasoner {
         classification: triage.classification,
         kb_gap: triage.kb_gap,
         quick_win: triage.quick_win,
+        recommended_tier: triage.recommended_tier,
       },
       provider: result.provider,
       model: result.model,
@@ -254,6 +264,54 @@ export class Reasoner {
     return event.attachments
       .filter(a => a.base64Content && a.mimeType.startsWith('image/'))
       .map(a => ({ base64: a.base64Content!, mimeType: a.mimeType }));
+  }
+
+  private async searchConfluence(summary: string): Promise<string> {
+    try {
+      if (!this.settings) return 'No Confluence configuration available.';
+      const siteUrl = this.settings.get('confluence_site_url')?.trim();
+      const email = this.settings.get('jira_ob_email')?.trim();
+      const token = this.settings.get('jira_ob_token')?.trim();
+      const spaceKeys = this.settings.get('kb_confluence_space_keys')?.trim();
+      if (!siteUrl || !email || !token) return 'No Confluence configuration available.';
+
+      const words = summary.replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2).slice(0, 4);
+      if (words.length === 0) return 'No search terms derived from ticket summary.';
+      const searchTerms = words.join(' ');
+
+      let cql = `text ~ "${searchTerms}"`;
+      if (spaceKeys) {
+        const spaces = spaceKeys.split(',').map(s => `"${s.trim()}"`).join(',');
+        cql += ` AND space IN (${spaces})`;
+      }
+      cql += ' ORDER BY lastmodified DESC';
+
+      const url = `${siteUrl.replace(/\/$/, '')}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=3`;
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        console.warn(`[reasoner] Confluence search failed: ${res.status}`);
+        return 'Confluence search unavailable.';
+      }
+
+      const json = await res.json() as { results?: Array<{ title: string; _links?: { webui?: string } }> };
+      const results = json.results ?? [];
+      if (results.length === 0) return 'No matching Confluence articles found.';
+
+      const baseUrl = siteUrl.replace(/\/$/, '');
+      return results.map((r, i) => {
+        const link = r._links?.webui ? `${baseUrl}/wiki${r._links.webui}` : '';
+        return `${i + 1}. ${r.title}${link ? ` — ${link}` : ''}`;
+      }).join('\n');
+    } catch (err) {
+      console.warn('[reasoner] Confluence search error:', err instanceof Error ? err.message : err);
+      return 'Confluence search failed.';
+    }
   }
 
   private hasUnreadableCriticalAttachments(event: TicketEvent): boolean {

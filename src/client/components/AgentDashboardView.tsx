@@ -1409,7 +1409,7 @@ function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decisio
               {output.internal_note ? (
                 <div className="mb-3">
                   <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Internal Note</div>
-                  <div className="text-xs text-neutral-300 bg-[#272C33] rounded p-3 whitespace-pre-wrap">{String(output.internal_note)}</div>
+                  <div className="text-xs text-neutral-300 bg-[#272C33] rounded p-3 whitespace-pre-wrap">{typeof output.internal_note === 'string' ? output.internal_note : (output.internal_note as any)?.summary ?? JSON.stringify(output.internal_note, null, 2)}</div>
                 </div>
               ) : null}
               <JsonBlock data={output} />

@@ -73,7 +73,48 @@ export const TriageResultSchema = z.object({
   sla_risk: flexString,
   recommended_action: flexEnum(['respond', 'escalate', 'gather_context', 'assign'] as const),
   draft_response: flexNullableString,
-  internal_note: flexString,
+  internal_note: z.any().transform((val): {
+    summary: string;
+    actions_issues: string[];
+    private_comment: { diagnosis: string; severity: string; probable_causes: string[] };
+    next_steps: { tier: string; steps: { title: string; details: string[] }[] };
+    escalation_guidance: { current_tier_appropriate: string; escalate_if: string[]; do_not_escalate_if: string | null };
+  } => {
+    if (typeof val === 'string') {
+      return { summary: val, actions_issues: [], private_comment: { diagnosis: '', severity: '', probable_causes: [] }, next_steps: { tier: '', steps: [] }, escalation_guidance: { current_tier_appropriate: '', escalate_if: [], do_not_escalate_if: null } };
+    }
+    if (val && typeof val === 'object') {
+      const o = val as Record<string, unknown>;
+      const str = (v: unknown): string => typeof v === 'string' ? v : (v && typeof v === 'object' ? (v as any).description ?? (v as any).summary ?? (v as any).value ?? (v as any).text ?? JSON.stringify(v) : String(v ?? ''));
+      const arr = (v: unknown): string[] => Array.isArray(v) ? v.map(str) : [];
+      const pc = (o.private_comment && typeof o.private_comment === 'object' ? o.private_comment : {}) as Record<string, unknown>;
+      const ns = (o.next_steps && typeof o.next_steps === 'object' ? o.next_steps : {}) as Record<string, unknown>;
+      const eg = (o.escalation_guidance && typeof o.escalation_guidance === 'object' ? o.escalation_guidance : {}) as Record<string, unknown>;
+      return {
+        summary: str(o.summary ?? ''),
+        actions_issues: arr(o.actions_issues),
+        private_comment: {
+          diagnosis: str(pc.diagnosis ?? ''),
+          severity: str(pc.severity ?? ''),
+          probable_causes: arr(pc.probable_causes),
+        },
+        next_steps: {
+          tier: str(ns.tier ?? ''),
+          steps: Array.isArray(ns.steps) ? ns.steps.map((s: any) => ({
+            title: str(s?.title ?? ''),
+            details: arr(s?.details),
+          })) : [],
+        },
+        escalation_guidance: {
+          current_tier_appropriate: str(eg.current_tier_appropriate ?? ''),
+          escalate_if: arr(eg.escalate_if),
+          do_not_escalate_if: eg.do_not_escalate_if ? str(eg.do_not_escalate_if) : null,
+        },
+      };
+    }
+    return { summary: String(val ?? ''), actions_issues: [], private_comment: { diagnosis: '', severity: '', probable_causes: [] }, next_steps: { tier: '', steps: [] }, escalation_guidance: { current_tier_appropriate: '', escalate_if: [], do_not_escalate_if: null } };
+  }),
+  recommended_tier: flexEnum(['customer_care', 'tier_2', 'tier_3', 'development'] as const),
   reasoning_trace: flexString,
   kb_gap: z.object({
     should_have_article: flexBool,

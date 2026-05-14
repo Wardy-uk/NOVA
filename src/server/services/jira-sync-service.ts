@@ -2,6 +2,17 @@ import type { JiraRestClient, JiraIssue, JiraComment } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, queryOne, execute } from './database.js';
 
+const PRIORITY_NORMALIZE: Record<string, string> = {
+  '最高': 'Highest', '高': 'High', '中': 'Medium', '低': 'Low', '最低': 'Lowest',
+  '高い': 'High', '低い': 'Low',
+  '최고': 'Highest', '높음': 'High', '중간': 'Medium', '낮음': 'Low', '최저': 'Lowest',
+};
+
+function normalisePriorityName(raw: string | null): string | null {
+  if (!raw) return null;
+  return PRIORITY_NORMALIZE[raw] ?? raw;
+}
+
 const ALL_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
   'assignee', 'reporter', 'created', 'updated', 'duedate',
@@ -237,6 +248,8 @@ export class JiraSyncService {
     const resolution = f.resolution as any;
 
     // Normalise status name: Jira returns localised names (e.g. Chinese) depending on
+    const priorityName = normalisePriorityName(priority?.name as string | undefined ?? null);
+
     // the API user's locale. Fall back to statusCategory for non-ASCII names.
     const statusName = (() => {
       const name = status?.name as string | undefined;
@@ -331,7 +344,7 @@ export class JiraSyncService {
         issue.id, issue.key.split('-')[0], f.summary as string ?? null,
         descriptionText || null, descriptionAdf,
         statusName, status?.statusCategory?.key ?? null,
-        priority?.name ?? null, issuetype?.name ?? null,
+        priorityName, issuetype?.name ?? null,
         resolution?.name ?? null,
         assignee?.accountId ?? null, assignee?.displayName ?? null, assignee?.emailAddress ?? null,
         reporter?.accountId ?? null, reporter?.displayName ?? null, reporter?.emailAddress ?? null,
@@ -349,7 +362,7 @@ export class JiraSyncService {
         issue.key, issue.id, issue.key.split('-')[0], f.summary as string ?? null,
         descriptionText || null, descriptionAdf,
         statusName, status?.statusCategory?.key ?? null,
-        priority?.name ?? null, issuetype?.name ?? null,
+        priorityName, issuetype?.name ?? null,
         resolution?.name ?? null,
         assignee?.accountId ?? null, assignee?.displayName ?? null, assignee?.emailAddress ?? null,
         reporter?.accountId ?? null, reporter?.displayName ?? null, reporter?.emailAddress ?? null,

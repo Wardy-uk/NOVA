@@ -95,6 +95,7 @@ export class AgentLoop {
     this.autonomyEngine = new AutonomyEngine();
     this.perceiver = new Perceiver(jiraClient, settings, cache);
     this.reasoner = new Reasoner(llmService, this.kbSearch, this.autonomyEngine);
+    this.reasoner.setSettings(settings);
     this.actor = new Actor(jiraClient, new EscalationLogService(), settings);
     this.actor.setLlmService(llmService);
     this.observer = new Observer();
@@ -1480,8 +1481,9 @@ export class AgentLoop {
     }
 
     // Post internal note (safe in all modes — except hands_off handled above)
-    const internalNote = decision.output.internal_note as string | undefined;
-    const shouldPostNote = internalNote && !(isAssigned && mode === 'hands_off');
+    const rawInternalNote = decision.output.internal_note;
+    const hasInternalNote = rawInternalNote && (typeof rawInternalNote === 'string' ? rawInternalNote.length > 0 : typeof rawInternalNote === 'object');
+    const shouldPostNote = hasInternalNote && !(isAssigned && mode === 'hands_off');
     if (shouldPostNote) {
       try {
         await this.jiraClient.addComment(decision.ticketKey, this.formatInternalNote(decision), { internal: true });
@@ -1571,8 +1573,13 @@ export class AgentLoop {
 
       // For duplicates, enrich the decision with the reasoning so approvers see which ticket is the original
       if (qw.type === 'duplicate' && qw.reasoning) {
-        const existing = (decision.output.internal_note as string) || '';
-        decision.output.internal_note = `${existing ? existing + '\n' : ''}[Duplicate detection] ${qw.reasoning}`;
+        const note = decision.output.internal_note;
+        if (note && typeof note === 'object' && 'summary' in (note as any)) {
+          (note as any).summary = `${(note as any).summary}\n[Duplicate detection] ${qw.reasoning}`;
+        } else {
+          const existing = typeof note === 'string' ? note : '';
+          decision.output.internal_note = `${existing ? existing + '\n' : ''}[Duplicate detection] ${qw.reasoning}`;
+        }
       }
     }
 
@@ -1745,13 +1752,13 @@ export class AgentLoop {
 
   private formatInternalNote(decision: AgentDecision): string {
     const classification = decision.output.classification as { ticket_type?: string; category?: string; sub_category?: string; confidence?: number; impact?: string; urgency?: string; priority_matrix?: string } | undefined;
-    const intent = decision.inputs.intent as { type?: string; confidence?: number } | undefined;
     const priorityAssessment = decision.output.priority_assessment as { suggested_priority?: number; reasoning?: string } | undefined;
-    const internalNote = (decision.output.internal_note as string) ?? '';
+    const rawNote = decision.output.internal_note;
     const sentiment = (decision.inputs.sentiment as string) ?? null;
     const slaRisk = (decision.inputs.sla_risk as string) ?? null;
     const assigneeName = (decision.inputs.assignee as string) ?? null;
     const draftResponse = (decision.output.draft_response as string) ?? null;
+    const recommendedTier = (decision.output.recommended_tier as string) ?? null;
 
     const triggerLabel = decision.eventType === 'ticket_created' ? 'New Ticket Triage'
       : decision.eventType === 'comment_added' ? 'New Customer Reply'
@@ -1760,39 +1767,63 @@ export class AgentLoop {
 
     const shadowTag = decision.shadowMode ? ' [SHADOW MODE — observe only]' : '';
 
-    const actionLabels: Record<string, string> = {
-      respond: 'send a reply to the customer',
-      draft_response: 'draft a reply for agent review',
-      gather_context: 'ask the customer for more information before proceeding',
-      escalate: 'escalate to a senior agent or specialist',
-      assign: 'assign to an available agent',
-      close: 'close the ticket',
-      no_action: 'no action needed at this time',
-      chase: 'chase the customer for a response',
-      transition: 'move ticket to a new status',
+    // Normalise internal_note: structured object or legacy string
+    type StructuredNote = {
+      summary: string;
+      actions_issues: string[];
+      private_comment: { diagnosis: string; severity: string; probable_causes: string[] };
+      next_steps: { tier: string; steps: { title: string; details: string[] }[] };
+      escalation_guidance: { current_tier_appropriate: string; escalate_if: string[]; do_not_escalate_if: string | null };
     };
-
-    const rawAction = (decision.output.recommended_action as string) ?? decision.action;
-    const actionDesc = actionLabels[rawAction] ?? rawAction;
-    const forWhom = assigneeName
-      ? `**For ${assigneeName}:** ${actionDesc}`
-      : `**For next available agent:** ${actionDesc}`;
-
-    const statusDesc = decision.shadowMode
-      ? `This is shadow mode — the AI is observing only. No action has been taken.`
-      : decision.approvalRequired
-        ? `A draft reply has been submitted to the NOVA approval queue for agent review before sending.`
-        : `This action was executed automatically based on autonomy rules.`;
+    const note: StructuredNote = typeof rawNote === 'string'
+      ? { summary: rawNote, actions_issues: [], private_comment: { diagnosis: '', severity: '', probable_causes: [] }, next_steps: { tier: '', steps: [] }, escalation_guidance: { current_tier_appropriate: '', escalate_if: [], do_not_escalate_if: null } }
+      : (rawNote as StructuredNote) ?? { summary: '', actions_issues: [], private_comment: { diagnosis: '', severity: '', probable_causes: [] }, next_steps: { tier: '', steps: [] }, escalation_guidance: { current_tier_appropriate: '', escalate_if: [], do_not_escalate_if: null } };
 
     const lines = [
       `\u{1F916} AI ${triggerLabel}${shadowTag}`,
       ``,
-      internalNote,
-      ``,
-      forWhom,
-      `**Confidence:** ${(decision.confidence * 100).toFixed(0)}%`,
+      note.summary,
     ];
 
+    if (note.actions_issues.length > 0) {
+      lines.push(``, `**Actions / Issues:**`);
+      for (const action of note.actions_issues) lines.push(`- ${action}`);
+    }
+
+    if (note.private_comment.diagnosis) {
+      lines.push(``, `**Private Comment (for agents only):**`, note.private_comment.diagnosis);
+      if (note.private_comment.probable_causes.length > 0) {
+        lines.push(``, `Probable causes:`);
+        for (const cause of note.private_comment.probable_causes) lines.push(`- ${cause}`);
+      }
+    }
+
+    if (note.next_steps.steps.length > 0) {
+      lines.push(``, `Next steps (${note.next_steps.tier || recommendedTier || 'assigned tier'}):`);
+      for (let i = 0; i < note.next_steps.steps.length; i++) {
+        const step = note.next_steps.steps[i];
+        lines.push(`${i + 1}. ${step.title}:`);
+        for (const detail of step.details) lines.push(`   - ${detail}`);
+      }
+    }
+
+    if (note.escalation_guidance.current_tier_appropriate || note.escalation_guidance.escalate_if.length > 0) {
+      lines.push(``, `Escalation guidance:`);
+      if (note.escalation_guidance.current_tier_appropriate) {
+        lines.push(`- ${note.escalation_guidance.current_tier_appropriate}`);
+      }
+      if (note.escalation_guidance.escalate_if.length > 0) {
+        lines.push(`- Escalate if:`);
+        for (const cond of note.escalation_guidance.escalate_if) lines.push(`  - ${cond}`);
+      }
+      if (note.escalation_guidance.do_not_escalate_if) {
+        lines.push(`- Do not escalate if: ${note.escalation_guidance.do_not_escalate_if}`);
+      }
+    }
+
+    // --- Metadata ---
+    lines.push(``, `--- Metadata ---`);
+    lines.push(`**Confidence:** ${(decision.confidence * 100).toFixed(0)}%`);
     if (sentiment) lines.push(`**Sentiment:** ${sentiment}`);
 
     if (classification?.ticket_type) {
@@ -1800,24 +1831,25 @@ export class AgentLoop {
       const catLabel = classification.category && classification.sub_category
         ? `${classification.category} > ${classification.sub_category}`
         : classification.category ?? '';
-      lines.push(`**Type:** ${typeLabel}`);
-      if (catLabel) lines.push(`**Category:** ${catLabel}`);
+      lines.push(`**Type:** ${typeLabel}${catLabel ? ` | **Category:** ${catLabel}` : ''}`);
       if (classification.impact && classification.urgency && classification.priority_matrix) {
-        lines.push(`**Impact:** ${classification.impact} | **Urgency:** ${classification.urgency} | **Priority:** ${classification.priority_matrix}`);
+        lines.push(`**Impact:** ${classification.impact} | **Urgency:** ${classification.urgency}`);
       }
-    } else if (classification?.category && classification.category !== 'unknown') {
-      const sub = classification.sub_category && classification.sub_category !== 'unknown'
-        ? ` > ${classification.sub_category}` : '';
-      lines.push(`**Category:** ${classification.category}${sub}`);
-    }
-    if (intent?.type) {
-      lines.push(`**Customer Intent:** ${intent.type.replace(/_/g, ' ')}`);
     }
 
     if (slaRisk && slaRisk !== 'unknown') lines.push(`**SLA Risk:** ${slaRisk}`);
 
     if (priorityAssessment?.suggested_priority) {
       lines.push(`**Suggested Priority:** ${priorityAssessment.suggested_priority} — ${priorityAssessment.reasoning ?? ''}`);
+    }
+
+    if (classification?.priority_matrix) {
+      lines.push(`**Priority:** ${classification.priority_matrix}`);
+    }
+
+    const tierLabels: Record<string, string> = { customer_care: 'Customer Care', tier_2: 'Tier 2', tier_3: 'Tier 3', development: 'Development' };
+    if (recommendedTier) {
+      lines.push(`**Recommended Tier:** ${tierLabels[recommendedTier] ?? recommendedTier}`);
     }
 
     // Ticket context block
@@ -1850,13 +1882,17 @@ export class AgentLoop {
       lines.push(``, `--- Ticket Context ---`, contextParts.join(' | '));
     }
 
-    // Draft response (shown in shadow mode so agents can copy/paste)
     if (draftResponse) {
       lines.push(``, `**Suggested response:**`, draftResponse);
     }
 
+    const statusDesc = decision.shadowMode
+      ? `This is shadow mode — the AI is observing only. No action has been taken.`
+      : decision.approvalRequired
+        ? `A draft reply has been submitted to the NOVA approval queue for agent review before sending.`
+        : `This action was executed automatically based on autonomy rules.`;
     lines.push(``, statusDesc);
-    lines.push(``, `_${decision.provider ?? 'unknown'}/${decision.model ?? 'unknown'}_`);
+    lines.push(`_${decision.provider ?? 'unknown'}/${decision.model ?? 'unknown'}_`);
 
     return lines.join('\n');
   }

@@ -96,7 +96,7 @@ function extractAdfText(adfJson: string | null): string {
     if (doc.draft_response || doc.reasoning_trace || doc.reasoning || doc.internal_note) {
       const parts: string[] = [];
       if (doc.draft_response) parts.push(doc.draft_response);
-      else if (doc.internal_note) parts.push(doc.internal_note);
+      else if (doc.internal_note) parts.push(typeof doc.internal_note === 'string' ? doc.internal_note : doc.internal_note.summary ?? JSON.stringify(doc.internal_note));
       if (doc.reasoning_trace) parts.push(`\nReasoning: ${doc.reasoning_trace}`);
       else if (doc.reasoning) parts.push(`\nReasoning: ${doc.reasoning}`);
       return parts.join('\n');

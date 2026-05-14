@@ -22,7 +22,7 @@ export interface DevReviewThreadEntry {
   jira_key: string;
   user_id: number;
   user_display: string;
-  kind: 'comment' | 'state_change' | 'accept' | 'return' | 'claim' | 'fasttrack';
+  kind: 'comment' | 'state_change' | 'accept' | 'return' | 'claim' | 'fasttrack' | 'link_existing';
   body: string | null;
   body_adf: string | null;
   meta_json: string | null;

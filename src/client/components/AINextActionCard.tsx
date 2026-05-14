@@ -157,7 +157,24 @@ export function AINextActionCard({ ticketKey, compact, pendingDecision, onDecisi
     }
   };
 
-  if (error || !data) return null;
+  if (error || !data) {
+    return (
+      <div
+        className={`rounded-2xl overflow-hidden ${compact ? 'p-3' : 'p-5'}`}
+        style={{ background: 'rgba(107,114,128,0.06)', border: '1px solid rgba(107,114,128,0.15)' }}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm">⚪</span>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">
+            No AI recommendation available
+          </span>
+        </div>
+        {error && (
+          <div className="text-[11px] text-neutral-500 mt-1">{error}</div>
+        )}
+      </div>
+    );
+  }
 
   const cfg = STATE_CONFIG[data.state] || STATE_CONFIG.no_context;
 

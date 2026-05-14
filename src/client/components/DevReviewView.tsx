@@ -3,6 +3,7 @@ import { TicketBriefCard } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
 import { AdfCommentBody } from './AdfCommentBody.js';
 import { useAuth } from '../hooks/useAuth.js';
+import { useDevReviewTheme } from '../utils/devReviewTheme.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -128,15 +129,11 @@ function adfToText(adf: unknown): string {
 // ── Visual primitives ──────────────────────────────────────────────────────
 
 function GlassCard({ children, className = '', accent }: { children: React.ReactNode; className?: string; accent?: boolean }) {
+  const t = useDevReviewTheme();
   return (
     <div
       className={`relative rounded-2xl overflow-hidden ${className}`}
-      style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%)',
-        backdropFilter: 'blur(20px)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)',
-      }}
+      style={t.glassCard}
     >
       {accent && (
         <div
@@ -198,20 +195,14 @@ function FastTrackFlame() {
 }
 
 function BriefField({ label, value, mono }: { label: string; value: string | undefined | null; mono?: boolean }) {
+  const t = useDevReviewTheme();
   if (!value) return null;
   return (
     <div className="mb-4">
       <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5">{label}</div>
       <div
         className={`leading-relaxed whitespace-pre-wrap break-words ${mono ? 'font-mono text-[12px] text-emerald-200' : 'text-[13px] text-neutral-50'}`}
-        style={{
-          background: 'rgba(255,255,255,0.06)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: '8px',
-          padding: '12px 14px',
-          maxHeight: mono ? '320px' : 'none',
-          overflowY: mono ? 'auto' : 'visible',
-        }}
+        style={mono ? t.briefFieldMono : t.briefField}
       >
         {value}
       </div>
@@ -223,6 +214,7 @@ function BriefField({ label, value, mono }: { label: string; value: string | und
 
 export function DevReviewView() {
   const { user } = useAuth();
+  const drTheme = useDevReviewTheme();
   const [items, setItems] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -244,6 +236,8 @@ export function DevReviewView() {
   const [acceptDevDetails, setAcceptDevDetails] = useState('');
   const [acceptWorkItemComment, setAcceptWorkItemComment] = useState('');
   const [showAcceptModal, setShowAcceptModal] = useState(false);
+  const [showLinkExistingModal, setShowLinkExistingModal] = useState(false);
+  const [linkExistingKey, setLinkExistingKey] = useState('');
   const [acceptedWorkItem, setAcceptedWorkItem] = useState<{ key: string; sourceKey: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -476,7 +470,61 @@ export function DevReviewView() {
     setAcceptTldr('');
     setAcceptDevDetails('');
     setAcceptWorkItemComment('');
+  }
+  const openLinkExistingModal = () => {
+    if (!detail) return;
+    setAcceptTldr(adfToText(detail.fields.customfield_13184));
+    setAcceptDevDetails(adfToText(detail.fields.customfield_13215));
+    setAcceptNote('');
+    setLinkExistingKey('');
+    setShowLinkExistingModal(true);
   };
+  const onLinkExisting = async () => {
+    if (!linkExistingKey.trim() || !/^[A-Z]+-\d+$/.test(linkExistingKey.trim())) {
+      fireToast('err', 'A valid Jira key is required (e.g. BYM-1234)');
+      return;
+    }
+    if (!acceptTldr.trim()) {
+      fireToast('err', 'TL;DR is required by the Escalate to Development screen');
+      return;
+    }
+    if (!selectedKey) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/dev-review/ticket/${selectedKey}/link-existing`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workItemKey: linkExistingKey.trim(),
+          note: acceptNote,
+          tldr: acceptTldr,
+          developmentDetails: acceptDevDetails,
+        }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        if (json.warnings?.length) {
+          setTimeout(() => fireToast('err', json.warnings.join('; ')), 500);
+        }
+        setItems(prev => prev.map(i => i.key === selectedKey
+          ? { ...i, state: { ...i.state!, status: 'accepted' as const, accepted_at: new Date().toISOString(), work_item_key: json.workItemKey ?? null } }
+          : i));
+        setShowLinkExistingModal(false);
+        setAcceptedWorkItem({ key: json.workItemKey, sourceKey: selectedKey });
+      } else {
+        fireToast('err', json.error || 'Link failed');
+        await Promise.all([loadQueue({ silent: true }), loadDetail(selectedKey)]);
+      }
+    } catch (e) {
+      fireToast('err', e instanceof Error ? e.message : 'Link failed');
+    } finally {
+      setBusy(false);
+    }
+    setAcceptNote('');
+    setAcceptTldr('');
+    setAcceptDevDetails('');
+    setLinkExistingKey('');
+  };;
   const onReturn = async () => {
     if (returnDraft.trim().length < 10 || !selectedKey) {
       fireToast('err', 'Next steps must be at least 10 characters');
@@ -506,16 +554,8 @@ export function DevReviewView() {
   return (
     <div className="relative min-h-screen -mx-6 -my-4 px-8 py-6 overflow-hidden">
       <div
-        className="fixed inset-0 pointer-events-none opacity-70"
-        style={{
-          background: `
-            radial-gradient(ellipse at 12% 18%, rgba(155,106,237,0.13) 0%, transparent 50%),
-            radial-gradient(ellipse at 88% 25%, rgba(94,193,202,0.10) 0%, transparent 50%),
-            radial-gradient(ellipse at 50% 95%, rgba(249,115,22,0.05) 0%, transparent 55%)
-          `,
-          animation: 'drMesh 25s ease-in-out infinite alternate',
-          zIndex: 0,
-        }}
+        className={`fixed inset-0 pointer-events-none ${drTheme.meshOpacityClass}`}
+        style={drTheme.meshBackground}
       />
       <style>{`
         @keyframes drMesh {
@@ -535,8 +575,8 @@ export function DevReviewView() {
         @keyframes drSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .dr-fade { animation: drFadeIn 0.45s cubic-bezier(0.16,1,0.3,1) both; }
         .dr-scroll::-webkit-scrollbar { width: 6px; }
-        .dr-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 6px; }
-        .dr-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+        .dr-scroll::-webkit-scrollbar-thumb { background: ${drTheme.scrollbarThumbCss}; border-radius: 6px; }
+        .dr-scroll::-webkit-scrollbar-thumb:hover { background: ${drTheme.scrollbarThumbHoverCss}; }
       `}</style>
 
       <div className="relative z-10 max-w-[1800px] mx-auto">
@@ -557,12 +597,7 @@ export function DevReviewView() {
               <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-semibold">Technical Support</div>
               <h1
                 className="text-2xl font-black tracking-tight"
-                style={{
-                  fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-                  background: 'linear-gradient(135deg, #f8fafc 0%, #94a3b8 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                }}
+                style={drTheme.titleGradient}
               >
                 Dev Review Queue
               </h1>
@@ -578,7 +613,7 @@ export function DevReviewView() {
               onClick={() => loadQueue()}
               disabled={loading}
               className="px-3 py-2 text-xs rounded-lg font-semibold text-neutral-200 border border-white/10 hover:bg-white/5 transition-all disabled:opacity-60 flex items-center gap-1.5"
-              style={{ background: 'rgba(255,255,255,0.03)' }}
+              style={drTheme.input}
             >
               <span
                 style={{
@@ -610,7 +645,7 @@ export function DevReviewView() {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search key, summary, TL;DR…"
                 className="flex-1 px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600"
-                style={{ background: 'rgba(255,255,255,0.03)' }}
+                style={drTheme.input}
               />
             </div>
             {isAdminUser && (
@@ -621,7 +656,7 @@ export function DevReviewView() {
                   onKeyDown={(e) => e.key === 'Enter' && onJumpToTicket()}
                   placeholder="NT-xxxxx"
                   className="w-28 px-2 py-1.5 text-[11px] rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 font-mono"
-                  style={{ background: 'rgba(255,255,255,0.03)' }}
+                  style={drTheme.input}
                 />
                 <button
                   onClick={onJumpToTicket}
@@ -636,12 +671,12 @@ export function DevReviewView() {
                 value={teamFilter}
                 onChange={(e) => setTeamFilter(e.target.value)}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-100 font-medium"
-                style={{ background: 'rgba(255,255,255,0.04)' }}
+                style={drTheme.input}
               >
-                <option value="all" className="bg-[#272C33]">All teams ({items.length})</option>
-                {teamOptions.map((t) => (
-                  <option key={t.team} value={t.team} className="bg-[#272C33]">
-                    {t.team} ({t.count})
+                <option value="all" className={drTheme.selectBg}>All teams ({items.length})</option>
+                {teamOptions.map((to) => (
+                  <option key={to.team} value={to.team} className={drTheme.selectBg}>
+                    {to.team} ({to.count})
                   </option>
                 ))}
               </select>
@@ -675,11 +710,7 @@ export function DevReviewView() {
                   key={f}
                   onClick={() => setFilter(f)}
                   className="px-2.5 py-1 rounded-full font-semibold transition-all"
-                  style={{
-                    background: filter === f ? 'linear-gradient(135deg, rgba(155,106,237,0.2), rgba(94,193,202,0.2))' : 'transparent',
-                    color: filter === f ? '#c4b5fd' : '#64748b',
-                    border: `1px solid ${filter === f ? 'rgba(155,106,237,0.4)' : 'rgba(255,255,255,0.05)'}`,
-                  }}
+                  style={drTheme.filterPill(filter === f)}
                 >
                   {f === 'fasttrack' ? '🔥 Fast' : f === 'mine' ? 'Mine' : f === 'unclaimed' ? 'Unclaimed' : 'All'}
                 </button>
@@ -735,6 +766,7 @@ export function DevReviewView() {
                 onComment={onComment}
                 onAcceptClick={openAcceptModal}
                 onReturnClick={() => setShowReturnModal(true)}
+                onLinkExistingClick={openLinkExistingModal}
                 claimedByDisplay={detail.claimed_by_display || selectedItem?.claimed_by_display || null}
               />
             ) : null}
@@ -772,7 +804,7 @@ export function DevReviewView() {
               rows={2}
               className="w-full px-3 py-2 text-[13px] rounded-lg border text-neutral-50 placeholder-neutral-600"
               style={{
-                background: 'rgba(255,255,255,0.06)',
+                ...drTheme.input,
                 borderColor: acceptTldr.trim() ? 'rgba(255,255,255,0.12)' : 'rgba(239,68,68,0.4)',
               }}
               autoFocus
@@ -790,7 +822,7 @@ export function DevReviewView() {
               placeholder="Any technical context, suspected cause, queries to run, related tickets…"
               rows={6}
               className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600 font-mono"
-              style={{ background: 'rgba(255,255,255,0.06)' }}
+              style={drTheme.input}
             />
           </div>
 
@@ -805,7 +837,7 @@ export function DevReviewView() {
               placeholder="Anything you'd like to add to the dev work item?"
               rows={3}
               className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600"
-              style={{ background: 'rgba(255,255,255,0.06)' }}
+              style={drTheme.input}
             />
           </div>
 
@@ -819,7 +851,7 @@ export function DevReviewView() {
               placeholder="Optional context for the dev team…"
               rows={2}
               className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600"
-              style={{ background: 'rgba(255,255,255,0.06)' }}
+              style={drTheme.input}
             />
           </div>
 
@@ -845,6 +877,117 @@ export function DevReviewView() {
                 style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}
               >
                 {busy ? 'Accepting…' : '✓ Move to Development'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showLinkExistingModal && (
+        <Modal onClose={() => setShowLinkExistingModal(false)} wide>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.3)' }}>
+              LINK EXISTING WORK ITEM
+            </span>
+            <span className="text-[11px] font-mono text-[#5ec1ca]">{selectedKey}</span>
+          </div>
+          <h3 className="text-lg font-bold text-neutral-50 mb-1" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+            Link to existing work item
+          </h3>
+          <p className="text-[12px] text-neutral-300 mb-5">
+            Links an existing Jira work item instead of creating a new Bug. The ticket will still be transitioned to <span className="text-neutral-100 font-semibold">Development</span>.
+          </p>
+
+          <div className="mb-4">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2">
+              <span>Work Item Key</span>
+              <span className="text-red-400">*</span>
+              <span className="text-neutral-500 normal-case font-normal text-[10px]">The existing Jira issue to link (e.g. BYM-1234)</span>
+            </label>
+            <input
+              type="text"
+              value={linkExistingKey}
+              onChange={(e) => setLinkExistingKey(e.target.value.toUpperCase())}
+              placeholder="e.g. BYM-1234"
+              className="w-full px-3 py-2 text-[13px] rounded-lg border text-neutral-50 placeholder-neutral-600 font-mono"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                borderColor: linkExistingKey.trim() && /^[A-Z]+-\d+$/.test(linkExistingKey.trim()) ? 'rgba(255,255,255,0.12)' : 'rgba(239,68,68,0.4)',
+              }}
+              autoFocus
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2">
+              <span>TL;DR</span>
+              <span className="text-red-400">*</span>
+              <span className="text-neutral-500 normal-case font-normal text-[10px]">High level short phrase to describe the issue / request</span>
+            </label>
+            <textarea
+              value={acceptTldr}
+              onChange={(e) => setAcceptTldr(e.target.value)}
+              placeholder="e.g. Email sends are queueing more than once for some campaigns…"
+              rows={2}
+              className="w-full px-3 py-2 text-[13px] rounded-lg border text-neutral-50 placeholder-neutral-600"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                borderColor: acceptTldr.trim() ? 'rgba(255,255,255,0.12)' : 'rgba(239,68,68,0.4)',
+              }}
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2">
+              <span>Development Details</span>
+              <span className="text-neutral-500 normal-case font-normal text-[10px]">Anything Engineering needs — repro, suspected cause, links, queries</span>
+            </label>
+            <textarea
+              value={acceptDevDetails}
+              onChange={(e) => setAcceptDevDetails(e.target.value)}
+              placeholder="Any technical context, suspected cause, queries to run, related tickets…"
+              rows={6}
+              className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600 font-mono"
+              style={{ background: 'rgba(255,255,255,0.06)' }}
+            />
+          </div>
+
+          <div className="mb-5">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 block">
+              Internal note (optional)
+            </label>
+            <textarea
+              value={acceptNote}
+              onChange={(e) => setAcceptNote(e.target.value)}
+              placeholder="Optional context for the dev team…"
+              rows={2}
+              className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600"
+              style={{ background: 'rgba(255,255,255,0.06)' }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/5">
+            <div className="text-[10px] text-neutral-500">
+              {linkExistingKey.trim() && /^[A-Z]+-\d+$/.test(linkExistingKey.trim()) && acceptTldr.trim() ? (
+                <span className="text-blue-400">✓ Ready to link</span>
+              ) : (
+                <span className="text-red-400">{!linkExistingKey.trim() || !/^[A-Z]+-\d+$/.test(linkExistingKey.trim()) ? 'Valid work item key required' : 'TL;DR required'}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowLinkExistingModal(false)}
+                className="px-4 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onLinkExisting}
+                disabled={busy || !acceptTldr.trim() || !linkExistingKey.trim() || !/^[A-Z]+-\d+$/.test(linkExistingKey.trim())}
+                className="px-5 py-2 text-xs rounded-lg font-bold text-white disabled:opacity-40"
+                style={{ background: 'linear-gradient(135deg, #3b82f6, #60a5fa)', boxShadow: '0 4px 16px rgba(59,130,246,0.35)' }}
+              >
+                {busy ? 'Linking…' : '🔗 Link & Accept'}
               </button>
             </div>
           </div>
@@ -912,7 +1055,7 @@ export function DevReviewView() {
             placeholder="Clear next steps for the agent…"
             rows={6}
             className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-2"
-            style={{ background: 'rgba(255,255,255,0.03)' }}
+            style={drTheme.input}
             autoFocus
           />
           <div className="flex items-center justify-between mb-4">
@@ -941,13 +1084,7 @@ export function DevReviewView() {
       {toast && (
         <div
           className="fixed bottom-6 right-6 px-4 py-3 rounded-xl text-sm font-semibold z-50"
-          style={{
-            background: toast.kind === 'ok' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-            border: `1px solid ${toast.kind === 'ok' ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
-            color: toast.kind === 'ok' ? '#10b981' : '#ef4444',
-            backdropFilter: 'blur(12px)',
-            animation: 'drFadeIn 0.3s ease',
-          }}
+          style={drTheme.toast(toast.kind)}
         >
           {toast.msg}
         </div>
@@ -972,6 +1109,7 @@ function HeaderStat({ label, value, accent = '#94a3b8' }: { label: string; value
 function QueueRow({
   item, selected, isMine, onClick,
 }: { item: QueueItem; selected: boolean; isMine: boolean; onClick: () => void }) {
+  const t = useDevReviewTheme();
   const tldr = adfToText(item.fields.customfield_13184);
   const summary = item.fields.summary || '(no summary)';
   const team = item.team;
@@ -982,11 +1120,7 @@ function QueueRow({
     <div
       onClick={onClick}
       className="group cursor-pointer p-3 rounded-xl transition-all duration-200"
-      style={{
-        background: selected ? 'rgba(155,106,237,0.1)' : 'rgba(255,255,255,0.02)',
-        border: `1px solid ${selected ? 'rgba(155,106,237,0.4)' : 'rgba(255,255,255,0.06)'}`,
-        boxShadow: selected ? '0 4px 20px rgba(155,106,237,0.15)' : 'none',
-      }}
+      style={t.queueRow(selected)}
     >
       <div className="flex items-start justify-between gap-2 mb-1.5">
         <div className="flex items-center gap-2 min-w-0">
@@ -1035,7 +1169,7 @@ function QueueRow({
 function TicketDetailPane({
   detail, selectedItem, busy, currentUserId, isAdmin,
   commentDraft, setCommentDraft, onClaim, onUnclaim, onFastTrack, onComment,
-  onAcceptClick, onReturnClick, claimedByDisplay,
+  onAcceptClick, onReturnClick, onLinkExistingClick, claimedByDisplay,
 }: {
   detail: TicketDetail;
   selectedItem: QueueItem | undefined;
@@ -1050,8 +1184,10 @@ function TicketDetailPane({
   onComment: () => void;
   onAcceptClick: () => void;
   onReturnClick: () => void;
+  onLinkExistingClick: () => void;
   claimedByDisplay: string | null;
 }) {
+  const drTheme = useDevReviewTheme();
   const { fields, state, thread } = detail;
   const product = fields.customfield_13183?.value;
   const isMine = state?.claimed_by_user_id === currentUserId;
@@ -1194,6 +1330,13 @@ function TicketDetailPane({
                   ↩ Return
                 </button>
                 <button
+                  onClick={onLinkExistingClick}
+                  disabled={busy}
+                  className="px-3 py-2 text-xs rounded-lg font-semibold text-blue-400 border border-blue-500/30 hover:bg-blue-500/10 disabled:opacity-40"
+                >
+                  🔗 Link Existing
+                </button>
+                <button
                   onClick={onAcceptClick}
                   disabled={busy}
                   className="px-3 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
@@ -1238,7 +1381,7 @@ function TicketDetailPane({
                 placeholder="Add a comment (will post to Jira as internal, tagged with your name)"
                 rows={3}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-2"
-                style={{ background: 'rgba(255,255,255,0.03)' }}
+                style={drTheme.input}
               />
               <div className="flex justify-end">
                 <button
@@ -1379,21 +1522,17 @@ function ThreadEntryRow({ entry }: { entry: ThreadEntry }) {
 }
 
 function Modal({ children, onClose, wide }: { children: React.ReactNode; onClose: () => void; wide?: boolean }) {
+  const t = useDevReviewTheme();
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(6px)' }}
+      style={t.modal.backdrop}
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         className={`w-full ${wide ? 'max-w-2xl' : 'max-w-md'} rounded-2xl p-6 max-h-[90vh] overflow-y-auto`}
-        style={{
-          background: 'rgba(30,36,48,0.97)',
-          backdropFilter: 'blur(24px)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.12)',
-        }}
+        style={t.modal.content}
       >
         {children}
       </div>

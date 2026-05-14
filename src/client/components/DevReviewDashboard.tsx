@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useDevReviewTheme } from '../utils/devReviewTheme.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -82,15 +83,11 @@ function ragForAge(hours: number | null): string {
 // ── Visual primitives (matching DevReviewView) ────────────────────────────
 
 function GlassCard({ children, className = '', accent }: { children: React.ReactNode; className?: string; accent?: boolean }) {
+  const t = useDevReviewTheme();
   return (
     <div
       className={`relative rounded-2xl overflow-hidden ${className}`}
-      style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%)',
-        backdropFilter: 'blur(20px)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)',
-      }}
+      style={t.glassCard}
     >
       {accent && (
         <div
@@ -204,6 +201,7 @@ function StackedBarChart({ data }: { data: Array<{ date: string; accepted: numbe
 // ── Main component ─────────────────────────────────────────────────────────
 
 export function DevReviewDashboard() {
+  const drTheme = useDevReviewTheme();
   const [data, setData] = useState<Dashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -264,16 +262,8 @@ export function DevReviewDashboard() {
   return (
     <div className="relative min-h-screen -mx-6 -my-4 px-8 py-6 overflow-hidden">
       <div
-        className="fixed inset-0 pointer-events-none opacity-70"
-        style={{
-          background: `
-            radial-gradient(ellipse at 12% 18%, rgba(155,106,237,0.13) 0%, transparent 50%),
-            radial-gradient(ellipse at 88% 25%, rgba(94,193,202,0.10) 0%, transparent 50%),
-            radial-gradient(ellipse at 50% 95%, rgba(16,185,129,0.06) 0%, transparent 55%)
-          `,
-          animation: 'drMesh 25s ease-in-out infinite alternate',
-          zIndex: 0,
-        }}
+        className={`fixed inset-0 pointer-events-none ${drTheme.meshOpacityClass}`}
+        style={drTheme.meshBackground}
       />
       <style>{`
         @keyframes drMesh {
@@ -307,12 +297,7 @@ export function DevReviewDashboard() {
               <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-semibold">Technical Support</div>
               <h1
                 className="text-2xl font-black tracking-tight"
-                style={{
-                  fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-                  background: 'linear-gradient(135deg, #f8fafc 0%, #94a3b8 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                }}
+                style={drTheme.titleGradient}
               >
                 Dev Review Dashboard
               </h1>
@@ -321,7 +306,7 @@ export function DevReviewDashboard() {
           <button
             onClick={load}
             className="px-3 py-2 text-xs rounded-lg font-semibold text-neutral-200 border border-white/10 hover:bg-white/5 transition-all"
-            style={{ background: 'rgba(255,255,255,0.03)' }}
+            style={drTheme.input}
           >
             ↻ Refresh
           </button>

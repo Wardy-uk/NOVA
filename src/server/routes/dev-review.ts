@@ -1122,6 +1122,201 @@ export function createDevReviewRoutes(
     res.json({ ok: true, workItemKey, warnings: warnings.length > 0 ? warnings : undefined });
   });
 
+  // ── Link Existing (skip Bug creation, link user-supplied work item) ───
+  // Mirrors Accept but instead of creating a new Bug, validates and links
+  // an existing Jira work item provided by the reviewer.
+
+  router.post('/ticket/:key/link-existing', async (req: Request, res: Response) => {
+    if (!req.user) { res.status(401).json({ ok: false }); return; }
+    if (!await requireClaim(req, res)) return;
+    const client = getJiraClient();
+    if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
+
+    const key = String(req.params.key);
+    const workItemKey = String(req.body?.workItemKey || '').trim();
+    const note = String(req.body?.note || '').trim();
+    const tldr = String(req.body?.tldr || '').trim();
+    const developmentDetails = String(req.body?.developmentDetails || '').trim();
+    const display = await userDisplay(req);
+
+    if (!workItemKey || !/^[A-Z]+-\d+$/.test(workItemKey)) {
+      res.status(400).json({ ok: false, error: 'A valid Jira work item key is required (e.g. BYM-1234)' });
+      return;
+    }
+    if (!tldr) {
+      res.status(400).json({ ok: false, error: 'TL;DR is required by the Escalate to Development screen' });
+      return;
+    }
+    if (!developmentDetails) {
+      res.status(400).json({ ok: false, error: 'Development Details is required by the Escalate to Development screen' });
+      return;
+    }
+
+    // Validate the work item actually exists in Jira
+    try {
+      await client.getIssue(workItemKey, ['summary', 'status']);
+    } catch (lookupErr) {
+      const msg = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
+      res.status(400).json({ ok: false, error: `Work item not found: ${workItemKey}` });
+      return;
+    }
+
+    const threadId = await devQueries.addThreadEntry({
+      jira_key: key,
+      user_id: req.user.id,
+      user_display: display,
+      kind: 'link_existing',
+      body: note || `Linked to existing work item ${workItemKey}`,
+      meta: { tldr, developmentDetails, workItemKey },
+      syncState: 'pending',
+    });
+
+    // Capture the current assignee BEFORE the transition
+    let originalAssigneeAccountId: string | null = null;
+    try {
+      const currentIssue = await client.getIssue(key, ['assignee']);
+      const assignee = (currentIssue?.fields as { assignee?: { accountId?: string } | null } | undefined)?.assignee;
+      originalAssigneeAccountId = assignee?.accountId ?? null;
+    } catch { /* non-fatal */ }
+
+    // Discover and execute Escalate to Development transition (same logic as Accept)
+    const findTransitionByName = async (rx: RegExp): Promise<string | null> => {
+      try {
+        const meta = await client.getTransitionsWithFields(key) as {
+          transitions?: Array<{ id: string; name?: string }>;
+        };
+        const t = (meta.transitions || []).find((x) => rx.test(x.name || ''));
+        return t?.id || null;
+      } catch { return null; }
+    };
+
+    let transitionId = String(
+      settingsQueries.getAll().dev_review_accept_transition_id || '',
+    );
+    if (transitionId) {
+      const available = await findTransitionByName(new RegExp(`^${transitionId}$`));
+      if (!available) transitionId = '';
+    }
+    if (!transitionId) {
+      transitionId = (await findTransitionByName(/escalate.*development/i)) || '';
+    }
+    if (!transitionId) {
+      const wipId = await findTransitionByName(/work\s*in\s*progress|^wip$/i);
+      if (wipId) {
+        try {
+          await client.transitionIssue(key, wipId);
+          transitionId = (await findTransitionByName(/escalate.*development/i)) || '';
+        } catch (wipErr) {
+          console.warn(`[DevReview/link-existing] WIP pre-transition failed for ${key}: ${wipErr instanceof Error ? wipErr.message : wipErr}`);
+        }
+      }
+    }
+    if (!transitionId) {
+      const msg = 'Escalate to Development transition not reachable from current status';
+      await devQueries.markThreadSyncFailed(threadId, msg);
+      res.status(409).json({ ok: false, error: msg });
+      return;
+    }
+
+    // Step 1 — transition with screen fields + comment
+    const transitionComment = note || `Linked to existing work item ${workItemKey} by ${display}`;
+    try {
+      try {
+        await client.transitionIssue(key, transitionId, {
+          fields: {
+            [CF_TLDR]: adfDoc(tldr),
+            [CF_DEVELOPMENT_DETAILS]: adfDoc(developmentDetails),
+          },
+          comment: {
+            body: adfDoc(transitionComment),
+            internal: true,
+          },
+        });
+      } catch (fieldErr: unknown) {
+        const fieldMsg = fieldErr instanceof Error ? fieldErr.message : String(fieldErr);
+        if (fieldMsg.includes('cannot be set') || fieldMsg.includes('not on the appropriate screen')) {
+          console.warn(`[dev-review] ${key}: transition fields rejected, retrying without custom fields`);
+          await client.transitionIssue(key, transitionId, {
+            comment: {
+              body: adfDoc(transitionComment),
+              internal: true,
+            },
+          });
+        } else {
+          throw fieldErr;
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Transition failed';
+      await devQueries.markThreadSyncFailed(threadId, msg);
+      await devQueries.addOutbox({
+        jira_key: key,
+        op: 'accept',
+        payload: { transitionId, tldr, developmentDetails },
+      });
+      res.status(502).json({ ok: false, error: msg });
+      return;
+    }
+
+    await devQueries.markThreadSynced(threadId, null);
+    await devQueries.markAccepted(key, workItemKey);
+
+    // Step 2 — restore the original assignee
+    const warnings: string[] = [];
+    const postUpdatePayload: Record<string, unknown> = {};
+    if (originalAssigneeAccountId) {
+      postUpdatePayload.assignee = { accountId: originalAssigneeAccountId };
+    }
+    if (Object.keys(postUpdatePayload).length > 0) {
+      try {
+        await client.updateFields(key, postUpdatePayload);
+      } catch (postErr) {
+        const msg = postErr instanceof Error ? postErr.message : 'post-transition update failed';
+        console.warn(`[DevReview/link-existing] Post-transition field update failed for ${key}: ${msg}`);
+        warnings.push(`Field update after transition failed: ${msg}`);
+      }
+    }
+
+    // Step 3 — internal comment aimed at the T2 agent (fire-and-forget)
+    const agentNoticeText =
+      `📋 Action required — ${display} has accepted this ticket into the development backlog.\n\n` +
+      `Please update the customer to let them know their ticket is now with the development team. ` +
+      `You can expect updates from development every 5 working days. ` +
+      `If there is no update after 5 working days, chase via the Jira comment thread.`;
+    client.addComment(key, agentNoticeText, { internal: true }).catch((noticeErr) => {
+      console.warn(`[DevReview/link-existing] Failed to post agent-notice comment for ${key}: ${noticeErr instanceof Error ? noticeErr.message : noticeErr}`);
+    });
+
+    // Step 4 — link the existing work item to the NT support ticket
+    try {
+      await client.createIssueLink({
+        type: { name: 'Developer Escalations' },
+        outwardIssue: { key: workItemKey },
+        inwardIssue: { key },
+      });
+    } catch (linkErr) {
+      const msg = linkErr instanceof Error ? linkErr.message : 'Link creation failed';
+      console.error(`[DevReview/link-existing] Issue link failed for ${key} → ${workItemKey}: ${msg}`);
+      warnings.push(`Link creation failed: ${msg}`);
+    }
+
+    // Step 5 — customer-facing comment
+    try {
+      const customerComment =
+        `Thank you for raising this with us.\n\n` +
+        `Following review by our Development team, this has been confirmed as requiring development work and has been linked to an existing item in our development pipeline.\n\n` +
+        `Your reference for this work is ${workItemKey} — please quote this in any follow-up communication.\n\n` +
+        `We'll keep you updated as this progresses. If you have any concerns or need to discuss prioritisation, please contact your Account Manager.`;
+      await client.addComment(key, customerComment);
+    } catch (commentErr) {
+      const msg = commentErr instanceof Error ? commentErr.message : 'Customer comment failed';
+      console.error(`[DevReview/link-existing] Customer comment failed for ${key}: ${msg}`);
+      warnings.push(`Customer comment failed: ${msg}`);
+    }
+
+    res.json({ ok: true, workItemKey, warnings: warnings.length > 0 ? warnings : undefined });
+  });
+
   // ── Return (back to T2 with mandatory next steps) ─────────────────────
 
   router.post('/ticket/:key/return', async (req: Request, res: Response) => {

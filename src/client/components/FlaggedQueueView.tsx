@@ -3,6 +3,7 @@ import { TicketBriefCard, type BriefFields } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
 import { AIAnalysisPanel } from './AIAnalysisPanel.js';
 import { BcAccountBadge } from './BcAccountBadge.js';
+import { normalisePriority } from '../utils/normalisePriority.js';
 import {
   UnifiedQueue,
   type UnifiedQueueConfig,
@@ -149,7 +150,8 @@ function riskBucketColor(bucket: string): string {
 
 function FlaggedRow({ ticket, selected, focused }: { ticket: FlaggedTicket; selected: boolean; focused: boolean }) {
   const sla = slaDisplay(ticket);
-  const priStyle = PRIORITY_STYLES[(ticket.priority || 'normal').toLowerCase()] || PRIORITY_STYLES.normal;
+  const normPri = normalisePriority(ticket.priority);
+  const priStyle = PRIORITY_STYLES[normPri.toLowerCase()] || PRIORITY_STYLES.normal;
   return (
     <div
       className={`px-3 py-3 transition-all duration-150 border-b border-[#2f353d]/50 ${
@@ -162,7 +164,7 @@ function FlaggedRow({ ticket, selected, focused }: { ticket: FlaggedTicket; sele
         </span>
         <span className="text-[11px] font-mono font-semibold text-[#5ec1ca]">{ticket.ticket_key}</span>
         {ticket.priority && (
-          <span className={`inline-block px-1.5 py-0.5 text-[9px] font-semibold rounded border ${priStyle}`}>{ticket.priority}</span>
+          <span className={`inline-block px-1.5 py-0.5 text-[9px] font-semibold rounded border ${priStyle}`}>{normPri}</span>
         )}
         {ticket.ticket_status && <StatusPill status={ticket.ticket_status} />}
         {sla && <span className={`text-[9px] font-semibold ${sla.color}`}>{sla.text}</span>}
@@ -322,7 +324,7 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
         <div className="grid grid-cols-2 gap-3 text-[13px]">
           <div><span className="text-neutral-500 text-[11px]">Assignee</span><div className="text-neutral-300">{ticket.assignee ?? 'Unassigned'}</div></div>
           <div><span className="text-neutral-500 text-[11px]">Reporter</span><div className="text-neutral-300">{ticket.reporter ?? '—'}</div></div>
-          <div><span className="text-neutral-500 text-[11px]">Priority</span><div><span className={`inline-block px-2 py-0.5 text-[11px] font-semibold rounded border ${PRIORITY_STYLES[(ticket.priority || 'normal').toLowerCase()] || PRIORITY_STYLES.normal}`}>{ticket.priority || 'Normal'}</span></div></div>
+          <div><span className="text-neutral-500 text-[11px]">Priority</span><div><span className={`inline-block px-2 py-0.5 text-[11px] font-semibold rounded border ${PRIORITY_STYLES[normalisePriority(ticket.priority).toLowerCase()] || PRIORITY_STYLES.normal}`}>{normalisePriority(ticket.priority)}</span></div></div>
           <div><span className="text-neutral-500 text-[11px]">BC Account</span><div><BcAccountBadge ticketKey={ticket.ticket_key} accountNumber={(briefFields?.customfield_14626 as string) ?? (briefFields as any)?.bc_account_number ?? null} compact /></div></div>
           <div><span className="text-neutral-500 text-[11px]">Flagged</span><div className="text-neutral-300">{timeAgo(ticket.flagged_at)}</div></div>
           {ticket.reviewed_by && (

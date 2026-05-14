@@ -26,6 +26,13 @@ Attachments:
 
 {{kb_matches}}
 
+## Relevant Confluence Documentation
+
+{{confluence_matches}}
+
+If a matching Confluence article is found above, include it at the end of the internal note summary as:
+"Relevant Confluence doc: [Article Title](URL)"
+
 ## Prior Learnings (human-submitted corrections)
 
 These are lessons from human reviewers correcting previous AI responses. Apply these when relevant — they represent institutional knowledge about customers, products, and communication standards.
@@ -85,12 +92,25 @@ Produce a JSON object with the following structure:
    - If escalating: acknowledge the issue, explain a human agent from our support team will pick this up shortly, and ask any useful clarifying questions that would help them. Do NOT mention "specialist", "T2", "T3", or internal team names to the customer.
    - If assigning: acknowledge receipt and set expectations on next steps
 
-7. **internal_note** — AI analysis summary posted as an internal Jira comment (always produced, regardless of action). Include:
-   - Classification and confidence
-   - Customer context summary (if available)
-   - KB matches found (if any)
-   - Recommended action and reasoning
-   - Any risks or flags
+7. **internal_note** — Structured AI analysis posted as an internal Jira comment. This is the primary tool agents use to understand and work the ticket. It must be detailed, actionable, and tier-appropriate. Produce an object with these subsections:
+
+   - **summary**: A clear paragraph (3-5 sentences) explaining what this ticket is about, what the customer is experiencing, and why it matters. Write as if briefing a colleague who hasn't seen the ticket. Reference specific details from the ticket (product names, error messages, affected features). If a matching Confluence article was found above, end with: "Relevant Confluence doc: [Article Title](URL)"
+
+   - **actions_issues**: An array of concrete, actionable bullet points the agent should take. These are immediate steps, not troubleshooting — e.g. "Confirm the client instance URL and website address", "Check Admin Hub > Feeds for the relevant inbound feed", "Verify the description field is present in the inbound payload". Be specific to the ticket's domain (feeds, email, CRM, portal, etc.). Minimum 3 items.
+
+   - **private_comment**: Object with:
+     - diagnosis: Your technical assessment of what's happening. Include severity reasoning. Explain the mechanism — what's broken, what's working, and what the boundary is.
+     - severity: One of "Critical", "High", "Medium", "Low" with a one-sentence justification.
+     - probable_causes: Array of 2-4 probable causes, ordered by likelihood. Each should be specific and testable (e.g. "Feed config for this office is missing or mis-mapping the description field" not just "configuration issue").
+
+   - **next_steps**: Object with:
+     - tier: Which tier these steps are written for (must match recommended_tier). Write "Tier 2" not "tier_2".
+     - steps: Array of numbered step objects, each with a title (e.g. "Gather info") and details (array of specific sub-steps). Write 3-5 major steps. Each step should have 2-5 sub-steps. Sub-steps must be specific and actionable — reference actual UI paths (e.g. "Admin Hub > Feeds"), actual tools, actual field names. Include decision trees: "If X, then Y. If Z, then W."
+
+   - **escalation_guidance**: Object with:
+     - current_tier_appropriate: Why this tier should handle it initially (e.g. "Tier 2 is appropriate initially to perform feed health checks, payload inspection and basic data comparison")
+     - escalate_if: Array of specific conditions (e.g. "Payload from the third party contains the correct description but our platform does not store or expose it correctly")
+     - do_not_escalate_if: When to resolve at current tier or feed back to customer (e.g. "If the problem is clearly on the third-party side, feed back to the customer with evidence"). Null if not applicable.
 
 8. **reasoning_trace** — Your internal reasoning process. This trace is AUDITABLE — humans will review it to verify your work. You MUST include:
    - What specific records, fields, or data you checked and what they contained (or that you could not access them)
@@ -116,6 +136,14 @@ Produce a JSON object with the following structure:
    - confidence: How certain you are that this IS a quick win (0.0 to 1.0). Only set above 0.85 if you are very confident. When in doubt, return "none".
    - reasoning: One sentence explaining your classification.
    - suggested_kba: If type is "kba_match", the title of the matching KB article from above. Otherwise null.
+
+11. **recommended_tier** — Which support tier should handle this ticket:
+    - "customer_care": Standard enquiries, how-to questions, account queries, password resets
+    - "tier_2": Technical investigation needed — feed issues, integration problems, data discrepancies, template/config changes
+    - "tier_3": Complex technical issues requiring senior expertise — cross-system problems, performance issues, security concerns
+    - "development": Confirmed bugs, code changes needed, platform defects
+
+    This is separate from recommended_action. A ticket can have recommended_action "respond" but recommended_tier "tier_2" (meaning T2 should respond). Or recommended_action "escalate" with recommended_tier "development" (meaning this needs dev).
 
 ## Hard Rules (non-negotiable)
 

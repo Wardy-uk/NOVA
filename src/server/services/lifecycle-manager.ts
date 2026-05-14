@@ -331,7 +331,8 @@ export class LifecycleManager {
             }
           }
 
-          const internalNote = chaseDecision.output.internal_note as string;
+          const rawNote = chaseDecision.output.internal_note;
+          const internalNote = typeof rawNote === 'string' ? rawNote : (rawNote as any)?.summary ?? '';
           if (internalNote) {
             try {
               await this.jiraClient.addComment(ticket.ticketId, internalNote, { internal: true });
