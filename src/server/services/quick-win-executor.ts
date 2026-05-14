@@ -12,6 +12,7 @@ const CLOSE_COMMENTS: Record<string, string> = {
   thank_you: `${QW_COMMENT_PREFIX} Thanks for letting us know — glad we could help! Closing this ticket. If you need anything else, just raise a new request and we'll pick it up.`,
   stale_no_response: `${QW_COMMENT_PREFIX} We've followed up a few times but haven't heard back. Closing this ticket for now — if you still need help, just raise a new request or reply to this one and we'll reopen it.`,
   auto_resolved: `${QW_COMMENT_PREFIX} It looks like this issue has been resolved. Closing this ticket — if the problem returns, please raise a new request.`,
+  duplicate: `${QW_COMMENT_PREFIX} This ticket appears to be a duplicate. Please see the original ticket referenced below. Closing to avoid duplication — if this is a separate issue, please raise a new request.`,
 };
 
 interface QuickWin {

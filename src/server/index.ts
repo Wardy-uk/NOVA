@@ -2752,7 +2752,7 @@ ${panelHtml}
           await devReviewQueries.markReturned(entry.jira_key);
         } else if (entry.op === 'comment') {
           const text = String(payload.commentText || payload.body || '');
-          await client.addComment(entry.jira_key, text);
+          await client.addComment(entry.jira_key, text, { internal: true });
         }
         await devReviewQueries.markOutboxDone(entry.id);
       } catch (e) {

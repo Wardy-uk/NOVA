@@ -1568,6 +1568,12 @@ export class AgentLoop {
         decision.approvalRequired = true;
         console.log(`[agent] Quick win ${qw.type} (${(qw.confidence ?? 0).toFixed(2)}) — routing to approval queue for close`);
       }
+
+      // For duplicates, enrich the decision with the reasoning so approvers see which ticket is the original
+      if (qw.type === 'duplicate' && qw.reasoning) {
+        const existing = (decision.output.internal_note as string) || '';
+        decision.output.internal_note = `${existing ? existing + '\n' : ''}[Duplicate detection] ${qw.reasoning}`;
+      }
     }
 
     // Route based on action + approval requirement
