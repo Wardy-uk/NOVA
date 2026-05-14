@@ -790,9 +790,18 @@ async function main() {
   let adobeSignClient: AdobeSignClient | null = null;
   function buildAdobeSignService() {
     const s = settingsQueries.getAll();
-    adobeSignClient = buildAdobeSignClient(s, (newToken) => {
-      settingsQueries.set('adobe_sign_refresh_token', newToken);
-    });
+    adobeSignClient = buildAdobeSignClient(
+      s,
+      (newToken) => {
+        settingsQueries.set('adobe_sign_refresh_token', newToken);
+      },
+      (newAccessToken, expiresAtMs) => {
+        // Persist access token + expiry so NOVA restarts don't force a refresh.
+        // Reduces refresh frequency from "every restart" to "every ~1 hour" (real token TTL).
+        settingsQueries.set('adobe_sign_access_token', newAccessToken);
+        settingsQueries.set('adobe_sign_access_token_expires', String(expiresAtMs));
+      },
+    );
     if (adobeSignClient) {
       console.log('[N.O.V.A] Adobe Sign: Service configured');
     }
