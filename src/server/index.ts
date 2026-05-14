@@ -2478,6 +2478,8 @@ ${panelHtml}
   const portalChat = new PortalChatService(settingsQueries, typeof llmService !== 'undefined' ? llmService : null, portalJira);
   const portalKb = new PortalKbService(settingsQueries, mcpManager);
 
+  portalChat.setIntakeService(portalIntake);
+
   // Gap 5: Playbook service
   const { PortalPlaybookService } = await import('./services/portal-playbooks.js');
   portalChat.setPlaybookService(new PortalPlaybookService(settingsQueries));
@@ -2497,7 +2499,7 @@ ${panelHtml}
   // Authenticated portal routes
   const portalAuth = portalAuthMiddleware(settingsQueries, getRoles);
   app.use('/api/portal', portalGate, portalAuth, createPortalTicketRoutes(portalJira, portalIntake));
-  app.use('/api/portal', portalGate, portalAuth, createPortalChatRoutes(portalChat));
+  app.use('/api/portal', portalGate, portalAuth, createPortalChatRoutes(portalChat, portalJira));
   app.use('/api/portal', portalGate, portalAuth, createPortalEventsRoutes());
 
   console.log(`[N.O.V.A] Portal routes wired (currently ${settingsQueries.get('portal_enabled') === 'true' ? 'enabled' : 'disabled'} — toggle via Admin > Feature Flags)`);

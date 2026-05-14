@@ -123,6 +123,9 @@ export type PortalAnalyticsEventType =
   | 'handoff_raw_transcript'
   | 'form_started'
   | 'form_completed'
+  | 'intake_started'
+  | 'intake_confirmed'
+  | 'intake_kb_deflection'
   | 'comment_added'
   | 'attachment_uploaded';
 
@@ -194,6 +197,41 @@ export interface PortalSlaStatus {
   name: string;
   remaining: string | null;
   breached: boolean;
+}
+
+// ── Conversational Intake ──
+
+export type IntakeStage = 'intent' | 'category' | 'detail' | 'kb_check' | 'summary' | 'confirmed';
+export type IntakeIntent = 'problem' | 'change' | 'question' | 'status';
+
+export interface IntakeCollectedFields {
+  subject: string | null;
+  account: string | null;
+  description: string | null;
+  url: string | null;
+  errorMessage: string | null;
+  browser: string | null;
+  os: string | null;
+  urgency: 'Normal' | 'High' | 'Critical';
+  contactPreference: 'portal' | 'email' | 'phone';
+}
+
+export interface IntakeSessionMetadata {
+  stage: IntakeStage;
+  intent: IntakeIntent | null;
+  category: string | null;
+  subcategory: string | null;
+  collectedFields: IntakeCollectedFields;
+  kbSuggested: boolean;
+  deflected: boolean;
+}
+
+export interface ChatMessageMetadata {
+  type?: 'summary_card';
+  fields?: IntakeCollectedFields & {
+    category: string | null;
+    subcategory: string | null;
+  };
 }
 
 // ── Chat Widget Config ──

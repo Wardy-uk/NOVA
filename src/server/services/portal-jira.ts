@@ -19,11 +19,57 @@ interface TicketQueryOptions {
   pageSize?: number;
 }
 
+interface JiraPriority {
+  id: string;
+  name: string;
+  isDefault?: boolean;
+}
+
 export class PortalJiraService {
+  private priorityCache: { names: string[]; defaultName: string; fetchedAt: number } | null = null;
+  private static PRIORITY_CACHE_TTL = 3_600_000; // 1 hour
+
   constructor(
     private settings: FileSettingsQueries,
     private jiraClient: JiraRestClient | null,
   ) {}
+
+  async getJiraPriorities(): Promise<{ names: string[]; defaultName: string }> {
+    if (this.priorityCache && Date.now() - this.priorityCache.fetchedAt < PortalJiraService.PRIORITY_CACHE_TTL) {
+      return { names: this.priorityCache.names, defaultName: this.priorityCache.defaultName };
+    }
+
+    if (!this.jiraClient) throw new Error('Jira client not configured');
+
+    const priorities = await this.jiraClient.rawGet<JiraPriority[]>('priority');
+    const names = priorities.map((p: JiraPriority) => p.name);
+    const defaultPriority = priorities.find((p: JiraPriority) => p.isDefault)?.name || names[Math.floor(names.length / 2)] || 'Medium';
+
+    this.priorityCache = { names, defaultName: defaultPriority, fetchedAt: Date.now() };
+    console.log(`[portal-jira] Cached ${names.length} Jira priorities: [${names.join(', ')}], default: ${defaultPriority}`);
+    return { names, defaultName: defaultPriority };
+  }
+
+  async resolveJiraPriority(requested: string): Promise<string | null> {
+    try {
+      const { names, defaultName } = await this.getJiraPriorities();
+      if (names.includes(requested)) return requested;
+      const lower = requested.toLowerCase();
+      const caseMatch = names.find(n => n.toLowerCase() === lower);
+      if (caseMatch) return caseMatch;
+      // Try partial match (e.g. "Highest" → "Highest" even if casing differs)
+      const partialMatch = names.find(n => n.toLowerCase().includes(lower) || lower.includes(n.toLowerCase()));
+      if (partialMatch) {
+        console.warn(`[portal-jira] Priority "${requested}" partial-matched to "${partialMatch}"`);
+        return partialMatch;
+      }
+      console.warn(`[portal-jira] Priority "${requested}" not found in Jira [${names.join(', ')}], using default "${defaultName}"`);
+      return defaultName;
+    } catch (err) {
+      console.error('[portal-jira] Could not fetch priorities, omitting priority field:', err instanceof Error ? err.message : err);
+      return null;
+    }
+  }
 
   async getOrgEmailDomain(orgId: number): Promise<string | null> {
     // Check explicit mapping first
@@ -184,6 +230,46 @@ export class PortalJiraService {
       };
     }
 
+    let attachments: PortalTicketAttachment[] = [];
+    let statusHistory: PortalStatusChange[] = [];
+
+    if (this.jiraClient) {
+      const [attachResult, changelogResult] = await Promise.allSettled([
+        this.jiraClient.getIssue(ticketKey, ['attachment']),
+        this.jiraClient.getChangelog(ticketKey),
+      ]);
+
+      if (attachResult.status === 'fulfilled' && attachResult.value) {
+        const fields = attachResult.value.fields as Record<string, unknown> | undefined;
+        const rawAttachments = (fields?.attachment ?? []) as Array<{
+          id: string; filename: string; mimeType: string; size: number; content: string;
+        }>;
+        attachments = rawAttachments.map(a => ({
+          id: a.id,
+          filename: a.filename,
+          mimeType: a.mimeType,
+          size: a.size,
+          url: `/api/portal/tickets/${ticketKey}/attachments/${a.id}`,
+        }));
+      }
+
+      if (changelogResult.status === 'fulfilled') {
+        const entries = changelogResult.value ?? [];
+        statusHistory = entries
+          .flatMap(entry =>
+            entry.items
+              .filter(item => item.field === 'status')
+              .map(item => ({
+                from: item.fromString,
+                to: item.toString || 'Unknown',
+                changedAt: entry.created,
+                changedBy: entry.author?.displayName || null,
+              })),
+          )
+          .sort((a, b) => new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime());
+      }
+    }
+
     return {
       key: ticket.issue_key,
       summary: ticket.summary || '',
@@ -197,8 +283,8 @@ export class PortalJiraService {
       description: ticket.description,
       bcAccountNumber: ticket.bc_account_number,
       comments: publicComments,
-      attachments: [],
-      statusHistory: [],
+      attachments,
+      statusHistory,
       slaStatus,
     };
   }
@@ -230,6 +316,10 @@ export class PortalJiraService {
   }): Promise<string> {
     if (!this.jiraClient) throw new Error('Jira client not configured');
 
+    const resolvedPriority = params.priority
+      ? await this.resolveJiraPriority(params.priority)
+      : null;
+
     const fields: Record<string, unknown> = {
       project: { key: params.projectKey },
       summary: params.summary,
@@ -237,21 +327,82 @@ export class PortalJiraService {
       issuetype: { name: 'Service Request' },
     };
 
-    if (params.priority) {
-      fields.priority = { name: params.priority };
+    if (resolvedPriority) {
+      fields.priority = { name: resolvedPriority };
     }
 
     if (params.components && params.components.length > 0) {
       fields.components = params.components.map(c => ({ name: c }));
     }
 
-    const issue = await this.jiraClient.createIssue({ fields });
+    let issue: { key: string };
+    try {
+      issue = await this.jiraClient.createIssue({ fields });
+    } catch (err: unknown) {
+      const jiraErr = err as { statusCode?: number; body?: unknown; message?: string };
+      console.error('[portal-jira] Ticket creation failed:', {
+        status: jiraErr.statusCode,
+        body: typeof jiraErr.body === 'object' ? JSON.stringify(jiraErr.body).slice(0, 500) : jiraErr.body,
+        fields: { project: fields.project, priority: fields.priority, issuetype: fields.issuetype },
+        error: jiraErr.message || String(err),
+      });
+      throw new Error("We couldn't create your ticket right now — please try again or contact us directly at support@nurtur.tech.");
+    }
 
-    // Post internal note with structured intake data
     if (params.internalNote) {
-      await this.jiraClient.addComment(issue.key, params.internalNote, { internal: true });
+      try {
+        await this.jiraClient.addComment(issue.key, params.internalNote, { internal: true });
+      } catch (err) {
+        console.warn('[portal-jira] Failed to post internal note on', issue.key, ':', err instanceof Error ? err.message : err);
+      }
     }
 
     return issue.key;
+  }
+
+  async uploadAttachment(
+    ticketKey: string,
+    orgId: number,
+    filename: string,
+    buffer: Buffer,
+    mimeType: string,
+  ): Promise<void> {
+    const domain = await this.getOrgEmailDomain(orgId);
+    if (!domain) throw new Error('Organisation not mapped');
+
+    const ticket = await queryOne<{ issue_key: string }>(
+      `SELECT issue_key FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
+      [ticketKey, `%@${domain}`],
+    );
+    if (!ticket) throw new Error('Ticket not found or not accessible');
+
+    if (!this.jiraClient) throw new Error('Jira client not configured');
+
+    await this.jiraClient.uploadAttachment(ticketKey, filename, buffer, mimeType);
+  }
+
+  async proxyAttachment(
+    ticketKey: string,
+    attachmentId: string,
+    orgId: number,
+  ): Promise<{ body: ReadableStream<Uint8Array>; contentType: string; contentLength: string | null; filename: string }> {
+    const domain = await this.getOrgEmailDomain(orgId);
+    if (!domain) throw new Error('Organisation not mapped');
+
+    const ticket = await queryOne<{ issue_key: string }>(
+      `SELECT issue_key FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
+      [ticketKey, `%@${domain}`],
+    );
+    if (!ticket) throw new Error('Ticket not found or not accessible');
+    if (!this.jiraClient) throw new Error('Jira client not configured');
+
+    const issue = await this.jiraClient.getIssue(ticketKey, ['attachment']);
+    const fields = issue?.fields as Record<string, unknown> | undefined;
+    const attachments = (fields?.attachment ?? []) as Array<{ id: string; filename: string; content: string }>;
+    const attachment = attachments.find(a => a.id === attachmentId);
+    if (!attachment) throw new Error('Attachment not found');
+
+    const stream = await this.jiraClient.fetchAttachmentContent(attachment.content);
+    return { ...stream, filename: attachment.filename };
   }
 }

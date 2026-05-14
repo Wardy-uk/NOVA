@@ -451,6 +451,43 @@ export class JiraRestClient {
     }
   }
 
+  async uploadAttachment(issueKey: string, filename: string, buffer: Buffer, mimeType: string): Promise<unknown> {
+    const url = `${this.baseUrl}/rest/api/3/issue/${issueKey}/attachments`;
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': this.authHeader,
+        'X-Atlassian-Token': 'no-check',
+      },
+      body: form,
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[JiraClient] Attachment upload failed: ${res.status} ${res.statusText}`, body.slice(0, 500));
+      throw new JiraApiError(res.status, res.statusText, body, res.status >= 500);
+    }
+
+    return res.json();
+  }
+
+  async fetchAttachmentContent(contentUrl: string): Promise<{ body: ReadableStream<Uint8Array>; contentType: string; contentLength: string | null }> {
+    const res = await fetch(contentUrl, {
+      headers: { 'Authorization': this.authHeader },
+    });
+    if (!res.ok || !res.body) {
+      throw new JiraApiError(res.status, res.statusText, `Failed to fetch attachment from ${contentUrl}`, false);
+    }
+    return {
+      body: res.body,
+      contentType: res.headers.get('content-type') || 'application/octet-stream',
+      contentLength: res.headers.get('content-length'),
+    };
+  }
+
   async rawGet<T = unknown>(path: string): Promise<T> {
     return this.request<T>('GET', path);
   }

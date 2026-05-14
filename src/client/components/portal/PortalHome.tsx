@@ -64,28 +64,45 @@ export default function PortalHome({ onNavigate, onViewTicket }: Props) {
 
   return (
     <div className="space-y-8">
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <button
-          onClick={() => onNavigate('new-request')}
-          className="bg-brand text-white rounded-xl p-6 text-left hover:bg-brand-dark transition-colors group"
-        >
-          <div className="text-lg font-semibold mb-1">Report an issue</div>
-          <div className="text-white/60 text-sm">Submit a new support request</div>
-        </button>
+      {/* Primary CTA */}
+      <div className="text-center py-2">
         <button
           onClick={() => onNavigate('chat')}
-          className="bg-white border border-gray-200 rounded-xl p-6 text-left hover:border-brand/40 hover:shadow-sm transition-all"
+          className="inline-flex items-center gap-3 bg-brand text-white rounded-xl px-8 py-5 hover:bg-brand-dark transition-colors group shadow-sm"
         >
-          <div className="text-lg font-semibold text-gray-900 mb-1">Ask a question</div>
-          <div className="text-gray-500 text-sm">Chat with our AI assistant</div>
+          <svg className="w-6 h-6 text-white/80 group-hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          <div className="text-left">
+            <div className="text-lg font-semibold">Get help</div>
+            <div className="text-white/60 text-sm">Report an issue, ask a question, or request a change</div>
+          </div>
+        </button>
+      </div>
+
+      {/* Secondary links */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <button
+          onClick={() => onNavigate('kb')}
+          className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-brand/40 hover:shadow-sm transition-all"
+        >
+          <div className="text-sm font-semibold text-gray-900">Browse knowledge base</div>
+          <div className="text-xs text-gray-500 mt-0.5">Find answers in our help articles</div>
         </button>
         <button
           onClick={() => onNavigate('tickets')}
-          className="bg-white border border-gray-200 rounded-xl p-6 text-left hover:border-brand/40 hover:shadow-sm transition-all"
+          className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-brand/40 hover:shadow-sm transition-all"
         >
-          <div className="text-lg font-semibold text-gray-900 mb-1">Check ticket status</div>
-          <div className="text-gray-500 text-sm">{ticketCount} open ticket{ticketCount !== 1 ? 's' : ''}</div>
+          <div className="text-sm font-semibold text-gray-900">View my tickets</div>
+          <div className="text-xs text-gray-500 mt-0.5">{ticketCount} open ticket{ticketCount !== 1 ? 's' : ''}</div>
+        </button>
+        <button
+          onClick={() => onNavigate('new-request')}
+          className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-brand/40 hover:shadow-sm transition-all"
+        >
+          <div className="text-sm font-semibold text-gray-900">Submit a form</div>
+          <div className="text-xs text-gray-500 mt-0.5">Use the traditional request form</div>
         </button>
       </div>
 

@@ -167,7 +167,7 @@ function PortalApp() {
         )}
         {view === 'new-request' && <PortalNewRequest onCreated={(key) => { handleViewTicket(key); }} />}
         {view === 'kb' && <PortalKnowledgeBase />}
-        {view === 'chat' && <PortalChat />}
+        {view === 'chat' && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
       </Suspense>
     </PortalLayout>
   );

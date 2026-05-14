@@ -1768,6 +1768,10 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_chat_sessions', 'metadata') IS NULL
      ALTER TABLE portal_chat_sessions ADD metadata NVARCHAR(MAX) NULL;`,
 
+    // Portal chat message metadata (for summary cards etc.)
+    `IF COL_LENGTH('portal_chat_messages', 'metadata') IS NULL
+     ALTER TABLE portal_chat_messages ADD metadata NVARCHAR(MAX) NULL;`,
+
     // Per-decision time saved tracking
     `IF COL_LENGTH('agent_decisions', 'estimated_minutes_saved') IS NULL
      ALTER TABLE agent_decisions ADD estimated_minutes_saved FLOAT NULL;`,

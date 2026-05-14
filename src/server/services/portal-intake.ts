@@ -4,7 +4,7 @@ import type { PortalTicketCreateInput } from '../../shared/portal-types.js';
 import { execute, queryOne } from './database.js';
 import { trackEvent } from './portal-analytics.js';
 
-const URGENCY_TO_PRIORITY: Record<string, string> = {
+const URGENCY_TO_PRIORITY_HINT: Record<string, string> = {
   Normal: 'Medium',
   High: 'High',
   Critical: 'Highest',
@@ -143,7 +143,8 @@ export class PortalIntakeService {
     await trackEvent('form_completed', portalUserId, orgId, { category: input.category });
 
     const projectKey = this.getProjectForCategory(input.category);
-    const priority = URGENCY_TO_PRIORITY[input.urgency] || 'Medium';
+    const priorityHint = URGENCY_TO_PRIORITY_HINT[input.urgency] || 'Medium';
+    const priority = await this.portalJira.resolveJiraPriority(priorityHint);
 
     const descParts = [input.description];
     if (input.url) descParts.push(`\n*URL/Page:* ${input.url}`);
@@ -166,7 +167,7 @@ export class PortalIntakeService {
         projectKey,
         summary: input.subject,
         description: descParts.join('\n'),
-        priority,
+        priority: priority || undefined,
         reporterEmail: userEmail,
         internalNote: internalParts.join('\n'),
       });
