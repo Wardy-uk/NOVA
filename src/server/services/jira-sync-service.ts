@@ -2,6 +2,7 @@ import type { JiraRestClient, JiraIssue, JiraComment } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, queryOne, execute } from './database.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
+import { generateCsatSurvey } from '../routes/portal-csat.js';
 
 const PRIORITY_NORMALIZE: Record<string, string> = {
   '最高': 'Highest', '高': 'High', '中': 'Medium', '低': 'Low', '最低': 'Lowest',
@@ -413,6 +414,17 @@ export class JiraSyncService {
               data: { from: oldRow.assignee_display, to: newAssignee },
             });
           }
+        }
+      }
+
+      // CSAT trigger: if status changed to a resolved state, generate survey
+      if (oldRow && oldRow.status_name !== statusName) {
+        const resolvedStates = ['Closed', 'Resolved', 'Done'];
+        if (statusName && resolvedStates.includes(statusName)) {
+          const reporterEmail = reporter?.emailAddress as string | null;
+          generateCsatSurvey(issue.key, reporterEmail).catch(err => {
+            console.warn(`[jira-sync] CSAT survey generation failed for ${issue.key}:`, err);
+          });
         }
       }
     }

@@ -1,79 +1,71 @@
-#nurtur-chat-widget {
+/* NOVA Embeddable Chat Widget — Scoped Styles (Shadow DOM) */
+
+:host {
+  all: initial;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
 }
 
-.nurtur-chat-bubble {
+/* Floating bubble */
+.nw-bubble {
   position: fixed;
-  bottom: 20px;
+  bottom: var(--nw-bottom, 20px);
+  right: var(--nw-right, 20px);
+  left: var(--nw-left, auto);
   width: 56px;
   height: 56px;
   border-radius: 50%;
+  background: var(--nw-brand, #0d9488);
+  color: white;
   border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 99998;
-  transition: transform 0.2s, box-shadow 0.2s;
+  z-index: 2147483647;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.nurtur-chat-bubble:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+.nw-bubble:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
 }
 
-.nurtur-chat-bubble.open {
-  transform: scale(0.9);
-}
-
-.nurtur-chat-panel {
+/* Chat panel */
+.nw-panel {
   position: fixed;
-  bottom: 88px;
-  width: 380px;
+  bottom: var(--nw-bottom, 90px);
+  right: var(--nw-right, 20px);
+  left: var(--nw-left, auto);
+  width: 360px;
   height: 520px;
-  background: #fff;
   border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-  z-index: 99999;
-  display: flex;
+  background: #ffffff;
+  display: none;
   flex-direction: column;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  z-index: 2147483647;
   overflow: hidden;
 }
 
-.nurtur-chat-panel.right {
-  right: 20px;
+.nw-panel.open {
+  display: flex;
 }
 
-.nurtur-chat-panel.left {
-  left: 20px;
-}
-
-.nurtur-chat-header {
-  padding: 14px 16px;
-  color: #fff;
-  font-weight: 600;
+/* Header */
+.nw-header {
+  background: var(--nw-brand, #0d9488);
+  color: white;
+  padding: 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  border-radius: 16px 16px 0 0;
+  flex-shrink: 0;
 }
 
-.nurtur-chat-close {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 20px;
-  cursor: pointer;
-  padding: 0 4px;
-}
-
-.nurtur-chat-close:hover {
-  color: #fff;
-}
-
-.nurtur-chat-messages {
+/* Messages area */
+.nw-messages {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
@@ -82,84 +74,140 @@
   gap: 12px;
 }
 
-.nurtur-chat-message {
-  display: flex;
-}
-
-.nurtur-chat-message.user {
-  justify-content: flex-end;
-}
-
-.nurtur-chat-message.assistant {
-  justify-content: flex-start;
-}
-
-.nurtur-chat-msg-content {
+/* Message bubbles */
+.nw-msg {
   max-width: 80%;
   padding: 10px 14px;
-  border-radius: 18px;
+  border-radius: 16px;
   font-size: 14px;
   line-height: 1.4;
-  word-break: break-word;
-  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
-.nurtur-chat-message.user .nurtur-chat-msg-content {
-  background-color: #2563eb;
-  color: #fff;
-  border-bottom-right-radius: 4px;
-}
-
-.nurtur-chat-message.assistant .nurtur-chat-msg-content {
-  background-color: #f3f4f6;
-  color: #1f2937;
+.nw-msg.bot {
+  background: #f3f4f6;
+  align-self: flex-start;
   border-bottom-left-radius: 4px;
 }
 
-.nurtur-chat-input-area {
-  padding: 12px;
+.nw-msg.user {
+  background: var(--nw-brand, #0d9488);
+  color: white;
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+.nw-msg .nw-time {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-top: 4px;
+}
+
+/* Input area */
+.nw-input-area {
+  padding: 12px 16px;
   border-top: 1px solid #e5e7eb;
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
-.nurtur-chat-input {
+.nw-input {
   flex: 1;
-  padding: 8px 12px;
   border: 1px solid #d1d5db;
   border-radius: 20px;
+  padding: 8px 16px;
   font-size: 14px;
   outline: none;
+  transition: border-color 0.2s ease;
 }
 
-.nurtur-chat-input:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+.nw-input:focus {
+  border-color: var(--nw-brand, #0d9488);
 }
 
-.nurtur-chat-send {
+.nw-send {
   width: 36px;
   height: 36px;
   border-radius: 50%;
+  background: var(--nw-brand, #0d9488);
+  color: white;
   border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: opacity 0.2s ease;
 }
 
-.nurtur-chat-send:hover {
-  opacity: 0.9;
+.nw-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-@media (max-width: 440px) {
-  .nurtur-chat-panel {
-    width: calc(100vw - 20px);
-    height: calc(100vh - 120px);
-    bottom: 80px;
-    right: 10px !important;
-    left: 10px !important;
-    border-radius: 12px;
+/* Typing indicator */
+.nw-typing {
+  display: flex;
+  gap: 4px;
+  padding: 10px 14px;
+  align-self: flex-start;
+}
+
+.nw-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d1d5db;
+  animation: nw-bounce 1.4s infinite ease-in-out both;
+}
+
+.nw-typing span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.nw-typing span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+.nw-typing span:nth-child(3) {
+  animation-delay: 0s;
+}
+
+@keyframes nw-bounce {
+  0%, 80%, 100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
+}
+
+/* Email form */
+.nw-email-form {
+  padding: 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+/* Mobile: full-screen panel */
+@media (max-width: 480px) {
+  .nw-panel {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    bottom: 0;
+    right: 0;
+    left: 0;
+  }
+
+  .nw-header {
+    border-radius: 0;
   }
 }

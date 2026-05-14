@@ -99,10 +99,11 @@ import { createBacklogRoutes } from './routes/backlog.js';
 import { logWallboard, getWallboardLogs, clearWallboardLogs, logWallboardClient } from './services/wallboard-logger.js';
 import { createPortalAuthRoutes } from './routes/portal-auth.js';
 import { createPortalTicketRoutes } from './routes/portal-tickets.js';
-import { createPortalChatRoutes } from './routes/portal-chat.js';
+import { createPortalChatRoutes, createWidgetChatRoutes } from './routes/portal-chat.js';
 import { createPortalKbRoutes } from './routes/portal-kb.js';
 import { createPortalAdminRoutes } from './routes/portal-admin.js';
 import { createPortalEventsRoutes } from './routes/portal-events.js';
+import { createPortalCsatRoutes } from './routes/portal-csat.js';
 import { portalAuthMiddleware } from './middleware/portal-auth-middleware.js';
 import { PortalJiraService } from './services/portal-jira.js';
 import { PortalIntakeService } from './services/portal-intake.js';
@@ -859,7 +860,7 @@ async function main() {
   app.use('/api', (req, res, next) => {
     if (req.path.startsWith('/portal') && !req.path.startsWith('/portal/admin')) {
       // Always public: auth endpoints + KB (read-only)
-      if (req.path.startsWith('/portal/auth') || req.path.startsWith('/portal/kb')) return next();
+      if (req.path.startsWith('/portal/auth') || req.path.startsWith('/portal/kb') || req.path.startsWith('/portal/csat') || req.path.startsWith('/portal/widget')) return next();
       const authMode = settingsQueries.get('portal_auth_mode') || 'internal';
       if (authMode === 'internal') {
         // Internal mode: portal routes need NOVA JWT — let them through NOVA auth
@@ -2501,6 +2502,12 @@ ${panelHtml}
   app.use('/api/portal', portalGate, portalAuth, createPortalTicketRoutes(portalJira, portalIntake, settingsQueries));
   app.use('/api/portal', portalGate, portalAuth, createPortalChatRoutes(portalChat, portalJira));
   app.use('/api/portal', portalGate, portalAuth, createPortalEventsRoutes());
+
+  // Widget routes (public, CORS-gated, own auth via email identification)
+  app.use('/api/portal/widget', portalGate, createWidgetChatRoutes(portalChat, settingsQueries));
+
+  // CSAT survey routes (public, token-based, no auth)
+  app.use('/api/portal/csat', portalGate, createPortalCsatRoutes());
 
   console.log(`[N.O.V.A] Portal routes wired (currently ${settingsQueries.get('portal_enabled') === 'true' ? 'enabled' : 'disabled'} — toggle via Admin > Feature Flags)`);
 

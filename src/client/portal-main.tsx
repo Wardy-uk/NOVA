@@ -12,6 +12,7 @@ const PortalTicketDetail = lazy(() => import('./components/portal/PortalTicketDe
 const PortalNewRequest = lazy(() => import('./components/portal/PortalNewRequest.js'));
 const PortalKnowledgeBase = lazy(() => import('./components/portal/PortalKnowledgeBase.js'));
 const PortalChat = lazy(() => import('./components/portal/PortalChat.js'));
+const PortalCSAT = lazy(() => import('./components/portal/PortalCSAT.js'));
 
 type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 'chat';
 
@@ -293,7 +294,18 @@ function parseNovaJwt(token: string): { id: number; username: string; role: stri
   }
 }
 
+function CsatRoute() {
+  const match = window.location.pathname.match(/^\/portal\/csat\/([a-f0-9]+)$/);
+  if (!match) return null;
+  return (
+    <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>}>
+      <PortalCSAT token={match[1]} />
+    </Suspense>
+  );
+}
+
 const root = document.getElementById('portal-root');
 if (root) {
-  createRoot(root).render(<PortalApp />);
+  const csatMatch = window.location.pathname.match(/^\/portal\/csat\/[a-f0-9]+$/);
+  createRoot(root).render(csatMatch ? <CsatRoute /> : <PortalApp />);
 }

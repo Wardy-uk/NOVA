@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nurtur Chat Widget — Test Page</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 0 20px;
+      color: #333;
+    }
+    h1 { color: #0d9488; }
+    pre { background: #f3f4f6; padding: 16px; border-radius: 8px; overflow-x: auto; }
+    code { font-size: 14px; }
+    .controls { margin: 24px 0; display: flex; gap: 8px; }
+    .controls button {
+      padding: 8px 16px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: white;
+      cursor: pointer;
+    }
+    .controls button:hover { background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <h1>Nurtur Chat Widget Test</h1>
+  <p>This page demonstrates the embeddable chat widget. The floating chat bubble should appear in the bottom-right corner.</p>
+
+  <h2>Embed Code</h2>
+  <pre><code>&lt;script
+  src="/widget/nurtur-chat.js"
+  data-api="http://localhost:3069"
+  data-brand-color="#0d9488"
+  data-greeting="Hi! How can we help you today?"
+  data-position="bottom-right"&gt;
+&lt;/script&gt;</code></pre>
+
+  <h2>API Controls</h2>
+  <div class="controls">
+    <button onclick="window.NurturChat?.open()">Open</button>
+    <button onclick="window.NurturChat?.close()">Close</button>
+    <button onclick="window.NurturChat?.destroy()">Destroy</button>
+  </div>
+
+  <h2>Page Content</h2>
+  <p>This is a regular page with its own styles. The widget should not be affected by or affect the host page styles.</p>
+
+  <!-- Widget embed -->
+  <script
+    src="/widget/nurtur-chat.js"
+    data-api=""
+    data-brand-color="#0d9488"
+    data-greeting="Hi! How can we help you today?"
+    data-position="bottom-right">
+  </script>
+</body>
+</html>

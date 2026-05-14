@@ -1791,6 +1791,24 @@ async function runMigrations(): Promise<void> {
     // BC Account Number on jira_issue_cache
     `IF COL_LENGTH('jira_issue_cache', 'bc_account_number') IS NULL
      ALTER TABLE jira_issue_cache ADD bc_account_number NVARCHAR(100) NULL;`,
+
+    // CSAT surveys
+    `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'portal_csat_surveys')
+     CREATE TABLE portal_csat_surveys (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       token NVARCHAR(64) NOT NULL UNIQUE,
+       jira_issue_key NVARCHAR(50) NOT NULL,
+       portal_user_id INT NULL REFERENCES portal_users(id),
+       org_id INT NULL,
+       csat_score INT NULL,
+       ease_score INT NULL,
+       effort_score INT NULL,
+       comment NVARCHAR(MAX) NULL,
+       sent_at DATETIME2 DEFAULT GETUTCDATE(),
+       responded_at DATETIME2 NULL,
+       expires_at DATETIME2 NOT NULL,
+       created_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
