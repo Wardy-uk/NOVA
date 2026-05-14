@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { initializeDatabase, shutdownDatabase } from './db/schema.js';
 import { query, queryOne, execute } from './services/database.js';
-import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries, TrainingQueries } from './db/queries.js';
+import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, ContractTemplateQueries, AdobeSignAgreementQueries, ContractTermsQueries, TrainingQueries } from './db/queries.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
@@ -111,6 +111,7 @@ import { PortalKbService } from './services/portal-kb.js';
 import { startWallboardLiveCache, getCohortSnapshot, type CohortSnapshot } from './services/wallboard-live-cache.js';
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
+import { createContractTermsRoutes } from './routes/contract-terms.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
 import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
 import { createAgentRoutes } from './routes/agent.js';
@@ -364,6 +365,7 @@ async function main() {
   const contractsQueries = new ContractsQueries();
   const contractTemplateQueries = new ContractTemplateQueries();
   const adobeSignAgreementQueries = new AdobeSignAgreementQueries();
+  const contractTermsQueries = new ContractTermsQueries();
   const approvalQueries = new ApprovalQueries();
   const trainingQueries = new TrainingQueries();
   const devReviewQueries = new DevReviewQueries();
@@ -925,6 +927,7 @@ async function main() {
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/contracts', createContractsRoutes(bcCustomerQueries, contractsQueries, settingsQueries));
   app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, contractTemplateQueries, settingsQueries));
+  app.use('/api/contract-terms', createContractTermsRoutes(contractTermsQueries));
   app.use('/api/surveys', createSurveyRoutes(settingsQueries, userQueries, teamQueries));
   app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries, buildOnboardingJiraClient() ?? undefined, async (action, ticketKey, approvalId, editedResponse, decidedBy) => {
     if (!agentLoop) throw new Error('Agent loop not available');

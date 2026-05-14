@@ -207,6 +207,7 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'adobe_sign_redirect_uri', label: 'Redirect URI', type: 'url', placeholder: 'https://nova.yourorg.com/api/adobe-sign/callback', required: true },
       { key: 'adobe_sign_api_base_url', label: 'API Base URL', type: 'text', placeholder: 'https://api.na1.adobesign.com (region-dependent)', required: true },
       { key: 'adobe_sign_refresh_token', label: 'Refresh Token', type: 'password', placeholder: 'Auto-populated after OAuth connection', required: false },
+      { key: 'adobe_sign_terms_field_prefix', label: 'Terms Field Prefix', type: 'text', placeholder: 'contract terms (matches contract_terms_bym, contract terms yomdel, etc.)', required: false },
     ],
   },
   {

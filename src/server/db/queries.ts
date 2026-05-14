@@ -2447,6 +2447,56 @@ export class ContractTemplateQueries {
   }
 }
 
+// ─── Contract Terms (pre-approved text blocks for Adobe agreements) ────────
+
+export interface ContractTerm {
+  id: number;
+  label: string;
+  body: string;
+  active: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export class ContractTermsQueries {
+  async getAll(filters?: { activeOnly?: boolean }): Promise<ContractTerm[]> {
+    let sql = `SELECT id, label, body, active, sort_order, created_at, updated_at FROM contract_terms`;
+    if (filters?.activeOnly) sql += ` WHERE active = 1`;
+    sql += ` ORDER BY sort_order ASC, label ASC`;
+    return query<ContractTerm>(sql, []);
+  }
+
+  async getById(id: number): Promise<ContractTerm | null> {
+    return (await queryOne<ContractTerm>(`SELECT * FROM contract_terms WHERE id = ?`, [id])) ?? null;
+  }
+
+  async create(t: { label: string; body: string; active?: number; sort_order?: number }): Promise<number> {
+    return executeAndGetId(
+      `INSERT INTO contract_terms (label, body, active, sort_order) VALUES (?, ?, ?, ?)`,
+      [t.label, t.body, t.active ?? 1, t.sort_order ?? 0]
+    );
+  }
+
+  async update(id: number, t: Partial<Pick<ContractTerm, 'label' | 'body' | 'active' | 'sort_order'>>): Promise<boolean> {
+    const existing = await this.getById(id);
+    if (!existing) return false;
+    await execute(
+      `UPDATE contract_terms SET label=?, body=?, active=?, sort_order=?, updated_at=GETUTCDATE() WHERE id=?`,
+      [t.label ?? existing.label, t.body ?? existing.body,
+       t.active ?? existing.active, t.sort_order ?? existing.sort_order, id]
+    );
+    return true;
+  }
+
+  async delete(id: number): Promise<boolean> {
+    const existing = await this.getById(id);
+    if (!existing) return false;
+    await execute(`DELETE FROM contract_terms WHERE id = ?`, [id]);
+    return true;
+  }
+}
+
 // ─── Adobe Sign Agreements ──────────────────────────────────────────────────
 
 export interface AdobeSignAgreement {

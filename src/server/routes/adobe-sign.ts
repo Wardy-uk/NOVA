@@ -17,6 +17,20 @@ const SIGNER_ONLY_FIELD_TYPES = new Set([
   'HYPERLINK',
 ]);
 
+const DEFAULT_TERMS_FIELD_PREFIX = 'contract terms';
+
+// Case- and separator-agnostic prefix match.
+// Matches "contract terms bym", "contract_terms_bym", "ContractTermsBYM", etc.
+function normaliseFieldName(s: string): string {
+  return (s ?? '').toLowerCase().replace(/[_\-\s]+/g, ' ').trim();
+}
+
+function fieldMatchesPrefix(fieldName: string, prefix: string): boolean {
+  const n = normaliseFieldName(fieldName);
+  const p = normaliseFieldName(prefix);
+  return p.length > 0 && n.startsWith(p);
+}
+
 function adobeError(err: unknown): { status: number; error: string; retryAfter?: number } {
   if (err instanceof AdobeSignApiError) {
     return {
@@ -163,7 +177,7 @@ export function createAdobeSignRoutes(
       return;
     }
 
-    const { library_document_ids, contract_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days } = req.body;
+    const { library_document_ids, contract_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days, contract_terms_text } = req.body;
     if (!Array.isArray(library_document_ids) || library_document_ids.length === 0) {
       res.status(400).json({ ok: false, error: 'library_document_ids must be a non-empty array' });
       return;
@@ -177,6 +191,36 @@ export function createAdobeSignRoutes(
     if (!name?.trim()) { res.status(400).json({ ok: false, error: 'name is required' }); return; }
     if (!signer_emails?.length) { res.status(400).json({ ok: false, error: 'At least one signer email is required' }); return; }
 
+    // Auto-detect terms fields on each template and inject the concatenated terms text.
+    // Field names matching the configured prefix (default 'contract terms') receive the same value.
+    const allMergeFields: Array<{ fieldName: string; defaultValue: string }> = Array.isArray(merge_fields)
+      ? merge_fields.filter((m: { fieldName?: unknown }) => typeof m?.fieldName === 'string')
+      : [];
+    let termsFieldsPopulated: Array<{ fieldName: string; libraryDocumentId: string }> = [];
+    const termsText = typeof contract_terms_text === 'string' ? contract_terms_text.trim() : '';
+
+    if (termsText) {
+      const settings = settingsQueries.getAll();
+      const prefix = (settings.adobe_sign_terms_field_prefix || DEFAULT_TERMS_FIELD_PREFIX).trim();
+      const explicitlyProvided = new Set(allMergeFields.map(f => f.fieldName));
+      const populated = new Set<string>();
+      for (const docId of cleanIds) {
+        try {
+          const fields = await client.getLibraryDocumentFormFields(docId);
+          for (const f of fields) {
+            if (!fieldMatchesPrefix(f.name, prefix)) continue;
+            if (explicitlyProvided.has(f.name)) continue;
+            if (populated.has(f.name)) continue;
+            allMergeFields.push({ fieldName: f.name, defaultValue: termsText });
+            populated.add(f.name);
+            termsFieldsPopulated.push({ fieldName: f.name, libraryDocumentId: docId });
+          }
+        } catch (err) {
+          console.warn(`[Adobe Sign] Could not fetch form fields for ${docId} (terms auto-detect):`, err instanceof Error ? err.message : err);
+        }
+      }
+    }
+
     try {
       const result = await client.createAgreement({
         name,
@@ -184,7 +228,7 @@ export function createAdobeSignRoutes(
         ccEmails: cc_emails,
         message,
         libraryDocumentIds: cleanIds,
-        mergeFields: merge_fields,
+        mergeFields: allMergeFields.length > 0 ? allMergeFields : undefined,
         expirationDays: expiration_days,
       });
 
@@ -196,7 +240,7 @@ export function createAdobeSignRoutes(
         status: 'OUT_FOR_SIGNATURE',
         sender_email: null,
         signer_emails: JSON.stringify(signer_emails),
-        filled_fields: merge_fields ? JSON.stringify(merge_fields) : null,
+        filled_fields: allMergeFields.length > 0 ? JSON.stringify(allMergeFields) : null,
         created_via_nova: 1,
         adobe_created_date: new Date().toISOString(),
         adobe_expiration_date: null,
@@ -205,7 +249,7 @@ export function createAdobeSignRoutes(
         synced_at: new Date().toISOString(),
       });
 
-      res.json({ ok: true, data: { agreement_id: result.id } });
+      res.json({ ok: true, data: { agreement_id: result.id, terms_fields_populated: termsFieldsPopulated } });
     } catch (err) {
       console.error('[Adobe Sign] Create agreement error:', err);
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create agreement' });
@@ -245,6 +289,14 @@ export function createAdobeSignRoutes(
       const e = adobeError(err);
       res.status(e.status).json({ ok: false, error: e.error, retryAfter: e.retryAfter });
     }
+  });
+
+  // GET /api/adobe-sign/terms-prefix — returns the configured prefix used to auto-detect
+  // contract-terms merge fields on templates. Default 'contract terms'.
+  router.get('/terms-prefix', (_req, res) => {
+    const s = settingsQueries.getAll();
+    const prefix = (s.adobe_sign_terms_field_prefix || DEFAULT_TERMS_FIELD_PREFIX).trim();
+    res.json({ ok: true, data: { prefix } });
   });
 
   // GET /api/adobe-sign/library-documents/:id/form-fields

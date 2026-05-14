@@ -12,6 +12,7 @@ import { NewContractWizard } from './components/NewContractWizard.js';
 import { LoginView } from './components/LoginView.js';
 import { HelpView } from './components/HelpView.js';
 const AdminView = lazy(() => import('./components/AdminView.js').then(m => ({ default: m.AdminView })));
+const AdminContractTermsView = lazy(() => import('./components/AdminContractTermsView.js').then(m => ({ default: m.AdminContractTermsView })));
 const OnboardingConfigView = lazy(() => import('./components/OnboardingConfigView.js').then(m => ({ default: m.OnboardingConfigView })));
 import { OnboardingCalendar } from './components/OnboardingCalendar.js';
 import { OnboardingDashboard } from './components/OnboardingDashboard.js';
@@ -114,11 +115,11 @@ type View = 'daily' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
   | 'agent-kb-health' | 'agent-training' | 'agent-capacity' | 'agent-intelligence' | 'agent-impact' | 'agent-ops-pack' | 'agent-121'
   | 'backlog-board'
-  | 'settings' | 'admin-panel' | 'portal-admin' | 'my-feedback'
+  | 'settings' | 'admin-panel' | 'portal-admin' | 'admin-contract-terms' | 'my-feedback'
   | 'help' | 'debug';
 
 // Standalone views that don't belong to any area (no sub-tab bar)
-const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel', 'portal-admin', 'my-feedback']);
+const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel', 'portal-admin', 'admin-contract-terms', 'my-feedback']);
 
 interface AreaDef {
   label: string;
@@ -875,6 +876,12 @@ export function App() {
                           Admin
                         </button>
                         <button
+                          onClick={() => { setView('admin-contract-terms'); setShowUserMenu(false); }}
+                          className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
+                        >
+                          Contract Terms
+                        </button>
+                        <button
                           onClick={() => { setView('portal-admin'); setShowUserMenu(false); }}
                           className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
                         >
@@ -1381,6 +1388,11 @@ export function App() {
           )}
           {view === 'admin-panel' && (
             <AdminView />
+          )}
+          {view === 'admin-contract-terms' && (
+            <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>
+              <AdminContractTermsView />
+            </Suspense>
           )}
           {view === 'portal-admin' && (
             <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>

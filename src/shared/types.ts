@@ -164,6 +164,16 @@ export interface AdobeSignFormField {
   isMultiLine?: boolean;
 }
 
+export interface ContractTerm {
+  id: number;
+  label: string;
+  body: string;
+  active: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AdobeSignAgreement {
   id: number;
   agreement_id: string;
