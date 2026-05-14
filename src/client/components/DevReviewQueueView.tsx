@@ -3,6 +3,7 @@ import { TicketBriefCard } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
 import { AdfCommentBody } from './AdfCommentBody.js';
 import { useAuth } from '../hooks/useAuth.js';
+import { BcAccountBadge } from './BcAccountBadge.js';
 import {
   UnifiedQueue,
   type UnifiedQueueConfig,
@@ -335,7 +336,7 @@ function DevReviewDetail({
               <span className="text-neutral-600">·</span>
               <span>Assignee: <span className="text-neutral-100 font-semibold">{fields.assignee?.displayName || 'Unassigned'}</span></span>
               <span className="text-neutral-600">·</span>
-              <span>BC Account: {(fields as any).customfield_14626 || (fields as any).bc_account_number ? <span className="text-amber-300 font-mono font-semibold">{(fields as any).customfield_14626 ?? (fields as any).bc_account_number}</span> : <span className="text-red-400 italic">Not set</span>}</span>
+              <span>BC Account: <BcAccountBadge ticketKey={detail.key} accountNumber={(fields as any).customfield_14626 ?? (fields as any).bc_account_number ?? null} compact /></span>
               <span className="text-neutral-600">·</span>
               <span>Updated <span className="text-neutral-100">{timeAgo(fields.updated)}</span></span>
               {state?.claimed_by_user_id && (
