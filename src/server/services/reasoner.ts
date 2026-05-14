@@ -338,7 +338,11 @@ export class Reasoner {
     // Gap 2: Handle no_action sub-states
     if (respond.recommended_action === 'no_action' && respond.no_action_reason) {
       if (respond.no_action_reason === 'human_should_act') {
-        action = 'assign';
+        if (event.assignee) {
+          console.log(`[reasoner] Keeping no_action for ${event.ticketKey}: already assigned to ${event.assignee}`);
+        } else {
+          action = 'assign';
+        }
       }
     }
 

@@ -300,6 +300,13 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
   }
 
   private async assignTicket(decision: AgentDecision): Promise<ActionResult> {
+    // Guard: never reassign a ticket that already has an active human assignee
+    const currentAssignee = (decision.inputs as any)?.assignee as string | null | undefined;
+    if (currentAssignee) {
+      console.log(`[actor] Skipping assign on ${decision.ticketKey}: already assigned to ${currentAssignee}`);
+      return { success: true, action: 'assign', ticketKey: decision.ticketKey, detail: `Skipped: already assigned to ${currentAssignee}.` };
+    }
+
     // Change Request Type from "AI Request" before assigning to a human
     await this.updateRequestTypeOnHandoff(decision.ticketKey, decision);
 
