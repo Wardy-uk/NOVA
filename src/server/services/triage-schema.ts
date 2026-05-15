@@ -115,6 +115,7 @@ export const TriageResultSchema = z.object({
     return { summary: String(val ?? ''), actions_issues: [], private_comment: { diagnosis: '', severity: '', probable_causes: [] }, next_steps: { tier: '', steps: [] }, escalation_guidance: { current_tier_appropriate: '', escalate_if: [], do_not_escalate_if: null } };
   }),
   recommended_tier: flexEnum(['customer_care', 'tier_2', 'tier_3', 'development'] as const),
+  needs_customer_reply: flexBool,
   reasoning_trace: flexString,
   kb_gap: z.object({
     should_have_article: flexBool,

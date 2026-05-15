@@ -233,6 +233,7 @@ export class Reasoner {
         kb_gap: triage.kb_gap,
         quick_win: triage.quick_win,
         recommended_tier: triage.recommended_tier,
+        needs_customer_reply: triage.needs_customer_reply,
       },
       provider: result.provider,
       model: result.model,

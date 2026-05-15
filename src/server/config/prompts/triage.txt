@@ -112,19 +112,23 @@ Produce a JSON object with the following structure:
      - escalate_if: Array of specific conditions (e.g. "Payload from the third party contains the correct description but our platform does not store or expose it correctly")
      - do_not_escalate_if: When to resolve at current tier or feed back to customer (e.g. "If the problem is clearly on the third-party side, feed back to the customer with evidence"). Null if not applicable.
 
-8. **reasoning_trace** — Your internal reasoning process. This trace is AUDITABLE — humans will review it to verify your work. You MUST include:
+8. **needs_customer_reply** — Does your draft_response require the customer to reply before we can proceed?
+   - true if the response asks the customer a question, requests information, or needs them to confirm/provide something before we can act.
+   - false if the response is a statement, acknowledgement, or action confirmation that doesn't require customer input (e.g. "We will proceed with updating X as requested").
+
+9. **reasoning_trace** — Your internal reasoning process. This trace is AUDITABLE — humans will review it to verify your work. You MUST include:
    - What specific records, fields, or data you checked and what they contained (or that you could not access them)
    - What KB articles you matched and why they were relevant (or not)
    - What alternatives you considered and why you rejected them
    - If you assert any fact about the customer's data, system state, or account, cite the exact source (ticket description field, specific comment, KB article title)
    - If you cannot verify a claim, say so explicitly — do not leave it ambiguous
 
-9. **kb_gap** — Knowledge base gap assessment. Based on the ticket type and the KB matches above, is this the kind of issue that SHOULD have a knowledge base article?
+10. **kb_gap** — Knowledge base gap assessment. Based on the ticket type and the KB matches above, is this the kind of issue that SHOULD have a knowledge base article?
    - should_have_article: true if this is a recurring or common question type that would benefit from a KB article (e.g. how-to, common config change, known issue). false for one-off data issues, unique bugs, or account-specific problems.
    - reason: one sentence explaining your assessment (e.g. "Common how-to question about feed configuration" or "One-off data issue, no article needed")
    - suggested_title: if should_have_article is true, suggest a concise KB article title. Otherwise null.
 
-10. **quick_win** — Assess whether this ticket is a "quick win" that could potentially be resolved without human judgment. Quick win types:
+11. **quick_win** — Assess whether this ticket is a "quick win" that could potentially be resolved without human judgment. Quick win types:
    - **spam**: Junk mail, phishing, automated bounce-backs, out-of-office auto-replies, test submissions, gibberish, bot-generated content. NOT a real customer asking for help.
    - **vendor_email**: Vendor renewal notifications, third-party subscription confirmations, marketing emails, automated system notifications (e.g. CookieYes, Stripe, hosting renewals). The sender is not a Nurtur customer reporting a support issue — it's a vendor or service sending an automated notification. These should be auto-closed, NOT responded to.
    - **thank_you**: Customer replied with thanks, confirmation, "all sorted", or acknowledgment of resolution. No new question or issue raised. The ticket's purpose has been fulfilled.
