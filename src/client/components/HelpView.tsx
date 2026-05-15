@@ -11,18 +11,8 @@ const SECTIONS: Section[] = [
     content: [
       'N.O.V.A (Nurtur Operational Virtual Assistant) is a personal productivity dashboard that aggregates your tasks, calendar, email, and delivery tracking into one place.',
       'On first launch, create an admin account. After logging in, head to My Settings to connect your personal integrations (Jira, Dynamics 365).',
-      'Once connected, N.O.V.A will automatically sync tasks from all your sources on a configurable interval. Your My NOVA dashboard will populate with KPIs.',
+      'Once connected, N.O.V.A will automatically sync tasks from all your sources on a configurable interval.',
       'N.O.V.A uses role-based access: Admins can manage users, teams, and system settings. Editors can modify settings and data. Viewers have read-only access across the app.',
-    ],
-  },
-  {
-    title: 'My NOVA',
-    content: [
-      'Your home dashboard showing at-a-glance KPIs: total tasks, overdue count, due today/this week, completion rate, and average task age. Breakdowns by source, status, and category are also shown.',
-      'NOVA Insights — type a question or request and the AI assistant will analyse your tasks and provide suggestions. Use the source selector to choose which integrations to include in the analysis.',
-      'Team Load — a workload overview showing active deliveries, pending milestones, overdue milestones, and open tickets per team member. Colour-coded cells highlight where the team is stretched.',
-      'The morning standup triggers automatically on your first visit each day. It analyses your tasks and prepares a prioritised briefing.',
-      'Quick links let you jump to Tasks or Standup directly from the dashboard.',
     ],
   },
   {

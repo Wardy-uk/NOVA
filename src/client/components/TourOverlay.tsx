@@ -9,9 +9,9 @@ interface TourStep {
 
 const TOUR_STEPS: TourStep[] = [
   {
-    target: '[data-area="command"]',
-    title: 'My NOVA',
-    description: 'Your command centre hub. Tabs: Dashboard (KPIs & charts), NOVA Insights (AI analysis), Chat (conversational AI), Daily (priority tasks & starred deliveries), Standup (AI morning briefing), and Team Load (per-person workload overview).',
+    target: '[data-area="ai-agent"]',
+    title: 'NOVA AI Agent',
+    description: 'Your home base. Tabs: My Tickets (your queue), AI Approvals, Workspace, Dashboard, Coaching, Manager tools, Pipelines, KB Gaps, and more.',
     position: 'bottom',
   },
   {

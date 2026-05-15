@@ -104,7 +104,6 @@ interface CustomRole {
 }
 
 const AREA_DEFS = [
-  { id: 'command', label: 'My NOVA' },
   { id: 'nova_features', label: 'Briefing / Team' },
   { id: 'servicedesk', label: 'Service Desk' },
   { id: 'sales', label: 'Sales Hotbox' },

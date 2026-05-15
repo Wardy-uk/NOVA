@@ -173,6 +173,7 @@ import { createApprovalRoutes } from './routes/approvals.js';
 import { createTrainingRoutes } from './routes/training.js';
 import { sendTrainingReminders } from './services/training-reminder.js';
 import { addBusinessHours, toSqliteDatetime } from './utils/business-hours.js';
+/* CALYX SHELVED — imports commented out
 import { getCalyxDb, initializeCalyxSchema, seedCalyxData } from './db/calyx-db.js';
 import { CalyxQueries } from './db/calyx-queries.js';
 import { createCalyxRoutes } from './routes/calyx.js';
@@ -180,10 +181,11 @@ import { createCalyxPhase4Routes } from './routes/calyx-phase4.js';
 import { createCalyxPhase5Routes } from './routes/calyx-phase5.js';
 import { createCalyxReportRoutes } from './routes/calyx-reports.js';
 import { createCalyxPortalRoutes } from './routes/calyx-portal.js';
-import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
 import { checkSloBreaches } from './services/calyx-slo-engine.js';
 import { processEmailQueue } from './services/calyx-email.js';
 import { syncCalyxKpisToNova } from './services/calyx-kpi-sync.js';
+*/
+import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
 import cookieParser from 'cookie-parser';
 
 dotenv.config();
@@ -203,7 +205,7 @@ async function main() {
   // Forward declaration — populated later when Jira creds are available
   let agentLoop: AgentLoop | null = null;
 
-  // Calyx database (separate SQLite via better-sqlite3, optional)
+  /* CALYX SHELVED — database init commented out
   const calyxDb = getCalyxDb();
   let calyxQueries: CalyxQueries | null = null;
   if (calyxDb) {
@@ -214,6 +216,7 @@ async function main() {
   } else {
     console.log('[N.O.V.A] Calyx database not available (better-sqlite3 not installed) — Calyx features disabled');
   }
+  */
 
   const taskQueries = new TaskQueries();
   const fileSettings = new FileSettingsQueries();
@@ -223,7 +226,7 @@ async function main() {
   );
   const settingsQueries = configService as FileSettingsQueries;
 
-  // Calyx background timers (must be after settingsQueries is initialized)
+  /* CALYX SHELVED — background timers commented out
   if (calyxDb) {
     jobRegistry.register('calyx-slo-check', 'Calyx SLO breach check', async () => {
       checkSloBreaches(calyxDb, settingsQueries.getAll());
@@ -236,6 +239,7 @@ async function main() {
     }, 30 * 60 * 1000);
     setTimeout(() => syncCalyxKpisToNova(calyxDb, settingsQueries).catch(() => {}), 60_000);
   }
+  */
 
   // Wallboard live cache — cohort-scoped stats from jira_issue_cache (5-min refresh)
   startWallboardLiveCache().catch(err => console.warn('[wallboard-live-cache] startup failed:', err instanceof Error ? err.message : err));
@@ -841,10 +845,11 @@ async function main() {
     }
   });
 
-  // Calyx portal — public + portal-JWT auth (no NOVA auth)
+  /* CALYX SHELVED — portal routes commented out
   if (calyxDb) {
     app.use('/api/calyx/portal', createCalyxPortalRoutes(calyxDb, settingsQueries));
   }
+  */
 
   // Protected API routes — role cache with 30s TTL avoids hitting DB on every single request
   const roleCache = new Map<number, { role: string; expires: number }>();
@@ -884,6 +889,7 @@ async function main() {
     res.json({ ok: true, data: list });
   });
 
+  /* CALYX SHELVED — API routes commented out
   const getCalyxSettings = () => settingsQueries.getAll();
   if (calyxDb && calyxQueries) {
     app.use('/api/calyx', createCalyxRoutes(calyxQueries, calyxDb, getCalyxSettings));
@@ -891,6 +897,7 @@ async function main() {
     app.use('/api/calyx', createCalyxPhase5Routes(calyxDb, settingsQueries));
     app.use('/api/calyx', createCalyxReportRoutes(calyxDb));
   }
+  */
   app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries, settingsQueries, onboardingRunQueries, problemTicketQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries, userSettingsQueries, (key) => {

@@ -1,9 +1,6 @@
 import { useState, useEffect, useRef, useCallback, Component, Suspense, lazy, type ReactNode } from 'react';
 import { TaskList } from './components/TaskList.js';
 import { SettingsView } from './components/SettingsView.js';
-import { StandupView } from './components/StandupView.js';
-import { DailyStatsView } from './components/DailyStatsView.js';
-import { KpisView } from './components/KpisView.js';
 import { DeliveryView } from './components/DeliveryView.js';
 import { CrmView } from './components/CrmView.js';
 import { ContractsView } from './components/ContractsView.js';
@@ -32,9 +29,7 @@ const KpiBreachedView = lazy(() => import('./components/KpiBreachedView.js').the
 const QAView = lazy(() => import('./components/QAView.js').then(m => ({ default: m.QAView })));
 const BackfillStatusView = lazy(() => import('./components/BackfillStatusView.js').then(m => ({ default: m.BackfillStatusView })));
 const SalesHotboxView = lazy(() => import('./components/SalesHotboxView.js').then(m => ({ default: m.SalesHotboxView })));
-import { TeamWorkloadView } from './components/TeamWorkloadView.js';
 import { NotificationBell } from './components/NotificationBell.js';
-import { NextActions } from './components/NextActions.js';
 import { StatusBar } from './components/StatusBar.js';
 import { FeedbackModal } from './components/FeedbackModal.js';
 import { ReleaseNotesModal, LATEST_RELEASE_VERSION } from './components/ReleaseNotesModal.js';
@@ -53,6 +48,7 @@ const DevReviewQueueView = lazy(() => import('./components/DevReviewQueueView.js
 const DevReviewDashboard = lazy(() => import('./components/DevReviewDashboard.js').then(m => ({ default: m.DevReviewDashboard })));
 const MyTicketsQueueView = lazy(() => import('./components/MyTicketsQueueView.js').then(m => ({ default: m.MyTicketsQueueView })));
 const AgentKpisView = lazy(() => import('./components/AgentKpisView.js').then(m => ({ default: m.AgentKpisView })));
+/* CALYX SHELVED — lazy imports commented out
 const CalyxQueueView = lazy(() => import('./components/CalyxQueueView.js').then(m => ({ default: m.CalyxQueueView })));
 const CalyxDashboardView = lazy(() => import('./components/CalyxDashboardView.js').then(m => ({ default: m.CalyxDashboardView })));
 const CalyxPlaylistView = lazy(() => import('./components/CalyxPlaylistView.js').then(m => ({ default: m.CalyxPlaylistView })));
@@ -67,6 +63,7 @@ const CalyxOrganisationsView = lazy(() => import('./components/CalyxOrganisation
 const CalyxTicketsView = lazy(() => import('./components/CalyxTicketsView.js').then(m => ({ default: m.CalyxTicketsView })));
 const CalyxSettingsView = lazy(() => import('./components/CalyxSettingsView.js').then(m => ({ default: m.CalyxSettingsView })));
 const CalyxPortal = lazy(() => import('./components/CalyxPortal.js').then(m => ({ default: m.CalyxPortal })));
+*/
 const AgentDashboardView = lazy(() => import('./components/AgentDashboardView.js').then(m => ({ default: m.AgentDashboardView })));
 const AgentWorkspaceView = lazy(() => import('./components/AgentWorkspaceView.js').then(m => ({ default: m.AgentWorkspaceView })));
 const AgentCoachingView = lazy(() => import('./components/AgentCoachingView.js').then(m => ({ default: m.AgentCoachingView })));
@@ -78,7 +75,6 @@ const KbGapsView = lazy(() => import('./components/KbGapsView.js').then(m => ({ 
 const AgentLearningsView = lazy(() => import('./components/AgentLearningsView.js').then(m => ({ default: m.AgentLearningsView })));
 const ManagerDashboardView = lazy(() => import('./components/ManagerDashboardView.js').then(m => ({ default: m.ManagerDashboardView })));
 const AgentRosterView = lazy(() => import('./components/AgentRosterView.js').then(m => ({ default: m.AgentRosterView })));
-const BriefingView = lazy(() => import('./components/BriefingView.js').then(m => ({ default: m.BriefingView })));
 const BacklogKanbanView = lazy(() => import('./components/BacklogKanbanView.js').then(m => ({ default: m.BacklogKanbanView })));
 const KbHealthView = lazy(() => import('./components/KbHealthView.js').then(m => ({ default: m.KbHealthView })));
 const TrainingSignalsView = lazy(() => import('./components/TrainingSignalsView.js').then(m => ({ default: m.TrainingSignalsView })));
@@ -86,7 +82,6 @@ const CapacityView = lazy(() => import('./components/CapacityView.js').then(m =>
 const IntelligenceView = lazy(() => import('./components/IntelligenceView.js').then(m => ({ default: m.IntelligenceView })));
 const OpsPackView = lazy(() => import('./components/OpsPackView.js').then(m => ({ default: m.OpsPackView })));
 const Briefing121View = lazy(() => import('./components/Briefing121View.js').then(m => ({ default: m.Briefing121View })));
-import { BriefingPopup } from './components/BriefingPopup.js';
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -97,9 +92,8 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'command' | 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'calyx' | 'ai-agent' | 'backlog';
-type View = 'daily' | 'tasks' | 'standup' | 'nova' | 'briefing'
-  | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals' | 'team-workload'
+type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog';
+type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
@@ -110,7 +104,6 @@ type View = 'daily' | 'tasks' | 'standup' | 'nova' | 'briefing'
   | 'training-matrix' | 'training-summary'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
-  | 'calyx-queue' | 'calyx-dashboard' | 'calyx-playlist' | 'calyx-tickets' | 'calyx-kb' | 'calyx-improvements' | 'calyx-settings' | 'calyx-problems' | 'calyx-changes' | 'calyx-major-incidents' | 'calyx-slo-settings' | 'calyx-business-hours' | 'calyx-organisations'
   | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
   | 'agent-kb-health' | 'agent-training' | 'agent-capacity' | 'agent-intelligence' | 'agent-impact' | 'agent-ops-pack' | 'agent-121'
   | 'backlog-board'
@@ -131,32 +124,16 @@ type AccessLevel = 'hidden' | 'view' | 'edit';
 interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
-  command: 'view', nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', calyx: 'hidden', 'ai-agent': 'view', backlog: 'view',
+  nova_features: 'view',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', 'ai-agent': 'view', backlog: 'view',
 };
 
-// Map certain command sub-tabs to their own permission area
 const TAB_AREA_GATE: Partial<Record<View, string>> = {
-  briefing: 'nova_features',
-  standup: 'nova_features',
-  'team-workload': 'nova_features',
   'people-roster': 'admin',
   'agent-manager': 'admin',
 };
 
 const AREAS: Record<Area, AreaDef> = {
-  command: {
-    label: 'My NOVA',
-    defaultView: 'daily',
-    tabs: [
-      { view: 'briefing', label: 'Briefing' },
-      { view: 'daily', label: 'My Dashboard' },
-      { view: 'nova', label: 'NOVA Insights' },
-      { view: 'tasks', label: 'My Tasks' },
-      { view: 'standup', label: 'NOVA Standup' },
-      { view: 'team-workload', label: 'My Team' },
-    ],
-  },
   servicedesk: {
     label: 'Service Desk',
     defaultView: 'sd-dashboard',
@@ -268,6 +245,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'dev-review-dashboard', label: 'Dashboard' },
     ],
   },
+  /* CALYX SHELVED
   calyx: {
     label: 'Calyx',
     defaultView: 'calyx-queue',
@@ -281,6 +259,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'calyx-settings', label: 'Settings' },
     ],
   },
+  */
   'ai-agent': {
     label: 'NOVA AI Agent',
     defaultView: 'agent-workspace',
@@ -313,19 +292,19 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['command', 'servicedesk', 'calyx', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'ai-agent', 'backlog'];
+const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog'];
 
-// Derive area from view (standalone views fall back to 'command')
+// Derive area from view (standalone views fall back to 'ai-agent')
 function getArea(view: View): Area {
-  if (STANDALONE_VIEWS.has(view)) return 'command';
+  if (STANDALONE_VIEWS.has(view)) return 'ai-agent';
   for (const [area, def] of Object.entries(AREAS) as [Area, AreaDef][]) {
     if (def.tabs.some((t) => t.view === view)) return area;
   }
-  return 'command';
+  return 'ai-agent';
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'team-workload', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'calyx-queue', 'calyx-dashboard', 'calyx-playlist', 'calyx-tickets', 'calyx-kb', 'calyx-improvements', 'calyx-settings', 'calyx-problems', 'calyx-changes', 'calyx-major-incidents', 'calyx-slo-settings', 'calyx-business-hours', 'calyx-organisations', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -371,8 +350,9 @@ function getViewFromHash(): View | null {
 }
 
 export function App() {
-  // Calyx requester portal — standalone (no NOVA chrome or auth)
+  /* CALYX SHELVED
   if (window.location.pathname.startsWith('/portal/calyx')) return <CalyxPortal />;
+  */
 
   // Customer setup portal — standalone public page (no NOVA auth)
   const setupMatch = window.location.pathname.match(/^\/setup\/([a-f0-9]{64})$/);
@@ -387,7 +367,7 @@ export function App() {
     return <KpiBreachedView isWallboard />;
   }
 
-  const [view, setViewRaw] = useState<View>(() => getViewFromHash() ?? 'daily');
+  const [view, setViewRaw] = useState<View>(() => getViewFromHash() ?? 'tickets');
 
   // Wrap setView to sync hash
   const setView = useCallback((v: View) => {
@@ -405,7 +385,7 @@ export function App() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
   const auth = useAuth();
-  const { tasks, loading, error, syncing, fetchTasks, updateTask } = useTasks();
+  const { tasks, loading, error, syncing, updateTask } = useTasks();
   const health = useHealth();
   const { theme, setTheme } = useTheme();
   const { showTour, startTour, closeTour, checkFirstVisit } = useTour();
@@ -430,7 +410,6 @@ export function App() {
   const [approvalBadge, setApprovalBadge] = useState(0);
   const [flaggedBadge, setFlaggedBadge] = useState(0);
   const userMenuRef = useRef<HTMLDivElement>(null);
-  const standupChecked = useRef(false);
 
   // Wallboard drill-down panel state (triggered by postMessage from wallboard iframes)
   const [wbDrill, setWbDrill] = useState<{ kpi?: string; agent?: string; label: string } | null>(null);
@@ -451,7 +430,7 @@ export function App() {
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
     userRole.split(',').map(r => r.trim()).some(r => r === 'admin' || r === 'super_admin')
-      ? { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit', training: 'edit', mi: 'edit', devreview: 'edit', 'ai-agent': 'edit' }
+      ? { nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit', training: 'edit', mi: 'edit', devreview: 'edit', 'ai-agent': 'edit' }
       : DEFAULT_AREA_ACCESS,
   );
   useEffect(() => {
@@ -521,22 +500,6 @@ export function App() {
     return () => window.removeEventListener('nova-show-release-notes', handler);
   }, []);
 
-  // Auto-trigger standup on first visit if no morning ritual today
-  // (skip if user navigated to a specific view via URL hash or has a pinned homepage)
-  useEffect(() => {
-    if (!auth.isAuthenticated || standupChecked.current) return;
-    standupChecked.current = true;
-    if (getViewFromHash() || homepage) return; // User has hash nav or pinned homepage — don't override
-    if ((areaAccess.nova_features || 'hidden') === 'hidden') return; // No briefing permission
-    fetch('/api/standups/today')
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.ok && !json.data.hasMorning) {
-          setView('standup');
-        }
-      })
-      .catch(() => {});
-  }, [auth.isAuthenticated, setView, homepage]);
 
   // Poll approval queue badge count (pauses when tab hidden)
   const pollApprovals = useCallback(() => {
@@ -708,9 +671,7 @@ export function App() {
   const handleManualRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      if (currentArea === 'command') {
-        await fetchTasks();
-      } else if (currentArea === 'servicedesk') {
+      if (currentArea === 'servicedesk') {
         refreshSdTasks();
       }
       // Onboarding and CRM views manage their own data — dispatching a custom event lets them know
@@ -718,7 +679,7 @@ export function App() {
     } catch { /* ignore */ }
     // Brief timeout so spinner is visible
     setTimeout(() => setRefreshing(false), 500);
-  }, [currentArea, fetchTasks, refreshSdTasks]);
+  }, [currentArea, refreshSdTasks]);
 
   // Auth gate
   if (auth.initializing) {
@@ -743,10 +704,8 @@ export function App() {
     );
   }
 
-  // Check if user can see an area (uses resolved area access from custom roles)
-  // My NOVA (command) is always visible — it's the core area
   const canSeeArea = (area: Area): boolean => {
-    if (area === 'command' || area === 'wallboards') return true;
+    if (area === 'ai-agent' || area === 'wallboards') return true;
     // Board MI gated by the 'mi' permission area
     if (area === 'board') return (areaAccess['mi'] || 'hidden') !== 'hidden';
     // Dev Review — standard area permission (configured in Admin > Permissions)
@@ -783,7 +742,7 @@ export function App() {
             <div className="flex items-center gap-4">
               <h1
                 className="text-lg font-bold tracking-tight font-[var(--font-heading)] cursor-pointer"
-                onClick={() => setView('daily')}
+                onClick={() => setView('tickets')}
               >
                 <span className="text-[#5ec1ca]">N.O.V.A</span>
               </h1>
@@ -1029,37 +988,6 @@ export function App() {
         {/* Main content */}
         <main className={`flex-1 px-6 py-6 mx-auto w-full ${isFullWidth ? 'max-w-full' : 'max-w-4xl'}`}>
         <Suspense fallback={<div className="flex items-center justify-center py-20 text-zinc-400">Loading...</div>}>
-          {/* Command Centre */}
-          {view === 'daily' && (
-            <>
-              <DailyStatsView tasks={tasks} onNavigate={navigate} />
-              <KpisView tasks={tasks} embedded />
-            </>
-          )}
-          {view === 'nova' && (
-            <NextActions onUpdateTask={updateTask} />
-          )}
-          {view === 'tasks' && (
-            <>
-              {error && (
-                <div className="mb-4 p-3 bg-red-950/50 border border-red-900 rounded text-red-400 text-sm">
-                  {error}
-                </div>
-              )}
-              <TaskList tasks={tasks} loading={loading} onUpdateTask={updateTask} />
-            </>
-          )}
-          {view === 'briefing' && (
-            <Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400" /></div>}>
-              <BriefingView />
-            </Suspense>
-          )}
-          {view === 'standup' && (
-            <StandupView onUpdateTask={updateTask} onNavigate={navigate} />
-          )}
-          {view === 'team-workload' && (
-            <TeamWorkloadView />
-          )}
           {/* Service Desk — right pill overrides left tab content */}
           {currentArea === 'servicedesk' && sdFilter === 'all-breached' && (
             <NeedsAttentionView onUpdateTask={updateTask} scope="all" />
@@ -1263,46 +1191,7 @@ export function App() {
             <DevReviewDashboard />
           )}
 
-          {/* Calyx — internal service desk */}
-          {view === 'calyx-queue' && (
-            <CalyxQueueView />
-          )}
-          {view === 'calyx-dashboard' && (
-            <CalyxDashboardView />
-          )}
-          {view === 'calyx-playlist' && (
-            <CalyxPlaylistView />
-          )}
-          {view === 'calyx-tickets' && (
-            <CalyxTicketsView />
-          )}
-          {view === 'calyx-kb' && (
-            <CalyxKnowledgeBaseView />
-          )}
-          {view === 'calyx-improvements' && (
-            <CalyxImprovementsView />
-          )}
-          {view === 'calyx-settings' && (
-            <CalyxSettingsView />
-          )}
-          {view === 'calyx-problems' && (
-            <CalyxProblemsView />
-          )}
-          {view === 'calyx-changes' && (
-            <CalyxChangesView />
-          )}
-          {view === 'calyx-major-incidents' && (
-            <CalyxMajorIncidentsView />
-          )}
-          {view === 'calyx-slo-settings' && (
-            <CalyxSloSettingsView />
-          )}
-          {view === 'calyx-business-hours' && (
-            <CalyxBusinessHoursView />
-          )}
-          {view === 'calyx-organisations' && (
-            <CalyxOrganisationsView />
-          )}
+          {/* CALYX SHELVED — all Calyx view rendering commented out */}
 
           {/* NOVA AI Agent */}
           {view === 'tickets' && canSeeArea('ai-agent') && auth.user && (
@@ -1419,7 +1308,6 @@ export function App() {
       {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
       {showReleaseNotes && <ReleaseNotesModal onClose={() => setShowReleaseNotes(false)} />}
       <TourOverlay show={showTour} onClose={closeTour} />
-      {auth.user && <BriefingPopup onNavigate={navigate} />}
       {wbDrill && (
         <WallboardDrillPanel
           kpi={wbDrill.kpi}

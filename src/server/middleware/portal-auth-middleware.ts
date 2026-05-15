@@ -61,7 +61,7 @@ async function upsertInternalPortalUser(
 }
 
 const ACCESS_RANK: Record<string, number> = { hidden: 0, view: 1, edit: 2 };
-const PORTAL_AREAS = ['servicedesk', 'calyx'];
+const PORTAL_AREAS = ['servicedesk'];
 
 function hasPortalAreaAccess(roleStr: string, allRoles: CustomRole[]): boolean {
   const userRoleIds = parseRoles(roleStr);
