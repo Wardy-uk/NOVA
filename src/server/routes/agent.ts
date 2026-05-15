@@ -3726,7 +3726,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
       // Check if agent has any decision on this ticket
       const decisions = await query(
-        `SELECT TOP 1 id, action, confidence FROM agent_decisions WHERE ticket_id = ? ORDER BY decided_at DESC`,
+        `SELECT TOP 1 id, action, confidence FROM agent_decisions WHERE ticket_id = ? ORDER BY created_at DESC`,
         [ticketKey],
       );
 
