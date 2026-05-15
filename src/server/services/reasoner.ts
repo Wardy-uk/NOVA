@@ -716,6 +716,7 @@ Assigned agent: ${opts.assigneeName}`;
     exchanges: Array<{ role: 'ai' | 'customer'; text: string; at: string }>;
     kbReferences: string[];
     recommendedNextSteps: string;
+    assigneeName?: string;
   }): Promise<string> {
     const complexity = opts.confidence >= 0.85 ? 'simple' : opts.confidence >= 0.5 ? 'moderate' : 'complex';
     const exchangeLines = opts.exchanges.map(e => {
@@ -727,18 +728,36 @@ Assigned agent: ${opts.assigneeName}`;
       ? `\nKB References:\n${opts.kbReferences.map(r => `- ${r}`).join('\n')}`
       : '';
 
+    const assignmentLine = opts.assigneeName
+      ? `Assigned to: ${opts.assigneeName} (Customer Care, round-robin)\n`
+      : '';
+
+    // Format next steps: if JSON object, convert to readable bullets
+    let nextStepsText = opts.recommendedNextSteps || 'Review ticket details and respond to customer.';
+    try {
+      const trimmed = nextStepsText.trim();
+      if (trimmed.startsWith('{')) {
+        const parsed = JSON.parse(trimmed);
+        if (typeof parsed === 'object' && parsed !== null) {
+          nextStepsText = Object.entries(parsed)
+            .map(([key, value]) => `- ${key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}: ${value}`)
+            .join('\n');
+        }
+      }
+    } catch { /* not JSON, use as-is */ }
+
     return `🤖 NOVA Handoff Summary
 
 Ticket: ${opts.ticketKey} — ${opts.summary}
 Classification: ${opts.category} — ${opts.ticketType}
 Complexity: ${complexity}
 Confidence: ${(opts.confidence * 100).toFixed(0)}%
-
+${assignmentLine}
 What happened:
 ${exchangeLines || '- No AI exchanges recorded'}
 
 Recommended next steps:
-${opts.recommendedNextSteps || 'Review ticket details and respond to customer.'}
+${nextStepsText}
 ${kbSection}`;
   }
 

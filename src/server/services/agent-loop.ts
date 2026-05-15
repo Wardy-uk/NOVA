@@ -1590,8 +1590,14 @@ export class AgentLoop {
     const hasInternalNote = rawInternalNote && (typeof rawInternalNote === 'string' ? rawInternalNote.length > 0 : typeof rawInternalNote === 'object');
     const shouldPostNote = hasInternalNote && !(isAssigned && mode === 'hands_off');
     if (shouldPostNote) {
+      // Skip draft response text when first-reply pipeline will post it separately
+      const frThreshold = parseFloat(this.settings.get('agent_first_reply_confidence_threshold') || '0.85');
+      const hasDraft = (decision.action === 'draft_response' || decision.action === 'respond');
+      const draftText = (decision.output.draft_response as string) ?? '';
+      const willPostFirstReply = decision.eventType === 'ticket_created' && hasDraft && draftText && !looksLikeStructuredPayload(draftText);
+      const skipDraft = willPostFirstReply && (decision.confidence >= frThreshold || hasDraft);
       try {
-        await this.jiraClient.addComment(decision.ticketKey, this.formatInternalNote(decision), { internal: true });
+        await this.jiraClient.addComment(decision.ticketKey, this.formatInternalNote(decision, { skipDraftResponse: !!skipDraft }), { internal: true });
         console.log(`[agent] Posted internal note on ${decision.ticketKey}${decision.shadowMode ? ' [SHADOW]' : ''}`);
       } catch (err) {
         console.warn(`[agent] Failed to post internal note on ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
@@ -1844,13 +1850,13 @@ export class AgentLoop {
     const classification = decision.output.classification as { category?: string; ticket_type?: string } | undefined;
 
     // Step 1: Round-robin to Customer Care (resolve assignee before generating messages)
+    // Assignment comment is NOT posted here — it's merged into the handoff summary (step 3) to reduce comment spam.
     let assigneeName: string | null = null;
     if (this.assignmentEngine) {
       try {
         const assignment = await this.assignmentEngine.assignWithFallback(decision.ticketKey, 'cc', 'NT');
         if (assignment) {
           assigneeName = assignment.agent.display_name;
-          await this.assignmentEngine.postAssignmentComment(decision.ticketKey, assignment);
           console.log(`[agent] Handoff assignment: ${decision.ticketKey} → ${assigneeName} (CC)`);
         } else if (this.assignmentEngine.isWorkingTime()) {
           await this.alertService.createAlert({
@@ -1883,7 +1889,7 @@ export class AgentLoop {
       }
     }
 
-    // Step 3: Handoff summary (internal comment)
+    // Step 3: Handoff summary (internal comment) — includes assignment info to avoid a separate comment
     try {
       const exchanges = await this.getAiExchanges(decision.ticketKey);
       const handoffSummary = await this.reasoner.generateHandoffSummary({
@@ -1895,6 +1901,7 @@ export class AgentLoop {
         exchanges,
         kbReferences: ((decision.inputs.kb_matches as any[]) ?? []).map((m: any) => m.title ?? m.path ?? 'KB article').slice(0, 5),
         recommendedNextSteps: decision.reasoning?.slice(0, 500) ?? '',
+        assigneeName: assigneeName ?? undefined,
       });
       await this.jiraClient.addComment(decision.ticketKey, handoffSummary, { internal: true });
       console.log(`[agent] Handoff summary posted on ${decision.ticketKey}`);
@@ -1902,8 +1909,9 @@ export class AgentLoop {
       console.warn(`[agent] Handoff summary failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
     }
 
-    // Step 4: Public handoff message (only if not already posted a first reply in this same call)
-    if (reason !== 'low confidence first reply') {
+    // Step 4: Public handoff message — skip if a public first reply was already posted in this flow
+    const alreadyReplied = reason === 'low confidence first reply' || reason === 'high confidence no question';
+    if (!alreadyReplied) {
       try {
         const isWorkingHours = this.assignmentEngine?.isWorkingTime() ?? true;
         const nextWorkingDay = this.getNextWorkingDayLabel();
@@ -2094,7 +2102,7 @@ export class AgentLoop {
     }
   }
 
-  private formatInternalNote(decision: AgentDecision): string {
+  private formatInternalNote(decision: AgentDecision, opts?: { skipDraftResponse?: boolean }): string {
     const classification = decision.output.classification as { ticket_type?: string; category?: string; sub_category?: string; confidence?: number; impact?: string; urgency?: string; priority_matrix?: string } | undefined;
     const priorityAssessment = decision.output.priority_assessment as { suggested_priority?: number; reasoning?: string } | undefined;
     const rawNote = decision.output.internal_note;
@@ -2226,16 +2234,18 @@ export class AgentLoop {
       lines.push(``, `--- Ticket Context ---`, contextParts.join(' | '));
     }
 
-    if (draftResponse) {
+    if (draftResponse && !opts?.skipDraftResponse) {
       lines.push(``, `**Suggested response:**`, draftResponse);
-    }
 
-    const statusDesc = decision.shadowMode
-      ? `This is shadow mode — the AI is observing only. No action has been taken.`
-      : decision.approvalRequired
-        ? `A draft reply has been submitted to the NOVA approval queue for agent review before sending.`
-        : `This action was executed automatically based on autonomy rules.`;
-    lines.push(``, statusDesc);
+      const statusDesc = decision.shadowMode
+        ? `This is shadow mode — the AI is observing only. No action has been taken.`
+        : decision.approvalRequired
+          ? `A draft reply has been submitted to the NOVA approval queue for agent review before sending.`
+          : `This action was executed automatically based on autonomy rules.`;
+      lines.push(``, statusDesc);
+    } else if (opts?.skipDraftResponse) {
+      lines.push(``, `_First reply posted separately by NOVA._`);
+    }
     lines.push(`_${decision.provider ?? 'unknown'}/${decision.model ?? 'unknown'}_`);
 
     return lines.join('\n');
@@ -2448,7 +2458,10 @@ export class AgentLoop {
             resolution,
             comment: `Ticket resolved — approved by ${decidedBy ?? 'unknown'} via NOVA.`,
           });
-          await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, { fields, comment });
+          await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, {
+            fields,
+            comment: { ...comment, internal: true },
+          });
           console.log(`[agent] Transitioned ${ticketKey} to Resolved after approved ${effectiveAction}`);
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
