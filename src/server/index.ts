@@ -1033,6 +1033,8 @@ async function main() {
     agentLoop.getAutoRulesEngine().setOverrideQueries(autoRuleOverrideQueries);
 
     const assignmentEngine = new AssignmentEngine(agentJiraClient, settingsQueries, 'NT');
+    assignmentEngine.setApprovalQueries(approvalQueries);
+    assignmentEngine.validateProjectConfig();
     assignmentEngine.seedPoolCapsFromKpi().catch(() => {});
     agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
     agentLoop.setAssignmentEngine(assignmentEngine);

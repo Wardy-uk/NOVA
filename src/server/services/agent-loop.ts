@@ -1739,25 +1739,49 @@ export class AgentLoop {
         await this.observer.logOutcome(decisionId, replyResult);
 
         if (replyResult.success) {
+          // Withdraw any pending approvals for this ticket — prevents double-fire
+          if (this.approvalQueries) {
+            try {
+              await this.approvalQueries.withdrawByTicketKey(decision.ticketKey, 'first-reply-posted');
+            } catch { /* best effort */ }
+          }
+
           const needsReply = !!(decision.output.needs_customer_reply ?? true);
 
           if (needsReply) {
             // AI asked a question — stay on ticket, assign to NOVA-Jira, enter ai_conversation
             console.log(`[agent] First reply posted (AI draft) on ${decision.ticketKey} — confidence ${(decision.confidence * 100).toFixed(0)}%, entering ai_conversation`);
             const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+            let assignedToNova = false;
             if (novaAccountId) {
               try {
                 await this.jiraClient.updateFields(decision.ticketKey, { assignee: { accountId: novaAccountId } });
+                assignedToNova = true;
                 console.log(`[agent] Assigned ${decision.ticketKey} to NOVA-Jira for ai_conversation`);
               } catch (err) {
-                console.warn(`[agent] Failed to assign ${decision.ticketKey} to NOVA-Jira:`, err instanceof Error ? err.message : err);
+                console.error(`[agent] Failed to assign ${decision.ticketKey} to NOVA-Jira — falling back to handoff:`, err instanceof Error ? err.message : err);
               }
+            } else {
+              console.warn(`[agent] nova_ai_jira_account_id not configured — cannot assign ${decision.ticketKey} to NOVA-Jira`);
             }
-            try {
-              await ticketState.transition(decision.ticketKey, 'ai_conversation', {
-                lastAgentActionAt: new Date().toISOString(),
-              });
-            } catch { /* best effort */ }
+
+            if (assignedToNova) {
+              try {
+                await ticketState.transition(decision.ticketKey, 'ai_conversation', {
+                  lastAgentActionAt: new Date().toISOString(),
+                });
+              } catch { /* best effort */ }
+
+              try {
+                await this.updateRequestTypeAfterAssign(decision);
+              } catch (err) {
+                console.warn(`[agent] Request type update failed for ${decision.ticketKey} (needsReply):`, err instanceof Error ? err.message : err);
+              }
+            } else {
+              // Assignment failed — fall back to human handoff so ticket doesn't sit unassigned
+              console.log(`[agent] NOVA-Jira assignment failed for ${decision.ticketKey} — falling back to executeHandoff`);
+              await this.executeHandoff(decision, decisionId, ticketState, 'high confidence no question');
+            }
           } else {
             // AI gave a definitive answer — no question asked, immediate handoff
             console.log(`[agent] First reply posted (AI draft) on ${decision.ticketKey} — confidence ${(decision.confidence * 100).toFixed(0)}%, no question asked → immediate handoff`);
@@ -1828,6 +1852,12 @@ export class AgentLoop {
           assigneeName = assignment.agent.display_name;
           await this.assignmentEngine.postAssignmentComment(decision.ticketKey, assignment);
           console.log(`[agent] Handoff assignment: ${decision.ticketKey} → ${assigneeName} (CC)`);
+        } else if (this.assignmentEngine.isWorkingTime()) {
+          await this.alertService.createAlert({
+            alertType: 'error', severity: 'warning',
+            title: `Handoff assignment failed: ${decision.ticketKey}`,
+            detail: `No agents available in any pool during handoff. Ticket is unassigned — manual assignment required.`,
+          });
         }
       } catch (err) {
         console.warn(`[agent] Handoff assignment failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
@@ -2308,8 +2338,12 @@ export class AgentLoop {
       }
       if (responseText && quickWinType !== 'spam') {
         try {
-          await this.jiraClient.addComment(ticketKey, responseText, { internal: false });
-          console.log(`[agent] Posted approved response on ${ticketKey}`);
+          const closableActions = ['close', 'quick_win_close', 'resolve', 'transition'];
+          const closableQwTypesForComment = ['spam', 'vendor_email', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
+          const isCloseAction = (actionType && closableActions.includes(actionType))
+            || (quickWinType && closableQwTypesForComment.includes(quickWinType));
+          await this.jiraClient.addComment(ticketKey, responseText, { internal: !!isCloseAction });
+          console.log(`[agent] Posted approved response on ${ticketKey} (${isCloseAction ? 'internal' : 'public'})`);
           commentPosted = true;
 
           // Lifecycle: move to response_sent → awaiting_customer

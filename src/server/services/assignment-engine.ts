@@ -65,6 +65,7 @@ export class AssignmentEngine {
   private kpiPool: sql.ConnectionPool | null = null;
   private workingDayClock: WorkingDayClock;
   private bankHolidaysHash: string = '';
+  private approvalQueries: { withdrawByTicketKey(ticketKey: string, reason: string): Promise<number> } | null = null;
 
   constructor(
     private jiraClient: JiraRestClient,
@@ -72,6 +73,10 @@ export class AssignmentEngine {
     private jiraProject: string = 'NT',
   ) {
     this.workingDayClock = this.buildWorkingDayClock();
+  }
+
+  setApprovalQueries(aq: { withdrawByTicketKey(ticketKey: string, reason: string): Promise<number> }): void {
+    this.approvalQueries = aq;
   }
 
   private async getKpiPool(): Promise<sql.ConnectionPool> {
@@ -206,6 +211,13 @@ export class AssignmentEngine {
       assignee: { accountId: result.agent.jira_account_id },
     });
 
+    // Auto-withdraw pending approvals when a human agent is assigned
+    if (this.approvalQueries) {
+      try {
+        await this.approvalQueries.withdrawByTicketKey(ticketKey, `assigned-to-${result.agent.display_name}`);
+      } catch { /* best effort */ }
+    }
+
     return result;
   }
 
@@ -278,6 +290,16 @@ export class AssignmentEngine {
       || this.settingsQueries.get('agent_jira_project')
       || 'NT';
     return raw.split(',').map(p => p.trim()).filter(Boolean);
+  }
+
+  validateProjectConfig(): void {
+    const projects = this.getConfiguredProjects();
+    const expected = ['NT', 'NTPJ'];
+    for (const proj of expected) {
+      if (!projects.includes(proj)) {
+        console.warn(`[assignment] ⚠️ Project ${proj} is not in assignment_projects (${projects.join(', ')}). Tickets in ${proj} won't be included in capacity calculations.`);
+      }
+    }
   }
 
   async getAvailableAgents(pool: Pool): Promise<RosterAgent[]> {
@@ -578,10 +600,10 @@ export class AssignmentEngine {
       if (row.project_key === 'NTPJ') {
         b.tpj += row.cnt;
       } else {
-        const tier = (row.current_tier || '').trim();
-        if (tier === 'Customer Care' || tier === 'T1' || tier === '') {
+        const tier = (row.current_tier || '').trim().toLowerCase();
+        if (tier === '' || tier === 'customer care' || tier === 't1' || tier.startsWith('tier 1') || tier.startsWith('tier1')) {
           b.cc += row.cnt;
-        } else if (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier)) {
+        } else if (tier.startsWith('t2') || tier.startsWith('t3') || tier.startsWith('tier 2') || tier.startsWith('tier2') || tier.startsWith('tier 3') || tier.startsWith('tier3') || tier === 'production') {
           b.t2t3 += row.cnt;
         }
       }

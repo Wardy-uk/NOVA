@@ -2656,6 +2656,24 @@ export class ApprovalQueries {
     return novaRows.length ? agentDecisionToApproval(novaRows[0]) : undefined;
   }
 
+  async withdrawByTicketKey(ticketKey: string, reason: string): Promise<number> {
+    const result = await execute(
+      `UPDATE approval_queue SET status = 'cancelled', decided_by = ?, decided_at = GETUTCDATE()
+       WHERE ticket_id = ? AND status = 'pending'`,
+      [reason, ticketKey],
+    );
+    await execute(
+      `UPDATE agent_decisions SET approval_status = 'cancelled', resolved_by = ?, resolved_at = GETUTCDATE()
+       WHERE ticket_id = ? AND approval_required = 1 AND (approval_status IS NULL OR approval_status = 'pending')`,
+      [reason, ticketKey],
+    );
+    const count = (result as any)?.rowsAffected?.[0] ?? 0;
+    if (count > 0) {
+      console.log(`[approvals] Withdrew ${count} pending approval(s) for ${ticketKey}: ${reason}`);
+    }
+    return count;
+  }
+
   async getPendingCount(): Promise<number> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
     const queueRow = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);

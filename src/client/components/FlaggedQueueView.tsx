@@ -193,6 +193,11 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
   const [briefFields, setBriefFields] = useState<BriefFields | null>(null);
   const [diagnoseData, setDiagnoseData] = useState<DiagnoseData | null>(null);
   const [diagnoseLoading, setDiagnoseLoading] = useState(false);
+  const [showCommentForm, setShowCommentForm] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [showOverrideForm, setShowOverrideForm] = useState(false);
+  const [overrideAction, setOverrideAction] = useState('approve');
+  const [overrideReason, setOverrideReason] = useState('');
   const sla = slaDisplay(ticket);
   const isPending = ticket.status === 'pending';
   const conversation = parseConversation(ticket.conversation_json);
@@ -242,6 +247,35 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
         body: JSON.stringify({ dismiss: true, dismiss_reason: reason }),
       });
       actions.toast('Dismissed', 'ok');
+      onRefresh();
+    } finally { setReviewing(false); }
+  };
+
+  const handleComment = async () => {
+    if (!commentText.trim()) return;
+    setReviewing(true);
+    try {
+      await api(`/flagged/${ticket.ticket_key}/comment`, {
+        method: 'POST',
+        body: JSON.stringify({ comment: commentText.trim() }),
+      });
+      actions.toast('Comment posted', 'ok');
+      setShowCommentForm(false);
+      setCommentText('');
+    } finally { setReviewing(false); }
+  };
+
+  const handleOverride = async () => {
+    if (!overrideReason.trim()) return;
+    setReviewing(true);
+    try {
+      await api(`/flagged/${ticket.ticket_key}/override`, {
+        method: 'POST',
+        body: JSON.stringify({ action: overrideAction, reason: overrideReason.trim() }),
+      });
+      actions.toast(`Override (${overrideAction}) applied`, 'ok');
+      setShowOverrideForm(false);
+      setOverrideReason('');
       onRefresh();
     } finally { setReviewing(false); }
   };
@@ -428,6 +462,56 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
               )}
             </div>
           )}
+
+          <div className="flex-1" />
+
+          <button
+            disabled={reviewing}
+            onClick={() => { setShowCommentForm(!showCommentForm); setShowOverrideForm(false); }}
+            className="px-3 py-2 text-xs rounded-lg bg-[#272C33] border border-[#3a424d] text-neutral-300 hover:bg-[#2f353d] disabled:opacity-50"
+          >Add Comment</button>
+          <button
+            disabled={reviewing}
+            onClick={() => { setShowOverrideForm(!showOverrideForm); setShowCommentForm(false); }}
+            className="px-3 py-2 text-xs rounded-lg bg-amber-900/30 text-amber-400 border border-amber-800/40 hover:bg-amber-900/50 disabled:opacity-50"
+          >Override AI</button>
+        </div>
+      )}
+
+      {showCommentForm && isPending && (
+        <div className="sticky bottom-12 bg-[#14171c]/95 backdrop-blur-sm border-t border-[#2f353d] -mx-5 px-5 py-3 flex items-center gap-2">
+          <input
+            value={commentText}
+            onChange={e => setCommentText(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleComment()}
+            placeholder="Internal note to Jira…"
+            className="flex-1 px-3 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200 placeholder-neutral-600"
+            autoFocus
+          />
+          <button onClick={handleComment} disabled={reviewing || !commentText.trim()} className="px-3 py-1.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-50" style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)' }}>Post</button>
+        </div>
+      )}
+
+      {showOverrideForm && isPending && (
+        <div className="sticky bottom-12 bg-[#14171c]/95 backdrop-blur-sm border-t border-[#2f353d] -mx-5 px-5 py-3 flex items-center gap-2">
+          <select
+            value={overrideAction}
+            onChange={e => setOverrideAction(e.target.value)}
+            className="px-2 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200"
+          >
+            <option value="approve">Approve AI action</option>
+            <option value="reject">Reject AI action</option>
+            <option value="escalate">Escalate</option>
+          </select>
+          <input
+            value={overrideReason}
+            onChange={e => setOverrideReason(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleOverride()}
+            placeholder="Reason for override…"
+            className="flex-1 px-3 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200 placeholder-neutral-600"
+            autoFocus
+          />
+          <button onClick={handleOverride} disabled={reviewing || !overrideReason.trim()} className="px-3 py-1.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-50" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}>Apply</button>
         </div>
       )}
     </div>

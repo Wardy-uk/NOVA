@@ -446,6 +446,55 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.post('/flagged/:key/reassign', async (req, res) => {
+    const { key } = req.params;
+    const { accountId } = req.body ?? {};
+    if (!accountId) return res.status(400).json({ ok: false, error: 'accountId required' });
+    try {
+      const jira = agentLoop.getJiraClient();
+      await jira.updateFields(key, { assignee: { accountId } });
+      const username = (req as any).user?.username ?? 'unknown';
+      await jira.addComment(key, `Reassigned via NOVA Flagged Review by ${username}`, { internal: true });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Reassign failed' });
+    }
+  });
+
+  router.post('/flagged/:key/comment', async (req, res) => {
+    const { key } = req.params;
+    const { comment } = req.body ?? {};
+    if (!comment?.trim()) return res.status(400).json({ ok: false, error: 'comment required' });
+    try {
+      const jira = agentLoop.getJiraClient();
+      const username = (req as any).user?.username ?? 'unknown';
+      await jira.addComment(key, `[NOVA Flagged Review — ${username}] ${comment.trim()}`, { internal: true });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Comment failed' });
+    }
+  });
+
+  router.post('/flagged/:key/override', async (req, res) => {
+    const { key } = req.params;
+    const { action, reason } = req.body ?? {};
+    if (!action || !reason?.trim()) return res.status(400).json({ ok: false, error: 'action and reason required' });
+    const username = (req as any).user?.username ?? 'unknown';
+    try {
+      if (action === 'approve') {
+        await agentLoop.handleApprovalCallback('approve', key, undefined, undefined, username);
+      }
+      const jira = agentLoop.getJiraClient();
+      await jira.addComment(key, `[NOVA Manager Override — ${username}] Action: ${action}. Reason: ${reason.trim()}`, { internal: true });
+      if (deps?.riskScorer) {
+        await deps.riskScorer.reviewTicket(key, username, false);
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Override failed' });
+    }
+  });
+
   router.get('/confidence-history', async (req, res) => {
     const days = Math.min(parseInt(req.query.days as string, 10) || 30, 90);
     try {

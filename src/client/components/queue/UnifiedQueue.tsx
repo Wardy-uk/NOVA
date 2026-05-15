@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } fro
 import { GlassCard } from './GlassCard.js';
 import { ToastContainer, nextToastId, type ToastItem } from './Toast.js';
 import { KeyboardHints, type KeyboardShortcut } from './KeyboardHints.js';
+import { useTheme } from '../../hooks/useTheme.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -70,10 +71,15 @@ export interface QueueActions {
 
 // ── Styles ───────────────────────────────────────────────────────────────
 
-const MESH_BG = `radial-gradient(ellipse at 20% 50%, rgba(94,193,202,0.06) 0%, transparent 50%),
+const MESH_BG_DARK = `radial-gradient(ellipse at 20% 50%, rgba(94,193,202,0.06) 0%, transparent 50%),
   radial-gradient(ellipse at 80% 20%, rgba(155,106,237,0.04) 0%, transparent 50%),
   radial-gradient(ellipse at 50% 80%, rgba(16,185,129,0.03) 0%, transparent 50%),
   linear-gradient(135deg, #1a1e24 0%, #14171c 100%)`;
+
+const MESH_BG_LIGHT = `radial-gradient(ellipse at 20% 50%, rgba(94,193,202,0.04) 0%, transparent 50%),
+  radial-gradient(ellipse at 80% 20%, rgba(155,106,237,0.03) 0%, transparent 50%),
+  radial-gradient(ellipse at 50% 80%, rgba(16,185,129,0.02) 0%, transparent 50%),
+  linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)`;
 
 const KEYFRAME_CSS = `
 @keyframes qShift {
@@ -99,6 +105,14 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
     new Set(config.groupCollapsed ?? []),
   );
   const listRef = useRef<HTMLDivElement>(null);
+  const { theme } = useTheme();
+  const isLight = theme === 'light' || (theme === 'system' && typeof window !== 'undefined' && !window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const borderColor = isLight ? '#e2e8f0' : '#2f353d';
+  const meshBg = isLight ? MESH_BG_LIGHT : MESH_BG_DARK;
+  const btnBg = isLight ? '#e2e8f0' : '#2f353d';
+  const btnHoverBg = isLight ? '#cbd5e1' : '#363d47';
+  const groupHeaderBg = isLight ? 'rgba(248,250,252,0.95)' : 'rgba(26,30,36,0.95)';
+  const scrollbarColor = isLight ? '#cbd5e1 transparent' : '#3a424d transparent';
 
   const items = externalItems ?? internalItems;
   const loading = externalLoading ?? internalLoading;
@@ -264,11 +278,11 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
   ];
 
   return (
-    <div className="h-full flex flex-col" style={{ background: MESH_BG }}>
+    <div className="h-full flex flex-col" style={{ background: meshBg, '--uq-border': borderColor } as React.CSSProperties}>
       <style>{KEYFRAME_CSS}</style>
 
       {/* ── Header ──────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-[#2f353d]">
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-[var(--uq-border)]">
         <span className="text-lg">{config.icon}</span>
         <h2
           className="text-sm font-bold uppercase tracking-wider"
@@ -295,7 +309,10 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
 
         <button
           onClick={() => refresh()}
-          className="p-1.5 rounded-lg bg-[#2f353d] hover:bg-[#363d47] text-neutral-400 transition-colors"
+          className="p-1.5 rounded-lg text-neutral-400 transition-colors"
+          style={{ background: btnBg }}
+          onMouseEnter={e => (e.currentTarget.style.background = btnHoverBg)}
+          onMouseLeave={e => (e.currentTarget.style.background = btnBg)}
           title="Refresh"
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -305,7 +322,7 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
       </div>
 
       {/* ── Toolbar ─────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-[#2f353d] flex-wrap">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--uq-border)] flex-wrap">
         {/* Search */}
         <div className="relative">
           <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -316,7 +333,7 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder={config.searchPlaceholder ?? 'Search...'}
-            className="pl-8 pr-3 py-1.5 rounded-lg bg-[#1a1e24] border border-[#2f353d] text-[11px] text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-[#5ec1ca]/40 w-48"
+            className="pl-8 pr-3 py-1.5 rounded-lg bg-[#1a1e24] border border-[var(--uq-border)] text-[11px] text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-[#5ec1ca]/40 w-48"
           />
         </div>
 
@@ -379,8 +396,8 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
         {/* Queue list (left, 40%) */}
         <div
           ref={listRef}
-          className="w-[40%] overflow-y-auto border-r border-[#2f353d]"
-          style={{ scrollbarWidth: 'thin', scrollbarColor: '#3a424d transparent' }}
+          className="w-[40%] overflow-y-auto border-r border-[var(--uq-border)]"
+          style={{ scrollbarWidth: 'thin', scrollbarColor: scrollbarColor }}
         >
           {loading && !items.length ? (
             <div className="flex items-center justify-center h-full text-neutral-600 text-[11px]">Loading…</div>
@@ -401,7 +418,7 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
                     return next;
                   })}
                   className="w-full flex items-center gap-2 px-4 py-2 text-[9px] font-bold uppercase tracking-wider text-neutral-500 hover:text-neutral-300 transition-colors sticky top-0 z-10"
-                  style={{ background: 'rgba(26,30,36,0.95)', backdropFilter: 'blur(8px)' }}
+                  style={{ background: groupHeaderBg, backdropFilter: 'blur(8px)' }}
                 >
                   <span className="transition-transform" style={{ transform: collapsedGroups.has(group) ? 'rotate(-90deg)' : 'rotate(0)' }}>▾</span>
                   {group}
@@ -462,7 +479,7 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
         {/* Detail panel (right, 60%) */}
         <div
           className="w-[60%] overflow-y-auto"
-          style={{ scrollbarWidth: 'thin', scrollbarColor: '#3a424d transparent' }}
+          style={{ scrollbarWidth: 'thin', scrollbarColor: scrollbarColor }}
         >
           {selectedItem ? (
             config.renderDetail(selectedItem, queueActions)

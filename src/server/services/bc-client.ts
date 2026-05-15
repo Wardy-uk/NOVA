@@ -146,12 +146,19 @@ export class BusinessCentralClient {
   async searchCustomers(query: string): Promise<BcRawCustomer[]> {
     const escaped = query.replace(/'/g, "''");
     const filter = `contains(displayName, '${escaped}') or contains(email, '${escaped}') or contains(number, '${escaped}')`;
-    const data = await this.request<{ value: BcRawCustomer[] }>('/customers', {
-      '$filter': filter,
-      '$top': '20',
-      '$select': 'id,number,displayName,email,phoneNumber,addressLine1,city,country,balance,blocked',
-    });
-    return data.value ?? [];
+    console.log(`[bc] Searching customers: filter=${filter}`);
+    try {
+      const data = await this.request<{ value: BcRawCustomer[] }>('/customers', {
+        '$filter': filter,
+        '$top': '20',
+        '$select': 'id,number,displayName,email,phoneNumber,addressLine1,city,country,balance,blocked',
+      });
+      console.log(`[bc] Search returned ${data.value?.length ?? 0} results`);
+      return data.value ?? [];
+    } catch (err) {
+      console.error(`[bc] Search failed:`, err instanceof Error ? err.message : err);
+      throw err;
+    }
   }
 
   async getSalesOrders(customerNumber: string): Promise<BcRawOrder[]> {

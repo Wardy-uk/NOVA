@@ -28,6 +28,12 @@ export function BcAccountBadge({ ticketKey, accountNumber, onLinked, compact }: 
   const [searchLoading, setSearchLoading] = useState(false);
 
   useEffect(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setSearchResults([]);
+  }, [ticketKey]);
+
+  useEffect(() => {
     setAccountName(null);
     if (!accountNumber) return;
     setLoading(true);
@@ -116,6 +122,7 @@ export function BcAccountBadge({ ticketKey, accountNumber, onLinked, compact }: 
                   onKeyDown={e => e.key === 'Enter' && handleSearch()}
                   placeholder="Account name, email, or account number..."
                   className="flex-1 bg-[#1f242b] border border-[#3a424d] rounded-lg px-3 py-2 text-[13px] text-neutral-200 placeholder-neutral-600 focus:border-amber-500/50 focus:outline-none"
+                  autoComplete="off"
                   autoFocus
                 />
                 <button
