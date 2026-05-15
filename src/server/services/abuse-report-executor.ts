@@ -60,6 +60,42 @@ export class AbuseReportExecutor {
         console.warn(`[abuse-report] Failed to insert abuse log for ${ticketKey} (non-blocking):`, err instanceof Error ? err.message : err);
       }
 
+      // 1b. Dedup check — skip stored proc if same contact+instance was processed in last 24h
+      try {
+        const pool = await this.externalDb.getAbuseReportPool();
+        const recentDupe = await pool.request()
+          .input('ContactId', parseInt(contactId, 10))
+          .input('InstanceId', parseInt(instanceId, 10))
+          .input('CurrentTicket', ticketKey)
+          .query(`SELECT TOP 1 TicketKey, LoggedAtUtc
+                  FROM dbo.AbuseReportAutomationLog
+                  WHERE ContactId = @ContactId
+                    AND InstanceId = @InstanceId
+                    AND TicketKey != @CurrentTicket
+                    AND LoggedAtUtc > DATEADD(HOUR, -24, GETUTCDATE())
+                  ORDER BY LoggedAtUtc DESC`);
+
+        if (recentDupe.recordset.length > 0) {
+          const prior = recentDupe.recordset[0];
+          console.log(`[abuse-report] Skipping stored proc for ${ticketKey} — same contact/instance already processed by ${prior.TicketKey} at ${prior.LoggedAtUtc}`);
+          try {
+            await this.jiraClient.addComment(
+              ticketKey,
+              `Duplicate abuse report — Contact ${contactId}, Instance ${instanceId} was already processed by ${prior.TicketKey}. Stored procedure skipped. Review and close this ticket.`,
+              { internal: true },
+            );
+          } catch { /* best effort */ }
+          return {
+            success: true,
+            actionId: 'abuse_report',
+            ticketKey,
+            detail: `Duplicate — already processed by ${prior.TicketKey}`,
+          };
+        }
+      } catch (err) {
+        console.warn(`[abuse-report] Dedup check failed for ${ticketKey} (proceeding anyway):`, err instanceof Error ? err.message : err);
+      }
+
       // 2. Call stored procedure on Admin DB (retry up to 3 times with pool reset + backoff)
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -130,6 +166,7 @@ export class AbuseReportExecutor {
         priority: 'High',
         expires_at: expiresAt,
         action_type: 'abuse_report',
+        source: 'nova_ai',
       });
 
       // 7. Log to hybrid_action_log
