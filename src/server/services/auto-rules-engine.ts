@@ -32,6 +32,24 @@ const ABUSE_FIELD_PATTERNS = {
   instanceUrl: /instance\s*url\s*[:=]\s*(https?:\/\/[^\s\r\n]+)/i,
 };
 
+function normaliseForComparison(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 500);
+}
+
+function descriptionSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  const short = a.length <= b.length ? a : b;
+  const long = a.length <= b.length ? b : a;
+  if (short.length === 0) return 0;
+  const prefix = Math.min(200, short.length);
+  if (short.slice(0, prefix) === long.slice(0, prefix)) return 1;
+  let matches = 0;
+  for (let i = 0; i < short.length; i++) {
+    if (short[i] === long[i]) matches++;
+  }
+  return matches / long.length;
+}
+
 export interface AutoRuleMatch {
   rule: AutoRule;
   ticketKey: string;
@@ -291,17 +309,22 @@ export class AutoRulesEngine {
       }
       jql += ' ORDER BY created DESC';
       try {
-        const result = await this.jiraClient.searchJql(jql, ['summary'], 5);
-        const exactMatch = result.issues.some((issue: { fields?: { summary?: string } }) => {
+        const result = await this.jiraClient.searchJql(jql, ['summary', 'description'], 5);
+        const duplicateMatch = result.issues.some((issue: { fields?: { summary?: string; description?: string | null } }) => {
           const issueSummary = issue.fields?.summary ?? '';
-          return issueSummary.toLowerCase().trim() === event.summary.toLowerCase().trim();
+          if (issueSummary.toLowerCase().trim() !== event.summary.toLowerCase().trim()) return false;
+          const candidateDesc = normaliseForComparison(issue.fields?.description ?? '');
+          const eventDesc = normaliseForComparison(event.description ?? '');
+          if (!candidateDesc && !eventDesc) return true;
+          if (!candidateDesc || !eventDesc) return false;
+          return descriptionSimilarity(eventDesc, candidateDesc) >= 0.8;
         });
-        if (exactMatch) {
-          console.log(`[auto-rules] Conditional '${rule.id}': found ${result.issues.length} sibling(s) for "${event.summary}"${rule.conditional.sameReporter ? ` from ${event.reporterEmail}` : ''} — condition met`);
+        if (duplicateMatch) {
+          console.log(`[auto-rules] Conditional '${rule.id}': found duplicate (subject+description match) for "${event.summary}"${rule.conditional.sameReporter ? ` from ${event.reporterEmail}` : ''} — condition met`);
         } else {
-          console.log(`[auto-rules] Conditional '${rule.id}': JQL returned ${result.issues.length} result(s) but no exact summary match for "${event.summary}"`);
+          console.log(`[auto-rules] Conditional '${rule.id}': JQL returned ${result.issues.length} result(s) but no subject+description match for "${event.summary}"`);
         }
-        return exactMatch;
+        return duplicateMatch;
       } catch (err) {
         console.error(`[auto-rules] Conditional JQL FAILED for '${rule.id}' on ${event.ticketKey}: ${err instanceof Error ? err.message : err}`);
         return false;
