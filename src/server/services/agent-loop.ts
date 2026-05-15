@@ -2022,8 +2022,8 @@ export class AgentLoop {
         `SELECT assignee_display, assignee_account_id FROM jira_issue_cache WHERE issue_key = ?`,
         [decision.ticketKey],
       ).then(rows => rows[0] ?? null);
-      if (cached?.assignee_display && cached.assignee_account_id && cached.assignee_account_id !== novaAccountId) {
-        assignedAgent = cached.assignee_display;
+      if (cached?.assignee_account_id && cached.assignee_account_id !== novaAccountId) {
+        assignedAgent = cached.assignee_account_id;
       }
     } catch { /* best effort — falls back to global queue */ }
 

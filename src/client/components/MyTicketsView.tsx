@@ -182,6 +182,18 @@ function QueueRow({
       )}
       <div className="flex items-center justify-between text-[10px] text-neutral-400">
         <div className="flex items-center gap-2">
+          {ticket.pendingDecision && !ticket.pendingDecision.shadowMode && (
+            <span
+              className="px-1.5 py-0.5 rounded font-bold text-[10px]"
+              style={{
+                background: 'rgba(245,158,11,0.15)',
+                color: '#f59e0b',
+                border: '1px solid rgba(245,158,11,0.3)',
+              }}
+            >
+              AI Approval
+            </span>
+          )}
           {fields.tier && (
             <span
               className="px-1.5 py-0.5 rounded font-semibold"
@@ -800,6 +812,7 @@ export function MyTicketsView({ tasks, loading, onUpdateTask, agentUsername, age
     next: bands.next.length,
     deferred: bands.deferred.length,
     waiting: bands.waiting.length,
+    approvals: queue?.tickets.filter(t => t.pendingDecision && !t.pendingDecision.shadowMode).length ?? 0,
   }), [queue, bands]);
 
   const selectedTicket = useMemo(() => {
@@ -885,6 +898,9 @@ export function MyTicketsView({ tasks, loading, onUpdateTask, agentUsername, age
             <HeaderStat label="Next" value={counts.next} accent="#5ec1ca" />
             <HeaderStat label="Deferred" value={counts.deferred} accent="#9b6aed" />
             <HeaderStat label="Waiting" value={counts.waiting} accent="#64748b" />
+            {counts.approvals > 0 && (
+              <HeaderStat label="AI Approvals" value={counts.approvals} accent="#f59e0b" />
+            )}
             <button
               onClick={() => refresh()}
               disabled={isLoading}

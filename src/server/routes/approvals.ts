@@ -93,11 +93,39 @@ export function createApprovalRoutes(
     res.json({ ok: true, data: { count } });
   });
 
-  // GET /api/approvals/by-agent/:agentName — approvals assigned to a specific agent (My Tickets)
-  router.get('/by-agent/:agentName', async (req: Request, res: Response) => {
-    const agentName = decodeURIComponent(req.params.agentName as string);
+  // GET /api/approvals/mine — approvals assigned to the current user's tickets (My Tickets)
+  router.get('/mine', async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    if (!user) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
+
+    // Resolve Jira account ID from agent_roster via email or display_name
+    let jiraAccountId: string | null = null;
+    try {
+      const roster = user.email
+        ? await query<{ jira_account_id: string }>(
+            `SELECT jira_account_id FROM agent_roster WHERE email = ? AND active = 1`,
+            [user.email],
+          ).then(rows => rows[0] ?? null)
+        : null;
+      if (roster) {
+        jiraAccountId = roster.jira_account_id;
+      } else {
+        const displayName = user.display_name ?? user.username;
+        const fallback = await query<{ jira_account_id: string }>(
+          `SELECT jira_account_id FROM agent_roster WHERE display_name = ? AND active = 1`,
+          [displayName],
+        ).then(rows => rows[0] ?? null);
+        jiraAccountId = fallback?.jira_account_id ?? null;
+      }
+    } catch { /* roster lookup failed */ }
+
+    if (!jiraAccountId) {
+      res.json({ ok: true, data: { items: [], canInteract: false } });
+      return;
+    }
+
     const status = req.query.status as string | undefined;
-    const items = await approvalQueries.getByAgent(agentName, status);
+    const items = await approvalQueries.getByAgent(jiraAccountId, status);
     const canInteract = isApprover(req);
     res.json({ ok: true, data: { items, canInteract } });
   });

@@ -2660,10 +2660,10 @@ export class ApprovalQueries {
     return novaRows.length ? agentDecisionToApproval(novaRows[0]) : undefined;
   }
 
-  async getByAgent(agentDisplayName: string, status?: string): Promise<ApprovalItem[]> {
+  async getByAgent(agentAccountId: string, status?: string): Promise<ApprovalItem[]> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
     let sql = `SELECT *, CAST(0 AS BIT) AS shadow_mode, NULL AS decision_id FROM approval_queue WHERE assigned_agent = ?`;
-    const params: unknown[] = [agentDisplayName];
+    const params: unknown[] = [agentAccountId];
     if (status) { sql += ` AND status = ?`; params.push(status); }
     sql += ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`;
     return query<ApprovalItem>(sql, params);
