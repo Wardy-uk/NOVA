@@ -548,6 +548,31 @@ export class AgentLoop {
         return true;
       });
 
+      // 1.1 NTPJ FAST PATH — assign immediately, skip auto-rules/triage/reasoner entirely
+      const ntpjHandledKeys = new Set<string>();
+      if (this.assignmentEngine) {
+        for (const event of deduped) {
+          if (!event.ticketKey.startsWith('NTPJ-')) continue;
+          try {
+            const assignment = await this.assignmentEngine.assignWithFallback(event.ticketKey, 'tpj', 'NTPJ');
+            if (assignment) {
+              await this.assignmentEngine.postAssignmentComment(event.ticketKey, assignment);
+              console.log(`[agent] NTPJ fast-path: ${event.ticketKey} → ${assignment.agent.display_name} (TPJ)`);
+            } else {
+              console.log(`[agent] NTPJ fast-path: ${event.ticketKey} — no agents available, will retry on sweep`);
+            }
+            const ticketState = this.lifecycleManager.getTicketState();
+            try { await ticketState.transition(event.ticketKey, 'handed_off'); } catch { /* best effort */ }
+          } catch (err) {
+            console.error(`[agent] NTPJ fast-path failed for ${event.ticketKey}:`, err instanceof Error ? err.message : err);
+          }
+          ntpjHandledKeys.add(event.ticketKey);
+          this.recentlyProcessedTickets.set(`${event.ticketKey}:${event.eventType}`, Date.now());
+          this.ticketsProcessed++;
+        }
+      }
+      const nonNtpjEvents = deduped.filter(e => !ntpjHandledKeys.has(e.ticketKey));
+
       // 1.5 AUTO-RULES EVALUATION (config-driven, deterministic — replaces hybrid detector)
       // All deterministic actions (plugin_to_tpj, abuse_report, auto-close, tier routing)
       // are now handled by the unified auto-rules engine. They execute in hybrid + live mode
@@ -555,7 +580,7 @@ export class AgentLoop {
       // deterministic rules are safe by definition.
       const autoRuleHandledKeys = new Set<string>();
       const shadowModeForRules = this.getShadowMode();
-      for (const event of deduped) {
+      for (const event of nonNtpjEvents) {
         try {
           const handled = await this.autoRulesEngine.evaluateAndExecute(event, shadowModeForRules);
           if (handled) {
@@ -573,7 +598,7 @@ export class AgentLoop {
         }
       }
 
-      const llmEvents = deduped.filter(e => !autoRuleHandledKeys.has(e.ticketKey));
+      const llmEvents = nonNtpjEvents.filter(e => !autoRuleHandledKeys.has(e.ticketKey));
 
       // DB-level dedup: skip ticket_created/backfill if already triaged in last 30 min
       const dedupedLlmEvents: typeof llmEvents = [];
