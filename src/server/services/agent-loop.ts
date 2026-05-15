@@ -2006,6 +2006,19 @@ export class AgentLoop {
 
     const expiresAt = toSqliteDatetime(addBusinessHours(new Date(), 2));
 
+    // Look up current human assignee — route approval to their My Tickets instead of global queue
+    let assignedAgent: string | undefined;
+    try {
+      const novaAccountId = this.settings.get('nova_ai_jira_account_id') ?? '';
+      const cached = await query<{ assignee_display: string | null; assignee_account_id: string | null }>(
+        `SELECT assignee_display, assignee_account_id FROM jira_issue_cache WHERE issue_key = ?`,
+        [decision.ticketKey],
+      ).then(rows => rows[0] ?? null);
+      if (cached?.assignee_display && cached.assignee_account_id && cached.assignee_account_id !== novaAccountId) {
+        assignedAgent = cached.assignee_display;
+      }
+    } catch { /* best effort — falls back to global queue */ }
+
     try {
       const approvalId = await this.approvalQueries.create({
         ticket_id: decision.ticketKey,
@@ -2020,6 +2033,7 @@ export class AgentLoop {
         expires_at: expiresAt,
         action_type: decision.action,
         source: 'nova_ai',
+        assigned_agent: assignedAgent,
       });
 
       await this.observer.logOutcome(decisionId, {
@@ -2342,9 +2356,35 @@ export class AgentLoop {
           const closableQwTypesForComment = ['spam', 'vendor_email', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
           const isCloseAction = (actionType && closableActions.includes(actionType))
             || (quickWinType && closableQwTypesForComment.includes(quickWinType));
-          await this.jiraClient.addComment(ticketKey, responseText, { internal: !!isCloseAction });
-          console.log(`[agent] Posted approved response on ${ticketKey} (${isCloseAction ? 'internal' : 'public'})`);
+          // Close/resolve: customer-facing message goes PUBLIC, reasoning goes as separate internal note
+          await this.jiraClient.addComment(ticketKey, responseText, { internal: false });
+          console.log(`[agent] Posted approved response on ${ticketKey} (public)`);
           commentPosted = true;
+
+          if (isCloseAction) {
+            try {
+              const parts: string[] = [`🤖 NOVA AI — Close/Resolve approved by ${decidedBy ?? 'unknown'}`];
+              if (actionType) parts.push(`Action: ${actionType}`);
+              if (quickWinType) parts.push(`Quick-win type: ${quickWinType}`);
+              // Pull reasoning from the decision record
+              const decMeta = await query<{ reasoning: string; confidence: number; output: string }>(
+                `SELECT TOP 1 reasoning, confidence, output FROM agent_decisions WHERE ticket_id = ? ORDER BY created_at DESC`,
+                [ticketKey],
+              ).then(rows => rows[0] ?? null);
+              if (decMeta) {
+                if (decMeta.confidence != null) parts.push(`Confidence: ${(decMeta.confidence * 100).toFixed(0)}%`);
+                if (decMeta.reasoning) parts.push(`Reasoning: ${decMeta.reasoning}`);
+                try {
+                  const out = JSON.parse(decMeta.output || '{}');
+                  if (out.classification?.category) parts.push(`Category: ${out.classification.category}`);
+                } catch { /* ignore */ }
+              }
+              await this.jiraClient.addComment(ticketKey, parts.join('\n'), { internal: true });
+              console.log(`[agent] Posted internal reasoning note on ${ticketKey}`);
+            } catch (noteErr) {
+              console.warn(`[agent] Failed to post internal reasoning note on ${ticketKey}:`, noteErr instanceof Error ? noteErr.message : noteErr);
+            }
+          }
 
           // Lifecycle: move to response_sent → awaiting_customer
           try {

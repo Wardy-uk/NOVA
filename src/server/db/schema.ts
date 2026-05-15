@@ -1804,6 +1804,10 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('jira_issue_cache', 'bc_account_number') IS NULL
      ALTER TABLE jira_issue_cache ADD bc_account_number NVARCHAR(100) NULL;`,
 
+    // Snag 13: Route approvals to assigned agent's My Tickets
+    `IF COL_LENGTH('approval_queue', 'assigned_agent') IS NULL
+     ALTER TABLE approval_queue ADD assigned_agent NVARCHAR(200) NULL;`,
+
     // CSAT surveys
     `IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'portal_csat_surveys')
      CREATE TABLE portal_csat_surveys (

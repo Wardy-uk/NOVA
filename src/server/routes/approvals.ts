@@ -93,6 +93,15 @@ export function createApprovalRoutes(
     res.json({ ok: true, data: { count } });
   });
 
+  // GET /api/approvals/by-agent/:agentName — approvals assigned to a specific agent (My Tickets)
+  router.get('/by-agent/:agentName', async (req: Request, res: Response) => {
+    const agentName = decodeURIComponent(req.params.agentName as string);
+    const status = req.query.status as string | undefined;
+    const items = await approvalQueries.getByAgent(agentName, status);
+    const canInteract = isApprover(req);
+    res.json({ ok: true, data: { items, canInteract } });
+  });
+
   // GET /api/approvals/by-ticket/:ticketId — find pending approval for a ticket
   router.get('/by-ticket/:ticketId', async (req: Request, res: Response) => {
     const item = await approvalQueries.getPendingByTicket(req.params.ticketId as string);

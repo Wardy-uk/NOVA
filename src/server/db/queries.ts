@@ -2609,7 +2609,11 @@ export class ApprovalQueries {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
     let sql = `SELECT *, CAST(0 AS BIT) AS shadow_mode, NULL AS decision_id FROM approval_queue`;
     const params: string[] = [];
-    if (status) { sql += ` WHERE status = ?`; params.push(status); }
+    const conditions: string[] = [];
+    if (status) { conditions.push(`status = ?`); params.push(status); }
+    // Exclude agent-assigned approvals from the global queue — those show in My Tickets
+    conditions.push(`assigned_agent IS NULL`);
+    if (conditions.length) sql += ` WHERE ${conditions.join(' AND ')}`;
     sql += ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`;
     const queueItems = await query<ApprovalItem>(sql, params);
     // getNovaDecisions already excludes tickets that have any approval_queue entry
@@ -2656,6 +2660,15 @@ export class ApprovalQueries {
     return novaRows.length ? agentDecisionToApproval(novaRows[0]) : undefined;
   }
 
+  async getByAgent(agentDisplayName: string, status?: string): Promise<ApprovalItem[]> {
+    await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
+    let sql = `SELECT *, CAST(0 AS BIT) AS shadow_mode, NULL AS decision_id FROM approval_queue WHERE assigned_agent = ?`;
+    const params: unknown[] = [agentDisplayName];
+    if (status) { sql += ` AND status = ?`; params.push(status); }
+    sql += ` ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`;
+    return query<ApprovalItem>(sql, params);
+  }
+
   async withdrawByTicketKey(ticketKey: string, reason: string): Promise<number> {
     const result = await execute(
       `UPDATE approval_queue SET status = 'cancelled', decided_by = ?, decided_at = GETUTCDATE()
@@ -2676,7 +2689,7 @@ export class ApprovalQueries {
 
   async getPendingCount(): Promise<number> {
     await execute(`UPDATE approval_queue SET status = 'timed_out' WHERE status = 'pending' AND expires_at <= GETUTCDATE()`);
-    const queueRow = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending'`);
+    const queueRow = await queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM approval_queue WHERE status = 'pending' AND assigned_agent IS NULL`);
     const novaRow = await queryOne<{ count: number }>(
       `SELECT COUNT(DISTINCT d.ticket_id) as count FROM agent_decisions d
        WHERE d.approval_required = 1 AND d.shadow_mode = 0
@@ -2742,13 +2755,15 @@ export class ApprovalQueries {
     ticket_id: string; ticket_summary: string; reporter_name?: string; reporter_email?: string;
     ai_response_adf?: string; conversation_json?: string; kb_sources?: string;
     resume_url: string; priority?: string; expires_at: string; action_type?: string; source?: string;
+    assigned_agent?: string;
   }): Promise<number> {
     return executeAndGetId(
-      `INSERT INTO approval_queue (ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, expires_at, action_type, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO approval_queue (ticket_id, ticket_summary, reporter_name, reporter_email, ai_response_adf, conversation_json, kb_sources, resume_url, priority, expires_at, action_type, source, assigned_agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [item.ticket_id, item.ticket_summary, item.reporter_name || null, item.reporter_email || null,
        item.ai_response_adf || null, item.conversation_json || null, item.kb_sources || null,
-       item.resume_url, item.priority || null, item.expires_at, item.action_type || 'draft_response', item.source || 'n8n_ai']
+       item.resume_url, item.priority || null, item.expires_at, item.action_type || 'draft_response', item.source || 'n8n_ai',
+       item.assigned_agent || null]
     );
   }
 

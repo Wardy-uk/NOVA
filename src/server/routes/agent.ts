@@ -88,7 +88,11 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     return kpiPool;
   }
 
-  router.use(requireRole('admin', 'super_admin'));
+  // Allow next-action endpoints for any authenticated user (used in My Tickets + approval views)
+  router.use((req, res, next) => {
+    if (req.path.startsWith('/next-action/')) return next();
+    requireRole('admin', 'super_admin')(req, res, next);
+  });
 
   router.get('/status', (_req, res) => {
     res.json({ ok: true, data: agentLoop.status });
@@ -3694,7 +3698,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: { count: nextActionMissingCount } });
   });
 
-  router.get('/next-action/:ticketKey', requireRole('admin'), async (req, res) => {
+  router.get('/next-action/:ticketKey', async (req, res) => {
     const ticketKey = String(req.params.ticketKey);
     try {
       const jira = agentLoop.getJiraClient();
