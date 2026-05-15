@@ -394,6 +394,10 @@ export class AutoRulesEngine {
       } else if (action.type === 'set_tier') {
         await this.handleSetTier(ticketKey, action as { type: 'set_tier'; tier: string; note: string }, rule);
       } else if (action.type === 'plugin_to_tpj') {
+        if (ticketKey.startsWith('NTPJ-')) {
+          console.log(`[auto-rules] Skipping plugin_to_tpj on ${ticketKey}: already an NTPJ ticket`);
+          return;
+        }
         await this.handlePluginToTpj(match, event);
       } else if (action.type === 'abuse_report') {
         await this.handleAbuseReport(match, event);
