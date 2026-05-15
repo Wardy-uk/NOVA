@@ -690,7 +690,7 @@ Description snippet: ${opts.description.slice(0, 300)}
 Customer first name: ${firstName}
 Assigned agent: ${opts.assigneeName}`;
 
-    const GenericReplySchema = z.object({ reply: z.string() });
+    const GenericReplySchema = z.object({ reply: z.string() }) as z.ZodType<{ reply: string }>;
 
     try {
       const result = await this.llmService.call<{ reply: string }>(
