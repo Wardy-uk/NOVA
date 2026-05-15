@@ -13,7 +13,7 @@ const CriticResultSchema = z.object({
   reason: z.string(),
 });
 
-const HIGH_STAKES_ACTIONS = ['close', 'resolve', 'draft_response', 'escalate', 'quick_win_close', 'transition'];
+const HIGH_STAKES_ACTIONS = ['close', 'resolve', 'escalate', 'quick_win_close', 'transition'];
 
 const CF_REQUEST_TYPE = 'customfield_10020';
 
@@ -243,7 +243,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
 
   private async postComment(decision: AgentDecision): Promise<ActionResult> {
     const text = (decision.output.draft_response as string) ?? (decision.output.response as string) ?? (decision.output.comment as string) ?? decision.reasoning;
-    // GUARDRAIL: Actor must NEVER post public comments. Public replies go through approval callback only.
+    // GUARDRAIL: Actor must NEVER post public comments via this method. Public replies use postPublicReply() only.
     if (Actor.looksLikeStructuredPayload(text)) {
       console.error(`[actor] BLOCKED internal postComment on ${decision.ticketKey}: text looks like structured/JSON data`);
       return { success: false, action: decision.action, ticketKey: decision.ticketKey, detail: 'Blocked: comment text contained structured/JSON data.' };
@@ -251,6 +251,15 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
     await this.jiraClient.addComment(decision.ticketKey, text, { internal: true });
 
     return { success: true, action: decision.action, ticketKey: decision.ticketKey, detail: 'Posted internal comment.' };
+  }
+
+  async postPublicReply(ticketKey: string, text: string): Promise<ActionResult> {
+    if (Actor.looksLikeStructuredPayload(text)) {
+      console.error(`[actor] BLOCKED public reply on ${ticketKey}: text looks like structured/JSON data`);
+      return { success: false, action: 'public_reply', ticketKey, detail: 'Blocked: response contained structured/JSON data.' };
+    }
+    await this.jiraClient.addComment(ticketKey, text, { internal: false });
+    return { success: true, action: 'public_reply', ticketKey, detail: 'Posted public reply.' };
   }
 
   private async transitionTicket(decision: AgentDecision): Promise<ActionResult> {

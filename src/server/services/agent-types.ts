@@ -35,6 +35,8 @@ export type TicketLifecycle =
   | 'awaiting_customer'
   | 'customer_replied'
   | 're_evaluating'
+  | 'ai_conversation'
+  | 'handed_off'
   | 'resolved'
   | 'stale'
   | 'chase_sent'
@@ -76,7 +78,9 @@ export type AgentAction =
   | 'plugin_to_tpj'
   | 'abuse_report'
   | 'quick_win_close'
-  | 'undo_close';
+  | 'undo_close'
+  | 'public_reply'
+  | 'handoff';
 
 export interface CommentSnapshot {
   author: string;

@@ -3,12 +3,14 @@ import type { TicketLifecycle, TicketLifecycleState } from './agent-types.js';
 
 const VALID_TRANSITIONS: Record<TicketLifecycle, TicketLifecycle[]> = {
   new:                  ['triaged'],
-  triaged:              ['awaiting_approval', 'response_sent', 'awaiting_customer', 'resolved', 'closed'],
+  triaged:              ['awaiting_approval', 'response_sent', 'awaiting_customer', 'ai_conversation', 'handed_off', 'resolved', 'closed'],
   awaiting_approval:    ['response_sent', 'awaiting_customer', 'resolved', 'closed'],
-  response_sent:        ['awaiting_customer', 'customer_replied', 'resolved', 'closed'],
+  response_sent:        ['awaiting_customer', 'customer_replied', 'ai_conversation', 'resolved', 'closed'],
   awaiting_customer:    ['customer_replied', 'stale', 'resolved', 'closed'],
-  customer_replied:     ['re_evaluating', 'triaged', 'awaiting_approval', 'resolved', 'closed'],
+  customer_replied:     ['re_evaluating', 'triaged', 'awaiting_approval', 'ai_conversation', 'resolved', 'closed'],
   re_evaluating:        ['awaiting_approval', 'response_sent', 'awaiting_customer', 'resolved', 'closed'],
+  ai_conversation:      ['ai_conversation', 'handed_off', 'awaiting_approval', 'resolved', 'closed'],
+  handed_off:           ['customer_replied', 'resolved', 'closed'],
   stale:                ['chase_sent', 'auto_close_candidate', 'customer_replied', 'resolved', 'closed'],
   chase_sent:           ['customer_replied', 'auto_close_candidate', 'resolved', 'closed'],
   auto_close_candidate: ['closed', 'customer_replied', 'resolved'],

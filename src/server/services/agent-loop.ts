@@ -759,8 +759,8 @@ export class AgentLoop {
       console.log(`[agent] Running lifecycle sweep...`);
       const result = await this.lifecycleManager.sweep(shadow);
       const total = result.approvalTimeouts + result.customerReplies + result.staleTransitions
-        + result.chaseSent + result.autoCloseCandidates + result.autoClosed;
-      console.log(`[agent] Lifecycle sweep complete — ${total} actions (timeouts: ${result.approvalTimeouts}, replies: ${result.customerReplies}, stale: ${result.staleTransitions}, chased: ${result.chaseSent}, closed: ${result.autoClosed})`);
+        + result.chaseSent + result.autoCloseCandidates + result.autoClosed + result.aiConversationTimeouts;
+      console.log(`[agent] Lifecycle sweep complete — ${total} actions (timeouts: ${result.approvalTimeouts}, replies: ${result.customerReplies}, stale: ${result.staleTransitions}, chased: ${result.chaseSent}, closed: ${result.autoClosed}, ai_conv_timeout: ${result.aiConversationTimeouts})`);
     } catch (err) {
       this.errorCount++;
       console.error(`[agent] Lifecycle sweep failed:`, err instanceof Error ? err.message : err);
@@ -1026,10 +1026,7 @@ export class AgentLoop {
       [decision.ticketKey],
     );
     if (ticket) {
-      // "AI Request" is NOT excluded here — after triage, NOVA needs to assign even
-      // while the ticket is still typed as "AI Request". The request type gets updated
-      // to the classified type immediately after assignment (see below).
-      const excludedTypes = ['Escalation', 'Franchise Hub', 'New Products Launch'];
+      const excludedTypes = ['Escalation'];
       if (ticket.request_type && excludedTypes.includes(ticket.request_type)) return;
       if (ticket.labels && ticket.labels.includes('TPJ_Feed')) return;
     }
@@ -1195,7 +1192,7 @@ export class AgentLoop {
            AND c.created_at < DATEADD(minute, -5, GETUTCDATE())
            AND c.created_at >= DATEADD(hour, -${maxAgeHours}, GETUTCDATE())
            AND c.project_key IN (${projectPlaceholders})
-           AND (c.request_type IS NULL OR c.request_type NOT IN ('Escalation', 'Franchise Hub', 'New Products Launch'))
+           AND (c.request_type IS NULL OR c.request_type NOT IN ('Escalation'))
            AND (c.labels IS NULL OR c.labels NOT LIKE '%TPJ_Feed%')
            AND NOT EXISTS (
              SELECT 1 FROM approval_queue aq
@@ -1453,6 +1450,31 @@ export class AgentLoop {
       return;
     }
 
+    // ── NTPJ: Immediate round-robin assignment, no AI conversation ──
+    const project = this.assignmentEngine?.resolveProjectFromTicketKey(decision.ticketKey) ?? 'NT';
+    if (project === 'NTPJ') {
+      if (decision.eventType === 'ticket_created' && decision.action !== 'no_action') {
+        try { await ticketState.transition(decision.ticketKey, 'triaged', { lastTriageDecisionId: decisionId }); } catch { /* best effort */ }
+      }
+      if (this.assignmentEngine) {
+        try {
+          const assignment = await this.assignmentEngine.assignWithFallback(decision.ticketKey, 'tpj', 'NTPJ');
+          if (assignment) {
+            await this.assignmentEngine.postAssignmentComment(decision.ticketKey, assignment);
+            console.log(`[agent] NTPJ immediate assign: ${decision.ticketKey} → ${assignment.agent.display_name} (TPJ)`);
+            await this.observer.logOutcome(decisionId, {
+              success: true, action: 'assign', ticketKey: decision.ticketKey,
+              detail: `NTPJ immediate round-robin to ${assignment.agent.display_name} (TPJ pool).`,
+            });
+          }
+        } catch (err) {
+          console.error(`[agent] NTPJ assignment failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+        }
+      }
+      this.ticketsProcessed++;
+      return;
+    }
+
     // Lifecycle: transition to 'triaged' on new ticket triage
     if (decision.eventType === 'ticket_created' && decision.action !== 'no_action') {
       try {
@@ -1530,16 +1552,13 @@ export class AgentLoop {
 
     // Shadow mode: log what WOULD happen but don't take external actions
     if (decision.shadowMode) {
-      const wouldDo = decision.approvalRequired && decision.action === 'draft_response'
-        ? 'submit to approval queue'
-        : `execute ${decision.action}`;
       await this.observer.logOutcome(decisionId, {
         success: true,
         action: decision.action,
         ticketKey: decision.ticketKey,
-        detail: `[SHADOW] Would ${wouldDo}. Draft: ${((decision.output.draft_response as string) ?? '').slice(0, 200)}`,
+        detail: `[SHADOW] Would execute first-reply pipeline. Draft: ${((decision.output.draft_response as string) ?? '').slice(0, 200)}`,
       });
-      console.log(`[agent] [SHADOW] ${decision.ticketKey}: would ${wouldDo} (confidence: ${decision.confidence.toFixed(2)})`);
+      console.log(`[agent] [SHADOW] ${decision.ticketKey}: would execute first-reply pipeline (confidence: ${decision.confidence.toFixed(2)})`);
       this.ticketsProcessed++;
       return;
     }
@@ -1547,7 +1566,6 @@ export class AgentLoop {
     // Quick-win auto-close (only reached in non-shadow mode)
     const qw = decision.output.quick_win as { type?: string; confidence?: number; reasoning?: string } | undefined;
     const closableQwTypes = ['spam', 'vendor_email', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
-    // Auto-reply and out-of-office are unambiguous — always auto-close at high confidence
     const alwaysAutoCloseTypes = ['auto_reply', 'out_of_office'];
     if (qw?.type && qw.type !== 'none') {
       const isAlwaysClose = alwaysAutoCloseTypes.includes(qw.type) && (qw.confidence ?? 0) >= 0.85;
@@ -1564,14 +1582,13 @@ export class AgentLoop {
         return;
       }
 
-      // Quick win detected but auto-close not enabled/allowed — submit to approval queue instead of silently dropping
+      // Quick win detected but auto-close not enabled/allowed — submit to approval queue for close
       if (closableQwTypes.includes(qw.type) && (qw.confidence ?? 0) >= 0.85 && decision.action === 'draft_response') {
         decision.action = 'transition';
         decision.approvalRequired = true;
         console.log(`[agent] Quick win ${qw.type} (${(qw.confidence ?? 0).toFixed(2)}) — routing to approval queue for close`);
       }
 
-      // For duplicates, enrich the decision with the reasoning so approvers see which ticket is the original
       if (qw.type === 'duplicate' && qw.reasoning) {
         const note = decision.output.internal_note;
         if (note && typeof note === 'object' && 'summary' in (note as any)) {
@@ -1583,23 +1600,81 @@ export class AgentLoop {
       }
     }
 
-    // Route based on action + approval requirement
-    let pendingApproval = false;
-    const autoApproveThreshold = parseFloat(this.settings.get('agent_auto_approve_threshold') || '0.85');
-    if (decision.approvalRequired && decision.action === 'draft_response'
-        && decision.confidence >= autoApproveThreshold) {
-      console.log(`[agent] Auto-approved at submission: ${decision.ticketKey} (confidence ${decision.confidence.toFixed(2)} >= ${autoApproveThreshold})`);
-      await this.observer.logOutcome(decisionId, {
-        success: true, action: 'draft_response', ticketKey: decision.ticketKey,
-        detail: `Auto-approved at submission (confidence ${(decision.confidence * 100).toFixed(0)}% >= threshold ${(autoApproveThreshold * 100).toFixed(0)}%). Executing immediately.`,
-      });
-      const result = await this.actor.execute(decision);
-      if (!result.success) {
-        this.errorCount++;
-        console.warn(`[agent] Auto-approved action failed for ${decision.ticketKey}: ${result.error}`);
+    // ── NT First-Reply Pipeline ──
+    // For draft_response actions: post first reply as public comment, bypassing approval queue.
+    // Approval queue is ONLY for transition (close/resolve) actions.
+    const FIRST_REPLY_CONFIDENCE_THRESHOLD = parseFloat(this.settings.get('agent_first_reply_confidence_threshold') || '0.85');
+    const isDraftResponse = decision.action === 'draft_response' || decision.action === 'respond';
+    const isNewTicketTriage = decision.eventType === 'ticket_created';
+    const existingLifecycle = (await ticketState.get(decision.ticketKey))?.lifecycle;
+
+    // ── Conversation continuation (ai_conversation tickets) ──
+    if (existingLifecycle === 'ai_conversation' && decision.eventType === 'comment_added' && isDraftResponse) {
+      const sentiment = (decision.inputs.sentiment as string) ?? 'neutral';
+      const isFrustrated = sentiment === 'frustrated' || sentiment === 'angry';
+
+      // Count prior AI public replies on this ticket
+      const priorReplies = await query<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM agent_decisions
+         WHERE ticket_id = ? AND action IN ('public_reply', 'draft_response')
+           AND shadow_mode = 0 AND outcome LIKE '%public reply%'`,
+        [decision.ticketKey],
+      );
+      const exchangeCount = priorReplies[0]?.cnt ?? 0;
+
+      if (isFrustrated || exchangeCount >= 3 || decision.confidence < FIRST_REPLY_CONFIDENCE_THRESHOLD) {
+        const reason = isFrustrated ? 'frustrated sentiment' : exchangeCount >= 3 ? 'max exchanges reached' : 'confidence dropped';
+        console.log(`[agent] AI conversation handoff for ${decision.ticketKey}: ${reason}`);
+        await this.executeHandoff(decision, decisionId, ticketState, reason);
+        this.ticketsProcessed++;
+        return;
       }
-    } else if (decision.approvalRequired && (decision.action === 'draft_response' || decision.action === 'transition')) {
-      // Dedup: skip if there's already a pending approval for this ticket
+
+      // Continue conversation: post another public reply
+      const draftText = (decision.output.draft_response as string) ?? '';
+      if (draftText) {
+        const replyResult = await this.actor.postPublicReply(decision.ticketKey, draftText);
+        await this.observer.logOutcome(decisionId, replyResult);
+        if (replyResult.success) {
+          console.log(`[agent] AI conversation reply #${exchangeCount + 1} on ${decision.ticketKey} (confidence: ${decision.confidence.toFixed(2)})`);
+          await ticketState.transition(decision.ticketKey, 'ai_conversation', {
+            lastAgentActionAt: new Date().toISOString(),
+          });
+        }
+      }
+      this.ticketsProcessed++;
+      return;
+    }
+
+    // ── First reply on new ticket triage ──
+    if (isNewTicketTriage && isDraftResponse) {
+      const draftText = (decision.output.draft_response as string) ?? '';
+
+      if (decision.confidence >= FIRST_REPLY_CONFIDENCE_THRESHOLD && draftText && !looksLikeStructuredPayload(draftText)) {
+        // High confidence: post AI draft as public first reply
+        const replyResult = await this.actor.postPublicReply(decision.ticketKey, draftText);
+        await this.observer.logOutcome(decisionId, replyResult);
+
+        if (replyResult.success) {
+          console.log(`[agent] First reply posted (AI draft) on ${decision.ticketKey} — confidence ${(decision.confidence * 100).toFixed(0)}%, entering ai_conversation`);
+          try {
+            await ticketState.transition(decision.ticketKey, 'ai_conversation', {
+              lastAgentActionAt: new Date().toISOString(),
+            });
+          } catch { /* best effort */ }
+        }
+      } else {
+        // Low confidence: round-robin first, then generic first reply, then handoff
+        console.log(`[agent] Low confidence (${(decision.confidence * 100).toFixed(0)}%) on ${decision.ticketKey} — generic first reply + immediate handoff`);
+        await this.executeHandoff(decision, decisionId, ticketState, 'low confidence first reply');
+      }
+
+      this.ticketsProcessed++;
+      return;
+    }
+
+    // ── Approval queue: ONLY for transition (close/resolve) actions ──
+    if (decision.approvalRequired && decision.action === 'transition') {
       const existingPending = this.approvalQueries
         ? await this.approvalQueries.getPendingByTicket(decision.ticketKey)
         : null;
@@ -1607,45 +1682,169 @@ export class AgentLoop {
         console.log(`[agent] Skipping duplicate approval for ${decision.ticketKey}: pending approval #${existingPending.id} already exists`);
       } else {
         await this.submitToApprovalQueue(decision, decisionId);
-        pendingApproval = true;
       }
-    } else {
-      // Autonomous execution — log alert for visibility
-      const autonomyCheck = this.reasoner.getLastAutonomyCheck();
-      if (autonomyCheck?.allowed && decision.action === 'draft_response') {
-        const classification = decision.output.classification as { category?: string } | undefined;
-        await this.alertService.createAutonomyAlert({
-          ticketKey: decision.ticketKey,
-          action: decision.action,
-          confidence: decision.confidence,
-          category: classification?.category ?? 'unknown',
-        });
-        console.log(`[agent] Autonomous execution: ${decision.action} on ${decision.ticketKey}`);
-      }
-
-      const result = await this.actor.execute(decision);
-      await this.observer.logOutcome(decisionId, result);
-      if (!result.success) {
-        this.errorCount++;
-        console.warn(`[agent] Action failed for ${decision.ticketKey}: ${result.error}`);
-      }
+      this.ticketsProcessed++;
+      return;
     }
 
-    // Auto-assign via Round Robin if ticket is still unassigned after action.
-    // Skip when decision is pending approval — NOVA hasn't replied yet, so the
-    // human agent would see the ticket with no first response (Snag 18).
-    if (!decision.inputs.assignee && !decision.shadowMode && !pendingApproval) {
+    // ── All other actions: execute directly ──
+    const result = await this.actor.execute(decision);
+    await this.observer.logOutcome(decisionId, result);
+    if (!result.success) {
+      this.errorCount++;
+      console.warn(`[agent] Action failed for ${decision.ticketKey}: ${result.error}`);
+    }
+
+    // Auto-assign via Round Robin if ticket is still unassigned after action
+    if (!decision.inputs.assignee && !decision.shadowMode) {
       if (this.assignmentEngine) {
         console.log(`[agent] Auto-assign check for ${decision.ticketKey}: unassigned, attempting round-robin`);
         await this.tryAutoAssign(decision);
-      } else {
-        console.warn(`[agent] Auto-assign skipped for ${decision.ticketKey}: assignmentEngine not initialised`);
       }
-    } else if (pendingApproval) {
-      console.log(`[agent] Auto-assign deferred for ${decision.ticketKey}: awaiting approval before assignment`);
     }
 
     this.ticketsProcessed++;
+  }
+
+  /**
+   * Execute the full handoff sequence: round-robin → generic first reply (if needed) → handoff summary → public handoff message → request type update.
+   */
+  private async executeHandoff(
+    decision: AgentDecision,
+    decisionId: number,
+    ticketState: import('./ticket-state.js').TicketStateStore,
+    reason: string,
+  ): Promise<void> {
+    const reporterName = (decision.inputs.reporter as string) ?? 'there';
+    const classification = decision.output.classification as { category?: string; ticket_type?: string } | undefined;
+
+    // Step 1: Round-robin to Customer Care (resolve assignee before generating messages)
+    let assigneeName: string | null = null;
+    if (this.assignmentEngine) {
+      try {
+        const assignment = await this.assignmentEngine.assignWithFallback(decision.ticketKey, 'cc', 'NT');
+        if (assignment) {
+          assigneeName = assignment.agent.display_name;
+          await this.assignmentEngine.postAssignmentComment(decision.ticketKey, assignment);
+          console.log(`[agent] Handoff assignment: ${decision.ticketKey} → ${assigneeName} (CC)`);
+        }
+      } catch (err) {
+        console.warn(`[agent] Handoff assignment failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    // Step 2: Generic first reply (only for new tickets with low confidence, not for conversation timeouts)
+    if (reason === 'low confidence first reply') {
+      try {
+        const genericReply = await this.reasoner.generateGenericFirstReply({
+          ticketKey: decision.ticketKey,
+          summary: (decision.inputs.summary as string) ?? decision.ticketKey,
+          description: (decision.inputs.description as string) ?? '',
+          reporterName,
+          assigneeName: assigneeName ?? 'our Customer Care team',
+        });
+        const replyResult = await this.actor.postPublicReply(decision.ticketKey, genericReply);
+        if (replyResult.success) {
+          console.log(`[agent] Generic first reply posted on ${decision.ticketKey}`);
+        }
+      } catch (err) {
+        console.warn(`[agent] Generic first reply failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    // Step 3: Handoff summary (internal comment)
+    try {
+      const exchanges = await this.getAiExchanges(decision.ticketKey);
+      const handoffSummary = await this.reasoner.generateHandoffSummary({
+        ticketKey: decision.ticketKey,
+        summary: (decision.inputs.summary as string) ?? '',
+        category: classification?.category ?? 'unknown',
+        ticketType: classification?.ticket_type ?? 'unknown',
+        confidence: decision.confidence,
+        exchanges,
+        kbReferences: ((decision.inputs.kb_matches as any[]) ?? []).map((m: any) => m.title ?? m.path ?? 'KB article').slice(0, 5),
+        recommendedNextSteps: decision.reasoning?.slice(0, 500) ?? '',
+      });
+      await this.jiraClient.addComment(decision.ticketKey, handoffSummary, { internal: true });
+      console.log(`[agent] Handoff summary posted on ${decision.ticketKey}`);
+    } catch (err) {
+      console.warn(`[agent] Handoff summary failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+
+    // Step 4: Public handoff message (only if not already posted a first reply in this same call)
+    if (reason !== 'low confidence first reply') {
+      try {
+        const isWorkingHours = this.assignmentEngine?.isWorkingTime() ?? true;
+        const nextWorkingDay = this.getNextWorkingDayLabel();
+        const handoffMsg = await this.reasoner.generateHandoffMessage({
+          reporterName,
+          assigneeName,
+          isWorkingHours,
+          nextWorkingDay,
+        });
+        await this.actor.postPublicReply(decision.ticketKey, handoffMsg);
+        console.log(`[agent] Handoff message posted on ${decision.ticketKey}`);
+      } catch (err) {
+        console.warn(`[agent] Handoff message failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    // Step 5: Update request type
+    try {
+      await this.updateRequestTypeAfterAssign(decision);
+    } catch (err) {
+      console.warn(`[agent] Request type update failed during handoff for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+
+    // Step 6: Transition to handed_off
+    try {
+      await ticketState.transition(decision.ticketKey, 'handed_off', {
+        assigneeName,
+        lastAgentActionAt: new Date().toISOString(),
+      });
+    } catch { /* best effort */ }
+
+    await this.observer.logOutcome(decisionId, {
+      success: true, action: 'handoff', ticketKey: decision.ticketKey,
+      detail: `Handoff complete (${reason}). Assigned to ${assigneeName ?? 'CC pool'}.`,
+    });
+  }
+
+  private async getAiExchanges(ticketKey: string): Promise<Array<{ role: 'ai' | 'customer'; text: string; at: string }>> {
+    try {
+      const comments = await query<{
+        body_text: string; author_display: string; is_public: number; jira_created: string;
+      }>(
+        `SELECT body_text, author_display, is_public, jira_created
+         FROM jira_comment_cache
+         WHERE issue_key = ? AND is_public = 1
+         ORDER BY jira_created ASC`,
+        [ticketKey],
+      );
+      const novaNames = ['NOVA AI', 'NOVA', 'nova-ai'];
+      return comments.map(c => ({
+        role: novaNames.some(n => c.author_display?.includes(n)) ? 'ai' as const : 'customer' as const,
+        text: c.body_text?.slice(0, 300) ?? '',
+        at: c.jira_created,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  private getNextWorkingDayLabel(): string {
+    const now = new Date();
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const workingDaysStr = (this.settings.get('agent_working_days') || '1,2,3,4,5').trim();
+    const workingDays = new Set(workingDaysStr.split(',').map(d => parseInt(d.trim(), 10)));
+
+    for (let offset = 1; offset <= 7; offset++) {
+      const candidate = new Date(now.getTime() + offset * 86_400_000);
+      if (workingDays.has(candidate.getDay())) {
+        return `${dayNames[candidate.getDay()]} morning`;
+      }
+    }
+    return 'the next working day';
   }
 
   private async submitToApprovalQueue(decision: AgentDecision, decisionId: number): Promise<void> {

@@ -244,6 +244,11 @@ export function AdminView() {
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [featureFlagsLoaded, setFeatureFlagsLoaded] = useState(false);
 
+  // Pipeline settings state
+  const [pipelineSettings, setPipelineSettings] = useState<Record<string, string>>({});
+  const [pipelineSaving, setPipelineSaving] = useState(false);
+  const [pipelineSaved, setPipelineSaved] = useState(false);
+
   // Import users state
   const [showImportUsers, setShowImportUsers] = useState(false);
   const [importPreview, setImportPreview] = useState<Array<{ username: string; display_name: string; email: string; role: string }>>([]);
@@ -487,7 +492,44 @@ export function AdminView() {
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { fetchData(); fetchAiKeys(); fetchIntegrations(); fetchMilestones(); fetchSaleTypes(); fetchMatrixOffsets(); fetchRoles(); fetchFeedback(); fetchFeatureFlags(); }, [fetchData, fetchAiKeys, fetchIntegrations, fetchMilestones, fetchSaleTypes, fetchMatrixOffsets, fetchRoles, fetchFeedback, fetchFeatureFlags]);
+  const PIPELINE_SETTING_KEYS = [
+    'agent_jira_project', 'assignment_projects',
+    'agent_first_reply_confidence_threshold', 'agent_ai_conversation_timeout_hours',
+    'agent_critic_enabled',
+  ];
+
+  const fetchPipelineSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const json = await res.json();
+      if (json.ok) {
+        const vals: Record<string, string> = {};
+        for (const key of PIPELINE_SETTING_KEYS) {
+          vals[key] = json.data?.[key] ?? '';
+        }
+        setPipelineSettings(vals);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const savePipelineSettings = async () => {
+    setPipelineSaving(true);
+    setPipelineSaved(false);
+    try {
+      for (const [key, value] of Object.entries(pipelineSettings)) {
+        await fetch(`/api/settings/${key}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        });
+      }
+      setPipelineSaved(true);
+      setTimeout(() => setPipelineSaved(false), 3000);
+    } catch { /* ignore */ }
+    setPipelineSaving(false);
+  };
+
+  useEffect(() => { fetchData(); fetchAiKeys(); fetchIntegrations(); fetchMilestones(); fetchSaleTypes(); fetchMatrixOffsets(); fetchRoles(); fetchFeedback(); fetchFeatureFlags(); fetchPipelineSettings(); }, [fetchData, fetchAiKeys, fetchIntegrations, fetchMilestones, fetchSaleTypes, fetchMatrixOffsets, fetchRoles, fetchFeedback, fetchFeatureFlags, fetchPipelineSettings]);
 
   const updateUser = async (id: number, updates: Record<string, unknown>) => {
     clearMessages();
@@ -2139,6 +2181,87 @@ export function AdminView() {
               ))}
             </div>
           </div>
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Pipeline">
+        <div className="space-y-4">
+          <p className="text-[11px] text-neutral-500">Configure the AI first-reply pipeline, project scope, and assignment behaviour.</p>
+
+          {/* Text inputs */}
+          {[
+            { key: 'agent_jira_project', label: 'Triage Projects', placeholder: 'NT,NTPJ', desc: 'Comma-separated Jira project keys the agent triages' },
+            { key: 'assignment_projects', label: 'Assignment Projects', placeholder: 'NT,NTPJ', desc: 'Comma-separated projects for round-robin assignment sweep' },
+          ].map(field => (
+            <div key={field.key}>
+              <label className="block text-xs text-neutral-400 mb-1">{field.label}</label>
+              <input
+                type="text"
+                value={pipelineSettings[field.key] ?? ''}
+                onChange={e => { setPipelineSaved(false); setPipelineSettings(prev => ({ ...prev, [field.key]: e.target.value })); }}
+                placeholder={field.placeholder}
+                className="w-full bg-[#272C33] border border-[#3a424d] rounded px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-[#5ec1ca] focus:outline-none"
+              />
+              <span className="text-[10px] text-neutral-500">{field.desc}</span>
+            </div>
+          ))}
+
+          {/* Number inputs */}
+          {[
+            { key: 'agent_first_reply_confidence_threshold', label: 'First Reply Confidence Threshold', placeholder: '0.85', desc: 'AI drafts with confidence ≥ this post as public first reply. Below this → generic acknowledgement + immediate handoff.' },
+            { key: 'agent_ai_conversation_timeout_hours', label: 'AI Conversation Timeout (hours)', placeholder: '2', desc: 'Hours before an unanswered AI conversation auto-hands off to Customer Care.' },
+          ].map(field => (
+            <div key={field.key}>
+              <label className="block text-xs text-neutral-400 mb-1">{field.label}</label>
+              <input
+                type="number"
+                step={field.key.includes('threshold') ? '0.05' : '1'}
+                min={field.key.includes('threshold') ? '0' : '1'}
+                max={field.key.includes('threshold') ? '1' : '24'}
+                value={pipelineSettings[field.key] ?? ''}
+                onChange={e => { setPipelineSaved(false); setPipelineSettings(prev => ({ ...prev, [field.key]: e.target.value })); }}
+                placeholder={field.placeholder}
+                className="w-full bg-[#272C33] border border-[#3a424d] rounded px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-[#5ec1ca] focus:outline-none"
+              />
+              <span className="text-[10px] text-neutral-500">{field.desc}</span>
+            </div>
+          ))}
+
+          {/* Toggle: Critic enabled */}
+          <div className="flex items-center justify-between px-3 py-2 rounded bg-[#272C33] border border-[#3a424d]">
+            <div>
+              <span className="text-xs text-neutral-200">Critic Gate</span>
+              <span className="text-[10px] text-neutral-500 ml-2">Run quality check before close/resolve/escalate actions</span>
+            </div>
+            <button
+              onClick={() => {
+                const current = pipelineSettings['agent_critic_enabled'] !== 'false';
+                const next = !current;
+                setPipelineSettings(prev => ({ ...prev, agent_critic_enabled: next ? 'true' : 'false' }));
+                fetch('/api/settings/agent_critic_enabled', {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ value: next ? 'true' : 'false' }),
+                }).catch(() => {});
+              }}
+              className={`relative w-9 h-5 rounded-full transition-colors ${pipelineSettings['agent_critic_enabled'] !== 'false' ? 'bg-[#5ec1ca]' : 'bg-[#3a424d]'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${pipelineSettings['agent_critic_enabled'] !== 'false' ? 'translate-x-4' : ''}`} />
+            </button>
+          </div>
+
+          {/* Save button */}
+          <button
+            onClick={savePipelineSettings}
+            disabled={pipelineSaving}
+            className={`px-4 py-2 font-semibold rounded text-sm transition-colors disabled:opacity-40 ${
+              pipelineSaved
+                ? 'bg-emerald-600 text-white'
+                : 'bg-[#5ec1ca] text-[#272C33] hover:bg-[#4db0b9]'
+            }`}
+          >
+            {pipelineSaving ? 'Saving...' : pipelineSaved ? 'Saved ✓' : 'Save Pipeline Settings'}
+          </button>
         </div>
       </CollapsibleSection>
 

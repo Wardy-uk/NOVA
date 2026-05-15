@@ -24,6 +24,7 @@ interface LifecycleSweepResult {
   chaseSent: number;
   autoCloseCandidates: number;
   autoClosed: number;
+  aiConversationTimeouts: number;
 }
 
 export class LifecycleManager {
@@ -83,6 +84,7 @@ export class LifecycleManager {
       chaseSent: 0,
       autoCloseCandidates: 0,
       autoClosed: 0,
+      aiConversationTimeouts: 0,
     };
 
     try {
@@ -109,6 +111,12 @@ export class LifecycleManager {
       result.autoClosed = staleResult.autoClosed;
     } catch (err) {
       console.warn('[lifecycle] Stale ticket check failed:', err instanceof Error ? err.message : err);
+    }
+
+    try {
+      result.aiConversationTimeouts = await this.checkAiConversationTimeouts();
+    } catch (err) {
+      console.warn('[lifecycle] AI conversation timeout check failed:', err instanceof Error ? err.message : err);
     }
 
     return result;
@@ -523,5 +531,34 @@ export class LifecycleManager {
       const cat = classification?.category ? ` (${classification.category})` : '';
       return `Decision ${i + 1} [${d.createdAt}]: ${label}${cat}, confidence ${(d.confidence * 100).toFixed(0)}%. Reasoning: ${d.reasoning.slice(0, 200)}`;
     }).join('\n\n');
+  }
+
+  private async checkAiConversationTimeouts(): Promise<number> {
+    const timeoutHours = this.getNumber('agent_ai_conversation_timeout_hours', 2);
+    const tickets = await this.ticketState.getAll('ai_conversation');
+    let timedOut = 0;
+
+    for (const ticket of tickets) {
+      const lastAction = ticket.lastAgentActionAt ? new Date(ticket.lastAgentActionAt) : null;
+      if (!lastAction) continue;
+
+      const hoursSinceLastAction = (Date.now() - lastAction.getTime()) / (1000 * 60 * 60);
+      if (hoursSinceLastAction >= timeoutHours) {
+        try {
+          await this.ticketState.transition(ticket.ticketId, 'handed_off', {
+            lastAgentActionAt: new Date().toISOString(),
+          });
+          console.log(`[lifecycle] AI conversation timeout on ${ticket.ticketId} — ${hoursSinceLastAction.toFixed(1)}h since last AI reply, triggering handoff`);
+          timedOut++;
+        } catch (err) {
+          console.warn(`[lifecycle] Failed to timeout AI conversation for ${ticket.ticketId}:`, err instanceof Error ? err.message : err);
+        }
+      }
+    }
+
+    if (timedOut > 0) {
+      console.log(`[lifecycle] AI conversation timeouts: ${timedOut} tickets transitioned to handed_off`);
+    }
+    return timedOut;
   }
 }

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { TicketEvent, AgentDecision, AutonomyCheck } from './agent-types.js';
 import type { LlmService } from './llm-service.js';
 import type { KbSearchService } from './kb-search.js';
@@ -652,6 +653,106 @@ export class Reasoner {
     ).catch(err => {
       console.warn(`[reasoner] Failed to log KB gap for ${ticketKey}:`, err instanceof Error ? err.message : err);
     });
+  }
+
+  async generateGenericFirstReply(opts: {
+    ticketKey: string;
+    summary: string;
+    description: string;
+    reporterName: string;
+    assigneeName: string;
+  }): Promise<string> {
+    const firstName = opts.reporterName.split(/\s+/)[0] || opts.reporterName;
+    const agentFirstName = opts.assigneeName.split(/\s+/)[0] || opts.assigneeName;
+
+    const systemPrompt = `You are writing a first-reply acknowledgement email for Nurtur's tech support desk.
+The customer has raised a ticket and an agent has been assigned. Write a short, warm, personal reply.
+
+REQUIRED STRUCTURE:
+1. Greeting — use the customer's first name
+2. Acknowledgement — name what they raised, prove you read it
+3. What happens next — name the assigned agent: "I've passed this to ${agentFirstName} in our Customer Care team who'll be looking into this for you."
+4. Warm close — brief, human
+
+RULES:
+- No "your request has been logged with reference number..."
+- No "a member of our team will be in contact at the earliest opportunity"
+- No promises about specific timelines
+- No technical jargon about queues or triage
+- No corporate filler ("we value your custom", "rest assured")
+- Sign off as "Kind regards,\\nNurtur Support"
+- Keep it under 80 words
+- Return ONLY the reply text, no JSON, no explanation`;
+
+    const userMessage = `Ticket: ${opts.ticketKey}
+Summary: ${opts.summary}
+Description snippet: ${opts.description.slice(0, 300)}
+Customer first name: ${firstName}
+Assigned agent: ${opts.assigneeName}`;
+
+    const GenericReplySchema = z.object({ reply: z.string() });
+
+    try {
+      const result = await this.llmService.call<{ reply: string }>(
+        systemPrompt,
+        userMessage + '\n\nReturn JSON: { "reply": "your reply text here" }',
+        GenericReplySchema,
+        { callType: 'generic_first_reply', tier: 'cheap' as any, temperature: 0.4 },
+      );
+      return result.data.reply;
+    } catch (err) {
+      console.warn(`[reasoner] Generic first reply LLM failed for ${opts.ticketKey}, using fallback:`, err instanceof Error ? err.message : err);
+      return `Hi ${firstName},\n\nThanks for getting in touch about this. I've passed it to ${agentFirstName} in our Customer Care team who'll take a closer look.\n\nThey'll be in touch shortly.\n\nKind regards,\nNurtur Support`;
+    }
+  }
+
+  async generateHandoffSummary(opts: {
+    ticketKey: string;
+    summary: string;
+    category: string;
+    ticketType: string;
+    confidence: number;
+    exchanges: Array<{ role: 'ai' | 'customer'; text: string; at: string }>;
+    kbReferences: string[];
+    recommendedNextSteps: string;
+  }): Promise<string> {
+    const complexity = opts.confidence >= 0.85 ? 'simple' : opts.confidence >= 0.5 ? 'moderate' : 'complex';
+    const exchangeLines = opts.exchanges.map(e => {
+      const label = e.role === 'ai' ? 'AI replied' : 'Customer replied';
+      return `- ${label} at ${e.at}: "${e.text.slice(0, 200)}"`;
+    }).join('\n');
+
+    const kbSection = opts.kbReferences.length > 0
+      ? `\nKB References:\n${opts.kbReferences.map(r => `- ${r}`).join('\n')}`
+      : '';
+
+    return `🤖 NOVA Handoff Summary
+
+Ticket: ${opts.ticketKey} — ${opts.summary}
+Classification: ${opts.category} — ${opts.ticketType}
+Complexity: ${complexity}
+Confidence: ${(opts.confidence * 100).toFixed(0)}%
+
+What happened:
+${exchangeLines || '- No AI exchanges recorded'}
+
+Recommended next steps:
+${opts.recommendedNextSteps || 'Review ticket details and respond to customer.'}
+${kbSection}`;
+  }
+
+  async generateHandoffMessage(opts: {
+    reporterName: string;
+    assigneeName: string | null;
+    isWorkingHours: boolean;
+    nextWorkingDay: string;
+  }): Promise<string> {
+    const firstName = opts.reporterName.split(/\s+/)[0] || opts.reporterName;
+
+    if (opts.isWorkingHours && opts.assigneeName) {
+      return `Hi ${firstName},\n\nI've gathered the details and passed this to ${opts.assigneeName} in our Customer Care team who'll take it from here.\n\nKind regards,\nNurtur Support`;
+    }
+    return `Hi ${firstName},\n\nI've gathered the details and passed this to our Customer Care team. They'll pick this up first thing on ${opts.nextWorkingDay}.\n\nKind regards,\nNurtur Support`;
   }
 
   private noAction(event: TicketEvent, reason?: string): AgentDecision {
