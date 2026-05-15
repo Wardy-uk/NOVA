@@ -573,6 +573,21 @@ export class AgentLoop {
       }
       const nonNtpjEvents = deduped.filter(e => !ntpjHandledKeys.has(e.ticketKey));
 
+      // 1.2 YO (YOMDEL) FAST PATH — auto-close live leads, skip everything else
+      const yoHandledKeys = new Set<string>();
+      for (const event of nonNtpjEvents) {
+        if (!event.ticketKey.startsWith('YO-')) continue;
+        try {
+          await this.handleYomdel(event.ticketKey, event.summary);
+        } catch (err) {
+          console.error(`[agent] YO fast-path failed for ${event.ticketKey}:`, err instanceof Error ? err.message : err);
+        }
+        yoHandledKeys.add(event.ticketKey);
+        this.recentlyProcessedTickets.set(`${event.ticketKey}:${event.eventType}`, Date.now());
+        this.ticketsProcessed++;
+      }
+      const nonYoEvents = nonNtpjEvents.filter(e => !yoHandledKeys.has(e.ticketKey));
+
       // 1.5 AUTO-RULES EVALUATION (config-driven, deterministic — replaces hybrid detector)
       // All deterministic actions (plugin_to_tpj, abuse_report, auto-close, tier routing)
       // are now handled by the unified auto-rules engine. They execute in hybrid + live mode
@@ -580,7 +595,7 @@ export class AgentLoop {
       // deterministic rules are safe by definition.
       const autoRuleHandledKeys = new Set<string>();
       const shadowModeForRules = this.getShadowMode();
-      for (const event of nonNtpjEvents) {
+      for (const event of nonYoEvents) {
         try {
           const handled = await this.autoRulesEngine.evaluateAndExecute(event, shadowModeForRules);
           if (handled) {
@@ -598,7 +613,7 @@ export class AgentLoop {
         }
       }
 
-      const llmEvents = nonNtpjEvents.filter(e => !autoRuleHandledKeys.has(e.ticketKey));
+      const llmEvents = nonYoEvents.filter(e => !autoRuleHandledKeys.has(e.ticketKey));
 
       // DB-level dedup: skip ticket_created/backfill if already triaged in last 30 min
       const dedupedLlmEvents: typeof llmEvents = [];
@@ -1153,6 +1168,33 @@ export class AgentLoop {
     } catch { /* classification not available */ }
   }
 
+  // Yomdel live lead pattern — matches en-dash (–) and hyphen-minus
+  private readonly YOMDEL_LEAD_RE = /^Yomdel Live Lead\s*[–\-]/i;
+  private readonly YOMDEL_REPLY_RE = /^re:\s/i;
+
+  private async handleYomdel(ticketKey: string, summary: string): Promise<void> {
+    const isLead = this.YOMDEL_LEAD_RE.test(summary);
+    const isReply = this.YOMDEL_REPLY_RE.test(summary);
+
+    if (isLead && !isReply) {
+      const RESOLVE_TRANSITION_ID = '17';
+      const { fields, comment } = buildResolveFields({
+        tldr: 'Yomdel live lead — auto-closed by NOVA',
+        resolution: 'No Fault Found',
+        comment: 'Yomdel live lead — auto-closed by NOVA, no action required.',
+      });
+      await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, {
+        fields,
+        comment: { ...comment, internal: true },
+      });
+      console.log(`[agent] YO auto-closed: ${ticketKey} — "${summary}"`);
+    } else if (isReply) {
+      console.log(`[agent] YO reply — leaving for human: ${ticketKey}`);
+    } else {
+      console.log(`[agent] YO non-lead — skipping: ${ticketKey}`);
+    }
+  }
+
   private determinePool(
     decision: import('./agent-types.js').AgentDecision,
     project: string,
@@ -1500,6 +1542,22 @@ export class AgentLoop {
       return;
     }
 
+    // ── YO (Yomdel): Auto-close live leads, no AI/triage/assignment ──
+    if (project === 'YO') {
+      try {
+        const summary = (decision.inputs.summary as string) ?? '';
+        await this.handleYomdel(decision.ticketKey, summary);
+        await this.observer.logOutcome(decisionId, {
+          success: true, action: 'transition', ticketKey: decision.ticketKey,
+          detail: `YO ticket handled via executeDecision fallback.`,
+        });
+      } catch (err) {
+        console.error(`[agent] YO executeDecision handler failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+      this.ticketsProcessed++;
+      return;
+    }
+
     // Lifecycle: transition to 'triaged' on new ticket triage
     if (decision.eventType === 'ticket_created' && decision.action !== 'no_action') {
       try {
@@ -1681,12 +1739,30 @@ export class AgentLoop {
         await this.observer.logOutcome(decisionId, replyResult);
 
         if (replyResult.success) {
-          console.log(`[agent] First reply posted (AI draft) on ${decision.ticketKey} — confidence ${(decision.confidence * 100).toFixed(0)}%, entering ai_conversation`);
-          try {
-            await ticketState.transition(decision.ticketKey, 'ai_conversation', {
-              lastAgentActionAt: new Date().toISOString(),
-            });
-          } catch { /* best effort */ }
+          const needsReply = !!(decision.output.needs_customer_reply ?? true);
+
+          if (needsReply) {
+            // AI asked a question — stay on ticket, assign to NOVA-Jira, enter ai_conversation
+            console.log(`[agent] First reply posted (AI draft) on ${decision.ticketKey} — confidence ${(decision.confidence * 100).toFixed(0)}%, entering ai_conversation`);
+            const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+            if (novaAccountId) {
+              try {
+                await this.jiraClient.updateFields(decision.ticketKey, { assignee: { accountId: novaAccountId } });
+                console.log(`[agent] Assigned ${decision.ticketKey} to NOVA-Jira for ai_conversation`);
+              } catch (err) {
+                console.warn(`[agent] Failed to assign ${decision.ticketKey} to NOVA-Jira:`, err instanceof Error ? err.message : err);
+              }
+            }
+            try {
+              await ticketState.transition(decision.ticketKey, 'ai_conversation', {
+                lastAgentActionAt: new Date().toISOString(),
+              });
+            } catch { /* best effort */ }
+          } else {
+            // AI gave a definitive answer — no question asked, immediate handoff
+            console.log(`[agent] First reply posted (AI draft) on ${decision.ticketKey} — confidence ${(decision.confidence * 100).toFixed(0)}%, no question asked → immediate handoff`);
+            await this.executeHandoff(decision, decisionId, ticketState, 'high confidence no question');
+          }
         }
       } else {
         // Low confidence: round-robin first, then generic first reply, then handoff
@@ -2545,13 +2621,14 @@ export class AgentLoop {
     const untriaged = await query<{
       issue_key: string; jira_id: string; summary: string; description_text: string;
       status_name: string; priority_name: string; request_type: string;
-      assignee_display: string; reporter_display: string; reporter_email: string;
+      assignee_display: string; assignee_account_id: string | null;
+      reporter_display: string; reporter_email: string;
       jira_created: string; jira_updated: string; sla_breach_time: string;
       fields_json: string;
     }>(
       `SELECT TOP (${batchSize}) c.issue_key, c.jira_id, c.summary, c.description_text,
               c.status_name, c.priority_name, c.request_type,
-              c.assignee_display, c.reporter_display, c.reporter_email,
+              c.assignee_display, c.assignee_account_id, c.reporter_display, c.reporter_email,
               c.jira_created, c.jira_updated, c.sla_breach_time, c.fields_json
        FROM jira_issue_cache c
        LEFT JOIN agent_decisions d ON d.ticket_id = c.issue_key
@@ -2575,6 +2652,49 @@ export class AgentLoop {
     let errors = 0;
 
     for (const row of untriaged) {
+      // NTPJ/YO: skip triage entirely — these projects never enter the reasoner
+      const projectPrefix = row.issue_key.match(/^([A-Z]+)-/)?.[1];
+      if (projectPrefix === 'NTPJ') {
+        // Only assign if genuinely unassigned — tick() fast-path doesn't write agent_decisions
+        const novaAccountId = this.settings.get('nova_ai_jira_account_id') ?? '';
+        const isUnassigned = !row.assignee_account_id || row.assignee_account_id === novaAccountId;
+        if (isUnassigned && this.assignmentEngine) {
+          try {
+            const assignment = await this.assignmentEngine.assignWithFallback(row.issue_key, 'tpj', 'NTPJ');
+            if (assignment) {
+              await this.assignmentEngine.postAssignmentComment(row.issue_key, assignment);
+              console.log(`[backfill] NTPJ round-robin: ${row.issue_key} → ${assignment.agent.display_name}`);
+              processed++;
+            } else {
+              skipped++;
+            }
+          } catch (err) {
+            console.warn(`[backfill] NTPJ assignment failed for ${row.issue_key}:`, err instanceof Error ? err.message : err);
+            errors++;
+          }
+        } else {
+          console.log(`[backfill] NTPJ already assigned, skipping: ${row.issue_key} (${row.assignee_display})`);
+          skipped++;
+        }
+        continue;
+      }
+      if (projectPrefix === 'YO') {
+        // status_category != 'done' is enforced by the query, but double-check status
+        const statusLower = (row.status_name ?? '').toLowerCase();
+        if (statusLower === 'resolved' || statusLower === 'closed' || statusLower === 'done') {
+          skipped++;
+          continue;
+        }
+        try {
+          await this.handleYomdel(row.issue_key, row.summary ?? '');
+          console.log(`[backfill] YO handled: ${row.issue_key}`);
+        } catch (err) {
+          console.warn(`[backfill] YO handler failed for ${row.issue_key}:`, err instanceof Error ? err.message : err);
+        }
+        processed++;
+        continue;
+      }
+
       const event = {
         ticketId: row.jira_id,
         ticketKey: row.issue_key,
