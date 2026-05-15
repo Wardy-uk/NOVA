@@ -1479,7 +1479,7 @@ function VerdictCard({ s, onApply, onDismiss, onSnooze, onCustomize }: {
 }) {
   const [expanded, setExpanded] = useState(false);
   const v = s.verdict;
-  const ev = s.evidence || {};
+  const ev: Record<string, any> = s.evidence || {};
   const cfg = v ? VERDICT_CONFIG[v.verdict] : null;
   const category = String(s.suggestion.category ?? s.evidence.category ?? 'Unknown');
   const riskFlag = ev.riskFlag;

@@ -1258,9 +1258,9 @@ export function App() {
           {view === 'agent-ops-pack' && canSeeArea('ai-agent') && (
             <OpsPackView />
           )}
-          {view === 'agent-121' && canSeeArea('ai-agent') && (
+          {view === 'agent-121' && canSeeArea('ai-agent') && selectedAgentName && (
             <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>
-              <Briefing121View />
+              <Briefing121View agentId={selectedAgentName} agentName={selectedAgentName} />
             </Suspense>
           )}
 
