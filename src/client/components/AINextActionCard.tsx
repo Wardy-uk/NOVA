@@ -24,6 +24,7 @@ interface Props {
   ticketKey: string;
   compact?: boolean;
   pendingDecision?: PendingDecision | null;
+  forceGenerate?: boolean;
   onDecisionActioned?: () => void;
   onTransition?: (transitionName: string) => void;
   onEscalate?: (context: { headline: string; body: string }) => void;
@@ -45,7 +46,7 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` };
 }
 
-export function AINextActionCard({ ticketKey, compact, pendingDecision, onDecisionActioned, onTransition, onEscalate, onHoldingUpdate, onCloseTicket, onRoute, onChase, onStuckHelper }: Props) {
+export function AINextActionCard({ ticketKey, compact, pendingDecision, forceGenerate, onDecisionActioned, onTransition, onEscalate, onHoldingUpdate, onCloseTicket, onRoute, onChase, onStuckHelper }: Props) {
   const [data, setData] = useState<NextActionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +64,7 @@ export function AINextActionCard({ ticketKey, compact, pendingDecision, onDecisi
     if (!ticketKey) return;
     setLoading(true);
     setError(null);
-    fetch(`/api/agent/next-action/${encodeURIComponent(ticketKey)}`, { headers: authHeaders() })
+    fetch(`/api/agent/next-action/${encodeURIComponent(ticketKey)}${forceGenerate ? '?force=true' : ''}`, { headers: authHeaders() })
       .then(r => r.json())
       .then(json => {
         if (json.ok) setData(json.data);
@@ -176,7 +177,7 @@ export function AINextActionCard({ ticketKey, compact, pendingDecision, onDecisi
     );
   }
 
-  if (data.state === 'no_context' && !pendingDecision) {
+  if (data.state === 'no_context' && !pendingDecision && !forceGenerate) {
     return null;
   }
 

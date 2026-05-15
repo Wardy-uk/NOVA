@@ -3700,12 +3700,15 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
   router.get('/next-action/:ticketKey', async (req, res) => {
     const ticketKey = String(req.params.ticketKey);
+    const forceGenerate = req.query.force === 'true';
     try {
       // 1. Check cache first (cheap, no DB or Jira call)
       const cached = nextActionCache.get(ticketKey);
       if (cached && Date.now() < cached.expiresAt) {
-        res.json({ ok: true, data: cached.data });
-        return;
+        if (!forceGenerate || (cached.data as any)?.state !== 'no_context') {
+          res.json({ ok: true, data: cached.data });
+          return;
+        }
       }
 
       // 2. Check if AI has ANY decision on this ticket — cheap DB query, before Jira
@@ -3714,7 +3717,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         [ticketKey],
       );
 
-      if (!decisions || decisions.length === 0) {
+      if ((!decisions || decisions.length === 0) && !forceGenerate) {
         nextActionMissingCount++;
         const fallback = {
           state: 'no_context' as const,

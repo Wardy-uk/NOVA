@@ -312,7 +312,7 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
       {briefFields && <TicketBriefCard ticketKey={ticket.ticket_key} fields={briefFields} tier={(briefFields.customfield_12981 as any)?.value ?? null} compact />}
 
       {/* AI Suggested Next Action */}
-      <AINextActionCard ticketKey={ticket.ticket_key} compact />
+      <AINextActionCard ticketKey={ticket.ticket_key} compact forceGenerate />
 
       {/* AI Analysis */}
       <AIAnalysisPanel ticketKey={ticket.ticket_key} />
