@@ -1825,6 +1825,23 @@ async function runMigrations(): Promise<void> {
        expires_at DATETIME2 NOT NULL,
        created_at DATETIME2 DEFAULT GETUTCDATE()
      );`,
+
+    // ── Assignment retry queue — unassigned tickets queued for automatic retry ──
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'assignment_retry_queue') AND type = 'U')
+     CREATE TABLE assignment_retry_queue (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_key NVARCHAR(50) NOT NULL,
+       pool NVARCHAR(20) NOT NULL DEFAULT 'cc',
+       project_key NVARCHAR(20) NOT NULL DEFAULT 'NT',
+       retry_count INT NOT NULL DEFAULT 0,
+       max_retries INT NOT NULL DEFAULT 5,
+       last_error NVARCHAR(500) NULL,
+       resolved BIT NOT NULL DEFAULT 0,
+       resolved_reason NVARCHAR(100) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_retry_queue_ticket UNIQUE (ticket_key)
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

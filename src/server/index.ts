@@ -73,7 +73,7 @@ import { JiraUserClientFactory } from './services/jira-user-client.js';
 import { NotificationQueries } from './db/notifications.js';
 import { NotificationEngine } from './services/notification-engine.js';
 import { createNotificationRoutes } from './routes/notifications.js';
-import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries, PortalAccountQueries, BranchDistrictQueries, WelcomePackQueries, ApprovalQueries, BacklogQueries, AutoRuleOverrideQueries } from './db/queries.js';
+import { ProblemTicketQueries, InstanceSetupQueries, BranchQueries, BrandSettingsQueries, LogoQueries, SetupExecutionQueries, SetupPortalQueries, PortalAccountQueries, BranchDistrictQueries, WelcomePackQueries, ApprovalQueries, BacklogQueries, AutoRuleOverrideQueries, AssignmentRetryQueries } from './db/queries.js';
 import { createInstanceSetupRoutes } from './routes/instance-setup.js';
 import { createBranchRoutes } from './routes/branches.js';
 import { createBrandSettingsRoutes } from './routes/brand-settings.js';
@@ -1033,7 +1033,9 @@ async function main() {
     agentLoop.getAutoRulesEngine().setOverrideQueries(autoRuleOverrideQueries);
 
     const assignmentEngine = new AssignmentEngine(agentJiraClient, settingsQueries, 'NT');
+    const retryQueries = new AssignmentRetryQueries();
     assignmentEngine.setApprovalQueries(approvalQueries);
+    assignmentEngine.setRetryQueries(retryQueries);
     assignmentEngine.validateProjectConfig();
     assignmentEngine.seedPoolCapsFromKpi().catch(() => {});
     agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
@@ -1696,6 +1698,106 @@ async function main() {
         console.log(`[flag-dismiss] Auto-dismissed ${result.total} flags: resolved=${result.resolved}, aged=${result.aged_out}, handled=${result.auto_handled}`);
       }
     }, 30 * 60 * 1000);
+
+    // Assignment retry sweep — every 5 min during working hours, max 10 per sweep
+    jobRegistry.register('assignment-retry-sweep', 'Assignment retry sweep (5 min, working hours)', async () => {
+      if (!assignmentEngine.isWorkingTime()) return;
+
+      const items = await retryQueries.getUnresolved(10);
+      if (items.length === 0) return;
+
+      let assigned = 0;
+      let exhausted = 0;
+      for (const item of items) {
+        try {
+          // Check if ticket is still unassigned and in an assignable status
+          const cached = await query<{ assignee_account_id: string | null; status_name: string | null }>(
+            `SELECT assignee_account_id, status_name FROM jira_issue_cache WHERE issue_key = ?`,
+            [item.ticket_key],
+          ).then(rows => rows[0] ?? null);
+
+          if (!cached) {
+            await retryQueries.markResolved(item.ticket_key, 'not_in_cache');
+            continue;
+          }
+
+          // Already assigned by someone else
+          const novaAccountId = settingsQueries.get('nova_ai_jira_account_id') ?? '';
+          if (cached.assignee_account_id && cached.assignee_account_id !== novaAccountId) {
+            await retryQueries.markResolved(item.ticket_key, 'manually_assigned');
+            continue;
+          }
+
+          // Skip non-assignable statuses
+          const status = (cached.status_name ?? '').toLowerCase();
+          if (['resolved', 'closed', 'done', 'waiting on partner'].includes(status)) {
+            await retryQueries.markResolved(item.ticket_key, `status_${status.replace(/\s+/g, '_')}`);
+            continue;
+          }
+
+          const result = await assignmentEngine.assignWithFallback(
+            item.ticket_key,
+            item.pool as import('./services/assignment-engine.js').Pool,
+            item.project_key,
+          );
+
+          if (result) {
+            console.log(`[retry-sweep] Assigned ${item.ticket_key} → ${result.agent.display_name} (attempt ${item.retry_count + 1})`);
+            assigned++;
+          } else {
+            await retryQueries.incrementRetry(item.id, 'No agents available');
+            if (item.retry_count + 1 >= item.max_retries) {
+              await retryQueries.markExhausted(item.id);
+              exhausted++;
+              await agentLoop?.getAlertService().createAlert({
+                alertType: 'error',
+                severity: 'critical',
+                title: `Assignment exhausted: ${item.ticket_key}`,
+                detail: `${item.max_retries} retry attempts failed. Manual assignment required. Last error: ${item.last_error ?? 'No agents available'}`,
+                ticketKey: item.ticket_key,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn(`[retry-sweep] Error processing ${item.ticket_key}:`, err instanceof Error ? err.message : err);
+          await retryQueries.incrementRetry(item.id, err instanceof Error ? err.message : 'Unknown error').catch(() => {});
+        }
+      }
+
+      if (assigned > 0 || exhausted > 0) {
+        console.log(`[retry-sweep] Sweep complete: ${assigned} assigned, ${exhausted} exhausted out of ${items.length} items`);
+      }
+    }, 5 * 60 * 1000);
+
+    // Cold-start scan: queue any unassigned Open tickets not already in retry queue
+    setTimeout(async () => {
+      if (!assignmentEngine.isWorkingTime()) return;
+      try {
+        const novaAccountId = settingsQueries.get('nova_ai_jira_account_id') ?? '';
+        const projects = assignmentEngine.getConfiguredProjects();
+        const placeholders = projects.map(() => '?').join(',');
+        const unassigned = await query<{ issue_key: string; project_key: string }>(
+          `SELECT issue_key, project_key FROM jira_issue_cache
+           WHERE status_name IN ('Open', 'Waiting on Assignee')
+             AND (assignee_account_id IS NULL OR assignee_account_id = ?)
+             AND project_key IN (${placeholders})
+             AND NOT EXISTS (SELECT 1 FROM assignment_retry_queue r WHERE r.ticket_key = jira_issue_cache.issue_key AND r.resolved = 0)
+           ORDER BY jira_created ASC`,
+          [novaAccountId, ...projects],
+        );
+        if (unassigned.length > 0) {
+          let queued = 0;
+          for (const t of unassigned) {
+            const pool = t.project_key === 'NTPJ' ? 'tpj' : 'cc';
+            await retryQueries.insert(t.issue_key, pool, t.project_key, 'cold-start scan');
+            queued++;
+          }
+          console.log(`[retry-sweep] Cold-start: queued ${queued} unassigned ticket(s) for retry`);
+        }
+      } catch (err) {
+        console.warn('[retry-sweep] Cold-start scan failed:', err instanceof Error ? err.message : err);
+      }
+    }, 30_000);
 
     // Weekly impact snapshot — runs Monday 07:00 UK time
     let lastImpactSnapshotDay = -1;

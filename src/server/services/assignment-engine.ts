@@ -66,6 +66,7 @@ export class AssignmentEngine {
   private workingDayClock: WorkingDayClock;
   private bankHolidaysHash: string = '';
   private approvalQueries: { withdrawByTicketKey(ticketKey: string, reason: string): Promise<number> } | null = null;
+  private retryQueries: { insert(ticketKey: string, pool: string, projectKey: string, error?: string): Promise<number>; markResolved(ticketKey: string, reason: string): Promise<void> } | null = null;
 
   constructor(
     private jiraClient: JiraRestClient,
@@ -77,6 +78,10 @@ export class AssignmentEngine {
 
   setApprovalQueries(aq: { withdrawByTicketKey(ticketKey: string, reason: string): Promise<number> }): void {
     this.approvalQueries = aq;
+  }
+
+  setRetryQueries(rq: { insert(ticketKey: string, pool: string, projectKey: string, error?: string): Promise<number>; markResolved(ticketKey: string, reason: string): Promise<void> }): void {
+    this.retryQueries = rq;
   }
 
   private async getKpiPool(): Promise<sql.ConnectionPool> {
@@ -218,6 +223,12 @@ export class AssignmentEngine {
       } catch { /* best effort */ }
     }
 
+    // Mark resolved in retry queue if it was queued
+    if (this.retryQueries) {
+      try { await this.retryQueries.markResolved(ticketKey, `assigned-to-${result.agent.display_name}`); }
+      catch { /* best effort */ }
+    }
+
     return result;
   }
 
@@ -240,8 +251,15 @@ export class AssignmentEngine {
       console.log(`[assignment] No agents in ${tryPool} for ${project}, trying next pool`);
     }
 
-    // All pools exhausted — post internal note (but avoid duplicates from sweep retries)
-    console.warn(`[assignment] All pools exhausted for ${ticketKey} (tried: ${fallbackChain.join(', ')})`);
+    // All pools exhausted — queue for automatic retry + post internal note (dedup within 2h)
+    const exhaustionMsg = `No agents available in any pool (tried: ${fallbackChain.join(', ')})`;
+    console.warn(`[assignment] All pools exhausted for ${ticketKey}: ${exhaustionMsg}`);
+
+    if (this.retryQueries) {
+      try { await this.retryQueries.insert(ticketKey, pool, project, exhaustionMsg); }
+      catch (err) { console.warn(`[assignment] Failed to queue ${ticketKey} for retry:`, err instanceof Error ? err.message : err); }
+    }
+
     try {
       const comments = await this.jiraClient.getComments(ticketKey, 10);
       const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
@@ -252,7 +270,7 @@ export class AssignmentEngine {
       if (!alreadyNoted) {
         await this.jiraClient.addComment(
           ticketKey,
-          `⚠️ Assignment failed — no agents available in any pool (tried: ${fallbackChain.join(', ')}). Will retry on next sweep cycle.`,
+          `⚠️ Assignment failed — no agents available in any pool (tried: ${fallbackChain.join(', ')}). Queued for automatic retry during working hours.`,
           { internal: true },
         );
       }

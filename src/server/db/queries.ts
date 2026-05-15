@@ -3267,3 +3267,77 @@ export class AutoRuleOverrideQueries {
     );
   }
 }
+
+// ── Assignment Retry Queue ──
+
+export interface RetryQueueItem {
+  id: number;
+  ticket_key: string;
+  pool: string;
+  project_key: string;
+  retry_count: number;
+  max_retries: number;
+  last_error: string | null;
+  resolved: boolean;
+  resolved_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export class AssignmentRetryQueries {
+  async insert(ticketKey: string, pool: string, projectKey: string, error?: string): Promise<number> {
+    return executeAndGetId(
+      `MERGE assignment_retry_queue AS t
+       USING (SELECT ? AS ticket_key) AS s ON t.ticket_key = s.ticket_key
+       WHEN MATCHED AND t.resolved = 0 THEN UPDATE SET
+         last_error = ?, updated_at = GETUTCDATE()
+       WHEN NOT MATCHED THEN INSERT (ticket_key, pool, project_key, last_error)
+         VALUES (?, ?, ?, ?);`,
+      [ticketKey, error ?? null, ticketKey, pool, projectKey, error ?? null],
+    );
+  }
+
+  async getUnresolved(limit: number = 10): Promise<RetryQueueItem[]> {
+    return query<RetryQueueItem>(
+      `SELECT TOP(?) * FROM assignment_retry_queue
+       WHERE resolved = 0 AND retry_count < max_retries
+       ORDER BY created_at ASC`,
+      [limit],
+    );
+  }
+
+  async incrementRetry(id: number, error?: string): Promise<void> {
+    await execute(
+      `UPDATE assignment_retry_queue
+       SET retry_count = retry_count + 1, last_error = ?, updated_at = GETUTCDATE()
+       WHERE id = ?`,
+      [error ?? null, id],
+    );
+  }
+
+  async markResolved(ticketKey: string, reason: string): Promise<void> {
+    await execute(
+      `UPDATE assignment_retry_queue
+       SET resolved = 1, resolved_reason = ?, updated_at = GETUTCDATE()
+       WHERE ticket_key = ? AND resolved = 0`,
+      [reason, ticketKey],
+    );
+  }
+
+  async markExhausted(id: number): Promise<void> {
+    await execute(
+      `UPDATE assignment_retry_queue
+       SET resolved = 1, resolved_reason = 'max_retries_exhausted', updated_at = GETUTCDATE()
+       WHERE id = ?`,
+      [id],
+    );
+  }
+
+  async isQueued(ticketKey: string): Promise<boolean> {
+    const row = await queryOne<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM assignment_retry_queue WHERE ticket_key = ? AND resolved = 0`,
+      [ticketKey],
+    );
+    return (row?.cnt ?? 0) > 0;
+  }
+}

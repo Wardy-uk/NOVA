@@ -3701,30 +3701,14 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   router.get('/next-action/:ticketKey', async (req, res) => {
     const ticketKey = String(req.params.ticketKey);
     try {
-      const jira = agentLoop.getJiraClient();
-      const llm = agentLoop.getLlmService();
-
-      const issue = await jira.getIssue(ticketKey, [
-        'summary', 'description', 'status', 'priority', 'reporter',
-        'assignee', 'created', 'updated', 'comment', 'issuetype',
-        'customfield_12981',
-      ]);
-      if (!issue) {
-        res.status(404).json({ ok: false, error: `Ticket ${ticketKey} not found` });
-        return;
-      }
-
-      const f = issue.fields;
-      const issueUpdated = (f.updated as string) ?? null;
-
-      // Check cache — bust on ticket update
+      // 1. Check cache first (cheap, no DB or Jira call)
       const cached = nextActionCache.get(ticketKey);
-      if (cached && Date.now() < cached.expiresAt && cached.issueUpdated === issueUpdated) {
+      if (cached && Date.now() < cached.expiresAt) {
         res.json({ ok: true, data: cached.data });
         return;
       }
 
-      // Check if agent has any decision on this ticket
+      // 2. Check if AI has ANY decision on this ticket — cheap DB query, before Jira
       const decisions = await query(
         `SELECT TOP 1 id, action, confidence FROM agent_decisions WHERE ticket_id = ? ORDER BY created_at DESC`,
         [ticketKey],
@@ -3734,12 +3718,43 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         nextActionMissingCount++;
         const fallback = {
           state: 'no_context' as const,
-          headline: 'No agent context yet — this ticket hasn\'t been processed by the AI agent.',
-          body: 'Tickets reach this state only when assignment beat AI processing, or processing failed silently.',
+          headline: 'No AI activity on this ticket',
+          body: 'The AI agent hasn\'t processed this ticket yet.',
           primaryAction: { label: 'Run agent on this ticket', jiraTransition: null },
           generatedAt: new Date().toISOString(),
         };
+        nextActionCache.set(ticketKey, { data: fallback, expiresAt: Date.now() + NEXT_ACTION_CACHE_TTL, issueUpdated: null });
         res.json({ ok: true, data: fallback });
+        return;
+      }
+
+      // 3. Has AI history — NOW fetch from Jira for the LLM recommendation
+      const jira = agentLoop.getJiraClient();
+      const llm = agentLoop.getLlmService();
+
+      const issue = await jira.getIssue(ticketKey, [
+        'summary', 'description', 'status', 'priority', 'reporter',
+        'assignee', 'created', 'updated', 'comment', 'issuetype',
+        'customfield_12981',
+      ]);
+      if (!issue) {
+        const stale = {
+          state: 'no_context' as const,
+          headline: 'Ticket no longer accessible',
+          body: 'The AI processed this ticket previously but it\'s no longer available in Jira.',
+          primaryAction: { label: 'Refresh', jiraTransition: null },
+          generatedAt: new Date().toISOString(),
+        };
+        res.json({ ok: true, data: stale });
+        return;
+      }
+
+      const f = issue.fields;
+      const issueUpdated = (f.updated as string) ?? null;
+
+      // Re-check cache with issueUpdated bust (for tickets WITH AI history)
+      if (cached && Date.now() < cached.expiresAt && cached.issueUpdated === issueUpdated) {
+        res.json({ ok: true, data: cached.data });
         return;
       }
 

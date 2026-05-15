@@ -176,6 +176,10 @@ export function AINextActionCard({ ticketKey, compact, pendingDecision, onDecisi
     );
   }
 
+  if (data.state === 'no_context' && !pendingDecision) {
+    return null;
+  }
+
   const cfg = STATE_CONFIG[data.state] || STATE_CONFIG.no_context;
 
   const handleRunAgent = async () => {
