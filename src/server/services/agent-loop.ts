@@ -1169,7 +1169,7 @@ export class AgentLoop {
   }
 
   // Yomdel live lead pattern — matches en-dash (–) and hyphen-minus
-  private readonly YOMDEL_LEAD_RE = /^Yomdel Live Lead\s*[–\-]/i;
+  private readonly YOMDEL_LEAD_RE = /^(?:RESEND\s*\/\/\s*)?Yomdel Live Lead\s*[–\-]/i;
   private readonly YOMDEL_REPLY_RE = /^re:\s/i;
 
   private async handleYomdel(ticketKey: string, summary: string): Promise<void> {
