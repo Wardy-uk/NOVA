@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
-import { TicketBriefCard } from './TicketBriefCard.js';
-import { AINextActionCard } from './AINextActionCard.js';
-import { AdfCommentBody } from './AdfCommentBody.js';
 import { useAuth } from '../hooks/useAuth.js';
-import { BcAccountBadge } from './BcAccountBadge.js';
 import { useDevReviewTheme } from '../utils/devReviewTheme.js';
+import { UnifiedTicketDetail } from './ticket-detail/index.js';
 import {
   UnifiedQueue,
   type UnifiedQueueConfig,
@@ -168,59 +165,6 @@ function Modal({ children, onClose, wide }: { children: ReactNode; onClose: () =
   );
 }
 
-// ── Thread rendering ───────────────────────────────────────────────────────
-
-function ThreadBody({ body, bodyAdf, issueKey }: { body: string | null; bodyAdf?: string | null; issueKey?: string }) {
-  if (bodyAdf) {
-    try {
-      return <AdfCommentBody body={JSON.parse(bodyAdf)} className="text-[12px] text-neutral-100 leading-relaxed" issueKey={issueKey} />;
-    } catch { /* fall through */ }
-  }
-  if (body) return <div className="text-[12px] text-neutral-100 whitespace-pre-wrap leading-relaxed">{body}</div>;
-  return null;
-}
-
-function ThreadEntryRow({ entry }: { entry: ThreadEntry }) {
-  let isJiraOrigin = false;
-  try {
-    if (entry.meta_json) isJiraOrigin = (JSON.parse(entry.meta_json) as { source?: string }).source === 'jira';
-  } catch { /* ignore */ }
-
-  const kindColour = isJiraOrigin ? '#f59e0b' : ({
-    comment: '#5ec1ca', accept: '#10b981', return: '#9b6aed',
-    claim: '#64748b', fasttrack: '#f97316', state_change: '#64748b',
-  } as Record<string, string>)[entry.kind];
-  const icon = isJiraOrigin ? '📥' : ({
-    comment: '💬', accept: '✓', return: '↩', claim: '◉', fasttrack: '🔥', state_change: '◈',
-  } as Record<string, string>)[entry.kind];
-
-  return (
-    <div
-      className="p-3 rounded-lg"
-      style={{
-        background: isJiraOrigin ? 'rgba(245,158,11,0.06)' : 'rgba(255,255,255,0.05)',
-        border: `1px solid ${isJiraOrigin ? 'rgba(245,158,11,0.25)' : 'rgba(255,255,255,0.1)'}`,
-      }}
-    >
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="flex items-center gap-2 text-[10px] font-bold" style={{ color: kindColour }}>
-          <span>{icon}</span>
-          <span className="uppercase tracking-wider">{isJiraOrigin ? 'AGENT REPLY' : entry.kind}</span>
-          <span className="text-neutral-300 font-normal">· {entry.user_display}</span>
-          {isJiraOrigin && <span className="text-[9px] text-neutral-500 font-normal">· from Jira</span>}
-        </div>
-        <div className="flex items-center gap-2">
-          {!isJiraOrigin && entry.jira_sync_state === 'pending' && <span className="text-[9px] text-amber-400">syncing…</span>}
-          {!isJiraOrigin && entry.jira_sync_state === 'failed' && <span className="text-[9px] text-red-400" title={entry.jira_sync_error || ''}>sync failed</span>}
-          {!isJiraOrigin && entry.jira_sync_state === 'synced' && <span className="text-[9px] text-emerald-400">✓ jira</span>}
-          <span className="text-[10px] text-neutral-400">{timeAgo(entry.created_at)}</span>
-        </div>
-      </div>
-      <ThreadBody body={entry.body} bodyAdf={entry.body_adf} issueKey={entry.jira_key} />
-    </div>
-  );
-}
-
 function BackfillAdfButton() {
   const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [result, setResult] = useState('');
@@ -314,118 +258,109 @@ function DevReviewDetail({
   const claimedByDisplay = detail.claimed_by_display || item?.claimed_by_display || null;
   const [commentDraft, setCommentDraft] = useState('');
 
+  const issueWithoutStatus = useMemo(() => {
+    const { status: _s, ...rest } = fields as Record<string, unknown>;
+    return rest;
+  }, [fields]);
+
+  const badges = (
+    <>
+      <StatusPill status={state?.status} />
+      {state?.fast_track ? <FastTrackFlame /> : null}
+      {product && (
+        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full" style={{ background: 'rgba(94,193,202,0.15)', color: '#5ec1ca', border: '1px solid rgba(94,193,202,0.3)' }}>{product}</span>
+      )}
+      {fields.status?.name && <span className="text-[10px] text-neutral-500">· Jira: {fields.status.name}</span>}
+      {state?.claimed_by_user_id && (
+        <span className="text-[10px] text-[#c4b5fd] font-semibold">
+          {isMine ? 'Claimed by you' : `Claimed by ${claimedByDisplay || 'reviewer'}`} {timeAgo(state.claimed_at)}
+        </span>
+      )}
+    </>
+  );
+
+  const headerActions = (
+    <>
+      {terminal ? (
+        <div className="flex items-center gap-2 px-3 py-2">
+          <span className="text-[11px] text-neutral-500 italic">
+            {state?.status === 'accepted' ? 'Accepted to development' : 'Returned to CC — no further action'}
+          </span>
+          {state?.status === 'returned' && state.claimed_by_user_id && (
+            <button onClick={onUnclaim} disabled={busy} className="px-3 py-1.5 text-[10px] rounded-lg font-semibold text-neutral-400 border border-white/10 hover:bg-white/5 disabled:opacity-40">Release</button>
+          )}
+          {state?.status === 'accepted' && state.work_item_key && (
+            <>
+              <span className="text-[11px] text-neutral-600">·</span>
+              <a href={`https://nurturtech.atlassian.net/browse/${state.work_item_key}`} target="_blank" rel="noreferrer" className="text-[11px] font-mono font-semibold hover:underline" style={{ color: '#5ec1ca' }}>{state.work_item_key} ↗</a>
+            </>
+          )}
+        </div>
+      ) : !state?.claimed_by_user_id ? (
+        <button onClick={onClaim} disabled={busy} className="px-5 py-2.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)', boxShadow: '0 4px 16px rgba(245,158,11,0.4)' }}>◉ Claim to review</button>
+      ) : !isMine ? (
+        <div className="flex items-center gap-2">
+          <div className="text-[11px] font-semibold px-3 py-2 rounded-lg" style={{ background: 'rgba(155,106,237,0.1)', border: '1px solid rgba(155,106,237,0.3)', color: '#c4b5fd' }}>Claimed by {claimedByDisplay || 'another reviewer'}</div>
+          {isAdmin && <button onClick={onUnclaim} disabled={busy} className="px-3 py-1.5 text-[10px] rounded-lg font-semibold text-red-400 border border-red-500/30 hover:bg-red-500/10 disabled:opacity-40">Admin Release</button>}
+        </div>
+      ) : (
+        <>
+          <button onClick={onUnclaim} disabled={busy} className="px-3 py-2 text-xs rounded-lg font-semibold text-neutral-400 border border-white/10 hover:bg-white/5 disabled:opacity-40">Release</button>
+          <button onClick={() => onFastTrack(!state?.fast_track)} disabled={busy} className="px-3 py-2 text-xs rounded-lg font-semibold disabled:opacity-40" style={{ background: state?.fast_track ? 'linear-gradient(135deg, rgba(249,115,22,0.2), rgba(239,68,68,0.2))' : 'rgba(255,255,255,0.03)', border: state?.fast_track ? '1px solid rgba(249,115,22,0.4)' : '1px solid rgba(255,255,255,0.1)', color: state?.fast_track ? '#f97316' : '#d4d4d8' }}>🔥 Fast-track</button>
+          <button onClick={onReturnClick} disabled={busy} className="px-3 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #9b6aed, #c4b5fd)', boxShadow: '0 4px 16px rgba(155,106,237,0.35)' }}>↩ Return</button>
+          <button onClick={onLinkExistingClick} disabled={busy} className="px-3 py-2 text-xs rounded-lg font-semibold text-blue-400 border border-blue-500/30 hover:bg-blue-500/10 disabled:opacity-40">🔗 Link Existing</button>
+          <button onClick={onAcceptClick} disabled={busy} className="px-3 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}>✓ Accept</button>
+        </>
+      )}
+    </>
+  );
+
+  const threadComposer = (
+    <GlassCard className="p-5 flex flex-col">
+      {!terminal && isMine ? (
+        <div>
+          <textarea
+            value={commentDraft}
+            onChange={e => setCommentDraft(e.target.value)}
+            placeholder="Add a comment (will post to Jira as internal, tagged with your name)"
+            rows={3}
+            className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-2"
+            style={drTheme.input}
+          />
+          <div className="flex justify-end">
+            <button
+              onClick={() => { onComment(commentDraft); setCommentDraft(''); }}
+              disabled={busy || !commentDraft.trim()}
+              className="px-3 py-1.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
+              style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 12px rgba(94,193,202,0.3)' }}
+            >Post Comment</button>
+          </div>
+        </div>
+      ) : !terminal ? (
+        <div className="text-center">
+          <div className="text-[11px] text-neutral-500 py-2">
+            {state?.claimed_by_user_id ? 'Claimed by another reviewer' : 'Claim this ticket to comment'}
+          </div>
+        </div>
+      ) : null}
+    </GlassCard>
+  );
+
   return (
     <div className="p-5 space-y-4">
-      {/* Action bar */}
-      <GlassCard accent accentGradient="#9b6aed 30%, #5ec1ca 70%" className="p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-              <a href={`https://nurturtech.atlassian.net/browse/${detail.key}`} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#5ec1ca] hover:underline">{detail.key}</a>
-              <StatusPill status={state?.status} />
-              {state?.fast_track ? <FastTrackFlame /> : null}
-              {product && (
-                <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full" style={{ background: 'rgba(94,193,202,0.15)', color: '#5ec1ca', border: '1px solid rgba(94,193,202,0.3)' }}>{product}</span>
-              )}
-              {fields.status?.name && <span className="text-[10px] text-neutral-500">· Jira: {fields.status.name}</span>}
-            </div>
-            <h2 className="text-lg font-bold text-neutral-100 leading-tight" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>{fields.summary}</h2>
-            <div className="flex items-center gap-3 mt-1.5 text-[11px] text-neutral-300 flex-wrap">
-              <span>Reporter: <span className="text-neutral-100 font-semibold">{fields.reporter?.displayName || '—'}</span></span>
-              <span className="text-neutral-600">·</span>
-              <span>Assignee: <span className="text-neutral-100 font-semibold">{fields.assignee?.displayName || 'Unassigned'}</span></span>
-              <span className="text-neutral-600">·</span>
-              <span>BC Account: <BcAccountBadge ticketKey={detail.key} accountNumber={(fields as any).customfield_14626 ?? (fields as any).bc_account_number ?? null} compact /></span>
-              <span className="text-neutral-600">·</span>
-              <span>Updated <span className="text-neutral-100">{timeAgo(fields.updated)}</span></span>
-              {state?.claimed_by_user_id && (
-                <>
-                  <span className="text-neutral-600">·</span>
-                  <span className="text-[#c4b5fd] font-semibold">
-                    {isMine ? 'Claimed by you' : `Claimed by ${claimedByDisplay || 'reviewer'}`} {timeAgo(state.claimed_at)}
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {terminal ? (
-              <div className="flex items-center gap-2 px-3 py-2">
-                <span className="text-[11px] text-neutral-500 italic">
-                  {state?.status === 'accepted' ? 'Accepted to development' : 'Returned to CC — no further action'}
-                </span>
-                {state?.status === 'returned' && state.claimed_by_user_id && (
-                  <button onClick={onUnclaim} disabled={busy} className="px-3 py-1.5 text-[10px] rounded-lg font-semibold text-neutral-400 border border-white/10 hover:bg-white/5 disabled:opacity-40">Release</button>
-                )}
-                {state?.status === 'accepted' && state.work_item_key && (
-                  <>
-                    <span className="text-[11px] text-neutral-600">·</span>
-                    <a href={`https://nurturtech.atlassian.net/browse/${state.work_item_key}`} target="_blank" rel="noreferrer" className="text-[11px] font-mono font-semibold hover:underline" style={{ color: '#5ec1ca' }}>{state.work_item_key} ↗</a>
-                  </>
-                )}
-              </div>
-            ) : !state?.claimed_by_user_id ? (
-              <button onClick={onClaim} disabled={busy} className="px-5 py-2.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)', boxShadow: '0 4px 16px rgba(245,158,11,0.4)' }}>◉ Claim to review</button>
-            ) : !isMine ? (
-              <div className="flex items-center gap-2">
-                <div className="text-[11px] font-semibold px-3 py-2 rounded-lg" style={{ background: 'rgba(155,106,237,0.1)', border: '1px solid rgba(155,106,237,0.3)', color: '#c4b5fd' }}>Claimed by {claimedByDisplay || 'another reviewer'}</div>
-                {isAdmin && <button onClick={onUnclaim} disabled={busy} className="px-3 py-1.5 text-[10px] rounded-lg font-semibold text-red-400 border border-red-500/30 hover:bg-red-500/10 disabled:opacity-40">Admin Release</button>}
-              </div>
-            ) : (
-              <>
-                <button onClick={onUnclaim} disabled={busy} className="px-3 py-2 text-xs rounded-lg font-semibold text-neutral-400 border border-white/10 hover:bg-white/5 disabled:opacity-40">Release</button>
-                <button onClick={() => onFastTrack(!state?.fast_track)} disabled={busy} className="px-3 py-2 text-xs rounded-lg font-semibold disabled:opacity-40" style={{ background: state?.fast_track ? 'linear-gradient(135deg, rgba(249,115,22,0.2), rgba(239,68,68,0.2))' : 'rgba(255,255,255,0.03)', border: state?.fast_track ? '1px solid rgba(249,115,22,0.4)' : '1px solid rgba(255,255,255,0.1)', color: state?.fast_track ? '#f97316' : '#d4d4d8' }}>🔥 Fast-track</button>
-                <button onClick={onReturnClick} disabled={busy} className="px-3 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #9b6aed, #c4b5fd)', boxShadow: '0 4px 16px rgba(155,106,237,0.35)' }}>↩ Return</button>
-                <button onClick={onLinkExistingClick} disabled={busy} className="px-3 py-2 text-xs rounded-lg font-semibold text-blue-400 border border-blue-500/30 hover:bg-blue-500/10 disabled:opacity-40">🔗 Link Existing</button>
-                <button onClick={onAcceptClick} disabled={busy} className="px-3 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}>✓ Accept</button>
-              </>
-            )}
-          </div>
-        </div>
-      </GlassCard>
-
-      {/* Body grid: brief | thread */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '1.3fr 1fr' }}>
-        <div className="overflow-y-auto space-y-4" style={{ maxHeight: 'calc(100vh - 320px)', scrollbarWidth: 'thin', scrollbarColor: '#3a424d transparent' }}>
-          <TicketBriefCard ticketKey={detail.key} fields={fields} tier={fields.customfield_12981?.value} />
-          <AINextActionCard ticketKey={detail.key} />
-        </div>
-
-        <GlassCard className="p-5 flex flex-col">
-          <div className="text-[11px] uppercase tracking-wider text-[#5ec1ca] font-bold mb-3">◈ Activity</div>
-          <div className="flex-1 overflow-y-auto space-y-2 mb-3 pr-1" style={{ maxHeight: '360px', scrollbarWidth: 'thin', scrollbarColor: '#3a424d transparent' }}>
-            {thread.length === 0 && <div className="text-[11px] text-neutral-600 italic p-4 text-center">No activity yet</div>}
-            {thread.map(t => <ThreadEntryRow key={t.id} entry={t} />)}
-          </div>
-          {!terminal && isMine && (
-            <div className="pt-3 border-t border-white/5">
-              <textarea
-                value={commentDraft}
-                onChange={e => setCommentDraft(e.target.value)}
-                placeholder="Add a comment (will post to Jira as internal, tagged with your name)"
-                rows={3}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-2"
-                style={drTheme.input}
-              />
-              <div className="flex justify-end">
-                <button
-                  onClick={() => { onComment(commentDraft); setCommentDraft(''); }}
-                  disabled={busy || !commentDraft.trim()}
-                  className="px-3 py-1.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
-                  style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 12px rgba(94,193,202,0.3)' }}
-                >Post Comment</button>
-              </div>
-            </div>
-          )}
-          {!terminal && !isMine && (
-            <div className="pt-3 border-t border-white/5 text-center">
-              <div className="text-[11px] text-neutral-500 py-2">
-                {state?.claimed_by_user_id ? 'Claimed by another reviewer' : 'Claim this ticket to comment'}
-              </div>
-            </div>
-          )}
-        </GlassCard>
-      </div>
+      <UnifiedTicketDetail
+        ticketKey={detail.key}
+        issue={issueWithoutStatus}
+        briefFields={fields as any}
+        briefTier={fields.customfield_12981?.value ?? null}
+        badges={badges}
+        headerActions={headerActions}
+        aiNextAction={{}}
+        threadEntries={thread}
+        threadComposer={threadComposer}
+        commentConfig={{ internalOnly: true }}
+        onRefresh={() => {}}
+      />
     </div>
   );
 }

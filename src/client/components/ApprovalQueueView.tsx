@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { TicketBriefCard, type BriefFields } from './TicketBriefCard.js';
-import { AINextActionCard } from './AINextActionCard.js';
+import { type BriefFields } from './TicketBriefCard.js';
 import {
   UnifiedQueue,
   type UnifiedQueueConfig,
@@ -14,6 +13,7 @@ import {
   timeRemaining,
   URGENCY_COLORS,
 } from './queue/index.js';
+import { UnifiedTicketDetail } from './ticket-detail/index.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -196,7 +196,6 @@ function ApprovalDetail({
   const [editedText, setEditedText] = useState('');
   const [showDeclineForm, setShowDeclineForm] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
-  const [expiryDisplay, setExpiryDisplay] = useState(timeRemaining(item.expires_at));
 
   useEffect(() => {
     setEditedText(extractAdfText(item.ai_response_adf));
@@ -204,12 +203,6 @@ function ApprovalDetail({
     setShowDeclineForm(false);
     setDeclineReason('');
   }, [item.id]);
-
-  useEffect(() => {
-    setExpiryDisplay(timeRemaining(item.expires_at));
-    const interval = setInterval(() => setExpiryDisplay(timeRemaining(item.expires_at)), 1000);
-    return () => clearInterval(interval);
-  }, [item.expires_at]);
 
   const [briefFields, setBriefFields] = useState<BriefFields | null>(null);
   useEffect(() => {
@@ -221,13 +214,11 @@ function ApprovalDetail({
       .catch(() => {});
   }, [item.ticket_id]);
 
-  const conversation = parseConversation(item.conversation_json);
   const kbSources = parseKbSources(item.kb_sources);
   const originalText = extractAdfText(item.ai_response_adf);
   const hasEdits = editing && editedText !== originalText;
   const isPending = item.status === 'pending';
   const isShadow = item.shadow_mode && item.source === 'nova_ai';
-  const priStyle = PRIORITY_STYLES[(item.priority || 'normal').toLowerCase()] || PRIORITY_STYLES.normal;
 
   const handleApprove = () => {
     if (isShadow) { onDecide(item.id, 'execute', hasEdits ? editedText : undefined); }
@@ -247,158 +238,103 @@ function ApprovalDetail({
 
   const handleExecute = () => { onDecide(item.id, 'execute'); actions.toast('Executed', 'ok'); };
 
+  const aiDecisionContext = item.source === 'nova_ai' ? (
+    <GlassCard className="p-4 space-y-3" accentGradient="#5ec1ca 30%, #9b6aed 70%" accent>
+      <div className="text-[11px] font-bold uppercase tracking-wider text-[#5ec1ca]">AI Decision</div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {item.action_type && (() => {
+          const info = ACTION_LABELS[item.action_type] || { label: item.action_type.replace(/_/g, ' '), color: 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30' };
+          return <span className={`px-2.5 py-1 text-[12px] font-semibold rounded border ${info.color}`}>{info.label}</span>;
+        })()}
+        {item.confidence != null && (() => {
+          const cs = confidenceStyle(item.confidence);
+          return (
+            <span className={`inline-flex items-center gap-1.5 px-2 py-1 text-[12px] font-semibold rounded ${cs.color}`}>
+              <span className="relative w-12 h-1.5 bg-neutral-700 rounded-full overflow-hidden">
+                <span className={`absolute inset-y-0 left-0 rounded-full ${cs.bg}`} style={{ width: `${Math.round(item.confidence! * 100)}%` }} />
+              </span>
+              {cs.label}
+            </span>
+          );
+        })()}
+      </div>
+      {item.reasoning && (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">Reasoning</div>
+          <div className="text-[13px] text-neutral-300 whitespace-pre-wrap bg-[#1f242b] rounded px-3 py-2 border border-[#3a424d]">{item.reasoning}</div>
+        </div>
+      )}
+      {item.action_type === 'draft_response' && (() => {
+        const draft = parseDraftResponse(item.ai_response_adf);
+        if (!draft) return null;
+        return (
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">Draft Response</div>
+            <div className="text-[13px] text-neutral-200 whitespace-pre-wrap bg-[#272C33] rounded-lg px-4 py-3 border-2 border-blue-500/30">{draft}</div>
+          </div>
+        );
+      })()}
+    </GlassCard>
+  ) : undefined;
+
+  const actionBar = isPending && canInteract ? (
+    <div className="sticky bottom-0 bg-[#14171c]/95 backdrop-blur-sm border-t border-[#2f353d] -mx-5 px-5 py-3 flex items-center gap-2">
+      {isShadow ? (
+        <>
+          <button onClick={handleConfirm} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]" style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)' }}>{'✓'} Confirm Correct</button>
+          <button onClick={handleExecute} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]" style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}>Execute Action</button>
+        </>
+      ) : (
+        <button onClick={handleApprove} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]" style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)' }}>
+          {hasEdits ? 'Edit & Approve' : '✓ Approve'}
+        </button>
+      )}
+      <button onClick={handleDecline} className="px-4 py-2 text-xs rounded-lg font-bold bg-red-900/30 text-red-400 border border-red-800/40 hover:bg-red-900/50">Decline</button>
+      {showDeclineForm && (
+        <input value={declineReason} onChange={e => setDeclineReason(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleDecline()} placeholder="Reason for decline..." className="flex-1 px-3 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200 placeholder-neutral-600" autoFocus />
+      )}
+    </div>
+  ) : undefined;
+
   return (
     <div className="p-5 space-y-4">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <a href={item.resume_url || `https://nurturtech.atlassian.net/browse/${item.ticket_id}`} target="_blank" rel="noopener noreferrer" className="text-sm font-mono font-semibold text-[#5ec1ca] hover:underline">{item.ticket_id}</a>
-            <StatusPill status={item.status} />
-            <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${item.source === 'nova_ai' ? 'bg-[#5ec1ca]/15 text-[#5ec1ca]' : 'bg-violet-500/15 text-violet-400'}`}>
-              {item.source === 'nova_ai' ? 'NOVA AI' : 'n8n AI'}
-            </span>
-            {isShadow && <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-purple-500/15 text-purple-400">SHADOW</span>}
-          </div>
-          <div className="text-sm text-neutral-100 font-semibold">{item.ticket_summary}</div>
-        </div>
-        {item.source === 'nova_ai' && onNavigateToAgent && (
+      <UnifiedTicketDetail
+        ticketKey={item.ticket_id}
+        issue={briefFields as Record<string, unknown> | null}
+        queueFields={{
+          assignee: item.assignee_name,
+          reporter: item.reporter_name,
+          reporter_email: item.reporter_email,
+          priority: item.priority,
+          bc_account_number: item.bc_account_number,
+          status: item.status,
+          created: item.created_at,
+          expires_at: item.expires_at,
+          decided_by: item.decided_by,
+          decided_at: item.decided_at,
+          summary: item.ticket_summary,
+        }}
+        briefFields={briefFields}
+        briefTier={(briefFields?.customfield_12981 as any)?.value ?? null}
+        compact
+        badges={<>
+          <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${item.source === 'nova_ai' ? 'bg-[#5ec1ca]/15 text-[#5ec1ca]' : 'bg-violet-500/15 text-violet-400'}`}>
+            {item.source === 'nova_ai' ? 'NOVA AI' : 'n8n AI'}
+          </span>
+          {isShadow && <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-purple-500/15 text-purple-400">SHADOW</span>}
+        </>}
+        headerActions={item.source === 'nova_ai' && onNavigateToAgent ? (
           <button onClick={() => onNavigateToAgent(item.ticket_id)} className="px-3 py-1.5 text-[11px] rounded-lg bg-[#5ec1ca]/15 text-[#5ec1ca] hover:bg-[#5ec1ca]/25 font-medium shrink-0">Review in Agent</button>
-        )}
-      </div>
-
-      {/* Brief card + Next action */}
-      {briefFields && <TicketBriefCard ticketKey={item.ticket_id} fields={briefFields} tier={(briefFields.customfield_12981 as any)?.value ?? null} compact />}
-      {item.ticket_id && <AINextActionCard ticketKey={item.ticket_id} compact />}
-
-      {/* AI Decision Context */}
-      {item.source === 'nova_ai' && (
-        <GlassCard className="p-4 space-y-3" accentGradient="#5ec1ca 30%, #9b6aed 70%" accent>
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[#5ec1ca]">AI Decision</div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {item.action_type && (() => {
-              const info = ACTION_LABELS[item.action_type] || { label: item.action_type.replace(/_/g, ' '), color: 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30' };
-              return <span className={`px-2.5 py-1 text-[12px] font-semibold rounded border ${info.color}`}>{info.label}</span>;
-            })()}
-            {item.confidence != null && (() => {
-              const cs = confidenceStyle(item.confidence);
-              return (
-                <span className={`inline-flex items-center gap-1.5 px-2 py-1 text-[12px] font-semibold rounded ${cs.color}`}>
-                  <span className="relative w-12 h-1.5 bg-neutral-700 rounded-full overflow-hidden">
-                    <span className={`absolute inset-y-0 left-0 rounded-full ${cs.bg}`} style={{ width: `${Math.round(item.confidence! * 100)}%` }} />
-                  </span>
-                  {cs.label}
-                </span>
-              );
-            })()}
-          </div>
-          {item.reasoning && (
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">Reasoning</div>
-              <div className="text-[13px] text-neutral-300 whitespace-pre-wrap bg-[#1f242b] rounded px-3 py-2 border border-[#3a424d]">{item.reasoning}</div>
-            </div>
-          )}
-          {item.action_type === 'draft_response' && (() => {
-            const draft = parseDraftResponse(item.ai_response_adf);
-            if (!draft) return null;
-            return (
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">Draft Response</div>
-                <div className="text-[13px] text-neutral-200 whitespace-pre-wrap bg-[#272C33] rounded-lg px-4 py-3 border-2 border-blue-500/30">{draft}</div>
-              </div>
-            );
-          })()}
-        </GlassCard>
-      )}
-
-      {/* Ticket Details */}
-      <GlassCard className="p-4">
-        <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-3">Ticket Details</div>
-        <div className="grid grid-cols-2 gap-3 text-[13px]">
-          <div><span className="text-neutral-500 text-[11px]">Assignee</span><div className="text-neutral-300">{item.assignee_name ?? 'Unassigned'}</div></div>
-          <div><span className="text-neutral-500 text-[11px]">Reporter</span><div className="text-neutral-300">{item.reporter_name || 'Unknown'}{item.reporter_email && <span className="text-neutral-500 text-[11px] ml-1">({item.reporter_email})</span>}</div></div>
-          <div><span className="text-neutral-500 text-[11px]">Priority</span><div><span className={`inline-block px-2 py-0.5 text-[11px] font-semibold rounded border ${priStyle}`}>{item.priority || 'Normal'}</span></div></div>
-          {item.bc_account_number && <div><span className="text-neutral-500 text-[11px]">BC Account</span><div className="text-amber-300 font-mono font-semibold">{item.bc_account_number}</div></div>}
-          <div><span className="text-neutral-500 text-[11px]">Created</span><div className="text-neutral-300">{timeAgo(item.created_at)}</div></div>
-          <div><span className="text-neutral-500 text-[11px]">Expires</span><div className={URGENCY_COLORS[expiryDisplay.urgency]}>{expiryDisplay.text}</div></div>
-          {item.decided_by && <>
-            <div><span className="text-neutral-500 text-[11px]">Decided By</span><div className="text-neutral-300">{item.decided_by}</div></div>
-            <div><span className="text-neutral-500 text-[11px]">Decided At</span><div className="text-neutral-300">{item.decided_at ? timeAgo(item.decided_at) : '-'}</div></div>
-          </>}
-        </div>
-      </GlassCard>
-
-      {/* Conversation */}
-      {conversation.length > 0 && (
-        <GlassCard className="p-4">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-3">Conversation History</div>
-          <div className="space-y-3 max-h-80 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3a424d transparent' }}>
-            {conversation.map((msg, i) => {
-              const isAI = msg.role === 'ai' || msg.role === 'assistant' || msg.role === 'bot';
-              return (
-                <div key={i} className="flex gap-3">
-                  <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm" style={{ background: isAI ? 'rgba(94,193,202,0.15)' : 'rgba(124,58,237,0.15)' }}>
-                    {isAI ? '🤖' : '💬'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    {msg.author && <div className="text-[11px] text-neutral-500 mb-0.5">{msg.author}</div>}
-                    <div className="text-[13px] text-neutral-300 whitespace-pre-wrap">{msg.text}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </GlassCard>
-      )}
-
-      {/* AI Response (editable) */}
-      {originalText && (
-        <GlassCard className="p-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">AI Proposed Resolution</div>
-            {isPending && canInteract && (
-              <button onClick={() => setEditing(!editing)} className="text-[11px] text-[#5ec1ca] hover:underline">{editing ? 'Cancel edit' : 'Edit'}</button>
-            )}
-          </div>
-          {editing ? (
-            <textarea value={editedText} onChange={e => setEditedText(e.target.value)} rows={8} className="w-full px-3 py-2 text-[13px] rounded-lg border border-[#5ec1ca]/30 text-neutral-200 bg-[#1a1e24] focus:outline-none focus:border-[#5ec1ca]/60" />
-          ) : (
-            <div className="text-[13px] text-neutral-300 whitespace-pre-wrap bg-[#1a1e24] rounded-lg px-4 py-3 border border-[#3a424d]">{originalText}</div>
-          )}
-        </GlassCard>
-      )}
-
-      {/* KB Sources */}
-      {kbSources.length > 0 && (
-        <GlassCard className="p-4">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Knowledge Base Sources</div>
-          <div className="space-y-1">
-            {kbSources.map((src, i) => (
-              <a key={i} href={src.url} target="_blank" rel="noopener noreferrer" className="block text-[13px] text-[#5ec1ca] hover:underline">{src.title || src.url}</a>
-            ))}
-          </div>
-        </GlassCard>
-      )}
-
-      {/* Action bar */}
-      {isPending && canInteract && (
-        <div className="sticky bottom-0 bg-[#14171c]/95 backdrop-blur-sm border-t border-[#2f353d] -mx-5 px-5 py-3 flex items-center gap-2">
-          {isShadow ? (
-            <>
-              <button onClick={handleConfirm} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]" style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)' }}>✓ Confirm Correct</button>
-              <button onClick={handleExecute} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]" style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}>Execute Action</button>
-            </>
-          ) : (
-            <button onClick={handleApprove} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]" style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)' }}>
-              {hasEdits ? 'Edit & Approve' : '✓ Approve'}
-            </button>
-          )}
-          <button onClick={handleDecline} className="px-4 py-2 text-xs rounded-lg font-bold bg-red-900/30 text-red-400 border border-red-800/40 hover:bg-red-900/50">Decline</button>
-          {showDeclineForm && (
-            <input value={declineReason} onChange={e => setDeclineReason(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleDecline()} placeholder="Reason for decline…" className="flex-1 px-3 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200 placeholder-neutral-600" autoFocus />
-          )}
-        </div>
-      )}
+        ) : undefined}
+        aiNextAction={{ compact: true }}
+        aiDecisionContext={aiDecisionContext}
+        conversationJson={item.conversation_json ?? undefined}
+        proposedResolution={originalText || undefined}
+        proposedResolutionEditable={isPending && canInteract}
+        onProposedResolutionEdit={(text) => { setEditedText(text); setEditing(true); }}
+        kbSources={kbSources}
+        primaryActions={actionBar}
+      />
     </div>
   );
 }

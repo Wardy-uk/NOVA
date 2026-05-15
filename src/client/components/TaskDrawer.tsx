@@ -2,14 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '../../shared/types.js';
 import { TicketBriefCard, briefPropsFromTask } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
-import { AdfCommentBody } from './AdfCommentBody.js';
+import {
+  TicketDetailsGrid,
+  CommentComposer,
+  ActivityStream,
+  TransitionBar,
+} from './ticket-detail/index.js';
 
 const SOURCE_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   jira: { bg: 'bg-badge-info-muted', text: 'text-on-badge-info-muted', label: 'Jira' },
   milestone: { bg: 'bg-badge-emerald-muted', text: 'text-on-badge-emerald-muted', label: 'Onboarding' },
 };
-
-const JIRA_PRIORITIES = ['Highest', 'High', 'Medium', 'Low', 'Lowest'];
 
 // ---- Jira transition types ----
 
@@ -25,27 +28,6 @@ interface JiraComment {
   author: { displayName?: string; display_name?: string; name?: string; email?: string };
   created: string;
   updated?: string;
-}
-
-function commentBodyToText(body: unknown): string {
-  if (!body) return '';
-  if (typeof body === 'string') return body;
-  try {
-    const walk = (node: any): string => {
-      if (!node) return '';
-      if (typeof node === 'string') return node;
-      if (node.text) return node.text;
-      if (Array.isArray(node.content)) return node.content.map(walk).join('');
-      return '';
-    };
-    return walk(body);
-  } catch { return ''; }
-}
-
-const CUSTOMER_FACING_STATUSES = ['waiting on requestor', 'waiting on partner'];
-
-function getDefaultCommentType(transitionName: string): 'public' | 'internal' {
-  return CUSTOMER_FACING_STATUSES.includes(transitionName.toLowerCase()) ? 'public' : 'internal';
 }
 
 interface Props {
@@ -114,47 +96,30 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
   const [jiraLoading, setJiraLoading] = useState(false);
   const [jiraTools, setJiraTools] = useState<string[]>([]);
 
-  // Editable fields
+  // Editable fields (non-Jira)
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
-  const [dueDate, setDueDate] = useState(task.due_date?.split('T')[0] ?? '');
   const [status, setStatus] = useState(task.status);
-  const [priority, setPriority] = useState('');
-  const [agentNextUpdate, setAgentNextUpdate] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Jira assignee search
-  const [assigneeSearch, setAssigneeSearch] = useState('');
-  const [assigneeResults, setAssigneeResults] = useState<Array<{ accountId: string; displayName: string; emailAddress?: string }>>([]);
-  const [assigneeSearching, setAssigneeSearching] = useState(false);
-  const [selectedAssignee, setSelectedAssignee] = useState<{ accountId: string; displayName: string } | null>(null);
-  const [showAssigneeDropdown, setShowAssigneeDropdown] = useState(false);
-  const assigneeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // Jira transitions + comments
   const [jiraTransitions, setJiraTransitions] = useState<JiraTransition[]>([]);
   const [jiraComments, setJiraComments] = useState<JiraComment[]>([]);
-  const [comment, setComment] = useState('');
-  const [transition, setTransition] = useState('');
-  const [transitionModal, setTransitionModal] = useState<{
-    transition: JiraTransition;
-    commentTypes: ('internal' | 'public')[];
-  } | null>(null);
-  const [transitionComment, setTransitionComment] = useState('');
-  const [transitionCommentType, setTransitionCommentType] = useState<'internal' | 'public'>('internal');
+
+  // Pending field changes (collected from TicketDetailsGrid via onFieldChange)
+  const pendingFieldsRef = useRef<Record<string, unknown>>({});
 
   // Parse metadata from description lines (Jira-style "Key: Value") — memoised on description
   const metadata = useMemo(() => parseMetadata(task.description), [task.description]);
 
-  // Jira-specific derived fields — prefer live jiraIssue (if valid object), fall back to stored raw_data, then description metadata
+  // Jira-specific derived fields for header display
   const jiraFields = useMemo(() => {
     if (!isJira) return null;
     const rawData = isObj(task.raw_data) ? (task.raw_data as Record<string, unknown>) : null;
     const src = jiraIssue ?? rawData;
 
-    // Extract assignee (can be string, or object with displayName/name)
     const assigneeRaw = extractJiraField(src, 'assignee');
     const assignee = typeof assigneeRaw === 'string'
       ? assigneeRaw
@@ -162,16 +127,10 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
 
     return {
       status: extractJiraString(src, 'status') || metadata.status || task.status || 'Unknown',
-      priority: extractJiraString(src, 'priority') || metadata.priority || priorityLabel(task.priority),
       assignee: assignee || metadata.assignee || 'Unassigned',
-      dueDate: extractJiraDate(src, 'duedate', 'due_date') || (task.due_date?.split('T')[0] ?? ''),
-      agentNextUpdate: extractJiraDate(src, 'Agent Next Update', 'agent_next_update', 'customfield_10060', 'customfield_10061', 'customfield_10062', 'customfield_10063', 'customfield_10064', 'customfield_10065'),
-      agentLastUpdated: extractJiraString(src, 'Last Agent Public Comment', 'agent_last_updated', 'customfield_10058', 'customfield_10059', 'customfield_10060', 'customfield_10061') ||
-        extractJiraDate(src, 'Last Agent Public Comment', 'agent_last_updated', 'customfield_10058', 'customfield_10059'),
       summary: extractJiraString(src, 'summary') || task.title,
-      description: extractJiraString(src, 'description') || '',
     };
-  }, [isJira, jiraIssue, task.raw_data, task.title, task.due_date, task.status, task.priority, metadata]);
+  }, [isJira, jiraIssue, task.raw_data, task.title, task.status, metadata]);
 
   // Fetch live Jira data (issue, tools, transitions, comments)
   useEffect(() => {
@@ -186,10 +145,8 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
       fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}/transitions`).then(r => r.json()).catch(() => null),
     ]).then(([toolsJson, issueJson, transitionsJson]) => {
       if (toolsJson?.ok && toolsJson.data?.tools) setJiraTools(toolsJson.data.tools);
-      // Only set jiraIssue if the response is actually a JSON object (not markdown text)
       if (issueJson?.ok && isObj(issueJson.data)) {
         setJiraIssue(issueJson.data as Record<string, unknown>);
-        // Extract comments — API flattens fields, so comment is at top level
         const issueData = issueJson.data as Record<string, unknown>;
         const commentField = issueData.comment as { comments?: JiraComment[] } | JiraComment[] | undefined;
         const rawComments: JiraComment[] =
@@ -209,55 +166,21 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
     }).finally(() => setJiraLoading(false));
   }, [isJira, task.source_id, task.id]);
 
-  // Sync editable fields when task or jira data changes
+  // Sync non-Jira fields when task changes
   useEffect(() => {
     setTitle(task.title);
     setDescription(task.description ?? '');
-    setDueDate(task.due_date?.split('T')[0] ?? '');
     setStatus(task.status);
     setError(null);
     setSuccess(null);
-  }, [task.id, task.title, task.description, task.due_date, task.status]);
+    pendingFieldsRef.current = {};
+  }, [task.id, task.title, task.description, task.status]);
 
-  // Sync Jira-specific editable fields
-  useEffect(() => {
-    if (!jiraFields) return;
-    setPriority(jiraFields.priority);
-    setDueDate(jiraFields.dueDate || task.due_date?.split('T')[0] || '');
-    setAgentNextUpdate(jiraFields.agentNextUpdate);
-  }, [jiraFields, task.due_date]);
-
-  const canUpdateJira = jiraTools.some(t => t.includes('update_issue') || t.includes('update'));
-  const canCommentJira = jiraTools.some(t => t.includes('add_comment') || t.includes('create_comment'));
-  const canTransitionJira = jiraTools.some(t => t.includes('transition_issue') || t.includes('do_transition'));
-
-  const handleTransitionClick = (t: JiraTransition) => {
-    setTransitionComment('');
-    setTransitionCommentType(getDefaultCommentType(t.name ?? ''));
-    setTransitionModal({ transition: t, commentTypes: ['public', 'internal'] });
-  };
-
-  const [pendingCommentVisibility, setPendingCommentVisibility] = useState<'internal' | 'public' | null>(null);
-
-  const handleTransitionConfirm = () => {
-    if (!transitionModal) return;
-    setTransition(String(transitionModal.transition.id ?? transitionModal.transition.name ?? ''));
-    if (transitionComment.trim()) {
-      setComment(transitionComment.trim());
-      setPendingCommentVisibility(transitionCommentType);
-    }
-    setTransitionModal(null);
-    setTimeout(() => {
-      document.getElementById('jira-save-btn')?.click();
-    }, 50);
-  };
-
-  // Derive live Jira fields for TicketBriefCard (jiraIssue is already flattened: { key, id, ...fields })
+  // Derive live Jira fields for TicketBriefCard
   const liveBriefProps = useMemo((): { ticketKey: string; fields: Record<string, unknown>; tier?: string | null } | null => {
     if (!isJira) return null;
     const ticketKey = task.source_id || task.title?.match(/^[A-Z]+-\d+/)?.[0] || '';
     if (jiraIssue) {
-      // API returns flat object (key, id, self, + all issue.fields spread)
       const tierRaw = jiraIssue.customfield_12981;
       const tier = typeof tierRaw === 'string' ? tierRaw : (tierRaw as any)?.value ?? (tierRaw as any)?.name ?? null;
       return { ticketKey, fields: jiraIssue, tier };
@@ -266,97 +189,32 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
     return bp;
   }, [isJira, jiraIssue, task]);
 
-  // ---- Assignee search ----
-
-  const handleAssigneeSearch = (query: string) => {
-    setAssigneeSearch(query);
-    setShowAssigneeDropdown(true);
-    if (assigneeTimerRef.current) clearTimeout(assigneeTimerRef.current);
-    if (!query.trim() || query.length < 2) {
-      setAssigneeResults([]);
-      return;
-    }
-    assigneeTimerRef.current = setTimeout(async () => {
-      setAssigneeSearching(true);
-      try {
-        const res = await fetch(`/api/jira/users/search?query=${encodeURIComponent(query)}`);
-        const json = await res.json();
-        if (json.ok) {
-          const data = json.data;
-          // Jira user search can return different formats
-          const users = Array.isArray(data) ? data : data?.users ?? data?.values ?? [];
-          setAssigneeResults(users.map((u: Record<string, unknown>) => ({
-            accountId: (u.accountId ?? u.account_id ?? u.key ?? '') as string,
-            displayName: (u.displayName ?? u.display_name ?? u.name ?? '') as string,
-            emailAddress: (u.emailAddress ?? u.email ?? '') as string,
-          })).filter((u: { accountId: string }) => u.accountId));
-        }
-      } catch {
-        // silent
-      } finally {
-        setAssigneeSearching(false);
-      }
-    }, 300);
+  const handleFieldChange = (field: string, value: unknown) => {
+    pendingFieldsRef.current = { ...pendingFieldsRef.current, [field]: value };
   };
-
-  const handleAssigneeSelect = (user: { accountId: string; displayName: string }) => {
-    setSelectedAssignee(user);
-    setAssigneeSearch(user.displayName);
-    setShowAssigneeDropdown(false);
-  };
-
-  // Reset assignee state on task change
-  useEffect(() => {
-    setSelectedAssignee(null);
-    setAssigneeSearch('');
-    setShowAssigneeDropdown(false);
-  }, [task.id]);
 
   // ---- Save handlers ----
 
   const handleSaveJira = async () => {
+    const fields = pendingFieldsRef.current;
+    if (Object.keys(fields).length === 0) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     const issueKey = task.source_id ?? task.id.replace(/^jira:/, '');
 
     try {
-      const fieldsPayload: Record<string, unknown> = {};
-      if (jiraFields && priority !== jiraFields.priority) fieldsPayload.priority = { name: priority };
-      if (jiraFields && dueDate !== jiraFields.dueDate) fieldsPayload.duedate = dueDate || null;
-      if (jiraFields && agentNextUpdate !== jiraFields.agentNextUpdate) {
-        fieldsPayload['Agent Next Update'] = agentNextUpdate || null;
-      }
-      if (selectedAssignee) {
-        fieldsPayload.assignee = { accountId: selectedAssignee.accountId };
-      }
-
-      const body: Record<string, unknown> = {};
-      if (Object.keys(fieldsPayload).length > 0) body.fields = fieldsPayload;
-      if (comment.trim()) {
-        body.comment = comment.trim();
-        if (pendingCommentVisibility) body.commentVisibility = pendingCommentVisibility;
-      }
-      if (transition) body.transition = transition;
-
-      if (Object.keys(body).length === 0) {
-        setSaving(false);
-        return;
-      }
-
       const res = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ fields }),
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error ?? 'Update failed');
       setSuccess('Saved to Jira');
-      setComment('');
-      setTransition('');
-      setPendingCommentVisibility(null);
+      pendingFieldsRef.current = {};
 
-      // Refresh issue data + comments
+      // Refresh issue data
       const refresh = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}`);
       const refreshJson = await refresh.json();
       if (refreshJson.ok && isObj(refreshJson.data)) {
@@ -378,6 +236,36 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRefresh = async () => {
+    const issueKey = task.source_id ?? task.id.replace(/^jira:/, '');
+    try {
+      const refresh = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}`);
+      const refreshJson = await refresh.json();
+      if (refreshJson.ok && isObj(refreshJson.data)) {
+        setJiraIssue(refreshJson.data as Record<string, unknown>);
+        const d = refreshJson.data as Record<string, unknown>;
+        const cf = d.comment as { comments?: JiraComment[] } | JiraComment[] | undefined;
+        setJiraComments(
+          Array.isArray(cf) ? cf :
+          (cf as { comments?: JiraComment[] })?.comments ??
+          (d.comments as JiraComment[]) ??
+          []
+        );
+      }
+      // Re-fetch transitions
+      const transRes = await fetch(`/api/jira/issues/${encodeURIComponent(issueKey)}/transitions`).catch(() => null);
+      if (transRes) {
+        const transJson = await transRes.json();
+        if (transJson?.ok) {
+          const data = transJson.data;
+          const list = Array.isArray(data) ? data : data?.transitions ?? data?.value ?? [];
+          setJiraTransitions(list as JiraTransition[]);
+        }
+      }
+    } catch { /* silent */ }
+    onTaskUpdated?.();
   };
 
   const handleSave = handleSaveJira;
@@ -515,238 +403,48 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
         {/* ── Content ── */}
         <div className="flex-1 overflow-hidden px-4 py-3">
           {/* ──── JIRA TWO-COLUMN LAYOUT ──── */}
-          {isJira && (
-            <div className="grid gap-4 h-full" style={{ gridTemplateColumns: '1.3fr 1fr' }}>
-              {/* Left column: Brief + Fields + Transitions */}
-              <div className="overflow-y-auto td-scroll space-y-4 pr-1">
-                {liveBriefProps && (
-                  <TicketBriefCard ticketKey={liveBriefProps.ticketKey} fields={liveBriefProps.fields as any} tier={liveBriefProps.tier} compact />
-                )}
-                {task.source === 'jira' && task.source_id && (
-                  <AINextActionCard ticketKey={task.source_id} compact />
-                )}
-
-                {/* Editable fields */}
-                <TDGlassCard className="p-4 space-y-3">
-                  {/* Priority */}
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Priority</div>
-                    <select
-                      value={priority || jiraFields?.priority || metadata.priority || priorityLabel(task.priority)}
-                      onChange={(e) => setPriority(e.target.value)}
-                      className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
-                    >
-                      {JIRA_PRIORITIES.map(p => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                      {priority && !JIRA_PRIORITIES.includes(priority) && (
-                        <option value={priority}>{priority}</option>
-                      )}
-                    </select>
-                  </div>
-
-                  {/* Due Date */}
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Due Date</div>
-                    <input
-                      type="date"
-                      value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
-                      className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
-                    />
-                  </div>
-
-                  {/* Agent Next Update */}
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Agent Next Update</div>
-                    <input
-                      type="date"
-                      value={agentNextUpdate}
-                      onChange={(e) => setAgentNextUpdate(e.target.value)}
-                      className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
-                    />
-                  </div>
-
-                  {/* Assignee */}
-                  <div className="relative">
-                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Assignee</div>
-                    <input
-                      type="text"
-                      value={assigneeSearch || (selectedAssignee ? selectedAssignee.displayName : (jiraFields?.assignee || metadata.assignee || 'Unassigned'))}
-                      onChange={(e) => handleAssigneeSearch(e.target.value)}
-                      onFocus={() => { if (assigneeResults.length > 0) setShowAssigneeDropdown(true); }}
-                      onBlur={() => setTimeout(() => setShowAssigneeDropdown(false), 200)}
-                      placeholder="Search users..."
-                      className="w-full text-[13px] text-neutral-50 rounded-lg px-3 py-2.5"
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
-                    />
-                    {assigneeSearching && (
-                      <div className="absolute right-3 top-[30px] text-[10px] text-neutral-500">...</div>
-                    )}
-                    {showAssigneeDropdown && assigneeResults.length > 0 && (
-                      <div className="absolute z-10 left-0 right-0 mt-1 rounded-lg shadow-lg max-h-40 overflow-auto" style={{ background: 'rgba(30,35,43,0.98)', border: '1px solid rgba(255,255,255,0.12)' }}>
-                        {assigneeResults.map((u) => (
-                          <button
-                            key={u.accountId}
-                            onMouseDown={() => handleAssigneeSelect(u)}
-                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5 transition-colors"
-                          >
-                            <span className="font-medium">{u.displayName}</span>
-                            {u.emailAddress && (
-                              <span className="text-neutral-500 ml-1.5">{u.emailAddress}</span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {selectedAssignee && (
-                      <div className="mt-1 text-[10px] text-[#5ec1ca]">
-                        Will reassign to: {selectedAssignee.displayName}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Read-only fields */}
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-white/5">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Status</div>
-                      <div className="text-[13px] text-neutral-50 rounded-lg px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
-                        {jiraFields?.status || metadata.status || task.status || 'Unknown'}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1">Last Updated</div>
-                      <div className="text-[13px] text-neutral-50 rounded-lg px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
-                        {jiraFields?.agentLastUpdated ? formatDate(jiraFields.agentLastUpdated) : 'None'}
-                      </div>
-                    </div>
-                  </div>
-                </TDGlassCard>
-
-                {/* Transition buttons — all available */}
-                {canTransitionJira && jiraTransitions.length > 0 && (
-                  <TDGlassCard className="p-4">
-                    <div className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-2">Transitions</div>
-                    <div className="flex flex-wrap gap-2">
-                      {jiraTransitions.filter(t => t.name).map((t) => {
-                        const isCustomerFacing = CUSTOMER_FACING_STATUSES.includes((t.name ?? '').toLowerCase());
-                        return (
-                          <button
-                            key={String(t.id ?? t.name)}
-                            onClick={() => handleTransitionClick(t)}
-                            disabled={saving}
-                            className="px-3 py-1.5 text-xs rounded-lg font-semibold disabled:opacity-50 transition-colors"
-                            style={isCustomerFacing ? {
-                              background: 'linear-gradient(135deg, rgba(94,193,202,0.12), rgba(155,106,237,0.12))',
-                              border: '1px solid rgba(94,193,202,0.3)',
-                              color: '#5ec1ca',
-                            } : {
-                              background: 'rgba(255,255,255,0.04)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              color: '#d4d4d8',
-                            }}
-                          >
-                            {t.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </TDGlassCard>
-                )}
-
-                <RawDataSection rawData={task.raw_data} />
-              </div>
-
-              {/* Right column: Activity thread */}
-              <TDGlassCard className="p-4 flex flex-col overflow-hidden">
-                <div className="text-[11px] uppercase tracking-wider text-[#5ec1ca] font-bold mb-3">
-                  &#9670; Activity
-                </div>
-                <div className="flex-1 overflow-y-auto td-scroll space-y-2 mb-3 pr-1">
-                  {jiraComments.length === 0 && (
-                    <div className="text-[11px] text-neutral-600 italic p-4 text-center">No comments yet</div>
+          {isJira && (() => {
+            const issueKey = task.source_id ?? task.id.replace(/^jira:/, '');
+            return (
+              <div className="grid gap-4 h-full" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                {/* Left column: Brief + AI + Details */}
+                <div className="overflow-y-auto td-scroll space-y-4 pr-1">
+                  {liveBriefProps && (
+                    <TicketBriefCard ticketKey={liveBriefProps.ticketKey} fields={liveBriefProps.fields as any} tier={liveBriefProps.tier} compact />
                   )}
-                  {[...jiraComments].reverse().map((c) => (
-                    <div
-                      key={c.id}
-                      className="rounded-xl p-3"
-                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[11px] text-[#5ec1ca] font-semibold">
-                          {c.author?.displayName ?? c.author?.display_name ?? c.author?.name ?? 'Unknown'}
-                        </span>
-                        <span className="text-[10px] text-neutral-500">
-                          {new Date(c.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
-                          {' '}
-                          {new Date(c.created).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      {c.body && typeof c.body === 'object' ? (
-                        <AdfCommentBody body={c.body} className="text-[12px] text-neutral-100 break-words" issueKey={task.source_id ?? task.id.replace(/^jira:/, '')} />
-                      ) : (
-                        <div className="text-[12px] text-neutral-100 whitespace-pre-wrap break-words">
-                          {commentBodyToText(c.body)}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                  {task.source_id && (
+                    <AINextActionCard ticketKey={task.source_id} compact />
+                  )}
+                  <TicketDetailsGrid
+                    issue={jiraIssue}
+                    editable
+                    onFieldChange={handleFieldChange}
+                    ticketKey={issueKey}
+                  />
+                  <RawDataSection rawData={task.raw_data} />
                 </div>
 
-                {/* Comment composer */}
-                {canCommentJira && (
-                  <div className="pt-3 border-t border-white/5">
-                    <div className="flex gap-2 mb-2">
-                      <button
-                        onClick={() => setPendingCommentVisibility('internal')}
-                        className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${
-                          (pendingCommentVisibility ?? 'internal') === 'internal'
-                            ? 'bg-amber-900/50 border-amber-700 text-amber-300 font-semibold'
-                            : 'border-white/10 text-neutral-400 hover:text-neutral-200'
-                        }`}
-                      >
-                        Internal
-                      </button>
-                      <button
-                        onClick={() => setPendingCommentVisibility('public')}
-                        className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${
-                          pendingCommentVisibility === 'public'
-                            ? 'bg-blue-900/50 border-blue-700 text-blue-300 font-semibold'
-                            : 'border-white/10 text-neutral-400 hover:text-neutral-200'
-                        }`}
-                      >
-                        Public
-                      </button>
-                    </div>
-                    <textarea
-                      value={comment}
-                      onChange={(e) => setComment(e.target.value)}
-                      placeholder="Add a comment..."
-                      rows={3}
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-2"
-                      style={{ background: 'rgba(255,255,255,0.03)' }}
+                {/* Right column: Transitions + Comments + Activity */}
+                <div className="overflow-y-auto td-scroll space-y-4 pr-1">
+                  {jiraTransitions.length > 0 && (
+                    <TransitionBar
+                      ticketKey={issueKey}
+                      transitions={jiraTransitions}
+                      onTransitioned={handleRefresh}
                     />
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => {
-                          if (!comment.trim()) return;
-                          document.getElementById('jira-save-btn')?.click();
-                        }}
-                        disabled={!comment.trim() || saving}
-                        className="px-3 py-1.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
-                        style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 12px rgba(94,193,202,0.3)' }}
-                      >
-                        Post Comment
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </TDGlassCard>
-            </div>
-          )}
+                  )}
+                  <CommentComposer
+                    ticketKey={issueKey}
+                    onCommentPosted={handleRefresh}
+                  />
+                  <ActivityStream
+                    ticketKey={issueKey}
+                    comments={jiraComments}
+                  />
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ──── NON-JIRA SINGLE-COLUMN LAYOUT ──── */}
           {!isJira && (
@@ -834,77 +532,6 @@ export function TaskDrawer({ task, index, total, onClose, onPrev, onNext, onTask
         )}
       </div>
 
-      {/* Transition comment modal */}
-      {transitionModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setTransitionModal(null)} />
-          <div className="relative bg-[#1f242b] border border-[#3a424d] rounded-lg shadow-2xl w-full max-w-md mx-4 p-5">
-            <h3 className="text-sm font-semibold text-neutral-100 mb-1">
-              {transitionModal.transition.name}
-            </h3>
-            <p className="text-xs text-neutral-500 mb-4">
-              Optionally add a comment with this transition.
-            </p>
-
-            {transitionModal.commentTypes.length > 1 && (
-              <div className="flex gap-2 mb-3">
-                {transitionModal.commentTypes.map((type) => (
-                  <button
-                    key={type}
-                    onClick={() => setTransitionCommentType(type)}
-                    className={`px-3 py-1 text-xs rounded-lg border transition-colors ${
-                      transitionCommentType === type
-                        ? type === 'internal'
-                          ? 'bg-amber-900/50 border-amber-700 text-amber-300 font-semibold'
-                          : 'bg-blue-900/50 border-blue-700 text-blue-300 font-semibold'
-                        : 'bg-[#2f353d] border-[#3a424d] text-neutral-400 hover:text-neutral-200'
-                    }`}
-                  >
-                    {type === 'internal' ? 'Internal' : 'Public'}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {transitionModal.commentTypes.length === 1 && (
-              <div className="mb-3">
-                <span className={`px-2 py-0.5 text-[10px] font-semibold rounded ${
-                  transitionModal.commentTypes[0] === 'internal'
-                    ? 'bg-amber-900/50 text-amber-400'
-                    : 'bg-blue-900/50 text-blue-400'
-                }`}>
-                  {transitionModal.commentTypes[0] === 'internal' ? 'Internal comment' : 'Public comment'}
-                </span>
-              </div>
-            )}
-
-            <textarea
-              value={transitionComment}
-              onChange={(e) => setTransitionComment(e.target.value)}
-              placeholder="Add a comment (optional)..."
-              autoFocus
-              rows={4}
-              className="w-full bg-[#272C33] border border-[#3a424d] rounded-lg px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-600 focus:border-[#5ec1ca] focus:outline-none resize-none mb-4"
-            />
-
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setTransitionModal(null)}
-                className="px-4 py-2 text-xs bg-[#2f353d] text-neutral-400 hover:text-neutral-200 rounded-lg border border-[#3a424d] transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleTransitionConfirm}
-                className="px-4 py-2 text-xs font-bold text-[#0f172a] rounded-lg"
-                style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 12px rgba(94,193,202,0.3)' }}
-              >
-                Transition
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

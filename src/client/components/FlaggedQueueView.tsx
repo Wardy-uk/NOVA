@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { TicketBriefCard, type BriefFields } from './TicketBriefCard.js';
-import { AINextActionCard } from './AINextActionCard.js';
-import { AIAnalysisPanel } from './AIAnalysisPanel.js';
-import { BcAccountBadge } from './BcAccountBadge.js';
+import { type BriefFields } from './TicketBriefCard.js';
 import { normalisePriority } from '../utils/normalisePriority.js';
+import { UnifiedTicketDetail } from './ticket-detail/index.js';
 import {
   UnifiedQueue,
   type UnifiedQueueConfig,
@@ -63,15 +61,6 @@ interface FlaggedStats {
   distribution: ScoreDistribution[];
 }
 
-interface DiagnoseData {
-  found: boolean;
-  input: Record<string, unknown> | null;
-  score: number;
-  threshold: number;
-  factors: RiskFactor[];
-  enrichment: Record<string, unknown>;
-}
-
 const DISMISS_REASONS = [
   { value: 'false_positive', label: 'False positive' },
   { value: 'already_resolved', label: 'Already resolved' },
@@ -126,19 +115,6 @@ function slaDisplay(t: FlaggedTicket): { text: string; color: string } | null {
   return null;
 }
 
-function parseConversation(json: string | null): Array<{ role: string; text: string; author?: string }> {
-  if (!json) return [];
-  try {
-    const parsed = JSON.parse(json);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((msg: any) => ({
-      role: msg.role || 'unknown',
-      text: msg.body || msg.text || '',
-      author: msg.author || undefined,
-    }));
-  } catch { return []; }
-}
-
 function riskBucketColor(bucket: string): string {
   if (bucket.startsWith('90') || bucket.startsWith('80')) return '#ef4444';
   if (bucket.startsWith('70') || bucket.startsWith('60')) return '#f59e0b';
@@ -191,8 +167,6 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
   const [dismissReason, setDismissReason] = useState('');
   const [customReason, setCustomReason] = useState('');
   const [briefFields, setBriefFields] = useState<BriefFields | null>(null);
-  const [diagnoseData, setDiagnoseData] = useState<DiagnoseData | null>(null);
-  const [diagnoseLoading, setDiagnoseLoading] = useState(false);
   const [showCommentForm, setShowCommentForm] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [showOverrideForm, setShowOverrideForm] = useState(false);
@@ -200,13 +174,11 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
   const [overrideReason, setOverrideReason] = useState('');
   const sla = slaDisplay(ticket);
   const isPending = ticket.status === 'pending';
-  const conversation = parseConversation(ticket.conversation_json);
 
   useEffect(() => {
     setShowDismissForm(false);
     setDismissReason('');
     setCustomReason('');
-    setDiagnoseData(null);
 
     if (!ticket.ticket_key) return;
     const token = localStorage.getItem('nova_auth_token') || '';
@@ -214,14 +186,6 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
       .then(r => r.json())
       .then(json => { if (json.ok && json.data) setBriefFields((json.data.fields ?? json.data) as BriefFields); })
       .catch(() => {});
-  }, [ticket.ticket_key]);
-
-  const loadDiagnose = useCallback(async () => {
-    setDiagnoseLoading(true);
-    try {
-      const r = await api(`/flagged/diagnose/${ticket.ticket_key}`);
-      if (r.ok) setDiagnoseData(r.data);
-    } finally { setDiagnoseLoading(false); }
   }, [ticket.ticket_key]);
 
   const handleReview = async () => {
@@ -280,211 +244,92 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
     } finally { setReviewing(false); }
   };
 
-  return (
-    <div className="p-5 space-y-4">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="text-3xl font-bold tabular-nums" style={{ color: riskScoreColor(ticket.risk_score) }}>
-              {ticket.risk_score}
-            </span>
-            <a
-              href={`https://nurturtech.atlassian.net/browse/${ticket.ticket_key}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm font-mono font-semibold text-[#5ec1ca] hover:underline"
-            >{ticket.ticket_key}</a>
-            {ticket.ticket_status && <StatusPill status={ticket.ticket_status} />}
-            {sla && <span className={`text-[10px] font-semibold ${sla.color}`}>{sla.text}</span>}
-          </div>
-          <div className="text-sm text-neutral-100 font-semibold">{ticket.summary ?? 'No summary'}</div>
-        </div>
-        <a
-          href={`https://nurturtech.atlassian.net/browse/${ticket.ticket_key}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="px-3 py-1.5 text-[11px] rounded-lg bg-[#2f353d] text-[#5ec1ca] border border-[#3a424d] hover:bg-[#363d47] font-medium shrink-0"
-        >Open in Jira</a>
-      </div>
+  const queueFields: Record<string, unknown> = {
+    assignee: ticket.assignee,
+    reporter: ticket.reporter,
+    priority: ticket.priority,
+    ticket_status: ticket.ticket_status,
+    ticket_summary: ticket.summary,
+    risk_score: ticket.risk_score,
+    flagged_at: ticket.flagged_at,
+    reviewed_by: ticket.reviewed_by,
+    reviewed_at: ticket.reviewed_at,
+    dismiss_reason: ticket.dismiss_reason,
+    slaBreachTime: ticket.sla_breach_at,
+    slaBreached: ticket.sla_breached,
+  };
 
-      {/* Live Jira context via TicketBriefCard */}
-      {briefFields && <TicketBriefCard ticketKey={ticket.ticket_key} fields={briefFields} tier={(briefFields.customfield_12981 as any)?.value ?? null} compact />}
+  const riskScoreBadge = (
+    <span className="text-lg font-bold tabular-nums" style={{ color: riskScoreColor(ticket.risk_score) }}>
+      {ticket.risk_score}
+    </span>
+  );
 
-      {/* AI Suggested Next Action */}
-      <AINextActionCard ticketKey={ticket.ticket_key} compact forceGenerate />
+  const slaBadge = sla ? (
+    <span className={`text-[10px] font-semibold ${sla.color}`}>{sla.text}</span>
+  ) : null;
 
-      {/* AI Analysis */}
-      <AIAnalysisPanel ticketKey={ticket.ticket_key} />
-
-      {/* Risk Factors */}
-      <GlassCard className="p-4" accentGradient="#ef4444 30%, #f59e0b 70%" accent>
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-red-400">Risk Factors</div>
-          <button
-            onClick={loadDiagnose}
-            disabled={diagnoseLoading}
-            className="text-[10px] text-[#5ec1ca] hover:underline disabled:opacity-50"
-          >{diagnoseLoading ? 'Loading…' : diagnoseData ? 'Refresh diagnosis' : 'Run diagnosis'}</button>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {ticket.risk_factors.map((f, i) => (
-            <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full bg-[#272C33] border border-[#3a424d] text-neutral-400" title={f.detail}>
-              <span className="font-mono text-neutral-500">+{f.score}</span> {f.label}
-            </span>
-          ))}
-        </div>
-        {diagnoseData && diagnoseData.found && (
-          <div className="mt-3 pt-3 border-t border-[#3a424d]">
-            <div className="text-[10px] text-neutral-500 mb-1">
-              Recalculated: <span className="font-bold" style={{ color: riskScoreColor(diagnoseData.score) }}>{diagnoseData.score}</span> / threshold {diagnoseData.threshold}
-            </div>
-            {diagnoseData.factors.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {diagnoseData.factors.map((f, i) => (
-                  <span key={i} className="px-1.5 py-0.5 text-[9px] rounded bg-[#1a1e24] border border-[#3a424d] text-neutral-500">
-                    +{f.score} {f.label}{f.detail ? ` — ${f.detail}` : ''}
-                  </span>
-                ))}
-              </div>
+  const actionBar = isPending ? (
+    <>
+      <div className="sticky bottom-0 bg-[#14171c]/95 backdrop-blur-sm border-t border-[#2f353d] -mx-5 px-5 py-3 flex items-center gap-2">
+        <button
+          disabled={reviewing}
+          onClick={handleReview}
+          className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-50"
+          style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)' }}
+        >Reviewed</button>
+        <button
+          disabled={reviewing}
+          onClick={handleDismiss}
+          className="px-4 py-2 text-xs rounded-lg font-bold bg-red-900/30 text-red-400 border border-red-800/40 hover:bg-red-900/50 disabled:opacity-50"
+        >Dismiss</button>
+        {showDismissForm && (
+          <div className="flex items-center gap-2 flex-1">
+            <select
+              value={dismissReason}
+              onChange={e => setDismissReason(e.target.value)}
+              className="px-2 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200"
+            >
+              <option value="">Select reason...</option>
+              {DISMISS_REASONS.map(r => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+              <option value="custom">Other...</option>
+            </select>
+            {dismissReason === 'custom' && (
+              <input
+                value={customReason}
+                onChange={e => setCustomReason(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleDismiss()}
+                placeholder="Custom reason..."
+                className="flex-1 px-3 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200 placeholder-neutral-600"
+                autoFocus
+              />
             )}
           </div>
         )}
-      </GlassCard>
 
-      {/* Ticket Details grid */}
-      <GlassCard className="p-4">
-        <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-3">Ticket Details</div>
-        <div className="grid grid-cols-2 gap-3 text-[13px]">
-          <div><span className="text-neutral-500 text-[11px]">Assignee</span><div className="text-neutral-300">{ticket.assignee ?? 'Unassigned'}</div></div>
-          <div><span className="text-neutral-500 text-[11px]">Reporter</span><div className="text-neutral-300">{ticket.reporter ?? '—'}</div></div>
-          <div><span className="text-neutral-500 text-[11px]">Priority</span><div><span className={`inline-block px-2 py-0.5 text-[11px] font-semibold rounded border ${PRIORITY_STYLES[normalisePriority(ticket.priority).toLowerCase()] || PRIORITY_STYLES.normal}`}>{normalisePriority(ticket.priority)}</span></div></div>
-          <div><span className="text-neutral-500 text-[11px]">BC Account</span><div><BcAccountBadge ticketKey={ticket.ticket_key} accountNumber={(briefFields?.customfield_14626 as string) ?? (briefFields as any)?.bc_account_number ?? null} compact /></div></div>
-          <div><span className="text-neutral-500 text-[11px]">Flagged</span><div className="text-neutral-300">{timeAgo(ticket.flagged_at)}</div></div>
-          {ticket.reviewed_by && (
-            <>
-              <div><span className="text-neutral-500 text-[11px]">Reviewed By</span><div className="text-neutral-300">{ticket.reviewed_by}</div></div>
-              <div><span className="text-neutral-500 text-[11px]">Reviewed At</span><div className="text-neutral-300">{ticket.reviewed_at ? timeAgo(ticket.reviewed_at) : '—'}</div></div>
-            </>
-          )}
-          {ticket.dismiss_reason && (
-            <div className="col-span-2"><span className="text-neutral-500 text-[11px]">Dismiss Reason</span><div className="text-neutral-300">{ticket.dismiss_reason}</div></div>
-          )}
-        </div>
-      </GlassCard>
+        <div className="flex-1" />
 
-      {/* Full Conversation Thread */}
-      {conversation.length > 0 && (
-        <GlassCard className="p-4">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-3">Conversation History</div>
-          <div className="space-y-3 max-h-80 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#3a424d transparent' }}>
-            {conversation.map((msg, i) => {
-              const isAgent = msg.role === 'agent';
-              return (
-                <div key={i} className="flex gap-3">
-                  <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm" style={{ background: isAgent ? 'rgba(94,193,202,0.15)' : 'rgba(124,58,237,0.15)' }}>
-                    {isAgent ? '🤖' : '💬'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    {msg.author && <div className="text-[11px] text-neutral-500 mb-0.5">{msg.author}</div>}
-                    <div className="text-[13px] text-neutral-300 whitespace-pre-wrap">{msg.text}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </GlassCard>
-      )}
+        <button
+          disabled={reviewing}
+          onClick={() => { setShowCommentForm(!showCommentForm); setShowOverrideForm(false); }}
+          className="px-3 py-2 text-xs rounded-lg bg-[#272C33] border border-[#3a424d] text-neutral-300 hover:bg-[#2f353d] disabled:opacity-50"
+        >Add Comment</button>
+        <button
+          disabled={reviewing}
+          onClick={() => { setShowOverrideForm(!showOverrideForm); setShowCommentForm(false); }}
+          className="px-3 py-2 text-xs rounded-lg bg-amber-900/30 text-amber-400 border border-amber-800/40 hover:bg-amber-900/50 disabled:opacity-50"
+        >Override AI</button>
+      </div>
 
-      {/* Fallback: last comments if no conversation_json */}
-      {conversation.length === 0 && (ticket.last_customer_comment || ticket.last_agent_comment) && (
-        <GlassCard className="p-4">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Recent Comments</div>
-          <div className="space-y-3">
-            {ticket.last_customer_comment && (
-              <div className="flex gap-3">
-                <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm" style={{ background: 'rgba(124,58,237,0.15)' }}>💬</div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[11px] text-neutral-500 mb-0.5">Customer{ticket.last_customer_comment_at ? ` · ${timeAgo(ticket.last_customer_comment_at)}` : ''}</div>
-                  <div className="text-[13px] text-neutral-300 whitespace-pre-wrap">{ticket.last_customer_comment}</div>
-                </div>
-              </div>
-            )}
-            {ticket.last_agent_comment && (
-              <div className="flex gap-3">
-                <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm" style={{ background: 'rgba(94,193,202,0.15)' }}>🤖</div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[11px] text-neutral-500 mb-0.5">Agent{ticket.last_agent_comment_at ? ` · ${timeAgo(ticket.last_agent_comment_at)}` : ''}</div>
-                  <div className="text-[13px] text-neutral-300 whitespace-pre-wrap">{ticket.last_agent_comment}</div>
-                </div>
-              </div>
-            )}
-          </div>
-        </GlassCard>
-      )}
-
-      {/* Action bar */}
-      {isPending && (
-        <div className="sticky bottom-0 bg-[#14171c]/95 backdrop-blur-sm border-t border-[#2f353d] -mx-5 px-5 py-3 flex items-center gap-2">
-          <button
-            disabled={reviewing}
-            onClick={handleReview}
-            className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-50"
-            style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)' }}
-          >Reviewed</button>
-          <button
-            disabled={reviewing}
-            onClick={handleDismiss}
-            className="px-4 py-2 text-xs rounded-lg font-bold bg-red-900/30 text-red-400 border border-red-800/40 hover:bg-red-900/50 disabled:opacity-50"
-          >Dismiss</button>
-          {showDismissForm && (
-            <div className="flex items-center gap-2 flex-1">
-              <select
-                value={dismissReason}
-                onChange={e => setDismissReason(e.target.value)}
-                className="px-2 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200"
-              >
-                <option value="">Select reason…</option>
-                {DISMISS_REASONS.map(r => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-                <option value="custom">Other…</option>
-              </select>
-              {dismissReason === 'custom' && (
-                <input
-                  value={customReason}
-                  onChange={e => setCustomReason(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleDismiss()}
-                  placeholder="Custom reason…"
-                  className="flex-1 px-3 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200 placeholder-neutral-600"
-                  autoFocus
-                />
-              )}
-            </div>
-          )}
-
-          <div className="flex-1" />
-
-          <button
-            disabled={reviewing}
-            onClick={() => { setShowCommentForm(!showCommentForm); setShowOverrideForm(false); }}
-            className="px-3 py-2 text-xs rounded-lg bg-[#272C33] border border-[#3a424d] text-neutral-300 hover:bg-[#2f353d] disabled:opacity-50"
-          >Add Comment</button>
-          <button
-            disabled={reviewing}
-            onClick={() => { setShowOverrideForm(!showOverrideForm); setShowCommentForm(false); }}
-            className="px-3 py-2 text-xs rounded-lg bg-amber-900/30 text-amber-400 border border-amber-800/40 hover:bg-amber-900/50 disabled:opacity-50"
-          >Override AI</button>
-        </div>
-      )}
-
-      {showCommentForm && isPending && (
+      {showCommentForm && (
         <div className="sticky bottom-12 bg-[#14171c]/95 backdrop-blur-sm border-t border-[#2f353d] -mx-5 px-5 py-3 flex items-center gap-2">
           <input
             value={commentText}
             onChange={e => setCommentText(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleComment()}
-            placeholder="Internal note to Jira…"
+            placeholder="Internal note to Jira..."
             className="flex-1 px-3 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200 placeholder-neutral-600"
             autoFocus
           />
@@ -492,7 +337,7 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
         </div>
       )}
 
-      {showOverrideForm && isPending && (
+      {showOverrideForm && (
         <div className="sticky bottom-12 bg-[#14171c]/95 backdrop-blur-sm border-t border-[#2f353d] -mx-5 px-5 py-3 flex items-center gap-2">
           <select
             value={overrideAction}
@@ -507,13 +352,38 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
             value={overrideReason}
             onChange={e => setOverrideReason(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleOverride()}
-            placeholder="Reason for override…"
+            placeholder="Reason for override..."
             className="flex-1 px-3 py-1.5 text-[11px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-200 placeholder-neutral-600"
             autoFocus
           />
           <button onClick={handleOverride} disabled={reviewing || !overrideReason.trim()} className="px-3 py-1.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-50" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}>Apply</button>
         </div>
       )}
+    </>
+  ) : null;
+
+  return (
+    <div className="p-5 space-y-4">
+      <UnifiedTicketDetail
+        ticketKey={ticket.ticket_key}
+        queueFields={queueFields}
+        briefFields={briefFields}
+        briefTier={briefFields ? ((briefFields.customfield_12981 as any)?.value ?? null) : null}
+        compact
+        badges={<>{riskScoreBadge}{slaBadge}</>}
+        aiNextAction={{ forceGenerate: true, compact: true }}
+        aiAnalysis={{}}
+        riskFactors={ticket.risk_factors}
+        riskScore={ticket.risk_score}
+        conversationJson={ticket.conversation_json ?? undefined}
+        lastCustomerComment={ticket.last_customer_comment ?? undefined}
+        lastCustomerCommentAt={ticket.last_customer_comment_at ?? undefined}
+        lastAgentComment={ticket.last_agent_comment ?? undefined}
+        lastAgentCommentAt={ticket.last_agent_comment_at ?? undefined}
+        commentConfig={{ internalOnly: true }}
+        onRefresh={onRefresh}
+        primaryActions={actionBar}
+      />
     </div>
   );
 }
