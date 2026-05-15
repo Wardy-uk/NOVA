@@ -149,11 +149,7 @@ export class PortalKbService {
     const terms = searchQuery.split(/\s+/).filter(t => t.length > 2).slice(0, 10);
     if (terms.length === 0) return [];
 
-    const conditions = terms.map(() => `(body_text LIKE ? OR title LIKE ?)`).join(' OR ');
-    const params: unknown[] = [];
-    terms.forEach((t) => { params.push(`%${t}%`, `%${t}%`); });
-
-    const rows = await query<{
+    let rows: Array<{
       id: number;
       title: string;
       body_text: string;
@@ -161,13 +157,29 @@ export class PortalKbService {
       labels: string | null;
       helpful_yes: number;
       helpful_no: number;
-    }>(
-      `SELECT TOP 20 id, title, LEFT(body_text, 500) AS body_text, category, labels, helpful_yes, helpful_no
-       FROM portal_kb_articles
-       WHERE ${conditions}
-       ORDER BY (helpful_yes - helpful_no) DESC, view_count DESC`,
-      params,
-    );
+    }>;
+
+    try {
+      const ftTerms = terms.map(t => `"${t.replace(/"/g, '')}"`).join(' OR ');
+      rows = await query(
+        `SELECT TOP 20 id, title, LEFT(body_text, 500) AS body_text, category, labels, helpful_yes, helpful_no
+         FROM portal_kb_articles
+         WHERE CONTAINS((title, body_text), ?)
+         ORDER BY (helpful_yes - helpful_no) DESC, view_count DESC`,
+        [ftTerms],
+      );
+    } catch {
+      const conditions = terms.map(() => `(body_text LIKE ? OR title LIKE ?)`).join(' OR ');
+      const params: unknown[] = [];
+      terms.forEach((t) => { params.push(`%${t}%`, `%${t}%`); });
+      rows = await query(
+        `SELECT TOP 20 id, title, LEFT(body_text, 500) AS body_text, category, labels, helpful_yes, helpful_no
+         FROM portal_kb_articles
+         WHERE ${conditions}
+         ORDER BY (helpful_yes - helpful_no) DESC, view_count DESC`,
+        params,
+      );
+    }
 
     return rows.map(r => ({
       id: r.id,

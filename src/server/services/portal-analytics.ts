@@ -17,7 +17,7 @@ export async function trackEvent(
 export async function getMetrics(days: number = 30): Promise<PortalMetrics> {
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  const [deflection, chatResolution, formCompletion, kbSearch, helpfulness, timeToTicket, adoption] =
+  const [deflection, chatResolution, formCompletion, kbSearch, helpfulness, timeToTicket, adoption, repeatDeflection] =
     await Promise.all([
       getDeflectionRate(since),
       getChatResolutionRate(since),
@@ -26,6 +26,7 @@ export async function getMetrics(days: number = 30): Promise<PortalMetrics> {
       getArticleHelpfulness(),
       getMedianTimeToTicket(since),
       getPortalAdoption(since),
+      getRepeatDeflectionRate(since),
     ]);
 
   return {
@@ -36,6 +37,7 @@ export async function getMetrics(days: number = 30): Promise<PortalMetrics> {
     articleHelpfulness: helpfulness,
     medianTimeToTicket: timeToTicket,
     portalAdoption: adoption,
+    repeatDeflection,
   };
 }
 
@@ -126,6 +128,34 @@ async function getPortalAdoption(since: string): Promise<number> {
   );
   if (!totalUsers || totalUsers.cnt === 0) return 0;
   return Math.round(((logins?.cnt || 0) / totalUsers.cnt) * 100);
+}
+
+async function getRepeatDeflectionRate(since: string): Promise<number> {
+  const deflected = await queryOne<{ cnt: number }>(
+    `SELECT COUNT(DISTINCT portal_user_id) AS cnt
+     FROM portal_analytics
+     WHERE event_type IN ('deflection', 'kb_deflection')
+       AND created_at >= ?
+       AND portal_user_id IS NOT NULL`,
+    [since],
+  );
+  if (!deflected || deflected.cnt === 0) return 0;
+
+  const cameBack = await queryOne<{ cnt: number }>(
+    `SELECT COUNT(DISTINCT d.portal_user_id) AS cnt
+     FROM portal_analytics d
+     JOIN portal_analytics t ON d.portal_user_id = t.portal_user_id
+       AND t.event_type = 'ticket_created'
+       AND t.created_at > d.created_at
+       AND t.created_at <= DATEADD(HOUR, 24, d.created_at)
+     WHERE d.event_type IN ('deflection', 'kb_deflection')
+       AND d.created_at >= ?
+       AND d.portal_user_id IS NOT NULL`,
+    [since],
+  );
+
+  const stayedDeflected = deflected.cnt - (cameBack?.cnt || 0);
+  return Math.round((stayedDeflected / deflected.cnt) * 100);
 }
 
 export async function getTopSearches(limit: number = 20, since?: string): Promise<Array<{ query: string; count: number }>> {

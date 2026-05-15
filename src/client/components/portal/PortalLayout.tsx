@@ -21,23 +21,24 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
+      <header role="banner" className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
               <span className="text-xl font-heading font-extrabold tracking-tight text-brand">nurtur</span>
-              <span className="text-sm font-medium text-gray-400">|</span>
-              <span className="text-sm font-medium text-gray-500">Support Portal</span>
+              <span className="text-sm font-medium text-gray-600" aria-hidden="true">|</span>
+              <span className="text-sm font-medium text-gray-600">Support Portal</span>
             </div>
 
             <div className="flex items-center gap-4">
               <div className="text-right hidden sm:block">
                 <div className="text-sm font-medium text-gray-900">{user.email}</div>
-                <div className="text-xs text-gray-500">{user.orgName}</div>
+                <div className="text-xs text-gray-600">{user.orgName}</div>
               </div>
               <button
                 onClick={onLogout}
-                className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-md hover:bg-gray-100 transition-colors"
+                aria-label="Sign out"
+                className="text-sm text-gray-600 hover:text-gray-700 px-3 py-1.5 rounded-md hover:bg-gray-100 transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
               >
                 Sign out
               </button>
@@ -47,37 +48,41 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
 
         {/* Navigation */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex gap-1 -mb-px overflow-x-auto">
-            {NAV_ITEMS.map(item => (
-              <button
-                key={item.view}
-                onClick={() => onNavigate(item.view)}
-                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                  currentView === item.view || (item.view === 'tickets' && currentView === 'ticket-detail')
-                    ? 'border-brand text-brand'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
-                </svg>
-                {item.label}
-              </button>
-            ))}
+          <nav role="navigation" aria-label="Main navigation" className="flex gap-1 -mb-px overflow-x-auto">
+            {NAV_ITEMS.map(item => {
+              const isActive = currentView === item.view || (item.view === 'tickets' && currentView === 'ticket-detail');
+              return (
+                <button
+                  key={item.view}
+                  onClick={() => onNavigate(item.view)}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none ${
+                    isActive
+                      ? 'border-brand text-brand'
+                      : 'border-transparent text-gray-600 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
+                  </svg>
+                  {item.label}
+                </button>
+              );
+            })}
           </nav>
         </div>
       </header>
 
       {/* Main content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main role="main" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {children}
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 py-4">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between text-xs text-gray-400">
+      <footer role="contentinfo" className="bg-white border-t border-gray-200 py-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between text-xs text-gray-600">
           <span>Powered by Nurtur</span>
-          <a href="mailto:support@nurtur.tech" className="hover:text-gray-600">Need help? Contact us</a>
+          <a href="mailto:support@nurtur.tech" className="hover:text-gray-700 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none rounded">Need help? Contact us</a>
         </div>
       </footer>
     </div>

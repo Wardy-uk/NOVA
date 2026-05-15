@@ -288,14 +288,15 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
           <button
             onClick={startNewSession}
             disabled={loading}
-            className="w-full px-3 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 transition-colors"
+            aria-label="Start new conversation"
+            className="w-full px-3 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
           >
             New Conversation
           </button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {sessions.length === 0 ? (
-            <div className="p-4 text-center text-sm text-gray-500">
+            <div className="p-4 text-center text-sm text-gray-600">
               No previous conversations
             </div>
           ) : (
@@ -304,11 +305,12 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                 <button
                   key={s.id}
                   onClick={() => loadSession(s.id)}
-                  className={`w-full px-3 py-3 text-left hover:bg-gray-50 transition-colors ${
+                  aria-label={`Conversation from ${new Date(s.started_at).toLocaleDateString()} — ${s.status}${s.jira_issue_key ? `, ticket ${s.jira_issue_key}` : ''}`}
+                  className={`w-full px-3 py-3 text-left hover:bg-gray-50 transition-colors focus-visible:ring-2 focus-visible:ring-brand outline-none ${
                     s.id === activeSessionId ? 'bg-brand/5' : ''
                   }`}
                 >
-                  <div className="text-xs text-gray-500">{new Date(s.started_at).toLocaleDateString()}</div>
+                  <div className="text-xs text-gray-600">{new Date(s.started_at).toLocaleDateString()}</div>
                   <div className="text-sm text-gray-700 mt-0.5">
                     {s.status === 'active' ? 'Active' : s.status === 'resolved' ? 'Resolved' : s.status}
                   </div>
@@ -334,13 +336,13 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                 </svg>
               </div>
               <h2 className="text-lg font-semibold text-gray-900 mb-2">How can we help?</h2>
-              <p className="text-sm text-gray-500 mb-6">
+              <p className="text-sm text-gray-600 mb-6">
                 Tell us what you need — report an issue, ask a question, request a change, or check on a ticket.
               </p>
               <button
                 onClick={startNewSession}
                 disabled={loading}
-                className="px-6 py-2.5 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 transition-colors"
+                className="px-6 py-2.5 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
               >
                 Get help
               </button>
@@ -386,16 +388,17 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
               </div>
               <button
                 onClick={endSession}
-                className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
+                aria-label="End conversation"
+                className="text-xs text-gray-600 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 focus-visible:ring-2 focus-visible:ring-brand outline-none"
               >
                 End conversation
               </button>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+            <div role="log" aria-live="polite" className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
               {messages.length === 0 && (
-                <div className="text-center text-sm text-gray-500 py-8">
+                <div className="text-center text-sm text-gray-600 py-8">
                   How can we help you today? Describe your issue, question, or request.
                 </div>
               )}
@@ -436,16 +439,17 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                               key={cat.id}
                               onClick={() => handlePickerClick(cat.name)}
                               disabled={sending}
-                              className="text-left bg-white border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/50 hover:shadow-sm transition-all disabled:opacity-50"
+                              aria-label={cat.description ? `${cat.name} — ${cat.description}` : cat.name}
+                              className="text-left bg-white border border-gray-200 rounded-lg px-3 py-2 hover:border-brand/50 hover:shadow-sm transition-all disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-brand outline-none"
                             >
                               <div className="text-sm font-medium text-gray-900">{cat.name}</div>
                               {cat.description && (
-                                <div className="text-xs text-gray-500 mt-0.5">{cat.description}</div>
+                                <div className="text-xs text-gray-600 mt-0.5">{cat.description}</div>
                               )}
                             </button>
                           ))}
                         </div>
-                        <div className="text-xs text-gray-400 mt-2 ml-1">
+                        <div className="text-xs text-gray-600 mt-2 ml-1">
                           {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
                       </div>
@@ -462,19 +466,20 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                         </div>
                         <div className="space-y-2 ml-1">
                           {meta.articles.map((article: { id: number; title: string; excerpt: string }) => (
-                            <div key={article.id} className="bg-white border border-gray-200 rounded-lg p-3 hover:border-brand/40 hover:shadow-sm transition-all">
+                            <div key={article.id} role="article" aria-label={article.title} className="bg-white border border-gray-200 rounded-lg p-3 hover:border-brand/40 hover:shadow-sm transition-all">
                               <div className="text-sm font-medium text-gray-900">{article.title}</div>
-                              <div className="text-xs text-gray-500 mt-1 line-clamp-2">{article.excerpt}</div>
+                              <div className="text-xs text-gray-600 mt-1 line-clamp-2">{article.excerpt}</div>
                             </div>
                           ))}
                           <button
                             onClick={() => { setInput("These articles don't answer my question"); }}
-                            className="text-xs text-gray-500 hover:text-brand transition-colors mt-1"
+                            aria-label="None of these articles help, continue to ticket creation"
+                            className="text-xs text-gray-600 hover:text-brand transition-colors mt-1 focus-visible:ring-2 focus-visible:ring-brand outline-none rounded"
                           >
                             None of these help
                           </button>
                         </div>
-                        <div className="text-xs text-gray-400 mt-1 ml-1">
+                        <div className="text-xs text-gray-600 mt-1 ml-1">
                           {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
                       </div>
@@ -492,7 +497,7 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                       <div className="whitespace-pre-wrap">
                         {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
                       </div>
-                      <div className={`text-xs mt-1 ${msg.role === 'user' ? 'text-white/60' : 'text-gray-400'}`}>
+                      <div className={`text-xs mt-1 ${msg.role === 'user' ? 'text-white/70' : 'text-gray-600'}`}>
                         {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
                     </div>
@@ -521,15 +526,17 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Type your message..."
+                  aria-label="Chat message input"
                   rows={1}
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none"
                 />
                 <button
                   onClick={() => sendMessage()}
                   disabled={!input.trim() || sending}
-                  className="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Send message"
+                  className="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
                 >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                   </svg>
                 </button>
@@ -643,10 +650,10 @@ function SummaryCard({
                       {key !== 'category' && (
                         <button
                           onClick={() => setEditField(key)}
-                          className="p-0.5 text-gray-300 hover:text-brand transition-colors opacity-0 group-hover:opacity-100"
-                          title={`Edit ${label}`}
+                          className="p-0.5 text-gray-300 hover:text-brand transition-colors opacity-0 group-hover:opacity-100 focus-visible:ring-2 focus-visible:ring-brand outline-none rounded focus-visible:opacity-100"
+                          aria-label={`Edit ${label}`}
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                           </svg>
                         </button>
@@ -663,6 +670,7 @@ function SummaryCard({
               <select
                 value={editValues.urgency || fields.urgency || 'Normal'}
                 onChange={e => setEditValues(prev => ({ ...prev, urgency: e.target.value }))}
+                aria-label="Urgency"
                 className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand"
               >
                 <option value="Normal">Normal</option>
@@ -677,6 +685,7 @@ function SummaryCard({
               <select
                 value={editValues.contactPreference || fields.contactPreference || 'portal'}
                 onChange={e => setEditValues(prev => ({ ...prev, contactPreference: e.target.value }))}
+                aria-label="Contact preference"
                 className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand"
               >
                 <option value="portal">Portal reply</option>
@@ -693,11 +702,15 @@ function SummaryCard({
               onDragLeave={() => onDragStateChange(false)}
               onDrop={e => { e.preventDefault(); onDragStateChange(false); if (e.dataTransfer.files.length) onAddFiles(e.dataTransfer.files); }}
               onClick={() => fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); }}}
+              role="button"
+              tabIndex={0}
+              aria-label="Attach files"
+              className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors focus-visible:ring-2 focus-visible:ring-brand outline-none ${
                 isDragging ? 'border-brand bg-brand/5' : 'border-gray-300 hover:border-gray-400'
               }`}
             >
-              <p className="text-xs text-gray-500">Drop files here or click to attach screenshots</p>
+              <p className="text-xs text-gray-600">Drop files here or click to attach screenshots</p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -725,8 +738,8 @@ function SummaryCard({
                       <div className="text-gray-700 truncate">{f.file.name}</div>
                       <div className="text-gray-400">{formatFileSize(f.file.size)}</div>
                     </div>
-                    <button onClick={e => { e.stopPropagation(); onRemoveFile(i); }} className="p-0.5 text-gray-400 hover:text-red-500">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <button onClick={e => { e.stopPropagation(); onRemoveFile(i); }} aria-label={`Remove file ${f.file.name}`} className="p-0.5 text-gray-400 hover:text-red-500 focus-visible:ring-2 focus-visible:ring-brand outline-none rounded">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </button>
@@ -754,7 +767,7 @@ function SummaryCard({
           </div>
         </div>
 
-        <div className="text-xs text-gray-400 mt-1 ml-1">
+        <div className="text-xs text-gray-600 mt-1 ml-1">
           {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>
       </div>

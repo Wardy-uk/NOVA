@@ -81,15 +81,16 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
       <div className="max-w-3xl mx-auto">
         <button
           onClick={() => { setSelectedArticle(null); setRelatedArticles([]); }}
-          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4"
+          aria-label="Back to knowledge base"
+          className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-700 mb-4 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none rounded"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
           Back to Knowledge Base
         </button>
 
-        <div className="bg-white rounded-xl border border-gray-200 p-8">
+        <div role="article" className="bg-white rounded-xl border border-gray-200 p-8">
           {selectedArticle.category && (
             <span className="inline-block text-xs px-2.5 py-1 rounded-full bg-brand/15 text-brand mb-3">
               {selectedArticle.category}
@@ -112,13 +113,15 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
                 <span className="text-sm text-gray-600">Was this article helpful?</span>
                 <button
                   onClick={() => submitFeedback(selectedArticle.id, true)}
-                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-green-50 hover:border-green-300 transition-colors"
+                  aria-label="Mark as helpful"
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-green-50 hover:border-green-300 transition-colors focus-visible:ring-2 focus-visible:ring-brand outline-none"
                 >
                   Yes
                 </button>
                 <button
                   onClick={() => submitFeedback(selectedArticle.id, false)}
-                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-red-50 hover:border-red-300 transition-colors"
+                  aria-label="Mark as not helpful"
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-red-50 hover:border-red-300 transition-colors focus-visible:ring-2 focus-visible:ring-brand outline-none"
                 >
                   No
                 </button>
@@ -136,15 +139,16 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
                 <button
                   key={a.id}
                   onClick={() => openArticle(a.id)}
-                  className="w-full text-left p-3 rounded-lg border border-gray-100 hover:border-brand/40 hover:bg-gray-50 transition-all"
+                  aria-label={`Related article: ${a.title}`}
+                  className="w-full text-left p-3 rounded-lg border border-gray-100 hover:border-brand/40 hover:bg-gray-50 transition-all focus-visible:ring-2 focus-visible:ring-brand outline-none"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-sm font-medium text-gray-900">{a.title}</div>
-                      <div className="text-xs text-gray-500 mt-1 line-clamp-2">{a.excerpt}</div>
+                      <div className="text-xs text-gray-600 mt-1 line-clamp-2">{a.excerpt}</div>
                     </div>
                     {a.category && (
-                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">
+                      <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">
                         {a.category}
                       </span>
                     )}
@@ -177,6 +181,7 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search articles..."
+            aria-label="Search knowledge base"
             className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand text-sm"
             autoFocus
           />
@@ -185,7 +190,7 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
 
       {/* Search Results */}
       {search.length >= 2 && (
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-2xl mx-auto" aria-live="polite">
           {loading ? (
             <div className="space-y-3">
               {[...Array(3)].map((_, i) => (
@@ -206,15 +211,16 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
                 <button
                   key={a.id}
                   onClick={() => openArticle(a.id)}
-                  className="w-full text-left bg-white rounded-lg p-4 border border-gray-200 hover:border-brand/40 hover:shadow-sm transition-all"
+                  aria-label={`Article: ${a.title}`}
+                  className="w-full text-left bg-white rounded-lg p-4 border border-gray-200 hover:border-brand/40 hover:shadow-sm transition-all focus-visible:ring-2 focus-visible:ring-brand outline-none"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-sm font-medium text-gray-900">{a.title}</div>
-                      <div className="text-xs text-gray-500 mt-1 line-clamp-2">{a.excerpt}</div>
+                      <div className="text-xs text-gray-600 mt-1 line-clamp-2">{a.excerpt}</div>
                     </div>
                     {a.category && (
-                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">
+                      <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">
                         {a.category}
                       </span>
                     )}
@@ -235,10 +241,11 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
               <button
                 key={c.category}
                 onClick={() => setSearch(c.category)}
-                className="bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-brand/40 hover:shadow-sm transition-all"
+                aria-label={`Browse ${c.category} — ${c.count} article${c.count !== 1 ? 's' : ''}`}
+                className="bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-brand/40 hover:shadow-sm transition-all focus-visible:ring-2 focus-visible:ring-brand outline-none"
               >
                 <div className="text-sm font-medium text-gray-900">{c.category}</div>
-                <div className="text-xs text-gray-500 mt-1">{c.count} article{c.count !== 1 ? 's' : ''}</div>
+                <div className="text-xs text-gray-600 mt-1">{c.count} article{c.count !== 1 ? 's' : ''}</div>
               </button>
             ))}
           </div>
@@ -258,10 +265,11 @@ function StillNeedHelpCta({ onNavigate }: { onNavigate?: (view: PortalView) => v
   return (
     <div className="bg-brand/5 border border-brand/20 rounded-xl p-6 text-center">
       <h3 className="text-base font-semibold text-gray-900">Still need help?</h3>
-      <p className="text-sm text-gray-500 mt-1">Chat with our support assistant</p>
+      <p className="text-sm text-gray-600 mt-1">Chat with our support assistant</p>
       <button
         onClick={() => onNavigate('chat')}
-        className="mt-3 inline-flex items-center gap-2 px-5 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark transition-colors"
+        aria-label="Get help — chat with our support assistant"
+        className="mt-3 inline-flex items-center gap-2 px-5 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

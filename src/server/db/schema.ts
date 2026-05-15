@@ -1776,6 +1776,18 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_kb_articles', 'failed_deflection_count') IS NULL
      ALTER TABLE portal_kb_articles ADD failed_deflection_count INT DEFAULT 0;`,
 
+    // Full-text catalog and index for KB article search
+    `IF NOT EXISTS (SELECT 1 FROM sys.fulltext_catalogs WHERE name = 'portal_kb_ft_catalog')
+     CREATE FULLTEXT CATALOG portal_kb_ft_catalog;`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.fulltext_indexes WHERE object_id = OBJECT_ID('portal_kb_articles'))
+     BEGIN
+       DECLARE @pk_name NVARCHAR(128);
+       SELECT @pk_name = i.name FROM sys.indexes i
+       WHERE i.object_id = OBJECT_ID('portal_kb_articles') AND i.is_primary_key = 1;
+       IF @pk_name IS NOT NULL
+         EXEC('CREATE FULLTEXT INDEX ON portal_kb_articles(title, body_text) KEY INDEX ' + @pk_name + ' ON portal_kb_ft_catalog WITH CHANGE_TRACKING AUTO');
+     END;`,
+
     // Gap 4: Portal chat session metadata column
     `IF COL_LENGTH('portal_chat_sessions', 'metadata') IS NULL
      ALTER TABLE portal_chat_sessions ADD metadata NVARCHAR(MAX) NULL;`,

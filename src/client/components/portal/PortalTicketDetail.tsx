@@ -148,8 +148,8 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
   return (
     <div className="space-y-6">
       {/* Back button */}
-      <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <button onClick={onBack} aria-label="Back to ticket list" className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-700 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none rounded">
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
         Back to tickets
@@ -159,11 +159,11 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
         {/* Main content */}
         <div className="flex-1 space-y-6">
           {/* Header */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <div role="region" aria-label="Ticket information" className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="flex items-start justify-between flex-wrap gap-4">
               <div>
                 <div className="flex items-center gap-3 mb-2">
-                  <span className="text-sm font-mono text-gray-500">{ticket.key}</span>
+                  <span className="text-sm font-mono text-gray-600">{ticket.key}</span>
                   <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${statusColor(ticket.status)}`}>
                     {ticket.status}
                   </span>
@@ -178,24 +178,24 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
             {/* Info grid */}
             <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
-                <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Reporter</div>
+                <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">Reporter</div>
                 <div className="text-sm text-gray-900">{ticket.reporter || '-'}</div>
               </div>
               <div>
-                <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Assignee</div>
+                <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">Assignee</div>
                 <div className="text-sm text-gray-900">{ticket.assignee || 'Unassigned'}</div>
               </div>
               <div>
-                <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Created</div>
+                <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">Created</div>
                 <div className="text-sm text-gray-900">{new Date(ticket.created).toLocaleDateString()}</div>
               </div>
               <div>
-                <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Updated</div>
+                <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">Updated</div>
                 <div className="text-sm text-gray-900">{new Date(ticket.updated).toLocaleDateString()}</div>
               </div>
               {ticket.bcAccountNumber && (
                 <div>
-                  <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">BC Account</div>
+                  <div className="text-xs text-gray-600 uppercase tracking-wider mb-1">BC Account</div>
                   <div className="text-sm text-gray-900">{ticket.bcAccountNumber}</div>
                 </div>
               )}
@@ -235,7 +235,7 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-gray-900 truncate group-hover:text-brand">{att.filename}</div>
-                      <div className="text-xs text-gray-400">{formatFileSize(att.size)}</div>
+                      <div className="text-xs text-gray-600">{formatFileSize(att.size)}</div>
                     </div>
                     <svg className="w-4 h-4 text-gray-300 group-hover:text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -247,7 +247,7 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
           )}
 
           {/* Comments */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div role="region" aria-label="Comments" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100">
               <h2 className="text-lg font-semibold text-gray-900">Comments ({ticket.comments.length})</h2>
             </div>
@@ -265,7 +265,7 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
                         {comment.author.charAt(0).toUpperCase()}
                       </div>
                       <span className="text-sm font-medium text-gray-900">{comment.author}</span>
-                      <span className="text-xs text-gray-400">{new Date(comment.created).toLocaleString()}</span>
+                      <span className="text-xs text-gray-600">{new Date(comment.created).toLocaleString()}</span>
                     </div>
                     <div className="text-sm text-gray-600 whitespace-pre-wrap ml-9">{comment.body}</div>
                   </div>
@@ -283,37 +283,37 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
                 <button
                   type="button"
                   onClick={() => execCommand('bold')}
-                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 font-bold text-sm"
-                  title="Bold"
+                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 font-bold text-sm focus-visible:ring-2 focus-visible:ring-brand outline-none"
+                  aria-label="Bold"
                 >
                   B
                 </button>
                 <button
                   type="button"
                   onClick={() => execCommand('italic')}
-                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 italic text-sm"
-                  title="Italic"
+                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 italic text-sm focus-visible:ring-2 focus-visible:ring-brand outline-none"
+                  aria-label="Italic"
                 >
                   I
                 </button>
                 <button
                   type="button"
                   onClick={handleInsertLink}
-                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 text-sm"
-                  title="Insert link"
+                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 text-sm focus-visible:ring-2 focus-visible:ring-brand outline-none"
+                  aria-label="Insert link"
                 >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                   </svg>
                 </button>
-                <div className="w-px h-5 bg-gray-200 mx-1" />
+                <div className="w-px h-5 bg-gray-200 mx-1" aria-hidden="true" />
                 <button
                   type="button"
                   onClick={() => commentFileRef.current?.click()}
-                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 text-sm"
-                  title="Attach file"
+                  className="p-1.5 rounded hover:bg-gray-100 text-gray-600 text-sm focus-visible:ring-2 focus-visible:ring-brand outline-none"
+                  aria-label="Attach file"
                 >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                   </svg>
                 </button>
@@ -330,6 +330,9 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
               <div
                 ref={editorRef}
                 contentEditable
+                role="textbox"
+                aria-multiline="true"
+                aria-label="Add a comment"
                 onInput={() => setCommentText(editorRef.current?.innerText || '')}
                 data-placeholder="Add a comment..."
                 className="w-full min-h-[80px] px-3 py-2 text-sm border border-gray-300 rounded-b-lg focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand bg-white empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
@@ -340,7 +343,7 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
                   {commentFiles.map((f, i) => (
                     <span key={i} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded-full px-2.5 py-1 text-gray-700">
                       {f.name}
-                      <button onClick={() => setCommentFiles(prev => prev.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-500">
+                      <button onClick={() => setCommentFiles(prev => prev.filter((_, j) => j !== i))} aria-label={`Remove file ${f.name}`} className="text-gray-400 hover:text-red-500 focus-visible:ring-2 focus-visible:ring-brand outline-none rounded">
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         </svg>
@@ -353,7 +356,7 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
                 <button
                   onClick={handleAddComment}
                   disabled={(!commentText.trim() && commentFiles.length === 0) || submitting}
-                  className="px-4 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-4 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
                 >
                   {submitting ? 'Posting...' : 'Add Comment'}
                 </button>
@@ -387,7 +390,7 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
                           )}
                           <span className={`text-xs px-2 py-0.5 rounded font-medium ${statusColor(change.to)}`}>{change.to}</span>
                         </div>
-                        <div className="text-xs text-gray-400 mt-1">
+                        <div className="text-xs text-gray-600 mt-1">
                           {new Date(change.changedAt).toLocaleString()}
                           {change.changedBy && ` by ${change.changedBy}`}
                         </div>
@@ -407,7 +410,7 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
               <h3 className="text-sm font-medium text-gray-700 mb-3">SLA Status</h3>
               <div className="space-y-3">
                 <div>
-                  <div className="text-xs text-gray-500 mb-1">{ticket.slaStatus.name}</div>
+                  <div className="text-xs text-gray-600 mb-1">{ticket.slaStatus.name}</div>
                   {(() => {
                     const { text, color } = formatTimeRemaining(ticket.slaStatus.remaining, ticket.slaStatus.breached);
                     return (

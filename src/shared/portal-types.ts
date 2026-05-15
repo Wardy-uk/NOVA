@@ -317,4 +317,5 @@ export interface PortalMetrics {
   articleHelpfulness: number;
   medianTimeToTicket: number;
   portalAdoption: number;
+  repeatDeflection: number;
 }

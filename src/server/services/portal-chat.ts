@@ -232,6 +232,10 @@ export class PortalChatService {
       console.log(`[portal-chat] Frustration detected in session ${sessionId}`);
     }
 
+    // Read configurable thresholds
+    const maxExchanges = parseInt(this.settings.get('portal_chat_max_exchanges') || '10', 10);
+    const handoffThreshold = parseInt(this.settings.get('portal_chat_handoff_threshold') || '3', 10);
+
     try {
       const result = await this.processStage(meta, content, history, context, sessionId);
       responseContent = result.response;
@@ -240,6 +244,19 @@ export class PortalChatService {
         messageMeta.intent = meta.intent;
       } else {
         messageMeta = { intent: meta.intent };
+      }
+
+      // Post-stage handoff checks based on configurable thresholds
+      const userMessageCount = history.filter(m => m.role === 'user').length;
+      if (meta.stage !== 'summary' && meta.stage !== 'confirmed') {
+        if (userMessageCount >= maxExchanges && (meta.stage === 'detail' || meta.stage === 'category')) {
+          // Force handoff — create ticket with whatever we have
+          const ticketKey = await this.forceHandoff(meta, context, sessionId, history);
+          responseContent = `I've gone ahead and created ticket **${ticketKey}** with the details we've gathered so far. A team member will follow up with you.`;
+          meta.stage = 'confirmed';
+        } else if (userMessageCount >= handoffThreshold && meta.stage !== 'kb_check') {
+          responseContent += '\n\nWould you like me to create a ticket so a team member can assist directly?';
+        }
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -579,10 +596,11 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     context: ChatContext,
     sessionId: number,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
-    // Track exchanges for "other" intent — offer handoff after 2
+    // Track exchanges for "other" intent — offer handoff after threshold
     if (meta.intent === 'question' && (meta.category === 'other' || !meta.category)) {
+      const threshold = parseInt(this.settings.get('portal_chat_handoff_threshold') || '3', 10);
       meta.otherExchangeCount = (meta.otherExchangeCount || 0) + 1;
-      if (meta.otherExchangeCount >= 2) {
+      if (meta.otherExchangeCount >= threshold) {
         return {
           response: "I'm not sure I'm able to resolve this through chat. Would you like me to **create a support ticket** so a team member can help?",
         };
@@ -983,6 +1001,41 @@ Return JSON with only the fields present in the message.`,
     } catch (err) {
       console.warn('[portal-chat] Failed to log KB gap:', err instanceof Error ? err.message : err);
     }
+  }
+
+  private async forceHandoff(
+    meta: IntakeSessionMetadata,
+    context: ChatContext,
+    sessionId: number,
+    history: Array<{ role: string; content: string }>,
+  ): Promise<string> {
+    const f = meta.collectedFields;
+    const transcript = history.map(m => `[${m.role}]: ${m.content}`).join('\n\n');
+    const projectKey = this.settings.get('portal_jira_project_nt') || 'NT';
+    const catName = CATEGORY_NAMES[meta.category || ''] || 'General';
+
+    const ticketKey = await this.portalJira.createTicket({
+      projectKey,
+      summary: f.subject || `[Portal] ${catName} — auto-handoff from ${context.userName}`.slice(0, 250),
+      description: f.description || 'Chat conversation exceeded exchange limit. See transcript in internal notes.',
+      priority: f.urgency === 'Critical' ? 'Highest' : f.urgency === 'High' ? 'High' : 'Medium',
+      reporterEmail: context.userEmail,
+      internalNote: `*Auto-handoff (max exchanges reached, session ${sessionId})*\n\n${transcript}`,
+    });
+
+    meta.stage = 'confirmed';
+    await execute(
+      `UPDATE portal_chat_sessions SET jira_issue_key = ?, status = 'handed_off', metadata = ? WHERE id = ?`,
+      [ticketKey, JSON.stringify(meta), sessionId],
+    );
+
+    await trackEvent('handoff_with_summary', context.portalUserId, context.orgId, {
+      session_id: sessionId,
+      ticket_key: ticketKey,
+      reason: 'max_exchanges',
+    });
+
+    return ticketKey;
   }
 
   // ── Legacy Handoff (kept for old sessions) ──

@@ -90,13 +90,49 @@ export class PortalJiraService {
     return org?.domain || null;
   }
 
+  private async getOrgJiraOrgId(orgId: number): Promise<string | null> {
+    const mapping = await queryOne<{ jira_organisation_id: string | null }>(
+      `SELECT jira_organisation_id FROM portal_org_jira_mapping WHERE org_id = ?`,
+      [orgId],
+    );
+    return mapping?.jira_organisation_id || null;
+  }
+
   async listTickets(opts: TicketQueryOptions): Promise<{ tickets: PortalTicketSummary[]; total: number }> {
     const domain = await this.getOrgEmailDomain(opts.orgId);
-    if (!domain) return { tickets: [], total: 0 };
+    const jiraOrgId = await this.getOrgJiraOrgId(opts.orgId);
+
+    if (!domain && !jiraOrgId) return { tickets: [], total: 0 };
 
     const page = opts.page || 1;
     const pageSize = Math.min(opts.pageSize || 20, 100);
     const offset = (page - 1) * pageSize;
+
+    // Build org-scoped WHERE: email domain match, OR jira_org_id if column exists
+    // jira_issue_cache may not have a jira_org_id column yet — fall back to email only
+    let orgCondition: string;
+    const countParams: unknown[] = [];
+    const queryParams: unknown[] = [];
+
+    if (domain && jiraOrgId) {
+      // Both available — use OR for broadest match
+      orgCondition = `(jic.reporter_email LIKE ? OR jic.reporter_email LIKE ?)`;
+      countParams.push(`%@${domain}`, `%@${domain}`);
+      queryParams.push(`%@${domain}`, `%@${domain}`);
+      // NOTE: full jira_org_id matching requires a jira_org_id column on jira_issue_cache,
+      // populated by the Jira sync service. Until then, email domain is the only path.
+      if (jiraOrgId) {
+        console.log(`[portal-jira] Org ${opts.orgId} has jira_organisation_id=${jiraOrgId}, but jira_issue_cache lacks org column — using email domain only`);
+      }
+    } else if (domain) {
+      orgCondition = `jic.reporter_email LIKE ?`;
+      countParams.push(`%@${domain}`);
+      queryParams.push(`%@${domain}`);
+    } else {
+      // No domain, only jiraOrgId — can't query cache without org column
+      console.warn(`[portal-jira] Org ${opts.orgId} has jira_organisation_id but no email domain — cannot query ticket cache`);
+      return { tickets: [], total: 0 };
+    }
 
     let statusFilter = '';
     if (opts.status === 'open') {
@@ -108,8 +144,6 @@ export class PortalJiraService {
     let searchFilter = '';
     let priorityFilter = '';
     let dateFilter = '';
-    const countParams: unknown[] = [`%@${domain}`];
-    const queryParams: unknown[] = [`%@${domain}`];
 
     if (opts.search) {
       searchFilter = `AND (jic.summary LIKE ? OR jic.issue_key LIKE ?)`;
@@ -149,7 +183,7 @@ export class PortalJiraService {
 
     const countResult = await queryOne<{ total: number }>(
       `SELECT COUNT(*) AS total FROM jira_issue_cache jic
-       WHERE jic.reporter_email LIKE ? ${statusFilter} ${searchFilter} ${priorityFilter} ${dateFilter}`,
+       WHERE ${orgCondition} ${statusFilter} ${searchFilter} ${priorityFilter} ${dateFilter}`,
       countParams,
     );
 
@@ -168,7 +202,7 @@ export class PortalJiraService {
       `SELECT jic.issue_key, jic.summary, jic.status, ISNULL(jic.priority, 'Medium') AS priority,
               jic.created_at, jic.updated_at, jic.assignee_display AS assignee, jic.reporter_email
        FROM jira_issue_cache jic
-       WHERE jic.reporter_email LIKE ? ${statusFilter} ${searchFilter} ${priorityFilter} ${dateFilter}
+       WHERE ${orgCondition} ${statusFilter} ${searchFilter} ${priorityFilter} ${dateFilter}
        ORDER BY jic.updated_at DESC
        OFFSET ? ROWS FETCH NEXT ? ROWS ONLY`,
       queryParams,

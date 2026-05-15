@@ -67,12 +67,13 @@ export default function PortalTicketList({ onViewTicket }: Props) {
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex bg-gray-100 rounded-lg p-0.5">
+        <div className="flex bg-gray-100 rounded-lg p-0.5" role="group" aria-label="Filter by status">
           {(['all', 'open', 'resolved'] as const).map(s => (
             <button
               key={s}
               onClick={() => { setStatus(s); setPage(1); }}
-              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+              aria-pressed={status === s}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none ${
                 status === s ? 'bg-white shadow text-gray-900 font-medium' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
@@ -90,6 +91,7 @@ export default function PortalTicketList({ onViewTicket }: Props) {
         <select
           value={priority}
           onChange={e => { setPriority(e.target.value); setPage(1); }}
+          aria-label="Filter by priority"
           className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand"
         >
           <option value="all">All priorities</option>
@@ -102,6 +104,7 @@ export default function PortalTicketList({ onViewTicket }: Props) {
         <select
           value={dateRange}
           onChange={e => { setDateRange(e.target.value as typeof dateRange); setPage(1); }}
+          aria-label="Filter by date range"
           className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand"
         >
           <option value="all">All time</option>
@@ -115,6 +118,7 @@ export default function PortalTicketList({ onViewTicket }: Props) {
         <input
           type="text"
           placeholder="Search tickets..."
+          aria-label="Search tickets"
           value={search}
           onChange={e => { setSearch(e.target.value); setPage(1); }}
           className="w-64 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
@@ -122,7 +126,7 @@ export default function PortalTicketList({ onViewTicket }: Props) {
       </div>
 
       {/* Results */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden" aria-live="polite">
         {loading ? (
           <div className="divide-y divide-gray-100">
             {[...Array(5)].map((_, i) => (
@@ -134,21 +138,21 @@ export default function PortalTicketList({ onViewTicket }: Props) {
             ))}
           </div>
         ) : tickets.length === 0 ? (
-          <div className="px-6 py-16 text-center text-gray-500">
+          <div className="px-6 py-16 text-center text-gray-600">
             <p className="text-lg mb-2">No tickets found</p>
             <p className="text-sm">Try adjusting your filters or search query.</p>
           </div>
         ) : (
           <>
-            <table className="w-full text-sm">
+            <table className="w-full text-sm" aria-label="Tickets">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-left px-6 py-3 font-medium text-gray-500">Key</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-500">Summary</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-500">Status</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-500">Priority</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-500">Assignee</th>
-                  <th className="text-left px-6 py-3 font-medium text-gray-500">Updated</th>
+                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Key</th>
+                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Summary</th>
+                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Status</th>
+                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Priority</th>
+                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Assignee</th>
+                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Updated</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -156,9 +160,13 @@ export default function PortalTicketList({ onViewTicket }: Props) {
                   <tr
                     key={t.key}
                     onClick={() => onViewTicket(t.key)}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onViewTicket(t.key); }}}
+                    tabIndex={0}
+                    role="row"
+                    aria-label={`Ticket ${t.key}: ${t.summary}`}
+                    className="hover:bg-gray-50 cursor-pointer transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
                   >
-                    <td className="px-6 py-3 font-mono text-gray-500">{t.key}</td>
+                    <td className="px-6 py-3 font-mono text-gray-600">{t.key}</td>
                     <td className="px-6 py-3 text-gray-900 max-w-md truncate">{t.summary}</td>
                     <td className="px-6 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(t.status)}`}>
@@ -167,7 +175,7 @@ export default function PortalTicketList({ onViewTicket }: Props) {
                     </td>
                     <td className={`px-6 py-3 ${priorityColor(t.priority)}`}>{t.priority}</td>
                     <td className="px-6 py-3 text-gray-600">{t.assignee || '-'}</td>
-                    <td className="px-6 py-3 text-gray-500">{new Date(t.updated).toLocaleDateString()}</td>
+                    <td className="px-6 py-3 text-gray-600">{new Date(t.updated).toLocaleDateString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -176,21 +184,23 @@ export default function PortalTicketList({ onViewTicket }: Props) {
             {/* Pagination */}
             {totalPages > 1 && (
               <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-between">
-                <span className="text-sm text-gray-500">
+                <span className="text-sm text-gray-600">
                   Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
                 </span>
                 <div className="flex gap-1">
                   <button
                     disabled={page <= 1}
                     onClick={() => setPage(p => p - 1)}
-                    className="px-3 py-1 text-sm rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                    aria-label={`Previous page`}
+                    className="px-3 py-1 text-sm rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
                   >
                     Previous
                   </button>
                   <button
                     disabled={page >= totalPages}
                     onClick={() => setPage(p => p + 1)}
-                    className="px-3 py-1 text-sm rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                    aria-label={`Next page`}
+                    className="px-3 py-1 text-sm rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
                   >
                     Next
                   </button>

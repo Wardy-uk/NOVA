@@ -314,12 +314,14 @@ export default function PortalNewRequest({ onCreated, onNavigate }: Props) {
 
         {/* Subject */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Subject *</label>
+          <label htmlFor="portal-subject" className="block text-sm font-medium text-gray-700 mb-1">Subject *</label>
           <input
+            id="portal-subject"
             type="text"
             value={subject}
             onChange={e => setSubject(e.target.value)}
             placeholder="Brief summary of your issue"
+            aria-required="true"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm"
           />
         </div>
@@ -327,7 +329,7 @@ export default function PortalNewRequest({ onCreated, onNavigate }: Props) {
         {/* Category */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">What do you need help with? *</label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" role="group" aria-label="Category selection">
             {categories.map(c => (
               <button
                 key={c.id}
@@ -339,7 +341,9 @@ export default function PortalNewRequest({ onCreated, onNavigate }: Props) {
                   }
                   setCategory(c.id); setSubcategory('');
                 }}
-                className={`text-left p-3 rounded-lg border transition-all text-sm ${
+                aria-pressed={category === c.id}
+                aria-label={c.description ? `${c.name} — ${c.description}` : c.name}
+                className={`text-left p-3 rounded-lg border transition-all text-sm focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none ${
                   category === c.id
                     ? 'border-brand bg-brand/5 ring-1 ring-brand'
                     : 'border-gray-200 hover:border-brand/40 hover:bg-gray-50'
@@ -347,7 +351,7 @@ export default function PortalNewRequest({ onCreated, onNavigate }: Props) {
               >
                 <div className="font-medium text-gray-900">{c.name}</div>
                 {c.description && (
-                  <div className="text-xs text-gray-500 mt-0.5">{c.description}</div>
+                  <div className="text-xs text-gray-600 mt-0.5">{c.description}</div>
                 )}
               </button>
             ))}
@@ -386,11 +390,13 @@ export default function PortalNewRequest({ onCreated, onNavigate }: Props) {
 
         {/* Description — always shown, placeholder changes */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+          <label htmlFor="portal-description" className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
           <textarea
+            id="portal-description"
             value={description}
             onChange={e => setDescription(e.target.value)}
             placeholder={fieldConfig.description_hint}
+            aria-required="true"
             rows={5}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm resize-none"
           />
@@ -434,15 +440,19 @@ export default function PortalNewRequest({ onCreated, onNavigate }: Props) {
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); }}}
+            role="button"
+            tabIndex={0}
+            aria-label="Upload screenshots or files"
+            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors focus-visible:ring-2 focus-visible:ring-brand outline-none ${
               isDragging ? 'border-brand bg-brand/5' : 'border-gray-300 hover:border-gray-400'
             }`}
           >
-            <svg className="w-8 h-8 mx-auto text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-8 h-8 mx-auto text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
             <p className="text-sm text-gray-600">Drop files here or click to browse</p>
-            <p className="text-xs text-gray-400 mt-1">Max 10MB per file</p>
+            <p className="text-xs text-gray-600 mt-1">Max 10MB per file</p>
             <input
               ref={fileInputRef}
               type="file"
@@ -472,9 +482,10 @@ export default function PortalNewRequest({ onCreated, onNavigate }: Props) {
                   </div>
                   <button
                     onClick={e => { e.stopPropagation(); removeFile(i); }}
-                    className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                    aria-label={`Remove file ${f.file.name}`}
+                    className="p-1 text-gray-400 hover:text-red-500 transition-colors focus-visible:ring-2 focus-visible:ring-brand outline-none rounded"
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
@@ -540,7 +551,7 @@ export default function PortalNewRequest({ onCreated, onNavigate }: Props) {
           <button
             onClick={handleSubmit}
             disabled={submitting || !subject || !category || !description}
-            className="px-6 py-2.5 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-6 py-2.5 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
           >
             {submitting ? 'Submitting...' : 'Submit Request'}
           </button>

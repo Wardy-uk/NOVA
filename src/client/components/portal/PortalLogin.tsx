@@ -16,7 +16,7 @@ export default function PortalLogin({ onInternalAuth }: PortalLoginProps) {
   }, []);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 to-cyan-100 px-4">
+    <div role="main" aria-label="Portal login" className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 to-cyan-100 px-4">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
         <div className="mb-6">
           <div className="mt-2">

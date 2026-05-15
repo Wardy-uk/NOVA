@@ -80,16 +80,17 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
     <div className="space-y-8">
       {/* Announcement Banner */}
       {announcement && !announcementDismissed && (
-        <div className="bg-brand/10 border border-brand/30 rounded-xl p-4 flex items-start gap-3 relative">
-          <svg className="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div role="alert" className="bg-brand/10 border border-brand/30 rounded-xl p-4 flex items-start gap-3 relative">
+          <svg className="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
           </svg>
           <div className="flex-1 text-sm text-gray-800" dangerouslySetInnerHTML={{ __html: announcement }} />
           <button
             onClick={() => setAnnouncementDismissed(true)}
-            className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+            aria-label="Dismiss announcement"
+            className="text-gray-600 hover:text-gray-700 flex-shrink-0 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none rounded"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -110,9 +111,10 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
       <div className="text-center py-2">
         <button
           onClick={() => onNavigate('chat')}
-          className="inline-flex items-center gap-3 bg-brand text-white rounded-xl px-8 py-5 hover:bg-brand-dark transition-colors group shadow-sm"
+          aria-label="Get help from support"
+          className="inline-flex items-center gap-3 bg-brand text-white rounded-xl px-8 py-5 hover:bg-brand-dark transition-colors group shadow-sm focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
         >
-          <svg className="w-6 h-6 text-white/80 group-hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-6 h-6 text-white/80 group-hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
@@ -124,15 +126,15 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
       </div>
 
       {/* Recent Tickets */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div role="region" aria-label="Recent tickets" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">Recent Tickets</h2>
-          <button onClick={() => onNavigate('tickets')} className="text-sm text-brand hover:text-brand-dark">
+          <button onClick={() => onNavigate('tickets')} className="text-sm text-brand hover:text-brand-dark focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none rounded">
             View all
           </button>
         </div>
         {recentTickets.length === 0 ? (
-          <div className="px-6 py-12 text-center text-gray-500">
+          <div className="px-6 py-12 text-center text-gray-600">
             <p className="text-lg mb-2">No open tickets</p>
             <p className="text-sm">When you submit a request, it will appear here.</p>
           </div>
@@ -142,18 +144,19 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
               <button
                 key={t.key}
                 onClick={() => onViewTicket(t.key)}
-                className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors text-left"
+                aria-label={`View ticket ${t.key}: ${t.summary}`}
+                className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors text-left focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-mono text-gray-500">{t.key}</span>
+                    <span className="text-sm font-mono text-gray-600">{t.key}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(t.status)}`}>
                       {t.status}
                     </span>
                   </div>
                   <div className="text-sm text-gray-900 mt-1 truncate">{t.summary}</div>
                 </div>
-                <svg className="w-5 h-5 text-gray-400 flex-shrink-0 ml-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-5 h-5 text-gray-400 flex-shrink-0 ml-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
@@ -164,10 +167,10 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
 
       {/* Popular KB Articles */}
       {popularArticles.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div role="region" aria-label="Popular articles" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Popular Articles</h2>
-            <button onClick={() => onNavigate('kb')} className="text-sm text-brand hover:text-brand-dark">
+            <button onClick={() => onNavigate('kb')} className="text-sm text-brand hover:text-brand-dark focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none rounded">
               Browse all
             </button>
           </div>
@@ -176,11 +179,11 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
               <button
                 key={a.id}
                 onClick={() => onNavigate('kb')}
-                className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors text-left"
+                className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors text-left focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
               >
                 <div className="text-sm text-gray-900">{a.title}</div>
                 {a.category && (
-                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full ml-4 flex-shrink-0">{a.category}</span>
+                  <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full ml-4 flex-shrink-0">{a.category}</span>
                 )}
               </button>
             ))}

@@ -16,8 +16,10 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         org_name: string;
         last_login: string;
         role: string;
+        ticket_count: number;
       }>(
-        `SELECT pu.id, pu.email, pu.display_name, po.name AS org_name, pu.last_login, pu.role
+        `SELECT pu.id, pu.email, pu.display_name, po.name AS org_name, pu.last_login, pu.role,
+                (SELECT COUNT(*) FROM jira_issue_cache jic WHERE jic.reporter_email = pu.email) AS ticket_count
          FROM portal_users pu
          JOIN portal_organisations po ON pu.org_id = po.id
          ORDER BY pu.last_login DESC`,
@@ -37,9 +39,13 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         domain: string | null;
         external_id: string;
         user_count: number;
+        ticket_count: number;
       }>(
         `SELECT po.id, po.name, po.domain, po.external_id,
-                (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count
+                (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
+                (SELECT COUNT(*) FROM jira_issue_cache jic
+                 WHERE jic.reporter_email LIKE '%@' + po.domain
+                   AND po.domain IS NOT NULL AND po.domain != '') AS ticket_count
          FROM portal_organisations po
          ORDER BY po.name`,
       );
