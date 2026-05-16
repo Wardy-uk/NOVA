@@ -47,11 +47,16 @@ export default function PortalTicketList({ onViewTicket }: Props) {
   useEffect(() => { load(); }, [load]);
 
   const statusColor = (s: string) => {
-    const lower = s.toLowerCase();
-    if (lower.includes('closed') || lower.includes('resolved') || lower.includes('done')) return 'bg-green-100 text-green-700';
-    if (lower.includes('progress') || lower.includes('waiting')) return 'bg-blue-100 text-blue-700';
-    if (lower.includes('escalat')) return 'bg-red-100 text-red-700';
-    return 'bg-yellow-100 text-yellow-700';
+    switch (s) {
+      case 'Submitted': return 'bg-gray-100 text-gray-700';
+      case 'Reviewed': return 'bg-blue-100 text-blue-700';
+      case 'In Progress': return 'bg-amber-100 text-amber-700';
+      case 'Awaiting Your Response': return 'bg-red-100 text-red-700';
+      case 'Awaiting Third Party': return 'bg-purple-100 text-purple-700';
+      case 'Resolved': return 'bg-green-100 text-green-700';
+      case 'Closed': return 'bg-slate-100 text-slate-700';
+      default: return 'bg-gray-100 text-gray-700';
+    }
   };
 
   const priorityColor = (p: string) => {

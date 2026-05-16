@@ -1,5 +1,34 @@
 import { z } from 'zod';
 
+// ── Portal Status (customer-facing) ──
+
+export type PortalStatus =
+  | 'Submitted'
+  | 'Reviewed'
+  | 'In Progress'
+  | 'Awaiting Your Response'
+  | 'Awaiting Third Party'
+  | 'Resolved'
+  | 'Closed';
+
+export const portalStatusOrder: PortalStatus[] = [
+  'Submitted',
+  'Reviewed',
+  'In Progress',
+  'Resolved',
+  'Closed',
+];
+
+export const portalStatusDescriptions: Record<PortalStatus, string> = {
+  'Submitted': "We've received your request",
+  'Reviewed': "We've assessed this and know what's needed",
+  'In Progress': "We're actively working on this",
+  'Awaiting Your Response': 'We need information or action from you',
+  'Awaiting Third Party': "We're waiting on an external provider",
+  'Resolved': 'We believe this is fixed/complete',
+  'Closed': 'Confirmed done',
+};
+
 // ── Portal Organisation ──
 
 export interface PortalOrganisation {

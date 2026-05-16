@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import type { PortalTicketDetail as TicketDetail, PortalTicketComment, PortalTicketAttachment, PortalSlaStatus, PortalStatusChange } from '../../../shared/portal-types.js';
+import type { PortalTicketDetail as TicketDetail, PortalTicketComment, PortalTicketAttachment, PortalSlaStatus, PortalStatusChange, PortalStatus } from '../../../shared/portal-types.js';
+import { portalStatusOrder } from '../../../shared/portal-types.js';
 
 interface Props {
   ticketKey: string;
@@ -117,11 +118,59 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
   };
 
   const statusColor = (s: string) => {
-    const lower = s.toLowerCase();
-    if (lower.includes('closed') || lower.includes('resolved') || lower.includes('done')) return 'bg-green-100 text-green-800';
-    if (lower.includes('progress') || lower.includes('waiting')) return 'bg-blue-100 text-blue-800';
-    if (lower.includes('escalat')) return 'bg-red-100 text-red-800';
-    return 'bg-yellow-100 text-yellow-800';
+    switch (s) {
+      case 'Submitted': return 'bg-gray-100 text-gray-800';
+      case 'Reviewed': return 'bg-blue-100 text-blue-800';
+      case 'In Progress': return 'bg-amber-100 text-amber-800';
+      case 'Awaiting Your Response': return 'bg-red-100 text-red-800';
+      case 'Awaiting Third Party': return 'bg-purple-100 text-purple-800';
+      case 'Resolved': return 'bg-green-100 text-green-800';
+      case 'Closed': return 'bg-slate-100 text-slate-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const isBranchStatus = (s: string) => s === 'Awaiting Your Response' || s === 'Awaiting Third Party';
+
+  const renderStepper = (currentStatus: string) => {
+    const currentIdx = portalStatusOrder.indexOf(currentStatus as PortalStatus);
+    const branch = isBranchStatus(currentStatus);
+    const activeIdx = branch ? portalStatusOrder.indexOf('In Progress') : currentIdx;
+
+    return (
+      <div className="flex items-center gap-0 w-full" role="group" aria-label="Ticket progress">
+        {portalStatusOrder.map((step, i) => {
+          const reached = i <= activeIdx;
+          const isCurrent = !branch && step === currentStatus;
+          return (
+            <React.Fragment key={step}>
+              <div className="flex flex-col items-center relative">
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold border-2 ${
+                  isCurrent ? 'border-brand bg-brand text-white' :
+                  reached ? 'border-brand bg-brand/10 text-brand' :
+                  'border-gray-300 bg-white text-gray-400'
+                }`}>
+                  {reached && !isCurrent ? (
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                  ) : (i + 1)}
+                </div>
+                <span className={`text-[10px] mt-1 whitespace-nowrap ${isCurrent ? 'text-brand font-semibold' : reached ? 'text-gray-700' : 'text-gray-400'}`}>
+                  {step}
+                </span>
+                {branch && step === 'In Progress' && (
+                  <span className="text-[10px] mt-0.5 px-1.5 py-0.5 rounded bg-red-50 text-red-700 font-medium whitespace-nowrap">
+                    {currentStatus}
+                  </span>
+                )}
+              </div>
+              {i < portalStatusOrder.length - 1 && (
+                <div className={`flex-1 h-0.5 min-w-[16px] ${i < activeIdx ? 'bg-brand' : 'bg-gray-200'}`} />
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    );
   };
 
   if (loading) {
@@ -199,6 +248,11 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
                   <div className="text-sm text-gray-900">{ticket.bcAccountNumber}</div>
                 </div>
               )}
+            </div>
+
+            {/* Progress stepper */}
+            <div className="mt-6 pt-6 border-t border-gray-100">
+              {renderStepper(ticket.status)}
             </div>
 
             {/* Description */}

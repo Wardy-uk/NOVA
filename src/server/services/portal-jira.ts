@@ -10,6 +10,7 @@ import type {
   PortalStatusChange,
   PortalSlaStatus,
 } from '../../shared/portal-types.js';
+import { mapJiraStatusToPortal } from './portal-status-mapper.js';
 
 interface TicketQueryOptions {
   orgId: number;
@@ -211,7 +212,7 @@ export class PortalJiraService {
     const tickets: PortalTicketSummary[] = rows.map(r => ({
       key: r.issue_key,
       summary: r.summary || '',
-      status: r.status || 'Unknown',
+      status: mapJiraStatusToPortal(r.status || 'Unknown', this.settings),
       priority: r.priority,
       created: r.created_at,
       updated: r.updated_at,
@@ -333,8 +334,8 @@ export class PortalJiraService {
             entry.items
               .filter(item => item.field === 'status')
               .map(item => ({
-                from: item.fromString,
-                to: item.toString || 'Unknown',
+                from: item.fromString ? mapJiraStatusToPortal(item.fromString, this.settings) : null,
+                to: mapJiraStatusToPortal(item.toString || 'Unknown', this.settings),
                 changedAt: entry.created,
                 changedBy: entry.author?.displayName || null,
               })),
@@ -346,7 +347,7 @@ export class PortalJiraService {
     return {
       key: ticket.issue_key,
       summary: ticket.summary || '',
-      status: ticket.status || 'Unknown',
+      status: mapJiraStatusToPortal(ticket.status || 'Unknown', this.settings),
       priority: ticket.priority,
       created: ticket.created_at,
       updated: ticket.updated_at,
