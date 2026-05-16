@@ -15,6 +15,7 @@ interface SyncRunRow {
   chunks_updated: number;
   chunks_deleted: number;
   error_message: string | null;
+  diagnostics: string | null;
 }
 
 interface ChunkRow {
@@ -114,9 +115,13 @@ export class KbSyncWorker {
       );
       chunksDeleted = deleteResult.rowsAffected;
 
+      const diagnostics = 'lastDiagnostics' in provider
+        ? ((provider as any).lastDiagnostics as string[])?.join('\n') || null
+        : null;
+
       await execute(
-        `UPDATE kb_sync_runs SET status = 'success', completed_at = ?, docs_seen = ?, chunks_added = ?, chunks_updated = ?, chunks_deleted = ? WHERE id = ?`,
-        [new Date(), docsSeen, chunksAdded, chunksUpdated, chunksDeleted, runId]
+        `UPDATE kb_sync_runs SET status = 'success', completed_at = ?, docs_seen = ?, chunks_added = ?, chunks_updated = ?, chunks_deleted = ?, diagnostics = ? WHERE id = ?`,
+        [new Date(), docsSeen, chunksAdded, chunksUpdated, chunksDeleted, diagnostics, runId]
       );
 
       console.log(`[kb-sync] ${source}: completed — ${docsSeen} docs, +${chunksAdded} chunks, ~${chunksUpdated} updated, -${chunksDeleted} deleted`);
@@ -124,10 +129,13 @@ export class KbSyncWorker {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[kb-sync] ${source}: failed —`, msg);
+      const diagnostics = 'lastDiagnostics' in provider
+        ? ((provider as any).lastDiagnostics as string[])?.join('\n') || null
+        : null;
       if (runId > 0) {
         await execute(
-          `UPDATE kb_sync_runs SET status = 'error', completed_at = ?, error_message = ? WHERE id = ?`,
-          [new Date(), msg, runId]
+          `UPDATE kb_sync_runs SET status = 'error', completed_at = ?, error_message = ?, diagnostics = ? WHERE id = ?`,
+          [new Date(), msg, diagnostics, runId]
         ).catch(() => {});
       }
       return 0;

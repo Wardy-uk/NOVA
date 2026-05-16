@@ -8,6 +8,7 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
   readonly source = 'confluence';
   private settings: SettingsQueries;
   private turndown: TurndownService;
+  public lastDiagnostics: string[] = [];
 
   constructor(settings: SettingsQueries) {
     this.settings = settings;
@@ -46,8 +47,14 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
     return raw.split(',').map(s => s.trim()).filter(Boolean);
   }
 
+  private diag(msg: string) {
+    console.warn(msg);
+    this.lastDiagnostics.push(msg);
+  }
+
   async *fetchDocuments(): AsyncIterable<RawDocument> {
     if (!this.isConfigured()) return;
+    this.lastDiagnostics = [];
 
     const auth = this.getAuth();
     const spaceKeys = this.getSpaceKeys();
@@ -56,47 +63,49 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
       'Accept': 'application/json',
     };
 
-    console.log(`[kb-confluence] Starting sync — site: ${auth.baseUrl}, email: ${auth.email}, spaces: ${spaceKeys.join(',')}`);
+    this.diag(`[kb-confluence] Starting sync — site: ${auth.baseUrl}, email: ${auth.email}, spaces: ${spaceKeys.join(',')}`);
 
     for (const spaceKey of spaceKeys) {
       try {
         // Resolve space ID via v2 API
         const spaceUrl = `${auth.baseUrl}/wiki/api/v2/spaces?keys=${spaceKey}`;
-        console.log(`[kb-confluence] Resolving space ${spaceKey} via ${spaceUrl}`);
+        this.diag(`[kb-confluence] Resolving space ${spaceKey} via ${spaceUrl}`);
         const spaceRes = await fetch(spaceUrl, { headers });
         const spaceBody = await spaceRes.text();
         if (!spaceRes.ok) {
-          console.warn(`[kb-confluence] Failed to resolve space ${spaceKey}: ${spaceRes.status} — ${spaceBody.slice(0, 300)}`);
+          this.diag(`[kb-confluence] Failed to resolve space ${spaceKey}: ${spaceRes.status} — ${spaceBody.slice(0, 300)}`);
           continue;
         }
         if (!spaceBody.trim()) {
-          console.warn(`[kb-confluence] Empty response resolving space ${spaceKey} (status ${spaceRes.status}) — auth may have failed. Email: ${auth.email}`);
+          this.diag(`[kb-confluence] Empty response resolving space ${spaceKey} (status ${spaceRes.status}) — auth may have failed. Email: ${auth.email}`);
           continue;
         }
         let spaceData: { results: Array<{ id: string }> };
         try { spaceData = JSON.parse(spaceBody); } catch {
-          console.warn(`[kb-confluence] Invalid JSON resolving space ${spaceKey}: ${spaceBody.slice(0, 200)}`);
+          this.diag(`[kb-confluence] Invalid JSON resolving space ${spaceKey}: ${spaceBody.slice(0, 200)}`);
           continue;
         }
         if (!spaceData.results?.length) {
-          console.warn(`[kb-confluence] Space ${spaceKey} not found (API returned empty results)`);
+          this.diag(`[kb-confluence] Space "${spaceKey}" not found — check key is correct and service account has Confluence access`);
           continue;
         }
         const spaceId = spaceData.results[0].id;
-        console.log(`[kb-confluence] Space ${spaceKey} resolved to ID ${spaceId}`);
+        this.diag(`[kb-confluence] Space "${spaceKey}" resolved to ID ${spaceId}`);
 
         // Paginate through all pages in the space
         let pageUrl: string | null = `${auth.baseUrl}/wiki/api/v2/pages?space-id=${spaceId}&body-format=storage&limit=50&status=current`;
+        let pagesFound = 0;
+        let pagesSkipped = 0;
 
         while (pageUrl) {
           const pageRes = await fetch(pageUrl, { headers });
           const pageBody = await pageRes.text();
           if (!pageRes.ok) {
-            console.warn(`[kb-confluence] Page fetch failed: ${pageRes.status} — ${pageBody.slice(0, 300)}`);
+            this.diag(`[kb-confluence] Page fetch failed: ${pageRes.status} — ${pageBody.slice(0, 300)}`);
             break;
           }
           if (!pageBody.trim()) {
-            console.warn(`[kb-confluence] Empty response fetching pages — check auth`);
+            this.diag(`[kb-confluence] Empty response fetching pages — check auth`);
             break;
           }
           let pageData: {
@@ -110,20 +119,47 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
             _links?: { next?: string };
           };
           try { pageData = JSON.parse(pageBody); } catch {
-            console.warn(`[kb-confluence] Invalid JSON fetching pages: ${pageBody.slice(0, 200)}`);
+            this.diag(`[kb-confluence] Invalid JSON fetching pages: ${pageBody.slice(0, 200)}`);
             break;
           }
 
-          // Process pages with concurrency limit
+          // Process pages — fallback to individual fetch if body missing
           const pages = pageData.results || [];
           for (let i = 0; i < pages.length; i += MAX_CONCURRENT) {
             const batch = pages.slice(i, i + MAX_CONCURRENT);
-            const docs = batch
-              .filter(page => page.body?.storage?.value?.trim())
-              .map(page => this.pageToDocument(page, spaceKey, auth.baseUrl));
+            for (const page of batch) {
+              let bodyHtml = page.body?.storage?.value?.trim();
 
-            for (const doc of docs) {
-              if (doc) yield doc;
+              if (!bodyHtml) {
+                try {
+                  const pageDetailRes = await fetch(
+                    `${auth.baseUrl}/wiki/api/v2/pages/${page.id}?body-format=storage`,
+                    { headers }
+                  );
+                  if (pageDetailRes.ok) {
+                    const pageDetail = await pageDetailRes.json();
+                    bodyHtml = pageDetail.body?.storage?.value?.trim();
+                  }
+                  if (!bodyHtml) {
+                    pagesSkipped++;
+                    continue;
+                  }
+                } catch {
+                  pagesSkipped++;
+                  continue;
+                }
+              }
+
+              const doc = this.pageToDocument(
+                { ...page, body: { storage: { value: bodyHtml } } },
+                spaceKey, auth.baseUrl
+              );
+              if (doc) {
+                pagesFound++;
+                yield doc;
+              } else {
+                pagesSkipped++;
+              }
             }
           }
 
@@ -131,8 +167,10 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
           const nextLink = pageData._links?.next;
           pageUrl = nextLink ? `${auth.baseUrl}${nextLink}` : null;
         }
+
+        this.diag(`[kb-confluence] Space "${spaceKey}": ${pagesFound} pages processed, ${pagesSkipped} skipped (no body)`);
       } catch (err) {
-        console.warn(`[kb-confluence] Error syncing space ${spaceKey}:`, err instanceof Error ? err.message : err);
+        this.diag(`[kb-confluence] Error syncing space ${spaceKey}: ${err instanceof Error ? err.message : err}`);
       }
     }
   }

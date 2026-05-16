@@ -3921,9 +3921,21 @@ function CostCard({ label, value, sub }: { label: string; value: string; sub?: s
 
 // ── KB Index Tab ──
 
+interface KbSyncRun {
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  docs_seen: number;
+  chunks_added: number;
+  chunks_updated: number;
+  chunks_deleted: number;
+  error_message: string | null;
+  diagnostics: string | null;
+}
+
 interface KbStatus {
   chunks_by_source: Record<string, number>;
-  last_sync_by_source: Record<string, { status: string; started_at: string; completed_at: string | null; docs_seen: number; chunks_added: number; chunks_updated: number; chunks_deleted: number } | null>;
+  last_sync_by_source: Record<string, KbSyncRun | null>;
   embedding_model: string;
   vector_storage_mode: string;
   registered_providers: string[];
@@ -3933,6 +3945,8 @@ function KbIndexTab() {
   const [status, setStatus] = useState<KbStatus | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recentRuns, setRecentRuns] = useState<Record<string, KbSyncRun[]>>({});
+  const [expandedSource, setExpandedSource] = useState<string | null>(null);
 
   const fetchStatus = async () => {
     try {
@@ -3946,6 +3960,15 @@ function KbIndexTab() {
     }
   };
 
+  const fetchRuns = async (source: string) => {
+    try {
+      const token = localStorage.getItem('nova_token');
+      const res = await fetch(`/api/kb-admin/sync-runs?source=${source}&limit=3`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (data.ok) setRecentRuns(prev => ({ ...prev, [source]: data.data }));
+    } catch { /* ignore */ }
+  };
+
   const triggerSync = async (source: string) => {
     setSyncing(source);
     try {
@@ -3954,11 +3977,20 @@ function KbIndexTab() {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
-      setTimeout(fetchStatus, 5000);
+      setTimeout(() => { fetchStatus(); fetchRuns(source); }, 5000);
     } catch {
       // ignore
     } finally {
       setTimeout(() => setSyncing(null), 3000);
+    }
+  };
+
+  const toggleRuns = (source: string) => {
+    if (expandedSource === source) {
+      setExpandedSource(null);
+    } else {
+      setExpandedSource(source);
+      if (!recentRuns[source]) fetchRuns(source);
     }
   };
 
@@ -4004,13 +4036,46 @@ function KbIndexTab() {
                   <div>Docs: {lastSync.docs_seen} | +{lastSync.chunks_added} ~{lastSync.chunks_updated} -{lastSync.chunks_deleted}</div>
                 )}
               </div>
-              <button
-                onClick={() => triggerSync(source)}
-                disabled={syncing === source}
-                className="mt-2 text-xs px-2 py-1 rounded bg-[#363d47] text-[#5ec1ca] hover:bg-[#3a424d] disabled:opacity-50"
-              >
-                {syncing === source ? 'Syncing...' : 'Sync Now'}
-              </button>
+              {lastSync?.error_message && (
+                <div className="mt-1 text-xs text-red-400 bg-red-900/20 rounded px-2 py-1 break-words">
+                  {lastSync.error_message}
+                </div>
+              )}
+              {lastSync?.diagnostics && (
+                <div className="mt-1 text-xs text-yellow-400 bg-yellow-900/20 rounded px-2 py-1 break-words whitespace-pre-line max-h-32 overflow-y-auto">
+                  {lastSync.diagnostics}
+                </div>
+              )}
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  onClick={() => triggerSync(source)}
+                  disabled={syncing === source}
+                  className="text-xs px-2 py-1 rounded bg-[#363d47] text-[#5ec1ca] hover:bg-[#3a424d] disabled:opacity-50"
+                >
+                  {syncing === source ? 'Syncing...' : 'Sync Now'}
+                </button>
+                <button
+                  onClick={() => toggleRuns(source)}
+                  className="text-xs text-neutral-500 hover:text-neutral-300"
+                >
+                  {expandedSource === source ? 'Hide runs' : 'Recent runs'}
+                </button>
+              </div>
+              {expandedSource === source && recentRuns[source] && (
+                <div className="mt-2 border-t border-[#3a424d] pt-2 space-y-1.5">
+                  {recentRuns[source].map((run, i) => (
+                    <div key={i} className="text-[11px] text-neutral-400">
+                      <span className={run.status === 'error' ? 'text-red-400' : run.status === 'success' ? 'text-green-400' : 'text-blue-400'}>
+                        {run.status}
+                      </span>
+                      {' '}{run.started_at ? new Date(run.started_at).toLocaleString() : '—'}
+                      {' '}({run.docs_seen} docs)
+                      {run.error_message && <div className="text-red-400 mt-0.5 break-words">{run.error_message}</div>}
+                    </div>
+                  ))}
+                  {recentRuns[source].length === 0 && <div className="text-[11px] text-neutral-500">No runs recorded</div>}
+                </div>
+              )}
             </div>
           );
         })}

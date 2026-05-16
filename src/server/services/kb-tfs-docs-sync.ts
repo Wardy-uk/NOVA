@@ -1,14 +1,10 @@
-import path from 'path';
-import fs from 'fs';
-import { simpleGit, type SimpleGit } from 'simple-git';
 import type { KbSyncProvider, RawDocument } from './kb-sync-provider.js';
 import type { SettingsQueries } from '../db/settings-store.js';
-
-const CACHE_DIR = path.resolve('data/kb-cache/tfs-docs');
 
 export class TfsDocsSyncProvider implements KbSyncProvider {
   readonly source = 'tfs-docs';
   private settings: SettingsQueries;
+  public lastDiagnostics: string[] = [];
 
   constructor(settings: SettingsQueries) {
     this.settings = settings;
@@ -18,15 +14,19 @@ export class TfsDocsSyncProvider implements KbSyncProvider {
     return !!this.settings.get('tfs_docs_pat')?.trim();
   }
 
-  private getAuthUrl(): string {
+  private getHeaders(): Record<string, string> {
     const pat = this.settings.get('tfs_docs_pat')?.trim();
     if (!pat) throw new Error('tfs_docs_pat not configured');
+    return {
+      'Authorization': 'Basic ' + Buffer.from(`:${pat}`).toString('base64'),
+      'Accept': 'application/json',
+    };
+  }
+
+  private getRepoBaseUrl(): string {
     const repoUrl = this.settings.get('tfs_docs_repo_url')?.trim()
       || 'https://tfs.briefyourmarket.com/BYM2020/Core/_git/nurtur-docs';
-    const url = new URL(repoUrl);
-    url.username = '';
-    url.password = pat;
-    return url.toString();
+    return repoUrl.replace('/_git/', '/_apis/git/repositories/');
   }
 
   private getBranch(): string {
@@ -35,79 +35,78 @@ export class TfsDocsSyncProvider implements KbSyncProvider {
 
   async *fetchDocuments(): AsyncIterable<RawDocument> {
     if (!this.isConfigured()) return;
+    this.lastDiagnostics = [];
 
-    const authUrl = this.getAuthUrl();
+    const headers = this.getHeaders();
+    const apiBase = this.getRepoBaseUrl();
     const branch = this.getBranch();
     const repoUrl = this.settings.get('tfs_docs_repo_url')?.trim()
       || 'https://tfs.briefyourmarket.com/BYM2020/Core/_git/nurtur-docs';
 
-    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    const listUrl = `${apiBase}/items?recursionLevel=full&versionDescriptor.version=${branch}&api-version=7.0`;
+    this.diag(`[kb-tfs] Listing files from ${apiBase} (branch: ${branch})`);
 
-    let git: SimpleGit;
-    if (fs.existsSync(path.join(CACHE_DIR, '.git'))) {
-      console.log(`[kb-tfs] Fetching updates from ${repoUrl} (branch: ${branch})`);
-      git = simpleGit(CACHE_DIR);
-      await git.remote(['set-url', 'origin', authUrl]);
-      await git.fetch('origin');
-      await git.reset(['--hard', `origin/${branch}`]);
-    } else {
-      // Clean up stale empty cache dir before cloning
-      const existing = fs.readdirSync(CACHE_DIR);
-      if (existing.length > 0) {
-        console.log(`[kb-tfs] Removing stale cache dir (${existing.length} entries, no .git)`);
-        fs.rmSync(CACHE_DIR, { recursive: true, force: true });
-        fs.mkdirSync(CACHE_DIR, { recursive: true });
-      }
-      console.log(`[kb-tfs] Cloning ${repoUrl} (branch: ${branch}) into ${CACHE_DIR}`);
-      git = simpleGit();
-      await git.clone(authUrl, CACHE_DIR, ['--branch', branch, '--single-branch']);
-      git = simpleGit(CACHE_DIR);
+    const listRes = await fetch(listUrl, { headers });
+    if (!listRes.ok) {
+      const body = await listRes.text();
+      throw new Error(`TFS item list failed: ${listRes.status} — ${body.slice(0, 300)}`);
     }
 
-    console.log(`[kb-tfs] Clone/fetch complete, scanning for markdown files...`);
+    const listData = await listRes.json();
+    const items = (listData.value || []).filter(
+      (item: any) => !item.isFolder && item.path.endsWith('.md')
+    );
+    this.diag(`[kb-tfs] Found ${items.length} markdown files`);
 
-    const files = await this.walkMarkdownFiles(CACHE_DIR);
-    for (const filePath of files) {
+    let processed = 0;
+    let skipped = 0;
+
+    for (const item of items) {
       try {
-        const relativePath = path.relative(CACHE_DIR, filePath).replace(/\\/g, '/');
-        const content = fs.readFileSync(filePath, 'utf-8');
-        if (!content.trim()) continue;
+        const contentUrl = `${apiBase}/items?path=${encodeURIComponent(item.path)}&versionDescriptor.version=${branch}&api-version=7.0&$format=text`;
+        const contentRes = await fetch(contentUrl, {
+          headers: { ...headers, 'Accept': 'text/plain' },
+        });
+        if (!contentRes.ok) {
+          this.diag(`[kb-tfs] Failed to fetch ${item.path}: ${contentRes.status}`);
+          skipped++;
+          continue;
+        }
 
-        const blobSha = await git.raw(['hash-object', filePath]);
-        const title = this.extractTitle(content, relativePath);
-        const url = `${repoUrl}?path=/${encodeURIComponent(relativePath)}`;
+        const content = await contentRes.text();
+        if (!content.trim()) {
+          skipped++;
+          continue;
+        }
+
+        const title = this.extractTitle(content, item.path);
+        const relativePath = item.path.replace(/^\//, '');
 
         yield {
-          sourceDocId: blobSha.trim(),
+          sourceDocId: item.objectId || item.commitId || relativePath,
           path: relativePath,
           title,
-          url,
+          url: `${repoUrl}?path=${encodeURIComponent(item.path)}`,
           markdown: content,
         };
+        processed++;
       } catch (err) {
-        console.warn(`[kb-tfs] Failed to process ${filePath}:`, err instanceof Error ? err.message : err);
+        this.diag(`[kb-tfs] Error processing ${item.path}: ${err instanceof Error ? err.message : err}`);
+        skipped++;
       }
     }
+
+    this.diag(`[kb-tfs] Complete: ${processed} docs processed, ${skipped} skipped`);
   }
 
   private extractTitle(content: string, filename: string): string {
     const h1Match = content.match(/^#\s+(.+)/m);
     if (h1Match) return h1Match[1].trim();
-    return path.basename(filename, '.md');
+    return filename.split('/').pop()?.replace('.md', '') || filename;
   }
 
-  private async walkMarkdownFiles(dir: string): Promise<string[]> {
-    const results: string[] = [];
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name === '.git' || entry.name === 'node_modules') continue;
-        results.push(...await this.walkMarkdownFiles(fullPath));
-      } else if (entry.name.endsWith('.md')) {
-        results.push(fullPath);
-      }
-    }
-    return results;
+  private diag(msg: string) {
+    console.log(msg);
+    this.lastDiagnostics.push(msg);
   }
 }

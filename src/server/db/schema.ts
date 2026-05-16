@@ -1093,6 +1093,9 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_kb_sync_runs_source_started')
      CREATE INDEX IX_kb_sync_runs_source_started ON kb_sync_runs (source, started_at DESC);`,
 
+    `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'kb_sync_runs') AND name = 'diagnostics')
+     ALTER TABLE kb_sync_runs ADD diagnostics NVARCHAR(MAX) NULL;`,
+
     // ── AI Learnings (human-directed feedback for AI agent) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ai_learnings') AND type = 'U')
      CREATE TABLE ai_learnings (
