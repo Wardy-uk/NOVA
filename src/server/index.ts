@@ -1461,21 +1461,35 @@ async function main() {
     kpiPipeline.ensureDigestColumns().catch(() => {});
 
     // KPI pipeline timers (initial kicks staggered to avoid startup storm)
-    jobRegistry.register('kpi-jira-snapshot', 'KPI Jira snapshot collection', async () => {
+    jobRegistry.register('kpi-jira-snapshot', 'KPI Jira snapshot + agent metrics refresh', async () => {
       await kpiPipeline.collectJiraSnapshot();
+      await kpiPipeline.refreshAllAgentMetrics();
     }, 10 * 60 * 1000);
-    jobRegistry.register('kpi-agent-snapshot', 'KPI agent snapshot', async () => {
+    jobRegistry.register('kpi-agent-snapshot', 'KPI agent daily snapshot (all 27 cols)', async () => {
       await kpiPipeline.snapshotAgentKpis();
     }, 30 * 60 * 1000);
+    jobRegistry.register('kpi-snapshot-upsert', 'KpiSnapshot 3-min upsert (business hours)', async () => {
+      await kpiPipeline.upsertKpiSnapshot();
+    }, 3 * 60 * 1000);
     setTimeout(() => kpiPipeline.collectJiraSnapshot().catch(() => {}), 90_000);
+    setTimeout(() => kpiPipeline.refreshAllAgentMetrics().catch(() => {}), 100_000);
 
-    // Daily digest at 17:30, weekly digest Monday 09:00
-    jobRegistry.register('kpi-daily-rollup', 'KPI daily/weekly digest', async () => {
+    // Daily digest at 17:30, weekly digest Monday 09:00, EOD snapshot 17:25, derived KPIs 17:30
+    jobRegistry.register('kpi-daily-rollup', 'KPI daily/weekly digest + EOD + derived', async () => {
       const now = new Date();
-      if (now.getHours() === 17 && now.getMinutes() >= 30 && now.getMinutes() < 40) {
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+      const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
+      const ukDay = now.toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short' });
+      const isWeekday = !['Sat', 'Sun'].includes(ukDay);
+
+      if (isWeekday && ukHour === 17 && ukMin >= 25 && ukMin < 30) {
+        await kpiPipeline.captureEodSnapshot();
+      }
+      if (isWeekday && ukHour === 17 && ukMin >= 30 && ukMin < 40) {
+        await kpiPipeline.collectDerivedKpis();
         await kpiPipeline.generateDailyDigest();
       }
-      if (now.getDay() === 1 && now.getHours() === 9 && now.getMinutes() < 10) {
+      if (ukDay === 'Mon' && ukHour === 9 && ukMin < 10) {
         await kpiPipeline.generateWeeklyDigest();
       }
     }, 10 * 60 * 1000);

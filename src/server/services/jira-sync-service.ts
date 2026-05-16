@@ -317,7 +317,8 @@ export class JiraSyncService {
         development_details_text = ?, resolution_type = ?,
         agent_next_update = ?, agent_last_updated = ?,
         sla_breach_time = ?, sla_breached = ?, no_reply = ?, labels = ?,
-        issue_links_json = ?, fields_json = ?, organisation_name = ?, bc_account_number = ?, synced_at = GETUTCDATE()
+        issue_links_json = ?, fields_json = ?, organisation_name = ?, bc_account_number = ?,
+        resolved_at = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
         issue_key, jira_id, project_key, summary, description_text, description_adf,
         status_name, status_category, priority_name, issuetype_name,
@@ -330,7 +331,7 @@ export class JiraSyncService {
         development_details_text, resolution_type,
         agent_next_update, agent_last_updated,
         sla_breach_time, sla_breached, no_reply, labels,
-        issue_links_json, fields_json, organisation_name, bc_account_number
+        issue_links_json, fields_json, organisation_name, bc_account_number, resolved_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
@@ -343,7 +344,7 @@ export class JiraSyncService {
         ?, ?,
         ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, ?
+        ?, ?, ?, ?, ?
       );`,
       [
         // Source key
@@ -366,6 +367,7 @@ export class JiraSyncService {
         agentNextUpdate, agentLastUpdated,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
         issueLinksJson, fieldsJson, organisationName, bcAccountNumber,
+        f.resolutiondate ? new Date(f.resolutiondate as string) : null,
         // INSERT values (same order as columns)
         issue.key, issue.id, issue.key.split('-')[0], f.summary as string ?? null,
         descriptionText || null, descriptionAdf,
@@ -384,6 +386,7 @@ export class JiraSyncService {
         agentNextUpdate, agentLastUpdated,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
         issueLinksJson, fieldsJson, organisationName, bcAccountNumber,
+        f.resolutiondate ? new Date(f.resolutiondate as string) : null,
       ],
     );
 

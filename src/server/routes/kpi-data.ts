@@ -1614,5 +1614,82 @@ export function createKpiWallboardRoutes(settingsQueries: SettingsQueries): Rout
     }
   });
 
+  // ── Phase 5: Shadow comparison endpoint ──
+  router.get('/n8n-comparison', async (req: any, res: any) => {
+    try {
+      if (!isAdmin(req.user?.role)) return res.status(403).json({ ok: false, error: 'Admin only' });
+      const p = await getPool();
+      const today = new Date().toISOString().slice(0, 10);
+
+      const [liveResult, uatResult] = await Promise.all([
+        p.request().input('today', sql.Date, today).query(`
+          SELECT kpi, kpiGroup, [count], target, direction, rag
+          FROM dbo.jira_kpi_daily WHERE CAST(CreatedAt AS DATE) = @today
+          ORDER BY kpi
+        `),
+        p.request().input('today', sql.Date, today).query(`
+          SELECT kpi, kpiGroup, [count], target, direction, rag
+          FROM dbo.jira_kpi_dailyUAT WHERE CAST(CreatedAt AS DATE) = @today
+          ORDER BY kpi
+        `).catch(() => ({ recordset: [] })),
+      ]);
+
+      const liveMap = new Map(liveResult.recordset.map((r: any) => [r.kpi, r]));
+      const uatMap = new Map(uatResult.recordset.map((r: any) => [r.kpi, r]));
+      const allKpis = new Set([...liveMap.keys(), ...uatMap.keys()]);
+
+      const comparison: Array<{
+        kpi: string; live: number | null; nova: number | null;
+        diff: number | null; diffPct: number | null; match: boolean;
+      }> = [];
+
+      for (const kpi of allKpis) {
+        const l = liveMap.get(kpi);
+        const n = uatMap.get(kpi);
+        const liveVal = l?.count ?? null;
+        const novaVal = n?.count ?? null;
+        const diff = liveVal !== null && novaVal !== null ? novaVal - liveVal : null;
+        const diffPct = liveVal !== null && novaVal !== null && liveVal !== 0
+          ? Math.round((diff! / liveVal) * 1000) / 10 : null;
+        const match = liveVal !== null && novaVal !== null && Math.abs(diff!) < 0.01;
+        comparison.push({ kpi, live: liveVal, nova: novaVal, diff, diffPct, match });
+      }
+
+      const matchCount = comparison.filter(c => c.match).length;
+      const total = comparison.length;
+
+      res.json({
+        ok: true,
+        data: {
+          date: today, total, matching: matchCount,
+          matchPct: total > 0 ? Math.round((matchCount / total) * 100) : 0,
+          kpis: comparison.sort((a, b) => a.kpi.localeCompare(b.kpi)),
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Comparison failed' });
+    }
+  });
+
+  // ── Pipeline target toggle ──
+  router.post('/pipeline-target', async (req: any, res: any) => {
+    try {
+      if (!isAdmin(req.user?.role)) return res.status(403).json({ ok: false, error: 'Admin only' });
+      const { target } = req.body;
+      if (target !== 'live' && target !== 'uat') {
+        return res.status(400).json({ ok: false, error: 'target must be "live" or "uat"' });
+      }
+      settingsQueries.set('kpi_pipeline_target', target);
+      res.json({ ok: true, data: { kpi_pipeline_target: target } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to set target' });
+    }
+  });
+
+  router.get('/pipeline-target', async (req: any, res: any) => {
+    const target = settingsQueries.get('kpi_pipeline_target') || 'live';
+    res.json({ ok: true, data: { kpi_pipeline_target: target } });
+  });
+
   return router;
 }

@@ -631,6 +631,10 @@ async function runMigrations(): Promise<void> {
      CREATE INDEX IX_jira_cache_product ON jira_issue_cache (nurtur_product)
        WHERE nurtur_product IS NOT NULL;`,
 
+    // resolved_at — populated from Jira's resolutiondate field during sync
+    `IF COL_LENGTH('jira_issue_cache', 'resolved_at') IS NULL
+     ALTER TABLE jira_issue_cache ADD resolved_at DATETIME2 NULL;`,
+
     // last_public_comment on jira_issue_cache — populated by jira sync from comment cache
     `IF COL_LENGTH('jira_issue_cache', 'last_public_comment') IS NULL
      ALTER TABLE jira_issue_cache ADD last_public_comment NVARCHAR(MAX) NULL;`,

@@ -714,6 +714,211 @@ export class KpiPipeline {
     }
   }
 
+  async captureEodSnapshot(): Promise<void> {
+    const started = new Date();
+    try {
+      const p = await getKpiPool(this.settings);
+      const s = this.s;
+      const today = new Date().toISOString().slice(0, 10);
+
+      // Ensure target table exists
+      await p.request().query(`
+        IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.JiraEodTicketStatusSnapshot${s}') AND type = 'U')
+        CREATE TABLE dbo.JiraEodTicketStatusSnapshot${s} (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          SnapshotDate DATE NOT NULL,
+          ProjectKey NVARCHAR(10) NOT NULL,
+          ProjectName NVARCHAR(100) NULL,
+          CurrentTier NVARCHAR(100) NULL,
+          RequestTypeName NVARCHAR(200) NULL,
+          StatusName NVARCHAR(100) NULL,
+          StatusCategory NVARCHAR(50) NULL,
+          TicketCount INT NOT NULL,
+          SnapshotAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+        );
+      `).catch(() => {});
+
+      // Query all open tickets across all projects
+      const rows = await localQuery<{
+        project_key: string;
+        current_tier: string | null;
+        request_type: string | null;
+        status_name: string | null;
+        status_category: string | null;
+        cnt: number;
+      }>(`
+        SELECT project_key, current_tier, request_type, status_name, status_category, COUNT(*) AS cnt
+        FROM jira_issue_cache
+        WHERE status_category != 'Done'
+        GROUP BY project_key, current_tier, request_type, status_name, status_category
+      `);
+
+      // Delete today's rows first
+      const delReq = p.request();
+      delReq.input('snapDate', sql.Date, today);
+      await delReq.query(`DELETE FROM dbo.JiraEodTicketStatusSnapshot${s} WHERE SnapshotDate = @snapDate`);
+
+      // Insert per group
+      for (const r of rows) {
+        const req = p.request();
+        req.input('snapDate', sql.Date, today);
+        req.input('projectKey', sql.NVarChar(10), r.project_key);
+        req.input('projectName', sql.NVarChar(100), r.project_key);
+        req.input('currentTier', sql.NVarChar(100), r.current_tier);
+        req.input('requestType', sql.NVarChar(200), r.request_type);
+        req.input('statusName', sql.NVarChar(100), r.status_name);
+        req.input('statusCategory', sql.NVarChar(50), r.status_category);
+        req.input('ticketCount', sql.Int, r.cnt);
+        await req.query(`
+          INSERT INTO dbo.JiraEodTicketStatusSnapshot${s}
+            (SnapshotDate, ProjectKey, ProjectName, CurrentTier, RequestTypeName, StatusName, StatusCategory, TicketCount)
+          VALUES (@snapDate, @projectKey, @projectName, @currentTier, @requestType, @statusName, @statusCategory, @ticketCount)
+        `);
+      }
+
+      console.log(`[kpi-pipeline] EOD snapshot captured: ${rows.length} groups for ${today}`);
+
+      await this.monitor?.logRun({
+        pipeline_name: 'kpi-eod-snapshot', started_at: started, completed_at: new Date(),
+        status: 'success', rows_affected: rows.length, error_message: null,
+        duration_ms: Date.now() - started.getTime(),
+      });
+    } catch (err) {
+      console.error('[kpi-pipeline] EOD snapshot failed:', err instanceof Error ? err.message : err);
+      await this.monitor?.logRun({
+        pipeline_name: 'kpi-eod-snapshot', started_at: started, completed_at: new Date(),
+        status: 'error', rows_affected: 0, error_message: err instanceof Error ? err.message : String(err),
+        duration_ms: Date.now() - started.getTime(),
+      });
+    }
+  }
+
+  async refreshAllAgentMetrics(): Promise<void> {
+    try {
+      const p = await getKpiPool(this.settings);
+      const now = new Date();
+
+      // Open ticket stats per agent from local MSSQL cache
+      const openStats = await localQuery<{
+        assignee_account_id: string;
+        assignee_display: string | null;
+        OpenTickets_Total: number;
+        OpenTickets_Over2Hours: number;
+        OpenTickets_NoUpdateToday: number;
+        OldestTicketDays: number;
+      }>(`
+        SELECT assignee_account_id,
+          MAX(assignee_display) AS assignee_display,
+          COUNT(*) AS OpenTickets_Total,
+          SUM(CASE WHEN sla_breached = 1
+                   AND status_name NOT IN ('Done','Closed','Resolved','Waiting on Requestor','Waiting on Partner')
+                   AND (due_date IS NULL OR due_date <= CAST(GETUTCDATE() AS DATE))
+              THEN 1 ELSE 0 END) AS OpenTickets_Over2Hours,
+          SUM(CASE WHEN CAST(jira_updated AS DATE) < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) AS OpenTickets_NoUpdateToday,
+          MAX(DATEDIFF(day, jira_created, GETUTCDATE())) AS OldestTicketDays
+        FROM jira_issue_cache
+        WHERE project_key = @p0
+          AND status_category != 'Done'
+          AND assignee_account_id IS NOT NULL
+          AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3')
+          AND LOWER(ISNULL(request_type, '')) != 'onboarding'
+        GROUP BY assignee_account_id
+      `, [this.jiraProject]);
+
+      // Solved today per agent
+      const solvedToday = await localQuery<{
+        assignee_account_id: string;
+        SolvedTickets_Today: number;
+      }>(`
+        SELECT assignee_account_id, COUNT(*) AS SolvedTickets_Today
+        FROM jira_issue_cache
+        WHERE project_key = @p0
+          AND status_category = 'Done'
+          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND assignee_account_id IS NOT NULL
+          AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3')
+        GROUP BY assignee_account_id
+      `, [this.jiraProject]);
+
+      // Solved this week per agent
+      const solvedWeek = await localQuery<{
+        assignee_account_id: string;
+        SolvedTickets_ThisWeek: number;
+      }>(`
+        SELECT assignee_account_id, COUNT(*) AS SolvedTickets_ThisWeek
+        FROM jira_issue_cache
+        WHERE project_key = @p0
+          AND status_category = 'Done'
+          AND jira_updated >= DATEADD(day, -DATEPART(weekday, GETUTCDATE()) + 2, CAST(GETUTCDATE() AS DATE))
+          AND assignee_account_id IS NOT NULL
+          AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3')
+        GROUP BY assignee_account_id
+      `, [this.jiraProject]);
+
+      const solvedTodayMap = new Map(solvedToday.map(r => [r.assignee_account_id, r.SolvedTickets_Today]));
+      const solvedWeekMap = new Map(solvedWeek.map(r => [r.assignee_account_id, r.SolvedTickets_ThisWeek]));
+
+      // Update dbo.Agent for each agent that exists in the roster
+      let updated = 0;
+      for (const agent of openStats) {
+        const req = p.request();
+        req.input('accountId', sql.NVarChar(100), agent.assignee_account_id);
+        req.input('openTotal', sql.Int, agent.OpenTickets_Total);
+        req.input('over2h', sql.Int, agent.OpenTickets_Over2Hours);
+        req.input('noUpdate', sql.Int, agent.OpenTickets_NoUpdateToday);
+        req.input('solvedToday', sql.Int, solvedTodayMap.get(agent.assignee_account_id) ?? 0);
+        req.input('solvedWeek', sql.Int, solvedWeekMap.get(agent.assignee_account_id) ?? 0);
+        req.input('oldestDays', sql.Int, agent.OldestTicketDays ?? 0);
+
+        const result = await req.query(`
+          UPDATE dbo.Agent SET
+            OpenTickets_Total = @openTotal,
+            OpenTickets_Over2Hours = @over2h,
+            OpenTickets_NoUpdateToday = @noUpdate,
+            SolvedTickets_Today = @solvedToday,
+            SolvedTickets_ThisWeek = @solvedWeek,
+            OldestTicketDays = @oldestDays,
+            TicketsSnapshotAt = GETUTCDATE()
+          WHERE AccountId = @accountId
+        `);
+        if (result.rowsAffected[0] > 0) updated++;
+      }
+
+      // Zero out agents with no open tickets
+      const activeAccountIds = openStats.map(a => a.assignee_account_id);
+      if (activeAccountIds.length > 0) {
+        const zeroReq = p.request();
+        const placeholders = activeAccountIds.map((id, i) => {
+          zeroReq.input(`zid${i}`, sql.NVarChar(100), id);
+          return `@zid${i}`;
+        }).join(',');
+        await zeroReq.query(`
+          UPDATE dbo.Agent SET
+            OpenTickets_Total = 0, OpenTickets_Over2Hours = 0,
+            OpenTickets_NoUpdateToday = 0, OldestTicketDays = 0,
+            TicketsSnapshotAt = GETUTCDATE()
+          WHERE IsActive = 1 AND AccountId IS NOT NULL
+            AND AccountId NOT IN (${placeholders})
+        `);
+      } else {
+        await p.request().query(`
+          UPDATE dbo.Agent SET
+            OpenTickets_Total = 0, OpenTickets_Over2Hours = 0,
+            OpenTickets_NoUpdateToday = 0, OldestTicketDays = 0,
+            TicketsSnapshotAt = GETUTCDATE()
+          WHERE IsActive = 1 AND AccountId IS NOT NULL
+        `);
+      }
+
+      // Refresh NOVA AI metrics separately (uses different data source)
+      await this.refreshNovaAiMetrics(p);
+
+      console.log(`[kpi-pipeline] All agent metrics refreshed: ${updated} agents updated from ${openStats.length} with open tickets`);
+    } catch (err) {
+      console.error('[kpi-pipeline] refreshAllAgentMetrics failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
   async snapshotAgentKpis(): Promise<void> {
     const started = new Date();
     let rowsAffected = 0;
@@ -724,16 +929,56 @@ export class KpiPipeline {
       } catch { throw new Error('KPI SQL pool unavailable'); }
 
       const today = new Date().toISOString().slice(0, 10);
+      const s = this.s;
 
-      // Refresh NOVA AI metrics before reading Agent table
-      await this.refreshNovaAiMetrics(p);
+      // Ensure all columns exist on the daily table
+      const newCols = [
+        'OldestTicketDays INT NULL',
+        'SLAResolvedCount INT NULL',
+        'SLABreachedCount INT NULL',
+        'SLACompliancePct FLOAT NULL',
+        'AvailableHours FLOAT NULL',
+        'TicketsPerHour FLOAT NULL',
+        'CSATCount INT NULL',
+        'CSATAverage FLOAT NULL',
+        'QATicketsScored INT NULL',
+        'QAOverallAvg FLOAT NULL',
+        'QAAccuracyAvg FLOAT NULL',
+        'QAClarityAvg FLOAT NULL',
+        'QAToneAvg FLOAT NULL',
+        'QARedCount INT NULL',
+        'QAAmberCount INT NULL',
+        'QAGreenCount INT NULL',
+        'QAConcerningCount INT NULL',
+        'GoldenRulesScored INT NULL',
+        'GoldenRulesAvg FLOAT NULL',
+        'OwnershipAvg FLOAT NULL',
+        'NextActionAvg FLOAT NULL',
+        'TimeframeAvg FLOAT NULL',
+        'ragProductivity NVARCHAR(10) NULL',
+        'ragCSAT NVARCHAR(10) NULL',
+        'ragQA NVARCHAR(10) NULL',
+        'ragGoldenRules NVARCHAR(10) NULL',
+        'ragOver2h NVARCHAR(10) NULL',
+        'ragStale NVARCHAR(10) NULL',
+        'ragSLA NVARCHAR(10) NULL',
+        'ragOldestTicket NVARCHAR(10) NULL',
+      ];
+      for (const colDef of newCols) {
+        const colName = colDef.split(' ')[0];
+        await p.request().query(`
+          IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_agent_kpi_daily${s}') AND name = '${colName}')
+            ALTER TABLE dbo.jira_agent_kpi_daily${s} ADD ${colDef};
+        `).catch(() => {});
+      }
 
-      // Always READ from the live Agent table
+      // Read agents from live Agent table
       const agents = await p.request().query(`
-        SELECT AgentId,
+        SELECT AgentId, AccountId,
                RTRIM(LTRIM(ISNULL(AgentName, '') + ' ' + ISNULL(AgentSurname, ''))) AS AgentName,
                ISNULL(TierCode, '') AS TierCode,
                ISNULL(Team, '') AS Team,
+               ISNULL(IsAvailable, 0) AS IsAvailable,
                ISNULL(OpenTickets_Total, 0) AS OpenTickets_Total,
                ISNULL(OpenTickets_Over2Hours, 0) AS OpenTickets_Over2Hours,
                ISNULL(OpenTickets_NoUpdateToday, 0) AS OpenTickets_NoUpdateToday,
@@ -745,15 +990,111 @@ export class KpiPipeline {
 
       if (agents.recordset.length === 0) return;
 
-      const s = this.s;
-      // Ensure OldestTicketDays column exists on the daily table
-      await p.request().query(`
-        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.jira_agent_kpi_daily${s}') AND name = 'OldestTicketDays')
-          ALTER TABLE dbo.jira_agent_kpi_daily${s} ADD OldestTicketDays INT NULL;
-      `).catch(() => {});
+      // Get QA scores for today
+      const qaScores = new Map<string, any>();
+      try {
+        const qaResult = await p.request().query(`
+          SELECT assigneeName, COUNT(*) AS qaTicketsScored,
+                 AVG(CAST(overallScore AS FLOAT)) AS avgOverallScore,
+                 AVG(CAST(accuracyScore AS FLOAT)) AS avgAccuracyScore,
+                 AVG(CAST(clarityScore AS FLOAT)) AS avgClarityScore,
+                 AVG(CAST(toneScore AS FLOAT)) AS avgToneScore,
+                 SUM(CASE WHEN grade = 'RED' THEN 1 ELSE 0 END) AS redCount,
+                 SUM(CASE WHEN grade = 'AMBER' THEN 1 ELSE 0 END) AS amberCount,
+                 SUM(CASE WHEN grade = 'GREEN' THEN 1 ELSE 0 END) AS greenCount,
+                 SUM(CAST(ISNULL(isConcerning, 0) AS INT)) AS concerningCount
+          FROM dbo.jira_qa_results
+          WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+          GROUP BY assigneeName
+        `);
+        for (const r of qaResult.recordset) {
+          qaScores.set((r.assigneeName || '').trim().toLowerCase(), r);
+        }
+      } catch { /* jira_qa_results may not exist */ }
+
+      // Get Golden Rules scores for today
+      const grScores = new Map<string, any>();
+      try {
+        const grResult = await p.request().query(`
+          SELECT Assignee, COUNT(*) AS goldenRulesScored,
+                 AVG(CAST(OverallScore AS FLOAT)) AS avgGoldenRulesScore,
+                 AVG(CAST(Rule1Score AS FLOAT)) AS avgOwnershipScore,
+                 AVG(CAST(Rule2Score AS FLOAT)) AS avgNextActionScore,
+                 AVG(CAST(Rule3Score AS FLOAT)) AS avgTimeframeScore
+          FROM dbo.Jira_QA_GoldenRules
+          WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+          GROUP BY Assignee
+        `);
+        for (const r of grResult.recordset) {
+          grScores.set((r.Assignee || '').trim().toLowerCase(), r);
+        }
+      } catch { /* Jira_QA_GoldenRules may not exist */ }
+
+      // Get CSAT per agent from resolved-today tickets
+      const csatPerAgent = new Map<string, { count: number; sum: number }>();
+      try {
+        const csatRows = await localQuery<{ assignee_account_id: string; fields_json: string | null }>(`
+          SELECT assignee_account_id, fields_json FROM jira_issue_cache
+          WHERE project_key = @p0 AND status_category = 'Done'
+            AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+            AND assignee_account_id IS NOT NULL
+            AND fields_json IS NOT NULL
+        `, [this.jiraProject]);
+        for (const r of csatRows) {
+          const rating = parseCsat(r.fields_json);
+          if (rating !== null) {
+            const existing = csatPerAgent.get(r.assignee_account_id) ?? { count: 0, sum: 0 };
+            existing.count++;
+            existing.sum += rating;
+            csatPerAgent.set(r.assignee_account_id, existing);
+          }
+        }
+      } catch { /* non-critical */ }
+
+      // Get SLA stats per agent from resolved-today tickets
+      const slaPerAgent = new Map<string, { resolved: number; breached: number }>();
+      try {
+        const slaRows = await localQuery<{ assignee_account_id: string; fields_json: string | null }>(`
+          SELECT assignee_account_id, fields_json FROM jira_issue_cache
+          WHERE project_key = @p0 AND status_category = 'Done'
+            AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+            AND assignee_account_id IS NOT NULL
+        `, [this.jiraProject]);
+        for (const r of slaRows) {
+          const resBreached = isSlaBreached(parseSlaField(r.fields_json, 'customfield_14048'));
+          if (resBreached !== null) {
+            const existing = slaPerAgent.get(r.assignee_account_id) ?? { resolved: 0, breached: 0 };
+            existing.resolved++;
+            if (resBreached) existing.breached++;
+            slaPerAgent.set(r.assignee_account_id, existing);
+          }
+        }
+      } catch { /* non-critical */ }
 
       for (const a of agents.recordset) {
         if (!a.AgentName?.trim()) continue;
+
+        const agentNameLower = (a.AgentName || '').trim().toLowerCase();
+        const qa = qaScores.get(agentNameLower);
+        const gr = grScores.get(agentNameLower);
+        const csat = a.AccountId ? csatPerAgent.get(a.AccountId) : undefined;
+        const sla = a.AccountId ? slaPerAgent.get(a.AccountId) : undefined;
+
+        const availableHours = a.IsAvailable ? 7.5 : 0;
+        const ticketsPerHour = availableHours > 0 ? Math.round((Number(a.SolvedTickets_Today) / 7.5) * 100) / 100 : null;
+        const slaCompliance = sla && sla.resolved > 0 ? Math.round(((sla.resolved - sla.breached) / sla.resolved) * 100 * 100) / 100 : null;
+        const csatAvg = csat && csat.count > 0 ? Math.round((csat.sum / csat.count) * 100) / 100 : null;
+
+        // RAG calculations
+        const ragProductivity = ticketsPerHour !== null ? (ticketsPerHour >= 1.5 ? 'Green' : ticketsPerHour >= 1.0 ? 'Amber' : 'Red') : null;
+        const ragCSAT = csatAvg !== null ? (csatAvg >= 4.0 ? 'Green' : csatAvg >= 3.0 ? 'Amber' : 'Red') : null;
+        const ragQA = qa ? (qa.avgOverallScore >= 4.0 ? 'Green' : qa.avgOverallScore >= 3.0 ? 'Amber' : 'Red') : null;
+        const ragGoldenRules = gr ? (gr.avgGoldenRulesScore >= 3.0 ? 'Green' : gr.avgGoldenRulesScore >= 2.0 ? 'Amber' : 'Red') : null;
+        const ragOver2h = Number(a.OpenTickets_Over2Hours) <= 0 ? 'Green' : Number(a.OpenTickets_Over2Hours) <= 2 ? 'Amber' : 'Red';
+        const ragStale = Number(a.OpenTickets_NoUpdateToday) <= 0 ? 'Green' : Number(a.OpenTickets_NoUpdateToday) <= 1 ? 'Amber' : 'Red';
+        const ragSLA = slaCompliance !== null ? (slaCompliance >= 95 ? 'Green' : slaCompliance >= 90 ? 'Amber' : 'Red') : null;
+        const ragOldestTicket = Number(a.OldestTicketDays) <= 3 ? 'Green' : Number(a.OldestTicketDays) <= 7 ? 'Amber' : 'Red';
+
         const request = p.request();
         request.input('reportDate', sql.Date, today);
         request.input('agentId', sql.Int, Number(a.AgentId) || 0);
@@ -766,6 +1107,35 @@ export class KpiPipeline {
         request.input('solvedToday', sql.Int, Number(a.SolvedTickets_Today) || 0);
         request.input('solvedWeek', sql.Int, Number(a.SolvedTickets_ThisWeek) || 0);
         request.input('oldestDays', sql.Int, Number(a.OldestTicketDays) || 0);
+        request.input('slaResolved', sql.Int, sla?.resolved ?? null);
+        request.input('slaBreached', sql.Int, sla?.breached ?? null);
+        request.input('slaCompliance', sql.Float, slaCompliance);
+        request.input('availableHours', sql.Float, availableHours);
+        request.input('ticketsPerHour', sql.Float, ticketsPerHour);
+        request.input('csatCount', sql.Int, csat?.count ?? null);
+        request.input('csatAverage', sql.Float, csatAvg);
+        request.input('qaTicketsScored', sql.Int, qa?.qaTicketsScored ?? null);
+        request.input('qaOverallAvg', sql.Float, qa?.avgOverallScore ?? null);
+        request.input('qaAccuracyAvg', sql.Float, qa?.avgAccuracyScore ?? null);
+        request.input('qaClarityAvg', sql.Float, qa?.avgClarityScore ?? null);
+        request.input('qaToneAvg', sql.Float, qa?.avgToneScore ?? null);
+        request.input('qaRedCount', sql.Int, qa?.redCount ?? null);
+        request.input('qaAmberCount', sql.Int, qa?.amberCount ?? null);
+        request.input('qaGreenCount', sql.Int, qa?.greenCount ?? null);
+        request.input('qaConcerningCount', sql.Int, qa?.concerningCount ?? null);
+        request.input('grScored', sql.Int, gr?.goldenRulesScored ?? null);
+        request.input('grAvg', sql.Float, gr?.avgGoldenRulesScore ?? null);
+        request.input('ownershipAvg', sql.Float, gr?.avgOwnershipScore ?? null);
+        request.input('nextActionAvg', sql.Float, gr?.avgNextActionScore ?? null);
+        request.input('timeframeAvg', sql.Float, gr?.avgTimeframeScore ?? null);
+        request.input('ragProductivity', sql.NVarChar(10), ragProductivity);
+        request.input('ragCSAT', sql.NVarChar(10), ragCSAT);
+        request.input('ragQA', sql.NVarChar(10), ragQA);
+        request.input('ragGoldenRules', sql.NVarChar(10), ragGoldenRules);
+        request.input('ragOver2h', sql.NVarChar(10), ragOver2h);
+        request.input('ragStale', sql.NVarChar(10), ragStale);
+        request.input('ragSLA', sql.NVarChar(10), ragSLA);
+        request.input('ragOldestTicket', sql.NVarChar(10), ragOldestTicket);
 
         await request.query(`
           MERGE dbo.jira_agent_kpi_daily${s} AS t
@@ -776,18 +1146,40 @@ export class KpiPipeline {
             OpenTickets_Total = @openTotal, OpenTickets_Over2Hours = @over2h,
             OpenTickets_NoUpdateToday = @noUpdate,
             SolvedTickets_Today = @solvedToday, SolvedTickets_ThisWeek = @solvedWeek,
-            OldestTicketDays = @oldestDays
+            OldestTicketDays = @oldestDays,
+            SLAResolvedCount = @slaResolved, SLABreachedCount = @slaBreached, SLACompliancePct = @slaCompliance,
+            AvailableHours = @availableHours, TicketsPerHour = @ticketsPerHour,
+            CSATCount = @csatCount, CSATAverage = @csatAverage,
+            QATicketsScored = @qaTicketsScored, QAOverallAvg = @qaOverallAvg,
+            QAAccuracyAvg = @qaAccuracyAvg, QAClarityAvg = @qaClarityAvg, QAToneAvg = @qaToneAvg,
+            QARedCount = @qaRedCount, QAAmberCount = @qaAmberCount, QAGreenCount = @qaGreenCount, QAConcerningCount = @qaConcerningCount,
+            GoldenRulesScored = @grScored, GoldenRulesAvg = @grAvg,
+            OwnershipAvg = @ownershipAvg, NextActionAvg = @nextActionAvg, TimeframeAvg = @timeframeAvg,
+            ragProductivity = @ragProductivity, ragCSAT = @ragCSAT, ragQA = @ragQA, ragGoldenRules = @ragGoldenRules,
+            ragOver2h = @ragOver2h, ragStale = @ragStale, ragSLA = @ragSLA, ragOldestTicket = @ragOldestTicket
           WHEN NOT MATCHED THEN INSERT
             (ReportDate, AgentId, AgentName, TierCode, Team,
              OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
-             SolvedTickets_Today, SolvedTickets_ThisWeek, OldestTicketDays)
+             SolvedTickets_Today, SolvedTickets_ThisWeek, OldestTicketDays,
+             SLAResolvedCount, SLABreachedCount, SLACompliancePct,
+             AvailableHours, TicketsPerHour, CSATCount, CSATAverage,
+             QATicketsScored, QAOverallAvg, QAAccuracyAvg, QAClarityAvg, QAToneAvg,
+             QARedCount, QAAmberCount, QAGreenCount, QAConcerningCount,
+             GoldenRulesScored, GoldenRulesAvg, OwnershipAvg, NextActionAvg, TimeframeAvg,
+             ragProductivity, ragCSAT, ragQA, ragGoldenRules, ragOver2h, ragStale, ragSLA, ragOldestTicket)
           VALUES (@reportDate, @agentId, @agentName, @tierCode, @team,
-                  @openTotal, @over2h, @noUpdate, @solvedToday, @solvedWeek, @oldestDays);
+                  @openTotal, @over2h, @noUpdate, @solvedToday, @solvedWeek, @oldestDays,
+                  @slaResolved, @slaBreached, @slaCompliance,
+                  @availableHours, @ticketsPerHour, @csatCount, @csatAverage,
+                  @qaTicketsScored, @qaOverallAvg, @qaAccuracyAvg, @qaClarityAvg, @qaToneAvg,
+                  @qaRedCount, @qaAmberCount, @qaGreenCount, @qaConcerningCount,
+                  @grScored, @grAvg, @ownershipAvg, @nextActionAvg, @timeframeAvg,
+                  @ragProductivity, @ragCSAT, @ragQA, @ragGoldenRules, @ragOver2h, @ragStale, @ragSLA, @ragOldestTicket);
         `);
         rowsAffected++;
       }
 
-      console.log(`[kpi-pipeline] Agent snapshot → ${s || 'live'}: ${agents.recordset.length} agents`);
+      console.log(`[kpi-pipeline] Agent snapshot → ${s || 'live'}: ${agents.recordset.length} agents, all 27 columns + RAG`);
 
       await this.monitor?.logRun({
         pipeline_name: 'kpi-agent-snapshot', started_at: started, completed_at: new Date(),
