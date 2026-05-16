@@ -56,7 +56,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
   function parseEnv(req: any): Env {
     const env = req.query.env as string;
     if (VALID_ENVS.includes(env as Env)) return env as Env;
-    return 'uat'; // default to UAT for safety
+    const target = settingsQueries.get('kpi_pipeline_target') || 'live';
+    return (target === 'uat' ? 'uat' : 'live');
   }
 
   /**
