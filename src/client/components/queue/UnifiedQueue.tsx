@@ -67,6 +67,8 @@ export interface QueueActions {
   close: () => void;
   selectNext: () => void;
   selectPrev: () => void;
+  currentIndex: number;
+  totalCount: number;
 }
 
 // ── Styles ───────────────────────────────────────────────────────────────
@@ -104,7 +106,18 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(config.groupCollapsed ?? []),
   );
+  const [listWidthPct, setListWidthPct] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('uq-list-width');
+      return saved ? Number(saved) : 40;
+    } catch { return 40; }
+  });
+  const [listCollapsed, setListCollapsed] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+  const listWidthRef = useRef(listWidthPct);
+  listWidthRef.current = listWidthPct;
   const { theme } = useTheme();
   const isLight = theme === 'light' || (theme === 'system' && typeof window !== 'undefined' && !window.matchMedia('(prefers-color-scheme: dark)').matches);
   const borderColor = isLight ? '#e2e8f0' : '#2f353d';
@@ -208,7 +221,9 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
 
   const queueActions: QueueActions = useMemo(() => ({
     toast, refresh, close, selectNext, selectPrev,
-  }), [toast, refresh, close, selectNext, selectPrev]);
+    currentIndex: focusIndex,
+    totalCount: flatList.length,
+  }), [toast, refresh, close, selectNext, selectPrev, focusIndex, flatList.length]);
 
   // ── Keyboard ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -235,6 +250,10 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
         case 'Escape':
           e.preventDefault();
           setSelectedKey(null);
+          break;
+        case '[':
+          e.preventDefault();
+          setListCollapsed(prev => !prev);
           break;
       }
     };
@@ -274,6 +293,7 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
     { key: 'j/k', label: 'navigate' },
     { key: 'Enter', label: 'open' },
     { key: 'Esc', label: 'close' },
+    { key: '[', label: 'toggle list' },
     ...(config.keyboardShortcuts ?? []),
   ];
 
@@ -337,6 +357,22 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
           />
         </div>
 
+        <button
+          onClick={() => setListCollapsed(prev => !prev)}
+          className="p-1.5 rounded-lg text-neutral-400 transition-colors"
+          style={{ background: btnBg }}
+          onMouseEnter={e => (e.currentTarget.style.background = btnHoverBg)}
+          onMouseLeave={e => (e.currentTarget.style.background = btnBg)}
+          title={listCollapsed ? 'Show ticket list' : 'Hide ticket list'}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            {listCollapsed
+              ? <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              : <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+            }
+          </svg>
+        </button>
+
         {/* Filter pills */}
         {config.filters && (
           <div className="flex items-center gap-1">
@@ -392,12 +428,17 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
       </div>
 
       {/* ── Split pane ──────────────────────────────────────────────── */}
-      <div className="flex-1 flex min-h-0">
-        {/* Queue list (left, 40%) */}
+      <div ref={containerRef} className="flex-1 flex min-h-0">
+        {/* Queue list (left) */}
         <div
           ref={listRef}
-          className="w-[40%] overflow-y-auto border-r border-[var(--uq-border)]"
-          style={{ scrollbarWidth: 'thin', scrollbarColor: scrollbarColor }}
+          className="overflow-y-auto border-r border-[var(--uq-border)]"
+          style={{
+            width: listCollapsed ? 0 : listWidthPct + '%',
+            display: listCollapsed ? 'none' : undefined,
+            scrollbarWidth: 'thin',
+            scrollbarColor: scrollbarColor,
+          }}
         >
           {loading && !items.length ? (
             <div className="flex items-center justify-center h-full text-neutral-600 text-[11px]">Loading…</div>
@@ -476,21 +517,62 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
           )}
         </div>
 
-        {/* Detail panel (right, 60%) */}
+        {/* ── Drag handle ──────────────────────────────────────────── */}
+        {!listCollapsed && (
+          <div
+            className="w-1 cursor-col-resize flex-shrink-0 relative group"
+            style={{ background: borderColor }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              dragging.current = true;
+              document.body.style.cursor = 'col-resize';
+              document.body.style.userSelect = 'none';
+
+              const onMove = (ev: MouseEvent) => {
+                if (!dragging.current || !containerRef.current) return;
+                const rect = containerRef.current.getBoundingClientRect();
+                const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+                setListWidthPct(Math.max(15, Math.min(85, pct)));
+              };
+
+              const onUp = () => {
+                dragging.current = false;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                try { sessionStorage.setItem('uq-list-width', String(listWidthRef.current)); } catch {}
+              };
+
+              document.addEventListener('mousemove', onMove);
+              document.addEventListener('mouseup', onUp);
+            }}
+          >
+            <div className="absolute inset-y-0 -left-0.5 -right-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+              style={{ background: '#5ec1ca', borderRadius: 2 }} />
+          </div>
+        )}
+
+        {/* Detail panel (right) */}
         <div
-          className="w-[60%] overflow-y-auto"
-          style={{ scrollbarWidth: 'thin', scrollbarColor: scrollbarColor }}
+          className="flex flex-col overflow-hidden"
+          style={{ width: listCollapsed ? '100%' : (100 - listWidthPct) + '%' }}
         >
-          {selectedItem ? (
-            config.renderDetail(selectedItem, queueActions)
-          ) : (
-            <div className="flex items-center justify-center h-full text-neutral-600 text-[11px]">
-              <div className="text-center">
-                <div className="text-2xl mb-2">📋</div>
-                <div>Select an item to view details</div>
-                <div className="text-[9px] mt-1 text-neutral-700">Use j/k to navigate, Enter to open</div>
+          <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: scrollbarColor }}>
+            {selectedItem ? (
+              config.renderDetail(selectedItem, queueActions)
+            ) : (
+              <div className="flex items-center justify-center h-full text-neutral-600 text-[11px]">
+                <div className="text-center">
+                  <div className="text-2xl mb-2">📋</div>
+                  <div>Select an item to view details</div>
+                  <div className="text-[9px] mt-1 text-neutral-700">Use j/k to navigate, Enter to open</div>
+                </div>
               </div>
-            </div>
+            )}
+          </div>
+          {selectedItem && (
+            <DetailNavBar actions={queueActions} currentIndex={focusIndex} totalCount={flatList.length} />
           )}
         </div>
       </div>
@@ -500,6 +582,43 @@ export function UnifiedQueue<T>({ config, items: externalItems, loading: externa
 
       {/* ── Toasts ──────────────────────────────────────────────────── */}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+    </div>
+  );
+}
+
+// ── Detail navigation bar ─────────────────────────────────────────────────
+
+export function DetailNavBar({ actions, currentIndex, totalCount }: {
+  actions: QueueActions;
+  currentIndex: number;
+  totalCount: number;
+}) {
+  return (
+    <div className="flex items-center justify-between px-4 py-2 border-t"
+      style={{ borderColor: 'var(--uq-border, #2f353d)' }}>
+      <button
+        onClick={actions.selectPrev}
+        disabled={currentIndex <= 0}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed bg-[#2f353d] text-neutral-300 hover:bg-[#363d47]"
+      >
+        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+        </svg>
+        Prev
+      </button>
+      <span className="text-[10px] text-neutral-500">
+        {currentIndex + 1} of {totalCount}
+      </span>
+      <button
+        onClick={actions.selectNext}
+        disabled={currentIndex >= totalCount - 1}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed bg-[#2f353d] text-neutral-300 hover:bg-[#363d47]"
+      >
+        Next
+        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
     </div>
   );
 }
