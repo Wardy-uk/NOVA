@@ -1,4 +1,3 @@
-import TurndownService from 'turndown';
 import type { KbSyncProvider, RawDocument } from './kb-sync-provider.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 
@@ -7,37 +6,34 @@ const MAX_CONCURRENT = 4;
 export class ConfluenceSyncProvider implements KbSyncProvider {
   readonly source = 'confluence';
   private settings: SettingsQueries;
-  private turndown: TurndownService;
   public lastDiagnostics: string[] = [];
 
   constructor(settings: SettingsQueries) {
     this.settings = settings;
-    this.turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
-    // Strip Confluence macros
-    this.turndown.addRule('confluenceMacros', {
-      filter: (node) => node.nodeName === 'AC:STRUCTURED-MACRO' ||
-        (node as Element).tagName?.toLowerCase()?.startsWith('ac:'),
-      replacement: (_content, node) => {
-        const text = (node as Element).textContent?.trim();
-        return text ? `\n${text}\n` : '';
-      },
-    });
   }
 
   isConfigured(): boolean {
     const spaceKeys = this.settings.get('kb_confluence_space_keys')?.trim();
     const siteUrl = this.settings.get('confluence_site_url')?.trim();
-    const email = this.settings.get('jira_ob_email')?.trim();
-    const token = this.settings.get('jira_ob_token')?.trim();
+    const email = this.settings.get('kb_confluence_email')?.trim()
+      || this.settings.get('confluence_user')?.trim()
+      || this.settings.get('jira_ob_email')?.trim();
+    const token = this.settings.get('kb_confluence_token')?.trim()
+      || this.settings.get('confluence_api_token')?.trim()
+      || this.settings.get('jira_ob_token')?.trim();
     return !!(spaceKeys && siteUrl && email && token);
   }
 
   private getAuth(): { baseUrl: string; email: string; token: string } {
     const siteUrl = this.settings.get('confluence_site_url')?.trim();
-    const email = this.settings.get('jira_ob_email')?.trim();
-    const token = this.settings.get('jira_ob_token')?.trim();
+    const email = this.settings.get('kb_confluence_email')?.trim()
+      || this.settings.get('confluence_user')?.trim()
+      || this.settings.get('jira_ob_email')?.trim();
+    const token = this.settings.get('kb_confluence_token')?.trim()
+      || this.settings.get('confluence_api_token')?.trim()
+      || this.settings.get('jira_ob_token')?.trim();
     if (!siteUrl || !email || !token) {
-      throw new Error('Confluence sync needs confluence_site_url plus Jira (Global) email/token');
+      throw new Error('Confluence sync needs confluence_site_url plus email/token (kb_confluence_* → confluence_user/confluence_api_token → jira_ob_*)');
     }
     return { baseUrl: siteUrl.replace(/\/$/, ''), email, token };
   }
@@ -92,8 +88,8 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
         const spaceId = spaceData.results[0].id;
         this.diag(`[kb-confluence] Space "${spaceKey}" resolved to ID ${spaceId}`);
 
-        // Paginate through all pages in the space
-        let pageUrl: string | null = `${auth.baseUrl}/wiki/api/v2/pages?space-id=${spaceId}&body-format=storage&limit=50&status=current`;
+        // Paginate through all pages — request ADF body format (knowledge_base spaces use ADF, not storage HTML)
+        let pageUrl: string | null = `${auth.baseUrl}/wiki/api/v2/pages?space-id=${spaceId}&body-format=atlas_doc_format&limit=50&status=current`;
         let pagesFound = 0;
         let pagesSkipped = 0;
 
@@ -113,8 +109,8 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
               id: string;
               title: string;
               version: { number: number };
-              body?: { storage?: { value: string } };
-              _links?: { webui?: string };
+              body?: { atlas_doc_format?: { value: string } };
+              _links?: { next?: string };
             }>;
             _links?: { next?: string };
           };
@@ -123,24 +119,24 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
             break;
           }
 
-          // Process pages — fallback to individual fetch if body missing
           const pages = pageData.results || [];
           for (let i = 0; i < pages.length; i += MAX_CONCURRENT) {
             const batch = pages.slice(i, i + MAX_CONCURRENT);
             for (const page of batch) {
-              let bodyHtml = page.body?.storage?.value?.trim();
+              let adfValue = page.body?.atlas_doc_format?.value;
 
-              if (!bodyHtml) {
+              if (!adfValue) {
+                // Fallback: fetch individual page with ADF body
                 try {
                   const pageDetailRes = await fetch(
-                    `${auth.baseUrl}/wiki/api/v2/pages/${page.id}?body-format=storage`,
+                    `${auth.baseUrl}/wiki/api/v2/pages/${page.id}?body-format=atlas_doc_format`,
                     { headers }
                   );
                   if (pageDetailRes.ok) {
                     const pageDetail = await pageDetailRes.json();
-                    bodyHtml = pageDetail.body?.storage?.value?.trim();
+                    adfValue = pageDetail.body?.atlas_doc_format?.value;
                   }
-                  if (!bodyHtml) {
+                  if (!adfValue) {
                     pagesSkipped++;
                     continue;
                   }
@@ -150,10 +146,7 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
                 }
               }
 
-              const doc = this.pageToDocument(
-                { ...page, body: { storage: { value: bodyHtml } } },
-                spaceKey, auth.baseUrl
-              );
+              const doc = this.pageToDocument(page, adfValue, spaceKey, auth.baseUrl);
               if (doc) {
                 pagesFound++;
                 yield doc;
@@ -176,15 +169,14 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
   }
 
   private pageToDocument(
-    page: { id: string; title: string; version: { number: number }; body?: { storage?: { value: string } }; _links?: { webui?: string } },
+    page: { id: string; title: string; version: { number: number } },
+    adfValue: string,
     spaceKey: string,
     baseUrl: string
   ): RawDocument | null {
     try {
-      const html = page.body?.storage?.value || '';
-      if (!html.trim()) return null;
-
-      const markdown = this.turndown.turndown(html);
+      const adfObj = typeof adfValue === 'string' ? JSON.parse(adfValue) : adfValue;
+      const markdown = this.adfToMarkdown(adfObj);
       if (!markdown.trim()) return null;
 
       return {
@@ -195,8 +187,150 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
         markdown,
       };
     } catch (err) {
-      console.warn(`[kb-confluence] Failed to convert page ${page.id} "${page.title}":`, err instanceof Error ? err.message : err);
+      this.diag(`[kb-confluence] Failed to convert page ${page.id} "${page.title}": ${err instanceof Error ? err.message : err}`);
       return null;
     }
+  }
+
+  // ── ADF → Markdown converter ──
+
+  private adfToMarkdown(adf: any): string {
+    if (!adf || !adf.content) return '';
+    return this.walkAdfNodes(adf.content).trim();
+  }
+
+  private walkAdfNodes(nodes: any[], listDepth = 0): string {
+    let md = '';
+    for (const node of nodes) {
+      switch (node.type) {
+        case 'heading':
+          md += '#'.repeat(node.attrs?.level || 1) + ' ' + this.extractText(node) + '\n\n';
+          break;
+        case 'paragraph':
+          md += this.extractText(node) + '\n\n';
+          break;
+        case 'codeBlock':
+          md += '```' + (node.attrs?.language || '') + '\n' + this.extractText(node) + '\n```\n\n';
+          break;
+        case 'bulletList':
+          md += this.walkList(node.content || [], '- ', listDepth);
+          break;
+        case 'orderedList':
+          md += this.walkList(node.content || [], '1. ', listDepth);
+          break;
+        case 'table':
+          md += this.walkTable(node) + '\n';
+          break;
+        case 'blockCard':
+        case 'inlineCard':
+          md += `[${node.attrs?.url || 'link'}](${node.attrs?.url || ''})\n`;
+          break;
+        case 'rule':
+          md += '---\n\n';
+          break;
+        case 'panel':
+        case 'expand':
+        case 'nestedExpand':
+        case 'bodiedExtension':
+        case 'layoutSection':
+        case 'layoutColumn':
+          if (node.content) md += this.walkAdfNodes(node.content, listDepth);
+          break;
+        default:
+          if (node.content) md += this.walkAdfNodes(node.content, listDepth);
+          break;
+      }
+    }
+    return md;
+  }
+
+  private extractText(node: any): string {
+    if (!node.content) return '';
+    let text = '';
+    for (const child of node.content) {
+      if (child.type === 'text') {
+        let t = child.text || '';
+        if (child.marks) {
+          for (const mark of child.marks) {
+            switch (mark.type) {
+              case 'strong': t = `**${t}**`; break;
+              case 'em': t = `*${t}*`; break;
+              case 'code': t = `\`${t}\``; break;
+              case 'link': t = `[${t}](${mark.attrs?.href || ''})`; break;
+              case 'strike': t = `~~${t}~~`; break;
+            }
+          }
+        }
+        text += t;
+      } else if (child.type === 'hardBreak') {
+        text += '\n';
+      } else if (child.type === 'mention') {
+        text += child.attrs?.text || '@unknown';
+      } else if (child.type === 'emoji') {
+        text += child.attrs?.shortName || '';
+      } else if (child.type === 'inlineCard') {
+        text += `[${child.attrs?.url || 'link'}](${child.attrs?.url || ''})`;
+      } else if (child.type === 'status') {
+        text += `[${child.attrs?.text || 'status'}]`;
+      } else if (child.type === 'date') {
+        text += child.attrs?.timestamp ? new Date(parseInt(child.attrs.timestamp)).toISOString().slice(0, 10) : '';
+      } else if (child.content) {
+        text += this.extractText(child);
+      }
+    }
+    return text;
+  }
+
+  private walkList(items: any[], prefix: string, depth: number): string {
+    let md = '';
+    const indent = '  '.repeat(depth);
+    for (const item of items) {
+      if (item.type !== 'listItem') continue;
+      const children = item.content || [];
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        if (i === 0 && child.type === 'paragraph') {
+          md += indent + prefix + this.extractText(child) + '\n';
+        } else if (child.type === 'bulletList') {
+          md += this.walkList(child.content || [], '- ', depth + 1);
+        } else if (child.type === 'orderedList') {
+          md += this.walkList(child.content || [], '1. ', depth + 1);
+        } else if (child.type === 'paragraph') {
+          md += indent + '  ' + this.extractText(child) + '\n';
+        } else if (child.content) {
+          md += this.walkAdfNodes([child], depth);
+        }
+      }
+    }
+    return md + '\n';
+  }
+
+  private walkTable(node: any): string {
+    if (!node.content) return '';
+    const rows: string[][] = [];
+    for (const row of node.content) {
+      if (row.type !== 'tableRow') continue;
+      const cells: string[] = [];
+      for (const cell of (row.content || [])) {
+        const cellText = cell.content
+          ? this.walkAdfNodes(cell.content).replace(/\n+/g, ' ').trim()
+          : '';
+        cells.push(cellText);
+      }
+      rows.push(cells);
+    }
+    if (rows.length === 0) return '';
+
+    const colCount = Math.max(...rows.map(r => r.length));
+    let md = '';
+    for (let i = 0; i < rows.length; i++) {
+      const cells = rows[i];
+      while (cells.length < colCount) cells.push('');
+      md += '| ' + cells.join(' | ') + ' |\n';
+      if (i === 0) {
+        md += '| ' + cells.map(() => '---').join(' | ') + ' |\n';
+      }
+    }
+    return md + '\n';
   }
 }
