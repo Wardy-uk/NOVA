@@ -57,58 +57,62 @@ export class KbHealthService {
 
     let processed = 0;
     for (const chunk of chunks) {
-      const articleId = chunk.doc_id;
+      try {
+        const articleId = chunk.doc_id;
 
-      const usage30d = await query<{ cnt: number }>(
-        `SELECT COUNT(*) AS cnt FROM kb_article_usage
-         WHERE article_id = ? AND retrieved_at >= DATEADD(day, -30, GETUTCDATE())`,
-        [articleId],
-      );
-      const usage90d = await query<{ cnt: number }>(
-        `SELECT COUNT(*) AS cnt FROM kb_article_usage
-         WHERE article_id = ? AND retrieved_at >= DATEADD(day, -90, GETUTCDATE())`,
-        [articleId],
-      );
+        const usage30d = await query<{ cnt: number }>(
+          `SELECT COUNT(*) AS cnt FROM kb_article_usage
+           WHERE article_id = ? AND retrieved_at >= DATEADD(day, -30, GETUTCDATE())`,
+          [articleId],
+        );
+        const usage90d = await query<{ cnt: number }>(
+          `SELECT COUNT(*) AS cnt FROM kb_article_usage
+           WHERE article_id = ? AND retrieved_at >= DATEADD(day, -90, GETUTCDATE())`,
+          [articleId],
+        );
 
-      const count30 = usage30d[0]?.cnt ?? 0;
-      const count90 = usage90d[0]?.cnt ?? 0;
+        const count30 = usage30d[0]?.cnt ?? 0;
+        const count90 = usage90d[0]?.cnt ?? 0;
 
-      let driftScore = 0;
-      let status = 'current';
+        let driftScore = 0;
+        let status = 'current';
 
-      // Check if stale: no updates in 6 months (we use synced_at as proxy)
-      if (count90 < 3) {
-        status = 'unused';
-      } else {
-        // Check drift by comparing article content with recent resolutions
-        const driftResult = await this.checkDrift(articleId, chunk.doc_title);
-        driftScore = driftResult.drift_score;
-        if (driftScore >= 0.5) {
-          status = 'drifted';
+        // Check if stale: no updates in 6 months (we use synced_at as proxy)
+        if (count90 < 3) {
+          status = 'unused';
+        } else {
+          // Check drift by comparing article content with recent resolutions
+          const driftResult = await this.checkDrift(articleId, chunk.doc_title);
+          driftScore = driftResult.drift_score;
+          if (driftScore >= 0.5) {
+            status = 'drifted';
+          }
         }
-      }
 
-      // Upsert into kb_article_health
-      const existing = await query<{ id: number }>(
-        `SELECT id FROM kb_article_health WHERE article_id = ?`,
-        [articleId],
-      );
-      if (existing.length > 0) {
-        await execute(
-          `UPDATE kb_article_health
-           SET article_title = ?, status = ?, usage_count_30d = ?, usage_count_90d = ?,
-               drift_score = ?, article_url = ?, checked_at = GETUTCDATE()
-           WHERE article_id = ?`,
-          [chunk.doc_title, status, count30, count90, driftScore, chunk.doc_url, articleId],
+        // Upsert into kb_article_health
+        const existing = await query<{ id: number }>(
+          `SELECT id FROM kb_article_health WHERE article_id = ?`,
+          [articleId],
         );
-      } else {
-        await execute(
-          `INSERT INTO kb_article_health (article_id, article_title, status, usage_count_30d, usage_count_90d, drift_score, article_url, checked_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, GETUTCDATE())`,
-          [articleId, chunk.doc_title, status, count30, count90, driftScore, chunk.doc_url],
-        );
+        if (existing.length > 0) {
+          await execute(
+            `UPDATE kb_article_health
+             SET article_title = ?, status = ?, usage_count_30d = ?, usage_count_90d = ?,
+                 drift_score = ?, article_url = ?, checked_at = GETUTCDATE()
+             WHERE article_id = ?`,
+            [chunk.doc_title, status, count30, count90, driftScore, chunk.doc_url, articleId],
+          );
+        } else {
+          await execute(
+            `INSERT INTO kb_article_health (article_id, article_title, status, usage_count_30d, usage_count_90d, drift_score, article_url, checked_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, GETUTCDATE())`,
+            [articleId, chunk.doc_title, status, count30, count90, driftScore, chunk.doc_url],
+          );
+        }
+        processed++;
+      } catch (err) {
+        console.error(`[kb-health] Failed to process article "${chunk.doc_title}":`, err instanceof Error ? err.message : err);
       }
-      processed++;
     }
 
     return processed;

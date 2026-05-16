@@ -1617,6 +1617,13 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('kb_article_health', 'article_url') IS NULL
      ALTER TABLE kb_article_health ADD article_url NVARCHAR(500) NULL;`,
 
+    // kb_article_health + kb_article_usage — widen article_id from VARCHAR(100) to NVARCHAR(500)
+    `IF COL_LENGTH('kb_article_health', 'article_id') IS NOT NULL
+     ALTER TABLE kb_article_health ALTER COLUMN article_id NVARCHAR(500) NOT NULL;`,
+
+    `IF COL_LENGTH('kb_article_usage', 'article_id') IS NOT NULL
+     ALTER TABLE kb_article_usage ALTER COLUMN article_id NVARCHAR(500) NOT NULL;`,
+
     // ── P6: Customer Portal ──
 
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_organisations') AND type = 'U')

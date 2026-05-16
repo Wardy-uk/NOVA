@@ -1281,14 +1281,20 @@ async function main() {
     app.use('/api/cross-functional', createCrossFunctionalRoutes(crossFunctional));
 
     // P5 background jobs — registered with JobRegistry
-    jobRegistry.register('kb-staleness-scan', 'KB Staleness & Drift Scan (weekly Sun)', async () => {
-      const now = new Date();
-      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }));
-      if (now.getDay() === 0 && ukHour >= 22 && ukHour < 23) {
-        await kbHealth.runStalenessCheck();
-        console.log('[kb-health] Staleness scan complete');
+    jobRegistry.register('kb-staleness-scan', 'KB Staleness & Drift Scan (every 6h)', async () => {
+      const processed = await kbHealth.runStalenessCheck();
+      if (processed > 0) console.log(`[kb-health] Auto-scan: ${processed} articles checked`);
+    }, 6 * 60 * 60 * 1000);
+
+    // Initial KB health scan after 60s
+    setTimeout(async () => {
+      try {
+        const processed = await kbHealth.runStalenessCheck();
+        console.log(`[kb-health] Initial scan: ${processed} articles checked`);
+      } catch (err) {
+        console.error('[kb-health] Initial scan failed:', err instanceof Error ? err.message : err);
       }
-    }, 60 * 60 * 1000);
+    }, 60_000);
 
     jobRegistry.register('training-signals-weekly', 'Weekly Training Signal Generation (Mon 07:00)', async () => {
       const now = new Date();
