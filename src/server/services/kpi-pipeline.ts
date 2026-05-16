@@ -7,6 +7,7 @@ import { DailyDigestSchema, WeeklyDigestSchema, type DailyDigest, type WeeklyDig
 import { loadPrompt } from './prompt-loader.js';
 import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
 import { tableSuffix } from './pipeline-monitor.js';
+import { query as localQuery } from './database.js';
 
 let pool: sql.ConnectionPool | null = null;
 
@@ -233,6 +234,9 @@ export class KpiPipeline {
       } catch { throw new Error('KPI SQL pool unavailable'); }
 
       const today = new Date().toISOString().slice(0, 10);
+
+      // Refresh NOVA AI metrics before reading Agent table
+      await this.refreshNovaAiMetrics(p);
 
       // Always READ from the live Agent table
       const agents = await p.request().query(`
@@ -527,5 +531,139 @@ export class KpiPipeline {
     const risks = d.risks.map(r => `<li>${r}</li>`).join('');
     const recs = d.recommendations.map(r => `<li>${r}</li>`).join('');
     return `<h2>${d.headline}</h2><table><tr><th>KPI</th><th>This Week</th><th>Last Week</th><th>Change</th></tr>${wowRows}</table><h3>Wins</h3><ul>${wins}</ul><h3>Risks</h3><ul>${risks}</ul><h3>Recommendations</h3><ul>${recs}</ul><p><em>${d.narrative}</em></p>`;
+  }
+
+  private async refreshNovaAiMetrics(kpiPool: sql.ConnectionPool): Promise<void> {
+    try {
+      const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+      if (!novaAccountId) {
+        console.warn('[kpi-pipeline] nova_ai_jira_account_id not configured — skipping NOVA AI metrics');
+        return;
+      }
+
+      const openStats = await localQuery<{
+        openTotal: number; over2h: number; noUpdate: number; oldestDays: number | null;
+      }>(`
+        SELECT COUNT(*) AS openTotal,
+               SUM(CASE WHEN DATEDIFF(hour, jira_updated, GETUTCDATE()) > 2 THEN 1 ELSE 0 END) AS over2h,
+               SUM(CASE WHEN CAST(jira_updated AS DATE) < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) AS noUpdate,
+               MAX(DATEDIFF(day, jira_created, GETUTCDATE())) AS oldestDays
+        FROM jira_issue_cache
+        WHERE assignee_account_id = @p0
+          AND status_category NOT IN ('Done', 'Cancelled')
+      `, [novaAccountId]);
+
+      const solvedTodayRows = await localQuery<{ solvedToday: number }>(`
+        SELECT COUNT(DISTINCT ticket_id) AS solvedToday
+        FROM agent_decisions
+        WHERE CAST(created_at AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND (
+            (action = 'transition' AND outcome LIKE '%"success":true%')
+            OR quick_win_executed = 1
+          )
+      `);
+
+      const solvedWeekRows = await localQuery<{ solvedWeek: number }>(`
+        SELECT COUNT(DISTINCT ticket_id) AS solvedWeek
+        FROM agent_decisions
+        WHERE created_at >= DATEADD(day, -DATEPART(weekday, GETUTCDATE()) + 1, CAST(GETUTCDATE() AS DATE))
+          AND (
+            (action = 'transition' AND outcome LIKE '%"success":true%')
+            OR quick_win_executed = 1
+          )
+      `);
+
+      const open = openStats[0] ?? { openTotal: 0, over2h: 0, noUpdate: 0, oldestDays: 0 };
+      const solvedToday = solvedTodayRows[0]?.solvedToday ?? 0;
+      const solvedWeek = solvedWeekRows[0]?.solvedWeek ?? 0;
+
+      const req = kpiPool.request();
+      req.input('openTotal', sql.Int, open.openTotal ?? 0);
+      req.input('over2h', sql.Int, open.over2h ?? 0);
+      req.input('noUpdate', sql.Int, open.noUpdate ?? 0);
+      req.input('solvedToday', sql.Int, solvedToday);
+      req.input('solvedWeek', sql.Int, solvedWeek);
+      req.input('oldestDays', sql.Int, open.oldestDays ?? 0);
+      await req.query(`
+        UPDATE dbo.Agent SET
+          OpenTickets_Total = @openTotal,
+          OpenTickets_Over2Hours = @over2h,
+          OpenTickets_NoUpdateToday = @noUpdate,
+          SolvedTickets_Today = @solvedToday,
+          SolvedTickets_ThisWeek = @solvedWeek,
+          OldestTicketDays = @oldestDays
+        WHERE AgentName = 'NOVA' AND AgentSurname = 'AI'
+      `);
+
+      console.log(`[kpi-pipeline] NOVA AI metrics refreshed: ${open.openTotal} open, ${solvedToday} solved today, ${solvedWeek} this week`);
+    } catch (err) {
+      console.warn('[kpi-pipeline] Failed to refresh NOVA AI metrics:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  async backfillNovaAiKpis(): Promise<{ daysProcessed: number }> {
+    const goLiveDate = this.settings.get('agent_go_live_date') || '2026-04-23';
+    const p = await getKpiPool(this.settings);
+    const s = this.s;
+
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const endDate = yesterday.toISOString().slice(0, 10);
+
+    const dates: string[] = [];
+    const current = new Date(goLiveDate);
+    const end = new Date(endDate);
+    while (current <= end) {
+      dates.push(current.toISOString().slice(0, 10));
+      current.setDate(current.getDate() + 1);
+    }
+
+    let daysProcessed = 0;
+
+    for (const date of dates) {
+      const solvedRows = await localQuery<{ solvedToday: number }>(`
+        SELECT COUNT(DISTINCT ticket_id) AS solvedToday
+        FROM agent_decisions
+        WHERE CAST(created_at AS DATE) = @p0
+          AND (
+            (action = 'transition' AND outcome LIKE '%"success":true%')
+            OR (quick_win_executed = 1 AND CAST(quick_win_executed_at AS DATE) = @p0)
+          )
+      `, [date]);
+
+      const weekStart = new Date(date);
+      const dayOfWeek = weekStart.getDay();
+      const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      weekStart.setDate(weekStart.getDate() + mondayOffset);
+      const weekStartStr = weekStart.toISOString().slice(0, 10);
+
+      const solvedWeekRows = await localQuery<{ solvedWeek: number }>(`
+        SELECT COUNT(DISTINCT ticket_id) AS solvedWeek
+        FROM agent_decisions
+        WHERE CAST(created_at AS DATE) BETWEEN @p0 AND @p1
+          AND (
+            (action = 'transition' AND outcome LIKE '%"success":true%')
+            OR quick_win_executed = 1
+          )
+      `, [weekStartStr, date]);
+
+      const solvedToday = solvedRows[0]?.solvedToday ?? 0;
+      const solvedWeek = solvedWeekRows[0]?.solvedWeek ?? 0;
+
+      const req = p.request();
+      req.input('reportDate', sql.Date, date);
+      req.input('solvedToday', sql.Int, solvedToday);
+      req.input('solvedWeek', sql.Int, solvedWeek);
+      await req.query(`
+        UPDATE dbo.jira_agent_kpi_daily${s}
+        SET SolvedTickets_Today = @solvedToday, SolvedTickets_ThisWeek = @solvedWeek
+        WHERE ReportDate = @reportDate AND AgentName = 'NOVA AI'
+      `);
+
+      console.log(`[kpi-pipeline] NOVA AI backfill: ${date} → ${solvedToday} solved`);
+      daysProcessed++;
+    }
+
+    return { daysProcessed };
   }
 }

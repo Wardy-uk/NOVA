@@ -3337,6 +3337,17 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  router.post('/kpi/backfill-nova-ai', requireRole('admin'), async (_req, res) => {
+    try {
+      const kpi = deps?.kpiPipeline;
+      if (!kpi) { res.status(503).json({ ok: false, error: 'KPI pipeline not available' }); return; }
+      const result = await kpi.backfillNovaAiKpis();
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'NOVA AI backfill failed' });
+    }
+  });
+
   router.post('/kpi/daily-digest', async (_req, res) => {
     try {
       const kpi = deps?.kpiPipeline;
