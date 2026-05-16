@@ -9,6 +9,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { AutoRuleOverrideQueries } from '../db/queries.js';
 import { executeAndGetId, query } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+import { CF_REQUEST_TYPE } from './close-ticket-helper.js';
 
 const QUICK_RESOLVE_TRANSITION_ID = '17';
 const CF_CURRENT_TIER = 'customfield_12981';
@@ -486,6 +487,15 @@ export class AutoRulesEngine {
     const novaAccountId = this.settings.get('nova_ai_jira_account_id');
     if (novaAccountId) {
       await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
+    }
+
+    // Update request type from "AI Request" to correct type
+    try {
+      await this.jiraClient.updateFields(ticketKey, {
+        [CF_REQUEST_TYPE]: { requestType: { name: 'Emailed request' } },
+      });
+    } catch (err) {
+      console.warn(`[auto-rules] Failed to update request type on ${ticketKey}:`, err instanceof Error ? err.message : err);
     }
 
     // Validate transition is available before attempting

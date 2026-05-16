@@ -4,6 +4,7 @@ import type { Observer } from './observer.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { executeAndGetId, query } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+import { prepareTicketForClose } from './close-ticket-helper.js';
 
 const QW_COMMENT_PREFIX = '[AI Agent — Auto-Close]';
 
@@ -62,6 +63,13 @@ export class QuickWinExecutor {
         `UPDATE agent_decisions SET pre_close_status = ? WHERE id = ?`,
         [preCloseStatus, decisionId],
       );
+
+      // Assign to NOVA + update request type before closing
+      await prepareTicketForClose(this.jiraClient, this.settings, {
+        ticketKey,
+        classification: (decision.output.classification as { category?: string; ticket_type?: string }) ?? undefined,
+        requestTypeOverride: qw.type === 'spam' ? 'Emailed request' : undefined,
+      });
 
       // Post comment (spam = internal only, others = public)
       if (qw.type === 'kba_match') {

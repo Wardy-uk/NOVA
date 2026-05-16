@@ -27,6 +27,7 @@ import { ExternalDbService } from './external-db.js';
 import { query, queryOne, execute, executeAndGetId } from './database.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+import { prepareTicketForClose } from './close-ticket-helper.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 import { createHash } from 'crypto';
 import type { AssignmentEngine, Pool } from './assignment-engine.js';
@@ -1177,6 +1178,10 @@ export class AgentLoop {
     const isReply = this.YOMDEL_REPLY_RE.test(summary);
 
     if (isLead && !isReply) {
+      await prepareTicketForClose(this.jiraClient, this.settings, {
+        ticketKey,
+        requestTypeOverride: 'Emailed request',
+      });
       const RESOLVE_TRANSITION_ID = '17';
       const { fields, comment } = buildResolveFields({
         tldr: 'Yomdel live lead — auto-closed by NOVA',

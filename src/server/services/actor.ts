@@ -7,6 +7,7 @@ import type { LlmService } from './llm-service.js';
 import type { AssignmentEngine } from './assignment-engine.js';
 import { query, executeAndGetId } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+import { CATEGORY_TO_REQUEST_TYPE, CF_REQUEST_TYPE } from './close-ticket-helper.js';
 
 const CriticResultSchema = z.object({
   approved: z.boolean(),
@@ -14,38 +15,6 @@ const CriticResultSchema = z.object({
 });
 
 const HIGH_STAKES_ACTIONS = ['close', 'resolve', 'escalate', 'quick_win_close', 'transition'];
-
-const CF_REQUEST_TYPE = 'customfield_10020';
-
-// Maps triage classification categories to JSM Request Types.
-// Fallback: "Emailed request" for email-originated tickets, "Service Request" otherwise.
-const CATEGORY_TO_REQUEST_TYPE: Record<string, string> = {
-  'email': 'Emailed request',
-  'email_delivery': 'Emailed request',
-  'gdpr': 'GDPR',
-  'data_protection': 'GDPR',
-  'incident': 'Incident',
-  'integration': 'Incident',
-  'integration_issue': 'Incident',
-  'api_error': 'Incident',
-  'server_error': 'Incident',
-  'database_issue': 'Incident',
-  'feed_issue': 'Incident',
-  'data_feed': 'Incident',
-  'website': 'Incident',
-  'portal': 'Incident',
-  'crm': 'Incident',
-  'reporting': 'Service Request',
-  'user_management': 'Service Request',
-  'onboarding': 'Onboarding',
-  'delivery': 'Delivery QA',
-  'delivery_qa': 'Delivery QA',
-  'franchise': 'Franchise Hub',
-  'chat': 'Chat',
-  'template': 'Service Request',
-  'design': 'Service Request',
-  'branding': 'Service Request',
-};
 
 export class Actor {
   private jiraClient: JiraRestClient;
@@ -282,6 +251,8 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
     }
 
     if (transitionId === '17') {
+      await this.updateRequestTypeOnHandoff(decision.ticketKey, decision);
+
       const existingFields = (decision.output.fields as Record<string, unknown>) ?? {};
       if (!existingFields['customfield_14494']) {
         try {

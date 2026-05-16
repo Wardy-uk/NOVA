@@ -13,6 +13,7 @@ import { ChaseResultSchema, type ChaseResult } from './chase-schema.js';
 import { loadPrompt } from './prompt-loader.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import { addBusinessMinutes } from '../utils/business-hours.js';
+import { prepareTicketForClose } from './close-ticket-helper.js';
 
 interface LifecycleSweepResult {
   approvalTimeouts: number;
@@ -398,6 +399,10 @@ export class LifecycleManager {
 
         if (!shadow) {
           try {
+            await prepareTicketForClose(this.jiraClient, this.settings, {
+              ticketKey: ticket.ticketId,
+              requestTypeOverride: 'Emailed request',
+            });
             const closeDaysLabel = `${closeDays}+`;
             const { fields, comment } = buildResolveFields({
               tldr: `No customer response for ${closeDaysLabel} days — auto-closed per SOP-003`,
