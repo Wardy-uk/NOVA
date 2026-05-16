@@ -4080,6 +4080,226 @@ function KbIndexTab() {
           );
         })}
       </div>
+
+      <KbChunkBrowser sources={status.registered_providers} />
+    </div>
+  );
+}
+
+function KbChunkBrowser({ sources }: { sources: string[] }) {
+  const [docs, setDocs] = useState<Array<{
+    source: string; source_doc_id: string; doc_title: string;
+    doc_path: string; doc_url: string; chunk_count: number;
+    total_tokens: number; last_seen_at: string;
+  }>>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
+  const [chunks, setChunks] = useState<Record<string, Array<{
+    id: number; chunk_index: number; heading_path: string | null;
+    content: string; token_count: number;
+  }>>>({});
+  const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const fetchDocs = async (p = 1) => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('nova_token');
+      const params = new URLSearchParams();
+      params.set('page', String(p));
+      if (sourceFilter) params.set('source', sourceFilter);
+      if (searchQuery) params.set('q', searchQuery);
+      const res = await fetch(`/api/kb-admin/chunks?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (data.ok) {
+        setDocs(data.data.docs);
+        setTotal(data.data.total);
+        setPage(data.data.page);
+        setPageSize(data.data.pageSize);
+      }
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  const fetchChunks = async (source: string, docId: string) => {
+    const key = `${source}||${docId}`;
+    if (chunks[key]) return;
+    try {
+      const token = localStorage.getItem('nova_token');
+      const res = await fetch(`/api/kb-admin/chunks/${encodeURIComponent(source)}/${encodeURIComponent(docId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.ok) setChunks(prev => ({ ...prev, [key]: data.data }));
+    } catch { /* ignore */ }
+  };
+
+  const toggleDoc = (source: string, docId: string) => {
+    const key = `${source}||${docId}`;
+    if (expandedDoc === key) {
+      setExpandedDoc(null);
+    } else {
+      setExpandedDoc(key);
+      fetchChunks(source, docId);
+    }
+  };
+
+  const handleSearch = () => {
+    setSearchQuery(searchInput);
+    setPage(1);
+  };
+
+  useEffect(() => {
+    if (open) fetchDocs(page);
+  }, [open, page, sourceFilter, searchQuery]);
+
+  const totalPages = Math.ceil(total / pageSize);
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="text-xs text-[#5ec1ca] hover:text-[#7dd3d8] flex items-center gap-1"
+      >
+        <i className="fas fa-database" /> Browse Chunks
+      </button>
+    );
+  }
+
+  return (
+    <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-neutral-200">Chunk Browser</span>
+        <button onClick={() => setOpen(false)} className="text-xs text-neutral-500 hover:text-neutral-300">Close</button>
+      </div>
+
+      <div className="flex gap-2 items-center">
+        <select
+          value={sourceFilter}
+          onChange={e => { setSourceFilter(e.target.value); setPage(1); }}
+          className="bg-[#1f242b] border border-[#3a424d] rounded px-2 py-1.5 text-xs text-neutral-200"
+        >
+          <option value="">All sources</option>
+          {sources.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <input
+          type="text"
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSearch()}
+          placeholder="Search docs..."
+          className="flex-1 bg-[#1f242b] border border-[#3a424d] rounded px-2 py-1.5 text-xs text-neutral-200 placeholder-neutral-600"
+        />
+        <button onClick={handleSearch} className="text-xs px-2 py-1.5 rounded bg-[#363d47] text-[#5ec1ca] hover:bg-[#3a424d]">
+          Search
+        </button>
+        {searchQuery && (
+          <button onClick={() => { setSearchInput(''); setSearchQuery(''); setPage(1); }} className="text-xs text-neutral-500 hover:text-neutral-300">
+            Clear
+          </button>
+        )}
+      </div>
+
+      {loading && <div className="text-xs text-neutral-500 py-2">Loading...</div>}
+
+      <div className="space-y-1">
+        {docs.map(doc => {
+          const key = `${doc.source}||${doc.source_doc_id}`;
+          const isExpanded = expandedDoc === key;
+          const docChunks = chunks[key];
+          const ago = doc.last_seen_at ? timeAgo(doc.last_seen_at) : '—';
+
+          return (
+            <div key={key} className="border border-[#3a424d] rounded bg-[#272C33]">
+              <div
+                onClick={() => toggleDoc(doc.source, doc.source_doc_id)}
+                className="flex items-start justify-between px-3 py-2 cursor-pointer hover:bg-[#2a3038] transition-colors"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] text-neutral-200 font-medium truncate">
+                    {doc.doc_url
+                      ? <a href={doc.doc_url} target="_blank" rel="noopener noreferrer" className="hover:text-[#5ec1ca]" onClick={e => e.stopPropagation()}>{doc.doc_title}</a>
+                      : doc.doc_title
+                    }
+                  </div>
+                  <div className="text-[11px] text-neutral-500 mt-0.5">
+                    <span className="inline-block px-1.5 py-0.5 rounded bg-[#363d47] text-neutral-400 mr-1.5">{doc.source}</span>
+                    {doc.chunk_count} chunks · {doc.total_tokens?.toLocaleString()} tokens · {ago}
+                  </div>
+                </div>
+                <span className="text-neutral-500 text-xs ml-2 mt-1">{isExpanded ? '▼' : '▶'}</span>
+              </div>
+
+              {isExpanded && (
+                <div className="border-t border-[#3a424d] px-3 py-2 space-y-1.5">
+                  {!docChunks && <div className="text-[11px] text-neutral-500">Loading chunks...</div>}
+                  {docChunks?.map(chunk => {
+                    const chunkKey = `${key}||${chunk.chunk_index}`;
+                    const isChunkExpanded = expandedChunk === chunkKey;
+                    const preview = chunk.content.slice(0, 200);
+                    const hasMore = chunk.content.length > 200;
+
+                    return (
+                      <div key={chunk.chunk_index} className="bg-[#1f242b] rounded px-3 py-2 text-[11px]">
+                        <div className="flex items-center justify-between text-neutral-500 mb-1">
+                          <span>
+                            Chunk {chunk.chunk_index}
+                            {chunk.heading_path && <span className="text-neutral-400 ml-1.5">· {chunk.heading_path}</span>}
+                          </span>
+                          <span>{chunk.token_count} tokens</span>
+                        </div>
+                        <div className="text-neutral-300 whitespace-pre-wrap break-words">
+                          {isChunkExpanded ? chunk.content : preview}
+                          {hasMore && !isChunkExpanded && '...'}
+                        </div>
+                        {hasMore && (
+                          <button
+                            onClick={() => setExpandedChunk(isChunkExpanded ? null : chunkKey)}
+                            className="text-[10px] text-[#5ec1ca] hover:text-[#7dd3d8] mt-1"
+                          >
+                            {isChunkExpanded ? 'Show less' : 'Show full content'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {!loading && docs.length === 0 && (
+          <div className="text-xs text-neutral-500 text-center py-4">No documents found</div>
+        )}
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-xs text-neutral-400">
+          <span>Page {page} of {totalPages} ({total} docs)</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="px-2 py-1 rounded bg-[#363d47] hover:bg-[#3a424d] disabled:opacity-40"
+            >
+              ← Prev
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="px-2 py-1 rounded bg-[#363d47] hover:bg-[#3a424d] disabled:opacity-40"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

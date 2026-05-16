@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
 interface BcSearchResult {
   number: string;
@@ -101,8 +102,8 @@ export function BcAccountBadge({ ticketKey, accountNumber, onLinked, compact }: 
         </span>
       )}
 
-      {searchOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={() => setSearchOpen(false)}>
+      {searchOpen && createPortal(
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60" onClick={() => setSearchOpen(false)}>
           <div className="bg-[#272C33] border border-[#3a424d] rounded-xl shadow-2xl w-[500px] max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-[#3a424d] flex items-center justify-between">
               <h3 className="text-[15px] font-bold text-neutral-200">
@@ -161,7 +162,8 @@ export function BcAccountBadge({ ticketKey, accountNumber, onLinked, compact }: 
               ))}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

@@ -4,7 +4,7 @@ import type { KbSearchService } from '../services/kb-search.js';
 import type { KbEmbedder } from '../services/kb-embedder.js';
 import type { KbSyncProvider } from '../services/kb-sync-provider.js';
 import { requireRole } from '../middleware/auth.js';
-import { execute } from '../services/database.js';
+import { execute, query, queryOne } from '../services/database.js';
 
 interface KbAdminDeps {
   syncWorker: KbSyncWorker;
@@ -89,6 +89,81 @@ export function createKbAdminRoutes(deps: KbAdminDeps): Router {
       res.json({ ok: true, data: results });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Search failed' });
+    }
+  });
+
+  router.get('/chunks', async (req, res) => {
+    try {
+      const source = typeof req.query.source === 'string' ? req.query.source : undefined;
+      const search = typeof req.query.q === 'string' ? req.query.q : undefined;
+      const page = parseInt(typeof req.query.page === 'string' ? req.query.page : '1', 10);
+      const pageSize = 50;
+      const offset = (page - 1) * pageSize;
+
+      const conditions: string[] = [];
+      const params: any[] = [];
+      if (source) {
+        conditions.push('source = ?');
+        params.push(source);
+      }
+      if (search) {
+        conditions.push('(doc_title LIKE ? OR doc_path LIKE ? OR content LIKE ?)');
+        const pattern = `%${search}%`;
+        params.push(pattern, pattern, pattern);
+      }
+      const whereClause = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
+
+      const countResult = await queryOne<{ cnt: number }>(
+        `SELECT COUNT(DISTINCT CONCAT(source, '||', source_doc_id)) as cnt FROM kb_chunks${whereClause}`,
+        params
+      );
+      const total = countResult?.cnt || 0;
+
+      const docs = await query<{
+        source: string;
+        source_doc_id: string;
+        doc_title: string;
+        doc_path: string;
+        doc_url: string;
+        chunk_count: number;
+        total_tokens: number;
+        last_seen_at: Date;
+      }>(
+        `SELECT source, source_doc_id,
+                MIN(doc_title) as doc_title, MIN(doc_path) as doc_path, MIN(doc_url) as doc_url,
+                COUNT(*) as chunk_count, SUM(token_count) as total_tokens,
+                MAX(last_seen_at) as last_seen_at
+         FROM kb_chunks${whereClause}
+         GROUP BY source, source_doc_id
+         ORDER BY MAX(last_seen_at) DESC
+         OFFSET ${offset} ROWS FETCH NEXT ${pageSize} ROWS ONLY`,
+        params
+      );
+
+      res.json({ ok: true, data: { docs, total, page, pageSize } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Browse failed' });
+    }
+  });
+
+  router.get('/chunks/:source/:docId', async (req, res) => {
+    try {
+      const { source, docId } = req.params;
+      const chunks = await query<{
+        id: number;
+        chunk_index: number;
+        heading_path: string | null;
+        content: string;
+        token_count: number;
+      }>(
+        `SELECT id, chunk_index, heading_path, content, token_count
+         FROM kb_chunks WHERE source = ? AND source_doc_id = ?
+         ORDER BY chunk_index`,
+        [source, decodeURIComponent(docId)]
+      );
+      res.json({ ok: true, data: chunks });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Chunk fetch failed' });
     }
   });
 

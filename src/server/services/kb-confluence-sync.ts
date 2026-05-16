@@ -16,10 +16,10 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
     const spaceKeys = this.settings.get('kb_confluence_space_keys')?.trim();
     const siteUrl = this.settings.get('confluence_site_url')?.trim();
     const email = this.settings.get('kb_confluence_email')?.trim()
-      || this.settings.get('confluence_user')?.trim()
+      || this.settings.get('jira_username')?.trim()
       || this.settings.get('jira_ob_email')?.trim();
     const token = this.settings.get('kb_confluence_token')?.trim()
-      || this.settings.get('confluence_api_token')?.trim()
+      || this.settings.get('jira_token')?.trim()
       || this.settings.get('jira_ob_token')?.trim();
     return !!(spaceKeys && siteUrl && email && token);
   }
@@ -27,10 +27,10 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
   private getAuth(): { baseUrl: string; email: string; token: string } {
     const siteUrl = this.settings.get('confluence_site_url')?.trim();
     const email = this.settings.get('kb_confluence_email')?.trim()
-      || this.settings.get('confluence_user')?.trim()
+      || this.settings.get('jira_username')?.trim()
       || this.settings.get('jira_ob_email')?.trim();
     const token = this.settings.get('kb_confluence_token')?.trim()
-      || this.settings.get('confluence_api_token')?.trim()
+      || this.settings.get('jira_token')?.trim()
       || this.settings.get('jira_ob_token')?.trim();
     if (!siteUrl || !email || !token) {
       throw new Error('Confluence sync needs confluence_site_url plus email/token (kb_confluence_* → confluence_user/confluence_api_token → jira_ob_*)');
