@@ -691,7 +691,7 @@ function QaSection({ data, agent, onAgentChange }: { data: QaData | null; agent:
         </Card>
         <Card>
           <div style={{ height: 280 }}>
-            <Line data={grChartData} options={baseLineOptions('Golden Rules Compliance %', 80, { labels: grLabels })} />
+            <Line data={grChartData} options={baseLineOptions('Golden Rules Compliance %', 67, { labels: grLabels })} />
           </div>
         </Card>
       </div>

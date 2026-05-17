@@ -11,7 +11,7 @@ import { query as localQuery } from './database.js';
 
 let pool: sql.ConnectionPool | null = null;
 
-async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool> {
+export async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool> {
   if (pool?.connected) return pool;
 
   const all = settings.getAll();
@@ -158,6 +158,30 @@ function parseCsat(fieldsJson: string | null): number | null {
 // All tier groups that get per-tier KPIs
 const ALL_TIERS = ['Customer Care', 'CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Production', 'Tier 2', 'Tier 3', 'Development'];
 
+function n8nKpiName(tier: string, metric: string): string {
+  // Strip parentheses for tiers used in sentence-style names (except TPJ which keeps them)
+  const bare = tier === 'CC (TPJ)' ? 'CC (TPJ)' : tier.replace(/[()]/g, '').replace(/\s+/g, ' ').trim();
+
+  switch (metric) {
+    case 'Volume':
+      return `Number of Tickets in ${tier}`;
+    case 'No Reply':
+      return `Number of Tickets With No Reply in ${tier}`;
+    case 'Oldest Actionable':
+      return `Oldest actionable ticket (days) in ${bare}`;
+    case 'FRT Breached Actionable':
+      return `${bare} FRT breached (actionable)`;
+    case 'FRT Breached Not Actionable':
+      return `${bare} FRT breached (not actionable)`;
+    case 'Resolution SLA Breached Actionable':
+      return `${bare} over SLA (actionable)`;
+    case 'Resolution SLA Breached Not Actionable':
+      return `${bare} over SLA (not actionable)`;
+    default:
+      return `${tier} — ${metric}`;
+  }
+}
+
 export class KpiPipeline {
   constructor(
     private settings: SettingsQueries,
@@ -245,6 +269,36 @@ export class KpiPipeline {
         `);
       } catch (widenErr) {
         console.warn('[kpi-pipeline] Column widening failed (may need manual ALTER):', widenErr instanceof Error ? widenErr.message : widenErr);
+      }
+
+      // One-time migration: rename today's NOVA-style KPI names to n8n-compatible names
+      try {
+        const nameMap: Array<[string, string]> = [];
+        for (const tier of ALL_TIERS) {
+          nameMap.push([`${tier} — Volume`, n8nKpiName(tier, 'Volume')]);
+          nameMap.push([`${tier} — No Reply`, n8nKpiName(tier, 'No Reply')]);
+          nameMap.push([`${tier} — Oldest Actionable (days)`, n8nKpiName(tier, 'Oldest Actionable')]);
+          nameMap.push([`${tier} — Resolution SLA Breached (Actionable)`, n8nKpiName(tier, 'Resolution SLA Breached Actionable')]);
+          nameMap.push([`${tier} — FRT Breached (Actionable)`, n8nKpiName(tier, 'FRT Breached Actionable')]);
+          if (tier !== 'Development') {
+            nameMap.push([`${tier} — Resolution SLA Breached (Not Actionable)`, n8nKpiName(tier, 'Resolution SLA Breached Not Actionable')]);
+            nameMap.push([`${tier} — FRT Breached (Not Actionable)`, n8nKpiName(tier, 'FRT Breached Not Actionable')]);
+          }
+        }
+        for (const [oldName, newName] of nameMap) {
+          if (oldName === newName) continue;
+          const req = p.request();
+          req.input('oldName', sql.NVarChar(100), oldName);
+          req.input('newName', sql.NVarChar(100), newName);
+          await req.query(`
+            UPDATE dbo.jira_kpi_daily${s}
+            SET kpi = @newName
+            WHERE kpi = @oldName AND CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+              AND NOT EXISTS (SELECT 1 FROM dbo.jira_kpi_daily${s} x WHERE x.kpi = @newName AND CAST(x.CreatedAt AS DATE) = CAST(GETDATE() AS DATE))
+          `);
+        }
+      } catch (renameErr) {
+        console.warn('[kpi-pipeline] KPI name migration failed:', renameErr instanceof Error ? renameErr.message : renameErr);
       }
 
       const targets = await this.loadTargets(p);
@@ -389,9 +443,8 @@ export class KpiPipeline {
         { kpi: 'Open Tickets', group: 'Queue', count: openCount, target: t('Open Tickets').target || 30, direction: 'Lower is better' },
         { kpi: 'SLA Breached', group: 'SLA', count: breachedCount, target: t('SLA Breached').target || 0, direction: 'Lower is better' },
         { kpi: 'Unassigned', group: 'Queue', count: unassignedCount, target: t('Unassigned').target || 0, direction: 'Lower is better' },
-        { kpi: 'Resolved Today', group: 'Throughput', count: parsedResolved.length, target: t('Resolved Today').target || 15, direction: 'Higher is better' },
+        { kpi: 'Tickets Solved Today', group: 'Throughput', count: parsedResolved.length, target: t('Tickets Solved Today').target || 15, direction: 'Higher is better' },
         { kpi: 'New Tickets Today', group: 'Volume', count: createdToday, target: t('New Tickets Today').target || 20, direction: 'Lower is better' },
-        { kpi: 'Created Today', group: 'Volume', count: createdToday, target: t('Created Today').target || 20, direction: 'Lower is better' },
         { kpi: 'Waiting on Requestor', group: 'Queue', count: worCount, target: t('Waiting on Requestor').target || 10, direction: 'Lower is better' },
       );
 
@@ -421,16 +474,16 @@ export class KpiPipeline {
       for (const [tier, stats] of tierStats) {
         if (stats.volume === 0 && !ALL_TIERS.includes(tier)) continue;
         metrics.push(
-          { kpi: `${tier} — Volume`, group: 'Tier Volume', count: stats.volume, target: 0, direction: 'Lower is better' },
-          { kpi: `${tier} — No Reply`, group: 'Tier No Reply', count: stats.noReply, target: 0, direction: 'Lower is better' },
-          { kpi: `${tier} — Oldest Actionable (days)`, group: 'Tier Age', count: stats.oldestActionableDays, target: 0, direction: 'Lower is better' },
-          { kpi: `${tier} — Resolution SLA Breached (Actionable)`, group: 'Tier SLA', count: stats.resBreachedActionable, target: 0, direction: 'Lower is better' },
-          { kpi: `${tier} — FRT Breached (Actionable)`, group: 'Tier SLA', count: stats.frtBreachedActionable, target: 0, direction: 'Lower is better' },
+          { kpi: n8nKpiName(tier, 'Volume'), group: 'Tier Volume', count: stats.volume, target: 0, direction: 'Lower is better' },
+          { kpi: n8nKpiName(tier, 'No Reply'), group: 'Tier No Reply', count: stats.noReply, target: 0, direction: 'Lower is better' },
+          { kpi: n8nKpiName(tier, 'Oldest Actionable'), group: 'Tier Age', count: stats.oldestActionableDays, target: 0, direction: 'Lower is better' },
+          { kpi: n8nKpiName(tier, 'Resolution SLA Breached Actionable'), group: 'Tier SLA', count: stats.resBreachedActionable, target: 0, direction: 'Lower is better' },
+          { kpi: n8nKpiName(tier, 'FRT Breached Actionable'), group: 'Tier SLA', count: stats.frtBreachedActionable, target: 0, direction: 'Lower is better' },
         );
         if (tier !== 'Development') {
           metrics.push(
-            { kpi: `${tier} — Resolution SLA Breached (Not Actionable)`, group: 'Tier SLA', count: stats.resBreachedNotActionable, target: 0, direction: 'Lower is better' },
-            { kpi: `${tier} — FRT Breached (Not Actionable)`, group: 'Tier SLA', count: stats.frtBreachedNotActionable, target: 0, direction: 'Lower is better' },
+            { kpi: n8nKpiName(tier, 'Resolution SLA Breached Not Actionable'), group: 'Tier SLA', count: stats.resBreachedNotActionable, target: 0, direction: 'Lower is better' },
+            { kpi: n8nKpiName(tier, 'FRT Breached Not Actionable'), group: 'Tier SLA', count: stats.frtBreachedNotActionable, target: 0, direction: 'Lower is better' },
           );
         }
       }
@@ -441,6 +494,56 @@ export class KpiPipeline {
         metrics.push(...escMetrics);
       } catch (escErr) {
         console.warn('[kpi-pipeline] Escalation KPIs failed:', escErr instanceof Error ? escErr.message : escErr);
+      }
+
+      // AI KPIs (from approval_queue in local MSSQL)
+      try {
+        const aiResolved = await localQuery<{ cnt: number }>(`
+          SELECT COUNT(*) AS cnt FROM approval_queue
+          WHERE status = 'approved' AND CAST(decided_at AS DATE) = CAST(GETUTCDATE() AS DATE)
+        `);
+        const aiPending = await localQuery<{ cnt: number }>(`
+          SELECT COUNT(*) AS cnt FROM approval_queue
+          WHERE status = 'pending'
+        `);
+        const aiTotal = await localQuery<{ cnt: number }>(`
+          SELECT COUNT(*) AS cnt FROM approval_queue
+          WHERE CAST(created_at AS DATE) = CAST(GETUTCDATE() AS DATE)
+        `);
+        const aiResolvedCount = aiResolved[0]?.cnt ?? 0;
+        const aiPendingCount = aiPending[0]?.cnt ?? 0;
+        const aiTotalToday = aiTotal[0]?.cnt ?? 0;
+        const aiRate = aiTotalToday > 0 ? Math.round((aiResolvedCount / aiTotalToday) * 100) : 0;
+        metrics.push(
+          { kpi: 'AI Tickets Resolved (Today)', group: 'AI', count: aiResolvedCount, target: 0, direction: 'Higher is better' },
+          { kpi: 'AI Tickets Pending Approval', group: 'AI', count: aiPendingCount, target: 0, direction: 'Lower is better' },
+          { kpi: 'AI Resolution Rate %', group: 'AI', count: aiRate, target: 50, direction: 'Higher is better' },
+        );
+      } catch (aiErr) {
+        console.warn('[kpi-pipeline] AI KPIs failed:', aiErr instanceof Error ? aiErr.message : aiErr);
+      }
+
+      // WTD percentage KPIs Green/Red (from this week's jira_kpi_daily)
+      try {
+        const wtdResult = await p.request().query(`
+          SELECT
+            SUM(CASE WHEN rag = 1 THEN 1 ELSE 0 END) AS greenCount,
+            SUM(CASE WHEN rag = 3 THEN 1 ELSE 0 END) AS redCount,
+            COUNT(*) AS total
+          FROM dbo.jira_kpi_daily${s}
+          WHERE CreatedAt >= DATEADD(WEEKDAY, 1 - DATEPART(WEEKDAY, GETDATE()), CAST(GETDATE() AS DATE))
+            AND target > 0
+        `);
+        const wtd = wtdResult.recordset[0];
+        const wtdTotal = wtd?.total ?? 0;
+        const wtdGreenPct = wtdTotal > 0 ? Math.round(((wtd?.greenCount ?? 0) / wtdTotal) * 100) : 0;
+        const wtdRedPct = wtdTotal > 0 ? Math.round(((wtd?.redCount ?? 0) / wtdTotal) * 100) : 0;
+        metrics.push(
+          { kpi: "WTD percentage KPI's Green", group: 'Summary', count: wtdGreenPct, target: 80, direction: 'Higher is better' },
+          { kpi: "WTD percentage KPI's Red", group: 'Summary', count: wtdRedPct, target: 10, direction: 'Lower is better' },
+        );
+      } catch (wtdErr) {
+        console.warn('[kpi-pipeline] WTD KPIs failed:', wtdErr instanceof Error ? wtdErr.message : wtdErr);
       }
 
       // Write all metrics
@@ -554,81 +657,16 @@ export class KpiPipeline {
     const accuracy = totalEsc > 0 ? Math.round(((totalEsc - totalRej) / totalEsc) * 100) : 100;
 
     metrics.push(
-      { kpi: 'Escalated to Tier 2', group: 'Escalation', count: escT2, target: 0, direction: 'Lower is better' },
-      { kpi: 'Escalated to Tier 3', group: 'Escalation', count: escT3, target: 0, direction: 'Lower is better' },
-      { kpi: 'Escalated to Development', group: 'Escalation', count: escDev, target: 0, direction: 'Lower is better' },
-      { kpi: 'Rejected by Tier 2', group: 'Escalation', count: rejT2, target: 0, direction: 'Lower is better' },
-      { kpi: 'Rejected by Tier 3', group: 'Escalation', count: rejT3, target: 0, direction: 'Lower is better' },
-      { kpi: 'Rejected by Development', group: 'Escalation', count: rejDev, target: 0, direction: 'Lower is better' },
+      { kpi: 'Tickets escalated to Tier 2', group: 'Escalation', count: escT2, target: 0, direction: 'Lower is better' },
+      { kpi: 'Tickets escalated to Tier 3', group: 'Escalation', count: escT3, target: 0, direction: 'Lower is better' },
+      { kpi: 'Tickets escalated to Development', group: 'Escalation', count: escDev, target: 0, direction: 'Lower is better' },
+      { kpi: 'Tickets rejected by Tier 2', group: 'Escalation', count: rejT2, target: 0, direction: 'Lower is better' },
+      { kpi: 'Tickets rejected by Tier 3', group: 'Escalation', count: rejT3, target: 0, direction: 'Lower is better' },
+      { kpi: 'Tickets rejected by Development', group: 'Escalation', count: rejDev, target: 0, direction: 'Lower is better' },
       { kpi: 'Escalation Accuracy %', group: 'Escalation', count: accuracy, target: 90, direction: 'Higher is better' },
     );
 
     return metrics;
-  }
-
-  async upsertKpiSnapshot(): Promise<void> {
-    const started = new Date();
-    try {
-      const p = await getKpiPool(this.settings);
-
-      // Business hours guard: Mon-Fri 08:00-18:59 UK time
-      const ukHour = new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false });
-      const ukDay = new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short' });
-      const hour = parseInt(ukHour, 10);
-      if (['Sat', 'Sun'].includes(ukDay) || hour < 8 || hour > 18) return;
-
-      // Collect current metrics from the same local cache logic
-      const openRows = await localQuery<CacheRow>(`
-        SELECT issue_key, status_name, status_category, current_tier, request_type,
-               assignee_account_id, assignee_display, jira_created, jira_updated, due_date,
-               sla_breached, sla_breach_time, agent_last_updated, agent_next_update,
-               no_reply, fields_json, issuetype_name, resolution_name
-        FROM jira_issue_cache
-        WHERE project_key = @p0 AND status_category != 'Done'
-      `, [this.jiraProject]);
-
-      const filtered = openRows.filter(t => !isOnboarding(t.request_type));
-      const now = new Date();
-
-      const openCount = filtered.length;
-      const breachedCount = filtered.filter(t => {
-        const res = isSlaBreached(parseSlaField(t.fields_json, 'customfield_14048'));
-        return res === true;
-      }).length;
-      const unassigned = filtered.filter(t => !t.assignee_account_id).length;
-      const noReplyCount = filtered.filter(t => isNoReply(t, now)).length;
-
-      const resolvedRows = await localQuery<{ cnt: number }>(`
-        SELECT COUNT(*) AS cnt FROM jira_issue_cache
-        WHERE project_key = @p0 AND status_category = 'Done'
-          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
-      `, [this.jiraProject]);
-      const resolvedToday = resolvedRows[0]?.cnt ?? 0;
-
-      const snapshots: Array<{ name: string; value: number }> = [
-        { name: 'Open Tickets', value: openCount },
-        { name: 'SLA Breached', value: breachedCount },
-        { name: 'Unassigned', value: unassigned },
-        { name: 'No Reply', value: noReplyCount },
-        { name: 'Resolved Today', value: resolvedToday },
-      ];
-
-      for (const snap of snapshots) {
-        const req = p.request();
-        req.input('name', sql.NVarChar(100), snap.name);
-        req.input('value', sql.Float, snap.value);
-        await req.query(`
-          IF EXISTS (SELECT 1 FROM dbo.KpiSnapshot WHERE KpiName = @name)
-            UPDATE dbo.KpiSnapshot SET KpiValue = @value, UpdatedAt = GETUTCDATE() WHERE KpiName = @name
-          ELSE
-            INSERT INTO dbo.KpiSnapshot (KpiName, KpiValue, UpdatedAt) VALUES (@name, @value, GETUTCDATE())
-        `);
-      }
-
-      console.log(`[kpi-pipeline] KpiSnapshot upserted: ${snapshots.length} metrics`);
-    } catch (err) {
-      console.warn('[kpi-pipeline] KpiSnapshot upsert failed:', err instanceof Error ? err.message : err);
-    }
   }
 
   async collectDerivedKpis(): Promise<void> {
@@ -665,13 +703,68 @@ export class KpiPipeline {
       }
       const csatDerived = csatCount > 0 ? Math.round((csatSum / csatCount) * 20) : 0;
 
-      // FCR Rate % — stub: needs comment data, placeholder using tickets with single agent interaction
-      // Bug Escalation-to-Ack — stub: needs first comment time, placeholder
+      // FCR Rate % and Bug Escalation-to-Ack — computed from Jira comments
+      const BOT_PATTERNS = ['nurtur', 'automation', 'jira service', 'servicedesk', 'bot'];
+      const isBot = (name: string) => BOT_PATTERNS.some(p => name.toLowerCase().includes(p));
+
+      const resolvedForComments = await localQuery<{ issue_key: string; request_type: string | null; created_at: string | null }>(`
+        SELECT issue_key, request_type, jira_created AS created_at FROM jira_issue_cache
+        WHERE project_key = @p0 AND status_category = 'Done'
+          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND LOWER(ISNULL(request_type, '')) != 'onboarding'
+      `, [this.jiraProject]);
+
+      const bugTypes = ['bug', 'development', 'defect'];
+      let fcrCount = 0, fcrTotal = 0;
+      const ackHours: number[] = [];
+      const commentCap = 30;
+
+      for (let i = 0; i < Math.min(resolvedForComments.length, commentCap); i++) {
+        const ticket = resolvedForComments[i];
+        try {
+          const comments = await this.jiraClient.getComments(ticket.issue_key, 50);
+          const agentComments = comments.filter(c => {
+            const name = c.author?.displayName ?? '';
+            const acctType = c.author?.accountType;
+            return acctType !== 'customer' && !isBot(name);
+          });
+          const customerComments = comments.filter(c => c.author?.accountType === 'customer');
+
+          const rt = (ticket.request_type || '').toLowerCase();
+
+          // FCR: CC request types only
+          if (ccRequestTypes.includes(rt)) {
+            fcrTotal++;
+            if (agentComments.length > 0) {
+              const firstAgentTime = new Date(agentComments[agentComments.length - 1].created);
+              const customerAfterAgent = customerComments.some(c => new Date(c.created) > firstAgentTime);
+              if (!customerAfterAgent) fcrCount++;
+            }
+          }
+
+          // Bug Ack: bug/dev/defect types
+          if (bugTypes.includes(rt) && agentComments.length > 0 && ticket.created_at) {
+            const firstAgentComment = agentComments[agentComments.length - 1];
+            const createdAt = new Date(ticket.created_at);
+            const ackAt = new Date(firstAgentComment.created);
+            const hours = (ackAt.getTime() - createdAt.getTime()) / 3600000;
+            if (hours >= 0) ackHours.push(hours);
+          }
+
+          if (i < commentCap - 1) await new Promise(r => setTimeout(r, 200));
+        } catch (commentErr) {
+          console.warn(`[kpi-pipeline] Failed to fetch comments for ${ticket.issue_key}:`, commentErr instanceof Error ? commentErr.message : commentErr);
+        }
+      }
+
+      const fcrRate = fcrTotal > 0 ? Math.round((fcrCount / fcrTotal) * 100) : 0;
+      const avgAckHours = ackHours.length > 0 ? Math.round((ackHours.reduce((a, b) => a + b, 0) / ackHours.length) * 10) / 10 : 0;
+
       const derivedMetrics: Array<{ kpi: string; group: string; count: number; target: number; direction: string }> = [
         { kpi: '1st Line Resolution Rate %', group: 'Derived', count: firstLineRate, target: 60, direction: 'Higher is better' },
         { kpi: 'CSAT % (Derived)', group: 'Derived', count: csatDerived, target: 80, direction: 'Higher is better' },
-        { kpi: 'FCR Rate %', group: 'Derived', count: 0, target: 60, direction: 'Higher is better' }, // TODO: requires comment data
-        { kpi: 'Bug Escalation-to-Ack (hours)', group: 'Derived', count: 0, target: 4, direction: 'Lower is better' }, // TODO: requires first comment time
+        { kpi: 'FCR Rate %', group: 'Derived', count: fcrRate, target: 60, direction: 'Higher is better' },
+        { kpi: 'Bug Escalation-to-Ack (hours)', group: 'Derived', count: avgAckHours, target: 4, direction: 'Lower is better' },
       ];
 
       for (const m of derivedMetrics) {

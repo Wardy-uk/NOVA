@@ -1468,9 +1468,6 @@ async function main() {
     jobRegistry.register('kpi-agent-snapshot', 'KPI agent daily snapshot (all 27 cols)', async () => {
       await kpiPipeline.snapshotAgentKpis();
     }, 30 * 60 * 1000);
-    jobRegistry.register('kpi-snapshot-upsert', 'KpiSnapshot 3-min upsert (business hours)', async () => {
-      await kpiPipeline.upsertKpiSnapshot();
-    }, 3 * 60 * 1000);
     setTimeout(() => kpiPipeline.collectJiraSnapshot().catch(() => {}), 90_000);
     setTimeout(() => kpiPipeline.refreshAllAgentMetrics().catch(() => {}), 100_000);
 
@@ -2267,12 +2264,11 @@ ${wallboardRefreshScript('/wallboard/breached')}
         options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
       }).connect();
       const result = await pool.request().query(`
-        SELECT KPI, KPIGroup, [Count], KPITarget, KPIDirection, RAG, CreatedAt
-        FROM (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY KPI ORDER BY CreatedAt DESC) AS rn
-          FROM dbo.KpiSnapshot
-        ) t WHERE rn = 1
-        ORDER BY KPIGroup, KPI
+        SELECT kpi AS KPI, kpiGroup AS KPIGroup, [count] AS [Count],
+               target AS KPITarget, direction AS KPIDirection, rag AS RAG, CreatedAt
+        FROM dbo.jira_kpi_daily
+        WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+        ORDER BY kpiGroup, kpi
       `);
       const allKpis = result.recordset as Array<{ KPI: string; KPIGroup: string; Count: number; KPITarget: number | null; KPIDirection: string | null; RAG: number | null; CreatedAt: string }>;
       await pool.close();
@@ -2368,10 +2364,9 @@ ${wallboardRefreshScript('/wallboard/team-kpis')}
       options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
     }).connect();
     const result = await pool.request().query(`
-      SELECT KPI, [Count], RAG FROM (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY KPI ORDER BY CreatedAt DESC) AS rn
-        FROM dbo.KpiSnapshot
-      ) t WHERE rn = 1
+      SELECT kpi AS KPI, [count] AS [Count], rag AS RAG
+      FROM dbo.jira_kpi_daily
+      WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
     `);
     await pool.close();
     const kpis = new Map<string, { count: number; rag: number | null }>();

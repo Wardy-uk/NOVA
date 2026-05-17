@@ -99,7 +99,7 @@ export interface JiraIssueLink {
 
 export interface JiraComment {
   id: string;
-  author: { displayName: string; emailAddress?: string; accountId?: string };
+  author: { displayName: string; emailAddress?: string; accountId?: string; accountType?: string };
   body: unknown;
   created: string;
   updated: string;

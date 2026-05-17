@@ -586,9 +586,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
               r.input('cpDate', sql.Date, col.end);
               const result = await r.query(`
                 SELECT
-                  AVG(CASE WHEN rule1Pass = 1 THEN 100.0 ELSE 0 END +
-                      CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END +
-                      CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+                  (AVG(CAST(Rule1Score AS FLOAT)) + AVG(CAST(Rule2Score AS FLOAT)) + AVG(CAST(Rule3Score AS FLOAT))) / 9.0 * 100.0 AS avg_pct
                 FROM ${tbl}
                 WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)
                       BETWEEN DATEADD(DAY, -6, @cpDate) AND @cpDate
@@ -599,9 +597,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
               r.input('endDate', sql.Date, col.end);
               const result = await r.query(`
                 SELECT
-                  AVG(CASE WHEN rule1Pass = 1 THEN 100.0 ELSE 0 END +
-                      CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END +
-                      CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+                  (AVG(CAST(Rule1Score AS FLOAT)) + AVG(CAST(Rule2Score AS FLOAT)) + AVG(CAST(Rule3Score AS FLOAT))) / 9.0 * 100.0 AS avg_pct
                 FROM ${tbl}
                 WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)
                       BETWEEN @startDate AND @endDate
@@ -632,9 +628,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
                   r.input('cpDate', sql.Date, col.end);
                   const result = await r.query(`
                     SELECT
-                      AVG(CASE WHEN g.rule1Pass = 1 THEN 100.0 ELSE 0 END +
-                          CASE WHEN g.rule2Pass = 1 THEN 100.0 ELSE 0 END +
-                          CASE WHEN g.rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+                      (AVG(CAST(g.Rule1Score AS FLOAT)) + AVG(CAST(g.Rule2Score AS FLOAT)) + AVG(CAST(g.Rule3Score AS FLOAT))) / 9.0 * 100.0 AS avg_pct
                     FROM ${tbl} g
                     INNER JOIN (
                       SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
@@ -649,9 +643,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
                   r.input('endDate', sql.Date, col.end);
                   const result = await r.query(`
                     SELECT
-                      AVG(CASE WHEN g.rule1Pass = 1 THEN 100.0 ELSE 0 END +
-                          CASE WHEN g.rule2Pass = 1 THEN 100.0 ELSE 0 END +
-                          CASE WHEN g.rule3Pass = 1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+                      (AVG(CAST(g.Rule1Score AS FLOAT)) + AVG(CAST(g.Rule2Score AS FLOAT)) + AVG(CAST(g.Rule3Score AS FLOAT))) / 9.0 * 100.0 AS avg_pct
                     FROM ${tbl} g
                     INNER JOIN (
                       SELECT DISTINCT AgentName, TierCode FROM dbo.jira_agent_kpi_daily${suffix(env)}
@@ -919,9 +911,9 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
       const grResult = await grReq.query(`
         SELECT
           ${grDateGroup} AS period,
-          AVG(CASE WHEN rule1Pass = 1 THEN 100.0 ELSE 0 END) AS ownership_pct,
-          AVG(CASE WHEN rule2Pass = 1 THEN 100.0 ELSE 0 END) AS next_action_pct,
-          AVG(CASE WHEN rule3Pass = 1 THEN 100.0 ELSE 0 END) AS timeframe_pct,
+          AVG(CAST(Rule1Score AS FLOAT)) / 3.0 * 100.0 AS ownership_pct,
+          AVG(CAST(Rule2Score AS FLOAT)) / 3.0 * 100.0 AS next_action_pct,
+          AVG(CAST(Rule3Score AS FLOAT)) / 3.0 * 100.0 AS timeframe_pct,
           COUNT(*) AS comment_count
         FROM ${grTbl}
         WHERE COALESCE(commentTimestamp, CreatedAt) >= DATEADD(DAY, -@days, GETUTCDATE())
@@ -1046,9 +1038,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         grExReq.input('cpDate', sql.Date, cp.date);
         const grExResult = await grExReq.query(`
           SELECT COUNT(*) AS rows,
-            AVG(CASE WHEN rule1Pass=1 THEN 100.0 ELSE 0 END +
-                CASE WHEN rule2Pass=1 THEN 100.0 ELSE 0 END +
-                CASE WHEN rule3Pass=1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+            (AVG(CAST(Rule1Score AS FLOAT)) + AVG(CAST(Rule2Score AS FLOAT)) + AVG(CAST(Rule3Score AS FLOAT))) / 9.0 * 100.0 AS avg_pct
           FROM ${grTbl}
           WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE) = @cpDate
         `);
@@ -1058,9 +1048,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
         grWinReq.input('cpDate', sql.Date, cp.date);
         const grWinResult = await grWinReq.query(`
           SELECT COUNT(*) AS rows,
-            AVG(CASE WHEN rule1Pass=1 THEN 100.0 ELSE 0 END +
-                CASE WHEN rule2Pass=1 THEN 100.0 ELSE 0 END +
-                CASE WHEN rule3Pass=1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct,
+            (AVG(CAST(Rule1Score AS FLOAT)) + AVG(CAST(Rule2Score AS FLOAT)) + AVG(CAST(Rule3Score AS FLOAT))) / 9.0 * 100.0 AS avg_pct,
             COUNT(DISTINCT CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)) AS days_with_data
           FROM ${grTbl}
           WHERE CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)
@@ -1086,9 +1074,7 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
       const grDaily = p.request();
       const grDailyResult = await grDaily.query(`
         SELECT CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE) AS day, COUNT(*) AS rows,
-               AVG(CASE WHEN rule1Pass=1 THEN 100.0 ELSE 0 END +
-                   CASE WHEN rule2Pass=1 THEN 100.0 ELSE 0 END +
-                   CASE WHEN rule3Pass=1 THEN 100.0 ELSE 0 END) / 3.0 AS avg_pct
+               (AVG(CAST(Rule1Score AS FLOAT)) + AVG(CAST(Rule2Score AS FLOAT)) + AVG(CAST(Rule3Score AS FLOAT))) / 9.0 * 100.0 AS avg_pct
         FROM ${grTbl}
         WHERE COALESCE(commentTimestamp, CreatedAt) >= '2026-02-01'
         GROUP BY CAST(COALESCE(commentTimestamp, CreatedAt) AS DATE)

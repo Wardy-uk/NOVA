@@ -1,5 +1,6 @@
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, execute, executeAndGetId } from './database.js';
+import { getKpiPool } from './kpi-pipeline.js';
 
 export interface DayForecast {
   forecast_date: string;
@@ -21,7 +22,7 @@ export class CapacityPlanner {
   constructor(private settings: SettingsQueries) {}
 
   async generateForecast(): Promise<CapacityForecastResult> {
-    const project = this.settings.get('agent_jira_project') ?? 'NT';
+    const project = 'NT';
 
     // Backfill last week's actuals first
     await this.backfillActuals(project);
@@ -63,13 +64,39 @@ export class CapacityPlanner {
       dowStats.set(d.dow, existing);
     }
 
-    // Get team capacity
-    const rosterCount = await query<{ cnt: number }>(
-      `SELECT COUNT(*) AS cnt FROM agent_roster WHERE active = 1`,
+    // Get team capacity from real per-agent historical throughput
+    const activeAgents = await query<{ display_name: string }>(
+      `SELECT display_name FROM agent_roster WHERE active = 1`,
     );
-    const agentCount = rosterCount[0]?.cnt || parseInt(this.settings.get('capacity_default_agents') ?? '5', 10);
-    const capacityPerAgent = parseInt(this.settings.get('agent_max_capacity') ?? '12', 10);
-    const dailyCapacity = agentCount * capacityPerAgent;
+    const activeNames = new Set(activeAgents.map(a => a.display_name?.trim().toLowerCase()));
+
+    let dailyCapacity = 0;
+    try {
+      const kpiPool = await getKpiPool(this.settings);
+      const agentAverages = await kpiPool.request().query(`
+        SELECT AgentName, AVG(CAST(SolvedTickets_Today AS FLOAT)) AS avg_solved
+        FROM dbo.jira_agent_kpi_daily
+        WHERE ReportDate >= DATEADD(day, -90, GETUTCDATE())
+          AND SolvedTickets_Today IS NOT NULL
+          AND SolvedTickets_Today > 0
+        GROUP BY AgentName
+      `);
+      for (const a of agentAverages.recordset) {
+        if (activeNames.has(a.AgentName?.trim().toLowerCase())) {
+          dailyCapacity += a.avg_solved;
+        }
+      }
+      dailyCapacity = Math.round(dailyCapacity);
+      console.log(`[capacity] Team daily capacity: ${dailyCapacity} tickets (${activeAgents.length} active agents)`);
+    } catch (kpiErr) {
+      console.warn('[capacity] KPI pool unavailable for agent throughput, using fallback:', kpiErr instanceof Error ? kpiErr.message : kpiErr);
+    }
+
+    if (dailyCapacity === 0) {
+      const fallbackCount = activeAgents.length || parseInt(this.settings.get('capacity_default_agents') ?? '5', 10);
+      const fallbackRate = parseInt(this.settings.get('agent_max_capacity') ?? '12', 10);
+      dailyCapacity = fallbackCount * fallbackRate;
+    }
 
     // Generate 14-day forecast
     const forecasts: DayForecast[] = [];
@@ -101,8 +128,8 @@ export class CapacityPlanner {
       const stddev = stats ? this.computeStddev(stats.values, avg) : 0;
 
       const predicted = Math.round(avg);
-      const confidenceLow = Math.max(0, Math.round(avg - 1.5 * stddev));
-      const confidenceHigh = Math.round(avg + 1.5 * stddev);
+      const confidenceLow = Math.max(Math.round(avg * 0.5), Math.round(avg - stddev));
+      const confidenceHigh = Math.round(avg + stddev);
 
       const surplus = dailyCapacity - predicted;
 

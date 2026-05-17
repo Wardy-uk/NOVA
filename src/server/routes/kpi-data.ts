@@ -116,13 +116,13 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         { pattern: /resolution compliance/i, target: 95, direction: 'higher is better' },
         { pattern: /over sla \(actionable\)/i, target: 0, direction: 'lower is better' },
       ];
+      // Read from jira_kpi_daily (NOVA-populated) with column aliases matching frontend expectations
       const result = await p.request().query(`
-        SELECT KPI, KPIGroup, [Count], KPITarget, KPIDirection, RAG, CreatedAt
-        FROM (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY KPI ORDER BY CreatedAt DESC) AS rn
-          FROM dbo.KpiSnapshot${s}
-        ) t WHERE rn = 1
-        ORDER BY KPIGroup, KPI
+        SELECT kpi AS KPI, kpiGroup AS KPIGroup, [count] AS [Count],
+               target AS KPITarget, direction AS KPIDirection, rag AS RAG, CreatedAt
+        FROM dbo.jira_kpi_daily${s}
+        WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+        ORDER BY kpiGroup, kpi
       `);
       // Apply target fallbacks where KPITarget is 0 or null
       for (const row of result.recordset) {
@@ -132,7 +132,6 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
           row.KPITarget = fb.target;
           if (!row.KPIDirection) row.KPIDirection = fb.direction;
         } else {
-          // Try pattern matching as fallback
           const pf = PATTERN_FALLBACKS.find(p => p.pattern.test(row.KPI));
           if (pf) {
             row.KPITarget = pf.target;
