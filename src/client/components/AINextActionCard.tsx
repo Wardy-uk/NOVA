@@ -401,7 +401,7 @@ export function AINextActionCard({ ticketKey, compact, pendingDecision, forceGen
       <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={handlePrimaryAction}
-          disabled={runningAgent || (!data.primaryAction.jiraTransition && data.state !== 'no_context')}
+          disabled={runningAgent}
           className="px-3 py-1.5 text-[11px] rounded-lg font-bold disabled:opacity-40 transition-colors"
           style={{
             background: cfg.color,
