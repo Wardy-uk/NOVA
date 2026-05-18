@@ -207,6 +207,19 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'adobe_sign_redirect_uri', label: 'Redirect URI', type: 'url', placeholder: 'https://nova.yourorg.com/api/adobe-sign/callback', required: true },
       { key: 'adobe_sign_api_base_url', label: 'API Base URL', type: 'text', placeholder: 'https://api.na1.adobesign.com (region-dependent)', required: true },
       { key: 'adobe_sign_refresh_token', label: 'Refresh Token', type: 'password', placeholder: 'Auto-populated after OAuth connection', required: false },
+      { key: 'adobe_sign_terms_field_prefix', label: 'Terms Field Prefix', type: 'text', placeholder: 'contract terms (matches contract_terms_bym, contract terms yomdel, etc.)', required: false },
+    ],
+  },
+  {
+    id: 'contract-approvals',
+    name: 'Contract Approvals',
+    description: 'Approval workflow for contracts containing additional (non-pre-approved) terms. When configured, contracts with custom terms are held in NOVA, a webhook fires to your approval system (e.g. Power Automate → Teams), and the agreement is only released to Adobe Sign once an approver signs off. Leave the webhook empty to disable the approval workflow — contracts with custom terms will be blocked from sending.',
+    enabledKey: 'contract_approvals_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'contract_approvals_webhook_url', label: 'Approval Webhook URL', type: 'url', placeholder: 'https://prod-XX.westeurope.logic.azure.com/workflows/... (Power Automate / Teams trigger)', required: false },
+      { key: 'contract_approvals_webhook_secret', label: 'Shared Secret (optional)', type: 'password', placeholder: 'Used to sign webhook payloads and verify callbacks', required: false },
+      { key: 'contract_approvals_callback_url', label: 'NOVA Callback URL (info only)', type: 'text', placeholder: 'https://nova.nurtur.tech/api/contract-approvals/callback — configure this URL in your Power Automate flow', required: false },
     ],
   },
   {

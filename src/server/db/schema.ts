@@ -1856,6 +1856,21 @@ async function runMigrations(): Promise<void> {
        updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
        CONSTRAINT UQ_retry_queue_ticket UNIQUE (ticket_key)
      );`,
+
+    // Contract terms — pre-approved blocks of text that the sender can tick to include
+    // in an Adobe Sign agreement. NOVA concatenates selected terms and routes them to
+    // any field on the chosen template(s) whose name starts with the configured prefix
+    // (default 'contract terms', e.g. 'contract terms bym').
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'contract_terms') AND type = 'U')
+     CREATE TABLE contract_terms (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       label NVARCHAR(200) NOT NULL,
+       body NVARCHAR(MAX) NOT NULL,
+       active BIT NOT NULL DEFAULT 1,
+       sort_order INT NOT NULL DEFAULT 0,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

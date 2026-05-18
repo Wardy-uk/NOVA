@@ -19,6 +19,8 @@ export interface AdobeSignConfig {
   redirectUri: string;
   apiBaseUrl: string;
   refreshToken: string | null;
+  accessToken?: string | null;
+  accessTokenExpiresAt?: number | null;
 }
 
 export interface AdobeSignAgreementInput {
@@ -27,7 +29,9 @@ export interface AdobeSignAgreementInput {
   ccEmails?: string[];
   message?: string;
   transientDocumentId?: string;
-  libraryDocumentId?: string;
+  // Adobe concatenates documents in array order into one signable agreement.
+  // Field names that match across templates are auto-linked (fill once, all instances populate).
+  libraryDocumentIds?: string[];
   signatureType?: 'ESIGN' | 'WRITTEN';
   expirationDays?: number;
   mergeFields?: Array<{ fieldName: string; defaultValue: string }>;
@@ -73,12 +77,22 @@ export class AdobeSignClient {
   private formFieldsCache = new Map<string, { fields: AdobeSignFormField[]; expiresAt: number }>();
   // Adobe-imposed cooldown when we hit 429 — short-circuit further calls until this passes
   private throttledUntil = 0;
+  // Mutex: one concurrent token refresh per client instance. Without this, parallel
+  // API calls each trigger their own refresh, racing each other. Adobe Sign rotates
+  // refresh tokens — the slower racer ends up with an already-invalidated RT.
+  private refreshInFlight: Promise<string> | null = null;
 
   constructor(
     private config: AdobeSignConfig,
     private onRefreshTokenUpdate?: (newRefreshToken: string) => void,
+    private onAccessTokenUpdate?: (newAccessToken: string, expiresAtMs: number) => void,
   ) {
-    if (config.refreshToken) {
+    // Hydrate tokenCache from persisted access token if still valid (with 60s buffer).
+    // Avoids forcing a refresh on every NOVA restart.
+    if (config.accessToken && config.accessTokenExpiresAt && config.accessTokenExpiresAt > Date.now() + 60_000) {
+      this.tokenCache = { token: config.accessToken, expiresAt: config.accessTokenExpiresAt };
+      this.status = 'connected';
+    } else if (config.refreshToken) {
       this.status = 'connected';
     }
   }
@@ -122,16 +136,15 @@ export class AdobeSignClient {
     }
 
     const data = await res.json() as { access_token: string; refresh_token: string; expires_in: number };
-    this.tokenCache = {
-      token: data.access_token,
-      expiresAt: Date.now() + data.expires_in * 1000,
-    };
+    const expiresAt = Date.now() + data.expires_in * 1000;
+    this.tokenCache = { token: data.access_token, expiresAt };
     this.config.refreshToken = data.refresh_token;
     this.status = 'connected';
     this.lastConnected = new Date().toISOString();
     this.lastError = null;
 
     this.onRefreshTokenUpdate?.(data.refresh_token);
+    this.onAccessTokenUpdate?.(data.access_token, expiresAt);
 
     return {
       accessToken: data.access_token,
@@ -152,40 +165,77 @@ export class AdobeSignClient {
       throw new Error('Adobe Sign not connected — no refresh token. Complete OAuth flow first.');
     }
 
-    const res = await fetch(`${this.config.apiBaseUrl}/oauth/v2/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: this.config.clientId,
-        client_secret: this.config.clientSecret,
-        refresh_token: this.config.refreshToken,
-      }).toString(),
-    });
+    // Mutex: if a refresh is already in flight, await its result instead of
+    // launching a parallel refresh. Adobe rotates refresh tokens — parallel
+    // refreshes can invalidate each other's results.
+    if (this.refreshInFlight) {
+      return this.refreshInFlight;
+    }
+    this.refreshInFlight = this.doRefresh();
+    try {
+      return await this.refreshInFlight;
+    } finally {
+      this.refreshInFlight = null;
+    }
+  }
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      console.error(`[Adobe Sign Token] ${res.status} ${res.statusText} — ${errText}`);
-      this.status = 'error';
-      this.lastError = `Token refresh failed: ${res.status}`;
-      throw new AdobeSignApiError(res.status, res.statusText, errText);
+  private async doRefresh(): Promise<string> {
+    const refreshToken = this.config.refreshToken!;
+
+    // One retry on transient 5xx. 4xx (invalid_grant/invalid_client/etc.) is a
+    // real credential failure — retrying won't help and could compound rate limits.
+    let lastErrText = '';
+    let lastStatus = 0;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const res = await fetch(`${this.config.apiBaseUrl}/oauth/v2/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: this.config.clientId,
+          client_secret: this.config.clientSecret,
+          refresh_token: refreshToken,
+        }).toString(),
+      });
+
+      if (res.ok) {
+        const data = await res.json() as { access_token: string; refresh_token?: string; expires_in: number };
+        const expiresAt = Date.now() + data.expires_in * 1000;
+        this.tokenCache = { token: data.access_token, expiresAt };
+        this.status = 'connected';
+        this.lastConnected = new Date().toISOString();
+        this.lastError = null;
+        this.onAccessTokenUpdate?.(data.access_token, expiresAt);
+
+        if (data.refresh_token && data.refresh_token !== this.config.refreshToken) {
+          this.config.refreshToken = data.refresh_token;
+          this.onRefreshTokenUpdate?.(data.refresh_token);
+        }
+        return data.access_token;
+      }
+
+      lastErrText = await res.text().catch(() => '');
+      lastStatus = res.status;
+      console.error(`[Adobe Sign Token] attempt ${attempt}: ${res.status} ${res.statusText} — ${lastErrText.slice(0, 300)}`);
+
+      // 5xx → retry once after short delay. 4xx → don't retry, that's a real auth problem.
+      if (res.status >= 500 && attempt === 1) {
+        await new Promise(r => setTimeout(r, 750));
+        continue;
+      }
+      break;
     }
 
-    const data = await res.json() as { access_token: string; refresh_token?: string; expires_in: number };
-    this.tokenCache = {
-      token: data.access_token,
-      expiresAt: Date.now() + data.expires_in * 1000,
-    };
-    this.status = 'connected';
-    this.lastConnected = new Date().toISOString();
-    this.lastError = null;
-
-    if (data.refresh_token && data.refresh_token !== this.config.refreshToken) {
-      this.config.refreshToken = data.refresh_token;
-      this.onRefreshTokenUpdate?.(data.refresh_token);
-    }
-
-    return this.tokenCache.token;
+    // Capture the actual Adobe error body in lastError so we can diagnose
+    // (invalid_grant / expired_token / invalid_client etc.) without server log access.
+    let errParsed: { error?: string; error_description?: string } = {};
+    try { errParsed = JSON.parse(lastErrText); } catch { /* not JSON */ }
+    const errSummary = errParsed.error || errParsed.error_description
+      ? `${errParsed.error ?? ''}${errParsed.error_description ? ` — ${errParsed.error_description}` : ''}`.trim()
+      : lastErrText.slice(0, 200);
+    this.status = 'error';
+    this.lastError = `Token refresh failed: ${lastStatus}${errSummary ? ` ${errSummary}` : ''}`;
+    throw new AdobeSignApiError(lastStatus, 'Token refresh failed', lastErrText);
   }
 
   // ── HTTP Helpers ──
@@ -267,8 +317,10 @@ export class AdobeSignClient {
     const fileInfos: Array<Record<string, unknown>> = [];
     if (input.transientDocumentId) {
       fileInfos.push({ transientDocumentId: input.transientDocumentId });
-    } else if (input.libraryDocumentId) {
-      fileInfos.push({ libraryDocumentId: input.libraryDocumentId });
+    } else if (input.libraryDocumentIds?.length) {
+      for (const id of input.libraryDocumentIds) {
+        fileInfos.push({ libraryDocumentId: id });
+      }
     }
 
     const participantSetsInfo = input.signerEmails.map((email, i) => ({
@@ -421,17 +473,22 @@ export class AdobeSignClient {
   disconnect(): void {
     this.tokenCache = null;
     this.config.refreshToken = null;
+    this.config.accessToken = null;
+    this.config.accessTokenExpiresAt = null;
     this.status = 'disconnected';
     this.lastError = null;
     this.libraryDocsCache = null;
     this.formFieldsCache.clear();
     this.throttledUntil = 0;
+    // Wipe persisted access token too — the consumer callback nulls the setting
+    this.onAccessTokenUpdate?.('', 0);
   }
 }
 
 export function buildAdobeSignClient(
   settings: Record<string, string>,
   onRefreshTokenUpdate?: (newToken: string) => void,
+  onAccessTokenUpdate?: (newAccessToken: string, expiresAtMs: number) => void,
 ): AdobeSignClient | null {
   if (
     settings.adobe_sign_enabled !== 'true' ||
@@ -442,6 +499,10 @@ export function buildAdobeSignClient(
   ) {
     return null;
   }
+
+  const expiresRaw = settings.adobe_sign_access_token_expires;
+  const expiresAtMs = expiresRaw ? Number(expiresRaw) : NaN;
+
   return new AdobeSignClient(
     {
       clientId: settings.adobe_sign_client_id,
@@ -449,7 +510,10 @@ export function buildAdobeSignClient(
       redirectUri: settings.adobe_sign_redirect_uri,
       apiBaseUrl: settings.adobe_sign_api_base_url.replace(/\/+$/, ''),
       refreshToken: settings.adobe_sign_refresh_token || null,
+      accessToken: settings.adobe_sign_access_token || null,
+      accessTokenExpiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : null,
     },
     onRefreshTokenUpdate,
+    onAccessTokenUpdate,
   );
 }

@@ -1,17 +1,28 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { AdobeSignLibraryDocument, AdobeSignFormField } from '../../shared/types.js';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import type { AdobeSignLibraryDocument, AdobeSignFormField, ContractTerm } from '../../shared/types.js';
 
 interface Props {
   onNavigateToAgreements: () => void;
 }
 
-type Step = 'template' | 'fields' | 'recipients' | 'review';
+type Step = 'template' | 'fields' | 'terms' | 'recipients' | 'review';
 const STEPS: { key: Step; label: string }[] = [
-  { key: 'template', label: 'Select Template' },
+  { key: 'template', label: 'Select Templates' },
   { key: 'fields', label: 'Fill Fields' },
+  { key: 'terms', label: 'Terms' },
   { key: 'recipients', label: 'Recipients' },
   { key: 'review', label: 'Review & Send' },
 ];
+
+// Same normalisation/match logic as the backend so the wizard preview matches what the server does.
+function normaliseFieldName(s: string | undefined): string {
+  return (s ?? '').toLowerCase().replace(/[_\-\s]+/g, ' ').trim();
+}
+function fieldMatchesPrefix(fieldName: string, prefix: string): boolean {
+  const n = normaliseFieldName(fieldName);
+  const p = normaliseFieldName(prefix);
+  return p.length > 0 && n.startsWith(p);
+}
 
 const inputCls = 'bg-[#272C33] text-neutral-200 text-[11px] rounded px-2.5 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-full placeholder:text-neutral-600';
 const labelCls = 'text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block';
@@ -30,17 +41,13 @@ function normaliseType(s: string | undefined): string {
 }
 
 function inputTypeFor(field: AdobeSignFormField): InputKind {
-  // Multi-line flags (Adobe variants)
   if (field.multiLine === true || field.isMultiLine === true) return 'textarea';
 
   const ct = normaliseType(field.contentType);
   const it = normaliseType(field.inputType);
   const both = `${ct} ${it}`;
 
-  // Multi-line text variants — check first since these often share the TEXT prefix
   if (both.includes('MULTILINE') || both.includes('TEXTAREA') || both.includes('PARAGRAPH')) return 'textarea';
-
-  // Then specific kinds (use includes() so FIELD/ENUM/etc. suffixes don't matter)
   if (both.includes('CHECKBOX') || both.includes('CHECKMARK')) return 'checkbox';
   if (both.includes('RADIO')) return 'radio';
   if (both.includes('DROPDOWN') || both.includes('COMBOBOX') || both.includes('LIST')) return 'select';
@@ -51,14 +58,28 @@ function inputTypeFor(field: AdobeSignFormField): InputKind {
   return 'text';
 }
 
+// A form field aggregated across the selected templates. originNames captures which
+// templates contributed this field (Adobe links fields with the same name across docs).
+type MergedField = AdobeSignFormField & { originNames: string[] };
+
+// Adobe assigns each field to a participant role. Fields assigned to 'PREFILL' (or
+// 'SENDER', or no participant) are filled by NOVA via mergeFieldInfo before sending.
+// Everything else is filled by the signer when they open the agreement in Adobe.
+function isSenderField(f: AdobeSignFormField): boolean {
+  const a = (f.assignee ?? '').toUpperCase();
+  return a === '' || a === 'PREFILL' || a === 'SENDER';
+}
+
 export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [step, setStep] = useState<Step>('template');
   const [templates, setTemplates] = useState<AdobeSignLibraryDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [selectedTemplate, setSelectedTemplate] = useState<AdobeSignLibraryDocument | null>(null);
-  const [formFields, setFormFields] = useState<AdobeSignFormField[]>([]);
+  // Multi-select: order matters — Adobe concatenates the bundle in this order.
+  const [selectedTemplates, setSelectedTemplates] = useState<AdobeSignLibraryDocument[]>([]);
+  // Cache form fields per template ID — fetched on first selection, kept across reorders/deselects.
+  const [templateFields, setTemplateFields] = useState<Map<string, AdobeSignFormField[]>>(new Map());
   const [fieldsLoading, setFieldsLoading] = useState(false);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
 
@@ -70,6 +91,34 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [sending, setSending] = useState(false);
   const [sentId, setSentId] = useState<string | null>(null);
   const [templateSearch, setTemplateSearch] = useState('');
+
+  // Pre-approved contract terms
+  const [allTerms, setAllTerms] = useState<ContractTerm[]>([]);
+  const [selectedTermIds, setSelectedTermIds] = useState<Set<number>>(new Set());
+  const [termsFieldPrefix, setTermsFieldPrefix] = useState<string>('contract terms');
+
+  // Merged field list — union of all selected templates' fields, deduped by name, with origin tracking.
+  const mergedFields = useMemo<MergedField[]>(() => {
+    const map = new Map<string, MergedField>();
+    for (const t of selectedTemplates) {
+      const fields = templateFields.get(t.id) ?? [];
+      for (const f of fields) {
+        const existing = map.get(f.name);
+        if (existing) {
+          if (!existing.originNames.includes(t.name)) existing.originNames.push(t.name);
+        } else {
+          map.set(f.name, { ...f, originNames: [t.name] });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [selectedTemplates, templateFields]);
+
+  // Split fields by who fills them. Sender fields appear as wizard inputs; signer
+  // fields appear as a read-only "Signer will fill" panel so the user can see the
+  // full picture but doesn't accidentally fill them.
+  const senderFields = useMemo(() => mergedFields.filter(isSenderField), [mergedFields]);
+  const signerFields = useMemo(() => mergedFields.filter(f => !isSenderField(f)), [mergedFields]);
 
   const fetchTemplates = useCallback(async (force = false) => {
     setLoading(true);
@@ -94,6 +143,38 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
 
   useEffect(() => { fetchTemplates(false); }, [fetchTemplates]);
 
+  // Fetch terms catalog + prefix once on mount
+  useEffect(() => {
+    fetch('/api/contract-terms?activeOnly=1')
+      .then(r => r.json())
+      .then(j => { if (j.ok) setAllTerms(j.data ?? []); })
+      .catch(() => { /* terms step will just show empty */ });
+    fetch('/api/adobe-sign/terms-prefix')
+      .then(r => r.json())
+      .then(j => { if (j.ok && typeof j.data?.prefix === 'string') setTermsFieldPrefix(j.data.prefix); })
+      .catch(() => { /* fall back to default */ });
+  }, []);
+
+  // Concatenated terms text — selected terms joined by blank lines, in catalog order
+  const concatenatedTerms = useMemo(() => {
+    const selected = allTerms.filter(t => selectedTermIds.has(t.id));
+    return selected.map(t => t.body.trim()).filter(b => b.length > 0).join('\n\n');
+  }, [allTerms, selectedTermIds]);
+
+  // Which fields across the selected templates will receive the terms
+  const termsTargetFields = useMemo<Array<{ templateName: string; fieldName: string }>>(() => {
+    const out: Array<{ templateName: string; fieldName: string }> = [];
+    for (const t of selectedTemplates) {
+      const fields = templateFields.get(t.id) ?? [];
+      for (const f of fields) {
+        if (fieldMatchesPrefix(f.name, termsFieldPrefix)) {
+          out.push({ templateName: t.name, fieldName: f.name });
+        }
+      }
+    }
+    return out;
+  }, [selectedTemplates, templateFields, termsFieldPrefix]);
+
   const filteredTemplates = templates.filter((t) =>
     !templateSearch.trim() ||
     t.name.toLowerCase().includes(templateSearch.toLowerCase())
@@ -101,8 +182,12 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
 
   const canProceed = (s: Step): boolean => {
     switch (s) {
-      case 'template': return selectedTemplate !== null;
-      case 'fields': return formFields.filter(f => f.required).every(f => (fieldValues[f.name] ?? '').trim());
+      case 'template': return selectedTemplates.length > 0;
+      // Only sender-filled required fields gate the wizard. Required signer fields
+      // are the signer's problem, not ours. Required PREFILL fields left empty would
+      // cause Adobe to park the agreement awaiting prefill, so we block here.
+      case 'fields': return senderFields.filter(f => f.required).every(f => (fieldValues[f.name] ?? '').trim());
+      case 'terms': return true;
       case 'recipients': return contractName.trim() !== '' && signers.some(s => s.email.trim());
       case 'review': return true;
       default: return false;
@@ -113,33 +198,74 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const goNext = () => { if (stepIdx < STEPS.length - 1) setStep(STEPS[stepIdx + 1].key); };
   const goBack = () => { if (stepIdx > 0) setStep(STEPS[stepIdx - 1].key); };
 
-  const handleSelectTemplate = async (t: AdobeSignLibraryDocument) => {
-    setSelectedTemplate(t);
-    setContractName(t.name);
-    setFieldValues({});
-    setFormFields([]);
-    setFieldsLoading(true);
+  const fetchTemplateFields = useCallback(async (templateId: string): Promise<AdobeSignFormField[]> => {
     try {
-      const res = await fetch(`/api/adobe-sign/library-documents/${encodeURIComponent(t.id)}/form-fields`);
+      const res = await fetch(`/api/adobe-sign/library-documents/${encodeURIComponent(templateId)}/form-fields`);
       const json = await res.json();
-      if (json.ok) {
-        const fields: AdobeSignFormField[] = json.data ?? [];
-        setFormFields(fields);
-        const defaults: Record<string, string> = {};
+      if (json.ok) return json.data ?? [];
+    } catch { /* Step 2 will fall back to empty state */ }
+    return [];
+  }, []);
+
+  const toggleTemplate = useCallback(async (t: AdobeSignLibraryDocument) => {
+    const wasSelected = selectedTemplates.some(s => s.id === t.id);
+    if (wasSelected) {
+      setSelectedTemplates(prev => prev.filter(s => s.id !== t.id));
+      return;
+    }
+    // Adding: append to ordered list
+    const newSelection = [...selectedTemplates, t];
+    setSelectedTemplates(newSelection);
+    // Auto-populate contract name from the first template (user can still edit)
+    if (!contractName.trim() && newSelection.length === 1) setContractName(t.name);
+
+    // Fetch this template's fields if not already cached
+    if (!templateFields.has(t.id)) {
+      setFieldsLoading(true);
+      const fields = await fetchTemplateFields(t.id);
+      setTemplateFields(prev => new Map(prev).set(t.id, fields));
+      // Seed any default values for newly-discovered fields (don't overwrite user input)
+      setFieldValues(prev => {
+        const next = { ...prev };
         for (const f of fields) {
-          if (f.defaultValue) defaults[f.name] = f.defaultValue;
+          if (f.defaultValue && next[f.name] === undefined) next[f.name] = f.defaultValue;
         }
-        setFieldValues(defaults);
-      }
-    } catch { /* ignore — Step 2 will show empty state */ }
-    setFieldsLoading(false);
+        return next;
+      });
+      setFieldsLoading(false);
+    }
+  }, [selectedTemplates, templateFields, contractName, fetchTemplateFields]);
+
+  const moveTemplateUp = (idx: number) => {
+    if (idx <= 0) return;
+    setSelectedTemplates(prev => {
+      const next = [...prev];
+      [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+      return next;
+    });
+  };
+
+  const moveTemplateDown = (idx: number) => {
+    setSelectedTemplates(prev => {
+      if (idx >= prev.length - 1) return prev;
+      const next = [...prev];
+      [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+      return next;
+    });
+  };
+
+  const removeFromSelection = (idx: number) => {
+    setSelectedTemplates(prev => prev.filter((_, i) => i !== idx));
   };
 
   const handleSend = async () => {
     setSending(true);
     try {
-      const mergeFields = formFields.length > 0
-        ? formFields
+      // Only send merge values for sender-assigned fields. Sending a value for a
+      // signer-assigned field would overwrite what the signer is expected to enter
+      // and confuse Adobe's routing.
+      const mergeFields = senderFields.length > 0
+        ? senderFields
             .filter(f => (fieldValues[f.name] ?? '').trim())
             .map(f => ({ fieldName: f.name, defaultValue: fieldValues[f.name] }))
         : undefined;
@@ -148,13 +274,14 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          library_document_id: selectedTemplate?.id,
+          library_document_ids: selectedTemplates.map(t => t.id),
           name: contractName,
           signer_emails: signers.filter(s => s.email.trim()).map(s => s.email.trim()),
           cc_emails: ccEmails.split(',').map(e => e.trim()).filter(Boolean),
           message: message || undefined,
           merge_fields: mergeFields,
           expiration_days: expirationDays ? parseInt(expirationDays, 10) : undefined,
+          contract_terms_text: concatenatedTerms || undefined,
         }),
       });
       const json = await res.json();
@@ -175,6 +302,28 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
     setSigners(signers.map((s, i) => i === idx ? { ...s, ...updates } : s));
   };
 
+  const resetWizard = () => {
+    setSentId(null);
+    setStep('template');
+    setSelectedTemplates([]);
+    setTemplateFields(new Map());
+    setFieldValues({});
+    setSigners([{ email: '', name: '' }]);
+    setContractName('');
+    setCcEmails('');
+    setMessage('');
+    setExpirationDays('');
+    setSelectedTermIds(new Set());
+  };
+
+  const toggleTerm = (id: number) => {
+    setSelectedTermIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
   if (sentId) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -193,15 +342,7 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
             <button onClick={onNavigateToAgreements} className={btnPrimary}>
               View Agreements
             </button>
-            <button onClick={() => {
-              setSentId(null);
-              setStep('template');
-              setSelectedTemplate(null);
-              setFormFields([]);
-              setFieldValues({});
-              setSigners([{ email: '', name: '' }]);
-              setContractName('');
-            }} className={btnSecondary}>
+            <button onClick={resetWizard} className={btnSecondary}>
               Send Another
             </button>
           </div>
@@ -209,6 +350,10 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
       </div>
     );
   }
+
+  const selectedCount = selectedTemplates.length;
+  const isSelected = (t: AdobeSignLibraryDocument) => selectedTemplates.some(s => s.id === t.id);
+  const orderIndex = (t: AdobeSignLibraryDocument) => selectedTemplates.findIndex(s => s.id === t.id);
 
   return (
     <div className="flex flex-col h-full">
@@ -245,8 +390,10 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-[14px] font-semibold text-neutral-100">Select a Template</h2>
-                <p className="text-[11px] text-neutral-500 mt-0.5">Templates are pulled live from Adobe Sign. To add a new template, create it in Adobe Sign.</p>
+                <h2 className="text-[14px] font-semibold text-neutral-100">Select Templates</h2>
+                <p className="text-[11px] text-neutral-500 mt-0.5">
+                  Pick one or more templates. They'll be bundled into a single agreement in the order shown below.
+                </p>
               </div>
               <button onClick={() => fetchTemplates(true)} className={btnSecondary} disabled={loading}>
                 {loading ? 'Refreshing...' : 'Refresh'}
@@ -260,6 +407,40 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
               onChange={(e) => setTemplateSearch(e.target.value)}
               className={`${inputCls} max-w-sm mb-4`}
             />
+
+            {/* Selected templates — ordered bundle list with reorder controls */}
+            {selectedCount > 0 && (
+              <div className="mb-5 rounded-lg border border-[#5ec1ca]/30 bg-[#5ec1ca]/5 p-3">
+                <div className="text-[10px] text-[#5ec1ca] uppercase tracking-wider mb-2">
+                  Bundle order — {selectedCount} {selectedCount === 1 ? 'template' : 'templates'}
+                </div>
+                <div className="space-y-1">
+                  {selectedTemplates.map((t, idx) => (
+                    <div key={t.id} className="flex items-center gap-2 bg-[#1e2228] rounded px-2 py-1.5 border border-[#3a424d]">
+                      <span className="text-[10px] text-neutral-500 font-mono w-5">{idx + 1}.</span>
+                      <span className="text-[11px] text-neutral-200 flex-1 truncate">{t.name}</span>
+                      <button
+                        onClick={() => moveTemplateUp(idx)}
+                        disabled={idx === 0}
+                        className="text-neutral-500 hover:text-[#5ec1ca] disabled:opacity-20 disabled:hover:text-neutral-500 text-[12px] leading-none px-1"
+                        title="Move up"
+                      >▲</button>
+                      <button
+                        onClick={() => moveTemplateDown(idx)}
+                        disabled={idx === selectedCount - 1}
+                        className="text-neutral-500 hover:text-[#5ec1ca] disabled:opacity-20 disabled:hover:text-neutral-500 text-[12px] leading-none px-1"
+                        title="Move down"
+                      >▼</button>
+                      <button
+                        onClick={() => removeFromSelection(idx)}
+                        className="text-neutral-500 hover:text-red-400 text-sm leading-none px-1"
+                        title="Remove from bundle"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {loading ? (
               <div className="text-neutral-500 text-[12px] py-8 text-center">Loading templates from Adobe Sign...</div>
@@ -278,55 +459,71 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {filteredTemplates.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => handleSelectTemplate(t)}
-                    className={`text-left p-4 rounded-lg border transition-colors ${
-                      selectedTemplate?.id === t.id
-                        ? 'bg-[#5ec1ca]/10 border-[#5ec1ca]/40'
-                        : 'bg-[#1e2228] border-[#3a424d] hover:border-[#5ec1ca]/30'
-                    }`}
-                  >
-                    <div className="text-[12px] font-medium text-neutral-200 mb-1">{t.name}</div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {(t.templateTypes ?? []).map((tt) => (
-                        <span key={tt} className="text-[9px] px-1.5 py-0.5 rounded bg-[#2f353d] text-neutral-400">
-                          {tt.replace(/_/g, ' ').toLowerCase()}
+                {filteredTemplates.map((t) => {
+                  const sel = isSelected(t);
+                  const order = orderIndex(t);
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => toggleTemplate(t)}
+                      className={`text-left p-4 rounded-lg border transition-colors relative ${
+                        sel
+                          ? 'bg-[#5ec1ca]/10 border-[#5ec1ca]/40'
+                          : 'bg-[#1e2228] border-[#3a424d] hover:border-[#5ec1ca]/30'
+                      }`}
+                    >
+                      {sel && (
+                        <span className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[#5ec1ca] text-[#272C33] text-[10px] font-bold flex items-center justify-center">
+                          {order + 1}
                         </span>
-                      ))}
-                    </div>
-                    <div className="text-[10px] text-neutral-600 mt-2">Modified {fmtDate(t.modifiedDate)}</div>
-                  </button>
-                ))}
+                      )}
+                      <div className="text-[12px] font-medium text-neutral-200 mb-1 pr-7">{t.name}</div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {(t.templateTypes ?? []).map((tt) => (
+                          <span key={tt} className="text-[9px] px-1.5 py-0.5 rounded bg-[#2f353d] text-neutral-400">
+                            {tt.replace(/_/g, ' ').toLowerCase()}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="text-[10px] text-neutral-600 mt-2">Modified {fmtDate(t.modifiedDate)}</div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
         )}
 
-        {step === 'fields' && selectedTemplate && (
+        {step === 'fields' && selectedCount > 0 && (
           <div className="max-w-lg">
             <h2 className="text-[14px] font-semibold text-neutral-100 mb-1">Fill in Contract Details</h2>
-            <p className="text-[11px] text-neutral-500 mb-4">Template: {selectedTemplate.name}</p>
+            <p className="text-[11px] text-neutral-500 mb-4">
+              {selectedCount === 1
+                ? `Template: ${selectedTemplates[0].name}`
+                : `Bundle of ${selectedCount} templates — fields with the same name across templates are linked.`}
+            </p>
 
             {fieldsLoading ? (
               <div className="text-[12px] text-neutral-500 py-4">Loading fields from Adobe Sign...</div>
-            ) : formFields.length === 0 ? (
+            ) : senderFields.length === 0 && signerFields.length === 0 ? (
               <div className="text-[12px] text-neutral-500 py-4">
-                This template has no sender-fillable merge fields. Signers will fill any fields directly when signing.
+                No merge fields on the selected templates. Signers will fill any fields directly when signing.
               </div>
             ) : (
               <div className="space-y-3">
-                {formFields.map((f) => {
+                {senderFields.length === 0 && (
+                  <div className="text-[12px] text-neutral-500 py-2">
+                    Nothing for you to fill — every field on this template is assigned to the signer.
+                  </div>
+                )}
+                {senderFields.map((f) => {
                   const inputType = inputTypeFor(f);
                   const value = fieldValues[f.name] ?? '';
+                  const showOrigins = selectedCount > 1;
                   return (
                     <div key={f.name}>
                       <label className={labelCls}>
                         {f.displayLabel || f.name} {f.required && <span className="text-red-400">*</span>}
-                        {f.assignee && f.assignee !== 'SENDER' && (
-                          <span className="ml-2 text-neutral-600 normal-case">(assigned: {f.assignee})</span>
-                        )}
                       </label>
                       {inputType === 'select' ? (
                         <select
@@ -393,9 +590,101 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                           placeholder={f.defaultValue ?? ''}
                         />
                       )}
+                      {showOrigins && (
+                        <div className="text-[9px] text-neutral-600 mt-1">
+                          in: {f.originNames.join(', ')}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
+
+                {signerFields.length > 0 && (
+                  <div className="mt-6 rounded-lg border border-[#3a424d] bg-[#1e2228] p-3">
+                    <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">
+                      Signer will fill ({signerFields.length})
+                    </div>
+                    <ul className="space-y-1">
+                      {signerFields.map(f => (
+                        <li key={f.name} className="text-[11px] text-neutral-400 flex items-baseline gap-2">
+                          <span className="text-neutral-300">{f.displayLabel || f.name}</span>
+                          {f.required && <span className="text-red-400">*</span>}
+                          <span className="text-[9px] text-neutral-600 ml-auto">{f.assignee}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="text-[10px] text-neutral-600 mt-2">
+                      These fields appear in the agreement for the signer to fill when they open it in Adobe Sign.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {step === 'terms' && (
+          <div className="max-w-2xl">
+            <h2 className="text-[14px] font-semibold text-neutral-100 mb-1">Contract Terms</h2>
+            <p className="text-[11px] text-neutral-500 mb-4">
+              Tick pre-approved terms to include in the contract. Selected terms get concatenated and inserted into any field on your selected template(s) whose name starts with <code className="text-neutral-300">{termsFieldPrefix}</code>.
+            </p>
+
+            {allTerms.length === 0 ? (
+              <div className="text-[12px] text-neutral-500 py-4">
+                No pre-approved terms configured yet. An admin can add them in Admin &gt; Adobe Sign &gt; Contract Terms.
+              </div>
+            ) : (
+              <div className="space-y-2 mb-5">
+                {allTerms.map((t) => {
+                  const isChecked = selectedTermIds.has(t.id);
+                  return (
+                    <label
+                      key={t.id}
+                      className={`block p-3 rounded-lg border cursor-pointer transition-colors ${
+                        isChecked ? 'bg-[#5ec1ca]/10 border-[#5ec1ca]/40' : 'bg-[#1e2228] border-[#3a424d] hover:border-[#5ec1ca]/30'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleTerm(t.id)}
+                          className="accent-[#5ec1ca] mt-0.5 flex-shrink-0"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[12px] font-medium text-neutral-200 mb-1">{t.label}</div>
+                          <div className="text-[10px] text-neutral-500 whitespace-pre-wrap line-clamp-3">{t.body}</div>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Live target diagnostic */}
+            {selectedTermIds.size > 0 && (
+              <div className="rounded-lg border border-[#3a424d] bg-[#1e2228] p-3 mb-3">
+                <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Target fields</div>
+                {termsTargetFields.length === 0 ? (
+                  <div className="text-[11px] text-amber-400">
+                    None of your selected templates have a field starting with <code>{termsFieldPrefix}</code>. The selected terms won't appear in the signed contract.
+                  </div>
+                ) : (
+                  <ul className="text-[11px] text-neutral-300 space-y-0.5">
+                    {termsTargetFields.map((t, i) => (
+                      <li key={i}><span className="text-neutral-500">{t.templateName} →</span> <code className="text-[#5ec1ca]">{t.fieldName}</code></li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {selectedTermIds.size > 0 && termsTargetFields.length > 0 && (
+              <div className="rounded-lg border border-[#3a424d] bg-[#272C33] p-3">
+                <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Preview</div>
+                <pre className="text-[11px] text-neutral-300 whitespace-pre-wrap font-sans">{concatenatedTerms}</pre>
               </div>
             )}
           </div>
@@ -486,8 +775,16 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
 
             <div className="space-y-4 bg-[#1e2228] rounded-lg border border-[#3a424d] p-4">
               <div>
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-0.5">Template</span>
-                <span className="text-[12px] text-neutral-200">{selectedTemplate?.name}</span>
+                <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">
+                  {selectedCount === 1 ? 'Template' : `Bundle (${selectedCount} templates, in order)`}
+                </span>
+                <div className="space-y-0.5">
+                  {selectedTemplates.map((t, i) => (
+                    <div key={t.id} className="text-[11px] text-neutral-200">
+                      <span className="text-neutral-500 font-mono mr-2">{i + 1}.</span>{t.name}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div>
@@ -495,17 +792,42 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                 <span className="text-[12px] text-neutral-200">{contractName}</span>
               </div>
 
-              {formFields.length > 0 && (
+              {senderFields.length > 0 && (
                 <div>
-                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Merge Fields</span>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Pre-filled by NOVA</span>
                   <div className="space-y-1">
-                    {formFields.map((f) => (
+                    {senderFields.map((f) => (
                       <div key={f.name} className="flex items-baseline gap-2 text-[11px]">
                         <span className="text-neutral-500 min-w-[120px]">{f.displayLabel || f.name}:</span>
                         <span className="text-neutral-200">{fieldValues[f.name] || '—'}</span>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {signerFields.length > 0 && (
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Signer will fill ({signerFields.length})</span>
+                  <div className="text-[11px] text-neutral-400">
+                    {signerFields.map(f => f.displayLabel || f.name).join(', ')}
+                  </div>
+                </div>
+              )}
+
+              {selectedTermIds.size > 0 && (
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">
+                    Contract Terms ({selectedTermIds.size} selected → {termsTargetFields.length} {termsTargetFields.length === 1 ? 'field' : 'fields'})
+                  </span>
+                  <div className="text-[11px] text-neutral-300">
+                    {allTerms.filter(t => selectedTermIds.has(t.id)).map(t => t.label).join(', ')}
+                  </div>
+                  {termsTargetFields.length === 0 && (
+                    <div className="text-[10px] text-amber-400 mt-1">
+                      ⚠ No matching merge field on the selected templates — these terms won't appear in the signed contract.
+                    </div>
+                  )}
                 </div>
               )}
 
