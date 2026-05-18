@@ -62,6 +62,14 @@ function inputTypeFor(field: AdobeSignFormField): InputKind {
 // templates contributed this field (Adobe links fields with the same name across docs).
 type MergedField = AdobeSignFormField & { originNames: string[] };
 
+// Adobe assigns each field to a participant role. Fields assigned to 'PREFILL' (or
+// 'SENDER', or no participant) are filled by NOVA via mergeFieldInfo before sending.
+// Everything else is filled by the signer when they open the agreement in Adobe.
+function isSenderField(f: AdobeSignFormField): boolean {
+  const a = (f.assignee ?? '').toUpperCase();
+  return a === '' || a === 'PREFILL' || a === 'SENDER';
+}
+
 export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [step, setStep] = useState<Step>('template');
   const [templates, setTemplates] = useState<AdobeSignLibraryDocument[]>([]);
@@ -105,6 +113,12 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
     }
     return Array.from(map.values());
   }, [selectedTemplates, templateFields]);
+
+  // Split fields by who fills them. Sender fields appear as wizard inputs; signer
+  // fields appear as a read-only "Signer will fill" panel so the user can see the
+  // full picture but doesn't accidentally fill them.
+  const senderFields = useMemo(() => mergedFields.filter(isSenderField), [mergedFields]);
+  const signerFields = useMemo(() => mergedFields.filter(f => !isSenderField(f)), [mergedFields]);
 
   const fetchTemplates = useCallback(async (force = false) => {
     setLoading(true);
@@ -169,7 +183,10 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const canProceed = (s: Step): boolean => {
     switch (s) {
       case 'template': return selectedTemplates.length > 0;
-      case 'fields': return mergedFields.filter(f => f.required).every(f => (fieldValues[f.name] ?? '').trim());
+      // Only sender-filled required fields gate the wizard. Required signer fields
+      // are the signer's problem, not ours. Required PREFILL fields left empty would
+      // cause Adobe to park the agreement awaiting prefill, so we block here.
+      case 'fields': return senderFields.filter(f => f.required).every(f => (fieldValues[f.name] ?? '').trim());
       case 'terms': return true;
       case 'recipients': return contractName.trim() !== '' && signers.some(s => s.email.trim());
       case 'review': return true;
@@ -244,8 +261,11 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const handleSend = async () => {
     setSending(true);
     try {
-      const mergeFields = mergedFields.length > 0
-        ? mergedFields
+      // Only send merge values for sender-assigned fields. Sending a value for a
+      // signer-assigned field would overwrite what the signer is expected to enter
+      // and confuse Adobe's routing.
+      const mergeFields = senderFields.length > 0
+        ? senderFields
             .filter(f => (fieldValues[f.name] ?? '').trim())
             .map(f => ({ fieldName: f.name, defaultValue: fieldValues[f.name] }))
         : undefined;
@@ -485,13 +505,18 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
 
             {fieldsLoading ? (
               <div className="text-[12px] text-neutral-500 py-4">Loading fields from Adobe Sign...</div>
-            ) : mergedFields.length === 0 ? (
+            ) : senderFields.length === 0 && signerFields.length === 0 ? (
               <div className="text-[12px] text-neutral-500 py-4">
-                No sender-fillable merge fields across the selected templates. Signers will fill any fields directly when signing.
+                No merge fields on the selected templates. Signers will fill any fields directly when signing.
               </div>
             ) : (
               <div className="space-y-3">
-                {mergedFields.map((f) => {
+                {senderFields.length === 0 && (
+                  <div className="text-[12px] text-neutral-500 py-2">
+                    Nothing for you to fill — every field on this template is assigned to the signer.
+                  </div>
+                )}
+                {senderFields.map((f) => {
                   const inputType = inputTypeFor(f);
                   const value = fieldValues[f.name] ?? '';
                   const showOrigins = selectedCount > 1;
@@ -499,9 +524,6 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                     <div key={f.name}>
                       <label className={labelCls}>
                         {f.displayLabel || f.name} {f.required && <span className="text-red-400">*</span>}
-                        {f.assignee && f.assignee !== 'SENDER' && (
-                          <span className="ml-2 text-neutral-600 normal-case">(assigned: {f.assignee})</span>
-                        )}
                       </label>
                       {inputType === 'select' ? (
                         <select
@@ -576,6 +598,26 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                     </div>
                   );
                 })}
+
+                {signerFields.length > 0 && (
+                  <div className="mt-6 rounded-lg border border-[#3a424d] bg-[#1e2228] p-3">
+                    <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">
+                      Signer will fill ({signerFields.length})
+                    </div>
+                    <ul className="space-y-1">
+                      {signerFields.map(f => (
+                        <li key={f.name} className="text-[11px] text-neutral-400 flex items-baseline gap-2">
+                          <span className="text-neutral-300">{f.displayLabel || f.name}</span>
+                          {f.required && <span className="text-red-400">*</span>}
+                          <span className="text-[9px] text-neutral-600 ml-auto">{f.assignee}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="text-[10px] text-neutral-600 mt-2">
+                      These fields appear in the agreement for the signer to fill when they open it in Adobe Sign.
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -750,16 +792,25 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                 <span className="text-[12px] text-neutral-200">{contractName}</span>
               </div>
 
-              {mergedFields.length > 0 && (
+              {senderFields.length > 0 && (
                 <div>
-                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Merge Fields</span>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Pre-filled by NOVA</span>
                   <div className="space-y-1">
-                    {mergedFields.map((f) => (
+                    {senderFields.map((f) => (
                       <div key={f.name} className="flex items-baseline gap-2 text-[11px]">
                         <span className="text-neutral-500 min-w-[120px]">{f.displayLabel || f.name}:</span>
                         <span className="text-neutral-200">{fieldValues[f.name] || '—'}</span>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {signerFields.length > 0 && (
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Signer will fill ({signerFields.length})</span>
+                  <div className="text-[11px] text-neutral-400">
+                    {signerFields.map(f => f.displayLabel || f.name).join(', ')}
                   </div>
                 </div>
               )}
