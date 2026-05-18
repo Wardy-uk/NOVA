@@ -47,6 +47,8 @@ export interface FlaggedTicket {
   last_agent_comment_at: string | null;
   conversation_json: string | null;
   dismiss_reason: string | null;
+  current_tier: string | null;
+  project_key: string | null;
 }
 
 interface ScoreDistribution {
@@ -141,6 +143,9 @@ function FlaggedRow({ ticket, selected, focused }: { ticket: FlaggedTicket; sele
         <span className="text-[11px] font-mono font-semibold text-[#5ec1ca]">{ticket.ticket_key}</span>
         {ticket.priority && (
           <span className={`inline-block px-1.5 py-0.5 text-[9px] font-semibold rounded border ${priStyle}`}>{normPri}</span>
+        )}
+        {ticket.current_tier && (
+          <span className="inline-block px-1.5 py-0.5 text-[9px] font-semibold rounded border bg-purple-500/15 text-purple-400 border-purple-500/30">{ticket.current_tier}</span>
         )}
         {ticket.ticket_status && <StatusPill status={ticket.ticket_status} />}
         {sla && <span className={`text-[9px] font-semibold ${sla.color}`}>{sla.text}</span>}
@@ -393,6 +398,23 @@ function FlaggedDetail({ ticket, actions, onRefresh }: { ticket: FlaggedTicket; 
 export function FlaggedQueueView({ tickets, onRefresh }: { tickets: FlaggedTicket[]; onRefresh: () => void }) {
   const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [stats, setStats] = useState<FlaggedStats | null>(null);
+  const [excludedTiers, setExcludedTiers] = useState<Set<string>>(new Set());
+  const [projectFilter, setProjectFilter] = useState<string>('all');
+
+  const availableTiers = useMemo(() => {
+    const tiers = new Set<string>();
+    for (const t of tickets) if (t.current_tier) tiers.add(t.current_tier);
+    return Array.from(tiers).sort();
+  }, [tickets]);
+
+  const availableProjects = useMemo(() => {
+    const projects = new Set<string>();
+    for (const t of tickets) {
+      const pk = t.project_key || t.ticket_key.split('-')[0];
+      if (pk) projects.add(pk);
+    }
+    return Array.from(projects).sort();
+  }, [tickets]);
 
   const fetchStats = useCallback(async () => {
     const [summaryRes, distRes] = await Promise.all([
@@ -416,9 +438,12 @@ export function FlaggedQueueView({ tickets, onRefresh }: { tickets: FlaggedTicke
   }, [onRefresh, fetchStats]);
 
   const filtered = useMemo(() => {
-    if (statusFilter === 'all') return tickets;
-    return tickets.filter(t => t.status === statusFilter);
-  }, [tickets, statusFilter]);
+    let list = tickets;
+    if (statusFilter !== 'all') list = list.filter(t => t.status === statusFilter);
+    if (excludedTiers.size > 0) list = list.filter(t => !t.current_tier || !excludedTiers.has(t.current_tier));
+    if (projectFilter !== 'all') list = list.filter(t => (t.project_key || t.ticket_key.split('-')[0]) === projectFilter);
+    return list;
+  }, [tickets, statusFilter, excludedTiers, projectFilter]);
 
   const pendingCount = useMemo(() => tickets.filter(t => t.status === 'pending').length, [tickets]);
   const reviewedCount = useMemo(() => tickets.filter(t => t.status === 'reviewed').length, [tickets]);
@@ -455,6 +480,45 @@ export function FlaggedQueueView({ tickets, onRefresh }: { tickets: FlaggedTicke
     { key: 'dismiss', label: 'Dismiss', variant: 'danger', onExecute: (keys) => handleBulkAction('dismiss', keys) },
   ] : [];
 
+  const toggleTierExclusion = useCallback((tier: string) => {
+    setExcludedTiers(prev => {
+      const next = new Set(prev);
+      if (next.has(tier)) next.delete(tier); else next.add(tier);
+      return next;
+    });
+  }, []);
+
+  const tierProjectToolbar = useMemo(() => (
+    <div className="flex items-center gap-2">
+      {availableProjects.length > 1 && (
+        <select
+          value={projectFilter}
+          onChange={e => setProjectFilter(e.target.value)}
+          className="px-2 py-1 text-[10px] rounded-lg bg-[#1a1e24] border border-[#2f353d] text-neutral-300"
+        >
+          <option value="all">All projects</option>
+          {availableProjects.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+      )}
+      {availableTiers.length > 0 && (
+        <div className="flex items-center gap-1">
+          <span className="text-[9px] text-neutral-500 mr-0.5">Exclude:</span>
+          {availableTiers.map(tier => (
+            <button
+              key={tier}
+              onClick={() => toggleTierExclusion(tier)}
+              className={`px-1.5 py-0.5 text-[9px] rounded border transition-colors ${
+                excludedTiers.has(tier)
+                  ? 'bg-red-900/40 border-red-700/50 text-red-400 line-through'
+                  : 'bg-[#1a1e24] border-[#2f353d] text-neutral-400 hover:border-neutral-500'
+              }`}
+            >{tier}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  ), [availableProjects, availableTiers, projectFilter, excludedTiers, toggleTierExclusion]);
+
   const config: UnifiedQueueConfig<FlaggedTicket> = useMemo(() => ({
     title: 'Flagged for Review',
     icon: <span>⚠️</span>,
@@ -474,6 +538,7 @@ export function FlaggedQueueView({ tickets, onRefresh }: { tickets: FlaggedTicke
     filters: filterPills,
     activeFilter: statusFilter,
     onFilterChange: setStatusFilter,
+    extraToolbar: tierProjectToolbar,
     searchPlaceholder: 'Search by ticket, assignee, or summary…',
     searchFn: (t, q) =>
       t.ticket_key.toLowerCase().includes(q) ||
@@ -515,7 +580,7 @@ export function FlaggedQueueView({ tickets, onRefresh }: { tickets: FlaggedTicke
       }
       return false;
     },
-  }), [statusFilter, tickets, pendingCount, reviewedCount, handleRefresh, stats]);
+  }), [statusFilter, tickets, pendingCount, reviewedCount, handleRefresh, stats, tierProjectToolbar]);
 
   return <UnifiedQueue config={config} items={filtered} loading={false} />;
 }

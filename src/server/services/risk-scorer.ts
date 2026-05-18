@@ -31,6 +31,8 @@ export interface FlaggedTicket {
   last_agent_comment_at: string | null;
   conversation_json: string | null;
   dismiss_reason: string | null;
+  current_tier: string | null;
+  project_key: string | null;
 }
 
 interface TicketRiskInput {
@@ -652,6 +654,7 @@ export class RiskScorer {
     const params = status ? [status] : [];
     const rows = await query<Record<string, unknown>>(
       `SELECT f.*, j.status_name AS ticket_status, j.sla_breach_time, j.sla_breached,
+              j.current_tier, j.project_key,
               j.summary AS jira_summary, j.description_text,
               cc.body_text AS last_customer_comment, cc.jira_created AS last_customer_comment_at,
               ac.body_text AS last_agent_comment, ac.jira_created AS last_agent_comment_at,
@@ -756,6 +759,8 @@ export class RiskScorer {
       last_agent_comment_at: (row.last_agent_comment_at as string) ?? null,
       conversation_json: (row.conversation_json as string) ?? null,
       dismiss_reason: (row.dismiss_reason as string) ?? null,
+      current_tier: (row.current_tier as string) ?? null,
+      project_key: (row.project_key as string) ?? null,
     };
   }
 }
