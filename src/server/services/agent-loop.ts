@@ -1074,6 +1074,10 @@ export class AgentLoop {
 
     const project = this.assignmentEngine.resolveProjectFromTicketKey(decision.ticketKey);
     const pool = this.determinePool(decision, project, ticket);
+    if (!pool) {
+      console.log(`[agent] Skipping assignment for ${decision.ticketKey} — Development tier`);
+      return;
+    }
 
     try {
       const assignment = await this.assignmentEngine.assignWithFallback(
@@ -1225,7 +1229,7 @@ export class AgentLoop {
     decision: import('./agent-types.js').AgentDecision,
     project: string,
     ticket?: { current_tier?: string | null; labels?: string | null } | null,
-  ): Pool {
+  ): Pool | null {
     if (project === 'NTPJ') return 'tpj';
 
     // int_setup label → TPJ (n8n parity)
@@ -1234,6 +1238,7 @@ export class AgentLoop {
     // Tier-based routing takes priority (matches n8n's customfield_12981)
     if (ticket?.current_tier) {
       const tier = ticket.current_tier.trim();
+      if (tier === 'Development') return null;
       if (tier === 'Customer Care' || tier === 'T1') return 'cc';
       if (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier)) return 't2';
     }
@@ -1312,6 +1317,7 @@ export class AgentLoop {
       for (const ticket of unassigned) {
         const project = this.assignmentEngine.resolveProjectFromTicketKey(ticket.issue_key);
         const pool = this.determinePoolFromTicket(ticket, project);
+        if (!pool) continue;
 
         // Per-pool max-per-run cap
         const poolCount = assignedPerPool[pool] || 0;
@@ -1356,7 +1362,7 @@ export class AgentLoop {
   private determinePoolFromTicket(
     ticket: { issue_key: string; current_tier?: string | null; labels?: string | null },
     project: string,
-  ): Pool {
+  ): Pool | null {
     if (project === 'NTPJ') return 'tpj';
 
     // int_setup label → TPJ pool (matches n8n routing)
@@ -1364,10 +1370,11 @@ export class AgentLoop {
     if (labels.includes('int_setup')) return 'tpj';
 
     const tier = (ticket.current_tier || '').trim();
+    if (tier === 'Development') return null;
     if (tier === 'Customer Care' || tier === 'T1') return 'cc';
     if (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier)) return 't2';
 
-    if (tier && tier !== '' && tier !== 'Development') {
+    if (tier && tier !== '') {
       console.warn(`[agent] Unknown tier "${tier}" for ${ticket.issue_key}, defaulting to CC`);
     }
     return 'cc';
@@ -1876,21 +1883,27 @@ export class AgentLoop {
     const reporterName = (decision.inputs.reporter as string) ?? 'there';
     const classification = decision.output.classification as { category?: string; ticket_type?: string } | undefined;
 
-    // Step 1: Round-robin to Customer Care (resolve assignee before generating messages)
+    // Step 1: Round-robin assign (resolve assignee before generating messages)
     // Assignment comment is NOT posted here — it's merged into the handoff summary (step 3) to reduce comment spam.
     let assigneeName: string | null = null;
     if (this.assignmentEngine) {
       try {
-        const assignment = await this.assignmentEngine.assignWithFallback(decision.ticketKey, 'cc', 'NT');
-        if (assignment) {
-          assigneeName = assignment.agent.display_name;
-          console.log(`[agent] Handoff assignment: ${decision.ticketKey} → ${assigneeName} (CC)`);
-        } else if (this.assignmentEngine.isWorkingTime()) {
-          await this.alertService.createAlert({
-            alertType: 'error', severity: 'warning',
-            title: `Handoff assignment failed: ${decision.ticketKey}`,
-            detail: `No agents available in any pool during handoff. Ticket is unassigned — manual assignment required.`,
-          });
+        const project = this.assignmentEngine.resolveProjectFromTicketKey(decision.ticketKey);
+        const handoffPool = this.determinePool(decision, project);
+        if (!handoffPool) {
+          console.log(`[agent] Handoff: skipping assignment for ${decision.ticketKey} — Development tier`);
+        } else {
+          const assignment = await this.assignmentEngine.assignWithFallback(decision.ticketKey, handoffPool, project);
+          if (assignment) {
+            assigneeName = assignment.agent.display_name;
+            console.log(`[agent] Handoff assignment: ${decision.ticketKey} → ${assigneeName} (${handoffPool})`);
+          } else if (this.assignmentEngine.isWorkingTime()) {
+            await this.alertService.createAlert({
+              alertType: 'error', severity: 'warning',
+              title: `Handoff assignment failed: ${decision.ticketKey}`,
+              detail: `No agents available in any pool during handoff. Ticket is unassigned — manual assignment required.`,
+            });
+          }
         }
       } catch (err) {
         console.warn(`[agent] Handoff assignment failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
@@ -2597,11 +2610,21 @@ export class AgentLoop {
           const isUnassignedOrNova = !ticket?.assignee_account_id || ticket.assignee_account_id === novaAccountId;
           if (isUnassignedOrNova) {
             const project = this.assignmentEngine.resolveProjectFromTicketKey(ticketKey);
-            const pool = 'cc' as import('./assignment-engine.js').Pool;
-            const assignment = await this.assignmentEngine.assignWithFallback(ticketKey, pool, project);
-            if (assignment) {
-              await this.assignmentEngine.postAssignmentComment(ticketKey, assignment);
-              console.log(`[agent] Post-approval assignment: ${ticketKey} → ${assignment.agent.display_name}`);
+            const cachedTicket = await queryOne<{ current_tier: string | null; labels: string | null }>(
+              `SELECT current_tier, labels FROM jira_issue_cache WHERE issue_key = ?`, [ticketKey],
+            );
+            const tier = (cachedTicket?.current_tier || '').trim();
+            if (tier === 'Development') {
+              console.log(`[agent] Post-approval: skipping assignment for ${ticketKey} — Development tier`);
+            } else {
+              const poolFromTier = this.determinePoolFromTicket(
+                { issue_key: ticketKey, current_tier: cachedTicket?.current_tier, labels: cachedTicket?.labels }, project,
+              ) ?? 'cc';
+              const assignment = await this.assignmentEngine.assignWithFallback(ticketKey, poolFromTier, project);
+              if (assignment) {
+                await this.assignmentEngine.postAssignmentComment(ticketKey, assignment);
+                console.log(`[agent] Post-approval assignment: ${ticketKey} → ${assignment.agent.display_name}`);
+              }
             }
           }
         } catch (err) {

@@ -240,10 +240,9 @@ export class AssignmentEngine {
       for (const p of config.allowedPools) {
         if (!fallbackChain.includes(p)) fallbackChain.push(p);
       }
-    } else {
-      if (pool !== 'cc') fallbackChain.push('cc');
-      if (pool !== 't2') fallbackChain.push('t2');
     }
+    // No implicit cross-tier fallback — tickets stay in their assigned pool.
+    // T2 must not fall to CC, CC must not fall to T2.
 
     for (const tryPool of fallbackChain) {
       const result = await this.assignToJira(ticketKey, tryPool, preferredSkills, project);
