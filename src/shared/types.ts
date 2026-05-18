@@ -116,31 +116,6 @@ export const TaskUpdateSchema = z.object({
 export type TaskUpdate = z.infer<typeof TaskUpdateSchema>;
 
 // ---------- Adobe Sign ----------
-export interface ContractTemplateFieldDef {
-  key: string;
-  label: string;
-  type: 'text' | 'number' | 'date' | 'email' | 'select' | 'textarea';
-  required?: boolean;
-  defaultValue?: string;
-  options?: string[];
-}
-
-export interface ContractTemplate {
-  id: number;
-  name: string;
-  description: string | null;
-  category: string | null;
-  fields_schema: string | null;
-  adobe_library_doc_id: string | null;
-  file_name: string | null;
-  file_mime: string | null;
-  has_file?: boolean;
-  status: string;
-  created_by: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface AdobeSignLibraryDocument {
   id: string;
   name: string;

@@ -2381,72 +2381,6 @@ export class ContractsQueries {
   }
 }
 
-// ─── Contract Templates ─────────────────────────────────────────────────────
-
-export interface ContractTemplateFieldDef {
-  key: string; label: string;
-  type: 'text' | 'number' | 'date' | 'email' | 'select' | 'textarea';
-  required?: boolean; defaultValue?: string; options?: string[];
-}
-
-export interface ContractTemplate {
-  id: number; name: string; description: string | null; category: string | null;
-  fields_schema: string | null; adobe_library_doc_id: string | null;
-  file_data: Buffer | null; file_name: string | null; file_mime: string | null;
-  status: string; created_by: number | null; created_at: string; updated_at: string;
-}
-
-export class ContractTemplateQueries {
-  async getAll(filters?: { status?: string; category?: string; search?: string }): Promise<Omit<ContractTemplate, 'file_data'>[]> {
-    let sql = `SELECT id, name, description, category, fields_schema, adobe_library_doc_id, file_name, file_mime, status, created_by, created_at, updated_at FROM contract_templates WHERE 1=1`;
-    const params: (string | number)[] = [];
-    if (filters?.status) { sql += ` AND status = ?`; params.push(filters.status); }
-    if (filters?.category) { sql += ` AND category = ?`; params.push(filters.category); }
-    if (filters?.search?.trim()) {
-      sql += ` AND (name LIKE ? OR description LIKE ?)`;
-      const like = `%${filters.search.trim()}%`;
-      params.push(like, like);
-    }
-    sql += ` ORDER BY name ASC`;
-    return query<Omit<ContractTemplate, 'file_data'>>(sql, params);
-  }
-
-  async getById(id: number): Promise<ContractTemplate | null> {
-    return (await queryOne<ContractTemplate>(`SELECT * FROM contract_templates WHERE id = ?`, [id])) ?? null;
-  }
-
-  async create(t: { name: string; description?: string; category?: string; fields_schema?: string; adobe_library_doc_id?: string; file_data?: Buffer; file_name?: string; file_mime?: string; created_by?: number }): Promise<number> {
-    return executeAndGetId(
-      `INSERT INTO contract_templates (name, description, category, fields_schema, adobe_library_doc_id, file_data, file_name, file_mime, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [t.name, t.description ?? null, t.category ?? null, t.fields_schema ?? null,
-       t.adobe_library_doc_id ?? null, t.file_data ?? null, t.file_name ?? null,
-       t.file_mime ?? null, t.created_by ?? null]
-    );
-  }
-
-  async update(id: number, t: Partial<Omit<ContractTemplate, 'id' | 'created_at' | 'updated_at'>>): Promise<boolean> {
-    const existing = await this.getById(id);
-    if (!existing) return false;
-    await execute(
-      `UPDATE contract_templates SET name=?, description=?, category=?, fields_schema=?, adobe_library_doc_id=?, file_data=?, file_name=?, file_mime=?, status=?, updated_at=GETUTCDATE() WHERE id=?`,
-      [t.name ?? existing.name, t.description ?? existing.description,
-       t.category ?? existing.category, t.fields_schema ?? existing.fields_schema,
-       t.adobe_library_doc_id ?? existing.adobe_library_doc_id,
-       t.file_data ?? existing.file_data, t.file_name ?? existing.file_name,
-       t.file_mime ?? existing.file_mime, t.status ?? existing.status, id]
-    );
-    return true;
-  }
-
-  async delete(id: number): Promise<boolean> {
-    const existing = await this.getById(id);
-    if (!existing) return false;
-    await execute(`DELETE FROM contract_templates WHERE id = ?`, [id]);
-    return true;
-  }
-}
-
 // ─── Contract Terms (pre-approved text blocks for Adobe agreements) ────────
 
 export interface ContractTerm {
@@ -2500,7 +2434,7 @@ export class ContractTermsQueries {
 // ─── Adobe Sign Agreements ──────────────────────────────────────────────────
 
 export interface AdobeSignAgreement {
-  id: number; agreement_id: string; contract_id: number | null; template_id: number | null;
+  id: number; agreement_id: string; contract_id: number | null;
   name: string; status: string; sender_email: string | null; signer_emails: string | null;
   filled_fields: string | null; created_via_nova: number;
   adobe_created_date: string | null; adobe_expiration_date: string | null;
@@ -2509,11 +2443,10 @@ export interface AdobeSignAgreement {
 }
 
 export class AdobeSignAgreementQueries {
-  async getAll(filters?: { contract_id?: number; template_id?: number; status?: string; search?: string }): Promise<AdobeSignAgreement[]> {
+  async getAll(filters?: { contract_id?: number; status?: string; search?: string }): Promise<AdobeSignAgreement[]> {
     let sql = `SELECT * FROM adobe_sign_agreements WHERE 1=1`;
     const params: (string | number)[] = [];
     if (filters?.contract_id) { sql += ` AND contract_id = ?`; params.push(filters.contract_id); }
-    if (filters?.template_id) { sql += ` AND template_id = ?`; params.push(filters.template_id); }
     if (filters?.status) { sql += ` AND status = ?`; params.push(filters.status); }
     if (filters?.search?.trim()) {
       sql += ` AND (name LIKE ? OR sender_email LIKE ? OR signer_emails LIKE ?)`;
@@ -2535,8 +2468,8 @@ export class AdobeSignAgreementQueries {
   async upsert(a: Omit<AdobeSignAgreement, 'id' | 'created_at' | 'updated_at'>): Promise<void> {
     await execute(`
       MERGE INTO adobe_sign_agreements WITH (HOLDLOCK) AS target
-      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
-        AS source(agreement_id, contract_id, template_id, name, status, sender_email, signer_emails,
+      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
+        AS source(agreement_id, contract_id, name, status, sender_email, signer_emails,
                   filled_fields, created_via_nova, adobe_created_date, adobe_expiration_date,
                   signed_document_url, raw_data, synced_at)
       ON target.agreement_id = source.agreement_id
@@ -2544,12 +2477,12 @@ export class AdobeSignAgreementQueries {
         status=source.status, sender_email=source.sender_email, signer_emails=source.signer_emails,
         adobe_expiration_date=source.adobe_expiration_date, signed_document_url=source.signed_document_url,
         raw_data=source.raw_data, synced_at=source.synced_at, updated_at=GETUTCDATE()
-      WHEN NOT MATCHED THEN INSERT (agreement_id, contract_id, template_id, name, status, sender_email, signer_emails,
+      WHEN NOT MATCHED THEN INSERT (agreement_id, contract_id, name, status, sender_email, signer_emails,
         filled_fields, created_via_nova, adobe_created_date, adobe_expiration_date, signed_document_url, raw_data, synced_at)
-        VALUES (source.agreement_id, source.contract_id, source.template_id, source.name, source.status,
+        VALUES (source.agreement_id, source.contract_id, source.name, source.status,
           source.sender_email, source.signer_emails, source.filled_fields, source.created_via_nova,
           source.adobe_created_date, source.adobe_expiration_date, source.signed_document_url, source.raw_data, source.synced_at);
-    `, [a.agreement_id, a.contract_id ?? null, a.template_id ?? null, a.name,
+    `, [a.agreement_id, a.contract_id ?? null, a.name,
         a.status, a.sender_email ?? null, a.signer_emails ?? null,
         a.filled_fields ?? null, a.created_via_nova ? 1 : 0,
         a.adobe_created_date ?? null, a.adobe_expiration_date ?? null,

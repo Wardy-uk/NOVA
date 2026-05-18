@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { AdobeSignApiError, type AdobeSignClient } from '../services/adobe-sign-client.js';
-import type { AdobeSignAgreementQueries, ContractTemplateQueries } from '../db/queries.js';
+import type { AdobeSignAgreementQueries } from '../db/queries.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 
 // Signer-only field types — these are filled at signing time, never by the sender.
@@ -45,7 +45,6 @@ function adobeError(err: unknown): { status: number; error: string; retryAfter?:
 export function createAdobeSignRoutes(
   getClient: () => AdobeSignClient | null,
   agreementQueries: AdobeSignAgreementQueries,
-  templateQueries: ContractTemplateQueries,
   settingsQueries: FileSettingsQueries,
 ): Router {
   const router = Router();
@@ -137,7 +136,6 @@ export function createAdobeSignRoutes(
         await agreementQueries.upsert({
           agreement_id: a.id,
           contract_id: null,
-          template_id: null,
           name: a.name,
           status: a.status,
           sender_email: a.senderEmail ?? null,
@@ -235,7 +233,6 @@ export function createAdobeSignRoutes(
       await agreementQueries.upsert({
         agreement_id: result.id,
         contract_id: contract_id ?? null,
-        template_id: null,
         name,
         status: 'OUT_FOR_SIGNATURE',
         sender_email: null,
@@ -323,85 +320,6 @@ export function createAdobeSignRoutes(
       const e = adobeError(err);
       res.status(e.status).json({ ok: false, error: e.error, retryAfter: e.retryAfter });
     }
-  });
-
-  // ── Local Contract Templates ──
-
-  router.get('/templates', async (req, res) => {
-    const templates = await templateQueries.getAll({
-      status: req.query.status as string | undefined,
-      category: req.query.category as string | undefined,
-      search: req.query.search as string | undefined,
-    });
-    res.json({ ok: true, data: templates });
-  });
-
-  router.get('/templates/:id', async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    const template = await templateQueries.getById(id);
-    if (!template) { res.status(404).json({ ok: false, error: 'Template not found' }); return; }
-    // Don't send file_data in JSON — use separate download endpoint
-    const { file_data, ...rest } = template;
-    res.json({ ok: true, data: { ...rest, has_file: !!file_data } });
-  });
-
-  router.post('/templates', async (req, res) => {
-    const { name, description, category, fields_schema, adobe_library_doc_id, file_base64, file_name, file_mime } = req.body;
-    if (!name?.trim()) { res.status(400).json({ ok: false, error: 'name is required' }); return; }
-
-    const userId = (req as any).user?.id;
-    const fileData = file_base64 ? Buffer.from(file_base64, 'base64') : undefined;
-
-    const id = await templateQueries.create({
-      name,
-      description,
-      category,
-      fields_schema: fields_schema ? JSON.stringify(fields_schema) : undefined,
-      adobe_library_doc_id,
-      file_data: fileData,
-      file_name,
-      file_mime,
-      created_by: userId,
-    });
-    res.json({ ok: true, data: { id } });
-  });
-
-  router.put('/templates/:id', async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-
-    const { name, description, category, fields_schema, adobe_library_doc_id, file_base64, file_name, file_mime, status } = req.body;
-    const fileData = file_base64 ? Buffer.from(file_base64, 'base64') : undefined;
-
-    const updated = await templateQueries.update(id, {
-      name, description, category,
-      fields_schema: fields_schema ? JSON.stringify(fields_schema) : undefined,
-      adobe_library_doc_id,
-      file_data: fileData,
-      file_name, file_mime, status,
-    });
-    if (!updated) { res.status(404).json({ ok: false, error: 'Template not found' }); return; }
-    res.json({ ok: true });
-  });
-
-  router.delete('/templates/:id', async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    const deleted = await templateQueries.delete(id);
-    if (!deleted) { res.status(404).json({ ok: false, error: 'Template not found' }); return; }
-    res.json({ ok: true });
-  });
-
-  // GET /api/adobe-sign/templates/:id/download — download template file
-  router.get('/templates/:id/download', async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
-    const template = await templateQueries.getById(id);
-    if (!template?.file_data) { res.status(404).json({ ok: false, error: 'No file attached' }); return; }
-    res.setHeader('Content-Type', template.file_mime ?? 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${template.file_name ?? 'template'}"`);
-    res.send(Buffer.from(template.file_data));
   });
 
   return router;

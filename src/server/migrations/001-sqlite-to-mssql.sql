@@ -840,25 +840,6 @@ CREATE TABLE contracts (
 );
 GO
 
--- contract_templates
-IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'contract_templates') AND type = 'U')
-CREATE TABLE contract_templates (
-    id                  INT             IDENTITY(1,1) PRIMARY KEY,
-    name                NVARCHAR(200)   NOT NULL,
-    description         NVARCHAR(MAX)   NULL,
-    category            NVARCHAR(100)   NULL,
-    fields_schema       NVARCHAR(MAX)   NULL,
-    adobe_library_doc_id NVARCHAR(200)  NULL,
-    file_data           VARBINARY(MAX)  NULL,
-    file_name           NVARCHAR(200)   NULL,
-    file_mime           NVARCHAR(100)   NULL,
-    status              NVARCHAR(50)    DEFAULT 'active',
-    created_by          INT             NULL,
-    created_at          DATETIME2       DEFAULT GETUTCDATE(),
-    updated_at          DATETIME2       DEFAULT GETUTCDATE()
-);
-GO
-
 -- adobe_sign_agreements
 IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'adobe_sign_agreements') AND type = 'U')
 CREATE TABLE adobe_sign_agreements (
