@@ -579,7 +579,7 @@ export class AgentLoop {
       for (const event of nonNtpjEvents) {
         if (!event.ticketKey.startsWith('YO-')) continue;
         try {
-          await this.handleYomdel(event.ticketKey, event.summary);
+          await this.handleYomdel(event.ticketKey, event.summary, event.status);
         } catch (err) {
           console.error(`[agent] YO fast-path failed for ${event.ticketKey}:`, err instanceof Error ? err.message : err);
         }
@@ -1173,22 +1173,43 @@ export class AgentLoop {
   private readonly YOMDEL_LEAD_RE = /^(?:RESEND\s*\/\/\s*)?Yomdel Live Lead\s*[–\-]/i;
   private readonly YOMDEL_REPLY_RE = /^re:\s/i;
 
-  private async handleYomdel(ticketKey: string, summary: string): Promise<void> {
+  private async handleYomdel(ticketKey: string, summary: string, status?: string): Promise<void> {
+    const YO_WIP_TRANSITION = '11';
+    const YO_DONE_TRANSITION = '81';
+
     const isLead = this.YOMDEL_LEAD_RE.test(summary);
     const isReply = this.YOMDEL_REPLY_RE.test(summary);
 
     if (isLead && !isReply) {
+      // Resolve the current status — use provided value or fetch from Jira
+      let currentStatus = (status ?? '').toLowerCase();
+      if (!currentStatus) {
+        try {
+          const issue = await this.jiraClient.getIssue(ticketKey, ['status']);
+          currentStatus = (issue?.fields?.status?.name ?? '').toLowerCase();
+        } catch (err) {
+          console.warn(`[agent] YO could not fetch status for ${ticketKey}, assuming open:`, err instanceof Error ? err.message : err);
+          currentStatus = 'open';
+        }
+      }
+
       await prepareTicketForClose(this.jiraClient, this.settings, {
         ticketKey,
         requestTypeOverride: 'Emailed request',
       });
-      const RESOLVE_TRANSITION_ID = '17';
       const { fields, comment } = buildResolveFields({
         tldr: 'Yomdel live lead — auto-closed by NOVA',
         resolution: 'No Fault Found',
         comment: 'Yomdel live lead — auto-closed by NOVA, no action required.',
       });
-      await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, {
+
+      // YO workflow: Open → WIP (11) → Done (81). No direct Open → Resolved.
+      const isAlreadyWip = currentStatus.includes('progress') || currentStatus === 'work in progress';
+      if (!isAlreadyWip) {
+        await this.jiraClient.transitionIssue(ticketKey, YO_WIP_TRANSITION, {});
+        console.log(`[agent] YO transitioned ${ticketKey} to WIP (${YO_WIP_TRANSITION})`);
+      }
+      await this.jiraClient.transitionIssue(ticketKey, YO_DONE_TRANSITION, {
         fields,
         comment: { ...comment, internal: true },
       });
@@ -1551,7 +1572,8 @@ export class AgentLoop {
     if (project === 'YO') {
       try {
         const summary = (decision.inputs.summary as string) ?? '';
-        await this.handleYomdel(decision.ticketKey, summary);
+        const yoStatus = (decision.inputs.status as string) ?? undefined;
+        await this.handleYomdel(decision.ticketKey, summary, yoStatus);
         await this.observer.logOutcome(decisionId, {
           success: true, action: 'transition', ticketKey: decision.ticketKey,
           detail: `YO ticket handled via executeDecision fallback.`,
@@ -2778,7 +2800,7 @@ export class AgentLoop {
           continue;
         }
         try {
-          await this.handleYomdel(row.issue_key, row.summary ?? '');
+          await this.handleYomdel(row.issue_key, row.summary ?? '', row.status_name);
           console.log(`[backfill] YO handled: ${row.issue_key}`);
         } catch (err) {
           console.warn(`[backfill] YO handler failed for ${row.issue_key}:`, err instanceof Error ? err.message : err);
