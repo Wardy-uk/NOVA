@@ -407,7 +407,7 @@ export class AssignmentEngine {
              IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
-      WHERE Department IN ('NT', 'NTPJ')
+      WHERE Department IN ('NT', 'TPJ')
       ORDER BY Team, AgentName
     `);
 
@@ -810,7 +810,7 @@ export class AssignmentEngine {
     const name = [row.AgentName?.trim(), row.AgentSurname?.trim()].filter(Boolean).join(' ');
     return {
       id: row.AgentId,
-      jira_account_id: row.AccountId ?? '',
+      jira_account_id: decodeURIComponent(row.AccountId ?? ''),
       display_name: name || `Agent ${row.AgentId}`,
       email: row.AgentKey?.trim() || null,
       pool: normalizePool(row.Team),
