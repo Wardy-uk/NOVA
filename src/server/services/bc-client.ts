@@ -26,8 +26,13 @@ export interface BcRawCustomer {
   email: string;
   phoneNumber: string;
   addressLine1: string;
+  addressLine2: string;
   city: string;
+  state: string;
   country: string;
+  postalCode: string;
+  taxRegistrationNumber: string;
+  contact: string;
   currencyCode: string;
   balance: number;
   blocked: string;
@@ -129,6 +134,9 @@ export class BusinessCentralClient {
 
   async getCustomers(): Promise<BcRawCustomer[]> {
     const data = await this.request<{ value: BcRawCustomer[] }>('/customers', {
+      // Explicit $select keeps the payload small AND prevents BC from quietly
+      // dropping fields when their default projection changes between BC versions.
+      '$select': 'id,number,displayName,email,phoneNumber,addressLine1,addressLine2,city,state,country,postalCode,taxRegistrationNumber,contact,currencyCode,balance,blocked',
       '$top': '500',
     });
     return data.value ?? [];

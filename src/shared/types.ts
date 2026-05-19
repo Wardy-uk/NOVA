@@ -115,6 +115,24 @@ export const TaskUpdateSchema = z.object({
 });
 export type TaskUpdate = z.infer<typeof TaskUpdateSchema>;
 
+// ---------- Business Central ----------
+export interface BcCustomerLite {
+  id: number;
+  bc_id: string;
+  number: string | null;
+  display_name: string;
+  email: string | null;
+  phone_number: string | null;
+  address: string | null;             // addressLine1 from BC
+  address_line_2: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  postal_code: string | null;
+  tax_registration_number: string | null;
+  primary_contact_name: string | null;
+}
+
 // ---------- Adobe Sign ----------
 export interface AdobeSignLibraryDocument {
   id: string;

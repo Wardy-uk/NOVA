@@ -1,7 +1,15 @@
 import { Router } from 'express';
 import { AdobeSignApiError, type AdobeSignClient } from '../services/adobe-sign-client.js';
-import type { AdobeSignAgreementQueries } from '../db/queries.js';
+import type { AdobeSignAgreementQueries, AgreementFieldValueQueries, CounterQueries } from '../db/queries.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
+
+const SUBSCRIPTION_CONTRACT_COUNTER = 'subscription_contract_no';
+const SUBSCRIPTION_CONTRACT_PREFIX = 'NOVA-';
+const SUBSCRIPTION_CONTRACT_PAD = 10;
+
+function formatSubscriptionContractNo(n: number): string {
+  return SUBSCRIPTION_CONTRACT_PREFIX + n.toString().padStart(SUBSCRIPTION_CONTRACT_PAD, '0');
+}
 
 // Signer-only field types — these are filled at signing time, never by the sender.
 // Anything NOT in this set is shown as a sender-fillable input in the wizard.
@@ -45,6 +53,8 @@ function adobeError(err: unknown): { status: number; error: string; retryAfter?:
 export function createAdobeSignRoutes(
   getClient: () => AdobeSignClient | null,
   agreementQueries: AdobeSignAgreementQueries,
+  fieldValueQueries: AgreementFieldValueQueries,
+  counterQueries: CounterQueries,
   settingsQueries: FileSettingsQueries,
 ): Router {
   const router = Router();
@@ -136,6 +146,8 @@ export function createAdobeSignRoutes(
         await agreementQueries.upsert({
           agreement_id: a.id,
           contract_id: null,
+          bc_customer_id: null,
+          subscription_contract_no: null,
           name: a.name,
           status: a.status,
           sender_email: a.senderEmail ?? null,
@@ -175,7 +187,7 @@ export function createAdobeSignRoutes(
       return;
     }
 
-    const { library_document_ids, contract_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days, contract_terms_text } = req.body;
+    const { library_document_ids, contract_id, bc_customer_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days, contract_terms_text } = req.body;
     if (!Array.isArray(library_document_ids) || library_document_ids.length === 0) {
       res.status(400).json({ ok: false, error: 'library_document_ids must be a non-empty array' });
       return;
@@ -230,9 +242,17 @@ export function createAdobeSignRoutes(
         expirationDays: expiration_days,
       });
 
+      // Allocate the NOVA-NNNNNNNNNN subscription contract number now so it's stored
+      // on the agreement alongside the Adobe agreement id. Post-sign handler reads
+      // this to know what to write to BC's importedCustomerSubscriptionContracts.
+      const counterValue = await counterQueries.nextValue(SUBSCRIPTION_CONTRACT_COUNTER);
+      const subscriptionContractNo = formatSubscriptionContractNo(counterValue);
+
       await agreementQueries.upsert({
         agreement_id: result.id,
         contract_id: contract_id ?? null,
+        bc_customer_id: typeof bc_customer_id === 'string' && bc_customer_id.trim() ? bc_customer_id.trim() : null,
+        subscription_contract_no: subscriptionContractNo,
         name,
         status: 'OUT_FOR_SIGNATURE',
         sender_email: null,
@@ -246,7 +266,15 @@ export function createAdobeSignRoutes(
         synced_at: new Date().toISOString(),
       });
 
-      res.json({ ok: true, data: { agreement_id: result.id, terms_fields_populated: termsFieldsPopulated } });
+      // Capture every sender-filled merge field into agreement_field_values so the
+      // post-sign handler doesn't have to refetch from Adobe. Signer can't modify
+      // anything per current Adobe template policy, so SENDER is the only source.
+      if (allMergeFields.length > 0) {
+        await fieldValueQueries.bulkInsert(result.id, 'SENDER',
+          allMergeFields.map(m => ({ field_name: m.fieldName, field_value: m.defaultValue ?? null })));
+      }
+
+      res.json({ ok: true, data: { agreement_id: result.id, subscription_contract_no: subscriptionContractNo, terms_fields_populated: termsFieldsPopulated } });
     } catch (err) {
       console.error('[Adobe Sign] Create agreement error:', err);
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create agreement' });

@@ -2272,8 +2272,12 @@ export class WelcomePackQueries {
 
 export interface BcCustomer {
   id: number; bc_id: string; number: string | null; display_name: string;
-  email: string | null; phone_number: string | null; address: string | null;
-  city: string | null; country: string | null; currency_code: string | null;
+  email: string | null; phone_number: string | null;
+  address: string | null; address_line_2: string | null;
+  city: string | null; state: string | null; country: string | null;
+  postal_code: string | null; tax_registration_number: string | null;
+  primary_contact_name: string | null;
+  currency_code: string | null;
   balance: number | null; blocked: string | null; last_synced: string; created_at: string;
 }
 
@@ -2297,20 +2301,34 @@ export class BcCustomerQueries {
   async upsert(c: Omit<BcCustomer, 'id' | 'created_at'>): Promise<void> {
     await execute(`
       MERGE INTO bc_customers WITH (HOLDLOCK) AS target
-      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
-        AS source(bc_id, [number], display_name, email, phone_number, address, city, country, currency_code, balance, blocked)
+      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
+        AS source(bc_id, [number], display_name, email, phone_number,
+                  address, address_line_2, city, state, country, postal_code,
+                  tax_registration_number, primary_contact_name,
+                  currency_code, balance, blocked)
       ON target.bc_id = source.bc_id
       WHEN MATCHED THEN UPDATE SET
         [number]=source.[number], display_name=source.display_name, email=source.email,
-        phone_number=source.phone_number, address=source.address, city=source.city,
-        country=source.country, currency_code=source.currency_code, balance=source.balance,
+        phone_number=source.phone_number,
+        address=source.address, address_line_2=source.address_line_2,
+        city=source.city, state=source.state, country=source.country,
+        postal_code=source.postal_code, tax_registration_number=source.tax_registration_number,
+        primary_contact_name=source.primary_contact_name,
+        currency_code=source.currency_code, balance=source.balance,
         blocked=source.blocked, last_synced=GETUTCDATE()
-      WHEN NOT MATCHED THEN INSERT (bc_id, [number], display_name, email, phone_number, address, city, country, currency_code, balance, blocked, last_synced)
+      WHEN NOT MATCHED THEN INSERT (bc_id, [number], display_name, email, phone_number,
+        address, address_line_2, city, state, country, postal_code,
+        tax_registration_number, primary_contact_name,
+        currency_code, balance, blocked, last_synced)
         VALUES (source.bc_id, source.[number], source.display_name, source.email, source.phone_number,
-          source.address, source.city, source.country, source.currency_code, source.balance, source.blocked, GETUTCDATE());
+          source.address, source.address_line_2, source.city, source.state, source.country, source.postal_code,
+          source.tax_registration_number, source.primary_contact_name,
+          source.currency_code, source.balance, source.blocked, GETUTCDATE());
     `, [c.bc_id, c.number ?? null, c.display_name, c.email ?? null, c.phone_number ?? null,
-        c.address ?? null, c.city ?? null, c.country ?? null, c.currency_code ?? null,
-        c.balance ?? null, c.blocked ?? null]);
+        c.address ?? null, c.address_line_2 ?? null,
+        c.city ?? null, c.state ?? null, c.country ?? null, c.postal_code ?? null,
+        c.tax_registration_number ?? null, c.primary_contact_name ?? null,
+        c.currency_code ?? null, c.balance ?? null, c.blocked ?? null]);
   }
 
   async count(): Promise<number> {
@@ -2431,16 +2449,81 @@ export class ContractTermsQueries {
   }
 }
 
+// ─── Counters (atomic sequence numbers) ─────────────────────────────────────
+
+export class CounterQueries {
+  // Atomically increment + return the new value for a named counter.
+  // The MERGE INTO ... OUTPUT pattern is the standard MSSQL way to do a "get or
+  // create + increment" in a single round-trip without read-modify-write races.
+  // First call for a name returns 1, second returns 2, etc.
+  async nextValue(name: string): Promise<number> {
+    const row = await queryOne<{ value: number }>(
+      `MERGE INTO counters WITH (HOLDLOCK) AS target
+       USING (VALUES (?, 1)) AS source(name, value)
+       ON target.name = source.name
+       WHEN MATCHED THEN UPDATE SET value = target.value + 1
+       WHEN NOT MATCHED THEN INSERT (name, value) VALUES (source.name, source.value)
+       OUTPUT inserted.value AS value;`,
+      [name]
+    );
+    return row?.value ?? 0;
+  }
+}
+
+// ─── Agreement field values (per-field record per Adobe agreement) ──────────
+
+export interface AgreementFieldValue {
+  id: number;
+  agreement_id: string;
+  field_name: string;
+  field_value: string | null;
+  source: 'SENDER' | 'SIGNER';
+  captured_at: string;
+}
+
+export class AgreementFieldValueQueries {
+  async getByAgreementId(agreementId: string): Promise<AgreementFieldValue[]> {
+    return query<AgreementFieldValue>(
+      `SELECT * FROM agreement_field_values WHERE agreement_id = ? ORDER BY id ASC`,
+      [agreementId]
+    );
+  }
+
+  // Bulk insert — used at agreement-create time to capture every wizard-filled
+  // field in one go. Empty/null values are still inserted so we have a complete
+  // audit of what was asked vs. what was filled.
+  async bulkInsert(agreementId: string, source: 'SENDER' | 'SIGNER',
+    values: Array<{ field_name: string; field_value: string | null }>): Promise<void> {
+    if (values.length === 0) return;
+    for (const v of values) {
+      await execute(
+        `INSERT INTO agreement_field_values (agreement_id, field_name, field_value, source)
+         VALUES (?, ?, ?, ?)`,
+        [agreementId, v.field_name, v.field_value, source]
+      );
+    }
+  }
+}
+
 // ─── Adobe Sign Agreements ──────────────────────────────────────────────────
 
 export interface AdobeSignAgreement {
   id: number; agreement_id: string; contract_id: number | null;
+  bc_customer_id: string | null; subscription_contract_no: string | null;
   name: string; status: string; sender_email: string | null; signer_emails: string | null;
-  filled_fields: string | null; created_via_nova: number;
+  filled_fields: string | null;
+  signed_form_data: string | null; signed_pdf_path: string | null; signed_at: string | null;
+  created_via_nova: number;
   adobe_created_date: string | null; adobe_expiration_date: string | null;
   signed_document_url: string | null; raw_data: string | null;
   synced_at: string | null; created_at: string; updated_at: string;
 }
+
+// Subset used for upsert from the wizard / sync job. The signed_* columns are
+// never written via upsert — they're set via markSigned() after the post-sign
+// handler runs, so they aren't overwritten when the 5-min sync just refreshes status.
+export type AdobeSignAgreementUpsert = Omit<AdobeSignAgreement,
+  'id' | 'created_at' | 'updated_at' | 'signed_form_data' | 'signed_pdf_path' | 'signed_at'>;
 
 export class AdobeSignAgreementQueries {
   async getAll(filters?: { contract_id?: number; status?: string; search?: string }): Promise<AdobeSignAgreement[]> {
@@ -2465,11 +2548,13 @@ export class AdobeSignAgreementQueries {
     return (await queryOne<AdobeSignAgreement>(`SELECT * FROM adobe_sign_agreements WHERE agreement_id = ?`, [agreementId])) ?? null;
   }
 
-  async upsert(a: Omit<AdobeSignAgreement, 'id' | 'created_at' | 'updated_at'>): Promise<void> {
+  async upsert(a: AdobeSignAgreementUpsert): Promise<void> {
+    // bc_customer_id + subscription_contract_no are INSERT-only — once set at create
+    // time, the 5-min sync job (which passes null) won't be able to wipe them.
     await execute(`
       MERGE INTO adobe_sign_agreements WITH (HOLDLOCK) AS target
-      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
-        AS source(agreement_id, contract_id, name, status, sender_email, signer_emails,
+      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
+        AS source(agreement_id, contract_id, bc_customer_id, subscription_contract_no, name, status, sender_email, signer_emails,
                   filled_fields, created_via_nova, adobe_created_date, adobe_expiration_date,
                   signed_document_url, raw_data, synced_at)
       ON target.agreement_id = source.agreement_id
@@ -2477,17 +2562,32 @@ export class AdobeSignAgreementQueries {
         status=source.status, sender_email=source.sender_email, signer_emails=source.signer_emails,
         adobe_expiration_date=source.adobe_expiration_date, signed_document_url=source.signed_document_url,
         raw_data=source.raw_data, synced_at=source.synced_at, updated_at=GETUTCDATE()
-      WHEN NOT MATCHED THEN INSERT (agreement_id, contract_id, name, status, sender_email, signer_emails,
+      WHEN NOT MATCHED THEN INSERT (agreement_id, contract_id, bc_customer_id, subscription_contract_no, name, status, sender_email, signer_emails,
         filled_fields, created_via_nova, adobe_created_date, adobe_expiration_date, signed_document_url, raw_data, synced_at)
-        VALUES (source.agreement_id, source.contract_id, source.name, source.status,
+        VALUES (source.agreement_id, source.contract_id, source.bc_customer_id, source.subscription_contract_no, source.name, source.status,
           source.sender_email, source.signer_emails, source.filled_fields, source.created_via_nova,
           source.adobe_created_date, source.adobe_expiration_date, source.signed_document_url, source.raw_data, source.synced_at);
-    `, [a.agreement_id, a.contract_id ?? null, a.name,
+    `, [a.agreement_id, a.contract_id ?? null, a.bc_customer_id ?? null,
+        a.subscription_contract_no ?? null, a.name,
         a.status, a.sender_email ?? null, a.signer_emails ?? null,
         a.filled_fields ?? null, a.created_via_nova ? 1 : 0,
         a.adobe_created_date ?? null, a.adobe_expiration_date ?? null,
         a.signed_document_url ?? null, a.raw_data ?? null,
         a.synced_at ?? new Date().toISOString()]);
+  }
+
+  // Targeted update for post-sign capture — won't be touched by the periodic
+  // upsert from the sync job. Idempotent: callers can re-invoke safely.
+  async markSigned(agreementId: string, data: { signedFormData: string | null; signedPdfPath: string | null; signedAt: string }): Promise<void> {
+    await execute(
+      `UPDATE adobe_sign_agreements
+       SET signed_form_data = ?,
+           signed_pdf_path  = ?,
+           signed_at        = ?,
+           updated_at       = GETUTCDATE()
+       WHERE agreement_id = ?`,
+      [data.signedFormData, data.signedPdfPath, data.signedAt, agreementId]
+    );
   }
 
   async delete(id: number): Promise<boolean> {
