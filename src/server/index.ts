@@ -1485,6 +1485,10 @@ async function main() {
     }, 30 * 60 * 1000);
     setTimeout(() => kpiPipeline.collectJiraSnapshot().catch(() => {}), 90_000);
     setTimeout(() => kpiPipeline.refreshAllAgentMetrics().catch(() => {}), 100_000);
+    setTimeout(() => {
+      kpiPipeline.captureEodSnapshot().catch(() => {});
+      kpiPipeline.collectDerivedKpis().catch(() => {});
+    }, 120_000);
 
     // Daily digest at 17:30, weekly digest Monday 09:00, EOD snapshot 17:25, derived KPIs 17:30
     jobRegistry.register('kpi-daily-rollup', 'KPI daily/weekly digest + EOD + derived', async () => {
