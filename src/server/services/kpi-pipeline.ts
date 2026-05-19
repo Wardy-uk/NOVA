@@ -97,11 +97,12 @@ function classifyTier(currentTier: string | null): string {
   return mapped ?? 'Unclassified';
 }
 
-function ccBucket(requestType: string | null): string {
+function ccBucket(requestType: string | null): string | null {
   const rt = (requestType || '').toLowerCase();
   if (['incident', 'chat', 'ai request', 'emailed request', 'gdpr'].includes(rt)) return 'CC (Incidents)';
   if (rt === 'service request') return 'CC (Service Requests)';
   if (rt === 'tpj request') return 'CC (TPJ)';
+  if (!rt) return null;
   return 'CC (Incidents)';
 }
 
@@ -350,7 +351,8 @@ export class KpiPipeline {
 
       function parseTicket(t: CacheRow): ParsedTicket {
         const rawTier = classifyTier(t.current_tier);
-        const tier = rawTier === 'Customer Care' ? ccBucket(t.request_type) : rawTier;
+        const ccTier = rawTier === 'Customer Care' ? ccBucket(t.request_type) : null;
+        const tier = ccTier ?? rawTier;
         return {
           ...t,
           tier,

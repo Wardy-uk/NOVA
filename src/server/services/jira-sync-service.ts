@@ -3,6 +3,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import { query, queryOne, execute } from './database.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
 import { generateCsatSurvey } from '../routes/portal-csat.js';
+import { mapJiraStatusToPortal } from './portal-status-mapper.js';
 
 const PRIORITY_NORMALIZE: Record<string, string> = {
   '最高': 'Highest', '高': 'High', '中': 'Medium', '低': 'Low', '最低': 'Lowest',
@@ -20,8 +21,10 @@ const ALL_FIELDS = [
   'assignee', 'reporter', 'created', 'updated', 'duedate',
   'resolution', 'labels', 'issuelinks', 'attachment',
   'customfield_10010', // SLA
-  'customfield_10020', // Request type
+  'customfield_10020', // JSM customer request type (legacy — not used for CC bucketing)
+  'customfield_12800', // Request type fallback
   'customfield_12981', // Current Tier
+  'customfield_13482', // Request type (CC bucket classification)
   'customfield_13183', // Nurtur Product
   'customfield_13184', // TL;DR
   'customfield_13185', // Agent Summary
@@ -266,7 +269,12 @@ export class JiraSyncService {
     const descriptionAdf = f.description ? JSON.stringify(f.description) : null;
     const currentTier = (f.customfield_12981 as any)?.value ?? null;
     const nurturProduct = (f.customfield_13183 as any)?.value ?? null;
-    const requestType = (f.customfield_10020 as any)?.requestType?.name ?? null;
+    const cf13482 = f.customfield_13482 as any;
+    let requestType: string | null = (cf13482?.value ?? cf13482?.name ?? (typeof cf13482 === 'string' ? cf13482 : null)) || null;
+    if (!requestType) {
+      const cf12800 = f.customfield_12800 as any;
+      requestType = cf12800?.requestType?.name ?? cf12800?.requestType?.value ?? cf12800?.requestType?.displayName ?? null;
+    }
     const tldrText = extractText(f.customfield_13184);
     const agentSummaryText = extractText(f.customfield_13185);
     const troubleshootingText = extractText(f.customfield_13212);
@@ -402,11 +410,14 @@ export class JiraSyncService {
         ).catch(() => null);
 
         if (orgRow) {
-          if (oldRow.status_name !== statusName) {
+          const previousPortalStatus = mapJiraStatusToPortal(oldRow.status_name, this.settings);
+          const nextPortalStatus = mapJiraStatusToPortal(statusName, this.settings);
+
+          if (previousPortalStatus !== nextPortalStatus) {
             broadcastPortalEvent(orgRow.org_id, {
               type: 'ticket:status_change',
               ticketKey: issue.key,
-              data: { from: oldRow.status_name, to: statusName },
+              data: { from: previousPortalStatus, to: nextPortalStatus },
             });
           }
           const newAssignee = assignee?.displayName ?? null;
