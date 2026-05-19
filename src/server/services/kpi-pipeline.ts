@@ -342,8 +342,7 @@ export class KpiPipeline {
         FROM jira_issue_cache
         WHERE ${pf.sql}
           AND resolution_name IS NOT NULL
-          AND resolved_at IS NOT NULL
-          AND CAST(resolved_at AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND status_category = 'Done'
       `, pf.params);
 
