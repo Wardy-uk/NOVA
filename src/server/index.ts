@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { initializeDatabase, shutdownDatabase } from './db/schema.js';
 import { query, queryOne, execute } from './services/database.js';
-import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, AdobeSignAgreementQueries, ContractTermsQueries, TrainingQueries } from './db/queries.js';
+import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, AdobeSignAgreementQueries, ContractTermsQueries, TrainingQueries, CounterQueries, AgreementFieldValueQueries } from './db/queries.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
@@ -371,6 +371,8 @@ async function main() {
   const bcCustomerQueries = new BcCustomerQueries();
   const contractsQueries = new ContractsQueries();
   const adobeSignAgreementQueries = new AdobeSignAgreementQueries();
+  const agreementFieldValueQueries = new AgreementFieldValueQueries();
+  const counterQueries = new CounterQueries();
   const contractTermsQueries = new ContractTermsQueries();
   const approvalQueries = new ApprovalQueries();
   const trainingQueries = new TrainingQueries();
@@ -938,7 +940,7 @@ async function main() {
   // app.use('/api/milestones', ...) is registered after buildOrchestrator
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/contracts', createContractsRoutes(bcCustomerQueries, contractsQueries, settingsQueries));
-  app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, settingsQueries));
+  app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, agreementFieldValueQueries, counterQueries, settingsQueries));
   app.use('/api/contract-terms', createContractTermsRoutes(contractTermsQueries));
   app.use('/api/surveys', createSurveyRoutes(settingsQueries, userQueries, teamQueries));
   app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries, buildOnboardingJiraClient() ?? undefined, async (action, ticketKey, approvalId, editedResponse, decidedBy) => {
@@ -2850,17 +2852,64 @@ ${panelHtml}
     console.log('[ProblemTicketScanner] Disabled (problem_scanner_interval_minutes = 0)');
   }
 
+  // Post-sign capture handler — runs once per agreement when status flips to SIGNED.
+  // Signer can't modify the contract under current Adobe template policy, so
+  // NOVA's send-time agreement_field_values capture is authoritative — no need
+  // to refetch values from Adobe. We just archive the signed PDF locally and
+  // hand off to the BC subscription import writer (next phase).
+  // Failures in PDF save are non-fatal; we still markSigned so we don't loop.
+  const signedContractsDir = path.join(process.cwd(), 'data', 'signed-contracts');
+  async function handleSignedAgreement(agreementId: string) {
+    console.log(`[Adobe Sign] Capturing post-sign data for ${agreementId}`);
+    let pdfRelPath: string | null = null;
+
+    try {
+      const pdf = await adobeSignClient!.downloadSignedDocument(agreementId);
+      await fs.promises.mkdir(signedContractsDir, { recursive: true });
+      // Sanitise the agreement ID for filesystem safety even though Adobe IDs
+      // are alphanumeric — defensive against future ID format changes.
+      const safeName = agreementId.replace(/[^a-zA-Z0-9_-]/g, '_') + '.pdf';
+      pdfRelPath = path.posix.join('signed-contracts', safeName);
+      await fs.promises.writeFile(path.join(signedContractsDir, safeName), pdf);
+    } catch (err) {
+      console.warn(`[Adobe Sign] PDF download/save failed for ${agreementId}:`, err instanceof Error ? err.message : err);
+    }
+
+    await adobeSignAgreementQueries.markSigned(agreementId, {
+      signedFormData: null,    // sender values live in agreement_field_values; never reach Adobe-side
+      signedPdfPath: pdfRelPath,
+      signedAt: new Date().toISOString(),
+    });
+    console.log(`[Adobe Sign] Post-sign captured ${agreementId} — pdf:${pdfRelPath ?? 'fail'}`);
+    // TODO: hand off to BC subscription import writer once that client lands.
+  }
+
   // Adobe Sign agreement sync — every 5 minutes
   jobRegistry.register('adobe-sign-sync', 'Adobe Sign agreement sync', async () => {
     if (!adobeSignClient || adobeSignClient.getStatus().status !== 'connected') return;
     const remoteAgreements = await adobeSignClient.listAgreements();
+    // Collect agreements whose status flipped to SIGNED on this poll so we can fire
+    // the post-sign handler AFTER all upserts complete. Doing it serially after the
+    // loop avoids hammering Adobe with parallel /formData + /combinedDocument calls.
+    const newlySigned: string[] = [];
     for (const a of remoteAgreements) {
       const signerEmails = a.participantSetsInfo
         ?.filter(ps => ps.role === 'SIGNER')
         .flatMap(ps => ps.memberInfos.map(m => m.email)) ?? [];
-      adobeSignAgreementQueries.upsert({
+
+      // Snapshot prior local state to detect SIGNED transitions. We only fire the
+      // post-sign handler if (a) Adobe now says SIGNED, (b) we haven't already
+      // captured (signed_at is null). Existing rows that were SIGNED before this
+      // change rolled out won't re-trigger because signed_at is set on first capture.
+      const prior = await adobeSignAgreementQueries.getByAgreementId(a.id);
+      const transitionedToSigned = a.status === 'SIGNED'
+        && (!prior || prior.signed_at === null);
+
+      await adobeSignAgreementQueries.upsert({
         agreement_id: a.id,
         contract_id: null,
+        bc_customer_id: null,
+        subscription_contract_no: null,
         name: a.name,
         status: a.status,
         sender_email: a.senderEmail ?? null,
@@ -2873,8 +2922,18 @@ ${panelHtml}
         raw_data: JSON.stringify(a),
         synced_at: new Date().toISOString(),
       });
+
+      if (transitionedToSigned) newlySigned.push(a.id);
     }
-    console.log(`[Adobe Sign] Synced ${remoteAgreements.length} agreements`);
+    console.log(`[Adobe Sign] Synced ${remoteAgreements.length} agreements (${newlySigned.length} newly signed)`);
+
+    for (const agreementId of newlySigned) {
+      try {
+        await handleSignedAgreement(agreementId);
+      } catch (err) {
+        console.error(`[Adobe Sign] Post-sign handler crashed for ${agreementId}:`, err);
+      }
+    }
   }, 5 * 60 * 1000);
 
   // ── Dev Review outbox worker — drain failed Jira writes every 2 min ──

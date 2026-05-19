@@ -1871,6 +1871,66 @@ async function runMigrations(): Promise<void> {
        created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
        updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
      );`,
+
+    // Extra BC customer fields used to pre-populate Adobe Sign contract templates
+    // (REG NO, address line 2, postcode, county/state, primary contact name).
+    `IF COL_LENGTH('bc_customers', 'address_line_2') IS NULL
+     ALTER TABLE bc_customers ADD address_line_2 NVARCHAR(200) NULL;`,
+    `IF COL_LENGTH('bc_customers', 'postal_code') IS NULL
+     ALTER TABLE bc_customers ADD postal_code NVARCHAR(50) NULL;`,
+    `IF COL_LENGTH('bc_customers', 'state') IS NULL
+     ALTER TABLE bc_customers ADD state NVARCHAR(100) NULL;`,
+    `IF COL_LENGTH('bc_customers', 'tax_registration_number') IS NULL
+     ALTER TABLE bc_customers ADD tax_registration_number NVARCHAR(100) NULL;`,
+    `IF COL_LENGTH('bc_customers', 'primary_contact_name') IS NULL
+     ALTER TABLE bc_customers ADD primary_contact_name NVARCHAR(200) NULL;`,
+
+    // Post-sign capture columns on adobe_sign_agreements. Set when an agreement
+    // transitions to SIGNED — used as the raw material for downstream BC write-back.
+    //   bc_customer_id      — BC customer this agreement is for (set at create time, never null after sign)
+    //   signed_form_data    — JSON: {fieldName: value} parsed from Adobe's formData CSV
+    //   signed_pdf_path     — local path to combinedDocument PDF, relative to data dir
+    //   signed_at           — timestamp the transition was detected (NOVA-side, not Adobe-side)
+    `IF COL_LENGTH('adobe_sign_agreements', 'bc_customer_id') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD bc_customer_id NVARCHAR(200) NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'signed_form_data') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD signed_form_data NVARCHAR(MAX) NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'signed_pdf_path') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD signed_pdf_path NVARCHAR(500) NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'signed_at') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD signed_at DATETIME2 NULL;`,
+
+    // Subscription contract number assigned at agreement-create time. Format
+    // 'NOVA-NNNNNNNNNN' (10-digit zero-padded counter from the counters table).
+    // Drives the BC subscription import write later.
+    `IF COL_LENGTH('adobe_sign_agreements', 'subscription_contract_no') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD subscription_contract_no NVARCHAR(50) NULL;`,
+
+    // Atomic counters for NOVA-generated sequence numbers (e.g. subscription
+    // contract numbers). Use BCQueries.nextCounterValue to increment + read in
+    // one MERGE statement so concurrent agreement creates never collide.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'counters') AND type = 'U')
+     CREATE TABLE counters (
+       name  NVARCHAR(50) NOT NULL PRIMARY KEY,
+       value BIGINT       NOT NULL DEFAULT 0
+     );`,
+
+    // Per-field record of every value captured for an Adobe agreement.
+    // Written at SEND time (source=SENDER) by the create-agreement route, and at
+    // SIGN time (source=SIGNER) by the post-sign handler. This is the
+    // authoritative store for BC subscription mapping — never rely on Adobe's
+    // formData CSV directly.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agreement_field_values') AND type = 'U')
+     CREATE TABLE agreement_field_values (
+       id           INT IDENTITY(1,1) PRIMARY KEY,
+       agreement_id NVARCHAR(200) NOT NULL,
+       field_name   NVARCHAR(200) NOT NULL,
+       field_value  NVARCHAR(MAX) NULL,
+       source       NVARCHAR(20)  NOT NULL,
+       captured_at  DATETIME2     NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agreement_field_values_agreement_id')
+     CREATE INDEX IX_agreement_field_values_agreement_id ON agreement_field_values(agreement_id);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

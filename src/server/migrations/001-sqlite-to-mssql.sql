@@ -809,8 +809,13 @@ CREATE TABLE bc_customers (
     email               NVARCHAR(200)   NULL,
     phone_number        NVARCHAR(50)    NULL,
     address             NVARCHAR(500)   NULL,
+    address_line_2      NVARCHAR(200)   NULL,
     city                NVARCHAR(200)   NULL,
+    state               NVARCHAR(100)   NULL,
     country             NVARCHAR(100)   NULL,
+    postal_code         NVARCHAR(50)    NULL,
+    tax_registration_number NVARCHAR(100) NULL,
+    primary_contact_name NVARCHAR(200)  NULL,
     currency_code       NVARCHAR(10)    NULL,
     balance             DECIMAL(18,4)   NULL,
     blocked             NVARCHAR(50)    NULL,
@@ -847,11 +852,16 @@ CREATE TABLE adobe_sign_agreements (
     agreement_id        NVARCHAR(200)   NOT NULL UNIQUE,
     contract_id         INT             NULL,
     template_id         INT             NULL,
+    bc_customer_id      NVARCHAR(200)   NULL,
+    subscription_contract_no NVARCHAR(50) NULL,
     name                NVARCHAR(500)   NOT NULL,
     status              NVARCHAR(50)    DEFAULT 'DRAFT',
     sender_email        NVARCHAR(200)   NULL,
     signer_emails       NVARCHAR(MAX)   NULL,
     filled_fields       NVARCHAR(MAX)   NULL,
+    signed_form_data    NVARCHAR(MAX)   NULL,
+    signed_pdf_path     NVARCHAR(500)   NULL,
+    signed_at           DATETIME2       NULL,
     created_via_nova    INT             DEFAULT 0,
     adobe_created_date  NVARCHAR(50)    NULL,
     adobe_expiration_date NVARCHAR(50)  NULL,
@@ -1400,6 +1410,31 @@ GO
 -- NOTE: Milestone templates are loaded from src/server/data/milestone-templates.json
 -- and should be seeded by the application on first run, not by this SQL script,
 -- because the JSON data file is the source of truth.
+
+-- counters — atomic sequence-number store. Used today for NOVA-NNNNNNNNNN
+-- subscription contract numbers; can hold other sequences in future.
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'counters') AND type = 'U')
+CREATE TABLE counters (
+    name  NVARCHAR(50) NOT NULL PRIMARY KEY,
+    value BIGINT       NOT NULL DEFAULT 0
+);
+GO
+
+-- agreement_field_values — per-field value history for an Adobe agreement.
+-- Source='SENDER' rows written at create time, source='SIGNER' at sign time.
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agreement_field_values') AND type = 'U')
+CREATE TABLE agreement_field_values (
+    id           INT IDENTITY(1,1) PRIMARY KEY,
+    agreement_id NVARCHAR(200) NOT NULL,
+    field_name   NVARCHAR(200) NOT NULL,
+    field_value  NVARCHAR(MAX) NULL,
+    source       NVARCHAR(20)  NOT NULL,
+    captured_at  DATETIME2     NOT NULL DEFAULT GETUTCDATE()
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agreement_field_values_agreement_id')
+CREATE INDEX IX_agreement_field_values_agreement_id ON agreement_field_values(agreement_id);
+GO
 
 PRINT '=== NOVA MSSQL migration 001 complete ==='
 PRINT 'Tables: 63 | Indexes: 70+ | Seed data: problem_ticket_config, settings, setup_templates'

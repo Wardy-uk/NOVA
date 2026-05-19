@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import type { AdobeSignLibraryDocument, AdobeSignFormField, ContractTerm } from '../../shared/types.js';
+import type { AdobeSignLibraryDocument, AdobeSignFormField, ContractTerm, BcCustomerLite } from '../../shared/types.js';
 
 interface Props {
   onNavigateToAgreements: () => void;
@@ -70,6 +70,34 @@ function isSenderField(f: AdobeSignFormField): boolean {
   return a === '' || a === 'PREFILL' || a === 'SENDER';
 }
 
+// Map an Adobe form-field name (e.g. "COMPANY NAME BYM", "address_line_1_yomdel")
+// to a BC customer property. Brand suffixes (BYM, YOMDEL, LEADPRO, etc.) are
+// ignored — the patterns just look for the meaningful substring. First match wins.
+const BC_FIELD_PATTERNS: Array<[RegExp, keyof BcCustomerLite]> = [
+  [/customer\s*(?:no\.?|number|num|id)/i,    'number'],
+  [/company\s*name|business\s*name|^company$/i, 'display_name'],
+  [/reg(?:istration)?\s*(?:no\.?|number|num)|tax\s*reg(?:istration)?|vat\s*(?:no|number|reg)?/i, 'tax_registration_number'],
+  [/address\s*(?:line\s*)?2/i,               'address_line_2'],
+  [/address\s*(?:line\s*)?1|^address$|street/i, 'address'],
+  [/post(?:al)?\s*code|^postcode$|zip\s*code|^zip$/i, 'postal_code'],
+  [/^city$|^town$/i,                          'city'],
+  [/county|state|province|region/i,           'state'],
+  [/country/i,                                'country'],
+  [/e[\-_]?mail/i,                            'email'],
+  [/mobile|cell(?:phone)?/i,                  'phone_number'],  // Phase 2 will use a dedicated mobile field from contacts
+  [/tel(?:ephone)?|^phone$|landline/i,        'phone_number'],
+  [/contact\s*name|primary\s*contact|^contact$/i, 'primary_contact_name'],
+];
+
+// Returns the BC property name to fill from for a given Adobe field, or null if
+// the field doesn't match any BC field — caller leaves those untouched.
+function mapAdobeFieldToBcKey(adobeName: string): keyof BcCustomerLite | null {
+  for (const [pattern, key] of BC_FIELD_PATTERNS) {
+    if (pattern.test(adobeName)) return key;
+  }
+  return null;
+}
+
 export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [step, setStep] = useState<Step>('template');
   const [templates, setTemplates] = useState<AdobeSignLibraryDocument[]>([]);
@@ -96,6 +124,16 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [allTerms, setAllTerms] = useState<ContractTerm[]>([]);
   const [selectedTermIds, setSelectedTermIds] = useState<Set<number>>(new Set());
   const [termsFieldPrefix, setTermsFieldPrefix] = useState<string>('contract terms');
+
+  // BC customer picker — typeahead search over the local bc_customers cache.
+  // Selecting a customer auto-fills any sender-fillable field whose name matches
+  // a BC property (see BC_FIELD_PATTERNS).
+  const [bcSearch, setBcSearch] = useState('');
+  const [bcResults, setBcResults] = useState<BcCustomerLite[]>([]);
+  const [bcSearchOpen, setBcSearchOpen] = useState(false);
+  const [bcSearchLoading, setBcSearchLoading] = useState(false);
+  const [selectedBcCustomer, setSelectedBcCustomer] = useState<BcCustomerLite | null>(null);
+  const [autoFilledKeys, setAutoFilledKeys] = useState<Set<string>>(new Set());
 
   // Merged field list — union of all selected templates' fields, deduped by name, with origin tracking.
   const mergedFields = useMemo<MergedField[]>(() => {
@@ -153,6 +191,56 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
       .then(r => r.json())
       .then(j => { if (j.ok && typeof j.data?.prefix === 'string') setTermsFieldPrefix(j.data.prefix); })
       .catch(() => { /* fall back to default */ });
+  }, []);
+
+  // BC customer search — debounced 250ms so we don't hammer the backend on each keystroke.
+  // Empty query closes the dropdown without searching.
+  useEffect(() => {
+    const q = bcSearch.trim();
+    if (!q) { setBcResults([]); return; }
+    setBcSearchLoading(true);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/contracts/customers?search=${encodeURIComponent(q)}`);
+        const json = await res.json();
+        if (json.ok) setBcResults((json.data ?? []).slice(0, 30));
+      } catch { /* keep stale results — non-fatal */ }
+      setBcSearchLoading(false);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [bcSearch]);
+
+  // Auto-fill matching sender fields from a BC customer. Walks every sender-fillable
+  // field, runs the field name through BC_FIELD_PATTERNS, and writes the BC value if
+  // a match exists AND the BC field has a non-empty value. Records which fields were
+  // auto-filled so we can show a visual indicator.
+  const applyBcCustomer = useCallback((customer: BcCustomerLite) => {
+    setSelectedBcCustomer(customer);
+    setBcSearchOpen(false);
+    setBcSearch(customer.display_name);
+    setFieldValues(prev => {
+      const next = { ...prev };
+      const filled = new Set<string>();
+      for (const f of senderFields) {
+        const key = mapAdobeFieldToBcKey(f.name);
+        if (!key) continue;
+        const val = customer[key];
+        if (val !== null && val !== undefined && String(val).trim() !== '') {
+          next[f.name] = String(val);
+          filled.add(f.name);
+        }
+      }
+      setAutoFilledKeys(filled);
+      return next;
+    });
+  }, [senderFields]);
+
+  const clearBcCustomer = useCallback(() => {
+    setSelectedBcCustomer(null);
+    setBcSearch('');
+    setBcResults([]);
+    setAutoFilledKeys(new Set());
+    // Don't wipe field values — sender may have edited them after auto-fill.
   }, []);
 
   // Concatenated terms text — selected terms joined by blank lines, in catalog order
@@ -275,6 +363,9 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           library_document_ids: selectedTemplates.map(t => t.id),
+          // bc_customer_id carries the BC link forward — once signed, the post-sign
+          // handler reads this to know which BC customer the contract belongs to.
+          bc_customer_id: selectedBcCustomer?.bc_id ?? undefined,
           name: contractName,
           signer_emails: signers.filter(s => s.email.trim()).map(s => s.email.trim()),
           cc_emails: ccEmails.split(',').map(e => e.trim()).filter(Boolean),
@@ -503,6 +594,58 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                 : `Bundle of ${selectedCount} templates — fields with the same name across templates are linked.`}
             </p>
 
+            {/* BC customer picker — search by name or customer number, auto-fills matching fields */}
+            <div className="mb-5 rounded-lg border border-[#3a424d] bg-[#1e2228] p-3 relative">
+              <div className="flex items-center justify-between mb-2">
+                <label className={labelCls + ' mb-0'}>Auto-fill from Business Central customer</label>
+                {selectedBcCustomer && (
+                  <button onClick={clearBcCustomer} className="text-[10px] text-neutral-500 hover:text-red-400">
+                    Clear
+                  </button>
+                )}
+              </div>
+              <input
+                type="text"
+                className={inputCls}
+                placeholder="Search by company name or customer number..."
+                value={bcSearch}
+                onChange={(e) => { setBcSearch(e.target.value); setBcSearchOpen(true); }}
+                onFocus={() => { if (bcResults.length > 0) setBcSearchOpen(true); }}
+                onBlur={() => { setTimeout(() => setBcSearchOpen(false), 150); }}
+              />
+              {bcSearchOpen && (bcSearchLoading || bcResults.length > 0) && (
+                <div className="absolute left-3 right-3 mt-1 max-h-72 overflow-auto rounded-lg border border-[#3a424d] bg-[#272C33] shadow-xl z-10">
+                  {bcSearchLoading && (
+                    <div className="px-3 py-2 text-[11px] text-neutral-500">Searching BC cache...</div>
+                  )}
+                  {!bcSearchLoading && bcResults.length === 0 && (
+                    <div className="px-3 py-2 text-[11px] text-neutral-500">No matches in BC cache.</div>
+                  )}
+                  {bcResults.map((c) => (
+                    <button
+                      key={c.bc_id}
+                      onMouseDown={() => applyBcCustomer(c)}
+                      className="w-full text-left px-3 py-2 hover:bg-[#3a424d] border-b border-[#3a424d] last:border-b-0"
+                    >
+                      <div className="text-[11px] text-neutral-200">{c.display_name}</div>
+                      <div className="text-[10px] text-neutral-500">
+                        {c.number ? `#${c.number}` : 'No customer number'}
+                        {c.city ? ` · ${c.city}` : ''}
+                        {c.country ? `, ${c.country}` : ''}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectedBcCustomer && (
+                <div className="mt-2 text-[10px] text-[#5ec1ca]">
+                  ✓ Auto-filled {autoFilledKeys.size} {autoFilledKeys.size === 1 ? 'field' : 'fields'} from <span className="font-medium">{selectedBcCustomer.display_name}</span>
+                  {autoFilledKeys.size === 0 && ' — no fields on this template matched BC customer properties.'}
+                  . You can still edit any field below.
+                </div>
+              )}
+            </div>
+
             {fieldsLoading ? (
               <div className="text-[12px] text-neutral-500 py-4">Loading fields from Adobe Sign...</div>
             ) : senderFields.length === 0 && signerFields.length === 0 ? (
@@ -524,6 +667,9 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                     <div key={f.name}>
                       <label className={labelCls}>
                         {f.displayLabel || f.name} {f.required && <span className="text-red-400">*</span>}
+                        {autoFilledKeys.has(f.name) && (
+                          <span className="ml-2 text-[9px] text-[#5ec1ca] normal-case">from BC</span>
+                        )}
                       </label>
                       {inputType === 'select' ? (
                         <select
