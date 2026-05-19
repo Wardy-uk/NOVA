@@ -1207,7 +1207,7 @@ export class AgentLoop {
       if (!currentStatus) {
         try {
           const issue = await this.jiraClient.getIssue(ticketKey, ['status']);
-          currentStatus = (issue?.fields?.status?.name ?? '').toLowerCase();
+          currentStatus = ((issue?.fields?.status as any)?.name ?? '').toLowerCase();
         } catch (err) {
           console.warn(`[agent] YO could not fetch status for ${ticketKey}, assuming open:`, err instanceof Error ? err.message : err);
           currentStatus = 'open';
