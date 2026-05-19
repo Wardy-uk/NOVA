@@ -1060,7 +1060,7 @@ export class AgentLoop {
     if (!this.assignmentEngine) return;
 
     // Check exclusion filters before assigning (n8n parity)
-    const ticket = await queryOne<{
+    let ticket = await queryOne<{
       request_type: string | null; labels: string | null; current_tier: string | null;
     }>(
       `SELECT request_type, labels, current_tier FROM jira_issue_cache WHERE issue_key = ?`,
@@ -1070,6 +1070,23 @@ export class AgentLoop {
       const excludedTypes = ['Escalation'];
       if (ticket.request_type && excludedTypes.includes(ticket.request_type)) return;
       if (ticket.labels && ticket.labels.includes('TPJ_Feed')) return;
+    }
+
+    // Guard: if current_tier is unknown, fetch fresh from Jira before routing
+    if (ticket && !ticket.current_tier) {
+      try {
+        const fresh = await this.jiraClient.getIssue(decision.ticketKey, ['customfield_12981']);
+        const freshTier = (fresh?.fields as any)?.customfield_12981?.value ?? null;
+        if (freshTier) {
+          ticket = { ...ticket, current_tier: freshTier };
+          await execute(
+            `UPDATE jira_issue_cache SET current_tier = ? WHERE issue_key = ?`,
+            [freshTier, decision.ticketKey],
+          );
+        }
+      } catch (err) {
+        console.warn(`[agent] Failed to fetch fresh tier for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+      }
     }
 
     const project = this.assignmentEngine.resolveProjectFromTicketKey(decision.ticketKey);

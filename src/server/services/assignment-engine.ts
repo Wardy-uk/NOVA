@@ -51,8 +51,10 @@ const TEAM_TO_POOL: Record<string, Pool> = {
   'customer care': 'cc',
   t2: 't2',
   t3: 't2',
+  support: 't2',
   tpj: 'tpj',
   digital: 'digital',
+  digitaldesign: 'digital',
 };
 
 function normalizePool(team: string | null): Pool {
