@@ -286,6 +286,16 @@ export class AssignmentEngine {
     const comment = `[NOVA Round Robin] Auto-assigned to ${assignment.agent.display_name}\n` +
       `Pool: ${assignment.agent.pool.toUpperCase()} | ${assignment.reason}`;
     try {
+      // Dedup: skip if this agent was already assigned via round-robin recently
+      const recent = await this.jiraClient.getComments(ticketKey, 5);
+      const isDupe = recent.some(c => {
+        const text = JSON.stringify(c.body ?? '');
+        return text.includes('NOVA Round Robin') && text.includes(assignment.agent.display_name);
+      });
+      if (isDupe) {
+        console.log(`[assignment] Skipping duplicate comment for ${ticketKey} — already assigned to ${assignment.agent.display_name}`);
+        return;
+      }
       await this.jiraClient.addComment(ticketKey, comment, { internal: true });
     } catch (err) {
       console.warn(`[assignment] Failed to post assignment comment for ${ticketKey}:`, err instanceof Error ? err.message : err);

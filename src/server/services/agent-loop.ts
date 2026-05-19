@@ -1059,8 +1059,19 @@ export class AgentLoop {
   private async tryAutoAssign(decision: import('./agent-types.js').AgentDecision): Promise<void> {
     if (!this.assignmentEngine) return;
 
+    // Guard: skip if already assigned to a human agent
+    const novaAccountId = this.settings.get('nova_ai_jira_account_id') ?? '';
+    const current = await queryOne<{ assignee_account_id: string | null }>(
+      `SELECT assignee_account_id FROM jira_issue_cache WHERE issue_key = ?`,
+      [decision.ticketKey],
+    );
+    if (current?.assignee_account_id && current.assignee_account_id !== novaAccountId) {
+      console.log(`[agent] Skipping assignment for ${decision.ticketKey} — already assigned to ${current.assignee_account_id}`);
+      return;
+    }
+
     // Check exclusion filters before assigning (n8n parity)
-    let ticket = await queryOne<{
+    const ticket = await queryOne<{
       request_type: string | null; labels: string | null; current_tier: string | null;
     }>(
       `SELECT request_type, labels, current_tier FROM jira_issue_cache WHERE issue_key = ?`,
@@ -1072,21 +1083,10 @@ export class AgentLoop {
       if (ticket.labels && ticket.labels.includes('TPJ_Feed')) return;
     }
 
-    // Guard: if current_tier is unknown, fetch fresh from Jira before routing
+    // Guard: defer to sweep if current_tier not yet in cache — avoids defaulting to CC
     if (ticket && !ticket.current_tier) {
-      try {
-        const fresh = await this.jiraClient.getIssue(decision.ticketKey, ['customfield_12981']);
-        const freshTier = (fresh?.fields as any)?.customfield_12981?.value ?? null;
-        if (freshTier) {
-          ticket = { ...ticket, current_tier: freshTier };
-          await execute(
-            `UPDATE jira_issue_cache SET current_tier = ? WHERE issue_key = ?`,
-            [freshTier, decision.ticketKey],
-          );
-        }
-      } catch (err) {
-        console.warn(`[agent] Failed to fetch fresh tier for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
-      }
+      console.log(`[agent] Deferring assignment for ${decision.ticketKey} — current_tier not yet in cache, sweep will pick up`);
+      return;
     }
 
     const project = this.assignmentEngine.resolveProjectFromTicketKey(decision.ticketKey);
