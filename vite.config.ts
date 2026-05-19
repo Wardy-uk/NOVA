@@ -5,6 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
+import { codexPortalMockPlugin } from './src/client/dev/codexPortalMockPlugin';
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'));
 const gitHash = (() => {
@@ -14,6 +15,7 @@ const gitHash = (() => {
 
 export default defineConfig({
   plugins: [
+    codexPortalMockPlugin(),
     react(),
     tailwindcss(),
     VitePWA({

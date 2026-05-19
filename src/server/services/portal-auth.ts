@@ -29,6 +29,14 @@ interface OidcUserClaims {
   org_name?: string;
 }
 
+const CODEX_TEST_ORG_EXTERNAL_ID = 'codex-test-org';
+const CODEX_TEST_ORG_NAME = 'Codex Test Organisation';
+const CODEX_TEST_ORG_DOMAIN = 'codex.test';
+const CODEX_TEST_USER_EXTERNAL_ID = 'codex-test-user';
+const CODEX_TEST_USER_EMAIL = 'codex.portal.test@nurtur.tech';
+const CODEX_TEST_USER_NAME = 'Codex Test User';
+const CODEX_TEST_USER_ROLE: PortalUserRole = 'requester';
+
 // PKCE state storage (in-memory, short-lived)
 const pendingStates = new Map<string, { verifier: string; createdAt: number }>();
 setInterval(() => {
@@ -45,6 +53,11 @@ function getOidcConfig(settings: FileSettingsQueries): OidcConfig {
     clientSecret: settings.get('portal_oidc_client_secret') || '',
     redirectUri: settings.get('portal_oidc_redirect_uri') || '',
   };
+}
+
+function issuePortalToken(payload: PortalAuthPayload): string {
+  const secret = process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET || 'portal-default-secret';
+  return jwt.sign(payload, secret, { expiresIn: '8h' });
 }
 
 function base64UrlEncode(buffer: Buffer): string {
@@ -144,8 +157,7 @@ export async function handleCallback(
     role: 'requester',
   };
 
-  const secret = process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET || 'portal-default-secret';
-  const token = jwt.sign(payload, secret, { expiresIn: '8h' });
+  const token = issuePortalToken(payload);
 
   return { token, user: payload };
 }
@@ -191,6 +203,7 @@ async function upsertUser(
   orgId: number,
   email: string,
   displayName: string,
+  role: PortalUserRole = 'requester',
 ): Promise<number> {
   const existing = await queryOne<{ id: number }>(
     `SELECT id FROM portal_users WHERE external_id = ?`,
@@ -199,16 +212,16 @@ async function upsertUser(
 
   if (existing) {
     await execute(
-      `UPDATE portal_users SET email = ?, display_name = ?, last_login = GETUTCDATE() WHERE id = ?`,
-      [email, displayName, existing.id],
+      `UPDATE portal_users SET email = ?, display_name = ?, role = ?, last_login = GETUTCDATE() WHERE id = ?`,
+      [email, displayName, role, existing.id],
     );
     return existing.id;
   }
 
   const result = await queryOne<{ id: number }>(
-    `INSERT INTO portal_users (external_id, org_id, email, display_name)
-     OUTPUT INSERTED.id VALUES (?, ?, ?, ?)`,
-    [externalId, orgId, email, displayName],
+    `INSERT INTO portal_users (external_id, org_id, email, display_name, role)
+     OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?)`,
+    [externalId, orgId, email, displayName, role],
   );
   return result!.id;
 }
@@ -278,10 +291,40 @@ export async function refreshOidcToken(
     role: (row.role as PortalAuthPayload['role']) || 'requester',
   };
 
-  const secret = process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET || 'portal-default-secret';
-  const token = jwt.sign(payload, secret, { expiresIn: '8h' });
+  const token = issuePortalToken(payload);
 
   return { token, user: payload };
+}
+
+export function isCodexTestLoginEnabled(settings: FileSettingsQueries): boolean {
+  return settings.get('portal_codex_test_user_enabled') === 'true' || process.env.NODE_ENV !== 'production';
+}
+
+export async function createCodexTestSession(
+  settings: FileSettingsQueries,
+): Promise<{ token: string; user: PortalAuthPayload }> {
+  if (!isCodexTestLoginEnabled(settings)) {
+    throw new Error('Codex test login is disabled');
+  }
+
+  const orgId = await upsertOrganisation(CODEX_TEST_ORG_EXTERNAL_ID, CODEX_TEST_ORG_NAME, CODEX_TEST_ORG_DOMAIN);
+  const userId = await upsertUser(
+    CODEX_TEST_USER_EXTERNAL_ID,
+    orgId,
+    CODEX_TEST_USER_EMAIL,
+    CODEX_TEST_USER_NAME,
+    CODEX_TEST_USER_ROLE,
+  );
+
+  const payload: PortalAuthPayload = {
+    userId,
+    email: CODEX_TEST_USER_EMAIL,
+    orgId,
+    orgName: CODEX_TEST_ORG_NAME,
+    role: CODEX_TEST_USER_ROLE,
+  };
+
+  return { token: issuePortalToken(payload), user: payload };
 }
 
 export function generateLogoutUrl(settings: FileSettingsQueries): string {

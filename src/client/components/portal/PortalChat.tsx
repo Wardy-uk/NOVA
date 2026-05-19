@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { PortalChatSession, PortalChatMessage, ChatMessageMetadata, IntakeCollectedFields } from '../../../shared/portal-types.js';
+import type {
+  PortalChatSession,
+  PortalChatMessage,
+  ChatMessageMetadata,
+  IntakeCollectedFields,
+  PortalStatus,
+} from '../../../shared/portal-types.js';
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
@@ -33,6 +39,24 @@ const CATEGORY_LABELS: Record<string, string> = {
   billing: 'Billing & Contracts',
   other: 'Something Else',
 };
+
+function getSessionStatusLabel(session: PortalChatSession): PortalStatus {
+  if (session.jira_issue_key) {
+    return 'Submitted';
+  }
+
+  switch (session.status) {
+    case 'resolved':
+      return 'Resolved';
+    case 'abandoned':
+      return 'Closed';
+    case 'active':
+    case 'escalated':
+    case 'handed_off':
+    default:
+      return 'In Progress';
+  }
+}
 
 function renderMarkdown(text: string): React.ReactNode {
   const lines = text.split('\n');
@@ -150,6 +174,7 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
         setMessages(data.data.messages || []);
         // Check if this session was already confirmed
         const sess = data.data.session as PortalChatSession;
+        setSessions(prev => prev.map(existing => existing.id === id ? sess : existing));
         if (sess.jira_issue_key) {
           setConfirmedTicket(sess.jira_issue_key);
         }
@@ -187,9 +212,26 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
       const data = await res.json();
       if (data.ok) {
         setMessages(prev => [...prev, data.data]);
+      } else {
+        setMessages(prev => [...prev, {
+          id: Date.now() + 1,
+          session_id: activeSessionId,
+          role: 'assistant',
+          content: data.error || "We couldn't continue the chat just now. Please try again, or submit your request through the portal form.",
+          metadata: null,
+          created_at: new Date().toISOString(),
+        }]);
       }
     } catch (err) {
       console.error('Failed to send message:', err);
+      setMessages(prev => [...prev, {
+        id: Date.now() + 1,
+        session_id: activeSessionId,
+        role: 'assistant',
+        content: "We couldn't continue the chat just now. Please try again, or submit your request through the portal form.",
+        metadata: null,
+        created_at: new Date().toISOString(),
+      }]);
     } finally {
       setSending(false);
     }
@@ -248,6 +290,11 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
       if (data.ok) {
         const ticketKey = data.data.ticketKey;
         setConfirmedTicket(ticketKey);
+        setSessions(prev => prev.map(session => (
+          session.id === activeSessionId
+            ? { ...session, jira_issue_key: ticketKey, status: 'handed_off' as const }
+            : session
+        )));
 
         // Upload attachments if any
         for (const { file } of files) {
@@ -305,15 +352,13 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                 <button
                   key={s.id}
                   onClick={() => loadSession(s.id)}
-                  aria-label={`Conversation from ${new Date(s.started_at).toLocaleDateString()} — ${s.status}${s.jira_issue_key ? `, ticket ${s.jira_issue_key}` : ''}`}
+                  aria-label={`Conversation from ${new Date(s.started_at).toLocaleDateString()} — ${getSessionStatusLabel(s)}${s.jira_issue_key ? `, ticket ${s.jira_issue_key}` : ''}`}
                   className={`w-full px-3 py-3 text-left hover:bg-gray-50 transition-colors focus-visible:ring-2 focus-visible:ring-brand outline-none ${
                     s.id === activeSessionId ? 'bg-brand/5' : ''
                   }`}
                 >
                   <div className="text-xs text-gray-600">{new Date(s.started_at).toLocaleDateString()}</div>
-                  <div className="text-sm text-gray-700 mt-0.5">
-                    {s.status === 'active' ? 'Active' : s.status === 'resolved' ? 'Resolved' : s.status}
-                  </div>
+                  <div className="text-sm text-gray-700 mt-0.5">{getSessionStatusLabel(s)}</div>
                   {s.jira_issue_key && (
                     <div className="text-xs text-brand mt-0.5">{s.jira_issue_key}</div>
                   )}
@@ -598,7 +643,7 @@ function SummaryCard({
 
   const rows: Array<{ key: string; label: string; value: string }> = [
     { key: 'subject', label: 'Subject', value: getValue('subject') },
-    { key: 'category', label: 'Category', value: CATEGORY_LABELS[getValue('category')] || getValue('category') },
+    { key: 'category', label: 'Request type', value: CATEGORY_LABELS[getValue('category')] || getValue('category') },
     { key: 'account', label: 'Account', value: getValue('account') },
     { key: 'description', label: 'Description', value: getValue('description') },
     { key: 'url', label: 'URL', value: getValue('url') },

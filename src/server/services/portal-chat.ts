@@ -11,12 +11,34 @@ import type { PortalPlaybookService } from './portal-playbooks.js';
 
 // ── LLM Response Schemas ──
 
-const IntentSchema = z.object({
+const ConversationalIntakeSchema = z.object({
   intent: z.enum(['problem', 'change', 'question', 'status']),
+  isWebsiteRelated: z.boolean(),
+  websiteSubcategory: z.enum(['website_content', 'website_broken', 'website_new_page', 'website_design']).optional(),
+  isPropertyRelated: z.boolean().optional(),
+  propertySubcategory: z.enum([
+    'property_missing_listing', 'property_incorrect_details', 'property_media',
+    'property_feed_sync', 'property_status', 'property_visibility',
+  ]).optional(),
+  isAccountRelated: z.boolean().optional(),
+  accountSubcategory: z.enum([
+    'account_login', 'account_new_user', 'account_permissions',
+    'account_details', 'account_office_change', 'account_remove_user',
+  ]).optional(),
+  confidence: z.number(),
   subject: z.string().optional(),
   account: z.string().optional(),
   description: z.string().optional(),
+  url: z.string().optional(),
+  errorMessage: z.string().optional(),
+  browser: z.string().optional(),
   urgency: z.enum(['Normal', 'High', 'Critical']).optional(),
+  propertyAddress: z.string().optional(),
+  listingId: z.string().optional(),
+  affectedPortals: z.string().optional(),
+  acknowledgment: z.string(),
+  nextQuestion: z.string().optional(),
+  readyForConfirmation: z.boolean(),
 });
 
 const CategoryPickSchema = z.object({
@@ -37,9 +59,13 @@ const FieldExtractSchema = z.object({
   contactPreference: z.enum(['portal', 'email', 'phone']).optional(),
 });
 
-const ChatResponseSchema = z.object({ response: z.string() });
+const ConversationalFollowUpSchema = z.object({
+  question: z.string(),
+});
 
-const FRUSTRATION_PATTERNS = /\b(this is ridiculous|speak to someone|talk to a human|this is useless|waste of time|you'?re useless|what a joke|fed up|sick of this|absolutely terrible|disgusting service|incompetent|get me a manager|escalate this|I('m| am) furious)\b|[!?]{4,}/i;
+const FRUSTRATION_PATTERNS = /\b(this is (completely |absolutely |totally |utterly |just )?ridiculous|speak to (someone|a (real )?person|a human)|talk to (someone|a (real )?person|a human)|real person|not a (chat)?bot|don'?t want.*(chat)?bot|this is useless|waste of time|you'?re useless|what a joke|fed up|sick of this|absolutely terrible|disgusting service|incompetent|get me a manager|escalate this|I('m| am) (absolutely |completely |totally |utterly |so )?furious|human (please|now|agent)|actual (person|human)|nobody is (fixing|helping|doing anything|listening|responding)|no one is (fixing|helping|doing anything|listening|responding)|been (broken|waiting|like this|an issue|a problem) for (days|weeks|ages|months|a while|over a week)|how (many|long|much longer) (times?|do I|more)|still (not|hasn'?t been|hasn'?t|isn'?t) (fixed|resolved|working|sorted|done)|completely (useless|unacceptable|ridiculous|furious)|utterly (useless|unacceptable|ridiculous|furious)|beyond (frustrated|annoyed|angry)|extremely (unhappy|frustrated|disappointed|annoyed)|so frustrated|so (angry|annoyed|disappointed|unhappy)|I('ve| have) (had enough|lost patience|been waiting)|unacceptable|appalling|disgraceful|atrocious|dreadful|(wow|oh),? (great|brilliant|fantastic|wonderful|amazing|excellent) service|thanks for nothing|I('m| am) starting to (wonder|lose|think)|does anyone (actually |even )?(read|check|look at|care|respond)|wonder(ing)? if anyone (reads|listens|cares|checks|responds))\b|[!?]{4,}/i;
+
+const ATTACHMENT_PATTERNS = /\b(attached|attachment|see attached|photo attached|i'?ve attached|file attached|screenshot attached|attaching|i attach)\b/i;
 
 // ── Category Field Config ──
 
@@ -52,6 +78,8 @@ const CATEGORY_FIELD_CONFIG: Record<string, { url: boolean; browser: boolean; er
   account_new_user:   { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Name, email, which systems.' },
   account_permissions:{ url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which user, what access needed.' },
   account_details:    { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What details need updating.' },
+  account_office_change: { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which office/branch, what change.' },
+  account_remove_user:   { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Who needs removing, email address.' },
   email_campaign:     { url: false, browser: false, errorMessage: true,  account: true,  description_hint: 'Which campaign, what went wrong.' },
   email_triggers:     { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which trigger, what should it be doing.' },
   email_template:     { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which template, what changes.' },
@@ -64,6 +92,12 @@ const CATEGORY_FIELD_CONFIG: Record<string, { url: boolean; browser: boolean; er
   listings_tours:     { url: true,  browser: true,  errorMessage: false, account: true,  description_hint: 'Property address or listing ref.' },
   listings_media:     { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'Which property, what images.' },
   listings_management:{ url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which listings, what action.' },
+  property_missing_listing:    { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, where is it missing from.' },
+  property_incorrect_details:  { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, what details are wrong.' },
+  property_media:              { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, what media is affected.' },
+  property_feed_sync:          { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, which portals affected.' },
+  property_status:             { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, what status issue.' },
+  property_visibility:         { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, where is it not visible.' },
   onboarding_branch:  { url: false, browser: false, errorMessage: false, account: false, description_hint: 'Branch name, address, products needed.' },
   onboarding_product: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which product.' },
   onboarding_training:{ url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What training, how many attendees.' },
@@ -81,6 +115,7 @@ const CATEGORY_NAMES: Record<string, string> = {
   leadpro: 'LeadPro & CRM',
   data_feeds: 'Data Feeds & Integrations',
   listings: 'Property Listings',
+  property: 'Property Listings',
   onboarding: 'Onboarding & Setup',
   billing: 'Billing & Contracts',
   other: 'Something Else',
@@ -95,6 +130,8 @@ const SUBCATEGORY_NAMES: Record<string, string> = {
   account_new_user: 'New user',
   account_permissions: 'Permissions',
   account_details: 'Account details',
+  account_office_change: 'Office / branch change',
+  account_remove_user: 'User removal',
   email_campaign: 'Campaign issue',
   email_triggers: 'Triggers / automation',
   email_template: 'Template',
@@ -107,6 +144,12 @@ const SUBCATEGORY_NAMES: Record<string, string> = {
   listings_tours: 'Virtual tours',
   listings_media: 'Property media',
   listings_management: 'Listing management',
+  property_missing_listing: 'Missing listing',
+  property_incorrect_details: 'Incorrect property details',
+  property_media: 'Property photos / media',
+  property_feed_sync: 'Property update issue',
+  property_status: 'Property status issue',
+  property_visibility: 'Property visibility issue',
   onboarding_branch: 'New branch',
   onboarding_product: 'New product',
   onboarding_training: 'Training',
@@ -136,6 +179,13 @@ function emptyFields(): IntakeCollectedFields {
     os: null,
     urgency: 'Normal',
     contactPreference: 'portal',
+    propertyAddress: null,
+    listingId: null,
+    affectedPortals: null,
+    propertyStatus: null,
+    affectedPersonName: null,
+    affectedPersonEmail: null,
+    officeBranch: null,
   };
 }
 
@@ -161,6 +211,250 @@ function parseMetadata(raw: string | null): IntakeSessionMetadata {
   } catch {
     return defaultMetadata();
   }
+}
+
+function normaliseChoice(text: string): string {
+  return text.trim().toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function isAffirmativeResponse(text: string): boolean {
+  return /^(yes|yeah|yep|please do|go ahead|do it|create (a )?ticket|raise (a )?(ticket|request)|submit (it|that)|that sounds good|ok|okay|sure)\b/i.test(text.trim());
+}
+
+function isNegativeResponse(text: string): boolean {
+  return /^(no|nope|not yet|not now|don't|do not|cancel|never mind)\b/i.test(text.trim());
+}
+
+function detectWebsiteFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
+  const lower = content.toLowerCase();
+
+  // Broad website signals: explicit site words, named pages, or URLs
+  const hasWebsiteSignal =
+    /\b(website|web site|webpage|web page|homepage|home page|our site|the site|landing page|our page|contact page|about page|team page|staff page|services page|property page|branch page|office page|footer|header|banner|menu|navigation|nav bar)\b/.test(lower) ||
+    /https?:\/\/[^\s]+/i.test(lower) ||
+    /\b\w+\.(co\.uk|com|org|net|agency)\b/.test(lower);
+
+  if (!hasWebsiteSignal) {
+    // Content-change language that strongly implies website even without explicit "website" word
+    const impliedWebsite = /\b(phone number.*(wrong|incorrect|needs|change|update|outdated|old)|address.*(wrong|incorrect|needs|change|update|outdated|old)|opening hours.*(wrong|incorrect|needs|change|update|outdated|old)|office.*(wrong|incorrect|needs|change|update|outdated|old|details)|branch.*(wrong|incorrect|needs|change|update|outdated|old|details)|contact (details|info|information).*(wrong|incorrect|needs|change|update|outdated|old)|our (phone|number|address|hours|logo|image|photo|office|branch|contact|details).*(wrong|incorrect|outdated|old|needs|change|update))\b/.test(lower);
+    if (!impliedWebsite) return { likely: false, subcategory: null };
+  }
+
+  if (/\b(not working|isn.?t working|broken|error|down|can.?t (access|load|see)|won.?t (load|work|display)|blank|500|404|crash|displaying wrong|shows wrong|isn.?t displaying|not displaying|not loading|won.?t load)\b/.test(lower)) {
+    return { likely: true, subcategory: 'website_broken' };
+  }
+  if (/\b(new page|add a page|add.* page|create.* page|new section|need a page)\b/.test(lower)) {
+    return { likely: true, subcategory: 'website_new_page' };
+  }
+  if (/\b(design|layout|colour|color|font|style|rebrand|look and feel|redesign|theme)\b/.test(lower)) {
+    return { likely: true, subcategory: 'website_design' };
+  }
+  if (/\b(change|update|edit|replace|remove|add|wrong|incorrect|outdated|old|amend|modify|text|wording|image|photo|number|address|phone|hours|logo|staff|team|email address|needs updating|needs changing)\b/.test(lower)) {
+    return { likely: true, subcategory: 'website_content' };
+  }
+  return { likely: true, subcategory: null };
+}
+
+function detectPropertyFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
+  const lower = content.toLowerCase();
+
+  const hasPropertySignal =
+    /\b(property|properties|listing|listings|rightmove|zoopla|onthemarket|on the market|primelocation|prime location)\b/.test(lower) ||
+    /\b(feed|feeds|syndication|portal|portals)\b/.test(lower) && /\b(property|listing|house|flat|apartment|branch|office)\b/.test(lower) ||
+    /\b(floorplan|floor plan|epc|energy performance|virtual tour|property (photo|image|picture))\b/.test(lower) ||
+    /\b(sold|stc|under offer|withdrawn|available|for sale|to let|to rent)\b/.test(lower) && /\b(still|showing|appearing|displaying|not|wrong|incorrect)\b/.test(lower);
+
+  if (!hasPropertySignal) return { likely: false, subcategory: null };
+
+  if (/\b(missing|not showing|not appearing|disappeared|removed|can.?t (see|find)|not (visible|there|listed))\b/.test(lower)) {
+    if (/\b(photo|image|picture|floorplan|floor plan|epc|media|video)\b/.test(lower)) {
+      return { likely: true, subcategory: 'property_media' };
+    }
+    return { likely: true, subcategory: 'property_missing_listing' };
+  }
+  if (/\b(wrong|incorrect|outdated|old|inaccurate|needs (updating|changing)|price|description|address|details)\b/.test(lower)) {
+    return { likely: true, subcategory: 'property_incorrect_details' };
+  }
+  if (/\b(photo|image|picture|floorplan|floor plan|epc|media|video|gallery)\b/.test(lower)) {
+    return { likely: true, subcategory: 'property_media' };
+  }
+  if (/\b(sync|syncing|updating|update|feed|not (appearing|showing) everywhere|delay)\b/.test(lower)) {
+    return { likely: true, subcategory: 'property_feed_sync' };
+  }
+  if (/\b(sold|stc|under offer|withdrawn|available|status|state)\b/.test(lower)) {
+    return { likely: true, subcategory: 'property_status' };
+  }
+  if (/\b(not (visible|showing|displaying)|visibility|hidden|can.?t see)\b/.test(lower)) {
+    return { likely: true, subcategory: 'property_visibility' };
+  }
+
+  return { likely: true, subcategory: null };
+}
+
+function extractPropertyFieldsFromText(content: string, fields: IntakeCollectedFields): void {
+  // Property address — look for street number + name patterns
+  if (!fields.propertyAddress) {
+    const addrMatch = content.match(/\b(\d{1,5}\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}(?:\s+(?:Street|St|Road|Rd|Lane|Ln|Avenue|Ave|Drive|Dr|Close|Cl|Way|Place|Pl|Court|Ct|Crescent|Cres|Terrace|Gardens|Grove|Park|Square|Row|Mews|Hill|Rise|Walk|Green|Gate|Chase|Heath|Meadow|Vale|View)))\b/i);
+    if (addrMatch) fields.propertyAddress = addrMatch[1].trim();
+  }
+
+  // Listing / property ID
+  if (!fields.listingId) {
+    const idMatch = content.match(/\b(?:property|listing|ref(?:erence)?|id)[\s:#]*(\d{4,})\b/i) ||
+                    content.match(/\b(\d{5,})\b/);
+    if (idMatch) fields.listingId = idMatch[1];
+  }
+
+  // Affected portals
+  if (!fields.affectedPortals) {
+    const portals: string[] = [];
+    if (/\brightmove\b/i.test(content)) portals.push('Rightmove');
+    if (/\bzoopla\b/i.test(content)) portals.push('Zoopla');
+    if (/\b(onthemarket|on the market)\b/i.test(content)) portals.push('OnTheMarket');
+    if (/\b(primelocation|prime location)\b/i.test(content)) portals.push('PrimeLocation');
+    if (/\bwebsite\b/i.test(content)) portals.push('Website');
+    if (portals.length > 0) fields.affectedPortals = portals.join(', ');
+  }
+
+  // Property status mentions
+  if (!fields.propertyStatus) {
+    const statusMatch = content.match(/\b(sold|stc|under offer|withdrawn|available|for sale|to let|to rent|let agreed)\b/i);
+    if (statusMatch) fields.propertyStatus = statusMatch[1];
+  }
+}
+
+// ── Account Setup / Office Changes Detection ──
+
+const SECURITY_SENSITIVE_PATTERNS = /\b(remove.*(user|access|account|person|them|him|her|employee)|revoke.*(access|permissions?|login)|delete.*(user|account|access)|deactivate.*(user|account)|left the company|been (fired|let go|terminated|dismissed|made redundant)|no longer (works?|employed|with us)|was (fired|let go|terminated|dismissed|made redundant))\b/i;
+
+function detectAccountFromKeywords(content: string): { likely: boolean; subcategory: string | null; securitySensitive: boolean } {
+  const lower = content.toLowerCase();
+
+  const securitySensitive = SECURITY_SENSITIVE_PATTERNS.test(content);
+  if (securitySensitive) {
+    return { likely: true, subcategory: 'account_remove_user', securitySensitive: true };
+  }
+
+  const hasLoginSignal =
+    /\b(can'?t (log ?in|sign ?in|get ?in|access)|locked out|password.*(not|isn'?t|won'?t|stopped|expired|reset|forgot|forgotten)|forgot(ten)? (my )?password|login (isn'?t|not|won'?t) work|reset (my )?password|sign ?in (problem|issue|error|fail))\b/.test(lower);
+
+  if (hasLoginSignal) {
+    return { likely: true, subcategory: 'account_login', securitySensitive: false };
+  }
+
+  const hasNewUserSignal =
+    /\b(new (user|starter|employee|team member|person|staff|member|joiner)|set ?up.*(user|account|access|person|someone|starter)|add.*(user|person|someone|member|employee)|create.*(user|account|login)|need.*(user|account|access).*(set ?up|creat|add))\b/.test(lower);
+
+  if (hasNewUserSignal) {
+    return { likely: true, subcategory: 'account_new_user', securitySensitive: false };
+  }
+
+  const hasPermissionSignal =
+    /\b(permission|permissions|can'?t see.*(report|data|lead|dashboard|information)|admin access|access.*(wrong|changed|missing|lost|revoked|restricted)|role.*(change|update|wrong)|need access|grant access|give access)\b/.test(lower) &&
+    !/\b(website|web site|page|our site|listing|rightmove|zoopla)\b/.test(lower);
+
+  if (hasPermissionSignal) {
+    return { likely: true, subcategory: 'account_permissions', securitySensitive: false };
+  }
+
+  const hasOfficeSignal =
+    /\b(new (office|branch)|clos(e|ed|ing).*(office|branch)|merg(e|ed|ing).*(office|branch|offices|branches)|moved? offices?|office.*(move|relocation|restructur|closing|opening|merger)|branch.*(move|relocation|restructur|closing|opening|merger|open|new|add))\b/.test(lower) &&
+    !/\b(website|web site|page|our site|shows?|display|address.*wrong|address.*incorrect|address.*outdated)\b/.test(lower);
+
+  if (hasOfficeSignal) {
+    return { likely: true, subcategory: 'account_office_change', securitySensitive: false };
+  }
+
+  const hasAccountDetailSignal =
+    /\b(account.*(detail|setting|config|update|change)|change.*(account|company) (name|detail|address|email)|update.*(account|company) (name|detail|address|email))\b/.test(lower) &&
+    !/\b(website|web site|page|our site)\b/.test(lower);
+
+  if (hasAccountDetailSignal) {
+    return { likely: true, subcategory: 'account_details', securitySensitive: false };
+  }
+
+  return { likely: false, subcategory: null, securitySensitive: false };
+}
+
+function extractAccountFieldsFromText(content: string, fields: IntakeCollectedFields): void {
+  if (!fields.affectedPersonEmail) {
+    const emailMatch = content.match(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})\b/);
+    if (emailMatch) fields.affectedPersonEmail = emailMatch[1];
+  }
+
+  if (!fields.affectedPersonName) {
+    const namePatterns = [
+      /\b(?:remove|set ?up|add|create|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
+      /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s+(?:left|was fired|was let go|has left|is leaving|joined|started|needs?)\b/,
+    ];
+    for (const pattern of namePatterns) {
+      const match = content.match(pattern);
+      if (match) { fields.affectedPersonName = match[1].trim(); break; }
+    }
+  }
+
+  if (!fields.officeBranch) {
+    const branchPatterns = [
+      /\b(?:our |the )?(?:new |old )?(\w+(?:\s+\w+)?)\s+(?:office|branch)\b/i,
+      /\b(?:office|branch)\s+(?:in|at)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/,
+    ];
+    for (const pattern of branchPatterns) {
+      const match = content.match(pattern);
+      if (match && !/\b(new|old|our|the|this|that|my|main|head)\b/i.test(match[1])) {
+        fields.officeBranch = match[1].trim();
+        break;
+      }
+    }
+  }
+}
+
+function detectCrossDomainAmbiguity(content: string): { ambiguous: boolean; domains: string[]; clarificationQuestion: string | null } {
+  const lower = content.toLowerCase();
+
+  const hasAccountSignals = /\b(can'?t (see|access|get|log)|permission|new (user|starter|office|branch)|locked out|password)\b/.test(lower);
+  const hasWebsiteSignals = /\b(website|web site|our site|the site|page|homepage|display|showing)\b/.test(lower);
+  const hasPropertySignals = /\b(property|properties|listing|listings|rightmove|zoopla|onthemarket)\b/.test(lower);
+  const hasDataSignals = /\b(report|data|leads?|performance|dashboard)\b/.test(lower) && !hasAccountSignals;
+
+  const domains: string[] = [];
+  if (hasAccountSignals) domains.push('account');
+  if (hasWebsiteSignals) domains.push('website');
+  if (hasPropertySignals) domains.push('property');
+  if (hasDataSignals) domains.push('data');
+
+  if (domains.length <= 1) return { ambiguous: false, domains, clarificationQuestion: null };
+
+  // Website display + office/account context → website wins, no disambiguation needed
+  if (hasWebsiteSignals && /\b(shows?|display|address|wrong|incorrect|outdated|old|updating|update)\b/.test(lower)) {
+    return { ambiguous: false, domains: ['website'], clarificationQuestion: null };
+  }
+
+  // Property signals + account context → property wins if listing-specific vocabulary present
+  if (hasPropertySignals && !hasAccountSignals) {
+    return { ambiguous: false, domains: ['property'], clarificationQuestion: null };
+  }
+
+  // Genuine ambiguity — build a symptom-focused clarification question
+  let question: string | null = null;
+
+  if (domains.includes('account') && domains.includes('website')) {
+    question = "What specifically isn't working — is it that you can't log in or access something, or is something displaying incorrectly on the website?";
+  } else if (domains.includes('account') && domains.includes('data')) {
+    if (/\bnew\b/.test(lower)) {
+      question = "Is this for someone or something that was recently set up, or has it been working before and stopped?";
+    } else {
+      question = "What happens when you try to access this — do you get an error, or can you get in but the information just isn't there?";
+    }
+  } else if (domains.includes('account') && domains.includes('property')) {
+    question = "Is this about the property listing itself, or about being able to access or manage the property in the system?";
+  }
+
+  return { ambiguous: question !== null, domains, clarificationQuestion: question };
+}
+
+function extractUrlFromText(content: string): string | null {
+  const match = content.match(/https?:\/\/[^\s<>"{}|\\^`\[\]]+/i);
+  return match ? match[0].replace(/[.,;:!?)]+$/, '') : null;
 }
 
 export class PortalChatService {
@@ -254,8 +548,10 @@ export class PortalChatService {
           const ticketKey = await this.forceHandoff(meta, context, sessionId, history);
           responseContent = `I've gone ahead and created ticket **${ticketKey}** with the details we've gathered so far. A team member will follow up with you.`;
           meta.stage = 'confirmed';
-        } else if (userMessageCount >= handoffThreshold && meta.stage !== 'kb_check') {
+          meta.offeredTicketCreation = false;
+        } else if (userMessageCount >= handoffThreshold && meta.stage !== 'kb_check' && !meta.offeredTicketCreation) {
           responseContent += '\n\nWould you like me to create a ticket so a team member can assist directly?';
+          meta.offeredTicketCreation = true;
         }
       }
     } catch (err) {
@@ -264,6 +560,7 @@ export class PortalChatService {
       console.error(`[portal-chat] Stage processing failed for session ${sessionId}, stage=${meta.stage}, intent=${meta.intent}:`, errMsg);
       if (errStack) console.error('[portal-chat] Stack:', errStack);
       responseContent = "I'm having trouble processing your request right now. Would you like me to create a support ticket so our team can help you directly?";
+      meta.offeredTicketCreation = true;
     }
 
     // Persist updated metadata (best-effort — don't let this block the response)
@@ -313,11 +610,57 @@ export class PortalChatService {
     const stage = meta.stage;
     console.log(`[portal-chat] session=${sessionId} stage=${stage} intent=${meta.intent} category=${meta.category}`);
 
+    if (meta.offeredTicketCreation && stage !== 'confirmed') {
+      if (isAffirmativeResponse(content)) {
+        meta.offeredTicketCreation = false;
+        const ticketKey = await this.forceHandoff(meta, context, sessionId, history);
+        return {
+          response: `I've created ticket **${ticketKey}** with the information you've shared so far. You can track its progress in **My Tickets**, and our team will follow up if anything else is needed.`,
+        };
+      }
+
+      if (isNegativeResponse(content)) {
+        meta.offeredTicketCreation = false;
+      }
+    }
+
     // Frustration override — offer handoff immediately from any stage except confirmed
     if (meta.frustrationDetected && stage !== 'confirmed' && stage !== 'summary') {
       meta.frustrationDetected = false; // consume the flag
+      meta.offeredTicketCreation = true;
+
+      // Preserve operational detail from the frustration message before empathy return
+      extractPropertyFieldsFromText(content, meta.collectedFields);
+      extractAccountFieldsFromText(content, meta.collectedFields);
+      if (!meta.collectedFields.description) {
+        meta.collectedFields.description = content;
+      }
+      if (!meta.category) {
+        const propertyDetection = detectPropertyFromKeywords(content);
+        if (propertyDetection.likely) {
+          meta.category = 'property';
+          meta.conversational = true;
+          meta.subcategory = propertyDetection.subcategory || 'property_visibility';
+        } else {
+          const accountDetection = detectAccountFromKeywords(content);
+          if (accountDetection.likely) {
+            meta.category = 'account';
+            meta.conversational = true;
+            meta.subcategory = accountDetection.subcategory || 'account_login';
+            if (accountDetection.securitySensitive) {
+              meta.securitySensitive = true;
+              meta.collectedFields.urgency = 'High';
+            }
+          }
+        }
+      }
+      if (ATTACHMENT_PATTERNS.test(content)) {
+        meta.attachmentMentioned = true;
+      }
+
+      const empathy = this.buildEmpathyAcknowledgement(meta);
       return {
-        response: "I can see this is frustrating — I'm sorry. Would you like me to create a ticket right now so a member of our team can help you directly? Just say yes and I'll put one together for you.",
+        response: `${empathy} Would you like me to create a ticket right now so a member of our team can help you directly? Just say yes and I'll put one together for you.`,
       };
     }
 
@@ -347,7 +690,7 @@ export class PortalChatService {
     }
   }
 
-  // ── Stage 1: Intent Classification ──
+  // ── Stage 1: Conversational Intent + Classification ──
 
   private async handleIntentStage(
     meta: IntakeSessionMetadata,
@@ -355,90 +698,579 @@ export class PortalChatService {
     context: ChatContext,
     sessionId: number,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
-    if (!this.llm) {
-      meta.stage = 'category';
-      meta.intent = 'problem';
-      const q = this.buildCategoryQuestion();
-      return { response: q.text, messageMeta: q.messageMeta };
+    // Always capture opening message verbatim — this is the highest-quality signal
+    if (!meta.collectedFields.description) {
+      meta.collectedFields.description = content;
+    }
+    if (!meta.openingMessage) {
+      meta.openingMessage = content;
+    }
+
+    // Extract URL via regex (reliable, no LLM needed)
+    const detectedUrl = extractUrlFromText(content);
+    if (detectedUrl) meta.collectedFields.url = detectedUrl;
+
+    // Detect urgency / contact preference from language
+    if (/\b(urgent|emergency|down|critical|asap)\b/i.test(content)) {
+      meta.collectedFields.urgency = 'High';
+    }
+    if (/\b(call me|phone me|ring me)\b/i.test(content)) {
+      meta.collectedFields.contactPreference = 'phone';
+    } else if (/\bemail me\b/i.test(content)) {
+      meta.collectedFields.contactPreference = 'email';
+    }
+
+    // Detect attachment mentions
+    if (ATTACHMENT_PATTERNS.test(content)) {
+      meta.attachmentMentioned = true;
+    }
+
+    // Extract domain-specific fields from opening message
+    extractPropertyFieldsFromText(content, meta.collectedFields);
+    extractAccountFieldsFromText(content, meta.collectedFields);
+
+    if (this.llm) {
+      return this.handleIntentWithLlm(meta, content, context, sessionId);
+    }
+    return this.handleIntentWithoutLlm(meta, content);
+  }
+
+  private async handleIntentWithLlm(
+    meta: IntakeSessionMetadata,
+    content: string,
+    context: ChatContext,
+    sessionId: number,
+  ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
+    // H1: Security-sensitive fast-track — pre-empt LLM entirely for urgent removal/revocation.
+    // These signals are unambiguous and must never reach the category picker or disambiguation.
+    if (SECURITY_SENSITIVE_PATTERNS.test(content)) {
+      meta.category = 'account';
+      meta.subcategory = 'account_remove_user';
+      meta.conversational = true;
+      meta.securitySensitive = true;
+      meta.collectedFields.urgency = 'High';
+      meta.stage = 'detail';
+      extractAccountFieldsFromText(content, meta.collectedFields);
+
+      const personName = meta.collectedFields.affectedPersonName;
+      const personEmail = meta.collectedFields.affectedPersonEmail;
+
+      if (personName && personEmail) {
+        const summaryResult = this.buildSummaryCard(meta);
+        return {
+          response: `Understood — I'll get this raised urgently.\n\n${summaryResult.response}`,
+          messageMeta: summaryResult.messageMeta,
+        };
+      }
+
+      const missing = !personEmail ? 'email address' : 'name';
+      return { response: `Understood — I'll get this raised urgently. Could you confirm their ${missing} so I can get this raised?` };
+    }
+
+    // H1b: Frustration + urgency fast-track — frustrated customers with domain signals skip LLM classification
+    if (meta.frustrationDetected && SECURITY_SENSITIVE_PATTERNS.test(content)) {
+      meta.frustrationDetected = false;
+      meta.category = 'account';
+      meta.subcategory = 'account_remove_user';
+      meta.securitySensitive = true;
+      meta.collectedFields.urgency = 'High';
+      meta.stage = 'detail';
+      extractAccountFieldsFromText(content, meta.collectedFields);
+      const missing = !meta.collectedFields.affectedPersonEmail ? 'email address' : 'name';
+      return { response: `I understand this is urgent — I'll get this raised right away. Could you confirm their ${missing}?` };
     }
 
     try {
-      const result = await this.llm.call(
-        `You are classifying a customer support message. Determine the intent:
-- "problem": something is broken, not working, an error, or unexpected behavior
-- "change": content update, new user setup, configuration change, service modification
-- "question": how do I...?, what is...?, general enquiry
-- "status": checking on an existing ticket or request
+      const result = await this.llm!.call(
+        `You are a support assistant for a web technology company (estate agent websites, email marketing, CRM, property feeds). A customer has just described their issue.
 
-Also extract any fields already mentioned. Return JSON.`,
+Analyse the message and return structured JSON:
+
+1. INTENT — what they need:
+   - problem: something is broken, not working, showing errors
+   - change: content update, modification, new setup
+   - question: how to, what is, general enquiry
+   - status: checking on an existing ticket or request
+
+2. WEBSITE CLASSIFICATION — is this about their website?
+   Set isWebsiteRelated=true ONLY for website content, design, or functionality issues.
+   Set isWebsiteRelated=false for: email marketing, CRM/LeadPro, account/login, data feeds, billing, property portal feeds (Rightmove/Zoopla), property listings, or unclear requests.
+   IMPORTANT: Requests to correct business details (phone numbers, addresses, opening hours, office/branch details, contact information) are almost always website content updates — set isWebsiteRelated=true and websiteSubcategory=website_content for these.
+   If website-related, classify:
+   - website_content: updating text, images, phone numbers, addresses, staff details, opening hours, branch/office details, contact information on an existing page
+   - website_broken: something on the website is not working, displaying wrong, or erroring
+   - website_new_page: requesting a new page to be added to the website
+   - website_design: visual/layout/styling changes, redesign requests
+
+3. PROPERTY / LISTING CLASSIFICATION — is this about a property listing?
+   Set isPropertyRelated=true for issues with: property listings, Rightmove/Zoopla/OnTheMarket feeds, property photos/floorplans/EPCs, listing visibility, property sync, sold/STC status, property details being wrong on portals, missing listings, feed issues.
+   Set isPropertyRelated=false for: website design/content (even if the website shows properties), account/login, email marketing, billing, or unclear requests.
+   IMPORTANT: If a customer mentions a property not showing "on the website" AND also mentions portals (Rightmove/Zoopla), prefer isPropertyRelated=true.
+   If someone says "property isn't showing" without specifying where, set isPropertyRelated=true (it's more likely a listing/feed issue than a website issue).
+   If property-related, classify:
+   - property_missing_listing: listing not appearing on a portal or website
+   - property_incorrect_details: wrong price, description, address, or other details
+   - property_media: missing or wrong photos, floorplans, EPCs, virtual tours
+   - property_feed_sync: updates not appearing across portals, sync delays
+   - property_status: sold/STC/withdrawn properties showing wrong status
+   - property_visibility: general visibility problems, listing hidden or not findable
+
+4. ACCOUNT / ACCESS CLASSIFICATION — login, users, permissions, office/branch changes.
+   Set isAccountRelated=true for: login/password, new user setup, user removal, permission/access, office/branch changes, account config.
+   Set isAccountRelated=false for: website content/design, property listings, email marketing, billing, or unclear requests.
+   Routing rules: "can't log in to update the website" → login (isAccountRelated=true). "Website shows wrong office address" → website display (isWebsiteRelated=true). User removal/access revocation → SECURITY-SENSITIVE (accountSubcategory=account_remove_user, urgent).
+   Subcategories: account_login, account_new_user, account_permissions, account_details, account_office_change, account_remove_user.
+
+5. FIELD EXTRACTION — capture details already provided. Include subject, account, description, url, errorMessage, browser, urgency (only if explicit), propertyAddress, listingId, affectedPortals. Preserve the customer's exact words in description — do not rewrite or summarise. If they mention a phone number, include the phone number. If they mention an address, include the address verbatim.
+
+6. ACKNOWLEDGMENT — write 1-2 sentences that MIRROR the customer's specific details back to them. This is critical:
+   - Reflect specific nouns: names, addresses, phone numbers, locations, error messages, quantities, timelines, reference numbers
+   - Use the customer's own words and phrasing, not your summary of them
+   - If they said "the phone number on our contact page is wrong — it shows 01onal 555 1234 but should be 0161 555 6789", your acknowledgement MUST include both numbers and "contact page"
+   - If they mentioned multiple issues, acknowledge ALL of them, not just the primary one
+   - NEVER paraphrase away specifics. "I can help with that update" is a violation. "I can see the phone number on your contact page needs updating from 0161 555 1234 to 0161 555 6789" is correct.
+   VOCABULARY FIREWALL — never use ANY of these terms in the acknowledgement or any customer-facing text:
+   - Technical: feed, syndication, API, integration, CRM sync, data feed, data pipeline, webhook, endpoint
+   - Account/access internal: RBAC, provisioning, deprovisioning, authentication, authorisation, access control, role-based, permission matrix, scopes, entities, service account, SSO, SAML, identity provider
+   - Classification: triage, categorise, classify, route, intake, subcategory
+   Use the customer's own language. If they said "can't get in", say "can't get in", not "authentication issue".
+
+7. NEXT QUESTION — if you need more information to action this, write ONE natural follow-up question. Only ask for what's genuinely missing. If they've given enough detail, omit this field. Never ask the customer to diagnose the technical cause or identify which system is at fault. Never ask "which system" or "which platform".
+
+8. MULTI-ISSUE HANDLING — if the customer describes more than one issue (e.g. "I'm locked out AND the new users aren't set up"), capture ALL issues in the description field as separate items. The acknowledgement must reference every issue they raised. Do not collapse multiple issues into a single category.
+
+9. READY FOR CONFIRMATION — set readyForConfirmation=true if you have at minimum: what the problem is AND which property or account is affected. Otherwise false.
+
+Set confidence 0.0-1.0 for how certain you are about the classification. If both isWebsiteRelated and isPropertyRelated could apply, set the more specific one to true and the other to false.`,
         content,
-        IntentSchema,
-        { callType: 'portal_chat', tier: 'standard', maxTokens: 300, temperature: 0.1 },
+        ConversationalIntakeSchema,
+        { callType: 'portal_chat', tier: 'standard', maxTokens: 500, temperature: 0.2 },
       );
 
-      meta.intent = result.data.intent;
+      const d = result.data;
+      meta.intent = d.intent;
 
-      // Extract any fields the user already provided
-      if (result.data.subject) meta.collectedFields.subject = result.data.subject;
-      if (result.data.account) meta.collectedFields.account = result.data.account;
-      if (result.data.description) meta.collectedFields.description = result.data.description;
-      if (result.data.urgency) meta.collectedFields.urgency = result.data.urgency;
-
-      // Detect urgency from language
-      if (!result.data.urgency && /\b(urgent|emergency|down|critical|asap|broken)\b/i.test(content)) {
-        meta.collectedFields.urgency = 'High';
-      }
-      if (/\b(call me|phone me|ring me)\b/i.test(content)) {
-        meta.collectedFields.contactPreference = 'phone';
-      } else if (/\bemail me\b/i.test(content)) {
-        meta.collectedFields.contactPreference = 'email';
-      }
-    } catch (err) {
-      console.warn('[portal-chat] Intent classification failed, defaulting to problem:', err instanceof Error ? err.message : err);
-      meta.intent = 'problem';
-      meta.collectedFields.description = content;
-    }
-
-    // Route by intent
-    if (meta.intent === 'status') {
-      try {
-        return await this.handleStatusIntent(meta, content, context);
-      } catch (err) {
-        console.warn('[portal-chat] Status lookup failed, falling through to category:', err instanceof Error ? err.message : err);
-      }
-    }
-
-    if (meta.intent === 'question') {
-      try {
-        const kbResult = await this.searchKb(content);
-        if (kbResult.length > 0) {
-          meta.stage = 'kb_check';
-          meta.kbSuggested = true;
-          return {
-            response: 'I found some articles that might help:',
-            messageMeta: {
-              type: 'kb_suggestions' as const,
-              articles: kbResult.map(a => ({ id: 0, title: a.title, excerpt: a.excerpt })),
-            },
-          };
+      // Populate extracted fields (don't overwrite URL from regex)
+      if (d.subject) meta.collectedFields.subject = d.subject;
+      if (d.account) meta.collectedFields.account = d.account;
+      if (d.url && !meta.collectedFields.url) meta.collectedFields.url = d.url;
+      if (d.errorMessage) meta.collectedFields.errorMessage = d.errorMessage;
+      if (d.browser) meta.collectedFields.browser = d.browser;
+      if (d.urgency) meta.collectedFields.urgency = d.urgency;
+      if (d.propertyAddress) meta.collectedFields.propertyAddress = d.propertyAddress;
+      if (d.listingId) meta.collectedFields.listingId = d.listingId;
+      if (d.affectedPortals) meta.collectedFields.affectedPortals = d.affectedPortals;
+      // Never replace raw customer message with LLM summary — it loses operational detail.
+      // If the LLM extracted additional context, append it; otherwise keep raw message intact.
+      if (d.description && meta.openingMessage && d.description !== meta.openingMessage) {
+        const raw = meta.openingMessage;
+        const llmAdds = d.description;
+        // Only append LLM enrichment if it contains info not already in the raw message
+        const rawLower = raw.toLowerCase();
+        if (!rawLower.includes(llmAdds.toLowerCase().slice(0, 40))) {
+          meta.collectedFields.description = `${raw}\n\n${llmAdds}`;
         }
-        // No KB results — log the gap
-        await this.logKbGap(content, meta.category, sessionId);
-      } catch (err) {
-        console.warn('[portal-chat] KB search failed, falling through to category:', err instanceof Error ? err.message : err);
+        // else: LLM just rephrased the same content — keep raw
+      }
+
+      // Route status intent
+      if (d.intent === 'status') {
+        try {
+          return await this.handleStatusIntent(meta, content, context);
+        } catch (err) {
+          console.warn('[portal-chat] Status lookup failed:', err instanceof Error ? err.message : err);
+        }
+      }
+
+      // Route question intent — try KB first
+      if (d.intent === 'question') {
+        try {
+          const kbResult = await this.searchKb(content);
+          if (kbResult.length > 0) {
+            meta.stage = 'kb_check';
+            meta.kbSuggested = true;
+            return {
+              response: 'I found some articles that might help:',
+              messageMeta: {
+                type: 'kb_suggestions' as const,
+                articles: kbResult.map(a => ({ id: 0, title: a.title, excerpt: a.excerpt })),
+              },
+            };
+          }
+          await this.logKbGap(content, meta.category, sessionId);
+        } catch (err) {
+          console.warn('[portal-chat] KB search failed:', err instanceof Error ? err.message : err);
+        }
+      }
+
+      // Website conversational intake — the core behavioural change
+      if (d.isWebsiteRelated && d.confidence >= 0.6) {
+        meta.category = 'website';
+        meta.conversational = true;
+
+        if (d.websiteSubcategory) {
+          meta.subcategory = d.websiteSubcategory;
+          meta.stage = 'detail';
+
+          const config = CATEGORY_FIELD_CONFIG[meta.subcategory] || CATEGORY_FIELD_CONFIG['other_general']!;
+          const missing = this.getMissingFields(meta.collectedFields, config);
+
+          if (missing.length === 0) {
+            const ack = d.acknowledgment || 'Thanks for providing all those details.';
+            const summaryResult = this.buildSummaryCard(meta);
+            return {
+              response: `${ack}\n\n${summaryResult.response}`,
+              messageMeta: summaryResult.messageMeta,
+            };
+          }
+
+          const ack = d.acknowledgment;
+          const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
+          const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+          return { response: `${ack}\n\n${question}${fileNote}` };
+        }
+
+        // Website-related but no specific subcategory — conversational clarification
+        meta.stage = 'detail';
+        meta.subcategory = 'website_content'; // default, may refine later
+        const ack = d.acknowledgment || "Thanks for getting in touch about your website.";
+        const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+        return { response: `${ack}\n\nCould you tell me a bit more — is something not displaying correctly, or do you need some content updated?${fileNote}` };
+      }
+
+      // Moderate confidence (0.4–0.6) — possibly website, ask conversationally instead of showing category picker
+      if (d.isWebsiteRelated && d.confidence >= 0.4) {
+        meta.conversational = true;
+        meta.category = 'website';
+        meta.subcategory = 'website_content';
+        meta.stage = 'detail';
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
+        const fileNote2 = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+        return { response: `${ack}\n\nCould you tell me a bit more about what needs to happen?${fileNote2}` };
+      }
+
+      // Property / listing conversational intake
+      if (d.isPropertyRelated && d.confidence >= 0.6) {
+        meta.category = 'property';
+        meta.conversational = true;
+
+        // Extract property-specific fields from text via regex too
+        extractPropertyFieldsFromText(content, meta.collectedFields);
+
+        if (d.propertySubcategory) {
+          meta.subcategory = d.propertySubcategory;
+          meta.stage = 'detail';
+
+          const config = CATEGORY_FIELD_CONFIG[meta.subcategory] || CATEGORY_FIELD_CONFIG['property_visibility']!;
+          const missing = this.getPropertyMissingFields(meta.collectedFields, meta.subcategory);
+
+          if (missing.length === 0) {
+            const ack = d.acknowledgment || 'Thanks for providing all those details.';
+            const summaryResult = this.buildSummaryCard(meta);
+            return {
+              response: `${ack}\n\n${summaryResult.response}`,
+              messageMeta: summaryResult.messageMeta,
+            };
+          }
+
+          const ack = d.acknowledgment;
+          const question = d.nextQuestion || this.buildPropertyFollowUp(missing[0], meta);
+          const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+          return { response: `${ack}\n\n${question}${fileNote}` };
+        }
+
+        // Property-related but no specific subcategory — ask conversationally
+        meta.stage = 'detail';
+        meta.subcategory = 'property_visibility';
+        const ack = d.acknowledgment || "Thanks for getting in touch about your property listing.";
+        const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+        return { response: `${ack}\n\nCould you tell me which property is affected and where you're seeing the issue?${fileNote}` };
+      }
+
+      // Moderate confidence (0.4–0.6) for property — ask conversationally
+      if (d.isPropertyRelated && d.confidence >= 0.4) {
+        meta.conversational = true;
+        meta.category = 'property';
+        meta.subcategory = 'property_visibility';
+        meta.stage = 'detail';
+        extractPropertyFieldsFromText(content, meta.collectedFields);
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
+        const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+        return { response: `${ack}\n\nCould you tell me a bit more about what's happening with the property?${fileNote}` };
+      }
+
+      // Account / access / office change conversational intake
+      if (d.isAccountRelated && d.confidence >= 0.6) {
+        meta.category = 'account';
+        meta.conversational = true;
+        extractAccountFieldsFromText(content, meta.collectedFields);
+
+        // Security-sensitive fast-track: user removal / access revocation
+        if (d.accountSubcategory === 'account_remove_user' || SECURITY_SENSITIVE_PATTERNS.test(content)) {
+          meta.subcategory = 'account_remove_user';
+          meta.securitySensitive = true;
+          meta.collectedFields.urgency = 'High';
+          meta.stage = 'detail';
+
+          const ack = d.acknowledgment || "Understood — I'll get this raised urgently.";
+          const personName = meta.collectedFields.affectedPersonName;
+          const personEmail = meta.collectedFields.affectedPersonEmail;
+
+          if (personName && personEmail) {
+            const summaryResult = this.buildSummaryCard(meta);
+            return {
+              response: `${ack}\n\n${summaryResult.response}`,
+              messageMeta: summaryResult.messageMeta,
+            };
+          }
+
+          const missing = !personEmail ? 'email address' : 'name';
+          return { response: `${ack} Could you confirm their ${missing} so I can get this raised?` };
+        }
+
+        if (d.accountSubcategory) {
+          meta.subcategory = d.accountSubcategory;
+          meta.stage = 'detail';
+
+          const missing = this.getAccountMissingFields(meta.collectedFields, meta.subcategory);
+          if (missing.length === 0) {
+            const ack = d.acknowledgment || 'Thanks for providing all those details.';
+            const summaryResult = this.buildSummaryCard(meta);
+            return {
+              response: `${ack}\n\n${summaryResult.response}`,
+              messageMeta: summaryResult.messageMeta,
+            };
+          }
+
+          const ack = d.acknowledgment;
+          const question = d.nextQuestion || this.buildAccountFollowUp(missing[0], meta);
+          return { response: `${ack}\n\n${question}` };
+        }
+
+        // Account-related but no specific subcategory — conversational follow-up
+        meta.stage = 'detail';
+        meta.subcategory = 'account_login';
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
+        return { response: `${ack}\n\nCould you tell me a bit more about what's happening?` };
+      }
+
+      // Moderate confidence (0.4–0.6) for account — ask conversationally
+      if (d.isAccountRelated && d.confidence >= 0.4) {
+        meta.conversational = true;
+        meta.category = 'account';
+        meta.subcategory = 'account_login';
+        meta.stage = 'detail';
+        extractAccountFieldsFromText(content, meta.collectedFields);
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
+        return { response: `${ack}\n\nCould you tell me a bit more about what you need?` };
+      }
+
+      // Cross-domain disambiguation check — only when no single domain won above
+      const ambiguity = detectCrossDomainAmbiguity(content);
+      if (ambiguity.ambiguous && ambiguity.clarificationQuestion && !meta.disambiguationAsked) {
+        meta.disambiguationAsked = true;
+        meta.disambiguationDomain = ambiguity.domains.join(',');
+        meta.stage = 'detail';
+        meta.conversational = true;
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
+        return { response: `${ack}\n\n${ambiguity.clarificationQuestion}` };
+      }
+
+      // H2: Vague-but-domain-signalled fallback — if ANY domain signal is present,
+      // route to conversational clarification instead of the category picker.
+      // The picker is the last resort for genuinely unclassifiable input only.
+      const vagueAccountSignal = detectAccountFromKeywords(content);
+      const vagueWebsiteSignal = detectWebsiteFromKeywords(content);
+      const vaguePropertySignal = detectPropertyFromKeywords(content);
+
+      if (vagueAccountSignal.likely) {
+        meta.category = 'account';
+        meta.conversational = true;
+        meta.subcategory = vagueAccountSignal.subcategory || 'account_login';
+        meta.stage = 'detail';
+        extractAccountFieldsFromText(content, meta.collectedFields);
+        if (vagueAccountSignal.securitySensitive) {
+          meta.securitySensitive = true;
+          meta.collectedFields.urgency = 'High';
+          const missing = !meta.collectedFields.affectedPersonEmail ? 'email address' : 'name';
+          return { response: `Understood — I'll get this raised urgently. Could you confirm their ${missing} so I can get this raised?` };
+        }
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
+        return { response: `${ack}\n\nCould you tell me a bit more about what's happening?` };
+      }
+
+      if (vagueWebsiteSignal.likely) {
+        meta.category = 'website';
+        meta.conversational = true;
+        meta.subcategory = vagueWebsiteSignal.subcategory || 'website_content';
+        meta.stage = 'detail';
+        const ack = d.acknowledgment || "Thanks for getting in touch about your website.";
+        return { response: `${ack}\n\nCould you tell me a bit more — is something not displaying correctly, or do you need some content updated?` };
+      }
+
+      if (vaguePropertySignal.likely) {
+        meta.category = 'property';
+        meta.conversational = true;
+        meta.subcategory = vaguePropertySignal.subcategory || 'property_visibility';
+        meta.stage = 'detail';
+        extractPropertyFieldsFromText(content, meta.collectedFields);
+        const ack = d.acknowledgment || "Thanks for getting in touch about your property listing.";
+        return { response: `${ack}\n\nCould you tell me which property is affected and where you're seeing the issue?` };
+      }
+
+      // Genuinely unclassifiable — no domain signal detected at all. Category picker is appropriate.
+      meta.stage = 'category';
+      const prefix = d.intent === 'change'
+        ? "Thanks — I'll help you get that change request submitted."
+        : d.intent === 'question'
+          ? "I couldn't find a direct answer in our knowledge base, but let me help you get in touch with the right team."
+          : "Sorry to hear you're having trouble — let me help you get this sorted.";
+
+      const q = this.buildCategoryQuestion();
+      return { response: `${prefix}\n\n${q.text}`, messageMeta: q.messageMeta };
+    } catch (err) {
+      console.warn('[portal-chat] Conversational intake LLM call failed:', err instanceof Error ? err.message : err);
+      return this.handleIntentWithoutLlm(meta, content);
+    }
+  }
+
+  private handleIntentWithoutLlm(
+    meta: IntakeSessionMetadata,
+    content: string,
+  ): { response: string; messageMeta?: ChatMessageMetadata } {
+    // Check property first when portal indicators are present — avoids
+    // website detection winning on messages like "not showing on Zoopla or our website"
+    const propertyDetection = detectPropertyFromKeywords(content);
+    if (propertyDetection.likely) {
+      return this.handlePropertyFallback(meta, content, propertyDetection);
+    }
+
+    // Account / access / office change detection (before website, to catch login/access)
+    const accountDetection = detectAccountFromKeywords(content);
+    if (accountDetection.likely) {
+      // But check if website display is the actual complaint — website wins in that case
+      const websiteCheck = detectWebsiteFromKeywords(content);
+      if (websiteCheck.likely && /\b(website|web site|our site|the site|page|display|showing)\b/i.test(content) && /\b(wrong|incorrect|outdated|old|shows?|update|change)\b/i.test(content)) {
+        // Website display complaint takes priority — fall through to website detection below
+      } else {
+        return this.handleAccountFallback(meta, content, accountDetection);
       }
     }
 
-    // Move to category stage
-    meta.stage = 'category';
-    const prefix = meta.intent === 'change'
-      ? "Thanks — I'll help you get that change request submitted."
-      : meta.intent === 'question'
-        ? "I couldn't find a direct answer in our knowledge base, but let me help you get in touch with the right team."
-        : "Sorry to hear you're having trouble — let me help you get this sorted.";
+    const websiteDetection = detectWebsiteFromKeywords(content);
 
+    if (websiteDetection.likely) {
+      meta.intent = /\b(not working|isn.?t working|broken|error|down|can.?t|won.?t)\b/i.test(content) ? 'problem' : 'change';
+      meta.category = 'website';
+      meta.conversational = true;
+      meta.stage = 'detail';
+
+      if (websiteDetection.subcategory) {
+        meta.subcategory = websiteDetection.subcategory;
+
+        const config = CATEGORY_FIELD_CONFIG[meta.subcategory] || CATEGORY_FIELD_CONFIG['other_general']!;
+        const missing = this.getMissingFields(meta.collectedFields, config);
+
+        if (missing.length === 0) {
+          return this.buildSummaryCard(meta);
+        }
+
+        const nextMissing = missing.find(f => f !== 'description') || missing[0];
+        const question = this.buildConversationalQuestion(nextMissing, meta);
+        const ack = this.buildTemplateAcknowledgement(meta);
+        const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+        return { response: `${ack} ${question}${fileNote}` };
+      }
+
+      // Website likely but can't determine subcategory — ask conversationally
+      meta.subcategory = 'website_content';
+      const ack = this.buildTemplateAcknowledgement(meta);
+      const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+      return { response: `${ack} Could you tell me a bit more — is something not displaying correctly, or do you need some content updated?${fileNote}` };
+    }
+
+    // Not recognisably a website or property request — fall through to category picker
+    meta.intent = 'problem';
+    meta.stage = 'category';
     const q = this.buildCategoryQuestion();
-    return { response: `${prefix}\n\n${q.text}`, messageMeta: q.messageMeta };
+    return { response: q.text, messageMeta: q.messageMeta };
+  }
+
+  private handlePropertyFallback(
+    meta: IntakeSessionMetadata,
+    content: string,
+    detection: { likely: boolean; subcategory: string | null },
+  ): { response: string; messageMeta?: ChatMessageMetadata } {
+    meta.intent = 'problem';
+    meta.category = 'property';
+    meta.conversational = true;
+    meta.stage = 'detail';
+    extractPropertyFieldsFromText(content, meta.collectedFields);
+
+    if (detection.subcategory) {
+      meta.subcategory = detection.subcategory;
+      const missing = this.getPropertyMissingFields(meta.collectedFields, meta.subcategory);
+
+      if (missing.length === 0) {
+        return this.buildSummaryCard(meta);
+      }
+
+      const question = this.buildPropertyFollowUp(missing[0], meta);
+      const propAck = this.buildTemplateAcknowledgement(meta);
+      const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+      return { response: `${propAck} ${question}${fileNote}` };
+    }
+
+    meta.subcategory = 'property_visibility';
+    const propAck = this.buildTemplateAcknowledgement(meta);
+    const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+    return { response: `${propAck} Could you tell me which property is affected and where you're seeing the issue?${fileNote}` };
+  }
+
+  private handleAccountFallback(
+    meta: IntakeSessionMetadata,
+    content: string,
+    detection: { likely: boolean; subcategory: string | null; securitySensitive: boolean },
+  ): { response: string; messageMeta?: ChatMessageMetadata } {
+    meta.intent = 'change';
+    meta.category = 'account';
+    meta.conversational = true;
+    meta.stage = 'detail';
+    extractAccountFieldsFromText(content, meta.collectedFields);
+
+    if (detection.securitySensitive) {
+      meta.subcategory = 'account_remove_user';
+      meta.securitySensitive = true;
+      meta.collectedFields.urgency = 'High';
+
+      const personName = meta.collectedFields.affectedPersonName;
+      const personEmail = meta.collectedFields.affectedPersonEmail;
+
+      if (personName && personEmail) {
+        return this.buildSummaryCard(meta);
+      }
+
+      const ack = "Understood — I'll get this raised urgently.";
+      const missing = !personEmail ? 'email address' : 'name';
+      return { response: `${ack} Could you confirm their ${missing} so I can get this raised?` };
+    }
+
+    if (detection.subcategory) {
+      meta.subcategory = detection.subcategory;
+      const missing = this.getAccountMissingFields(meta.collectedFields, meta.subcategory);
+
+      if (missing.length === 0) {
+        return this.buildSummaryCard(meta);
+      }
+
+      const ack = this.buildAccountAcknowledgement(meta);
+      const question = this.buildAccountFollowUp(missing[0], meta);
+      return { response: `${ack} ${question}` };
+    }
+
+    meta.subcategory = 'account_login';
+    const ack = this.buildAccountAcknowledgement(meta);
+    return { response: `${ack} Could you tell me a bit more about what's happening?` };
   }
 
   // ── Status Intent ──
@@ -501,6 +1333,17 @@ Also extract any fields already mentioned. Return JSON.`,
     content: string,
     context: ChatContext,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
+    const explicitChoice = this.matchCategoryOrSubcategoryChoice(content);
+    if (explicitChoice.category) {
+      meta.category = explicitChoice.category;
+      if (explicitChoice.subcategory) {
+        meta.subcategory = explicitChoice.subcategory;
+        meta.stage = 'detail';
+        return { response: this.buildFirstDetailQuestion(meta) };
+      }
+      return this.askSubcategory(meta, explicitChoice.category);
+    }
+
     // If we already have a category (e.g. user picked from the list), check for subcategory
     if (meta.category && !meta.subcategory) {
       return this.handleSubcategoryPick(meta, content, context);
@@ -556,10 +1399,9 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     _context: ChatContext,
   ): { response: string; messageMeta?: ChatMessageMetadata } {
     const catId = meta.category!;
-    // Try to match the user's text to a subcategory
     const subs = Object.entries(SUBCATEGORY_NAMES).filter(([id]) => id.startsWith(catId + '_') || id.startsWith(catId.replace('_marketing', '') + '_'));
-    const lower = content.toLowerCase();
-    const match = subs.find(([id, name]) => lower.includes(name.toLowerCase()) || lower.includes(id.replace(catId + '_', '').replace('_', ' ')));
+    const selectedId = this.matchSubcategoryChoice(catId, content);
+    const match = selectedId ? subs.find(([id]) => id === selectedId) : null;
 
     if (match) {
       meta.subcategory = match[0];
@@ -596,6 +1438,35 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     context: ChatContext,
     sessionId: number,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
+    // Handle disambiguation response — route based on the customer's clarifying answer
+    if (meta.disambiguationAsked && !meta.category) {
+      meta.disambiguationAsked = false; // consume the flag — never ask a second time
+      const resolved = this.resolveDisambiguation(content, meta.disambiguationDomain || '');
+      meta.category = resolved.category;
+      meta.subcategory = resolved.subcategory;
+      if (resolved.ambiguityNote) meta.ambiguityNote = resolved.ambiguityNote;
+
+      extractAccountFieldsFromText(content, meta.collectedFields);
+
+      const missing = meta.category === 'account'
+        ? this.getAccountMissingFields(meta.collectedFields, meta.subcategory || '')
+        : meta.category === 'property'
+          ? this.getPropertyMissingFields(meta.collectedFields, meta.subcategory || '')
+          : this.getMissingFields(meta.collectedFields, CATEGORY_FIELD_CONFIG[meta.subcategory || ''] || CATEGORY_FIELD_CONFIG['other_general']!);
+
+      if (missing.length === 0) {
+        return this.buildSummaryCard(meta);
+      }
+
+      const question = meta.category === 'account'
+        ? this.buildAccountFollowUp(missing[0], meta)
+        : meta.category === 'property'
+          ? this.buildPropertyFollowUp(missing[0], meta)
+          : this.buildConversationalQuestion(missing[0], meta);
+
+      return { response: `Thanks for clarifying. ${question}` };
+    }
+
     // Track exchanges for "other" intent — offer handoff after threshold
     if (meta.intent === 'question' && (meta.category === 'other' || !meta.category)) {
       const threshold = parseInt(this.settings.get('portal_chat_handoff_threshold') || '3', 10);
@@ -607,24 +1478,60 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
       }
     }
 
+    // Detect attachment mentions
+    const attachmentJustMentioned = !meta.attachmentMentioned && ATTACHMENT_PATTERNS.test(content);
+    if (attachmentJustMentioned) {
+      meta.attachmentMentioned = true;
+    }
+    const attachmentAck = attachmentJustMentioned
+      ? "Noted — you'll be able to upload files when we get to the summary step.\n\n"
+      : '';
+
     // Extract fields from the user's message
     await this.extractFields(meta, content);
 
-    const config = CATEGORY_FIELD_CONFIG[meta.subcategory || ''] || CATEGORY_FIELD_CONFIG['other_general']!;
-    const missing = this.getMissingFields(meta.collectedFields, config);
+    // Use domain-specific field checks
+    const missing = meta.category === 'property'
+      ? this.getPropertyMissingFields(meta.collectedFields, meta.subcategory || '')
+      : meta.category === 'account'
+        ? this.getAccountMissingFields(meta.collectedFields, meta.subcategory || '')
+        : this.getMissingFields(meta.collectedFields, CATEGORY_FIELD_CONFIG[meta.subcategory || ''] || CATEGORY_FIELD_CONFIG['other_general']!);
 
     if (missing.length === 0) {
       // All required fields collected — move to KB check
       return this.tryKbDeflection(meta, context, sessionId);
     }
 
-    // Ask for the next missing field
-    return { response: this.buildDetailQuestion(missing[0], config) };
+    // Ask for the next missing field — conversational or generic
+    if (meta.conversational) {
+      if (meta.category === 'property') {
+        const question = await this.buildPropertyConversationalFollowUp(missing[0], meta, history);
+        return { response: `${attachmentAck}${question}` };
+      }
+      if (meta.category === 'account') {
+        const question = await this.buildAccountConversationalFollowUp(missing[0], meta, history);
+        return { response: `${attachmentAck}${question}` };
+      }
+      const question = await this.buildConversationalFollowUp(missing[0], meta, history);
+      return { response: `${attachmentAck}${question}` };
+    }
+    const config = CATEGORY_FIELD_CONFIG[meta.subcategory || ''] || CATEGORY_FIELD_CONFIG['other_general']!;
+    return { response: `${attachmentAck}${this.buildDetailQuestion(missing[0], config)}` };
   }
 
   private async extractFields(meta: IntakeSessionMetadata, content: string): Promise<void> {
+    // Regex fallback — catch structured data the LLM might miss
+    this.extractFieldsRegex(meta, content);
+
+    // Domain-specific regex extraction
+    if (meta.category === 'property') {
+      extractPropertyFieldsFromText(content, meta.collectedFields);
+    }
+    if (meta.category === 'account') {
+      extractAccountFieldsFromText(content, meta.collectedFields);
+    }
+
     if (!this.llm) {
-      // No LLM — try basic extraction
       if (!meta.collectedFields.description) meta.collectedFields.description = content;
       return;
     }
@@ -648,17 +1555,53 @@ Return JSON with only the fields present in the message.`,
       if (data.urgency) meta.collectedFields.urgency = data.urgency;
       if (data.contactPreference) meta.collectedFields.contactPreference = data.contactPreference;
 
-      // Description accumulates
-      if (data.description) {
-        meta.collectedFields.description = meta.collectedFields.description
-          ? `${meta.collectedFields.description}\n${data.description}`
-          : data.description;
-      } else if (!meta.collectedFields.description) {
+      // Accumulate raw content, not LLM rewrites — append the user's actual words
+      if (!meta.collectedFields.description) {
         meta.collectedFields.description = content;
+      } else if (content !== meta.openingMessage) {
+        // Multi-turn: append this follow-up message verbatim
+        meta.collectedFields.description = `${meta.collectedFields.description}\n${content}`;
       }
     } catch (err) {
       console.warn('[portal-chat] Field extraction failed:', err instanceof Error ? err.message : err);
       if (!meta.collectedFields.description) meta.collectedFields.description = content;
+    }
+  }
+
+  private extractFieldsRegex(meta: IntakeSessionMetadata, content: string): void {
+    const f = meta.collectedFields;
+
+    // URL
+    if (!f.url) {
+      const url = extractUrlFromText(content);
+      if (url) f.url = url;
+    }
+
+    // Email address (contact preference hint)
+    if (!f.contactPreference || f.contactPreference === 'portal') {
+      if (/\b(email me|reply by email|send.*email)\b/i.test(content)) f.contactPreference = 'email';
+      if (/\b(call me|phone me|ring me)\b/i.test(content)) f.contactPreference = 'phone';
+    }
+
+    // Phone numbers — preserve verbatim (common in change requests)
+    // Not extracted as a field but presence validates the description has operational data
+
+    // Browser detection
+    if (!f.browser) {
+      const browserMatch = content.match(/\b(Chrome|Firefox|Safari|Edge|Opera|Brave|Internet Explorer|IE)\b/i);
+      if (browserMatch) f.browser = browserMatch[1];
+    }
+
+    // OS detection
+    if (!f.os) {
+      const osMatch = content.match(/\b(Windows|Mac\s?OS|macOS|Linux|iOS|Android|iPad|iPhone)\b/i);
+      if (osMatch) f.os = osMatch[1];
+    }
+
+    // Account/brand name — look for "for [Name]" or "[Name] account" patterns
+    if (!f.account) {
+      const accountMatch = content.match(/\b(?:for|account(?:\s+name)?[:：]?\s+)([A-Z][A-Za-z0-9 &'-]{2,40})\b/);
+      if (accountMatch) f.account = accountMatch[1].trim();
     }
   }
 
@@ -799,20 +1742,35 @@ Return JSON with only the fields present in the message.`,
       },
     };
 
-    const lines = [
-      `**Subject:** ${f.subject}`,
-      `**Category:** ${CATEGORY_NAMES[meta.category || ''] || meta.category || 'General'}${meta.subcategory ? ` > ${SUBCATEGORY_NAMES[meta.subcategory] || meta.subcategory}` : ''}`,
-    ];
+    const lines = [`**Subject:** ${f.subject}`];
+    if (meta.conversational) {
+      // Customer-friendly request type — no internal taxonomy
+      const friendlyType = SUBCATEGORY_NAMES[meta.subcategory || ''] || CATEGORY_NAMES[meta.category || ''] || 'Support request';
+      lines.push(`**Request type:** ${friendlyType}`);
+    } else {
+      lines.push(`**Category:** ${CATEGORY_NAMES[meta.category || ''] || meta.category || 'General'}${meta.subcategory ? ` > ${SUBCATEGORY_NAMES[meta.subcategory] || meta.subcategory}` : ''}`);
+    }
     if (f.account) lines.push(`**Account:** ${f.account}`);
+    if (f.propertyAddress) lines.push(`**Property:** ${f.propertyAddress}`);
+    if (f.listingId) lines.push(`**Listing ref:** ${f.listingId}`);
+    if (f.affectedPortals) lines.push(`**Affected:** ${f.affectedPortals}`);
+    if (f.affectedPersonName) lines.push(`**Person:** ${f.affectedPersonName}`);
+    if (f.affectedPersonEmail) lines.push(`**Person's email:** ${f.affectedPersonEmail}`);
+    if (f.officeBranch) lines.push(`**Office/branch:** ${f.officeBranch}`);
     if (f.description) lines.push(`**Description:** ${f.description}`);
     if (f.url) lines.push(`**URL:** ${f.url}`);
     if (f.errorMessage) lines.push(`**Error:** ${f.errorMessage}`);
     if (f.browser) lines.push(`**Browser:** ${f.browser}`);
+    if (f.propertyStatus) lines.push(`**Status issue:** ${f.propertyStatus}`);
     lines.push(`**Urgency:** ${f.urgency}`);
     lines.push(`**Contact preference:** ${f.contactPreference}`);
 
+    const attachmentNote = meta.attachmentMentioned
+      ? '\n\nYou mentioned an attachment — you\'ll be able to upload files before submitting.'
+      : '';
+
     return {
-      response: `Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n${lines.join('\n')}`,
+      response: `Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n${lines.join('\n')}${attachmentNote}`,
       messageMeta,
     };
   }
@@ -900,25 +1858,13 @@ Return JSON with only the fields present in the message.`,
         description: f.description || 'See chat transcript',
         priority: urgencyHint[f.urgency] || 'Medium',
         reporterEmail: context.userEmail,
-        internalNote: `*Chat intake — ${meta.category || 'General'}*\n\n${transcript}`,
+        internalNote: `*Chat intake — ${meta.category || 'General'}*${meta.ambiguityNote ? `\n\n⚠️ ${meta.ambiguityNote}` : ''}${meta.securitySensitive ? '\n\n🔒 Security-sensitive: user removal / access revocation — treat as urgent' : ''}\n\n${transcript}`,
       });
-    }
-
-    // Post transcript as internal note (if intake service handled the ticket, we still want the transcript)
-    if (this.intakeService) {
-      try {
-        await this.portalJira.createTicket({
-          projectKey: 'NOOP',
-          summary: '',
-          description: '',
-          internalNote: `*Chat transcript (session ${sessionId})*\n\n${transcript}`,
-        }).catch(() => {});
-        // Actually we should use addInternalNote if it exists. For now, the intake's internalNote covers it.
-      } catch { /* already logged via intake */ }
     }
 
     // Update session
     meta.stage = 'confirmed';
+    meta.offeredTicketCreation = false;
     await execute(
       `UPDATE portal_chat_sessions SET jira_issue_key = ?, status = 'handed_off', metadata = ? WHERE id = ?`,
       [ticketKey, JSON.stringify(meta), sessionId],
@@ -940,6 +1886,319 @@ Return JSON with only the fields present in the message.`,
     });
 
     return { ticketKey };
+  }
+
+  // ── Conversational Helpers ──
+
+  private getFirstMissingField(meta: IntakeSessionMetadata): string | null {
+    const config = CATEGORY_FIELD_CONFIG[meta.subcategory || ''] || CATEGORY_FIELD_CONFIG['other_general']!;
+    const missing = this.getMissingFields(meta.collectedFields, config);
+    return missing[0] || null;
+  }
+
+  private getPropertyMissingFields(fields: IntakeCollectedFields, subcategory: string): string[] {
+    const missing: string[] = [];
+    if (!fields.description) missing.push('description');
+    if (!fields.propertyAddress && !fields.listingId) missing.push('propertyIdentifier');
+    if (!fields.affectedPortals && ['property_missing_listing', 'property_feed_sync', 'property_visibility', 'property_incorrect_details'].includes(subcategory)) {
+      missing.push('affectedPortals');
+    }
+    if (!fields.account) missing.push('account');
+    return missing;
+  }
+
+  private buildPropertyFollowUp(field: string, meta: IntakeSessionMetadata): string {
+    switch (field) {
+      case 'description':
+        if (meta.subcategory === 'property_missing_listing') return "Could you describe what's happening — is the listing missing completely, or is some information not showing?";
+        if (meta.subcategory === 'property_incorrect_details') return 'What details are incorrect, and what should they say instead?';
+        if (meta.subcategory === 'property_media') return "Could you describe the issue with the photos or media — are they missing, showing the wrong images, or not uploading?";
+        if (meta.subcategory === 'property_feed_sync') return "Could you describe what's not updating and when you first noticed it?";
+        if (meta.subcategory === 'property_status') return "What status is showing, and what should it be?";
+        return 'Could you describe the issue in a bit more detail?';
+      case 'propertyIdentifier':
+        return 'Which property is affected? An address or listing reference would help us look into this.';
+      case 'affectedPortals':
+        return 'Is this affecting your website, property portals like Rightmove or Zoopla, or both?';
+      case 'account':
+        return 'Which account or branch is this for?';
+      default:
+        return 'Could you share a few more details?';
+    }
+  }
+
+  private getAccountMissingFields(fields: IntakeCollectedFields, subcategory: string): string[] {
+    const missing: string[] = [];
+    if (!fields.description) missing.push('description');
+    if (subcategory === 'account_new_user' || subcategory === 'account_remove_user') {
+      if (!fields.affectedPersonName && !fields.affectedPersonEmail) missing.push('affectedPerson');
+    }
+    if (subcategory === 'account_office_change') {
+      if (!fields.officeBranch) missing.push('officeBranch');
+    }
+    if (!fields.account) missing.push('account');
+    return missing;
+  }
+
+  private buildAccountFollowUp(field: string, meta: IntakeSessionMetadata): string {
+    switch (field) {
+      case 'description':
+        if (meta.subcategory === 'account_login') return "What happens when you try to log in — do you get an error message, or does something else happen?";
+        if (meta.subcategory === 'account_new_user') return "Could you let me know what access they'll need?";
+        if (meta.subcategory === 'account_permissions') return "What are you trying to access, and what happens when you try?";
+        if (meta.subcategory === 'account_office_change') return "Could you tell me a bit more about what needs to change?";
+        if (meta.subcategory === 'account_details') return "What details need updating?";
+        return "Could you describe what's happening in a bit more detail?";
+      case 'affectedPerson':
+        if (meta.subcategory === 'account_remove_user') return "Could you confirm their name and email address?";
+        return "Could you let me know the person's name and email address?";
+      case 'officeBranch':
+        return "Which office or branch is this for?";
+      case 'account':
+        return "Which account or company is this for?";
+      default:
+        return "Could you share a few more details?";
+    }
+  }
+
+  private buildAccountAcknowledgement(meta: IntakeSessionMetadata): string {
+    const f = meta.collectedFields;
+    const parts: string[] = [];
+    if (f.affectedPersonName) parts.push(f.affectedPersonName);
+    if (f.officeBranch) parts.push(`the ${f.officeBranch} office`);
+
+    if (parts.length > 0) {
+      return `Thanks for letting us know about ${parts.join(' and ')}.`;
+    }
+    if (meta.subcategory === 'account_login') return "Sorry to hear you're having trouble getting in.";
+    if (meta.subcategory === 'account_new_user') return "I'll help you get that new user set up.";
+    if (meta.subcategory === 'account_office_change') return "I'll help you with that office change.";
+    return "Thanks for getting in touch.";
+  }
+
+  private async buildAccountConversationalFollowUp(
+    field: string,
+    meta: IntakeSessionMetadata,
+    history: Array<{ role: string; content: string }>,
+  ): Promise<string> {
+    if (this.llm && history.length >= 2) {
+      try {
+        const recentExchange = history.slice(-4).map(m => `${m.role}: ${m.content}`).join('\n');
+        const fieldLabel = field === 'affectedPerson' ? "the affected person's name and email"
+          : field === 'officeBranch' ? 'which office or branch'
+          : field === 'account' ? 'account or company name'
+          : field;
+
+        const result = await this.llm.call(
+          `You are a friendly support assistant helping a customer with an account/access request. Based on the conversation so far, ask for the missing piece of information naturally.
+
+Missing information: ${fieldLabel}
+${meta.collectedFields.description ? `Customer's request so far: ${meta.collectedFields.description.slice(0, 200)}` : ''}
+
+Recent conversation:
+${recentExchange}
+
+Rules:
+- Ask ONE question only
+- Reference what they've already told you where it makes sense
+- Keep it short and natural (one sentence)
+- Don't repeat information they've already provided
+- NEVER ask "which system" or "which platform"
+- NEVER use ANY of these terms: RBAC, provisioning, deprovisioning, authentication, authorisation, access control, role-based, permission matrix, scopes, entities, service account, SSO, SAML, identity provider, triage, categorise, classify, route
+- NEVER reveal multi-system provisioning (setting up one user may affect many systems — the customer sees one request)
+- Use the customer's own words. If they said "can't get in", say "can't get in", not "authentication issue"`,
+          `Ask for: ${fieldLabel}`,
+          ConversationalFollowUpSchema,
+          { callType: 'portal_chat', tier: 'standard', maxTokens: 150, temperature: 0.3 },
+        );
+
+        if (result.data.question) return result.data.question;
+      } catch (err) {
+        console.warn('[portal-chat] Account follow-up generation failed:', err instanceof Error ? err.message : err);
+      }
+    }
+
+    return this.buildAccountFollowUp(field, meta);
+  }
+
+  private buildConversationalQuestion(field: string, meta: IntakeSessionMetadata): string {
+    switch (field) {
+      case 'description':
+        if (meta.subcategory === 'website_content') return 'Could you tell me what needs changing and where on the page?';
+        if (meta.subcategory === 'website_broken') return "Could you describe what's happening and what you'd expect to see instead?";
+        if (meta.subcategory === 'website_new_page') return 'Could you describe what the new page should contain and where it should sit in the navigation?';
+        if (meta.subcategory === 'website_design') return 'Could you describe the design changes you have in mind?';
+        return 'Could you describe what you need in a bit more detail?';
+      case 'account':
+        return 'Which account or website is this for?';
+      case 'url':
+        return 'Which page is this on? A URL would be ideal if you have it.';
+      case 'errorMessage':
+        return 'Are there any error messages showing when this happens?';
+      case 'browser':
+        return 'Which browser are you using when you see this?';
+      default:
+        return 'Could you share a few more details?';
+    }
+  }
+
+  private async buildPropertyConversationalFollowUp(
+    field: string,
+    meta: IntakeSessionMetadata,
+    history: Array<{ role: string; content: string }>,
+  ): Promise<string> {
+    if (this.llm && history.length >= 2) {
+      try {
+        const recentExchange = history.slice(-4).map(m => `${m.role}: ${m.content}`).join('\n');
+        const fieldLabel = field === 'propertyIdentifier' ? 'which property is affected (address or reference)'
+          : field === 'affectedPortals' ? 'where the issue is appearing (website, Rightmove, Zoopla, etc.)'
+          : field === 'account' ? 'account or branch name'
+          : field;
+
+        const result = await this.llm.call(
+          `You are a friendly support assistant helping a customer with a property listing issue. Based on the conversation so far, ask for the missing piece of information naturally.
+
+Missing information: ${fieldLabel}
+${meta.collectedFields.description ? `Customer's issue so far: ${meta.collectedFields.description.slice(0, 200)}` : ''}
+
+Recent conversation:
+${recentExchange}
+
+Rules:
+- Ask ONE question only
+- Reference what they've already told you where it makes sense
+- Keep it short and natural (one sentence)
+- Don't repeat information they've already provided
+- NEVER use technical jargon like "feed", "syndication", "API", "integration", "CRM", "data sync", "data pipeline", or "portal feed"
+- Use the customer's own words — if they said "not showing on Rightmove", say "not showing on Rightmove"`,
+          `Ask for: ${fieldLabel}`,
+          ConversationalFollowUpSchema,
+          { callType: 'portal_chat', tier: 'standard', maxTokens: 150, temperature: 0.3 },
+        );
+
+        if (result.data.question) return result.data.question;
+      } catch (err) {
+        console.warn('[portal-chat] Property follow-up generation failed:', err instanceof Error ? err.message : err);
+      }
+    }
+
+    return this.buildPropertyFollowUp(field, meta);
+  }
+
+  private async buildConversationalFollowUp(
+    field: string,
+    meta: IntakeSessionMetadata,
+    history: Array<{ role: string; content: string }>,
+  ): Promise<string> {
+    // Try LLM-generated contextual question; fall back to template
+    if (this.llm && history.length >= 2) {
+      try {
+        const recentExchange = history.slice(-4).map(m => `${m.role}: ${m.content}`).join('\n');
+        const fieldLabel = field === 'errorMessage' ? 'error message' : field === 'contactPreference' ? 'contact preference' : field;
+
+        const result = await this.llm.call(
+          `You are a friendly support assistant helping a customer with a website request. Based on the conversation so far, ask for the missing piece of information naturally.
+
+Missing field: ${fieldLabel}
+${meta.collectedFields.description ? `Customer's request so far: ${meta.collectedFields.description.slice(0, 200)}` : ''}
+
+Recent conversation:
+${recentExchange}
+
+Rules:
+- Ask ONE question only
+- Reference what they've already told you where it makes sense
+- Keep it short and natural (one sentence)
+- Don't repeat information they've already provided
+- Don't use internal jargon, category names, or technical terms (feed, syndication, API, CRM, RBAC, provisioning)
+- Use the customer's own words wherever possible`,
+          `Ask for: ${fieldLabel}`,
+          ConversationalFollowUpSchema,
+          { callType: 'portal_chat', tier: 'standard', maxTokens: 150, temperature: 0.3 },
+        );
+
+        if (result.data.question) return result.data.question;
+      } catch (err) {
+        console.warn('[portal-chat] Conversational follow-up generation failed:', err instanceof Error ? err.message : err);
+      }
+    }
+
+    return this.buildConversationalQuestion(field, meta);
+  }
+
+  private resolveDisambiguation(response: string, domainsStr: string): { category: string; subcategory: string; ambiguityNote: string | null } {
+    const lower = response.toLowerCase();
+    const domains = domainsStr.split(',');
+
+    // Check for clear account/access signals in the response
+    if (/\b(can'?t (log ?in|sign ?in|get ?in|access)|error|locked|password|permission|new (user|starter|person)|set ?up|recently (added|set ?up|created|opened)|just (opened|started|set ?up))\b/.test(lower)) {
+      const subcategory = /\b(log ?in|sign ?in|password|locked|error)\b/.test(lower) ? 'account_login'
+        : /\b(new|set ?up|recently|just)\b/.test(lower) ? 'account_new_user'
+        : 'account_permissions';
+      return { category: 'account', subcategory, ambiguityNote: null };
+    }
+
+    // Check for website display signals
+    if (/\b(website|displaying|showing|page|wrong.*(address|info|details)|outdated|old.*showing)\b/.test(lower)) {
+      return { category: 'website', subcategory: 'website_content', ambiguityNote: null };
+    }
+
+    // Check for property signals
+    if (/\b(listing|property|rightmove|zoopla|portal|not (showing|appearing))\b/.test(lower)) {
+      return { category: 'property', subcategory: 'property_visibility', ambiguityNote: null };
+    }
+
+    // Check for data/reporting signals
+    if (/\b(report|data|dashboard|information|not there|missing|blank|empty|nothing|just.*not.*there)\b/.test(lower)) {
+      if (domains.includes('account')) {
+        return { category: 'account', subcategory: 'account_permissions', ambiguityNote: null };
+      }
+    }
+
+    // Ambiguity persists — route to safe default with note
+    const safeDefault = domains.includes('account') ? 'account' : domains[0] || 'account';
+    const safeSubcategory = safeDefault === 'account' ? 'account_permissions'
+      : safeDefault === 'website' ? 'website_content'
+      : safeDefault === 'property' ? 'property_visibility'
+      : 'other_general';
+
+    return {
+      category: safeDefault,
+      subcategory: safeSubcategory,
+      ambiguityNote: `Customer's description was ambiguous between ${domains.join(' and ')}. After one clarifying exchange, routed to ${safeDefault} as the operationally safe default. Support agent should verify whether other factors are involved.`,
+    };
+  }
+
+  private buildEmpathyAcknowledgement(meta: IntakeSessionMetadata): string {
+    const f = meta.collectedFields;
+    const details: string[] = [];
+    if (f.propertyAddress) details.push(`the issue with ${f.propertyAddress}`);
+    else if (f.listingId) details.push(`the issue with listing ${f.listingId}`);
+    if (f.affectedPortals) details.push(`on ${f.affectedPortals}`);
+    if (f.affectedPersonName) details.push(`the issue with ${f.affectedPersonName}'s access`);
+    if (f.officeBranch) details.push(`the ${f.officeBranch} office`);
+
+    if (details.length > 0) {
+      return `I understand this is frustrating, and I can see you've been dealing with ${details.join(' ')} — I'm sorry about that.`;
+    }
+    if (f.description && f.description.length > 20) {
+      return "I can see this is frustrating, and I hear you — I'm sorry you're having to chase this.";
+    }
+    return "I can see this is frustrating — I'm sorry.";
+  }
+
+  private buildTemplateAcknowledgement(meta: IntakeSessionMetadata): string {
+    const f = meta.collectedFields;
+    const parts: string[] = [];
+    if (f.propertyAddress) parts.push(f.propertyAddress);
+    if (f.listingId && !f.propertyAddress) parts.push(`listing ${f.listingId}`);
+    if (f.affectedPortals) parts.push(f.affectedPortals);
+    if (f.url) parts.push(f.url);
+
+    if (parts.length > 0) {
+      return `Thanks for those details about ${parts.slice(0, 2).join(' on ')}.`;
+    }
+    return 'Thanks for letting us know.';
   }
 
   // ── Helpers ──
@@ -965,6 +2224,51 @@ Return JSON with only the fields present in the message.`,
       text: 'Which area does this relate to?',
       messageMeta: { type: 'category_picker', categories },
     };
+  }
+
+  private matchCategoryOrSubcategoryChoice(content: string): { category: string | null; subcategory: string | null } {
+    const normalised = normaliseChoice(content);
+    if (!normalised) return { category: null, subcategory: null };
+
+    for (const [id, name] of Object.entries(CATEGORY_NAMES)) {
+      if (normalised === normaliseChoice(id) || normalised === normaliseChoice(name)) {
+        return { category: id, subcategory: null };
+      }
+    }
+
+    for (const [id, name] of Object.entries(SUBCATEGORY_NAMES)) {
+      if (normalised === normaliseChoice(id) || normalised === normaliseChoice(name)) {
+        return { category: this.getCategoryIdForSubcategory(id), subcategory: id };
+      }
+    }
+
+    return { category: null, subcategory: null };
+  }
+
+  private matchSubcategoryChoice(categoryId: string, content: string): string | null {
+    const normalised = normaliseChoice(content);
+    if (!normalised) return null;
+
+    const subcategories = Object.entries(SUBCATEGORY_NAMES).filter(([id]) =>
+      id.startsWith(`${categoryId}_`) || id.startsWith(`${categoryId.replace('_marketing', '')}_`),
+    );
+
+    for (const [id, name] of subcategories) {
+      if (normalised === normaliseChoice(id) || normalised === normaliseChoice(name)) {
+        return id;
+      }
+    }
+
+    return null;
+  }
+
+  private getCategoryIdForSubcategory(subcategoryId: string): string {
+    if (subcategoryId.startsWith('email_')) return 'email_marketing';
+    if (subcategoryId.startsWith('feeds_')) return 'data_feeds';
+    if (subcategoryId.startsWith('listings_')) return 'listings';
+    if (subcategoryId.startsWith('property_')) return 'property';
+    const [topLevel] = subcategoryId.split('_');
+    return topLevel || 'other';
   }
 
   private async searchKb(searchQuery: string): Promise<Array<{ title: string; excerpt: string }>> {
@@ -1020,10 +2324,11 @@ Return JSON with only the fields present in the message.`,
       description: f.description || 'Chat conversation exceeded exchange limit. See transcript in internal notes.',
       priority: f.urgency === 'Critical' ? 'Highest' : f.urgency === 'High' ? 'High' : 'Medium',
       reporterEmail: context.userEmail,
-      internalNote: `*Auto-handoff (max exchanges reached, session ${sessionId})*\n\n${transcript}`,
+      internalNote: `*Auto-handoff (max exchanges reached, session ${sessionId})*${meta.ambiguityNote ? `\n\n⚠️ ${meta.ambiguityNote}` : ''}${meta.securitySensitive ? '\n\n🔒 Security-sensitive: user removal / access revocation — treat as urgent' : ''}\n\n${transcript}`,
     });
 
     meta.stage = 'confirmed';
+    meta.offeredTicketCreation = false;
     await execute(
       `UPDATE portal_chat_sessions SET jira_issue_key = ?, status = 'handed_off', metadata = ? WHERE id = ?`,
       [ticketKey, JSON.stringify(meta), sessionId],

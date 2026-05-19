@@ -29,6 +29,86 @@ interface JiraPriority {
   isDefault?: boolean;
 }
 
+function extractTextFromInlineNodes(nodes: any[]): string {
+  return nodes.map((node: any) => {
+    if (Array.isArray(node.content)) return extractTextFromInlineNodes(node.content);
+    if (node.type === 'hardBreak') return '\n';
+    if (node.type === 'mention') return node.attrs?.text ?? node.attrs?.id ?? '';
+    if (node.type === 'inlineCard' && node.attrs?.url) return node.attrs.url;
+    if (node.type === 'emoji') return node.attrs?.shortName ?? '';
+    return node.text ?? '';
+  }).join('');
+}
+
+function extractTextFromNode(node: any): string {
+  if (node.type === 'paragraph' || node.type === 'heading') {
+    return Array.isArray(node.content) ? extractTextFromInlineNodes(node.content) : '';
+  }
+  if (node.type === 'bulletList' || node.type === 'orderedList') {
+    return (node.content ?? []).map((li: any) =>
+      `- ${(li.content ?? []).map(extractTextFromNode).join(' ').trim()}`
+    ).join('\n');
+  }
+  if (node.type === 'blockquote') {
+    return (node.content ?? []).map(extractTextFromNode).join('\n');
+  }
+  if (node.type === 'codeBlock') {
+    return (node.content ?? []).map((c: any) => c.text ?? '').join('');
+  }
+  if (node.type === 'mediaSingle' || node.type === 'mediaGroup') {
+    return (node.content ?? []).map((m: any) =>
+      m.attrs?.alt ?? m.attrs?.url ?? '[attachment]'
+    ).join(' ');
+  }
+  if (node.type === 'blockCard' && node.attrs?.url) return node.attrs.url;
+  if (node.type === 'embedCard' && node.attrs?.url) return node.attrs.url;
+  if (Array.isArray(node.content)) return node.content.map(extractTextFromNode).join('\n');
+  return node.text ?? '';
+}
+
+function extractJiraText(adf: unknown): string {
+  if (!adf || typeof adf !== 'object') return typeof adf === 'string' ? adf : '';
+  try {
+    const content = (adf as any).content;
+    if (!Array.isArray(content)) return JSON.stringify(adf).slice(0, 2000);
+    return content.map(extractTextFromNode).join('\n').trim();
+  } catch {
+    return '';
+  }
+}
+
+function buildCustomerVisibleStatusHistory(
+  entries: Array<{
+    created: string;
+    author?: { displayName?: string | null } | null;
+    items: Array<{ field: string; fromString?: string | null; toString?: string | null }>;
+  }>,
+  settings: FileSettingsQueries,
+): PortalStatusChange[] {
+  const ascendingChanges = entries
+    .flatMap(entry =>
+      entry.items
+        .filter(item => item.field === 'status')
+        .map((item) => ({
+          from: item.fromString ? mapJiraStatusToPortal(item.fromString, settings) : null,
+          to: mapJiraStatusToPortal(item.toString || 'Unknown', settings),
+          changedAt: entry.created,
+          changedBy: entry.author?.displayName || null,
+        })),
+    )
+    .sort((a, b) => new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime());
+
+  const deduped: PortalStatusChange[] = [];
+  for (const change of ascendingChanges) {
+    if (change.from === change.to) continue;
+    const previous = deduped[deduped.length - 1];
+    if (previous?.to === change.to) continue;
+    deduped.push(change);
+  }
+
+  return deduped.reverse();
+}
+
 export class PortalJiraService {
   private priorityCache: { names: string[]; defaultName: string; fetchedAt: number } | null = null;
   private static PRIORITY_CACHE_TTL = 3_600_000; // 1 hour
@@ -237,10 +317,104 @@ export class PortalJiraService {
     return result?.total || 0;
   }
 
+  private async hasPortalAssociation(ticketKey: string, orgId: number): Promise<boolean> {
+    const result = await queryOne<{ allowed: number }>(
+      `SELECT CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM portal_form_submissions pfs
+            INNER JOIN portal_users pu ON pu.id = pfs.portal_user_id
+            WHERE pfs.jira_issue_key = ? AND pu.org_id = ?
+          ) THEN 1
+          WHEN EXISTS (
+            SELECT 1
+            FROM portal_chat_sessions pcs
+            INNER JOIN portal_users pu ON pu.id = pcs.portal_user_id
+            WHERE pcs.jira_issue_key = ? AND pu.org_id = ?
+          ) THEN 1
+          ELSE 0
+        END AS allowed`,
+      [ticketKey, orgId, ticketKey, orgId],
+    );
+
+    return result?.allowed === 1;
+  }
+
+  private buildSlaStatus(slaBreachTime: string | null): PortalSlaStatus | null {
+    if (!slaBreachTime) return null;
+
+    const breachTime = new Date(slaBreachTime).getTime();
+    const now = Date.now();
+    const diffMs = breachTime - now;
+    const breached = diffMs <= 0;
+    const absDiff = Math.abs(diffMs);
+    const hours = Math.floor(absDiff / 3_600_000);
+    const minutes = Math.floor((absDiff % 3_600_000) / 60_000);
+
+    return {
+      name: 'Time to resolution',
+      remaining: breached ? `Breached by ${hours}h ${minutes}m` : `${hours}h ${minutes}m`,
+      breached,
+    };
+  }
+
+  private async getLiveTicketDetail(ticketKey: string): Promise<PortalTicketDetail | null> {
+    if (!this.jiraClient) return null;
+
+    const [issue, comments, changelog] = await Promise.all([
+      this.jiraClient.getIssue(ticketKey, ['summary', 'status', 'priority', 'created', 'updated', 'assignee', 'reporter', 'description', 'attachment']),
+      this.jiraClient.getComments(ticketKey, 20),
+      this.jiraClient.getChangelog(ticketKey),
+    ]);
+
+    if (!issue) return null;
+
+    const fields = (issue.fields ?? {}) as Record<string, any>;
+    const attachments = Array.isArray(fields.attachment)
+      ? fields.attachment.map((attachment: any) => ({
+          id: attachment.id,
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          url: `/api/portal/tickets/${ticketKey}/attachments/${attachment.id}`,
+        }))
+      : [];
+
+    const publicComments: PortalTicketComment[] = (comments ?? [])
+      .filter(comment => comment.jsdPublic !== false)
+      .map(comment => ({
+        id: comment.id,
+        author: comment.author?.displayName || 'Unknown',
+        body: extractJiraText(comment.body),
+        created: comment.created,
+        isInternal: false,
+      }));
+
+    const statusHistory = buildCustomerVisibleStatusHistory(changelog ?? [], this.settings);
+
+    return {
+      key: issue.key,
+      summary: fields.summary || '',
+      status: mapJiraStatusToPortal(fields.status?.name || 'Unknown', this.settings),
+      priority: fields.priority?.name || 'Medium',
+      created: fields.created || new Date().toISOString(),
+      updated: fields.updated || fields.created || new Date().toISOString(),
+      assignee: fields.assignee?.displayName || null,
+      reporter: fields.reporter?.emailAddress || fields.reporter?.displayName || null,
+      latestComment: publicComments.length > 0 ? publicComments[0].body.slice(0, 200) : null,
+      description: extractJiraText(fields.description),
+      bcAccountNumber: typeof fields.bc_account_number === 'string' ? fields.bc_account_number : null,
+      comments: publicComments,
+      attachments,
+      statusHistory,
+      slaStatus: null,
+    };
+  }
+
   async getTicketDetail(ticketKey: string, orgId: number): Promise<PortalTicketDetail | null> {
-    // Verify ticket belongs to org
     const domain = await this.getOrgEmailDomain(orgId);
-    if (!domain) return null;
+    const hasPortalAssociation = await this.hasPortalAssociation(ticketKey, orgId);
+    if (!domain && !hasPortalAssociation) return null;
 
     const ticket = await queryOne<{
       issue_key: string;
@@ -259,11 +433,15 @@ export class PortalJiraService {
               created_at, updated_at, assignee_display AS assignee, reporter_email, description,
               bc_account_number, sla_breach_time
        FROM jira_issue_cache
-       WHERE issue_key = ? AND reporter_email LIKE ?`,
-      [ticketKey, `%@${domain}`],
+       WHERE issue_key = ?
+         AND (? = 1 OR (? <> '' AND reporter_email LIKE ?))`,
+      [ticketKey, hasPortalAssociation ? 1 : 0, domain || '', domain ? `%@${domain}` : ''],
     );
 
-    if (!ticket) return null;
+    if (!ticket) {
+      if (!hasPortalAssociation) return null;
+      return this.getLiveTicketDetail(ticketKey);
+    }
 
     // Get public comments from comment cache
     const comments = await query<{
@@ -288,21 +466,7 @@ export class PortalJiraService {
       isInternal: false,
     }));
 
-    let slaStatus: PortalSlaStatus | null = null;
-    if (ticket.sla_breach_time) {
-      const breachTime = new Date(ticket.sla_breach_time).getTime();
-      const now = Date.now();
-      const diffMs = breachTime - now;
-      const breached = diffMs <= 0;
-      const absDiff = Math.abs(diffMs);
-      const hours = Math.floor(absDiff / 3_600_000);
-      const minutes = Math.floor((absDiff % 3_600_000) / 60_000);
-      slaStatus = {
-        name: 'Time to resolution',
-        remaining: breached ? `Breached by ${hours}h ${minutes}m` : `${hours}h ${minutes}m`,
-        breached,
-      };
-    }
+    const slaStatus = this.buildSlaStatus(ticket.sla_breach_time);
 
     let attachments: PortalTicketAttachment[] = [];
     let statusHistory: PortalStatusChange[] = [];
@@ -328,19 +492,7 @@ export class PortalJiraService {
       }
 
       if (changelogResult.status === 'fulfilled') {
-        const entries = changelogResult.value ?? [];
-        statusHistory = entries
-          .flatMap(entry =>
-            entry.items
-              .filter(item => item.field === 'status')
-              .map(item => ({
-                from: item.fromString ? mapJiraStatusToPortal(item.fromString, this.settings) : null,
-                to: mapJiraStatusToPortal(item.toString || 'Unknown', this.settings),
-                changedAt: entry.created,
-                changedBy: entry.author?.displayName || null,
-              })),
-          )
-          .sort((a, b) => new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime());
+        statusHistory = buildCustomerVisibleStatusHistory(changelogResult.value ?? [], this.settings);
       }
     }
 
@@ -364,15 +516,19 @@ export class PortalJiraService {
   }
 
   async addComment(ticketKey: string, orgId: number, body: string, authorName: string): Promise<void> {
-    // Verify ticket belongs to org
     const domain = await this.getOrgEmailDomain(orgId);
-    if (!domain) throw new Error('Organisation not mapped');
+    const hasPortalAssociation = await this.hasPortalAssociation(ticketKey, orgId);
+    if (!domain && !hasPortalAssociation) throw new Error('Organisation not mapped');
 
-    const ticket = await queryOne<{ issue_key: string }>(
-      `SELECT issue_key FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
-      [ticketKey, `%@${domain}`],
-    );
-    if (!ticket) throw new Error('Ticket not found or not accessible');
+    if (domain) {
+      const ticket = await queryOne<{ issue_key: string }>(
+        `SELECT issue_key FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
+        [ticketKey, `%@${domain}`],
+      );
+      if (!ticket && !hasPortalAssociation) throw new Error('Ticket not found or not accessible');
+    } else if (!hasPortalAssociation) {
+      throw new Error('Ticket not found or not accessible');
+    }
 
     if (!this.jiraClient) throw new Error('Jira client not configured');
 
@@ -448,13 +604,18 @@ export class PortalJiraService {
     mimeType: string,
   ): Promise<void> {
     const domain = await this.getOrgEmailDomain(orgId);
-    if (!domain) throw new Error('Organisation not mapped');
+    const hasPortalAssociation = await this.hasPortalAssociation(ticketKey, orgId);
+    if (!domain && !hasPortalAssociation) throw new Error('Organisation not mapped');
 
-    const ticket = await queryOne<{ issue_key: string }>(
-      `SELECT issue_key FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
-      [ticketKey, `%@${domain}`],
-    );
-    if (!ticket) throw new Error('Ticket not found or not accessible');
+    if (domain) {
+      const ticket = await queryOne<{ issue_key: string }>(
+        `SELECT issue_key FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
+        [ticketKey, `%@${domain}`],
+      );
+      if (!ticket && !hasPortalAssociation) throw new Error('Ticket not found or not accessible');
+    } else if (!hasPortalAssociation) {
+      throw new Error('Ticket not found or not accessible');
+    }
 
     if (!this.jiraClient) throw new Error('Jira client not configured');
 
@@ -467,13 +628,18 @@ export class PortalJiraService {
     orgId: number,
   ): Promise<{ body: ReadableStream<Uint8Array>; contentType: string; contentLength: string | null; filename: string }> {
     const domain = await this.getOrgEmailDomain(orgId);
-    if (!domain) throw new Error('Organisation not mapped');
+    const hasPortalAssociation = await this.hasPortalAssociation(ticketKey, orgId);
+    if (!domain && !hasPortalAssociation) throw new Error('Organisation not mapped');
 
-    const ticket = await queryOne<{ issue_key: string }>(
-      `SELECT issue_key FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
-      [ticketKey, `%@${domain}`],
-    );
-    if (!ticket) throw new Error('Ticket not found or not accessible');
+    if (domain) {
+      const ticket = await queryOne<{ issue_key: string }>(
+        `SELECT issue_key FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
+        [ticketKey, `%@${domain}`],
+      );
+      if (!ticket && !hasPortalAssociation) throw new Error('Ticket not found or not accessible');
+    } else if (!hasPortalAssociation) {
+      throw new Error('Ticket not found or not accessible');
+    }
     if (!this.jiraClient) throw new Error('Jira client not configured');
 
     const issue = await this.jiraClient.getIssue(ticketKey, ['attachment']);

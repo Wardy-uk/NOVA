@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { PortalTicketDetail as TicketDetail, PortalTicketComment, PortalTicketAttachment, PortalSlaStatus, PortalStatusChange, PortalStatus } from '../../../shared/portal-types.js';
-import { portalStatusOrder } from '../../../shared/portal-types.js';
+import { portalStatusDescriptions, portalStatusOrder } from '../../../shared/portal-types.js';
 
 interface Props {
   ticketKey: string;
@@ -131,6 +131,7 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
   };
 
   const isBranchStatus = (s: string) => s === 'Awaiting Your Response' || s === 'Awaiting Third Party';
+  const currentStatusDescription = portalStatusDescriptions[ticket?.status as PortalStatus] ?? null;
 
   const renderStepper = (currentStatus: string) => {
     const currentIdx = portalStatusOrder.indexOf(currentStatus as PortalStatus);
@@ -253,6 +254,9 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
             {/* Progress stepper */}
             <div className="mt-6 pt-6 border-t border-gray-100">
               {renderStepper(ticket.status)}
+              {currentStatusDescription && (
+                <p className="mt-3 text-sm text-gray-600">{currentStatusDescription}</p>
+              )}
             </div>
 
             {/* Description */}
@@ -447,6 +451,9 @@ export default function PortalTicketDetail({ ticketKey, onBack, onRefreshRef }: 
                         <div className="text-xs text-gray-600 mt-1">
                           {new Date(change.changedAt).toLocaleString()}
                           {change.changedBy && ` by ${change.changedBy}`}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {portalStatusDescriptions[change.to]}
                         </div>
                       </div>
                     </div>

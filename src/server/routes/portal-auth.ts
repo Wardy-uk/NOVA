@@ -1,6 +1,13 @@
 import { Router, type Request, type Response } from 'express';
 import type { FileSettingsQueries } from '../db/settings-store.js';
-import { generateAuthUrl, handleCallback, generateLogoutUrl, refreshOidcToken } from '../services/portal-auth.js';
+import {
+  createCodexTestSession,
+  generateAuthUrl,
+  handleCallback,
+  generateLogoutUrl,
+  isCodexTestLoginEnabled,
+  refreshOidcToken,
+} from '../services/portal-auth.js';
 import { isInternalMode } from '../middleware/portal-auth-middleware.js';
 
 export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
@@ -8,7 +15,16 @@ export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
 
   router.get('/mode', (_req: Request, res: Response) => {
     const mode = (settings.get('portal_auth_mode') || 'internal') === 'internal' ? 'internal' : 'oidc';
-    res.json({ ok: true, data: { mode } });
+    res.json({ ok: true, data: { mode, codexTestUserEnabled: isCodexTestLoginEnabled(settings) } });
+  });
+
+  router.post('/codex-test-login', async (_req: Request, res: Response) => {
+    try {
+      const result = await createCodexTestSession(settings);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(403).json({ ok: false, error: err instanceof Error ? err.message : 'Codex test login unavailable' });
+    }
   });
 
   router.get('/login', (req: Request, res: Response) => {

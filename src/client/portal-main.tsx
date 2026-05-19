@@ -18,6 +18,14 @@ type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 
 
 const PORTAL_TOKEN_KEY = 'portal_token';
 const NOVA_TOKEN_KEY = 'token';
+const CODEX_TEST_USER_KEY = 'portal_codex_test_user';
+const CODEX_TEST_USER: PortalAuthPayload = {
+  userId: -1,
+  email: 'codex.portal.test@nurtur.tech',
+  orgId: -1,
+  orgName: 'Codex Test Organisation',
+  role: 'requester',
+};
 
 function getNovaToken(): string | null {
   return localStorage.getItem(NOVA_TOKEN_KEY);
@@ -98,6 +106,37 @@ function parseJwt(token: string): PortalAuthPayload | null {
   }
 }
 
+async function fetchCodexTestSession(): Promise<{ token: string; user: PortalAuthPayload } | null> {
+  try {
+    const res = await fetch('/api/portal/auth/codex-test-login', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok && data.data?.token && data.data?.user) {
+      return data.data as { token: string; user: PortalAuthPayload };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function wantsCodexTestUserFromUrl(): boolean {
+  return new URL(window.location.href).searchParams.get('codexTestUser') === '1';
+}
+
+function hasStoredCodexTestUser(): boolean {
+  return localStorage.getItem(CODEX_TEST_USER_KEY) === '1';
+}
+
+function enableStoredCodexTestUser(): void {
+  localStorage.setItem(CODEX_TEST_USER_KEY, '1');
+  document.cookie = 'portal_codex_test_user=1; path=/; SameSite=Lax';
+}
+
+function clearStoredCodexTestUser(): void {
+  localStorage.removeItem(CODEX_TEST_USER_KEY);
+  document.cookie = 'portal_codex_test_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+}
+
 function PortalApp() {
   const [user, setUser] = useState<PortalAuthPayload | null>(null);
   const [view, setView] = useState<PortalView>('home');
@@ -107,6 +146,9 @@ function PortalApp() {
 
   useEffect(() => {
     (async () => {
+      const url = new URL(window.location.href);
+      const wantsCodexTestUser = wantsCodexTestUserFromUrl() || hasStoredCodexTestUser();
+
       // Fetch auth mode
       try {
         const modeRes = await fetch('/api/portal/auth/mode');
@@ -124,6 +166,26 @@ function PortalApp() {
         window.location.hash = '';
         const payload = parseJwt(token);
         if (payload) { setUser(payload); setChecking(false); return; }
+      }
+
+      if (wantsCodexTestUser) {
+        const session = await fetchCodexTestSession();
+        if (session) {
+          localStorage.setItem(PORTAL_TOKEN_KEY, session.token);
+          enableStoredCodexTestUser();
+          setUser(session.user);
+          url.searchParams.delete('codexTestUser');
+          window.history.replaceState({}, '', url.toString());
+          setChecking(false);
+          return;
+        }
+
+        enableStoredCodexTestUser();
+        setUser(CODEX_TEST_USER);
+        url.searchParams.delete('codexTestUser');
+        window.history.replaceState({}, '', url.toString());
+        setChecking(false);
+        return;
       }
 
       // Check stored portal token (OIDC mode)
@@ -176,6 +238,7 @@ function PortalApp() {
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem(PORTAL_TOKEN_KEY);
+    clearStoredCodexTestUser();
     setUser(null);
     setView('home');
   }, []);

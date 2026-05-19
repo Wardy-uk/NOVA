@@ -181,7 +181,7 @@ export interface PortalOrgJiraMapping {
 export interface PortalTicketSummary {
   key: string;
   summary: string;
-  status: string;
+  status: PortalStatus;
   priority: string;
   created: string;
   updated: string;
@@ -216,8 +216,8 @@ export interface PortalTicketAttachment {
 }
 
 export interface PortalStatusChange {
-  from: string | null;
-  to: string;
+  from: PortalStatus | null;
+  to: PortalStatus;
   changedAt: string;
   changedBy: string | null;
 }
@@ -243,6 +243,13 @@ export interface IntakeCollectedFields {
   os: string | null;
   urgency: 'Normal' | 'High' | 'Critical';
   contactPreference: 'portal' | 'email' | 'phone';
+  propertyAddress: string | null;
+  listingId: string | null;
+  affectedPortals: string | null;
+  propertyStatus: string | null;
+  affectedPersonName: string | null;
+  affectedPersonEmail: string | null;
+  officeBranch: string | null;
 }
 
 export interface IntakeSessionMetadata {
@@ -253,8 +260,16 @@ export interface IntakeSessionMetadata {
   collectedFields: IntakeCollectedFields;
   kbSuggested: boolean;
   deflected: boolean;
+  conversational?: boolean;
   otherExchangeCount?: number;
   frustrationDetected?: boolean;
+  offeredTicketCreation?: boolean;
+  attachmentMentioned?: boolean;
+  openingMessage?: string;
+  disambiguationAsked?: boolean;
+  disambiguationDomain?: string;
+  securitySensitive?: boolean;
+  ambiguityNote?: string;
 }
 
 export interface ChatMessageMetadata {

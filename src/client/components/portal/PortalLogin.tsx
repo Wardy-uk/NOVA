@@ -7,11 +7,20 @@ interface PortalLoginProps {
 export default function PortalLogin({ onInternalAuth }: PortalLoginProps) {
   const error = new URLSearchParams(window.location.search).get('error');
   const [authMode, setAuthMode] = useState<'oidc' | 'internal' | null>(null);
+  const [codexTestUserEnabled, setCodexTestUserEnabled] = useState(() => {
+    const host = window.location.hostname;
+    return host === '127.0.0.1' || host === 'localhost';
+  });
 
   useEffect(() => {
     fetch('/api/portal/auth/mode')
       .then(r => r.json())
-      .then(d => { if (d.ok) setAuthMode(d.data.mode); })
+      .then(d => {
+        if (d.ok) {
+          setAuthMode(d.data.mode);
+          setCodexTestUserEnabled(d.data.codexTestUserEnabled === true);
+        }
+      })
       .catch(() => setAuthMode('oidc'));
   }, []);
 
@@ -36,28 +45,45 @@ export default function PortalLogin({ onInternalAuth }: PortalLoginProps) {
 
         {authMode === null ? (
           <div className="py-3 text-gray-400 text-sm">Loading...</div>
-        ) : authMode === 'internal' ? (
-          <button
-            onClick={onInternalAuth}
-            className="inline-flex items-center justify-center w-full px-6 py-3 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
-          >
-            Access Portal
-          </button>
         ) : (
-          <button
-            onClick={async () => {
-              try {
-                const res = await fetch('/api/portal/auth/login');
-                const data = await res.json();
-                if (data.ok && data.data.url) {
-                  window.location.href = data.data.url;
-                }
-              } catch { /* ignore */ }
-            }}
-            className="inline-flex items-center justify-center w-full px-6 py-3 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
-          >
-            Sign in with Nurtur
-          </button>
+          <div className="space-y-3">
+            {authMode === 'internal' ? (
+              <button
+                onClick={onInternalAuth}
+                className="inline-flex items-center justify-center w-full px-6 py-3 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
+              >
+                Access Portal
+              </button>
+            ) : (
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch('/api/portal/auth/login');
+                    const data = await res.json();
+                    if (data.ok && data.data.url) {
+                      window.location.href = data.data.url;
+                    }
+                  } catch { /* ignore */ }
+                }}
+                className="inline-flex items-center justify-center w-full px-6 py-3 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
+              >
+                Sign in with Nurtur
+              </button>
+            )}
+
+            {codexTestUserEnabled && (
+              <button
+                onClick={() => {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('codexTestUser', '1');
+                  window.location.href = url.toString();
+                }}
+                className="inline-flex items-center justify-center w-full px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
+              >
+                Use Codex Test User
+              </button>
+            )}
+          </div>
         )}
 
         <p className="mt-6 text-xs text-gray-500">

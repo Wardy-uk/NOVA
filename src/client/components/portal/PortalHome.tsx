@@ -57,10 +57,16 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
   }, []);
 
   const statusColor = (status: string) => {
-    const s = status.toLowerCase();
-    if (s.includes('closed') || s.includes('resolved') || s.includes('done')) return 'bg-green-100 text-green-700';
-    if (s.includes('progress') || s.includes('waiting')) return 'bg-blue-100 text-blue-700';
-    return 'bg-yellow-100 text-yellow-700';
+    switch (status) {
+      case 'Submitted': return 'bg-gray-100 text-gray-700';
+      case 'Reviewed': return 'bg-blue-100 text-blue-700';
+      case 'In Progress': return 'bg-amber-100 text-amber-700';
+      case 'Awaiting Your Response': return 'bg-red-100 text-red-700';
+      case 'Awaiting Third Party': return 'bg-purple-100 text-purple-700';
+      case 'Resolved': return 'bg-green-100 text-green-700';
+      case 'Closed': return 'bg-slate-100 text-slate-700';
+      default: return 'bg-gray-100 text-gray-700';
+    }
   };
 
   if (loading) {

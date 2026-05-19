@@ -3950,7 +3950,7 @@ function KbIndexTab() {
 
   const fetchStatus = async () => {
     try {
-      const token = localStorage.getItem('nova_token');
+      const token = localStorage.getItem('nova_auth_token');
       const res = await fetch('/api/kb-admin/status', { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (data.ok) setStatus(data.data);
@@ -3962,7 +3962,7 @@ function KbIndexTab() {
 
   const fetchRuns = async (source: string) => {
     try {
-      const token = localStorage.getItem('nova_token');
+      const token = localStorage.getItem('nova_auth_token');
       const res = await fetch(`/api/kb-admin/sync-runs?source=${source}&limit=3`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (data.ok) setRecentRuns(prev => ({ ...prev, [source]: data.data }));
@@ -3972,7 +3972,7 @@ function KbIndexTab() {
   const triggerSync = async (source: string) => {
     setSyncing(source);
     try {
-      const token = localStorage.getItem('nova_token');
+      const token = localStorage.getItem('nova_auth_token');
       await fetch(`/api/kb-admin/sync/${source}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -4110,7 +4110,7 @@ function KbChunkBrowser({ sources }: { sources: string[] }) {
   const fetchDocs = async (p = 1) => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('nova_token');
+      const token = localStorage.getItem('nova_auth_token');
       const params = new URLSearchParams();
       params.set('page', String(p));
       if (sourceFilter) params.set('source', sourceFilter);
@@ -4131,7 +4131,7 @@ function KbChunkBrowser({ sources }: { sources: string[] }) {
     const key = `${source}||${docId}`;
     if (chunks[key]) return;
     try {
-      const token = localStorage.getItem('nova_token');
+      const token = localStorage.getItem('nova_auth_token');
       const res = await fetch(`/api/kb-admin/chunks/${encodeURIComponent(source)}/${encodeURIComponent(docId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
