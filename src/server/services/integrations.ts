@@ -193,6 +193,7 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'kpi_sql_database', label: 'Database', type: 'text', placeholder: 'JiraSupportDB', required: true },
       { key: 'kpi_sql_user', label: 'Username', type: 'text', placeholder: 'SQL username', required: true },
       { key: 'kpi_sql_password', label: 'Password', type: 'password', placeholder: 'SQL password', required: true },
+      { key: 'kpi_jira_projects', label: 'Jira Projects (KPI)', type: 'text', placeholder: 'NT', required: false },
     ],
   },
   {
