@@ -27,7 +27,7 @@ export async function getKpiPool(settings: SettingsQueries): Promise<sql.Connect
   pool = await new sql.ConnectionPool({
     server, database, user, password,
     options: { encrypt: true, trustServerCertificate: true },
-    requestTimeout: 30000,
+    requestTimeout: 60000,
   }).connect();
 
   return pool;
@@ -184,14 +184,26 @@ function n8nKpiName(tier: string, metric: string): string {
 }
 
 export class KpiPipeline {
+  private jiraProjects: string[];
+
   constructor(
     private settings: SettingsQueries,
     private llmService: LlmService,
     private jiraClient: JiraRestClient,
-    private jiraProject: string = 'NT',
+    jiraProject: string | string[] = 'NT',
     private monitor?: PipelineMonitor,
     private cache?: JiraCacheQueries,
-  ) {}
+  ) {
+    this.jiraProjects = Array.isArray(jiraProject)
+      ? jiraProject
+      : jiraProject.split(',').map(p => p.trim()).filter(Boolean);
+    if (this.jiraProjects.length === 0) this.jiraProjects = ['NT'];
+  }
+
+  private projectInClause(startIdx = 0): { sql: string; params: string[] } {
+    const placeholders = this.jiraProjects.map((_, i) => `@p${startIdx + i}`).join(', ');
+    return { sql: `project_key IN (${placeholders})`, params: [...this.jiraProjects] };
+  }
 
   private get target(): PipelineTarget {
     const val = this.settings.get('kpi_pipeline_target');
@@ -306,15 +318,16 @@ export class KpiPipeline {
       const endOfToday = new Date(now);
       endOfToday.setUTCHours(23, 59, 59, 999);
 
-      // Step 1: Load all open NT tickets from local MSSQL cache
+      // Step 1: Load all open tickets from local MSSQL cache (multi-project)
+      const pf = this.projectInClause();
       const openRows = await localQuery<CacheRow>(`
         SELECT issue_key, status_name, status_category, current_tier, request_type,
                assignee_account_id, assignee_display, jira_created, jira_updated, due_date,
                sla_breached, sla_breach_time, agent_last_updated, agent_next_update,
                no_reply, fields_json, issuetype_name, resolution_name
         FROM jira_issue_cache
-        WHERE project_key = @p0 AND status_category != 'Done'
-      `, [this.jiraProject]);
+        WHERE ${pf.sql} AND status_category != 'Done'
+      `, pf.params);
 
       // Step 2: Load resolved-today tickets
       const resolvedRows = await localQuery<CacheRow>(`
@@ -323,17 +336,17 @@ export class KpiPipeline {
                sla_breached, sla_breach_time, agent_last_updated, agent_next_update,
                no_reply, fields_json, issuetype_name, resolution_name
         FROM jira_issue_cache
-        WHERE project_key = @p0
+        WHERE ${pf.sql}
           AND resolution_name IS NOT NULL
           AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND status_category = 'Done'
-      `, [this.jiraProject]);
+      `, pf.params);
 
       // Step 3: Created today count
       const createdTodayRows = await localQuery<{ cnt: number }>(`
         SELECT COUNT(*) AS cnt FROM jira_issue_cache
-        WHERE project_key = @p0 AND CAST(jira_created AS DATE) = CAST(GETUTCDATE() AS DATE)
-      `, [this.jiraProject]);
+        WHERE ${pf.sql} AND CAST(jira_created AS DATE) = CAST(GETUTCDATE() AS DATE)
+      `, pf.params);
 
       // Filter out onboarding tickets
       const open = openRows.filter(t => !isOnboarding(t.request_type));
@@ -482,13 +495,32 @@ export class KpiPipeline {
           { kpi: n8nKpiName(tier, 'Resolution SLA Breached Actionable'), group: 'Tier SLA', count: stats.resBreachedActionable, target: 0, direction: 'Lower is better' },
           { kpi: n8nKpiName(tier, 'FRT Breached Actionable'), group: 'Tier SLA', count: stats.frtBreachedActionable, target: 0, direction: 'Lower is better' },
         );
-        if (tier !== 'Development') {
-          metrics.push(
-            { kpi: n8nKpiName(tier, 'Resolution SLA Breached Not Actionable'), group: 'Tier SLA', count: stats.resBreachedNotActionable, target: 0, direction: 'Lower is better' },
-            { kpi: n8nKpiName(tier, 'FRT Breached Not Actionable'), group: 'Tier SLA', count: stats.frtBreachedNotActionable, target: 0, direction: 'Lower is better' },
-          );
-        }
+        metrics.push(
+          { kpi: n8nKpiName(tier, 'Resolution SLA Breached Not Actionable'), group: 'Tier SLA', count: stats.resBreachedNotActionable, target: 0, direction: 'Lower is better' },
+          { kpi: n8nKpiName(tier, 'FRT Breached Not Actionable'), group: 'Tier SLA', count: stats.frtBreachedNotActionable, target: 0, direction: 'Lower is better' },
+        );
       }
+
+      // Customer Care aggregate: sum of CC sub-buckets
+      const ccSubBuckets = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)'];
+      const ccAgg = { volume: 0, noReply: 0, oldestActionableDays: 0, resBreachedActionable: 0, resBreachedNotActionable: 0, frtBreachedActionable: 0, frtBreachedNotActionable: 0 };
+      for (const bucket of ccSubBuckets) {
+        const bs = tierStats.get(bucket);
+        if (!bs) continue;
+        ccAgg.volume += bs.volume;
+        ccAgg.noReply += bs.noReply;
+        if (bs.oldestActionableDays > ccAgg.oldestActionableDays) ccAgg.oldestActionableDays = bs.oldestActionableDays;
+        ccAgg.resBreachedActionable += bs.resBreachedActionable;
+        ccAgg.resBreachedNotActionable += bs.resBreachedNotActionable;
+        ccAgg.frtBreachedActionable += bs.frtBreachedActionable;
+        ccAgg.frtBreachedNotActionable += bs.frtBreachedNotActionable;
+      }
+      metrics.push(
+        { kpi: 'Number of Tickets in Customer Care', group: 'Tier Volume', count: ccAgg.volume, target: 0, direction: 'Lower is better' },
+        { kpi: 'Number of Tickets With No Reply in Customer Care', group: 'Tier No Reply', count: ccAgg.noReply, target: 0, direction: 'Lower is better' },
+        { kpi: 'Customer Care FRT breached (actionable)', group: 'Tier SLA', count: ccAgg.frtBreachedActionable, target: 0, direction: 'Lower is better' },
+        { kpi: 'Customer Care over SLA (actionable)', group: 'Tier SLA', count: ccAgg.resBreachedActionable, target: 0, direction: 'Lower is better' },
+      );
 
       // Escalation KPIs (from local MSSQL escalation_log)
       try {
@@ -595,6 +627,45 @@ export class KpiPipeline {
     }
   }
 
+  async ensureKpiTargetDirections(): Promise<void> {
+    const KNOWN_DIRECTIONS: Record<string, string> = {
+      'Tickets Solved Today': 'Higher is better',
+      'FRT Compliance % (Resolved Today)': 'Higher is better',
+      'Resolution Compliance % (Resolved Today)': 'Higher is better',
+      'FRT Compliance % (Open Queue)': 'Higher is better',
+      'Resolution Compliance % (Open Queue)': 'Higher is better',
+      'CSAT %': 'Higher is better',
+      'AI Tickets Resolved (Today)': 'Higher is better',
+      'AI Resolution Rate %': 'Higher is better',
+      "WTD percentage KPI's Green": 'Higher is better',
+      '1st Line Resolution Rate %': 'Higher is better',
+      'CSAT % (Derived)': 'Higher is better',
+      'FCR Rate %': 'Higher is better',
+      'Open Tickets': 'Lower is better',
+      'SLA Breached': 'Lower is better',
+      'New Tickets Today': 'Lower is better',
+      'Unassigned': 'Lower is better',
+      'FRT Breaches (Resolved Today)': 'Lower is better',
+      'Resolution Breaches (Resolved Today)': 'Lower is better',
+      'Waiting on Requestor': 'Lower is better',
+      'Bug Escalation-to-Ack (hours)': 'Lower is better',
+      "WTD percentage KPI's Red": 'Lower is better',
+    };
+    try {
+      const p = await getKpiPool(this.settings);
+      const s = this.s;
+      for (const [kpi, dir] of Object.entries(KNOWN_DIRECTIONS)) {
+        await p.request()
+          .input('kpi', sql.NVarChar(100), kpi)
+          .input('dir', sql.NVarChar(50), dir)
+          .query(`UPDATE dbo.KpiTargets SET Direction = @dir WHERE KpiName = @kpi AND Direction != @dir`);
+      }
+      console.log('[kpi-pipeline] KpiTargets direction check complete');
+    } catch (err) {
+      console.warn('[kpi-pipeline] ensureKpiTargetDirections failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
   async loadTargets(p?: sql.ConnectionPool): Promise<Map<string, { target: number; direction: string; group: string }>> {
     const map = new Map<string, { target: number; direction: string; group: string }>();
     try {
@@ -679,12 +750,13 @@ export class KpiPipeline {
       const today = new Date().toISOString().slice(0, 10);
 
       // 1st Line Resolution Rate: CC-tier resolved / total resolved today
+      const pf = this.projectInClause();
       const resolvedRows = await localQuery<{ request_type: string | null; current_tier: string | null }>(`
         SELECT request_type, current_tier FROM jira_issue_cache
-        WHERE project_key = @p0 AND status_category = 'Done'
+        WHERE ${pf.sql} AND status_category = 'Done'
           AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND LOWER(ISNULL(request_type, '')) != 'onboarding'
-      `, [this.jiraProject]);
+      `, pf.params);
 
       const ccRequestTypes = ['incident', 'chat', 'ai request', 'emailed request', 'gdpr', 'service request', 'tpj request'];
       const totalResolved = resolvedRows.length;
@@ -694,10 +766,10 @@ export class KpiPipeline {
       // CSAT % (derived) — same as snapshot CSAT but with different RAG
       const csatRows = await localQuery<{ fields_json: string | null }>(`
         SELECT fields_json FROM jira_issue_cache
-        WHERE project_key = @p0 AND status_category = 'Done'
+        WHERE ${pf.sql} AND status_category = 'Done'
           AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND fields_json IS NOT NULL
-      `, [this.jiraProject]);
+      `, pf.params);
       let csatSum = 0, csatCount = 0;
       for (const r of csatRows) {
         const rating = parseCsat(r.fields_json);
@@ -711,10 +783,10 @@ export class KpiPipeline {
 
       const resolvedForComments = await localQuery<{ issue_key: string; request_type: string | null; created_at: string | null }>(`
         SELECT issue_key, request_type, jira_created AS created_at FROM jira_issue_cache
-        WHERE project_key = @p0 AND status_category = 'Done'
+        WHERE ${pf.sql} AND status_category = 'Done'
           AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND LOWER(ISNULL(request_type, '')) != 'onboarding'
-      `, [this.jiraProject]);
+      `, pf.params);
 
       const bugTypes = ['bug', 'development', 'defect'];
       let fcrCount = 0, fcrTotal = 0;
@@ -892,6 +964,7 @@ export class KpiPipeline {
     try {
       const p = await getKpiPool(this.settings);
       const now = new Date();
+      const pf = this.projectInClause();
 
       // Open ticket stats per agent from local MSSQL cache
       const openStats = await localQuery<{
@@ -912,13 +985,13 @@ export class KpiPipeline {
           SUM(CASE WHEN CAST(jira_updated AS DATE) < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) AS OpenTickets_NoUpdateToday,
           MAX(DATEDIFF(day, jira_created, GETUTCDATE())) AS OldestTicketDays
         FROM jira_issue_cache
-        WHERE project_key = @p0
+        WHERE ${pf.sql}
           AND status_category != 'Done'
           AND assignee_account_id IS NOT NULL
           AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3')
           AND LOWER(ISNULL(request_type, '')) != 'onboarding'
         GROUP BY assignee_account_id
-      `, [this.jiraProject]);
+      `, pf.params);
 
       // Solved today per agent
       const solvedToday = await localQuery<{
@@ -927,13 +1000,13 @@ export class KpiPipeline {
       }>(`
         SELECT assignee_account_id, COUNT(*) AS SolvedTickets_Today
         FROM jira_issue_cache
-        WHERE project_key = @p0
+        WHERE ${pf.sql}
           AND status_category = 'Done'
           AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND assignee_account_id IS NOT NULL
           AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3')
         GROUP BY assignee_account_id
-      `, [this.jiraProject]);
+      `, pf.params);
 
       // Solved this week per agent
       const solvedWeek = await localQuery<{
@@ -942,13 +1015,13 @@ export class KpiPipeline {
       }>(`
         SELECT assignee_account_id, COUNT(*) AS SolvedTickets_ThisWeek
         FROM jira_issue_cache
-        WHERE project_key = @p0
+        WHERE ${pf.sql}
           AND status_category = 'Done'
           AND jira_updated >= DATEADD(day, -DATEPART(weekday, GETUTCDATE()) + 2, CAST(GETUTCDATE() AS DATE))
           AND assignee_account_id IS NOT NULL
           AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3')
         GROUP BY assignee_account_id
-      `, [this.jiraProject]);
+      `, pf.params);
 
       const solvedTodayMap = new Map(solvedToday.map(r => [r.assignee_account_id, r.SolvedTickets_Today]));
       const solvedWeekMap = new Map(solvedWeek.map(r => [r.assignee_account_id, r.SolvedTickets_ThisWeek]));
@@ -1023,8 +1096,12 @@ export class KpiPipeline {
         p = await getKpiPool(this.settings);
       } catch { throw new Error('KPI SQL pool unavailable'); }
 
-      const today = new Date().toISOString().slice(0, 10);
       const s = this.s;
+
+      // Use SQL Server's own date to avoid JS timezone drift
+      const dateResult = await p.request().query(`SELECT CAST(GETDATE() AS DATE) AS today`);
+      const today = dateResult.recordset[0]?.today;
+      if (!today) throw new Error('Failed to get server date');
 
       // Ensure all columns exist on the daily table
       const newCols = [
@@ -1126,15 +1203,16 @@ export class KpiPipeline {
       } catch { /* Jira_QA_GoldenRules may not exist */ }
 
       // Get CSAT per agent from resolved-today tickets
+      const pfAgent = this.projectInClause();
       const csatPerAgent = new Map<string, { count: number; sum: number }>();
       try {
         const csatRows = await localQuery<{ assignee_account_id: string; fields_json: string | null }>(`
           SELECT assignee_account_id, fields_json FROM jira_issue_cache
-          WHERE project_key = @p0 AND status_category = 'Done'
+          WHERE ${pfAgent.sql} AND status_category = 'Done'
             AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
             AND assignee_account_id IS NOT NULL
             AND fields_json IS NOT NULL
-        `, [this.jiraProject]);
+        `, pfAgent.params);
         for (const r of csatRows) {
           const rating = parseCsat(r.fields_json);
           if (rating !== null) {
@@ -1151,10 +1229,10 @@ export class KpiPipeline {
       try {
         const slaRows = await localQuery<{ assignee_account_id: string; fields_json: string | null }>(`
           SELECT assignee_account_id, fields_json FROM jira_issue_cache
-          WHERE project_key = @p0 AND status_category = 'Done'
+          WHERE ${pfAgent.sql} AND status_category = 'Done'
             AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
             AND assignee_account_id IS NOT NULL
-        `, [this.jiraProject]);
+        `, pfAgent.params);
         for (const r of slaRows) {
           const resBreached = isSlaBreached(parseSlaField(r.fields_json, 'customfield_14048'));
           if (resBreached !== null) {
@@ -1274,7 +1352,12 @@ export class KpiPipeline {
         rowsAffected++;
       }
 
-      console.log(`[kpi-pipeline] Agent snapshot → ${s || 'live'}: ${agents.recordset.length} agents, all 27 columns + RAG`);
+      // Verify rows exist for today
+      const verifyReq = p.request();
+      verifyReq.input('checkDate', sql.Date, today);
+      const verify = await verifyReq.query(`SELECT COUNT(*) AS cnt FROM dbo.jira_agent_kpi_daily${s} WHERE ReportDate = @checkDate`);
+      const todayCount = verify.recordset[0]?.cnt ?? 0;
+      console.log(`[kpi-pipeline] Agent snapshot → ${s || 'live'}: ${agents.recordset.length} agents processed, ${todayCount} rows for ${today instanceof Date ? today.toISOString().slice(0, 10) : today}`);
 
       await this.monitor?.logRun({
         pipeline_name: 'kpi-agent-snapshot', started_at: started, completed_at: new Date(),

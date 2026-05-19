@@ -1159,7 +1159,8 @@ async function main() {
     pipelineMonitor.ensureRunsTable().catch(e => console.warn('[pipeline-monitor] ensureRunsTable failed:', e.message));
     pipelineMonitor.ensureUatTables().catch(e => console.warn('[pipeline-monitor] UAT table setup failed:', e.message));
 
-    const kpiPipeline = new KpiPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor, jiraCacheQueries);
+    const kpiProjects = settingsQueries.get('agent_jira_project') || 'NT';
+    const kpiPipeline = new KpiPipeline(settingsQueries, llmService, agentJiraClient, kpiProjects, pipelineMonitor, jiraCacheQueries);
     const qaPipeline = new QaPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
     const grPipeline = new GrPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
     const grCoachingEngine = new CoachingEngine(llmService, agentJiraClient, 'NT', settingsQueries);
@@ -1470,6 +1471,7 @@ async function main() {
     // Ensure NOVA AI synthetic agent exists in KPI database
     kpiPipeline.ensureNovaAiAgent().catch(() => {});
     kpiPipeline.ensureDigestColumns().catch(() => {});
+    kpiPipeline.ensureKpiTargetDirections().catch(() => {});
 
     // KPI pipeline timers (initial kicks staggered to avoid startup storm)
     jobRegistry.register('kpi-jira-snapshot', 'KPI Jira snapshot + agent metrics refresh', async () => {
