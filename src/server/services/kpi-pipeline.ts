@@ -102,19 +102,23 @@ function ccBucket(requestType: string | null): string | null {
   if (['incident', 'chat', 'ai request', 'emailed request', 'gdpr'].includes(rt)) return 'CC (Incidents)';
   if (rt === 'service request') return 'CC (Service Requests)';
   if (rt === 'tpj request') return 'CC (TPJ)';
-  if (!rt) return null;
-  return 'CC (Incidents)';
+  return null;
 }
 
-const ACTIONABLE_STATUSES = ['open', 'reopened', 'work in progress'];
 const EXCLUDED_STATUSES = ['done', 'closed', 'resolved', 'waiting on requestor', 'waiting on partner'];
+const SLA_ACTIONABLE_STATUSES = ['open', 'reopened', 'work in progress'];
 
 function isActionable(status: string | null): boolean {
-  return ACTIONABLE_STATUSES.includes((status || '').toLowerCase());
+  const s = (status || '').toLowerCase();
+  return !!s && !EXCLUDED_STATUSES.includes(s);
 }
 
 function isExcludedStatus(status: string | null): boolean {
   return EXCLUDED_STATUSES.includes((status || '').toLowerCase());
+}
+
+function isSlaActionable(status: string | null): boolean {
+  return SLA_ACTIONABLE_STATUSES.includes((status || '').toLowerCase());
 }
 
 function isNoReply(ticket: CacheRow, now: Date): boolean {
@@ -157,7 +161,7 @@ function parseCsat(fieldsJson: string | null): number | null {
 }
 
 // All tier groups that get per-tier KPIs
-const ALL_TIERS = ['Customer Care', 'CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Production', 'Tier 2', 'Tier 3', 'Development'];
+const ALL_TIERS = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Production', 'Tier 2', 'Tier 3', 'Development'];
 
 function n8nKpiName(tier: string, metric: string): string {
   // Strip parentheses for tiers used in sentence-style names (except TPJ which keeps them)
@@ -338,7 +342,8 @@ export class KpiPipeline {
         FROM jira_issue_cache
         WHERE ${pf.sql}
           AND resolution_name IS NOT NULL
-          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND resolved_at IS NOT NULL
+          AND CAST(resolved_at AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND status_category = 'Done'
       `, pf.params);
 
@@ -359,6 +364,7 @@ export class KpiPipeline {
         resBreached: boolean | null;
         csat: number | null;
         actionable: boolean;
+        slaActionable: boolean;
         excluded: boolean;
       };
 
@@ -373,6 +379,7 @@ export class KpiPipeline {
           resBreached: isSlaBreached(parseSlaField(t.fields_json, 'customfield_14048')),
           csat: parseCsat(t.fields_json),
           actionable: isActionable(t.status_name),
+          slaActionable: isSlaActionable(t.status_name),
           excluded: isExcludedStatus(t.status_name),
         };
       }
@@ -416,12 +423,12 @@ export class KpiPipeline {
 
         const dueDateOk = !t.due_date || new Date(t.due_date) <= endOfToday;
         if (t.resBreached === true) {
-          if (t.actionable && dueDateOk) stats.resBreachedActionable++;
-          else if (!t.excluded && !t.actionable) stats.resBreachedNotActionable++;
+          if (t.slaActionable && dueDateOk) stats.resBreachedActionable++;
+          else if (!t.excluded && !t.slaActionable) stats.resBreachedNotActionable++;
         }
         if (t.frtBreached === true) {
-          if (t.actionable) stats.frtBreachedActionable++;
-          else if (!t.excluded && !t.actionable) stats.frtBreachedNotActionable++;
+          if (t.slaActionable) stats.frtBreachedActionable++;
+          else if (!t.excluded && !t.slaActionable) stats.frtBreachedNotActionable++;
         }
 
         if (t.frtBreached !== null) { totalFrtChecked++; if (t.frtBreached) totalFrtBreached++; }
@@ -500,27 +507,6 @@ export class KpiPipeline {
           { kpi: n8nKpiName(tier, 'FRT Breached Not Actionable'), group: 'Tier SLA', count: stats.frtBreachedNotActionable, target: 0, direction: 'Lower is better' },
         );
       }
-
-      // Customer Care aggregate: sum of CC sub-buckets
-      const ccSubBuckets = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)'];
-      const ccAgg = { volume: 0, noReply: 0, oldestActionableDays: 0, resBreachedActionable: 0, resBreachedNotActionable: 0, frtBreachedActionable: 0, frtBreachedNotActionable: 0 };
-      for (const bucket of ccSubBuckets) {
-        const bs = tierStats.get(bucket);
-        if (!bs) continue;
-        ccAgg.volume += bs.volume;
-        ccAgg.noReply += bs.noReply;
-        if (bs.oldestActionableDays > ccAgg.oldestActionableDays) ccAgg.oldestActionableDays = bs.oldestActionableDays;
-        ccAgg.resBreachedActionable += bs.resBreachedActionable;
-        ccAgg.resBreachedNotActionable += bs.resBreachedNotActionable;
-        ccAgg.frtBreachedActionable += bs.frtBreachedActionable;
-        ccAgg.frtBreachedNotActionable += bs.frtBreachedNotActionable;
-      }
-      metrics.push(
-        { kpi: 'Number of Tickets in Customer Care', group: 'Tier Volume', count: ccAgg.volume, target: 0, direction: 'Lower is better' },
-        { kpi: 'Number of Tickets With No Reply in Customer Care', group: 'Tier No Reply', count: ccAgg.noReply, target: 0, direction: 'Lower is better' },
-        { kpi: 'Customer Care FRT breached (actionable)', group: 'Tier SLA', count: ccAgg.frtBreachedActionable, target: 0, direction: 'Lower is better' },
-        { kpi: 'Customer Care over SLA (actionable)', group: 'Tier SLA', count: ccAgg.resBreachedActionable, target: 0, direction: 'Lower is better' },
-      );
 
       // Escalation KPIs (from local MSSQL escalation_log)
       try {

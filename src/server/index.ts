@@ -1161,7 +1161,7 @@ async function main() {
     pipelineMonitor.ensureRunsTable().catch(e => console.warn('[pipeline-monitor] ensureRunsTable failed:', e.message));
     pipelineMonitor.ensureUatTables().catch(e => console.warn('[pipeline-monitor] UAT table setup failed:', e.message));
 
-    const kpiProjects = settingsQueries.get('agent_jira_project') || 'NT';
+    const kpiProjects = settingsQueries.get('kpi_jira_projects') || 'NT';
     const kpiPipeline = new KpiPipeline(settingsQueries, llmService, agentJiraClient, kpiProjects, pipelineMonitor, jiraCacheQueries);
     const qaPipeline = new QaPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
     const grPipeline = new GrPipeline(settingsQueries, llmService, agentJiraClient, 'NT', pipelineMonitor);
