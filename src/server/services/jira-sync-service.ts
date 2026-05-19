@@ -270,11 +270,7 @@ export class JiraSyncService {
     const currentTier = (f.customfield_12981 as any)?.value ?? null;
     const nurturProduct = (f.customfield_13183 as any)?.value ?? null;
     const cf13482 = f.customfield_13482 as any;
-    let requestType: string | null = (cf13482?.value ?? cf13482?.name ?? (typeof cf13482 === 'string' ? cf13482 : null)) || null;
-    if (!requestType) {
-      const cf12800 = f.customfield_12800 as any;
-      requestType = cf12800?.requestType?.name ?? cf12800?.requestType?.value ?? cf12800?.requestType?.displayName ?? null;
-    }
+    const requestType: string | null = (cf13482?.value ?? cf13482?.name ?? (typeof cf13482 === 'string' ? cf13482 : null)) || null;
     const tldrText = extractText(f.customfield_13184);
     const agentSummaryText = extractText(f.customfield_13185);
     const troubleshootingText = extractText(f.customfield_13212);
