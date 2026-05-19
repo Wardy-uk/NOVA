@@ -407,7 +407,7 @@ export class AssignmentEngine {
              IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
-      WHERE Department = 'NT'
+      WHERE Department IN ('NT', 'NTPJ')
       ORDER BY Team, AgentName
     `);
 
