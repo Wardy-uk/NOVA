@@ -97,12 +97,12 @@ function classifyTier(currentTier: string | null): string {
   return mapped ?? 'Unclassified';
 }
 
-function ccBucket(requestType: string | null): string | null {
+function ccBucket(requestType: string | null): string {
   const rt = (requestType || '').toLowerCase();
   if (['incident', 'chat', 'ai request', 'emailed request', 'gdpr'].includes(rt)) return 'CC (Incidents)';
   if (rt === 'service request') return 'CC (Service Requests)';
   if (rt === 'tpj request') return 'CC (TPJ)';
-  return null;
+  return 'CC (Incidents)';
 }
 
 const EXCLUDED_STATUSES = ['done', 'closed', 'resolved', 'waiting on requestor', 'waiting on partner'];
@@ -493,7 +493,7 @@ export class KpiPipeline {
 
       // Per-tier KPIs
       for (const [tier, stats] of tierStats) {
-        if (stats.volume === 0 && !ALL_TIERS.includes(tier)) continue;
+        if (!ALL_TIERS.includes(tier)) continue;
         metrics.push(
           { kpi: n8nKpiName(tier, 'Volume'), group: 'Tier Volume', count: stats.volume, target: 0, direction: 'Lower is better' },
           { kpi: n8nKpiName(tier, 'No Reply'), group: 'Tier No Reply', count: stats.noReply, target: 0, direction: 'Lower is better' },

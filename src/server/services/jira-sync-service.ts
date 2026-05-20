@@ -20,7 +20,7 @@ const ALL_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
   'assignee', 'reporter', 'created', 'updated', 'duedate',
   'resolution', 'labels', 'issuelinks', 'attachment',
-  'customfield_10010', // SLA
+  'customfield_10010', // SLA (legacy — not returned by API)
   'customfield_10020', // JSM customer request type (legacy — not used for CC bucketing)
   'customfield_12800', // Request type fallback
   'customfield_12981', // Current Tier
@@ -33,7 +33,8 @@ const ALL_FIELDS = [
   'customfield_13213', // Issue Environment
   'customfield_13214', // Expected Outcome
   'customfield_13215', // Development Details
-  'customfield_14048', // Problem ticket field
+  'customfield_14046', // First Reply Time SLA
+  'customfield_14048', // Resolution SLA
   'customfield_14081', // Agent Last Updated
   'customfield_14185', // Agent Next Update
   'customfield_14494', // Resolution type
