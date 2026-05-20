@@ -2510,6 +2510,7 @@ export class AgreementFieldValueQueries {
 export interface AdobeSignAgreement {
   id: number; agreement_id: string; contract_id: number | null;
   bc_customer_id: string | null; subscription_contract_no: string | null;
+  bc_imported_at: string | null; bc_import_error: string | null;
   name: string; status: string; sender_email: string | null; signer_emails: string | null;
   filled_fields: string | null;
   signed_form_data: string | null; signed_pdf_path: string | null; signed_at: string | null;
@@ -2519,11 +2520,12 @@ export interface AdobeSignAgreement {
   synced_at: string | null; created_at: string; updated_at: string;
 }
 
-// Subset used for upsert from the wizard / sync job. The signed_* columns are
-// never written via upsert — they're set via markSigned() after the post-sign
-// handler runs, so they aren't overwritten when the 5-min sync just refreshes status.
+// Subset used for upsert from the wizard / sync job. The signed_* and bc_imported_*
+// columns are never written via upsert — they're set via markSigned() / markBcImported
+// /markBcImportError, so they aren't overwritten when the 5-min sync just refreshes status.
 export type AdobeSignAgreementUpsert = Omit<AdobeSignAgreement,
-  'id' | 'created_at' | 'updated_at' | 'signed_form_data' | 'signed_pdf_path' | 'signed_at'>;
+  'id' | 'created_at' | 'updated_at' | 'signed_form_data' | 'signed_pdf_path' | 'signed_at'
+  | 'bc_imported_at' | 'bc_import_error'>;
 
 export class AdobeSignAgreementQueries {
   async getAll(filters?: { contract_id?: number; status?: string; search?: string }): Promise<AdobeSignAgreement[]> {
@@ -2587,6 +2589,31 @@ export class AdobeSignAgreementQueries {
            updated_at       = GETUTCDATE()
        WHERE agreement_id = ?`,
       [data.signedFormData, data.signedPdfPath, data.signedAt, agreementId]
+    );
+  }
+
+  // Successful BC subscription import write — sets the timestamp and clears any
+  // prior error so retries reset state cleanly. Idempotent.
+  async markBcImported(agreementId: string): Promise<void> {
+    await execute(
+      `UPDATE adobe_sign_agreements
+       SET bc_imported_at  = GETUTCDATE(),
+           bc_import_error = NULL,
+           updated_at      = GETUTCDATE()
+       WHERE agreement_id = ?`,
+      [agreementId]
+    );
+  }
+
+  // Failed BC subscription import write — stores the error message for visibility
+  // and leaves bc_imported_at null so the agreement can be retried.
+  async markBcImportError(agreementId: string, error: string): Promise<void> {
+    await execute(
+      `UPDATE adobe_sign_agreements
+       SET bc_import_error = ?,
+           updated_at      = GETUTCDATE()
+       WHERE agreement_id = ?`,
+      [error.slice(0, 4000), agreementId]
     );
   }
 

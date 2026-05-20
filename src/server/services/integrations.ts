@@ -183,6 +183,17 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
     ],
   },
   {
+    id: 'business-central-subscription-import',
+    name: 'BC — Subscription Import',
+    description: 'Custom Business Central API for pushing signed Adobe contracts into the Imported Customer Subscription Contracts staging tables. Uses the same app registration credentials as the main Business Central integration (Tenant ID, Client ID and Client Secret are reused) — only the BC environment and company differ, typically pointing at a test/sandbox environment.',
+    enabledKey: 'bc_sub_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'bc_sub_environment', label: 'Environment', type: 'text', placeholder: 'e.g. DA-260318', required: true },
+      { key: 'bc_sub_company_id', label: 'Company ID', type: 'text', placeholder: 'BC test company GUID', required: true },
+    ],
+  },
+  {
     id: 'kpi-sql',
     name: 'KPI SQL Server',
     description: 'SQL Server connection for Jira Support DB KPI data. Used by the KPIs area to display team and agent metrics.',

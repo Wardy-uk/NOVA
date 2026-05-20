@@ -1821,6 +1821,16 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('adobe_sign_agreements', 'subscription_contract_no') IS NULL
      ALTER TABLE adobe_sign_agreements ADD subscription_contract_no NVARCHAR(50) NULL;`,
 
+    // BC subscription import tracking. bc_imported_at is set when the post-sign
+    // (or manual) handler successfully writes the agreement's header row to BC's
+    // importedCustomerSubscriptionContracts staging table. bc_import_error stores
+    // the last failure message so the wizard / admin can see what went wrong and
+    // retry. Both stay NULL on a fresh agreement.
+    `IF COL_LENGTH('adobe_sign_agreements', 'bc_imported_at') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD bc_imported_at DATETIME2 NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'bc_import_error') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD bc_import_error NVARCHAR(MAX) NULL;`,
+
     // Atomic counters for NOVA-generated sequence numbers (e.g. subscription
     // contract numbers). Use BCQueries.nextCounterValue to increment + read in
     // one MERGE statement so concurrent agreement creates never collide.

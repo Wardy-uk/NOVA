@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AdobeSignApiError, type AdobeSignClient } from '../services/adobe-sign-client.js';
 import type { AdobeSignAgreementQueries, AgreementFieldValueQueries, CounterQueries } from '../db/queries.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
+import type { BcSubscriptionImportService } from '../services/bc-subscription-import-service.js';
 
 const SUBSCRIPTION_CONTRACT_COUNTER = 'subscription_contract_no';
 const SUBSCRIPTION_CONTRACT_PREFIX = 'NOVA-';
@@ -55,6 +56,7 @@ export function createAdobeSignRoutes(
   agreementQueries: AdobeSignAgreementQueries,
   fieldValueQueries: AgreementFieldValueQueries,
   counterQueries: CounterQueries,
+  bcSubscriptionImportService: BcSubscriptionImportService,
   settingsQueries: FileSettingsQueries,
 ): Router {
   const router = Router();
@@ -278,6 +280,28 @@ export function createAdobeSignRoutes(
     } catch (err) {
       console.error('[Adobe Sign] Create agreement error:', err);
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create agreement' });
+    }
+  });
+
+  // POST /api/adobe-sign/agreements/:id/push-to-bc — manual trigger for the BC
+  // Subscription Import write. Takes the LOCAL adobe_sign_agreements.id (int),
+  // looks up the agreement_id (Adobe's GUID), and delegates to the service.
+  // Used for testing or retrying a failed import without waiting for sign sync.
+  // Auto-fire on SIGNED is intentionally NOT wired yet — verify the field
+  // names land in BC successfully via this manual path first, then we flip
+  // the post-sign handler to auto-fire.
+  router.post('/agreements/:id/push-to-bc', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+    const agreement = await agreementQueries.getById(id);
+    if (!agreement) { res.status(404).json({ ok: false, error: 'Agreement not found' }); return; }
+
+    try {
+      const result = await bcSubscriptionImportService.pushAgreementToBC(agreement.agreement_id);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      console.error('[Adobe Sign] BC push error:', err);
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'BC push failed' });
     }
   });
 
