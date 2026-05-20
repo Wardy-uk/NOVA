@@ -89,11 +89,13 @@ export class BcSubscriptionImportApiError extends Error {
     public body: unknown,
     public requestUrl: string,
   ) {
-    // Include a snippet of the response body in the message — BC's error
-    // bodies are noisy but the meaningful bit ('Unknown field X', 'Permission
-    // denied on Y', etc.) is what we want surfaced when this bubbles up.
+    // Include a snippet of the response body AND the request URL in the message —
+    // BC's error bodies are noisy but the meaningful bit ('Unknown field X',
+    // 'Error in query syntax', etc.) plus the exact URL we hit is what we want
+    // surfaced when this bubbles up to the browser, since NSSM doesn't reliably
+    // capture console output to the log files.
     const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
-    super(`BC Subscription Import ${statusCode} ${statusText} — ${bodyStr.slice(0, 500)}`);
+    super(`BC Subscription Import ${statusCode} ${statusText} — ${bodyStr.slice(0, 500)} [URL: ${requestUrl}]`);
     this.name = 'BcSubscriptionImportApiError';
   }
 }
