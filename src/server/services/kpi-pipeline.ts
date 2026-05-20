@@ -959,23 +959,31 @@ export class KpiPipeline {
         OpenTickets_Over2Hours: number;
         OpenTickets_NoUpdateToday: number;
         OldestTicketDays: number;
+        OldestTicketKey: string | null;
       }>(`
-        SELECT assignee_account_id,
-          MAX(assignee_display) AS assignee_display,
+        SELECT a.assignee_account_id,
+          MAX(a.assignee_display) AS assignee_display,
           COUNT(*) AS OpenTickets_Total,
-          SUM(CASE WHEN sla_breached = 1
-                   AND status_name NOT IN ('Done','Closed','Resolved','Waiting on Requestor','Waiting on Partner')
-                   AND (due_date IS NULL OR due_date <= CAST(GETUTCDATE() AS DATE))
+          SUM(CASE WHEN a.sla_breached = 1
+                   AND a.status_name NOT IN ('Done','Closed','Resolved','Waiting on Requestor','Waiting on Partner')
+                   AND (a.due_date IS NULL OR a.due_date <= CAST(GETUTCDATE() AS DATE))
               THEN 1 ELSE 0 END) AS OpenTickets_Over2Hours,
-          SUM(CASE WHEN CAST(jira_updated AS DATE) < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) AS OpenTickets_NoUpdateToday,
-          MAX(DATEDIFF(day, jira_created, GETUTCDATE())) AS OldestTicketDays
-        FROM jira_issue_cache
-        WHERE ${pf.sql}
-          AND status_category != 'Done'
-          AND assignee_account_id IS NOT NULL
-          AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3')
-          AND LOWER(ISNULL(request_type, '')) != 'onboarding'
-        GROUP BY assignee_account_id
+          SUM(CASE WHEN CAST(a.jira_updated AS DATE) < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) AS OpenTickets_NoUpdateToday,
+          MAX(DATEDIFF(day, a.jira_created, GETUTCDATE())) AS OldestTicketDays,
+          (SELECT TOP 1 o.issue_key FROM jira_issue_cache o
+           WHERE o.assignee_account_id = a.assignee_account_id
+             AND ${pf.sql.replace(/project_key/g, 'o.project_key')}
+             AND o.status_category != 'Done'
+             AND o.current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3', 'Development')
+             AND LOWER(ISNULL(o.request_type, '')) != 'onboarding'
+           ORDER BY o.jira_created ASC) AS OldestTicketKey
+        FROM jira_issue_cache a
+        WHERE ${pf.sql.replace(/project_key/g, 'a.project_key')}
+          AND a.status_category != 'Done'
+          AND a.assignee_account_id IS NOT NULL
+          AND a.current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3', 'Development')
+          AND LOWER(ISNULL(a.request_type, '')) != 'onboarding'
+        GROUP BY a.assignee_account_id
       `, pf.params);
 
       // Solved today per agent
@@ -989,7 +997,7 @@ export class KpiPipeline {
           AND status_category = 'Done'
           AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND assignee_account_id IS NOT NULL
-          AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3')
+          AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3', 'Development')
         GROUP BY assignee_account_id
       `, pf.params);
 
@@ -1004,7 +1012,7 @@ export class KpiPipeline {
           AND status_category = 'Done'
           AND jira_updated >= DATEADD(day, -DATEPART(weekday, GETUTCDATE()) + 2, CAST(GETUTCDATE() AS DATE))
           AND assignee_account_id IS NOT NULL
-          AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3')
+          AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3', 'Development')
         GROUP BY assignee_account_id
       `, pf.params);
 
@@ -1013,6 +1021,7 @@ export class KpiPipeline {
 
       // Update dbo.Agent for each agent that exists in the roster
       let updated = 0;
+      const unmatchedAccountIds: string[] = [];
       for (const agent of openStats) {
         const req = p.request();
         req.input('accountId', sql.NVarChar(100), agent.assignee_account_id);
@@ -1022,6 +1031,7 @@ export class KpiPipeline {
         req.input('solvedToday', sql.Int, solvedTodayMap.get(agent.assignee_account_id) ?? 0);
         req.input('solvedWeek', sql.Int, solvedWeekMap.get(agent.assignee_account_id) ?? 0);
         req.input('oldestDays', sql.Int, agent.OldestTicketDays ?? 0);
+        req.input('oldestKey', sql.NVarChar(50), agent.OldestTicketKey ?? null);
 
         const result = await req.query(`
           UPDATE dbo.Agent SET
@@ -1031,10 +1041,12 @@ export class KpiPipeline {
             SolvedTickets_Today = @solvedToday,
             SolvedTickets_ThisWeek = @solvedWeek,
             OldestTicketDays = @oldestDays,
+            OldestTicketKey = @oldestKey,
             TicketsSnapshotAt = GETUTCDATE()
           WHERE AccountId = @accountId
         `);
         if (result.rowsAffected[0] > 0) updated++;
+        else unmatchedAccountIds.push(agent.assignee_account_id);
       }
 
       // Zero out agents with no open tickets
@@ -1049,6 +1061,7 @@ export class KpiPipeline {
           UPDATE dbo.Agent SET
             OpenTickets_Total = 0, OpenTickets_Over2Hours = 0,
             OpenTickets_NoUpdateToday = 0, OldestTicketDays = 0,
+            OldestTicketKey = NULL,
             TicketsSnapshotAt = GETUTCDATE()
           WHERE IsActive = 1 AND AccountId IS NOT NULL
             AND AccountId NOT IN (${placeholders})
@@ -1058,6 +1071,7 @@ export class KpiPipeline {
           UPDATE dbo.Agent SET
             OpenTickets_Total = 0, OpenTickets_Over2Hours = 0,
             OpenTickets_NoUpdateToday = 0, OldestTicketDays = 0,
+            OldestTicketKey = NULL,
             TicketsSnapshotAt = GETUTCDATE()
           WHERE IsActive = 1 AND AccountId IS NOT NULL
         `);
@@ -1066,7 +1080,10 @@ export class KpiPipeline {
       // Refresh NOVA AI metrics separately (uses different data source)
       await this.refreshNovaAiMetrics(p);
 
-      console.log(`[kpi-pipeline] All agent metrics refreshed: ${updated} agents updated from ${openStats.length} with open tickets`);
+      console.log(`[kpi-pipeline] Agent metrics refresh: ${openStats.length} agents from cache, ${updated} matched in dbo.Agent, ${unmatchedAccountIds.length} unmatched`);
+      if (unmatchedAccountIds.length > 0) {
+        console.warn(`[kpi-pipeline] Unmatched AccountIds (no dbo.Agent row): ${unmatchedAccountIds.slice(0, 10).join(', ')}${unmatchedAccountIds.length > 10 ? ` (+${unmatchedAccountIds.length - 10} more)` : ''}`);
+      }
     } catch (err) {
       console.error('[kpi-pipeline] refreshAllAgentMetrics failed:', err instanceof Error ? err.message : err);
     }
