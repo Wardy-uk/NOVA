@@ -98,9 +98,14 @@ export class BcSubscriptionImportService {
     }
 
     // ── Build header payload ──
-    // Minimal field test (2026-05-20): only the four fields confirmed for this pass.
+    // BC doesn't auto-assign the staging-table Entry No. over the API, so read the
+    // current max and send max+1.
+    const nextEntryNo = (await client.getMaxContractEntryNo()) + 1;
+
+    // Minimal field test (2026-05-20): only the fields confirmed for this pass.
     // createContractDeferrals intentionally omitted until the full payload is wired.
     const header: ImportedCustomerSubscriptionContractPayload = {
+      entryNo: nextEntryNo,
       subscriptionContractNo: agreement.subscription_contract_no,
       sellToCustomerNo: customer.number,
       billToCustomerNo: customer.number,       // same as sellTo

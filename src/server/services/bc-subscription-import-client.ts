@@ -37,6 +37,8 @@
 // here to match what BC expects — the client surfaces error bodies verbatim. ──
 
 export interface ImportedCustomerSubscriptionContractPayload {
+  entryNo: number;                      // staging-table PK — BC doesn't auto-assign it over the
+                                         // API, so NOVA supplies max(existing)+1.
   subscriptionContractNo: string;       // NOVA-NNNNNNNNNN
   sellToCustomerNo: string;             // BC customer No. (e.g. 'CU0000001')
   billToCustomerNo: string;             // same as sellTo for our use case
@@ -180,7 +182,42 @@ export class BcSubscriptionImportClient {
     return res.json() as Promise<T>;
   }
 
+  private async get<T>(path: string): Promise<T> {
+    const token = await this.getToken();
+    const url = `${this.baseUrl}${path}`;
+
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error(`[BC-Sub API] GET ${path} → ${res.status} ${res.statusText}`);
+      console.error(`[BC-Sub API] Request URL: ${url}`);
+      console.error(`[BC-Sub API] Response body: ${errText}`);
+      let errBody: unknown;
+      try { errBody = JSON.parse(errText); } catch { errBody = errText; }
+      throw new BcSubscriptionImportApiError(res.status, res.statusText, errBody, url);
+    }
+
+    return res.json() as Promise<T>;
+  }
+
   // ── Endpoints ──
+
+  // BC doesn't auto-assign Entry No. on insert via this API, so the caller must
+  // supply it. Returns the current highest entryNo (0 when the table is empty) so
+  // the service can POST with max+1.
+  async getMaxContractEntryNo(): Promise<number> {
+    const res = await this.get<{ value: Array<{ entryNo?: number }> }>(
+      '/importedCustomerSubscriptionContracts?$select=entryNo&$orderby=entryNo%20desc&$top=1'
+    );
+    return res.value?.[0]?.entryNo ?? 0;
+  }
 
   // POSTs the contract header. Returns whatever BC echoes back (typically the
   // created row including any BC-assigned fields like SystemId).
