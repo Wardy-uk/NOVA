@@ -839,7 +839,12 @@ async function main() {
   const bcSubscriptionImportService = new BcSubscriptionImportService(
     adobeSignAgreementQueries,
     bcCustomerQueries,
-    () => bcSubscriptionImportClient,
+    // Build the client fresh from current settings on every call rather than
+    // returning a cached instance. Pushes are infrequent (manual, and later
+    // per-signed-agreement), so the per-call OAuth token fetch is negligible —
+    // and it guarantees env/company/credential changes take effect immediately
+    // without a restart or relying on the settings-change rebuild hook.
+    () => buildBcSubscriptionImportClient(settingsQueries.getAll()),
   );
 
   // Setup orchestrator — coordinates direct BYM API execution
