@@ -854,6 +854,8 @@ CREATE TABLE adobe_sign_agreements (
     template_id         INT             NULL,
     bc_customer_id      NVARCHAR(200)   NULL,
     subscription_contract_no NVARCHAR(50) NULL,
+    bc_imported_at      DATETIME2       NULL,
+    bc_import_error     NVARCHAR(MAX)   NULL,
     name                NVARCHAR(500)   NOT NULL,
     status              NVARCHAR(50)    DEFAULT 'DRAFT',
     sender_email        NVARCHAR(200)   NULL,
