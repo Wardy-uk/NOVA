@@ -951,8 +951,35 @@ export class KpiPipeline {
       const now = new Date();
       const pf = this.projectInClause();
 
-      // Open ticket stats per agent from local MSSQL cache
-      const openStats = await localQuery<{
+      // Open ticket stats per agent from local MSSQL cache (per-ticket rows for SLA evaluation)
+      const openTickets = await localQuery<{
+        assignee_account_id: string;
+        assignee_display: string | null;
+        issue_key: string;
+        status_name: string | null;
+        due_date: string | null;
+        jira_created: string | null;
+        jira_updated: string | null;
+        fields_json: string | null;
+      }>(`
+        SELECT a.assignee_account_id,
+          a.assignee_display,
+          a.issue_key,
+          a.status_name,
+          a.due_date,
+          a.jira_created,
+          a.jira_updated,
+          a.fields_json
+        FROM jira_issue_cache a
+        WHERE ${pf.sql.replace(/project_key/g, 'a.project_key')}
+          AND a.status_category != 'Done'
+          AND a.assignee_account_id IS NOT NULL
+          AND a.current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3', 'Development')
+          AND LOWER(ISNULL(a.request_type, '')) != 'onboarding'
+      `, pf.params);
+
+      // Aggregate per-agent stats in TypeScript (SLA breach via parseSlaField + isSlaBreached)
+      const agentMap = new Map<string, {
         assignee_account_id: string;
         assignee_display: string | null;
         OpenTickets_Total: number;
@@ -960,31 +987,61 @@ export class KpiPipeline {
         OpenTickets_NoUpdateToday: number;
         OldestTicketDays: number;
         OldestTicketKey: string | null;
-      }>(`
-        SELECT a.assignee_account_id,
-          MAX(a.assignee_display) AS assignee_display,
-          COUNT(*) AS OpenTickets_Total,
-          SUM(CASE WHEN a.sla_breached = 1
-                   AND a.status_name NOT IN ('Done','Closed','Resolved','Waiting on Requestor','Waiting on Partner')
-                   AND (a.due_date IS NULL OR a.due_date <= CAST(GETUTCDATE() AS DATE))
-              THEN 1 ELSE 0 END) AS OpenTickets_Over2Hours,
-          SUM(CASE WHEN CAST(a.jira_updated AS DATE) < CAST(GETUTCDATE() AS DATE) THEN 1 ELSE 0 END) AS OpenTickets_NoUpdateToday,
-          MAX(DATEDIFF(day, a.jira_created, GETUTCDATE())) AS OldestTicketDays,
-          (SELECT TOP 1 o.issue_key FROM jira_issue_cache o
-           WHERE o.assignee_account_id = a.assignee_account_id
-             AND ${pf.sql.replace(/project_key/g, 'o.project_key')}
-             AND o.status_category != 'Done'
-             AND o.current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3', 'Development')
-             AND LOWER(ISNULL(o.request_type, '')) != 'onboarding'
-           ORDER BY o.jira_created ASC) AS OldestTicketKey
-        FROM jira_issue_cache a
-        WHERE ${pf.sql.replace(/project_key/g, 'a.project_key')}
-          AND a.status_category != 'Done'
-          AND a.assignee_account_id IS NOT NULL
-          AND a.current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3', 'Development')
-          AND LOWER(ISNULL(a.request_type, '')) != 'onboarding'
-        GROUP BY a.assignee_account_id
-      `, pf.params);
+      }>();
+
+      const todayDate = new Date();
+      todayDate.setUTCHours(0, 0, 0, 0);
+      const todayStr = todayDate.toISOString().slice(0, 10);
+      const SLA_EXCLUDED = ['done', 'closed', 'resolved', 'waiting on requestor', 'waiting on partner'];
+
+      for (const ticket of openTickets) {
+        let agg = agentMap.get(ticket.assignee_account_id);
+        if (!agg) {
+          agg = {
+            assignee_account_id: ticket.assignee_account_id,
+            assignee_display: ticket.assignee_display,
+            OpenTickets_Total: 0,
+            OpenTickets_Over2Hours: 0,
+            OpenTickets_NoUpdateToday: 0,
+            OldestTicketDays: 0,
+            OldestTicketKey: null,
+          };
+          agentMap.set(ticket.assignee_account_id, agg);
+        }
+
+        agg.OpenTickets_Total++;
+
+        // SLA breach: use parseSlaField + isSlaBreached with status/due_date operational filters
+        const statusLower = (ticket.status_name || '').toLowerCase();
+        const statusPassesSlaFilter = !SLA_EXCLUDED.includes(statusLower);
+        const dueDatePassesFilter = !ticket.due_date || ticket.due_date.slice(0, 10) <= todayStr;
+        if (statusPassesSlaFilter && dueDatePassesFilter) {
+          const slaField = parseSlaField(ticket.fields_json, 'customfield_14048');
+          if (isSlaBreached(slaField)) {
+            agg.OpenTickets_Over2Hours++;
+          }
+        }
+
+        // No update today
+        if (ticket.jira_updated) {
+          const updatedDate = ticket.jira_updated.slice(0, 10);
+          if (updatedDate < todayStr) {
+            agg.OpenTickets_NoUpdateToday++;
+          }
+        }
+
+        // Oldest ticket tracking
+        if (ticket.jira_created) {
+          const createdMs = new Date(ticket.jira_created).getTime();
+          const ageDays = Math.floor((now.getTime() - createdMs) / (1000 * 60 * 60 * 24));
+          if (ageDays > agg.OldestTicketDays) {
+            agg.OldestTicketDays = ageDays;
+            agg.OldestTicketKey = ticket.issue_key;
+          }
+        }
+      }
+
+      const openStats = Array.from(agentMap.values());
 
       // Solved today per agent
       const solvedToday = await localQuery<{

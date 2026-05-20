@@ -63,9 +63,78 @@ const ConversationalFollowUpSchema = z.object({
   question: z.string(),
 });
 
+// ── Vocabulary Firewall (runtime enforcement) ──
+// Safety net: catches internal/technical terms that should never appear in customer-facing text.
+// The LLM prompt is the first-line defence; this is the second.
+
+const VOCABULARY_REPLACEMENTS: Array<[RegExp, string]> = [
+  // Account/access internal terms
+  [/\bRBAC\b/gi, 'access settings'],
+  [/\bprovisioning\b/gi, 'setup'],
+  [/\bdeprovisioning\b/gi, 'removal'],
+  [/\bauthentication\b/gi, 'login'],
+  [/\bauthori[sz]ation\b/gi, 'access'],
+  [/\baccess control\b/gi, 'access settings'],
+  [/\brole[- ]based\b/gi, 'access'],
+  [/\bpermission matrix\b/gi, 'access settings'],
+  [/\bpermission model\b/gi, 'access settings'],
+  [/\bscopes\b/gi, 'access levels'],
+  [/\bentities\b/gi, 'items'],
+  [/\bservice account\b/gi, 'system account'],
+  [/\bSSO\b/g, 'single sign-on'],
+  [/\bSAML\b/g, 'login'],
+  [/\bidentity provider\b/gi, 'login system'],
+  [/\baccess permissions\b/gi, 'access'],
+  [/\buser permissions\b/gi, 'access'],
+  [/\brole permissions\b/gi, 'access'],
+  [/\baccess rights\b/gi, 'access'],
+  [/\bpermission levels\b/gi, 'access levels'],
+  // Technical integration terms
+  [/\bdata feed\b/gi, 'update'],
+  [/\bdata pipeline\b/gi, 'update process'],
+  [/\bwebhook\b/gi, 'notification'],
+  [/\bendpoint\b/gi, 'service'],
+  [/\bCRM sync\b/gi, 'update'],
+  [/\bsyndication\b/gi, 'distribution'],
+  [/\bAPI\b/g, 'system'],
+  [/\bintegration\b/gi, 'connection'],
+  // Classification/routing terms
+  [/\btriage\b/gi, 'review'],
+  [/\bcategori[sz]e\b/gi, 'sort'],
+  [/\bclassify\b/gi, 'identify'],
+  [/\broute\b/gi, 'direct'],
+  [/\bintake\b/gi, 'request'],
+  [/\bsubcategory\b/gi, 'type'],
+  [/\btaxonomy\b/gi, 'categories'],
+  [/\bconfidence\b/gi, 'certainty'],
+];
+
+function sanitizeCustomerResponse(text: string): string {
+  let result = text;
+  for (const [pattern, replacement] of VOCABULARY_REPLACEMENTS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+
+function extractPhoneNumbers(text: string): string[] {
+  if (!text) return [];
+  const matches = text.match(/(?:\+?\d{1,3}[\s-]?)?\(?\d{2,5}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}/g);
+  return matches || [];
+}
+
+function briefContext(meta: IntakeSessionMetadata): string {
+  const desc = meta.collectedFields.description || meta.openingMessage;
+  if (!desc) return '';
+  const firstSentence = desc.split(/[.!?\n]/)[0]?.trim() || '';
+  return firstSentence.length > 80 ? firstSentence.slice(0, 77) + '...' : firstSentence;
+}
+
 const FRUSTRATION_PATTERNS = /\b(this is (completely |absolutely |totally |utterly |just )?ridiculous|speak to (someone|a (real )?person|a human)|talk to (someone|a (real )?person|a human)|real person|not a (chat)?bot|don'?t want.*(chat)?bot|this is useless|waste of time|you'?re useless|what a joke|fed up|sick of this|absolutely terrible|disgusting service|incompetent|get me a manager|escalate this|I('m| am) (absolutely |completely |totally |utterly |so )?furious|human (please|now|agent)|actual (person|human)|nobody is (fixing|helping|doing anything|listening|responding)|no one is (fixing|helping|doing anything|listening|responding)|been (broken|waiting|like this|an issue|a problem) for (days|weeks|ages|months|a while|over a week)|how (many|long|much longer) (times?|do I|more)|still (not|hasn'?t been|hasn'?t|isn'?t) (fixed|resolved|working|sorted|done)|completely (useless|unacceptable|ridiculous|furious)|utterly (useless|unacceptable|ridiculous|furious)|beyond (frustrated|annoyed|angry)|extremely (unhappy|frustrated|disappointed|annoyed)|so frustrated|so (angry|annoyed|disappointed|unhappy)|I('ve| have) (had enough|lost patience|been waiting)|unacceptable|appalling|disgraceful|atrocious|dreadful|(wow|oh),? (great|brilliant|fantastic|wonderful|amazing|excellent) service|thanks for nothing|I('m| am) starting to (wonder|lose|think)|does anyone (actually |even )?(read|check|look at|care|respond)|wonder(ing)? if anyone (reads|listens|cares|checks|responds))\b|[!?]{4,}/i;
 
 const ATTACHMENT_PATTERNS = /\b(attached|attachment|see attached|photo attached|i'?ve attached|file attached|screenshot attached|attaching|i attach)\b/i;
+
+const ESCALATION_CHASE_PATTERNS = /\b(raised this|already (raised|reported|logged|submitted|sent|told you|contacted|emailed)|following up|chasing|chase this|chasing this up|nobody has (helped|replied|responded|got back|come back|done anything)|no one has (helped|replied|responded|got back|come back|done anything)|been waiting|still (waiting|not (fixed|resolved|sorted|done|working|heard))|I ('ve|have) (already|previously) (raised|reported|logged|submitted|sent)|originally (raised|reported|logged)|weeks? ago|days? ago|months? ago|some time ago|a while (ago|back|now)|first (raised|reported|contacted|logged)|re-?raise|re-?open|follow.?up|getting? back to (you|this|me)|still (an issue|a problem|happening|broken|not right)|hasn'?t been (fixed|resolved|sorted|addressed|looked at|dealt with))\b/i;
 
 // ── Category Field Config ──
 
@@ -373,6 +442,17 @@ function detectAccountFromKeywords(content: string): { likely: boolean; subcateg
     return { likely: true, subcategory: 'account_details', securitySensitive: false };
   }
 
+  // F4: Broad "access" signal — the word "access" in any context (including technical
+  // phrasings like "API endpoint access") indicates an account/permission concern.
+  // Routes to conversational clarification, not direct classification.
+  const hasBroadAccessSignal =
+    /\b(access)\b/.test(lower) &&
+    !/\b(website|web site|page|our site|listing|rightmove|zoopla|property|properties)\b/.test(lower);
+
+  if (hasBroadAccessSignal) {
+    return { likely: true, subcategory: 'account_permissions', securitySensitive: false };
+  }
+
   return { likely: false, subcategory: null, securitySensitive: false };
 }
 
@@ -562,6 +642,9 @@ export class PortalChatService {
       responseContent = "I'm having trouble processing your request right now. Would you like me to create a support ticket so our team can help you directly?";
       meta.offeredTicketCreation = true;
     }
+
+    // Runtime vocabulary firewall — catches jargon leaks from LLM and template paths
+    responseContent = sanitizeCustomerResponse(responseContent);
 
     // Persist updated metadata (best-effort — don't let this block the response)
     try {
@@ -758,13 +841,15 @@ export class PortalChatService {
       if (personName && personEmail) {
         const summaryResult = this.buildSummaryCard(meta);
         return {
-          response: `Understood — I'll get this raised urgently.\n\n${summaryResult.response}`,
+          response: `Understood — I'll get ${personName}'s access removed urgently.\n\n${summaryResult.response}`,
           messageMeta: summaryResult.messageMeta,
         };
       }
 
-      const missing = !personEmail ? 'email address' : 'name';
-      return { response: `Understood — I'll get this raised urgently. Could you confirm their ${missing} so I can get this raised?` };
+      if (personName) {
+        return { response: `Understood — I'll get ${personName}'s access removed urgently. Could you confirm their email address so I can get this raised?` };
+      }
+      return { response: `Understood — I'll get this raised urgently. Could you confirm their name and email address so I can get this raised?` };
     }
 
     // H1b: Frustration + urgency fast-track — frustrated customers with domain signals skip LLM classification
@@ -823,17 +908,22 @@ Analyse the message and return structured JSON:
 
 5. FIELD EXTRACTION — capture details already provided. Include subject, account, description, url, errorMessage, browser, urgency (only if explicit), propertyAddress, listingId, affectedPortals. Preserve the customer's exact words in description — do not rewrite or summarise. If they mention a phone number, include the phone number. If they mention an address, include the address verbatim.
 
-6. ACKNOWLEDGMENT — write 1-2 sentences that MIRROR the customer's specific details back to them. This is critical:
-   - Reflect specific nouns: names, addresses, phone numbers, locations, error messages, quantities, timelines, reference numbers
-   - Use the customer's own words and phrasing, not your summary of them
-   - If they said "the phone number on our contact page is wrong — it shows 01onal 555 1234 but should be 0161 555 6789", your acknowledgement MUST include both numbers and "contact page"
-   - If they mentioned multiple issues, acknowledge ALL of them, not just the primary one
-   - NEVER paraphrase away specifics. "I can help with that update" is a violation. "I can see the phone number on your contact page needs updating from 0161 555 1234 to 0161 555 6789" is correct.
-   VOCABULARY FIREWALL — never use ANY of these terms in the acknowledgement or any customer-facing text:
+6. ACKNOWLEDGMENT — write 1-2 sentences that MIRROR the customer's specific details back to them.
+   PRIMARY RULE: Always use the customer's own words to describe their problem. If they said "she can't see anything", say "she can't see anything". If they said "the number is wrong", say "the number is wrong". Do not translate their words into technical or internal vocabulary.
+   MANDATORY DETAIL INCLUSION — you MUST include these in the acknowledgement when the customer provides them:
+   - Phone numbers: include the EXACT phone number(s) mentioned (e.g. "0161 555 1234"). Never drop or omit phone numbers.
+   - Addresses: include the EXACT address or location mentioned. Never summarise to "your address".
+   - Person names: include the EXACT name mentioned (e.g. "Sarah Jenkins"). Never replace with "the user" or "them".
+   - Reference numbers: include any ticket/reference/listing numbers verbatim.
+   - Error messages: include the specific error text if provided.
+   If they said "the phone number on our contact page is wrong — it shows 0161 555 1234 but should be 0161 555 6789", your acknowledgement MUST include both numbers and "contact page".
+   If they mentioned multiple issues, acknowledge ALL of them, not just the primary one.
+   NEVER paraphrase away specifics. "I can help with that update" is a VIOLATION. "I can see the phone number on your contact page needs updating from 0161 555 1234 to 0161 555 6789" is correct.
+   VOCABULARY FIREWALL (safety net) — never use ANY of these terms in the acknowledgement or any customer-facing text:
    - Technical: feed, syndication, API, integration, CRM sync, data feed, data pipeline, webhook, endpoint
-   - Account/access internal: RBAC, provisioning, deprovisioning, authentication, authorisation, access control, role-based, permission matrix, scopes, entities, service account, SSO, SAML, identity provider
+   - Account/access internal: RBAC, provisioning, deprovisioning, authentication, authorisation, authorization, access control, role-based, permission matrix, permission model, scopes, entities, service account, SSO, SAML, identity provider, access permissions, user permissions, role permissions, access rights
    - Classification: triage, categorise, classify, route, intake, subcategory
-   Use the customer's own language. If they said "can't get in", say "can't get in", not "authentication issue".
+   Instead, mirror the customer's vocabulary. If they said "can't get in", say "can't get in", not "authentication issue". If they said "she can't see anything", say "she can't see anything", not "access permissions issue".
 
 7. NEXT QUESTION — if you need more information to action this, write ONE natural follow-up question. Only ask for what's genuinely missing. If they've given enough detail, omit this field. Never ask the customer to diagnose the technical cause or identify which system is at fault. Never ask "which system" or "which platform".
 
@@ -1012,9 +1102,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           meta.collectedFields.urgency = 'High';
           meta.stage = 'detail';
 
-          const ack = d.acknowledgment || "Understood — I'll get this raised urgently.";
           const personName = meta.collectedFields.affectedPersonName;
           const personEmail = meta.collectedFields.affectedPersonEmail;
+          const ack = personName
+            ? (d.acknowledgment || `Understood — I'll get ${personName}'s access removed urgently.`)
+            : (d.acknowledgment || "Understood — I'll get this raised urgently.");
 
           if (personName && personEmail) {
             const summaryResult = this.buildSummaryCard(meta);
@@ -1024,8 +1116,10 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
             };
           }
 
-          const missing = !personEmail ? 'email address' : 'name';
-          return { response: `${ack} Could you confirm their ${missing} so I can get this raised?` };
+          if (personName) {
+            return { response: `${ack} Could you confirm their email address so I can get this raised?` };
+          }
+          return { response: `${ack} Could you confirm their name and email address so I can get this raised?` };
         }
 
         if (d.accountSubcategory) {
@@ -1092,8 +1186,18 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         if (vagueAccountSignal.securitySensitive) {
           meta.securitySensitive = true;
           meta.collectedFields.urgency = 'High';
-          const missing = !meta.collectedFields.affectedPersonEmail ? 'email address' : 'name';
-          return { response: `Understood — I'll get this raised urgently. Could you confirm their ${missing} so I can get this raised?` };
+          const personName = meta.collectedFields.affectedPersonName;
+          if (personName && meta.collectedFields.affectedPersonEmail) {
+            const summaryResult = this.buildSummaryCard(meta);
+            return {
+              response: `Understood — I'll get ${personName}'s access removed urgently.\n\n${summaryResult.response}`,
+              messageMeta: summaryResult.messageMeta,
+            };
+          }
+          if (personName) {
+            return { response: `Understood — I'll get ${personName}'s access removed urgently. Could you confirm their email address so I can get this raised?` };
+          }
+          return { response: `Understood — I'll get this raised urgently. Could you confirm their name and email address so I can get this raised?` };
         }
         const ack = d.acknowledgment || "Thanks for getting in touch.";
         return { response: `${ack}\n\nCould you tell me a bit more about what's happening?` };
@@ -1116,6 +1220,16 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         extractPropertyFieldsFromText(content, meta.collectedFields);
         const ack = d.acknowledgment || "Thanks for getting in touch about your property listing.";
         return { response: `${ack}\n\nCould you tell me which property is affected and where you're seeing the issue?` };
+      }
+
+      // F5: Escalation/chase detection — messages referencing prior tickets/requests
+      // should trigger conversational follow-up, never the category picker.
+      if (ESCALATION_CHASE_PATTERNS.test(content)) {
+        meta.conversational = true;
+        meta.stage = 'detail';
+        meta.escalationDetected = true;
+        const ack = d.acknowledgment || "I can see you've been in touch about this before — sorry it's not been resolved yet.";
+        return { response: `${ack}\n\nCould you tell me a bit more about the issue you originally raised so I can get this picked up?` };
       }
 
       // Genuinely unclassifiable — no domain signal detected at all. Category picker is appropriate.
@@ -1189,6 +1303,14 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       return { response: `${ack} Could you tell me a bit more — is something not displaying correctly, or do you need some content updated?${fileNote}` };
     }
 
+    // F5: Escalation/chase detection — before picker fallback
+    if (ESCALATION_CHASE_PATTERNS.test(content)) {
+      meta.conversational = true;
+      meta.stage = 'detail';
+      meta.escalationDetected = true;
+      return { response: "I can see you've been in touch about this before — sorry it's not been resolved yet.\n\nCould you tell me a bit more about the issue you originally raised so I can get this picked up?" };
+    }
+
     // Not recognisably a website or property request — fall through to category picker
     meta.intent = 'problem';
     meta.stage = 'category';
@@ -1247,12 +1369,17 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       const personEmail = meta.collectedFields.affectedPersonEmail;
 
       if (personName && personEmail) {
-        return this.buildSummaryCard(meta);
+        const summaryResult = this.buildSummaryCard(meta);
+        return {
+          response: `Understood — I'll get ${personName}'s access removed urgently.\n\n${summaryResult.response}`,
+          messageMeta: summaryResult.messageMeta,
+        };
       }
 
-      const ack = "Understood — I'll get this raised urgently.";
-      const missing = !personEmail ? 'email address' : 'name';
-      return { response: `${ack} Could you confirm their ${missing} so I can get this raised?` };
+      if (personName) {
+        return { response: `Understood — I'll get ${personName}'s access removed urgently. Could you confirm their email address so I can get this raised?` };
+      }
+      return { response: `Understood — I'll get this raised urgently. Could you confirm their name and email address so I can get this raised?` };
     }
 
     if (detection.subcategory) {
@@ -1908,6 +2035,14 @@ Return JSON with only the fields present in the message.`,
   }
 
   private buildPropertyFollowUp(field: string, meta: IntakeSessionMetadata): string {
+    const ctx = briefContext(meta);
+
+    const withContext = (question: string): string => {
+      if (!ctx) return question;
+      const lc = ctx.toLowerCase().startsWith('i ') ? ctx : ctx.charAt(0).toLowerCase() + ctx.slice(1);
+      return `You mentioned ${lc} — ${question.charAt(0).toLowerCase() + question.slice(1)}`;
+    };
+
     switch (field) {
       case 'description':
         if (meta.subcategory === 'property_missing_listing') return "Could you describe what's happening — is the listing missing completely, or is some information not showing?";
@@ -1917,13 +2052,13 @@ Return JSON with only the fields present in the message.`,
         if (meta.subcategory === 'property_status') return "What status is showing, and what should it be?";
         return 'Could you describe the issue in a bit more detail?';
       case 'propertyIdentifier':
-        return 'Which property is affected? An address or listing reference would help us look into this.';
+        return withContext('Which property is affected? An address or listing reference would help us look into this.');
       case 'affectedPortals':
-        return 'Is this affecting your website, property portals like Rightmove or Zoopla, or both?';
+        return withContext('Is this affecting your website, property portals like Rightmove or Zoopla, or both?');
       case 'account':
-        return 'Which account or branch is this for?';
+        return withContext('Which account or branch is this for?');
       default:
-        return 'Could you share a few more details?';
+        return withContext('Could you share a few more details?');
     }
   }
 
@@ -1941,6 +2076,14 @@ Return JSON with only the fields present in the message.`,
   }
 
   private buildAccountFollowUp(field: string, meta: IntakeSessionMetadata): string {
+    const ctx = briefContext(meta);
+
+    const withContext = (question: string): string => {
+      if (!ctx) return question;
+      const lc = ctx.toLowerCase().startsWith('i ') ? ctx : ctx.charAt(0).toLowerCase() + ctx.slice(1);
+      return `You mentioned ${lc} — ${question.charAt(0).toLowerCase() + question.slice(1)}`;
+    };
+
     switch (field) {
       case 'description':
         if (meta.subcategory === 'account_login') return "What happens when you try to log in — do you get an error message, or does something else happen?";
@@ -1950,14 +2093,14 @@ Return JSON with only the fields present in the message.`,
         if (meta.subcategory === 'account_details') return "What details need updating?";
         return "Could you describe what's happening in a bit more detail?";
       case 'affectedPerson':
-        if (meta.subcategory === 'account_remove_user') return "Could you confirm their name and email address?";
-        return "Could you let me know the person's name and email address?";
+        if (meta.subcategory === 'account_remove_user') return withContext("Could you confirm their name and email address?");
+        return withContext("Could you let me know the person's name and email address?");
       case 'officeBranch':
-        return "Which office or branch is this for?";
+        return withContext("Which office or branch is this for?");
       case 'account':
-        return "Which account or company is this for?";
+        return withContext("Which account or company is this for?");
       default:
-        return "Could you share a few more details?";
+        return withContext("Could you share a few more details?");
     }
   }
 
@@ -1967,13 +2110,24 @@ Return JSON with only the fields present in the message.`,
     if (f.affectedPersonName) parts.push(f.affectedPersonName);
     if (f.officeBranch) parts.push(`the ${f.officeBranch} office`);
 
+    const context = briefContext(meta);
+
+    if (parts.length > 0 && context) {
+      return `Thanks for letting us know about ${parts.join(' and ')} — I can see ${context.toLowerCase().startsWith('i ') ? context : context.charAt(0).toLowerCase() + context.slice(1)}.`;
+    }
     if (parts.length > 0) {
       return `Thanks for letting us know about ${parts.join(' and ')}.`;
     }
-    if (meta.subcategory === 'account_login') return "Sorry to hear you're having trouble getting in.";
-    if (meta.subcategory === 'account_new_user') return "I'll help you get that new user set up.";
-    if (meta.subcategory === 'account_office_change') return "I'll help you with that office change.";
-    return "Thanks for getting in touch.";
+    if (meta.subcategory === 'account_login') {
+      return context ? `Sorry to hear you're having trouble getting in — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "Sorry to hear you're having trouble getting in.";
+    }
+    if (meta.subcategory === 'account_new_user') {
+      return context ? `I'll help you get that set up — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "I'll help you get that new user set up.";
+    }
+    if (meta.subcategory === 'account_office_change') {
+      return context ? `I'll help you with that — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "I'll help you with that office change.";
+    }
+    return context ? `Thanks for getting in touch — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "Thanks for getting in touch.";
   }
 
   private async buildAccountConversationalFollowUp(
@@ -2004,9 +2158,9 @@ Rules:
 - Keep it short and natural (one sentence)
 - Don't repeat information they've already provided
 - NEVER ask "which system" or "which platform"
-- NEVER use ANY of these terms: RBAC, provisioning, deprovisioning, authentication, authorisation, access control, role-based, permission matrix, scopes, entities, service account, SSO, SAML, identity provider, triage, categorise, classify, route
+- NEVER use ANY of these terms: RBAC, provisioning, deprovisioning, authentication, authorisation, authorization, access control, role-based, permission matrix, permission model, scopes, entities, service account, SSO, SAML, identity provider, triage, categorise, classify, route, access permissions, user permissions, role permissions, access rights, user access, permission levels
 - NEVER reveal multi-system provisioning (setting up one user may affect many systems — the customer sees one request)
-- Use the customer's own words. If they said "can't get in", say "can't get in", not "authentication issue"`,
+- ALWAYS use the customer's own words to describe their problem. If they said "can't get in", say "can't get in". If they said "she can't see anything", say "she can't see anything". Do not rephrase into technical vocabulary.`,
           `Ask for: ${fieldLabel}`,
           ConversationalFollowUpSchema,
           { callType: 'portal_chat', tier: 'standard', maxTokens: 150, temperature: 0.3 },
@@ -2069,8 +2223,8 @@ Rules:
 - Reference what they've already told you where it makes sense
 - Keep it short and natural (one sentence)
 - Don't repeat information they've already provided
-- NEVER use technical jargon like "feed", "syndication", "API", "integration", "CRM", "data sync", "data pipeline", or "portal feed"
-- Use the customer's own words — if they said "not showing on Rightmove", say "not showing on Rightmove"`,
+- NEVER use technical jargon like "feed", "syndication", "API", "integration", "CRM", "data sync", "data pipeline", "portal feed", "authentication", "authorisation", "access control"
+- ALWAYS use the customer's own words — if they said "not showing on Rightmove", say "not showing on Rightmove". Mirror their vocabulary, do not translate it.`,
           `Ask for: ${fieldLabel}`,
           ConversationalFollowUpSchema,
           { callType: 'portal_chat', tier: 'standard', maxTokens: 150, temperature: 0.3 },
@@ -2110,8 +2264,8 @@ Rules:
 - Reference what they've already told you where it makes sense
 - Keep it short and natural (one sentence)
 - Don't repeat information they've already provided
-- Don't use internal jargon, category names, or technical terms (feed, syndication, API, CRM, RBAC, provisioning)
-- Use the customer's own words wherever possible`,
+- Don't use internal jargon, category names, or technical terms (feed, syndication, API, CRM, RBAC, provisioning, authentication, authorisation, access control, role-based, permission)
+- ALWAYS use the customer's own words to describe their problem — mirror their vocabulary, do not translate it`,
           `Ask for: ${fieldLabel}`,
           ConversationalFollowUpSchema,
           { callType: 'portal_chat', tier: 'standard', maxTokens: 150, temperature: 0.3 },
@@ -2190,13 +2344,23 @@ Rules:
   private buildTemplateAcknowledgement(meta: IntakeSessionMetadata): string {
     const f = meta.collectedFields;
     const parts: string[] = [];
+
+    if (f.affectedPersonName) parts.push(`the issue with ${f.affectedPersonName}`);
     if (f.propertyAddress) parts.push(f.propertyAddress);
     if (f.listingId && !f.propertyAddress) parts.push(`listing ${f.listingId}`);
+    if (f.officeBranch) parts.push(`the ${f.officeBranch} office`);
     if (f.affectedPortals) parts.push(f.affectedPortals);
     if (f.url) parts.push(f.url);
+    if (f.account && parts.length === 0) parts.push(f.account);
+
+    const phones = extractPhoneNumbers(f.description || '');
+    const phoneSuffix = phones.length > 0 ? ` (${phones.slice(0, 2).join(', ')})` : '';
 
     if (parts.length > 0) {
-      return `Thanks for those details about ${parts.slice(0, 2).join(' on ')}.`;
+      return `Thanks for those details about ${parts.slice(0, 2).join(' on ')}${phoneSuffix}.`;
+    }
+    if (phoneSuffix) {
+      return `Thanks for letting us know about that${phoneSuffix}.`;
     }
     return 'Thanks for letting us know.';
   }

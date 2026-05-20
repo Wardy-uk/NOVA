@@ -270,6 +270,7 @@ export interface IntakeSessionMetadata {
   disambiguationDomain?: string;
   securitySensitive?: boolean;
   ambiguityNote?: string;
+  escalationDetected?: boolean;
 }
 
 export interface ChatMessageMetadata {
