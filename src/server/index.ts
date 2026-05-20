@@ -114,6 +114,8 @@ import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { createContractTermsRoutes } from './routes/contract-terms.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
+import { BcSubscriptionImportClient, buildBcSubscriptionImportClient } from './services/bc-subscription-import-client.js';
+import { BcSubscriptionImportService } from './services/bc-subscription-import-service.js';
 import { createSurveyRoutes, createSurveyPublicRoutes, runSurveyScheduler } from './routes/surveys.js';
 import { createAgentRoutes } from './routes/agent.js';
 import { createMyTicketsRoutes } from './routes/my-tickets.js';
@@ -821,6 +823,30 @@ async function main() {
   }
   buildAdobeSignService();
 
+  // BC Subscription Import — custom BC API client for pushing signed contracts
+  // into the importedCustomerSubscriptionContracts staging tables. Reuses the
+  // main BC integration's Entra creds, but targets a different env + company.
+  let bcSubscriptionImportClient: BcSubscriptionImportClient | null = null;
+  function buildBcSubscriptionImportService() {
+    const s = settingsQueries.getAll();
+    bcSubscriptionImportClient = buildBcSubscriptionImportClient(s);
+    if (bcSubscriptionImportClient) {
+      console.log('[N.O.V.A] BC Subscription Import: Service configured');
+    }
+  }
+  buildBcSubscriptionImportService();
+
+  const bcSubscriptionImportService = new BcSubscriptionImportService(
+    adobeSignAgreementQueries,
+    bcCustomerQueries,
+    // Build the client fresh from current settings on every call rather than
+    // returning a cached instance. Pushes are infrequent (manual, and later
+    // per-signed-agreement), so the per-call OAuth token fetch is negligible —
+    // and it guarantees env/company/credential changes take effect immediately
+    // without a restart or relying on the settings-change rebuild hook.
+    () => buildBcSubscriptionImportClient(settingsQueries.getAll()),
+  );
+
   // Setup orchestrator — coordinates direct BYM API execution
   const setupOrchestrator = new SetupOrchestrator({
     getBym: () => bymClient,
@@ -922,6 +948,11 @@ async function main() {
     if (key.startsWith('azdo_')) buildAzDoService();
     if (key.startsWith('bym_')) buildBymService();
     if (key.startsWith('adobe_sign_')) buildAdobeSignService();
+    // BC Subscription Import rebuilds when either its own settings change OR
+    // when the shared BC credentials change (because the client reuses them).
+    if (key.startsWith('bc_sub_') || key === 'bc_tenant_id' || key === 'bc_client_id' || key === 'bc_client_secret') {
+      buildBcSubscriptionImportService();
+    }
   }));
   app.use('/api/integrations', createIntegrationRoutes(mcpManager, settingsQueries, userSettingsQueries, uvxCommand, () => d365Service, (key) => {
     if (key.startsWith('d365_')) buildD365Service();
@@ -929,6 +960,9 @@ async function main() {
     if (key.startsWith('azdo_')) buildAzDoService();
     if (key.startsWith('bym_')) buildBymService();
     if (key.startsWith('adobe_sign_')) buildAdobeSignService();
+    if (key.startsWith('bc_sub_') || key === 'bc_tenant_id' || key === 'bc_client_id' || key === 'bc_client_secret') {
+      buildBcSubscriptionImportService();
+    }
   }, buildOnboardingJiraClient, () => bymClient));
 
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
@@ -940,7 +974,7 @@ async function main() {
   // app.use('/api/milestones', ...) is registered after buildOrchestrator
   app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
   app.use('/api/contracts', createContractsRoutes(bcCustomerQueries, contractsQueries, settingsQueries));
-  app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, agreementFieldValueQueries, counterQueries, settingsQueries));
+  app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, agreementFieldValueQueries, counterQueries, bcSubscriptionImportService, settingsQueries));
   app.use('/api/contract-terms', createContractTermsRoutes(contractTermsQueries));
   app.use('/api/surveys', createSurveyRoutes(settingsQueries, userQueries, teamQueries));
   app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries, buildOnboardingJiraClient() ?? undefined, async (action, ticketKey, approvalId, editedResponse, decidedBy) => {
