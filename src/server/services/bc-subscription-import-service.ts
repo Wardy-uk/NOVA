@@ -98,13 +98,14 @@ export class BcSubscriptionImportService {
     }
 
     // ── Build header payload ──
+    // Minimal field test (2026-05-20): only the four fields confirmed for this pass.
+    // createContractDeferrals intentionally omitted until the full payload is wired.
     const header: ImportedCustomerSubscriptionContractPayload = {
       subscriptionContractNo: agreement.subscription_contract_no,
       sellToCustomerNo: customer.number,
-      billToCustomerNo: customer.number,       // user confirmed: always same as sellTo
-      contractType: 'STD',                     // user confirmed: always STD
-      description: 'NOVA',                     // user confirmed: literal 'NOVA' for now
-      createContractDeferrals: true,           // user confirmed: always true
+      billToCustomerNo: customer.number,       // same as sellTo
+      subscriptionContractType: 'STD',         // BC property: subscriptionContractType
+      description: 'NOVA test',
     };
 
     // ── POST to BC ──
