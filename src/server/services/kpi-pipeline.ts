@@ -1014,7 +1014,8 @@ export class KpiPipeline {
         // SLA breach: use parseSlaField + isSlaBreached with status/due_date operational filters
         const statusLower = (ticket.status_name || '').toLowerCase();
         const statusPassesSlaFilter = !SLA_EXCLUDED.includes(statusLower);
-        const dueDatePassesFilter = !ticket.due_date || ticket.due_date.slice(0, 10) <= todayStr;
+        const dueStr = ticket.due_date ? new Date(ticket.due_date as any).toISOString().slice(0, 10) : null;
+        const dueDatePassesFilter = !dueStr || dueStr <= todayStr;
         if (statusPassesSlaFilter && dueDatePassesFilter) {
           const slaField = parseSlaField(ticket.fields_json, 'customfield_14048');
           if (isSlaBreached(slaField)) {
@@ -1024,7 +1025,7 @@ export class KpiPipeline {
 
         // No update today
         if (ticket.jira_updated) {
-          const updatedDate = ticket.jira_updated.slice(0, 10);
+          const updatedDate = new Date(ticket.jira_updated as any).toISOString().slice(0, 10);
           if (updatedDate < todayStr) {
             agg.OpenTickets_NoUpdateToday++;
           }
