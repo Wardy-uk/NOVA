@@ -40,12 +40,13 @@ export interface ImportedCustomerSubscriptionContractPayload {
   subscriptionContractNo: string;       // NOVA-NNNNNNNNNN
   sellToCustomerNo: string;             // BC customer No. (e.g. 'CU0000001')
   billToCustomerNo: string;             // same as sellTo for our use case
-  contractType: string;                 // always 'STD' per current config
-  description: string;                  // always 'NOVA' per current config
-  createContractDeferrals: boolean;     // always true per current config
+  subscriptionContractType: string;     // 'STD'. BC's real OData property is subscriptionContractType,
+                                         // NOT contractType (verified against $metadata 2026-05-20).
+  description: string;
+  createContractDeferrals?: boolean;    // Edm.Boolean on the header; omitted in the minimal field test
   // Intentionally omitted (deferred until later):
   // sellToContactNo, billToContactNo, yourReference, salespersonCode,
-  // assignedUserId, detailOverview, dimensionFromProjectNo
+  // assignedUserId, detailOverview, dimensionFromJobNo
 }
 
 export interface ImportedSubscriptionHeaderPayload {
