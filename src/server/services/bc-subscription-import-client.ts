@@ -98,13 +98,27 @@ export class BcSubscriptionImportApiError extends Error {
   }
 }
 
+// Matches a bare GUID (with or without dashes/braces). Used to decide whether the
+// company identifier is a GUID (use bare) or a display name (single-quote it).
+const GUID_RE = /^\{?[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}\}?$/;
+
+function formatCompanyRef(companyId: string): string {
+  const v = (companyId ?? '').trim();
+  if (GUID_RE.test(v)) return v.replace(/[{}]/g, '');     // companies(d01adb5e-…)
+  return `'${v.replace(/'/g, "''")}'`;                    // companies('TEST1')
+}
+
 export class BcSubscriptionImportClient {
   private baseUrl: string;
   private tokenUrl: string;
   private tokenCache: { token: string; expiresAt: number } | null = null;
 
   constructor(private config: BcSubscriptionImportConfig) {
-    this.baseUrl = `https://api.businesscentral.dynamics.com/v2.0/${config.tenantId}/${config.environment}/api/technologyManagement/billingSub/v2.0/companies(${config.companyId})`;
+    // BC's OData company reference accepts either a bare GUID — companies(d01adb5e-…)
+    // — or a quoted display name — companies('TEST1'). A name passed unquoted
+    // (companies(TEST1)) is parsed as an OData key and throws
+    // "',' expected at position N", so we quote anything that isn't a GUID.
+    this.baseUrl = `https://api.businesscentral.dynamics.com/v2.0/${config.tenantId}/${config.environment}/api/technologyManagement/billingSub/v2.0/companies(${formatCompanyRef(config.companyId)})`;
     this.tokenUrl = `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`;
   }
 
