@@ -151,11 +151,20 @@ export class JiraSyncService {
           const projectKeys = projects.split(',').map(p => p.trim()).filter(Boolean);
           const placeholders = projectKeys.map(() => '?').join(', ');
 
-          const deleteResult = await execute(
-            `DELETE FROM jira_issue_cache WHERE project_key IN (${placeholders}) AND synced_at < ?`,
-            [...projectKeys, syncStartIso]
-          );
-          console.log(`[jira-sync] Reconciliation sweep: removed ${deleteResult.rowsAffected} stale rows (synced before ${syncStartIso})`);
+          // Batch delete to avoid Azure SQL request timeout on large stale sets
+          let totalSwept = 0;
+          const BATCH_SIZE = 500;
+          let batchAffected: number;
+          do {
+            const batchResult = await execute(
+              `DELETE TOP (${BATCH_SIZE}) FROM jira_issue_cache WHERE project_key IN (${placeholders}) AND synced_at < ?`,
+              [...projectKeys, syncStartIso]
+            );
+            batchAffected = batchResult.rowsAffected;
+            totalSwept += batchAffected;
+          } while (batchAffected === BATCH_SIZE);
+
+          console.log(`[jira-sync] Reconciliation sweep: removed ${totalSwept} stale rows (synced before ${syncStartIso})`);
         } catch (err) {
           console.warn('[jira-sync] Reconciliation sweep failed (non-fatal):', err instanceof Error ? err.message : err);
         }
