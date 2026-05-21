@@ -40,6 +40,7 @@ const ALL_FIELDS = [
   'customfield_14494', // Resolution type
   'customfield_14527', // Problem ticket field
   'customfield_14626', // BC Account Number
+  'customfield_12802', // Customer Satisfaction (CSAT rating)
 ];
 
 export class JiraSyncService {
@@ -139,6 +140,29 @@ export class JiraSyncService {
       const issueDuration = Date.now() - start;
       console.log(`[jira-sync] Issue sync complete: ${issueCount} issues in ${issueDuration}ms${upsertErrors > 0 ? ` (${upsertErrors} failed)` : ''} — cache now active`);
 
+      // Reconciliation sweep: remove rows not touched by this full sync.
+      // Safety guard: only sweep if we upserted a credible number of issues (≥50)
+      // to avoid wiping the cache on a partial/failed Jira fetch.
+      const RECONCILIATION_MIN_ISSUES = 50;
+      if (issueCount >= RECONCILIATION_MIN_ISSUES) {
+        try {
+          const syncStartIso = new Date(start).toISOString();
+          const projects = this.buildProjectFilter();
+          const projectKeys = projects.split(',').map(p => p.trim()).filter(Boolean);
+          const placeholders = projectKeys.map(() => '?').join(', ');
+
+          const deleteResult = await execute(
+            `DELETE FROM jira_issue_cache WHERE project_key IN (${placeholders}) AND synced_at < ?`,
+            [...projectKeys, syncStartIso]
+          );
+          console.log(`[jira-sync] Reconciliation sweep: removed ${deleteResult.rowsAffected} stale rows (synced before ${syncStartIso})`);
+        } catch (err) {
+          console.warn('[jira-sync] Reconciliation sweep failed (non-fatal):', err instanceof Error ? err.message : err);
+        }
+      } else {
+        console.log(`[jira-sync] Reconciliation sweep skipped: only ${issueCount} issues upserted (minimum ${RECONCILIATION_MIN_ISSUES})`);
+      }
+
       // Backfill comments for open issues in background (non-blocking)
       const openIssues = result.issues.filter(i =>
         (i.fields.status as any)?.statusCategory?.key !== 'done'
@@ -230,7 +254,11 @@ export class JiraSyncService {
   async syncSingleIssue(issueKey: string): Promise<void> {
     try {
       const issue = await this.jiraClient.getIssue(issueKey, ALL_FIELDS);
-      if (!issue) return;
+      if (!issue) {
+        await execute('DELETE FROM jira_issue_cache WHERE issue_key = ?', [issueKey]);
+        console.log(`[jira-sync] Deleted confirmed-missing issue ${issueKey} from cache`);
+        return;
+      }
       await this.upsertIssue(issue);
 
       const comments = await this.jiraClient.getComments(issueKey, 20);
