@@ -733,6 +733,7 @@ export class KpiPipeline {
       const p = await getKpiPool(this.settings);
       const s = this.s;
       const today = new Date().toISOString().slice(0, 10);
+      console.log(`[kpi-pipeline] Derived KPIs: starting collection for ${today}`);
 
       // 1st Line Resolution Rate: CC-tier resolved / total resolved today
       const pf = this.projectInClause();
@@ -747,6 +748,7 @@ export class KpiPipeline {
       const totalResolved = resolvedRows.length;
       const ccResolved = resolvedRows.filter(r => ccRequestTypes.includes((r.request_type || '').toLowerCase())).length;
       const firstLineRate = totalResolved > 0 ? Math.round((ccResolved / totalResolved) * 100) : 0;
+      console.log(`[kpi-pipeline] Derived KPIs: ${totalResolved} resolved-today tickets found (${ccResolved} CC-tier), 1st Line Rate = ${firstLineRate}%`);
 
       // CSAT % (derived) — same as snapshot CSAT but with different RAG
       const csatRows = await localQuery<{ fields_json: string | null }>(`
@@ -761,6 +763,7 @@ export class KpiPipeline {
         if (rating !== null) { csatSum += rating; csatCount++; }
       }
       const csatDerived = csatCount > 0 ? Math.round((csatSum / csatCount) * 20) : 0;
+      console.log(`[kpi-pipeline] Derived KPIs: CSAT — ${csatCount} rated tickets from ${csatRows.length} resolved, derived ${csatDerived}%`);
 
       // FCR Rate % and Bug Escalation-to-Ack — computed from Jira comments
       const BOT_PATTERNS = ['nurtur', 'automation', 'jira service', 'servicedesk', 'bot'];
@@ -818,6 +821,8 @@ export class KpiPipeline {
 
       const fcrRate = fcrTotal > 0 ? Math.round((fcrCount / fcrTotal) * 100) : 0;
       const avgAckHours = ackHours.length > 0 ? Math.round((ackHours.reduce((a, b) => a + b, 0) / ackHours.length) * 10) / 10 : 0;
+      const commentTicketsProcessed = Math.min(resolvedForComments.length, commentCap);
+      console.log(`[kpi-pipeline] Derived KPIs: comments fetched for ${commentTicketsProcessed}/${resolvedForComments.length} tickets — FCR ${fcrCount}/${fcrTotal} (${fcrRate}%), Bug Ack samples: ${ackHours.length}, avg ${avgAckHours}h`);
 
       const derivedMetrics: Array<{ kpi: string; group: string; count: number; target: number; direction: string }> = [
         { kpi: '1st Line Resolution Rate %', group: 'Derived', count: firstLineRate, target: 60, direction: 'Higher is better' },

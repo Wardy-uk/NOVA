@@ -1204,6 +1204,18 @@ async function main() {
     const qaDigest = new QaDigest(settingsQueries, pipelineMonitor);
     const driftDetector = new DriftDetector(settingsQueries, agentLoop.getAlertService());
 
+    app.post('/api/kpi/derived/run', requireRole('admin'), async (_req, res) => {
+      try {
+        console.log('[kpi-pipeline] Manual derived KPI run triggered');
+        const start = Date.now();
+        await kpiPipeline.collectDerivedKpis();
+        res.json({ ok: true, data: { message: 'Derived KPIs collected', duration_ms: Date.now() - start } });
+      } catch (err) {
+        console.error('[kpi-pipeline] Manual derived KPI run failed:', err instanceof Error ? err.message : err);
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
     // Operational workflow services (WP-22)
     const productCancellation = new ProductCancellationService(settingsQueries, agentJiraClient);
     const abuseReportProcessor = new AbuseReportProcessor(settingsQueries, agentJiraClient);
@@ -1521,7 +1533,7 @@ async function main() {
     setTimeout(() => kpiPipeline.refreshAllAgentMetrics().catch(() => {}), 100_000);
     setTimeout(() => {
       kpiPipeline.captureEodSnapshot().catch(() => {});
-      kpiPipeline.collectDerivedKpis().catch(() => {});
+      kpiPipeline.collectDerivedKpis().catch(err => console.error('[kpi-pipeline] Derived KPIs startup failed:', err instanceof Error ? err.message : err));
     }, 120_000);
 
     // Daily digest at 17:30, weekly digest Monday 09:00, EOD snapshot 17:25, derived KPIs 17:30
