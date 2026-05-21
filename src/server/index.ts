@@ -1204,7 +1204,7 @@ async function main() {
     const qaDigest = new QaDigest(settingsQueries, pipelineMonitor);
     const driftDetector = new DriftDetector(settingsQueries, agentLoop.getAlertService());
 
-    app.post('/api/kpi/derived/run', requireRole('admin'), async (_req, res) => {
+    app.post('/api/kpi/derived/run', requireRole('admin', 'super_admin'), async (_req, res) => {
       try {
         console.log('[kpi-pipeline] Manual derived KPI run triggered');
         const start = Date.now();
