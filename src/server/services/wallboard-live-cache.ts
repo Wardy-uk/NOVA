@@ -58,12 +58,7 @@ function isKeyAccount(labels: string | null): boolean {
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 function shouldRefresh(): boolean {
-  const now = new Date();
-  const day = now.getDay();
-  if (day === 0 || day === 6) return false;
-  const h = now.getHours();
-  const m = now.getMinutes();
-  return (h > 9 || (h === 9 && m >= 0)) && (h < 17 || (h === 17 && m <= 30));
+  return true;
 }
 
 function isCacheStale(): boolean {
