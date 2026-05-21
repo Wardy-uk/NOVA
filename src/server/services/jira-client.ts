@@ -512,14 +512,14 @@ export class JiraRestClient {
     id: string;
     created: string;
     author: { displayName: string; accountId: string };
-    items: Array<{ field: string; fromString: string | null; toString: string | null }>;
+    items: Array<{ field: string; fieldId?: string; fromString: string | null; toString: string | null }>;
   }>> {
     const result = await this.request<{
       values: Array<{
         id: string;
         created: string;
         author: { displayName: string; accountId: string };
-        items: Array<{ field: string; fromString: string | null; toString: string | null }>;
+        items: Array<{ field: string; fieldId?: string; fromString: string | null; toString: string | null }>;
       }>;
     }>('GET', `issue/${issueKey}/changelog?maxResults=${maxResults}`);
     return result?.values ?? [];

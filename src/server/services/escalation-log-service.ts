@@ -160,15 +160,21 @@ export class EscalationLogService {
     changelog: Array<{
       created: string;
       author: { displayName: string };
-      items: Array<{ field: string; fromString: string | null; toString: string | null }>;
+      items: Array<{ field: string; fieldId?: string; fromString: string | null; toString: string | null }>;
     }>,
   ): Promise<number> {
     let inserted = 0;
     for (const entry of changelog) {
+      // Detect tier changes from Current Tier field (customfield_12981) or status transitions
+      const tierChanges = entry.items.filter(i =>
+        i.fieldId === 'customfield_12981' || i.field === 'Current Tier',
+      );
       const statusChanges = entry.items.filter(i => i.field === 'status');
-      for (const change of statusChanges) {
-        const fromTier = detectTierFromStatus(change.fromString ?? '');
-        const toTier = detectTierFromStatus(change.toString ?? '');
+
+      // Prefer direct Current Tier field changes — these carry the real tier values
+      for (const change of tierChanges) {
+        const fromTier = change.fromString;
+        const toTier = change.toString;
         if (!fromTier || !toTier || fromTier === toTier) continue;
 
         const existing = await query<{ cnt: number }>(
@@ -186,11 +192,41 @@ export class EscalationLogService {
           from_tier: fromTier,
           to_tier: toTier,
           escalated_by: entry.author.displayName,
-          notes: `${change.fromString} → ${change.toString}`,
+          notes: `Tier change: ${fromTier} → ${toTier}`,
           source: 'jira_backfill',
           created_at: entry.created,
         });
         inserted++;
+      }
+
+      // Fallback: infer tier from status transitions if no direct tier field change
+      if (tierChanges.length === 0) {
+        for (const change of statusChanges) {
+          const fromTier = detectTierFromStatus(change.fromString ?? '');
+          const toTier = detectTierFromStatus(change.toString ?? '');
+          if (!fromTier || !toTier || fromTier === toTier) continue;
+
+          const existing = await query<{ cnt: number }>(
+            `SELECT COUNT(*) as cnt FROM escalation_log
+             WHERE ticket_key = ? AND source = 'jira_backfill'
+             AND from_tier = ? AND to_tier = ?
+             AND ABS(DATEDIFF(minute, created_at, ?)) < 5`,
+            [ticketKey, fromTier, toTier, entry.created],
+          );
+          if ((existing[0]?.cnt ?? 0) > 0) continue;
+
+          await this.log({
+            ticket_key: ticketKey,
+            escalation_type: 'jira_transition',
+            from_tier: fromTier,
+            to_tier: toTier,
+            escalated_by: entry.author.displayName,
+            notes: `${change.fromString} → ${change.toString}`,
+            source: 'jira_backfill',
+            created_at: entry.created,
+          });
+          inserted++;
+        }
       }
     }
     return inserted;
