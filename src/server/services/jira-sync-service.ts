@@ -153,7 +153,7 @@ export class JiraSyncService {
 
           // Batch delete to avoid Azure SQL request timeout on large stale sets
           let totalSwept = 0;
-          const BATCH_SIZE = 500;
+          const BATCH_SIZE = 100;
           let batchAffected: number;
           do {
             const batchResult = await execute(
@@ -162,6 +162,7 @@ export class JiraSyncService {
             );
             batchAffected = batchResult.rowsAffected;
             totalSwept += batchAffected;
+            if (batchAffected === BATCH_SIZE) await new Promise(r => setTimeout(r, 200));
           } while (batchAffected === BATCH_SIZE);
 
           console.log(`[jira-sync] Reconciliation sweep: removed ${totalSwept} stale rows (synced before ${syncStartIso})`);
