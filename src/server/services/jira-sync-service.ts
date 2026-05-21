@@ -302,8 +302,8 @@ export class JiraSyncService {
     const fieldsJson = JSON.stringify(f);
 
     // Detect changes for portal SSE broadcast
-    const oldRow = await queryOne<{ status_name: string | null; assignee_display: string | null; reporter_email: string | null }>(
-      `SELECT status_name, assignee_display, reporter_email FROM jira_issue_cache WHERE issue_key = ?`,
+    const oldRow = await queryOne<{ status_name: string | null; assignee_display: string | null; reporter_email: string | null; current_tier: string | null }>(
+      `SELECT status_name, assignee_display, reporter_email, current_tier FROM jira_issue_cache WHERE issue_key = ?`,
       [issue.key],
     );
 
@@ -394,6 +394,30 @@ export class JiraSyncService {
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
       ],
     );
+
+    // Log tier changes to escalation_log for KPI pipeline
+    if (oldRow && currentTier && oldRow.current_tier && currentTier !== oldRow.current_tier) {
+      try {
+        await execute(`
+          INSERT INTO escalation_log
+            (ticket_key, escalation_type, from_tier, to_tier, escalated_by, notes, source, created_at)
+          SELECT ?, 'jira_transition', ?, ?, ?, ?, 'jira_sync', GETUTCDATE()
+          WHERE NOT EXISTS (
+            SELECT 1 FROM escalation_log
+            WHERE ticket_key = ? AND from_tier = ? AND to_tier = ? AND source = 'jira_sync'
+              AND ABS(DATEDIFF(minute, created_at, GETUTCDATE())) < 5
+          )`,
+          [
+            issue.key, oldRow.current_tier, currentTier,
+            (assignee?.displayName as string) ?? 'system',
+            `Tier change: ${oldRow.current_tier} → ${currentTier}`,
+            issue.key, oldRow.current_tier, currentTier,
+          ],
+        );
+      } catch (err) {
+        console.warn(`[jira-sync] Failed to log tier change for ${issue.key}:`, err instanceof Error ? err.message : err);
+      }
+    }
 
     // Broadcast portal SSE events on detected changes
     if (oldRow) {

@@ -171,9 +171,6 @@ export class EscalationLogService {
         const toTier = detectTierFromStatus(change.toString ?? '');
         if (!fromTier || !toTier || fromTier === toTier) continue;
 
-        const tierRank: Record<string, number> = { T1: 1, T2: 2, T3: 3, Dev: 4 };
-        if ((tierRank[toTier] ?? 0) <= (tierRank[fromTier] ?? 0)) continue;
-
         const existing = await query<{ cnt: number }>(
           `SELECT COUNT(*) as cnt FROM escalation_log
            WHERE ticket_key = ? AND source = 'jira_backfill'
