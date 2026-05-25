@@ -1,0 +1,73 @@
+{
+  "scenario": {
+    "id": 7,
+    "name": "Human Escalation Preference",
+    "message": "I don't want to use the bot, I just need someone to update our homepage."
+  },
+  "log": [
+    {
+      "step": "home_loaded",
+      "textLength": 859,
+      "hasGetHelp": true
+    },
+    {
+      "step": "get_help_clicked",
+      "result": "Get help\nReport an issue, ask a question, or request a change"
+    },
+    {
+      "step": "message_sent",
+      "message": "I don't want to use the bot, I just need someone to update our homepage."
+    },
+    {
+      "step": "first_response",
+      "hasCategoryPicker": true,
+      "hasDirectConversation": false,
+      "taxonomyLeaks": "CLEAN",
+      "responseExcerpt": "Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 12:41 | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "step": "chat_buttons",
+      "count": 5,
+      "labels": [
+        "18/05/2026",
+        "My Website",
+        "My Account",
+        "Billing & Contracts",
+        "Something Else"
+      ]
+    },
+    {
+      "step": "category_selected",
+      "target": "My Website",
+      "result": "My Website\nContent updates or something not working"
+    },
+    {
+      "step": "after_category",
+      "responseExcerpt": "General support requests and questions | 12:41 | My Website | 12:41 | Got it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see. | 12:41 | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "step": "re_description_requested",
+      "note": "Portal asked customer to re-describe after category selection"
+    },
+    {
+      "step": "after_description",
+      "responseExcerpt": "Email | Phone callback | Drop files here or click to attach screenshots | Submit request | Edit in chat | 12:41 | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "step": "confirmation_check",
+      "hasConfirmation": true
+    },
+    {
+      "step": "confirm_clicked",
+      "result": "18/05/2026\nSubmitted\nCOD-104"
+    },
+    {
+      "step": "after_submit",
+      "responseExcerpt": "Request Submitted | Your ticket COD-104 has been created. Our team will review it shortly. | View Ticket | Start a new conversation | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "step": "final_state",
+      "taxonomyLeaks": "CLEAN"
+    }
+  ]
+}

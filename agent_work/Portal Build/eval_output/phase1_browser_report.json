@@ -1,0 +1,1926 @@
+{
+  "landingText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin reset email is not arriving for the branch mailbox\nPopular Articles\nBrowse all\nCheck portal ticket progress\nSupport Portal\nWebsite change request checklist\nWebsite\nReset account access and browser cache\nAccounts\nPowered by Nurtur\nNeed help? Contact us",
+  "landingUrl": "http://127.0.0.1:5173/portal",
+  "landingLinks": [
+    {
+      "tag": "BUTTON",
+      "text": "Sign out",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Home",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "My Tickets",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Knowledge Base",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Get help\nReport an issue, ask a question, or request a change",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "View all",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "COD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "COD-102\nAwaiting Your Response\nLogin reset email is not arriving for the branch mailbox",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browse all",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Check portal ticket progress\nSupport Portal",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Website change request checklist\nWebsite",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Reset account access and browser cache\nAccounts",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "A",
+      "text": "Need help? Contact us",
+      "href": "mailto:support@nurtur.tech",
+      "type": null
+    }
+  ],
+  "landingInteractive": [
+    {
+      "tag": "BUTTON",
+      "text": "Sign out",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Home",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "My Tickets",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Knowledge Base",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Get help\nReport an issue, ask a question, or request a change",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "View all",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "COD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "COD-102\nAwaiting Your Response\nLogin reset email is not arriving for the branch mailbox",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browse all",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Check portal ticket progress\nSupport Portal",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Website change request checklist\nWebsite",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Reset account access and browser cache\nAccounts",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "A",
+      "text": "Need help? Contact us",
+      "href": "mailto:support@nurtur.tech",
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    }
+  ],
+  "landingStatuses": {
+    "hits": [
+      "Reviewed",
+      "Awaiting Your Response"
+    ],
+    "leaks": [],
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin reset email is not arriving for the branch mailbox\nPopular Articles\nBrowse all\nCheck portal ticket progress\nSupport Portal\nWebsite change request checklist\nWebsite\nReset account access and browser cache\nAccounts\nPowered by Nurtur\nNeed help? Contact us"
+  },
+  "landingShot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase1_landing.png",
+  "codexButtonClick": {
+    "clicked": false
+  },
+  "signInClick": {
+    "clicked": false
+  },
+  "afterSignInUrl": "http://127.0.0.1:5173/portal",
+  "afterSignInText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin reset email is not arriving for the branch mailbox\nPopular Articles\nBrowse all\nCheck portal ticket progress\nSupport Portal\nWebsite change request checklist\nWebsite\nReset account access and browser cache\nAccounts\nPowered by Nurtur\nNeed help? Contact us",
+  "afterSignInLinks": [
+    {
+      "tag": "BUTTON",
+      "text": "Sign out",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Home",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "My Tickets",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Knowledge Base",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Get help\nReport an issue, ask a question, or request a change",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "View all",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "COD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "COD-102\nAwaiting Your Response\nLogin reset email is not arriving for the branch mailbox",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browse all",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Check portal ticket progress\nSupport Portal",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Website change request checklist\nWebsite",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Reset account access and browser cache\nAccounts",
+      "href": null,
+      "type": null
+    },
+    {
+      "tag": "A",
+      "text": "Need help? Contact us",
+      "href": "mailto:support@nurtur.tech",
+      "type": null
+    }
+  ],
+  "afterSignInInteractive": [
+    {
+      "tag": "BUTTON",
+      "text": "Sign out",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Home",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "My Tickets",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Knowledge Base",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Get help\nReport an issue, ask a question, or request a change",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "View all",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "COD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "COD-102\nAwaiting Your Response\nLogin reset email is not arriving for the branch mailbox",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browse all",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Check portal ticket progress\nSupport Portal",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Website change request checklist\nWebsite",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Reset account access and browser cache\nAccounts",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "A",
+      "text": "Need help? Contact us",
+      "href": "mailto:support@nurtur.tech",
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    }
+  ],
+  "afterSignInEvents": [
+    {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "94864.42",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "documentURL": "http://127.0.0.1:5173/portal?codexTestUser=1",
+        "request": {
+          "url": "http://127.0.0.1:5173/api/portal/auth/codex-test-login",
+          "method": "POST",
+          "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Referer": "http://127.0.0.1:5173/portal?codexTestUser=1",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+            "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "High",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": true
+        },
+        "timestamp": 450320.638811,
+        "wallTime": 1779038104.624084,
+        "initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "fetchCodexTestSession",
+                "scriptId": "7",
+                "url": "http://127.0.0.1:5173/portal-main.tsx",
+                "lineNumber": 117,
+                "columnNumber": 22
+              },
+              {
+                "functionName": "",
+                "scriptId": "7",
+                "url": "http://127.0.0.1:5173/portal-main.tsx",
+                "lineNumber": 172,
+                "columnNumber": 30
+              }
+            ]
+          }
+        },
+        "redirectHasExtraInfo": false,
+        "type": "Fetch",
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1",
+        "hasUserGesture": false
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.10",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450320.640208,
+        "type": "Font",
+        "response": {
+          "url": "https://fonts.gstatic.com/s/figtree/v9/_Xms-HUzqDCFdgfMm4S9DQ.woff2",
+          "status": 200,
+          "statusText": "",
+          "headers": {
+            "age": "405714",
+            "report-to": "{\"group\":\"apps-themes\",\"max_age\":2592000,\"endpoints\":[{\"url\":\"https://csp.withgoogle.com/csp/report-to/apps-themes\"}]}",
+            "x-content-type-options": "nosniff",
+            "expires": "Wed, 12 May 2027 21:50:18 GMT",
+            "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+            "date": "Tue, 12 May 2026 21:50:18 GMT",
+            "last-modified": "Wed, 10 Sep 2025 17:04:00 GMT",
+            "content-type": "font/woff2",
+            "cache-control": "public, max-age=31536000",
+            "timing-allow-origin": "*",
+            "cross-origin-opener-policy": "same-origin; report-to=\"apps-themes\"",
+            "cross-origin-resource-policy": "cross-origin",
+            "content-security-policy-report-only": "require-trusted-types-for 'script'; report-uri https://csp.withgoogle.com/csp/apps-themes",
+            "accept-ranges": "bytes",
+            "access-control-allow-origin": "*",
+            "content-length": "20156",
+            "x-xss-protection": "0",
+            "server": "sffe"
+          },
+          "mimeType": "font/woff2",
+          "charset": "",
+          "connectionReused": false,
+          "connectionId": 0,
+          "remoteIPAddress": "142.250.129.94",
+          "remotePort": 443,
+          "fromDiskCache": true,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 0,
+          "timing": {
+            "requestTime": 450320.630511,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.04,
+            "sendEnd": 0.04,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 0.175,
+            "receiveHeadersEnd": 0.213
+          },
+          "responseTime": 1779028331915.385,
+          "protocol": "h2",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "unknown"
+        },
+        "hasExtraInfo": false,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.42",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450320.641731,
+        "type": "Fetch",
+        "response": {
+          "url": "http://127.0.0.1:5173/api/portal/auth/codex-test-login",
+          "status": 200,
+          "statusText": "OK",
+          "headers": {
+            "Keep-Alive": "timeout=5",
+            "Content-Length": "174",
+            "Date": "Sun, 17 May 2026 17:15:04 GMT",
+            "Content-Type": "application/json",
+            "Connection": "keep-alive"
+          },
+          "mimeType": "application/json",
+          "charset": "",
+          "connectionReused": true,
+          "connectionId": 108,
+          "remoteIPAddress": "127.0.0.1",
+          "remotePort": 5173,
+          "fromDiskCache": false,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 156,
+          "timing": {
+            "requestTime": 450320.639841,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.168,
+            "sendEnd": 0.269,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 0.689,
+            "receiveHeadersEnd": 0.723
+          },
+          "responseTime": 1779038104625.781,
+          "protocol": "http/1.1",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "secure"
+        },
+        "hasExtraInfo": true,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "94864.43",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "documentURL": "http://127.0.0.1:5173/portal",
+        "request": {
+          "url": "http://127.0.0.1:5173/components/portal/PortalHome.tsx",
+          "method": "GET",
+          "headers": {
+            "Origin": "http://127.0.0.1:5173",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Referer": "http://127.0.0.1:5173/portal-main.tsx",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+            "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "High",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": true
+        },
+        "timestamp": 450320.645327,
+        "wallTime": 1779038104.630675,
+        "initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "_c",
+                "scriptId": "7",
+                "url": "http://127.0.0.1:5173/portal-main.tsx",
+                "lineNumber": 23,
+                "columnNumber": 35
+              },
+              {
+                "functionName": "lazyInitializer",
+                "scriptId": "17",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/chunk-H4L4LYBS.js?v=34a5701f",
+                "lineNumber": 350,
+                "columnNumber": 25
+              },
+              {
+                "functionName": "react_stack_bottom_frame",
+                "scriptId": "12",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/react-dom_client.js?v=34a5701f",
+                "lineNumber": 18580,
+                "columnNumber": 17
+              },
+              {
+                "functionName": "resolveLazy",
+                "scriptId": "12",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/react-dom_client.js?v=34a5701f",
+                "lineNumber": 4523,
+                "columnNumber": 17
+              },
+              {
+                "functionName": "beginWork",
+                "scriptId": "12",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/react-dom_client.js?v=34a5701f",
+                "lineNumber": 8473,
+                "columnNumber": 74
+              },
+              {
+                "functionName": "runWithFiberInDEV",
+                "scriptId": "12",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/react-dom_client.js?v=34a5701f",
+                "lineNumber": 996,
+                "columnNumber": 71
+              },
+              {
+                "functionName": "performUnitOfWork",
+                "scriptId": "12",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/react-dom_client.js?v=34a5701f",
+                "lineNumber": 12560,
+                "columnNumber": 97
+              },
+              {
+                "functionName": "workLoopSync",
+                "scriptId": "12",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/react-dom_client.js?v=34a5701f",
+                "lineNumber": 12423,
+                "columnNumber": 42
+              },
+              {
+                "functionName": "renderRootSync",
+                "scriptId": "12",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/react-dom_client.js?v=34a5701f",
+                "lineNumber": 12407,
+                "columnNumber": 12
+              },
+              {
+                "functionName": "performWorkOnRoot",
+                "scriptId": "12",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/react-dom_client.js?v=34a5701f",
+                "lineNumber": 11765,
+                "columnNumber": 188
+              },
+              {
+                "functionName": "performWorkOnRootViaSchedulerTask",
+                "scriptId": "12",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/react-dom_client.js?v=34a5701f",
+                "lineNumber": 13504,
+                "columnNumber": 8
+              },
+              {
+                "functionName": "performWorkUntilDeadline",
+                "scriptId": "12",
+                "url": "http://127.0.0.1:5173/@fs/C:/Users/NickW/Claude/windows%20automation/daypilot/node_modules/.vite/deps/react-dom_client.js?v=34a5701f",
+                "lineNumber": 35,
+                "columnNumber": 49
+              }
+            ]
+          }
+        },
+        "redirectHasExtraInfo": false,
+        "type": "Script",
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1",
+        "hasUserGesture": false,
+        "renderBlockingBehavior": "NonBlocking"
+      }
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "94864.44",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "documentURL": "http://127.0.0.1:5173/portal",
+        "request": {
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "method": "GET",
+          "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Referer": "http://127.0.0.1:5173/portal",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+            "Accept": "text/event-stream",
+            "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "High",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": true
+        },
+        "timestamp": 450320.647711,
+        "wallTime": 1779038104.632984,
+        "initiator": {
+          "type": "other"
+        },
+        "redirectHasExtraInfo": false,
+        "type": "EventSource",
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1",
+        "hasUserGesture": false
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.44",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450320.650113,
+        "type": "EventSource",
+        "response": {
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "status": 501,
+          "statusText": "Not Implemented",
+          "headers": {
+            "Keep-Alive": "timeout=5",
+            "Content-Length": "39",
+            "Date": "Sun, 17 May 2026 17:15:04 GMT",
+            "Content-Type": "text/plain",
+            "Connection": "keep-alive"
+          },
+          "mimeType": "text/plain",
+          "charset": "",
+          "connectionReused": true,
+          "connectionId": 209,
+          "remoteIPAddress": "127.0.0.1",
+          "remotePort": 5173,
+          "fromDiskCache": false,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 162,
+          "timing": {
+            "requestTime": 450320.648637,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.268,
+            "sendEnd": 0.329,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 0.682,
+            "receiveHeadersEnd": 0.699
+          },
+          "responseTime": 1779038104634.57,
+          "protocol": "http/1.1",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "secure"
+        },
+        "hasExtraInfo": true,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "network",
+          "level": "error",
+          "text": "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+          "timestamp": 1779038104635.376,
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "networkRequestId": "94864.44"
+        }
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.43",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450320.650537,
+        "type": "Script",
+        "response": {
+          "url": "http://127.0.0.1:5173/components/portal/PortalHome.tsx",
+          "status": 200,
+          "statusText": "OK",
+          "headers": {
+            "Cache-Control": "no-cache",
+            "Etag": "W/\"5586-sY+9wqpXJ6yWvsXKlRUdb5CGNNc\"",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "http://127.0.0.1:5173",
+            "Keep-Alive": "timeout=5",
+            "Content-Length": "43793",
+            "Date": "Sun, 17 May 2026 17:15:04 GMT",
+            "Content-Type": "text/javascript",
+            "Vary": "Origin"
+          },
+          "mimeType": "text/javascript",
+          "charset": "",
+          "connectionReused": true,
+          "connectionId": 108,
+          "remoteIPAddress": "127.0.0.1",
+          "remotePort": 5173,
+          "fromDiskCache": false,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 292,
+          "timing": {
+            "requestTime": 450320.646101,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.652,
+            "sendEnd": 0.762,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 1.789,
+            "receiveHeadersEnd": 2.967
+          },
+          "responseTime": 1779038104633.141,
+          "protocol": "http/1.1",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "secure"
+        },
+        "hasExtraInfo": true,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "94864.20",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "documentURL": "http://127.0.0.1:5173/portal",
+        "request": {
+          "url": "https://fonts.gstatic.com/s/plusjakartasans/v12/LDIoaomQNQcsA88c7O9yZ4KMCoOg4Ko20yw.woff2",
+          "method": "GET",
+          "headers": {
+            "Origin": "http://127.0.0.1:5173",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Referer": "https://fonts.googleapis.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+            "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "VeryHigh",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": false
+        },
+        "timestamp": 450320.65496,
+        "wallTime": 1779038104.640243,
+        "initiator": {
+          "type": "parser",
+          "url": "https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap"
+        },
+        "redirectHasExtraInfo": false,
+        "type": "Font",
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1",
+        "hasUserGesture": false,
+        "renderBlockingBehavior": "NonBlocking"
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.20",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450320.661516,
+        "type": "Font",
+        "response": {
+          "url": "https://fonts.gstatic.com/s/plusjakartasans/v12/LDIoaomQNQcsA88c7O9yZ4KMCoOg4Ko20yw.woff2",
+          "status": 200,
+          "statusText": "",
+          "headers": {
+            "age": "406347",
+            "report-to": "{\"group\":\"apps-themes\",\"max_age\":2592000,\"endpoints\":[{\"url\":\"https://csp.withgoogle.com/csp/report-to/apps-themes\"}]}",
+            "x-content-type-options": "nosniff",
+            "expires": "Wed, 12 May 2027 21:39:45 GMT",
+            "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+            "date": "Tue, 12 May 2026 21:39:45 GMT",
+            "last-modified": "Tue, 09 Sep 2025 18:38:57 GMT",
+            "content-type": "font/woff2",
+            "cache-control": "public, max-age=31536000",
+            "timing-allow-origin": "*",
+            "cross-origin-opener-policy": "same-origin; report-to=\"apps-themes\"",
+            "cross-origin-resource-policy": "cross-origin",
+            "content-security-policy-report-only": "require-trusted-types-for 'script'; report-uri https://csp.withgoogle.com/csp/apps-themes",
+            "accept-ranges": "bytes",
+            "access-control-allow-origin": "*",
+            "content-length": "27348",
+            "x-xss-protection": "0",
+            "server": "sffe"
+          },
+          "mimeType": "font/woff2",
+          "charset": "",
+          "connectionReused": false,
+          "connectionId": 0,
+          "remoteIPAddress": "142.250.129.94",
+          "remotePort": 443,
+          "fromDiskCache": true,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 0,
+          "timing": {
+            "requestTime": 450320.655378,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.033,
+            "sendEnd": 0.033,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 0.192,
+            "receiveHeadersEnd": 0.23
+          },
+          "responseTime": 1779028331942.021,
+          "protocol": "h2",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "unknown"
+        },
+        "hasExtraInfo": false,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "94864.45",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "documentURL": "http://127.0.0.1:5173/portal",
+        "request": {
+          "url": "http://127.0.0.1:5173/api/portal/tickets?status=open&pageSize=3",
+          "method": "GET",
+          "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Authorization": "Bearer codex-test-token",
+            "Referer": "http://127.0.0.1:5173/portal",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+            "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+            "Content-Type": "application/json",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "High",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": true
+        },
+        "timestamp": 450320.952521,
+        "wallTime": 1779038104.937808,
+        "initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "portalFetch",
+                "scriptId": "7",
+                "url": "http://127.0.0.1:5173/portal-main.tsx",
+                "lineNumber": 96,
+                "columnNumber": 9
+              }
+            ]
+          }
+        },
+        "redirectHasExtraInfo": false,
+        "type": "Fetch",
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1",
+        "hasUserGesture": false
+      }
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "94864.46",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "documentURL": "http://127.0.0.1:5173/portal",
+        "request": {
+          "url": "http://127.0.0.1:5173/api/portal/kb/popular",
+          "method": "GET",
+          "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Authorization": "Bearer codex-test-token",
+            "Referer": "http://127.0.0.1:5173/portal",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+            "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+            "Content-Type": "application/json",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "High",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": true
+        },
+        "timestamp": 450320.95262,
+        "wallTime": 1779038104.937877,
+        "initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "portalFetch",
+                "scriptId": "7",
+                "url": "http://127.0.0.1:5173/portal-main.tsx",
+                "lineNumber": 96,
+                "columnNumber": 9
+              }
+            ]
+          }
+        },
+        "redirectHasExtraInfo": false,
+        "type": "Fetch",
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1",
+        "hasUserGesture": false
+      }
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "94864.47",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "documentURL": "http://127.0.0.1:5173/portal",
+        "request": {
+          "url": "http://127.0.0.1:5173/api/portal/home-summary",
+          "method": "GET",
+          "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Authorization": "Bearer codex-test-token",
+            "Referer": "http://127.0.0.1:5173/portal",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+            "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+            "Content-Type": "application/json",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "High",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": true
+        },
+        "timestamp": 450320.952661,
+        "wallTime": 1779038104.937917,
+        "initiator": {
+          "type": "script",
+          "stack": {
+            "callFrames": [
+              {
+                "functionName": "portalFetch",
+                "scriptId": "7",
+                "url": "http://127.0.0.1:5173/portal-main.tsx",
+                "lineNumber": 96,
+                "columnNumber": 9
+              }
+            ]
+          }
+        },
+        "redirectHasExtraInfo": false,
+        "type": "Fetch",
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1",
+        "hasUserGesture": false
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.45",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450320.956418,
+        "type": "Fetch",
+        "response": {
+          "url": "http://127.0.0.1:5173/api/portal/tickets?status=open&pageSize=3",
+          "status": 200,
+          "statusText": "OK",
+          "headers": {
+            "Keep-Alive": "timeout=5",
+            "Content-Length": "766",
+            "Date": "Sun, 17 May 2026 17:15:04 GMT",
+            "Content-Type": "application/json",
+            "Connection": "keep-alive"
+          },
+          "mimeType": "application/json",
+          "charset": "",
+          "connectionReused": true,
+          "connectionId": 209,
+          "remoteIPAddress": "127.0.0.1",
+          "remotePort": 5173,
+          "fromDiskCache": false,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 156,
+          "timing": {
+            "requestTime": 450320.95304,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.672,
+            "sendEnd": 0.717,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 1.264,
+            "receiveHeadersEnd": 1.609
+          },
+          "responseTime": 1779038104939.555,
+          "protocol": "http/1.1",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "secure"
+        },
+        "hasExtraInfo": true,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.46",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450320.9569,
+        "type": "Fetch",
+        "response": {
+          "url": "http://127.0.0.1:5173/api/portal/kb/popular",
+          "status": 200,
+          "statusText": "OK",
+          "headers": {
+            "Keep-Alive": "timeout=5",
+            "Content-Length": "303",
+            "Date": "Sun, 17 May 2026 17:15:04 GMT",
+            "Content-Type": "application/json",
+            "Connection": "keep-alive"
+          },
+          "mimeType": "application/json",
+          "charset": "",
+          "connectionReused": true,
+          "connectionId": 108,
+          "remoteIPAddress": "127.0.0.1",
+          "remotePort": 5173,
+          "fromDiskCache": false,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 156,
+          "timing": {
+            "requestTime": 450320.953191,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.589,
+            "sendEnd": 0.611,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 1.261,
+            "receiveHeadersEnd": 1.647
+          },
+          "responseTime": 1779038104939.703,
+          "protocol": "http/1.1",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "secure"
+        },
+        "hasExtraInfo": true,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.47",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450320.957083,
+        "type": "Fetch",
+        "response": {
+          "url": "http://127.0.0.1:5173/api/portal/home-summary",
+          "status": 200,
+          "statusText": "OK",
+          "headers": {
+            "Keep-Alive": "timeout=5",
+            "Content-Length": "187",
+            "Date": "Sun, 17 May 2026 17:15:04 GMT",
+            "Content-Type": "application/json",
+            "Connection": "keep-alive"
+          },
+          "mimeType": "application/json",
+          "charset": "",
+          "connectionReused": true,
+          "connectionId": 175,
+          "remoteIPAddress": "127.0.0.1",
+          "remotePort": 5173,
+          "fromDiskCache": false,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 156,
+          "timing": {
+            "requestTime": 450320.953302,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.513,
+            "sendEnd": 0.537,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 1.298,
+            "receiveHeadersEnd": 1.829
+          },
+          "responseTime": 1779038104939.851,
+          "protocol": "http/1.1",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "secure"
+        },
+        "hasExtraInfo": true,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "94864.48",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "documentURL": "http://127.0.0.1:5173/portal",
+        "request": {
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "method": "GET",
+          "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Referer": "http://127.0.0.1:5173/portal",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+            "Accept": "text/event-stream",
+            "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "High",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": true
+        },
+        "timestamp": 450321.66409,
+        "wallTime": 1779038105.64937,
+        "initiator": {
+          "type": "other"
+        },
+        "redirectHasExtraInfo": false,
+        "type": "EventSource",
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1",
+        "hasUserGesture": false
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.48",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450321.66679,
+        "type": "EventSource",
+        "response": {
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "status": 501,
+          "statusText": "Not Implemented",
+          "headers": {
+            "Keep-Alive": "timeout=5",
+            "Content-Length": "39",
+            "Date": "Sun, 17 May 2026 17:15:05 GMT",
+            "Content-Type": "text/plain",
+            "Connection": "keep-alive"
+          },
+          "mimeType": "text/plain",
+          "charset": "",
+          "connectionReused": true,
+          "connectionId": 175,
+          "remoteIPAddress": "127.0.0.1",
+          "remotePort": 5173,
+          "fromDiskCache": false,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 162,
+          "timing": {
+            "requestTime": 450321.664725,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.237,
+            "sendEnd": 0.349,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 0.904,
+            "receiveHeadersEnd": 0.933
+          },
+          "responseTime": 1779038105650.879,
+          "protocol": "http/1.1",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "secure"
+        },
+        "hasExtraInfo": true,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "network",
+          "level": "error",
+          "text": "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+          "timestamp": 1779038105652.054,
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "networkRequestId": "94864.48"
+        }
+      }
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "94864.49",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "documentURL": "http://127.0.0.1:5173/portal",
+        "request": {
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "method": "GET",
+          "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Referer": "http://127.0.0.1:5173/portal",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+            "Accept": "text/event-stream",
+            "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "High",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": true
+        },
+        "timestamp": 450323.679457,
+        "wallTime": 1779038107.664737,
+        "initiator": {
+          "type": "other"
+        },
+        "redirectHasExtraInfo": false,
+        "type": "EventSource",
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1",
+        "hasUserGesture": false
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.49",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450323.682178,
+        "type": "EventSource",
+        "response": {
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "status": 501,
+          "statusText": "Not Implemented",
+          "headers": {
+            "Keep-Alive": "timeout=5",
+            "Content-Length": "39",
+            "Date": "Sun, 17 May 2026 17:15:07 GMT",
+            "Content-Type": "text/plain",
+            "Connection": "keep-alive"
+          },
+          "mimeType": "text/plain",
+          "charset": "",
+          "connectionReused": true,
+          "connectionId": 175,
+          "remoteIPAddress": "127.0.0.1",
+          "remotePort": 5173,
+          "fromDiskCache": false,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 162,
+          "timing": {
+            "requestTime": 450323.68014,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.199,
+            "sendEnd": 0.514,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 0.875,
+            "receiveHeadersEnd": 0.904
+          },
+          "responseTime": 1779038107666.265,
+          "protocol": "http/1.1",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "secure"
+        },
+        "hasExtraInfo": true,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "network",
+          "level": "error",
+          "text": "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+          "timestamp": 1779038107667.442,
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "networkRequestId": "94864.49"
+        }
+      }
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "94864.50",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "documentURL": "http://127.0.0.1:5173/portal",
+        "request": {
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "method": "GET",
+          "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "Referer": "http://127.0.0.1:5173/portal",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+            "Accept": "text/event-stream",
+            "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "High",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": true
+        },
+        "timestamp": 450327.697146,
+        "wallTime": 1779038111.682442,
+        "initiator": {
+          "type": "other"
+        },
+        "redirectHasExtraInfo": false,
+        "type": "EventSource",
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1",
+        "hasUserGesture": false
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "94864.50",
+        "loaderId": "DA17E1091992304C048632872BA0E708",
+        "timestamp": 450327.700768,
+        "type": "EventSource",
+        "response": {
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "status": 501,
+          "statusText": "Not Implemented",
+          "headers": {
+            "Keep-Alive": "timeout=5",
+            "Content-Length": "39",
+            "Date": "Sun, 17 May 2026 17:15:11 GMT",
+            "Content-Type": "text/plain",
+            "Connection": "keep-alive"
+          },
+          "mimeType": "text/plain",
+          "charset": "",
+          "connectionReused": true,
+          "connectionId": 175,
+          "remoteIPAddress": "127.0.0.1",
+          "remotePort": 5173,
+          "fromDiskCache": false,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 162,
+          "timing": {
+            "requestTime": 450327.69816,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": -1,
+            "dnsEnd": -1,
+            "connectStart": -1,
+            "connectEnd": -1,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 0.675,
+            "sendEnd": 0.747,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 1.304,
+            "receiveHeadersEnd": 1.326
+          },
+          "responseTime": 1779038111684.715,
+          "protocol": "http/1.1",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "secure"
+        },
+        "hasExtraInfo": true,
+        "frameId": "16B48300017BABA9726E322DF4BBAEA1"
+      }
+    },
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "network",
+          "level": "error",
+          "text": "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+          "timestamp": 1779038111686.033,
+          "url": "http://127.0.0.1:5173/api/portal/events?token=codex-test-token",
+          "networkRequestId": "94864.50"
+        }
+      }
+    }
+  ],
+  "afterSignInShot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase1_after_sign_in.png",
+  "ticketListStatuses": {
+    "hits": [
+      "Reviewed",
+      "Awaiting Your Response"
+    ],
+    "leaks": [],
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin reset email is not arriving for the branch mailbox\nPopular Articles\nBrowse all\nCheck portal ticket progress\nSupport Portal\nWebsite change request checklist\nWebsite\nReset account access and browser cache\nAccounts\nPowered by Nurtur\nNeed help? Contact us"
+  },
+  "openTicket": {
+    "clicked": true,
+    "selector": "button",
+    "text": "COD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer",
+    "href": null
+  },
+  "ticketDetailUrl": "http://127.0.0.1:5173/portal",
+  "ticketDetailText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nBack to tickets\nCOD-101\nReviewed\nHigh\nHomepage hero banner is showing the wrong Spring offer\nREPORTER\ncodex.portal.test@nurtur.tech\nASSIGNEE\nWeb Team\nCREATED\n15/05/2026\nUPDATED\n17/05/2026\nBC ACCOUNT\nBC-44102\nSubmitted\n2\nReviewed\n3\nIn Progress\n4\nResolved\n5\nClosed\n\nWe've assessed this and know what's needed\n\nDescription\nPlease swap the homepage hero banner to the Summer valuation offer and update the CTA copy.\nComments (1)\nS\nSupport Team\n16/05/2026, 11:45:00\nWe have reviewed the request and confirmed the assets needed for the homepage update.\nB\nI\nAdd Comment\nStatus Timeline\nSubmitted\nReviewed\n16/05/2026, 11:44:00 by Support Team\nWe've assessed this and know what's needed\nSubmitted\n15/05/2026, 10:10:00 by Codex Test User\nWe've received your request\nSLA Status\nTime to resolution\n18h 15m\nPowered by Nurtur\nNeed help? Contact us",
+  "ticketDetailInteractive": [
+    {
+      "tag": "BUTTON",
+      "text": "Sign out",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Home",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "My Tickets",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Knowledge Base",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Back to tickets",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "B",
+      "href": null,
+      "type": "button",
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "I",
+      "href": null,
+      "type": "button",
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "href": null,
+      "type": "button",
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "href": null,
+      "type": "button",
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "INPUT",
+      "text": "",
+      "href": null,
+      "type": "file",
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Add Comment",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": true
+    },
+    {
+      "tag": "A",
+      "text": "Need help? Contact us",
+      "href": "mailto:support@nurtur.tech",
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    }
+  ],
+  "ticketDetailStatuses": {
+    "hits": [
+      "Submitted",
+      "Reviewed",
+      "In Progress",
+      "Resolved",
+      "Closed"
+    ],
+    "leaks": [],
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nBack to tickets\nCOD-101\nReviewed\nHigh\nHomepage hero banner is showing the wrong Spring offer\nREPORTER\ncodex.portal.test@nurtur.tech\nASSIGNEE\nWeb Team\nCREATED\n15/05/2026\nUPDATED\n17/05/2026\nBC ACCOUNT\nBC-44102\nSubmitted\n2\nReviewed\n3\nIn Progress\n4\nResolved\n5\nClosed\n\nWe've assessed this and know what's needed\n\nDescription\nPlease swap the homepage hero banner to the Summer valuation offer and update the CTA copy.\nComments (1)\nS\nSupport Team\n16/05/2026, 11:45:00\nWe have reviewed the request and confirmed the assets needed for the homepage update.\nB\nI\nAdd Comment\nStatus Timeline\nSubmitted\nReviewed\n16/05/2026, 11:44:00 by Support Team\nWe've assessed this and know what's needed\nSubmitted\n15/05/2026, 10:10:00 by Codex Test User\nWe've received your request\nSLA Status\nTime to resolution\n18h 15m\nPowered by Nurtur\nNeed help? Contact us"
+  },
+  "ticketDetailShot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase1_ticket_detail.png",
+  "firstGetHelp": {
+    "clicked": false
+  },
+  "afterGetHelpText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nBack to tickets\nCOD-101\nReviewed\nHigh\nHomepage hero banner is showing the wrong Spring offer\nREPORTER\ncodex.portal.test@nurtur.tech\nASSIGNEE\nWeb Team\nCREATED\n15/05/2026\nUPDATED\n17/05/2026\nBC ACCOUNT\nBC-44102\nSubmitted\n2\nReviewed\n3\nIn Progress\n4\nResolved\n5\nClosed\n\nWe've assessed this and know what's needed\n\nDescription\nPlease swap the homepage hero banner to the Summer valuation offer and update the CTA copy.\nComments (1)\nS\nSupport Team\n16/05/2026, 11:45:00\nWe have reviewed the request and confirmed the assets needed for the homepage update.\nB\nI\nAdd Comment\nStatus Timeline\nSubmitted\nReviewed\n16/05/2026, 11:44:00 by Support Team\nWe've assessed this and know what's needed\nSubmitted\n15/05/2026, 10:10:00 by Codex Test User\nWe've received your request\nSLA Status\nTime to resolution\n18h 15m\nPowered by Nurtur\nNeed help? Contact us",
+  "afterGetHelpInteractive": [
+    {
+      "tag": "BUTTON",
+      "text": "Sign out",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Home",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "My Tickets",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Knowledge Base",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Back to tickets",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "B",
+      "href": null,
+      "type": "button",
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "I",
+      "href": null,
+      "type": "button",
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "href": null,
+      "type": "button",
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "href": null,
+      "type": "button",
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "INPUT",
+      "text": "",
+      "href": null,
+      "type": "file",
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Add Comment",
+      "href": null,
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": true
+    },
+    {
+      "tag": "A",
+      "text": "Need help? Contact us",
+      "href": "mailto:support@nurtur.tech",
+      "type": null,
+      "name": null,
+      "placeholder": null,
+      "disabled": false
+    }
+  ],
+  "afterGetHelpShot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase1_after_get_help.png",
+  "fillIssue": {
+    "filled": false
+  },
+  "submitIssue": {
+    "clicked": false
+  },
+  "afterFirstInputText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nBack to tickets\nCOD-101\nReviewed\nHigh\nHomepage hero banner is showing the wrong Spring offer\nREPORTER\ncodex.portal.test@nurtur.tech\nASSIGNEE\nWeb Team\nCREATED\n15/05/2026\nUPDATED\n17/05/2026\nBC ACCOUNT\nBC-44102\nSubmitted\n2\nReviewed\n3\nIn Progress\n4\nResolved\n5\nClosed\n\nWe've assessed this and know what's needed\n\nDescription\nPlease swap the homepage hero banner to the Summer valuation offer and update the CTA copy.\nComments (1)\nS\nSupport Team\n16/05/2026, 11:45:00\nWe have reviewed the request and confirmed the assets needed for the homepage update.\nB\nI\nAdd Comment\nStatus Timeline\nSubmitted\nReviewed\n16/05/2026, 11:44:00 by Support Team\nWe've assessed this and know what's needed\nSubmitted\n15/05/2026, 10:10:00 by Codex Test User\nWe've received your request\nSLA Status\nTime to resolution\n18h 15m\nPowered by Nurtur\nNeed help? Contact us",
+  "afterFirstInputShot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase1_after_first_input.png",
+  "secondInput": {
+    "filled": false
+  },
+  "secondSubmit": {
+    "clicked": false
+  },
+  "afterSecondInputText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nBack to tickets\nCOD-101\nReviewed\nHigh\nHomepage hero banner is showing the wrong Spring offer\nREPORTER\ncodex.portal.test@nurtur.tech\nASSIGNEE\nWeb Team\nCREATED\n15/05/2026\nUPDATED\n17/05/2026\nBC ACCOUNT\nBC-44102\nSubmitted\n2\nReviewed\n3\nIn Progress\n4\nResolved\n5\nClosed\n\nWe've assessed this and know what's needed\n\nDescription\nPlease swap the homepage hero banner to the Summer valuation offer and update the CTA copy.\nComments (1)\nS\nSupport Team\n16/05/2026, 11:45:00\nWe have reviewed the request and confirmed the assets needed for the homepage update.\nB\nI\nAdd Comment\nStatus Timeline\nSubmitted\nReviewed\n16/05/2026, 11:44:00 by Support Team\nWe've assessed this and know what's needed\nSubmitted\n15/05/2026, 10:10:00 by Codex Test User\nWe've received your request\nSLA Status\nTime to resolution\n18h 15m\nPowered by Nurtur\nNeed help? Contact us",
+  "afterSecondInputShot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase1_after_second_input.png",
+  "finalStatuses": {
+    "hits": [
+      "Submitted",
+      "Reviewed",
+      "In Progress",
+      "Resolved",
+      "Closed"
+    ],
+    "leaks": [],
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nBack to tickets\nCOD-101\nReviewed\nHigh\nHomepage hero banner is showing the wrong Spring offer\nREPORTER\ncodex.portal.test@nurtur.tech\nASSIGNEE\nWeb Team\nCREATED\n15/05/2026\nUPDATED\n17/05/2026\nBC ACCOUNT\nBC-44102\nSubmitted\n2\nReviewed\n3\nIn Progress\n4\nResolved\n5\nClosed\n\nWe've assessed this and know what's needed\n\nDescription\nPlease swap the homepage hero banner to the Summer valuation offer and update the CTA copy.\nComments (1)\nS\nSupport Team\n16/05/2026, 11:45:00\nWe have reviewed the request and confirmed the assets needed for the homepage update.\nB\nI\nAdd Comment\nStatus Timeline\nSubmitted\nReviewed\n16/05/2026, 11:44:00 by Support Team\nWe've assessed this and know what's needed\nSubmitted\n15/05/2026, 10:10:00 by Codex Test User\nWe've received your request\nSLA Status\nTime to resolution\n18h 15m\nPowered by Nurtur\nNeed help? Contact us"
+  }
+}

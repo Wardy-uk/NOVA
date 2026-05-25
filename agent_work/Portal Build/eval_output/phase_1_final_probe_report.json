@@ -1,0 +1,139 @@
+{
+  "home": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin reset email is not arriving for the branch mailbox\nPopular Articles\nBrowse all\nCheck portal ticket progress\nSupport Portal\nWebsite change request checklist\nWebsite\nReset account access and browser cache\nAccounts\nPowered by Nurtur\nNeed help? Contact us",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_home.png"
+  },
+  "gotoTickets": {
+    "clicked": true,
+    "text": "My Tickets",
+    "tag": "BUTTON",
+    "href": null
+  },
+  "tickets": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nAll\nOpen\nResolved\nMy tickets only\nAll priorities\nHighest\nHigh\nMedium\nLow\nAll time\nToday\nThis week\nThis month\nKey\tSummary\tStatus\tPriority\tAssignee\tUpdated\nCOD-101\tHomepage hero banner is showing the wrong Spring offer\tReviewed\tHigh\tWeb Team\t17/05/2026\nCOD-102\tLogin reset email is not arriving for the branch mailbox\tAwaiting Your Response\tMedium\tSupport Team\t16/05/2026\nCOD-103\tProperty feed mismatch on featured listing cards\tResolved\tHigh\tIntegrations Team\t13/05/2026\nPowered by Nurtur\nNeed help? Contact us",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_tickets.png"
+  },
+  "cod101Click": {
+    "clicked": true,
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nAll\nOpen\nResolved\nMy tickets only\nAll priorities\nHighest\nHigh\nMedium\nLow\nAll time\nToday\nThis week\nThis month\nKey\tSummary\tStatus\tPriority\tAssignee\tUpdated\nCOD-101\tHomepage hero banner is showing the wrong Spring offer\tReviewed\tHigh\tWeb Team\t17/05/2026\nCOD-102\tLogin reset email is not arriving for the branch mailbox\tAwaiting Your Response\tMedium\tSupport Team\t16/05/2026\nCOD-103\tProperty feed mismatch on featured listing cards\tResolved\tHigh\tIntegrations Team\t13/05/2026\nPowered by Nurtur\nNeed help? Contact us",
+    "tag": "DIV"
+  },
+  "cod101": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nAll\nOpen\nResolved\nMy tickets only\nAll priorities\nHighest\nHigh\nMedium\nLow\nAll time\nToday\nThis week\nThis month\nKey\tSummary\tStatus\tPriority\tAssignee\tUpdated\nCOD-101\tHomepage hero banner is showing the wrong Spring offer\tReviewed\tHigh\tWeb Team\t17/05/2026\nCOD-102\tLogin reset email is not arriving for the branch mailbox\tAwaiting Your Response\tMedium\tSupport Team\t16/05/2026\nCOD-103\tProperty feed mismatch on featured listing cards\tResolved\tHigh\tIntegrations Team\t13/05/2026\nPowered by Nurtur\nNeed help? Contact us",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_cod101.png"
+  },
+  "backFrom101": {
+    "clicked": false
+  },
+  "cod102Click": {
+    "clicked": true,
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nAll\nOpen\nResolved\nMy tickets only\nAll priorities\nHighest\nHigh\nMedium\nLow\nAll time\nToday\nThis week\nThis month\nKey\tSummary\tStatus\tPriority\tAssignee\tUpdated\nCOD-101\tHomepage hero banner is showing the wrong Spring offer\tReviewed\tHigh\tWeb Team\t17/05/2026\nCOD-102\tLogin reset email is not arriving for the branch mailbox\tAwaiting Your Response\tMedium\tSupport Team\t16/05/2026\nCOD-103\tProperty feed mismatch on featured listing cards\tResolved\tHigh\tIntegrations Team\t13/05/2026\nPowered by Nurtur\nNeed help? Contact us",
+    "tag": "DIV"
+  },
+  "cod102": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nAll\nOpen\nResolved\nMy tickets only\nAll priorities\nHighest\nHigh\nMedium\nLow\nAll time\nToday\nThis week\nThis month\nKey\tSummary\tStatus\tPriority\tAssignee\tUpdated\nCOD-101\tHomepage hero banner is showing the wrong Spring offer\tReviewed\tHigh\tWeb Team\t17/05/2026\nCOD-102\tLogin reset email is not arriving for the branch mailbox\tAwaiting Your Response\tMedium\tSupport Team\t16/05/2026\nCOD-103\tProperty feed mismatch on featured listing cards\tResolved\tHigh\tIntegrations Team\t13/05/2026\nPowered by Nurtur\nNeed help? Contact us",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_cod102.png"
+  },
+  "backFrom102": {
+    "clicked": false
+  },
+  "cod103Click": {
+    "clicked": true,
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nAll\nOpen\nResolved\nMy tickets only\nAll priorities\nHighest\nHigh\nMedium\nLow\nAll time\nToday\nThis week\nThis month\nKey\tSummary\tStatus\tPriority\tAssignee\tUpdated\nCOD-101\tHomepage hero banner is showing the wrong Spring offer\tReviewed\tHigh\tWeb Team\t17/05/2026\nCOD-102\tLogin reset email is not arriving for the branch mailbox\tAwaiting Your Response\tMedium\tSupport Team\t16/05/2026\nCOD-103\tProperty feed mismatch on featured listing cards\tResolved\tHigh\tIntegrations Team\t13/05/2026\nPowered by Nurtur\nNeed help? Contact us",
+    "tag": "DIV"
+  },
+  "cod103": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nAll\nOpen\nResolved\nMy tickets only\nAll priorities\nHighest\nHigh\nMedium\nLow\nAll time\nToday\nThis week\nThis month\nKey\tSummary\tStatus\tPriority\tAssignee\tUpdated\nCOD-101\tHomepage hero banner is showing the wrong Spring offer\tReviewed\tHigh\tWeb Team\t17/05/2026\nCOD-102\tLogin reset email is not arriving for the branch mailbox\tAwaiting Your Response\tMedium\tSupport Team\t16/05/2026\nCOD-103\tProperty feed mismatch on featured listing cards\tResolved\tHigh\tIntegrations Team\t13/05/2026\nPowered by Nurtur\nNeed help? Contact us",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_cod103.png"
+  },
+  "backFrom103": {
+    "clicked": false
+  },
+  "homeFromTickets": {
+    "clicked": true,
+    "text": "Home",
+    "tag": "BUTTON",
+    "href": null
+  },
+  "openGetHelp": {
+    "clicked": true,
+    "text": "Get help\nReport an issue, ask a question, or request a change",
+    "tag": "BUTTON",
+    "href": null
+  },
+  "getHelpStart": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nSupport Assistant\nEnd conversation\nHow can we help you today? Describe your issue, question, or request.\nPowered by Nurtur\nNeed help? Contact us",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_get_help_start.png"
+  },
+  "intakeMessage1": {
+    "filled": true,
+    "tag": "TEXTAREA",
+    "placeholder": "Type your message..."
+  },
+  "intakeSubmit1": {
+    "clicked": true,
+    "found": true,
+    "x": 692.3125,
+    "y": 32,
+    "text": "Sign out",
+    "ariaLabel": "Sign out",
+    "title": null
+  },
+  "afterMessage1": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\nSupport Portal\n\nSign in to manage your support requests and access the knowledge base.\n\nSign in with NurturUse Codex Test User\n\nBy signing in, you agree to our terms of service and privacy policy.",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_after_message_1.png"
+  },
+  "chooseCategory": {
+    "clicked": false
+  },
+  "afterCategory": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\nSupport Portal\n\nSign in to manage your support requests and access the knowledge base.\n\nSign in with NurturUse Codex Test User\n\nBy signing in, you agree to our terms of service and privacy policy.",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_after_category.png"
+  },
+  "intakeMessage2": {
+    "filled": false
+  },
+  "intakeSubmit2": {
+    "clicked": false
+  },
+  "afterMessage2": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\nSupport Portal\n\nSign in to manage your support requests and access the knowledge base.\n\nSign in with NurturUse Codex Test User\n\nBy signing in, you agree to our terms of service and privacy policy.",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_after_message_2.png"
+  },
+  "submitRequest": {
+    "clicked": false
+  },
+  "afterSubmit": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\nSupport Portal\n\nSign in to manage your support requests and access the knowledge base.\n\nSign in with NurturUse Codex Test User\n\nBy signing in, you agree to our terms of service and privacy policy.",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_after_submit.png"
+  },
+  "viewTicket": {
+    "clicked": false
+  },
+  "newTicket": {
+    "url": "http://127.0.0.1:5173/portal",
+    "text": "nurtur\nSupport Portal\n\nSign in to manage your support requests and access the knowledge base.\n\nSign in with NurturUse Codex Test User\n\nBy signing in, you agree to our terms of service and privacy policy.",
+    "leaks": [],
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_final_new_ticket.png"
+  }
+}

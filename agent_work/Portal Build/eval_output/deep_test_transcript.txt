@@ -1,0 +1,151 @@
+DEEP TEST — Full Conversational Flow
+=====================================
+
+STEP 1 — User message: "Our homepage phone number is wrong. It should be 01234 567890."
+
+RESPONSE (category picker):
+nurtur
+|
+Support Portal
+codex.portal.test@nurtur.tech
+Codex Test Organisation
+Sign out
+Home
+My Tickets
+Knowledge Base
+New Conversation
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+Support Assistant
+End conversation
+Our homepage phone number is wrong. It should be 01234 567890.
+12:04
+Which area does this relate to?
+My Website
+Content updates or something not working
+My Account
+Login, passwords, users, permissions
+Billing & Contracts
+Cancellations, service changes, queries
+Something Else
+General support requests and questions
+12:04
+Powered by Nurtur
+Need help? Contact us
+
+STEP 2 — Clicked "My Website"
+Click result: My Website
+Content updates or something not working
+
+RESPONSE AFTER CLICK:
+nurtur
+|
+Support Portal
+codex.portal.test@nurtur.tech
+Codex Test Organisation
+Sign out
+Home
+My Tickets
+Knowledge Base
+New Conversation
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+Support Assistant
+End conversation
+Our homepage phone number is wrong. It should be 01234 567890.
+12:04
+Which area does this relate to?
+My Website
+Content updates or something not working
+My Account
+Login, passwords, users, permissions
+Billing & Contracts
+Cancellations, service changes, queries
+Something Else
+General support requests and questions
+12:04
+My Website
+12:04
+Got it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see.
+12:04
+Powered by Nurtur
+Need help? Contact us
+
+FINAL STATE:
+nurtur
+|
+Support Portal
+codex.portal.test@nurtur.tech
+Codex Test Organisation
+Sign out
+Home
+My Tickets
+Knowledge Base
+New Conversation
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+Support Assistant
+End conversation
+Our homepage phone number is wrong. It should be 01234 567890.
+12:04
+Which area does this relate to?
+My Website
+Content updates or something not working
+My Account
+Login, passwords, users, permissions
+Billing & Contracts
+Cancellations, service changes, queries
+Something Else
+General support requests and questions
+12:04
+My Website
+12:04
+Got it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see.
+12:04
+Powered by Nurtur
+Need help? Contact us
+
+TAXONOMY LEAKS: none
+BUTTONS: ["Sign out","Home","My Tickets","Knowledge Base","New Conversation","18/05/2026\nIn Progress","18/05/2026\nIn Progress","18/05/2026\nIn Progress","18/05/2026\nIn Progress","18/05/2026\nIn Progress","18/05/2026\nIn Progress","18/05/2026\nIn Progress","18/05/2026\nIn Progress","End conversation","My Website\nContent updates or something not working","My Account\nLogin, passwords, users, permissions","Billing & Contracts\nCancellations, service changes, queries","Something Else\nGeneral support requests and questions"]

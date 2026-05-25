@@ -1,0 +1,56 @@
+{
+  "scenario": {
+    "id": 7,
+    "name": "Human Escalation Preference",
+    "message": "I don't want to use the bot, I just need someone to update our homepage."
+  },
+  "steps": [
+    {
+      "t": "12:21:22",
+      "label": "chat_opened",
+      "hasInput": true
+    },
+    {
+      "t": "12:21:23",
+      "label": "message_sent",
+      "sent": true,
+      "message": "I don't want to use the bot, I just need someone to update our homepage."
+    },
+    {
+      "t": "12:21:29",
+      "label": "first_response",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": false,
+      "hasDirectSummary": false,
+      "assistantResponse": "13:21 | Which area does this relate to? | My Website | Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 13:21"
+    },
+    {
+      "t": "12:21:29",
+      "label": "taxonomy_check",
+      "leaks": "CLEAN"
+    },
+    {
+      "t": "12:21:29",
+      "label": "category_clicked",
+      "target": "My Website",
+      "result": "Which area does this relate to?\nMy Website\nContent updates or something not work"
+    },
+    {
+      "t": "12:21:33",
+      "label": "after_category",
+      "asksReDescribe": false,
+      "excerpt": "Cancellations, service changes, queries | Something Else | General support requests and questions | 13:21 | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "t": "12:21:35",
+      "label": "summary_check",
+      "hasSummary": false
+    },
+    {
+      "t": "12:21:35",
+      "label": "final",
+      "taxonomyLeaks": "CLEAN",
+      "consoleErrors": 5
+    }
+  ]
+}

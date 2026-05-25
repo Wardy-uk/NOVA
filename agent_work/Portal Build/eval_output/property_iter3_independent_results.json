@@ -1,0 +1,353 @@
+{
+  "pass": 51,
+  "fail": 1,
+  "details": [
+    {
+      "section": "Frustration",
+      "name": "Adverb: absolutely furious",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Adverb: completely ridiculous",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Sarcasm: wow great service",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Passive: wonder if anyone reads",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Thanks for nothing",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Been broken for days",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Utterly useless",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Speak to real person",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Fed up",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Excessive punctuation",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Adverb: totally ridiculous",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Adverb: so frustrated",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Sarcasm: oh brilliant service",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Passive: does anyone even check",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Nobody listening",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Frustration",
+      "name": "Been waiting for weeks",
+      "passed": false,
+      "reason": "no empathy, no handoff offer"
+    },
+    {
+      "section": "Detail",
+      "name": "Address preserved (14 Church Lane)",
+      "passed": true,
+      "reason": "14 Church Lane"
+    },
+    {
+      "section": "Detail",
+      "name": "Portal preserved (Rightmove)",
+      "passed": true,
+      "reason": "Rightmove"
+    },
+    {
+      "section": "Detail",
+      "name": "Description preserved",
+      "passed": true,
+      "reason": "captured"
+    },
+    {
+      "section": "Detail",
+      "name": "Category set to property",
+      "passed": true,
+      "reason": "category=property"
+    },
+    {
+      "section": "Detail",
+      "name": "Address preserved (42 Oak Avenue)",
+      "passed": true,
+      "reason": "42 Oak Avenue"
+    },
+    {
+      "section": "Detail",
+      "name": "Multiple portals preserved",
+      "passed": true,
+      "reason": "Rightmove, Zoopla"
+    },
+    {
+      "section": "Detail",
+      "name": "Empathy response references property details",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Detail",
+      "name": "Pure frustration (no property) still gets empathy",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Routing",
+      "name": "Rightmove listing → property",
+      "passed": true,
+      "reason": "got=property"
+    },
+    {
+      "section": "Routing",
+      "name": "Zoopla wrong details → property",
+      "passed": true,
+      "reason": "got=property"
+    },
+    {
+      "section": "Routing",
+      "name": "Vague property → property",
+      "passed": true,
+      "reason": "got=property"
+    },
+    {
+      "section": "Routing",
+      "name": "Feed sync → property",
+      "passed": true,
+      "reason": "got=property"
+    },
+    {
+      "section": "Routing",
+      "name": "Website phone number → website",
+      "passed": true,
+      "reason": "got=website"
+    },
+    {
+      "section": "Routing",
+      "name": "Website redesign → website",
+      "passed": true,
+      "reason": "got=website"
+    },
+    {
+      "section": "Routing",
+      "name": "Website + portal mix → property",
+      "passed": true,
+      "reason": "got=property"
+    },
+    {
+      "section": "Routing",
+      "name": "OnTheMarket → property",
+      "passed": true,
+      "reason": "got=property"
+    },
+    {
+      "section": "Routing",
+      "name": "Floorplan missing → property",
+      "passed": true,
+      "reason": "got=property"
+    },
+    {
+      "section": "Routing",
+      "name": "Property status wrong → property",
+      "passed": true,
+      "reason": "got=property"
+    },
+    {
+      "section": "Taxonomy",
+      "name": "Property listing issue",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Taxonomy",
+      "name": "Property photos wrong",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Taxonomy",
+      "name": "Property feed delay",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "NoPicker",
+      "name": "Direct property issue",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "NoPicker",
+      "name": "Property with frustration",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "NoPicker",
+      "name": "Vague property mention",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "NoPicker",
+      "name": "Property photos",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "NoReset",
+      "name": "Turn 1: category set to property",
+      "passed": true,
+      "reason": "category=property"
+    },
+    {
+      "section": "NoReset",
+      "name": "Turn 2: category still property",
+      "passed": true,
+      "reason": "category=property"
+    },
+    {
+      "section": "NoReset",
+      "name": "Turn 2: address captured",
+      "passed": true,
+      "reason": "25 Park Road"
+    },
+    {
+      "section": "NoReset",
+      "name": "Turn 2: no category picker",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "WebRegression",
+      "name": "Content update routes to website",
+      "passed": true,
+      "reason": "got=website"
+    },
+    {
+      "section": "WebRegression",
+      "name": "Design change routes to website",
+      "passed": true,
+      "reason": "got=website"
+    },
+    {
+      "section": "WebRegression",
+      "name": "Broken page routes to website",
+      "passed": true,
+      "reason": "got=website"
+    },
+    {
+      "section": "WebRegression",
+      "name": "New page request routes to website",
+      "passed": true,
+      "reason": "got=website"
+    },
+    {
+      "section": "Edge",
+      "name": "Ambiguous property page on website",
+      "passed": true,
+      "reason": "got=website"
+    },
+    {
+      "section": "Edge",
+      "name": "Frustration + attachment flag",
+      "passed": true,
+      "reason": "attachmentMentioned=true"
+    },
+    {
+      "section": "Edge",
+      "name": "Punctuation-only frustration",
+      "passed": true,
+      "reason": ""
+    }
+  ],
+  "sections": {
+    "Frustration": {
+      "pass": 15,
+      "fail": 1
+    },
+    "Detail": {
+      "pass": 8,
+      "fail": 0
+    },
+    "Routing": {
+      "pass": 10,
+      "fail": 0
+    },
+    "Taxonomy": {
+      "pass": 3,
+      "fail": 0
+    },
+    "NoPicker": {
+      "pass": 4,
+      "fail": 0
+    },
+    "NoReset": {
+      "pass": 4,
+      "fail": 0
+    },
+    "WebRegression": {
+      "pass": 4,
+      "fail": 0
+    },
+    "Edge": {
+      "pass": 3,
+      "fail": 0
+    }
+  },
+  "timestamp": "2026-05-19T11:20:52.058Z"
+}

@@ -6,6 +6,7 @@ import type { PortalJiraService } from './portal-jira.js';
 import type { PortalIntakeService } from './portal-intake.js';
 import type { PortalChatSession, PortalChatMessage } from '../../shared/portal-types.js';
 import type { IntakeSessionMetadata, IntakeCollectedFields, ChatMessageMetadata } from '../../shared/portal-types.js';
+import { PORTAL_CATEGORY_FIELD_CONFIG } from '../../shared/portal-category-field-config.js';
 import { trackEvent } from './portal-analytics.js';
 import type { PortalPlaybookService } from './portal-playbooks.js';
 
@@ -63,6 +64,11 @@ const ConversationalFollowUpSchema = z.object({
   question: z.string(),
 });
 
+const SummarySynthesisSchema = z.object({
+  subject: z.string(),
+  description: z.string(),
+});
+
 // ── Vocabulary Firewall (runtime enforcement) ──
 // Safety net: catches internal/technical terms that should never appear in customer-facing text.
 // The LLM prompt is the first-line defence; this is the second.
@@ -117,10 +123,134 @@ function sanitizeCustomerResponse(text: string): string {
   return result;
 }
 
+function descriptionLacksActionableDetail(desc: string | null): boolean {
+  if (!desc) return true;
+  const stripped = desc.replace(/^(hi|hello|hey|howdy|good (morning|afternoon|evening))[\s,.!\-]*/i, '').trim();
+  if (stripped.length < 30) return true;
+
+  // Purely abstract/vague phrasing that doesn't identify what's actually wrong —
+  // even if long enough, these need the "what specifically?" follow-up.
+  const VAGUE_ABSTRACT = /^(i'?m?\s+|we('re|\s+are)\s+|there('s|\s+is)\s+|i\s+have\s+|we\s+have\s+|i'?ve\s+got\s+|we'?ve\s+got\s+)?(having\s+)?(an?\s+|some\s+)?(issue|problem|trouble|difficulty|bit of (an?\s+)?trouble)s?\b/i;
+  const VAGUE_SOMETHING = /\b(something('s|\s+is)?\s+(wrong|broken|not (right|working))|things?\s+(aren'?t|isn'?t|is not|are not)\s+(right|working)|not\s+(sure\s+)?what('s|\s+is)\s+(wrong|going on|happening)|it('s|\s+is)?\s+(just\s+)?(not\s+(right|working)|playing up|broken)|stuff('s|\s+is)?\s+(not\s+working|broken))\b/i;
+  if (VAGUE_ABSTRACT.test(stripped) || VAGUE_SOMETHING.test(stripped)) {
+    // Check if there's also a specific noun/target — if so, it's not purely vague
+    const hasSpecificTarget = /\b(page|photo|image|listing|property|portal|rightmove|zoopla|email|campaign|phone\s*number|address|office|branch|template|floorplan|epc|virtual tour|media|price|website|login|password|user|account|report|data)\b/i.test(stripped);
+    if (!hasSpecificTarget) return true;
+  }
+
+  return !/\b(error|broken|not working|not loading|can'?t log\s*in|can'?t access|won'?t load|missing|incorrect|password|expired|locked out|not showing|disappeared|update|change|remove|add user|remove user|new user|wrong|page|photo|image|listing|property|portal|rightmove|zoopla|email|campaign|phone number|address|office|branch|display|showing|hidden|visible|template|trigger|data|report|login|sign.?in|set.?up|floorplan|epc|virtual tour|media|price|description|sync|feed)\b/i.test(stripped);
+}
+
+function followUpLacksConcreteProblem(text: string): boolean {
+  const stripped = stripGreeting(text);
+  if (stripped.length < 15) return true;
+  const hasProblemIndicator = /\b(error|broken|not working|not loading|can'?t|won'?t|missing|incorrect|wrong|outdated|old|need.{0,15}(updat|chang|fix|remov|add)|update|change|remove|add|not showing|not display|hidden|locked|expired|disappeared|playing up|not right|trouble|crash|down|slow|fail|stuck|won't|can not)\b/i.test(stripped);
+  return !hasProblemIndicator;
+}
+
+function isLikelyAccountName(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  if (/\b(not working|not loading|aren'?t|broken|error|issue|problem|can'?t|won'?t|missing|need|help|change|update|fix|showing|display|not right|trouble|having|loading|photos?|images?)\b/i.test(lower)) return false;
+  if (lower.length > 80) return false;
+  if (/^(i |we |the |my |our |it |there |something |need |please |help )/i.test(lower)) return false;
+  // Reject portal/channel names — these are answers to "which portal?" not account names
+  if (/^(the\s+)?(website|rightmove|zoopla|onthemarket|on the market|primelocation|prime location|our (website|site)|the (website|site)|both|all of them|everywhere)$/i.test(lower)) return false;
+  // Reject pure prepositions, articles, and very short non-name words
+  if (/^(on|at|in|to|of|by|for|the|a|an|or|and|but|so|if|no|yes|ok|hi)$/i.test(lower)) return false;
+  // Reject urgency/sentiment phrases that aren't company names
+  if (/^(quite|very|really|extremely|fairly|rather|super|absolutely|completely|totally|utterly)\s+(urgent|important|critical|high|serious|bad|frustrated|annoyed|unhappy)/i.test(lower)) return false;
+  if (/^(urgent|critical|high priority|asap|emergency)$/i.test(lower)) return false;
+  // Reject correction/conversational phrases
+  if (/^(actually|sorry|no wait|i meant|i mean|that'?s wrong|correction)/i.test(lower)) return false;
+  // Reject strings under 3 characters (too short for any real company name)
+  if (lower.length < 3) return false;
+  return true;
+}
+
+function stripGreeting(text: string): string {
+  return text.replace(/^(hi|hello|hey|howdy|good (morning|afternoon|evening))[\s,.!\-]*/i, '').trim();
+}
+
+function cleanAccountName(raw: string): string {
+  let cleaned = raw.trim();
+  cleaned = cleaned
+    .replace(/^(on\s+)?our\s+(main\s+)?website\s*,?\s*(the\s+)?/i, '')
+    .replace(/^(on\s+)?(the\s+)?(our\s+)?(website|site)\s+(for|at|with)\s+/i, '')
+    .replace(/^(it'?s\s+)(for|at|with|from)\s+/i, '')
+    .replace(/^it'?s\s+/i, '')
+    .replace(/^(the\s+)?account\s+(is|for|name\s+is)\s+/i, '')
+    .replace(/^(we\s+are|we'?re)\s+/i, '')
+    .replace(/^(on\s+)?(the\s+)?/i, '')
+    .replace(/\s+(website|site|portal|system|platform|rightmove|zoopla|onthemarket|primelocation)$/i, '')
+    .replace(/'s\s*$/i, '')
+    .replace(/\s+account'?s?\s*$/i, '')
+    .replace(/\s+not\s+\S.*$/i, '')
+    .replace(/\s+(is\s+)?(having|not working|broken|having issues|having problems|having trouble|is down|isn'?t working|won'?t|can'?t|doesn'?t|don'?t|needs?|but|and (we|they|i|it|the|our)|where|which|who|that|the\s+(website|site|portal|page|system|problem|issue|error|photos?|images?|listings?|login|password))\b.*$/i, '')
+    .replace(/\s*[-–—]\s+.*$/i, '')
+    .replace(/\s+(https?:\/\/|www\.)\S+$/i, '')
+    .replace(/\s+\S+\.(?:co\.uk|com|org|net|agency|io|uk)\S*$/i, '')
+    .replace(/[.,;:!?]+\s*$/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (cleaned.length < 3) return '';
+  // Reject if cleaning left only a stopword/preposition
+  if (/^(on|at|in|to|of|by|for|the|a|an|or|and|but|so|if|no|yes|ok|hi|it|is|was|are|be|do|go)$/i.test(cleaned)) return '';
+  return cleaned;
+}
+
+function cleanEditValue(raw: string): string {
+  return raw
+    .replace(/^(just\s+(?:be\s+)?|simply\s+(?:be\s+)?|should\s+(?:just\s+)?(?:be\s+)?|needs?\s+to\s+(?:be\s+)?|to\s+(?:just\s+)?(?:be\s+)?|(?:could|can)\s+you\s+(?:just\s+)?(?:make\s+it\s+|change\s+(?:it\s+)?(?:to\s+)?)?|(?:make|set)\s+(?:it|that)\s+(?:to\s+)?(?:be\s+)?|(?:change|update)\s+(?:it|that)\s+to\s+|it\s+should\s+(?:just\s+)?(?:be|say)\s+|it\s+needs?\s+to\s+(?:be|say)\s+|please\s+(?:(?:change|update|set|make)\s+(?:it\s+)?(?:to\s+)?)?)/i, '')
+    .replace(/\s*[.,;!?]+\s*$/g, '')
+    .trim();
+}
+
+function cleanFieldBoundary(raw: string): string {
+  return raw
+    .replace(/\s*,?\s*(?:and\s+)?(?:also\s+)?(?:(?:change|update|set|correct|make|please)\s+)?(?:the\s+)?(?:subject|account|description|urgency|person|name|email|url|contact)\s+(?:to|should|needs?|is)\b.*$/i, '')
+    .replace(/\s*[.,;!?]+\s*$/, '')
+    .trim();
+}
+
+function containsCorrection(text: string): boolean {
+  return /\b(actually|sorry|correction|no wait|i meant|that'?s wrong|not .+,?\s+(it'?s|should be|it should)|wrong .+,?\s+(it'?s|should be)|should be .+ not)\b/i.test(text);
+}
+
+function refreshStructuredFieldsFromCorrection(content: string, fields: IntakeCollectedFields): void {
+  // URL correction: "the URL is X not Y" / "actually X.co.uk" / "should be X"
+  const urlInContent = extractUrlFromText(content);
+  if (urlInContent) fields.url = urlInContent;
+
+  // Alphanumeric listing ref correction — preserve full multi-segment refs
+  // Exclude Jira ticket references (NT-xxx, NTPJ-xxx)
+  const alphanumMatch = content.match(/\b([A-Za-z]{2,5}[-_]\d{2,5}(?:[-_][A-Za-z0-9]{1,10})*)\b/);
+  if (alphanumMatch && !isPhoneLikeValue(alphanumMatch[1]) && !/^(NT|NTPJ)-/i.test(alphanumMatch[1])) {
+    fields.listingId = alphanumMatch[1];
+  }
+
+  // Property address correction — look for "should be X" / "it's actually X Street"
+  const STREET_SUFFIXES = 'Street|St|Road|Rd|Lane|Ln|Avenue|Ave|Drive|Dr|Close|Cl|Way|Place|Pl|Court|Ct|Crescent|Cres|Terrace|Gardens|Grove|Park|Square|Row|Mews|Hill|Rise|Walk|Green|Gate|Chase|Heath|Meadow|Vale|View';
+  const addrCorrectionRe = new RegExp(`(?:should be|it'?s actually|correct (?:address|one) is)\\s+(\\d{1,5}\\s+[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+){0,3}(?:\\s+(?:${STREET_SUFFIXES})))`, 'i');
+  const addrCorrectionMatch = content.match(addrCorrectionRe);
+  if (addrCorrectionMatch) {
+    fields.propertyAddress = addrCorrectionMatch[1].trim();
+  }
+}
+
 function extractPhoneNumbers(text: string): string[] {
   if (!text) return [];
   const matches = text.match(/(?:\+?\d{1,3}[\s-]?)?\(?\d{2,5}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}/g);
   return matches || [];
+}
+
+function isPhoneLikeValue(val: string): boolean {
+  const digits = val.replace(/\D/g, '');
+  if (digits.length < 5) return false;
+  // UK phone numbers starting with 0: full (10-11 digits) or partial (5+ digits like area code)
+  if (digits.startsWith('0') && digits.length >= 5 && digits.length <= 13) return true;
+  if (digits.length >= 11 && /^(44|353|1)/.test(digits)) return true;
+  if (/^\+?\d{1,3}[\s-]?\(?\d{2,5}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}$/.test(val.trim())) return true;
+  return false;
 }
 
 function briefContext(meta: IntakeSessionMetadata): string {
@@ -134,48 +264,13 @@ const FRUSTRATION_PATTERNS = /\b(this is (completely |absolutely |totally |utter
 
 const ATTACHMENT_PATTERNS = /\b(attached|attachment|see attached|photo attached|i'?ve attached|file attached|screenshot attached|attaching|i attach)\b/i;
 
-const ESCALATION_CHASE_PATTERNS = /\b(raised this|already (raised|reported|logged|submitted|sent|told you|contacted|emailed)|following up|chasing|chase this|chasing this up|nobody has (helped|replied|responded|got back|come back|done anything)|no one has (helped|replied|responded|got back|come back|done anything)|been waiting|still (waiting|not (fixed|resolved|sorted|done|working|heard))|I ('ve|have) (already|previously) (raised|reported|logged|submitted|sent)|originally (raised|reported|logged)|weeks? ago|days? ago|months? ago|some time ago|a while (ago|back|now)|first (raised|reported|contacted|logged)|re-?raise|re-?open|follow.?up|getting? back to (you|this|me)|still (an issue|a problem|happening|broken|not right)|hasn'?t been (fixed|resolved|sorted|addressed|looked at|dealt with))\b/i;
+const ESCALATION_CHASE_PATTERNS = /\b(raised this|already (raised|reported|logged|submitted|sent|told you|contacted|emailed)|following up|chasing|chase this|chasing this up|nobody has (helped|replied|responded|got back|come back|done anything)|no one has (helped|replied|responded|got back|come back|done anything)|been waiting|still (waiting|not (fixed|resolved|sorted|done|working|heard))|I ('ve|have) (already|previously) (raised|reported|logged|submitted|sent)|originally (raised|reported|logged)|weeks? ago|days? ago|months? ago|some time ago|a while (ago|back|now)|first (raised|reported|contacted|logged)|re-?raise|re-?open|follow.?up|getting? back to (you|this|me)|still (an issue|a problem|happening|broken|not right)|hasn'?t been (fixed|resolved|sorted|addressed|looked at|dealt with)|is not (fixed|resolved|sorted|done|working)|(marked|was|been) (resolved|closed|done|fixed) but|same (issue|problem|thing) (again|is back|has come back)|happen(ed|ing|s) again|it(('s| is| has) )?(come|came|coming) back|not actually (fixed|resolved|sorted|done)|problem (is back|came back|returned))\b/i;
+
+const COMPLAINT_INTENT_PATTERNS = /\b(I('d| would) like to (make a |raise a |lodge a |file a )?complain(t)?|I want to (complain|make a complaint|raise a complaint|lodge a complaint|file a complaint)|formal complaint|raise a complaint|make a complaint|lodge a complaint|file a complaint|I('m| am) (making|raising|lodging|filing) a complaint|complaining about|complaint about|I need to escalate|I want to escalate|I('d| would) like to escalate|please escalate|escalate my (issue|request|case|ticket|problem|concern)|this needs escalating|needs? to be escalated|need this escalated|want this escalated|I('m| am) not (happy|satisfied)|not good enough|(really|very|so|extremely|incredibly|absolutely) (unhappy|disappointed|dissatisfied|frustrated)( with)?|very unhappy with|very disappointed with|extremely unhappy|extremely disappointed|totally unacceptable|completely unacceptable|your service (is|has been) (terrible|awful|dreadful|appalling|abysmal|shocking)|I('m| am) (really |very |so |extremely |incredibly |absolutely )?(unhappy|disappointed|dissatisfied|furious|livid) (and |& )?(need|want|demand|require)(s?| this| it)( to be)? escalat)\b/i;
 
 // ── Category Field Config ──
 
-const CATEGORY_FIELD_CONFIG: Record<string, { url: boolean; browser: boolean; errorMessage: boolean; account: boolean; description_hint: string }> = {
-  website_content:    { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'What content needs changing? Include the page URL and exact text or image to update.' },
-  website_broken:     { url: true,  browser: true,  errorMessage: true,  account: true,  description_hint: 'What should be happening vs what is happening? Include any error messages.' },
-  website_new_page:   { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Describe the new page — content, navigation placement.' },
-  website_design:     { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'What design changes? Attach reference images.' },
-  account_login:      { url: false, browser: true,  errorMessage: true,  account: true,  description_hint: 'Which login? What happens when you try?' },
-  account_new_user:   { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Name, email, which systems.' },
-  account_permissions:{ url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which user, what access needed.' },
-  account_details:    { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What details need updating.' },
-  account_office_change: { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which office/branch, what change.' },
-  account_remove_user:   { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Who needs removing, email address.' },
-  email_campaign:     { url: false, browser: false, errorMessage: true,  account: true,  description_hint: 'Which campaign, what went wrong.' },
-  email_triggers:     { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which trigger, what should it be doing.' },
-  email_template:     { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which template, what changes.' },
-  leadpro_missing:    { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'When did the lead come in, which source, reference numbers.' },
-  leadpro_setup:      { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What needs configuring.' },
-  leadpro_access:     { url: false, browser: true,  errorMessage: true,  account: true,  description_hint: 'What happens when you try to access.' },
-  feeds_property:     { url: false, browser: false, errorMessage: true,  account: true,  description_hint: 'Which feed, when did it last work, CRM error messages.' },
-  feeds_integration:  { url: false, browser: false, errorMessage: true,  account: true,  description_hint: 'Which integration, what system.' },
-  feeds_reporting:    { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'Which report or view.' },
-  listings_tours:     { url: true,  browser: true,  errorMessage: false, account: true,  description_hint: 'Property address or listing ref.' },
-  listings_media:     { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'Which property, what images.' },
-  listings_management:{ url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which listings, what action.' },
-  property_missing_listing:    { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, where is it missing from.' },
-  property_incorrect_details:  { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, what details are wrong.' },
-  property_media:              { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, what media is affected.' },
-  property_feed_sync:          { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, which portals affected.' },
-  property_status:             { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, what status issue.' },
-  property_visibility:         { url: false, browser: false, errorMessage: false, account: true, description_hint: 'Which property, where is it not visible.' },
-  onboarding_branch:  { url: false, browser: false, errorMessage: false, account: false, description_hint: 'Branch name, address, products needed.' },
-  onboarding_product: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which product.' },
-  onboarding_training:{ url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What training, how many attendees.' },
-  billing_cancel:     { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which service, specific date.' },
-  billing_change:     { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What service change.' },
-  billing_query:      { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Billing question.' },
-  other_general:      { url: false, browser: false, errorMessage: false, account: false, description_hint: 'How can we help.' },
-  other_feedback:     { url: false, browser: false, errorMessage: false, account: false, description_hint: 'Feedback or suggestion.' },
-};
+const CATEGORY_FIELD_CONFIG = PORTAL_CATEGORY_FIELD_CONFIG;
 
 const CATEGORY_NAMES: Record<string, string> = {
   website: 'My Website',
@@ -185,8 +280,13 @@ const CATEGORY_NAMES: Record<string, string> = {
   data_feeds: 'Data Feeds & Integrations',
   listings: 'Property Listings',
   property: 'Property Listings',
+  letters: 'Letters & Correspondence',
   onboarding: 'Onboarding & Setup',
   billing: 'Billing & Contracts',
+  security: 'Website Security',
+  general_request: 'General Service Request',
+  followup: 'Reopened / Follow-up',
+  complaint: 'Complaint / Escalation',
   other: 'Something Else',
 };
 
@@ -219,12 +319,27 @@ const SUBCATEGORY_NAMES: Record<string, string> = {
   property_feed_sync: 'Property update issue',
   property_status: 'Property status issue',
   property_visibility: 'Property visibility issue',
+  letters_market_appraisal: 'Market appraisal letter',
+  letters_mailshot: 'Property mailshot',
+  letters_general: 'Other correspondence',
   onboarding_branch: 'New branch',
   onboarding_product: 'New product',
   onboarding_training: 'Training',
   billing_cancel: 'Cancellation',
   billing_change: 'Service change',
   billing_query: 'Billing query',
+  security_vulnerability: 'Suspicious activity / vulnerability',
+  security_ssl: 'SSL / certificate issue',
+  security_access: 'Unauthorised access concern',
+  general_request_change: 'Request a change',
+  general_request_info: 'Request information',
+  general_request_other: 'Other service request',
+  followup_reopen: 'Reopen a request',
+  followup_update: 'Chase an open request',
+  followup_not_resolved: 'Issue not fully resolved',
+  complaint_service: 'Service complaint',
+  complaint_response: 'Response time concern',
+  complaint_escalate: 'Escalate an issue',
   other_general: 'General query',
   other_feedback: 'Feedback',
 };
@@ -287,7 +402,16 @@ function normaliseChoice(text: string): string {
 }
 
 function isAffirmativeResponse(text: string): boolean {
-  return /^(yes|yeah|yep|please do|go ahead|do it|create (a )?ticket|raise (a )?(ticket|request)|submit (it|that)|that sounds good|ok|okay|sure)\b/i.test(text.trim());
+  const t = text.trim();
+  // Strong start-of-message affirmative
+  if (/^(yes|yeah|yep|yup|please do|go ahead|do it|create (a )?ticket|raise (a )?(ticket|request)|submit (it|that)|that sounds good|ok|okay|sure|perfect|confirmed?|all good|that'?s (correct|right|fine|good)|looks? (good|correct|right|fine)|that looks? (good|correct|right|fine))\b/i.test(t)) return true;
+  // Ticket-creation intent anywhere in the message
+  if (/\b(create|raise|submit|log|open)\s+(a\s+)?(ticket|request|issue)\b/i.test(t)) return true;
+  // "please submit" without a following object (e.g. "please submit" or "please submit it")
+  if (/\bplease\s+submit\b/i.test(t)) return true;
+  // Affirmative buried in a longer response (e.g. "that would be great, yes please")
+  if (/\b(yes\s*please|go ahead|please do|sounds good|looks? good|that'?s (correct|right)|all good|no changes?)\b/i.test(t) && t.length < 120) return true;
+  return false;
 }
 
 function isNegativeResponse(text: string): boolean {
@@ -324,8 +448,36 @@ function detectWebsiteFromKeywords(content: string): { likely: boolean; subcateg
   return { likely: true, subcategory: null };
 }
 
+function detectEmailTemplateFromKeywords(content: string): { likely: boolean } {
+  const lower = content.toLowerCase();
+  return {
+    likely: /\b(email\s+template|marketing\s+template|html\s+template|newsletter\s+template|template\s+(design|build|create|update|change|amend|new)|new\s+template|build\s+(a|me|us|our)\s+template|create\s+(a|me|us|our)\s+template)\b/.test(lower),
+  };
+}
+
+function detectLettersFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
+  const lower = content.toLowerCase();
+  const hasLetterSignal = /\b(letter|letters|correspondence|mailshot|mail\s*shot|market\s*appraisal|printed|print\s+run|letter\s+template|direct\s+mail|postal|postcard|brochure)\b/.test(lower);
+  if (!hasLetterSignal) return { likely: false, subcategory: null };
+  if (/\b(market\s*appraisal|valuation\s+letter|appraisal\s+letter)\b/.test(lower)) {
+    return { likely: true, subcategory: 'letters_market_appraisal' };
+  }
+  if (/\b(mailshot|mail\s*shot|property\s+mail|marketing\s+letter|direct\s+mail|postcard|brochure)\b/.test(lower)) {
+    return { likely: true, subcategory: 'letters_mailshot' };
+  }
+  return { likely: true, subcategory: 'letters_general' };
+}
+
 function detectPropertyFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
   const lower = content.toLowerCase();
+
+  // Website-context guard: if "property" is used as website content (e.g. "property images on my website")
+  // rather than real-estate listing intent, defer to website routing.
+  const hasExplicitWebsiteContext = /\b(website|web site|our site|my site|the site|homepage|home page|web page|webpage)\b/.test(lower);
+  const hasPortalListingSignal = /\b(rightmove|zoopla|onthemarket|on the market|primelocation|prime location|listing|listings|feed|feeds|syndication)\b/.test(lower);
+  if (hasExplicitWebsiteContext && !hasPortalListingSignal && /\bpropert(y|ies)\b/.test(lower)) {
+    return { likely: false, subcategory: null };
+  }
 
   const hasPropertySignal =
     /\b(property|properties|listing|listings|rightmove|zoopla|onthemarket|on the market|primelocation|prime location)\b/.test(lower) ||
@@ -360,7 +512,14 @@ function detectPropertyFromKeywords(content: string): { likely: boolean; subcate
   return { likely: true, subcategory: null };
 }
 
+const SITE_WIDE_PATTERNS = /\b(all\s+(our\s+)?(properties|listings|branches|offices)|every\s+(property|listing)|site[\s-]?wide|across\s+(the\s+)?(board|all|everything)|whole\s+(website|site|portfolio)|everything|all\s+of\s+(them|our|the)|not\s+just\s+one|multiple\s+(properties|listings)|several\s+(properties|listings)|none\s+of\s+(them|our|the)|affects?\s+(all|every|the\s+lot|multiple)|it'?s\s+all\s+of\s+them|no\s+specific\s+property|not\s+a\s+specific|not\s+(one\s+)?specific|not\s+about\s+a\s+(specific|particular)|not\s+a\s+particular|general\s+issue|doesn'?t\s+apply\s+to\s+(one|a\s+single)|not\s+(just\s+)?(one|a\s+single)\s+(property|listing)|all\s+listings|no\s+particular\s+(property|listing)|none\s+in\s+particular|the\s+(whole\s+)?feed|every(thing|\s+single\s+one))\b/i;
+
 function extractPropertyFieldsFromText(content: string, fields: IntakeCollectedFields): void {
+  // Site-wide indicator — customer says the issue affects all properties, not one specific one
+  if (!fields.propertyAddress && SITE_WIDE_PATTERNS.test(content)) {
+    fields.propertyAddress = 'All properties (site-wide)';
+  }
+
   // Property address — look for street number + name patterns
   if (!fields.propertyAddress) {
     const addrMatch = content.match(/\b(\d{1,5}\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}(?:\s+(?:Street|St|Road|Rd|Lane|Ln|Avenue|Ave|Drive|Dr|Close|Cl|Way|Place|Pl|Court|Ct|Crescent|Cres|Terrace|Gardens|Grove|Park|Square|Row|Mews|Hill|Rise|Walk|Green|Gate|Chase|Heath|Meadow|Vale|View)))\b/i);
@@ -369,9 +528,42 @@ function extractPropertyFieldsFromText(content: string, fields: IntakeCollectedF
 
   // Listing / property ID
   if (!fields.listingId) {
-    const idMatch = content.match(/\b(?:property|listing|ref(?:erence)?|id)[\s:#]*(\d{4,})\b/i) ||
-                    content.match(/\b(\d{5,})\b/);
-    if (idMatch) fields.listingId = idMatch[1];
+    // Alphanumeric listing refs like ABC-12345, BP-2024-001, RM-45821-A, ABC-12345-XZ
+    // Exclude Jira ticket references (NT-xxx, NTPJ-xxx) — those are follow-up refs, not listing IDs
+    const alphanumMatch = content.match(/\b([A-Za-z]{2,5}[-_]\d{2,5}(?:[-_][A-Za-z0-9]{1,10})*)\b/);
+    if (alphanumMatch && !isPhoneLikeValue(alphanumMatch[1]) && !/^(NT|NTPJ)-/i.test(alphanumMatch[1])) {
+      fields.listingId = alphanumMatch[1];
+    }
+  }
+  if (!fields.listingId) {
+    const keywordIdMatch = content.match(/\b(?:property|listing|ref(?:erence)?|id)[\s:#]*(\d{4,})\b/i);
+    if (keywordIdMatch && !isPhoneLikeValue(keywordIdMatch[1])) {
+      fields.listingId = keywordIdMatch[1];
+    } else if (!keywordIdMatch) {
+      // Bare 5+ digit fallback — only if it doesn't look like a phone number
+      const bareMatch = content.match(/\b(\d{5,})\b/);
+      if (bareMatch) {
+        const num = bareMatch[0];
+        const beforeCtx = content.slice(Math.max(0, bareMatch.index! - 40), bareMatch.index!);
+        const afterCtx = content.slice(bareMatch.index! + num.length, bareMatch.index! + num.length + 30);
+        const isPhoneContext = /\b(phone|tel|telephone|call|ring|mobile|number|fax|contact|dial|landline)\s*[:.]?\s*$/i.test(beforeCtx) ||
+          /^\s*[:.]?\s*\b(phone|tel|telephone|mobile|fax|landline)\b/i.test(afterCtx);
+        // UK phone numbers are typically 10-11 contiguous digits; listing refs are shorter
+        const isPhoneLikeLength = num.length >= 10 && num.length <= 13;
+        // Numbers starting with 0 in the UK are almost always phone numbers (full or partial)
+        const startsWithZero = num.startsWith('0');
+        // 7-9 digit numbers starting with 0 are partial UK phone numbers (e.g. area codes)
+        const isPartialPhone = startsWithZero && num.length >= 7;
+        // International-prefix numbers (e.g. 447712345678 from +44...) are phone numbers
+        const isInternationalPhone = num.length >= 11 && /^(44|353|1)/.test(num);
+        // Check for formatted phone number nearby (+44, 0xxx xxx xxxx patterns)
+        const hasPhoneFormat = /\+\d{1,3}\s*$/.test(beforeCtx) ||
+          /\b0\d{2,4}\s+\d{3,4}\s+\d{3,4}\b/.test(content);
+        if (!isPhoneContext && !isPartialPhone && !(isPhoneLikeLength && startsWithZero) && !isInternationalPhone && !hasPhoneFormat && !isPhoneLikeValue(num)) {
+          fields.listingId = num;
+        }
+      }
+    }
   }
 
   // Affected portals
@@ -381,8 +573,22 @@ function extractPropertyFieldsFromText(content: string, fields: IntakeCollectedF
     if (/\bzoopla\b/i.test(content)) portals.push('Zoopla');
     if (/\b(onthemarket|on the market)\b/i.test(content)) portals.push('OnTheMarket');
     if (/\b(primelocation|prime location)\b/i.test(content)) portals.push('PrimeLocation');
-    if (/\bwebsite\b/i.test(content)) portals.push('Website');
+    if (/\b(website|our site|the site|my site)\b/i.test(content)) portals.push('Website');
+    // "both" or "all of them" / "everywhere" — means website + portals
+    if (portals.length === 0 && /\b(both|all of them|everywhere|all portals)\b/i.test(content)) {
+      portals.push('Website', 'Property portals');
+    }
     if (portals.length > 0) fields.affectedPortals = portals.join(', ');
+  }
+
+  // Infer Website portal from URL — if a non-portal-domain URL is present, the issue
+  // is almost certainly about the customer's own website
+  if (!fields.affectedPortals && fields.url) {
+    const urlLower = fields.url.toLowerCase();
+    const isPortalUrl = /\b(rightmove|zoopla|onthemarket|primelocation)\b/.test(urlLower);
+    if (!isPortalUrl) {
+      fields.affectedPortals = 'Website';
+    }
   }
 
   // Property status mentions
@@ -533,8 +739,23 @@ function detectCrossDomainAmbiguity(content: string): { ambiguous: boolean; doma
 }
 
 function extractUrlFromText(content: string): string | null {
-  const match = content.match(/https?:\/\/[^\s<>"{}|\\^`\[\]]+/i);
-  return match ? match[0].replace(/[.,;:!?)]+$/, '') : null;
+  // Protocol-prefixed URLs (highest confidence)
+  const httpMatch = content.match(/https?:\/\/[^\s<>"{}|\\^`\[\]]+/i);
+  if (httpMatch) return httpMatch[0].replace(/[.,;:!?)]+$/, '');
+
+  // www-prefixed URLs
+  const wwwMatch = content.match(/\bwww\.[a-z0-9][-a-z0-9]*(?:\.[a-z]{2,})+(?:\/[^\s<>"{}|\\^`\[\]]*)*/i);
+  if (wwwMatch) return wwwMatch[0].replace(/[.,;:!?)]+$/, '');
+
+  // Bare domain URLs with common TLDs (only when not preceded by @ to avoid emails)
+  const domainMatch = content.match(/(?<!\S@)(?<!\w)\b([a-z0-9][-a-z0-9]*\.(?:co\.uk|com|org|net|agency|io|uk|biz|tech|info)(?:\/[^\s<>"{}|\\^`\[\]]*)*)/i);
+  if (domainMatch) {
+    const candidate = domainMatch[0].replace(/[.,;:!?)]+$/, '');
+    // Reject if it's just a file extension or email-like fragment
+    if (candidate.includes('.') && candidate.length > 5) return candidate;
+  }
+
+  return null;
 }
 
 export class PortalChatService {
@@ -627,6 +848,7 @@ export class PortalChatService {
           // Force handoff — create ticket with whatever we have
           const ticketKey = await this.forceHandoff(meta, context, sessionId, history);
           responseContent = `I've gone ahead and created ticket **${ticketKey}** with the details we've gathered so far. A team member will follow up with you.`;
+          messageMeta = { type: 'confirmed' as const, ticketKey, intent: meta.intent };
           meta.stage = 'confirmed';
           meta.offeredTicketCreation = false;
         } else if (userMessageCount >= handoffThreshold && meta.stage !== 'kb_check' && !meta.offeredTicketCreation) {
@@ -639,8 +861,13 @@ export class PortalChatService {
       const errStack = err instanceof Error ? err.stack : undefined;
       console.error(`[portal-chat] Stage processing failed for session ${sessionId}, stage=${meta.stage}, intent=${meta.intent}:`, errMsg);
       if (errStack) console.error('[portal-chat] Stack:', errStack);
-      responseContent = "I'm having trouble processing your request right now. Would you like me to create a support ticket so our team can help you directly?";
-      meta.offeredTicketCreation = true;
+      if (meta.submissionFailed) {
+        responseContent = "I'm sorry — I wasn't able to process that. Please contact us directly at **support@nurtur.tech** and we'll help you from there.";
+        meta.stage = 'confirmed';
+      } else {
+        responseContent = "I'm having trouble processing your request right now. Would you like me to create a support ticket so our team can help you directly?";
+        meta.offeredTicketCreation = true;
+      }
     }
 
     // Runtime vocabulary firewall — catches jargon leaks from LLM and template paths
@@ -693,18 +920,30 @@ export class PortalChatService {
     const stage = meta.stage;
     console.log(`[portal-chat] session=${sessionId} stage=${stage} intent=${meta.intent} category=${meta.category}`);
 
+    // Always attempt URL capture from every message — ensures URLs bundled with
+    // ticket-request language or conversational responses are never missed.
+    if (!meta.collectedFields.url) {
+      const url = extractUrlFromText(content);
+      if (url) meta.collectedFields.url = url;
+    }
+
     if (meta.offeredTicketCreation && stage !== 'confirmed') {
       if (isAffirmativeResponse(content)) {
         meta.offeredTicketCreation = false;
-        const ticketKey = await this.forceHandoff(meta, context, sessionId, history);
-        return {
-          response: `I've created ticket **${ticketKey}** with the information you've shared so far. You can track its progress in **My Tickets**, and our team will follow up if anything else is needed.`,
-        };
+        // Route through summary review instead of direct submission —
+        // customer should see what will be submitted before we create a ticket.
+        return await this.buildSummaryCard(meta);
       }
 
       if (isNegativeResponse(content)) {
         meta.offeredTicketCreation = false;
       }
+    }
+
+    // Follow-up with ticket reference wins over frustration handling —
+    // "NT-123 is still not fixed" is a follow-up case, not just frustration.
+    if (meta.frustrationDetected && ESCALATION_CHASE_PATTERNS.test(content) && /\b(NT|NTPJ)-\d+\b/i.test(content)) {
+      meta.frustrationDetected = false;
     }
 
     // Frustration override — offer handoff immediately from any stage except confirmed
@@ -719,20 +958,34 @@ export class PortalChatService {
         meta.collectedFields.description = content;
       }
       if (!meta.category) {
-        const propertyDetection = detectPropertyFromKeywords(content);
-        if (propertyDetection.likely) {
-          meta.category = 'property';
+        if (COMPLAINT_INTENT_PATTERNS.test(content)) {
+          meta.category = 'complaint';
           meta.conversational = true;
-          meta.subcategory = propertyDetection.subcategory || 'property_visibility';
+          meta.complaintDetected = true;
+          meta.collectedFields.urgency = 'High';
+          if (/\b(escalat)\b/i.test(content)) {
+            meta.subcategory = 'complaint_escalate';
+          } else if (/\b(waiting|response|replied|got back)\b/i.test(content)) {
+            meta.subcategory = 'complaint_response';
+          } else {
+            meta.subcategory = 'complaint_service';
+          }
         } else {
-          const accountDetection = detectAccountFromKeywords(content);
-          if (accountDetection.likely) {
-            meta.category = 'account';
+          const propertyDetection = detectPropertyFromKeywords(content);
+          if (propertyDetection.likely) {
+            meta.category = 'property';
             meta.conversational = true;
-            meta.subcategory = accountDetection.subcategory || 'account_login';
-            if (accountDetection.securitySensitive) {
-              meta.securitySensitive = true;
-              meta.collectedFields.urgency = 'High';
+            meta.subcategory = propertyDetection.subcategory || 'property_visibility';
+          } else {
+            const accountDetection = detectAccountFromKeywords(content);
+            if (accountDetection.likely) {
+              meta.category = 'account';
+              meta.conversational = true;
+              meta.subcategory = accountDetection.subcategory || 'account_login';
+              if (accountDetection.securitySensitive) {
+                meta.securitySensitive = true;
+                meta.collectedFields.urgency = 'High';
+              }
             }
           }
         }
@@ -761,6 +1014,23 @@ export class PortalChatService {
         return this.handleKbCheckResponse(meta, content, context, sessionId);
 
       case 'summary':
+        if (isAffirmativeResponse(content)) {
+          // Natural-language confirmation — submit as-is
+          try {
+            const result = await this.confirmAndSubmit(sessionId, {}, context, { skipMessage: true });
+            return {
+              response: `I've created ticket **${result.ticketKey}**. You can track its progress in **My Tickets**, and our team will follow up if anything else is needed.`,
+              messageMeta: { type: 'confirmed' as const, ticketKey: result.ticketKey },
+            };
+          } catch (err) {
+            console.error('[portal-chat] Summary-stage submission failed:', err instanceof Error ? err.message : err);
+            meta.submissionFailed = true;
+            meta.stage = 'confirmed';
+            return {
+              response: "I'm sorry — I wasn't able to create the ticket right now. Please contact us directly at **support@nurtur.tech** and we'll get this sorted for you. You can include the details from this conversation in your email.",
+            };
+          }
+        }
         return this.handleSummaryEdit(meta, content, context);
 
       case 'confirmed':
@@ -808,14 +1078,15 @@ export class PortalChatService {
       meta.attachmentMentioned = true;
     }
 
-    // Extract domain-specific fields from opening message
+    // Extract fields from opening message via regex (account patterns, URL, browser, etc.)
+    this.extractFieldsRegex(meta, content);
     extractPropertyFieldsFromText(content, meta.collectedFields);
     extractAccountFieldsFromText(content, meta.collectedFields);
 
     if (this.llm) {
       return this.handleIntentWithLlm(meta, content, context, sessionId);
     }
-    return this.handleIntentWithoutLlm(meta, content);
+    return await this.handleIntentWithoutLlm(meta, content);
   }
 
   private async handleIntentWithLlm(
@@ -839,7 +1110,7 @@ export class PortalChatService {
       const personEmail = meta.collectedFields.affectedPersonEmail;
 
       if (personName && personEmail) {
-        const summaryResult = this.buildSummaryCard(meta);
+        const summaryResult = await this.buildSummaryCard(meta);
         return {
           response: `Understood — I'll get ${personName}'s access removed urgently.\n\n${summaryResult.response}`,
           messageMeta: summaryResult.messageMeta,
@@ -942,13 +1213,21 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
 
       // Populate extracted fields (don't overwrite URL from regex)
       if (d.subject) meta.collectedFields.subject = d.subject;
-      if (d.account) meta.collectedFields.account = d.account;
+      if (d.account && isLikelyAccountName(d.account)) {
+        const cleaned = cleanAccountName(d.account);
+        if (cleaned) {
+          // Prefer longer/more complete account name from regex over LLM truncation
+          if (!meta.collectedFields.account || cleaned.length >= meta.collectedFields.account.length) {
+            meta.collectedFields.account = cleaned;
+          }
+        }
+      }
       if (d.url && !meta.collectedFields.url) meta.collectedFields.url = d.url;
       if (d.errorMessage) meta.collectedFields.errorMessage = d.errorMessage;
       if (d.browser) meta.collectedFields.browser = d.browser;
       if (d.urgency) meta.collectedFields.urgency = d.urgency;
       if (d.propertyAddress) meta.collectedFields.propertyAddress = d.propertyAddress;
-      if (d.listingId) meta.collectedFields.listingId = d.listingId;
+      if (d.listingId && !isPhoneLikeValue(d.listingId)) meta.collectedFields.listingId = d.listingId;
       if (d.affectedPortals) meta.collectedFields.affectedPortals = d.affectedPortals;
       // Never replace raw customer message with LLM summary — it loses operational detail.
       // If the LLM extracted additional context, append it; otherwise keep raw message intact.
@@ -993,6 +1272,67 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         }
       }
 
+      // F1: Deterministic follow-up gate — when a Jira ticket reference is present with
+      // escalation/chase language, route to follow-up BEFORE LLM-driven domain routing
+      // to prevent inconsistent LLM classifications from stealing follow-up messages.
+      const hasTicketRef = /\b(NT|NTPJ)-\d+\b/i.test(content);
+      if (hasTicketRef && ESCALATION_CHASE_PATTERNS.test(content)) {
+        meta.conversational = true;
+        meta.stage = 'detail';
+        meta.escalationDetected = true;
+        meta.category = 'followup';
+        meta.subcategory = 'followup_not_resolved';
+
+        const refMatch = content.match(/\b(NT|NTPJ)-\d+\b/i);
+        if (refMatch) {
+          const refKey = refMatch[0].toUpperCase();
+          meta.followUpTicketKey = refKey;
+          const domain = await this.portalJira.getOrgEmailDomain(context.orgId);
+          if (domain) {
+            try {
+              const refTicket = await queryOne<{ issue_key: string; summary: string; status: string }>(
+                `SELECT issue_key, summary, status FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
+                [refKey, `%@${domain}`],
+              );
+              if (refTicket) {
+                meta.followUpTicketKey = refTicket.issue_key;
+                meta.followUpTicketSummary = refTicket.summary;
+                const statusLower = refTicket.status.toLowerCase();
+                if (statusLower === 'resolved' || statusLower === 'closed') {
+                  meta.subcategory = 'followup_reopen';
+                }
+                const ack = d.acknowledgment || `I can see your original request **${refTicket.issue_key}** — "${refTicket.summary}" (currently **${refTicket.status}**).`;
+                return { response: `${ack}\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?` };
+              }
+            } catch { /* fall through to generic follow-up with key still set */ }
+          }
+          const ack = d.acknowledgment || `I can see you're following up on **${refKey}**.`;
+          return { response: `${ack}\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?` };
+        }
+      }
+
+      // Letters precedence gate — if the customer clearly wants letters/correspondence,
+      // don't let incidental website mentions route to the website path.
+      // Guard: skip when explicit website signals dominate (letters mention is incidental).
+      const lettersBeforeWebsite = detectLettersFromKeywords(content);
+      const hasExplicitWebsiteWords = /\b(website|web site|our site|my site|the site|homepage|home page|web page|webpage)\b/i.test(content);
+      if (lettersBeforeWebsite.likely && !hasExplicitWebsiteWords) {
+        meta.category = 'letters';
+        meta.subcategory = lettersBeforeWebsite.subcategory || 'letters_general';
+        meta.conversational = true;
+        meta.stage = 'detail';
+        const config = CATEGORY_FIELD_CONFIG[meta.subcategory] || CATEGORY_FIELD_CONFIG['letters_general']!;
+        const missing = this.getMissingFields(meta.collectedFields, config);
+        if (missing.length === 0) {
+          const ack = d.acknowledgment || "Thanks — I'll get your correspondence request raised with our production team.";
+          const summaryResult = await this.buildSummaryCard(meta);
+          return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
+        }
+        const ack = d.acknowledgment || "Thanks — I'll get your correspondence request raised with our production team.";
+        const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
+        return { response: `${ack}\n\n${question}` };
+      }
+
       // Website conversational intake — the core behavioural change
       if (d.isWebsiteRelated && d.confidence >= 0.6) {
         meta.category = 'website';
@@ -1007,7 +1347,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
 
           if (missing.length === 0) {
             const ack = d.acknowledgment || 'Thanks for providing all those details.';
-            const summaryResult = this.buildSummaryCard(meta);
+            const summaryResult = await this.buildSummaryCard(meta);
             return {
               response: `${ack}\n\n${summaryResult.response}`,
               messageMeta: summaryResult.messageMeta,
@@ -1056,7 +1396,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
 
           if (missing.length === 0) {
             const ack = d.acknowledgment || 'Thanks for providing all those details.';
-            const summaryResult = this.buildSummaryCard(meta);
+            const summaryResult = await this.buildSummaryCard(meta);
             return {
               response: `${ack}\n\n${summaryResult.response}`,
               messageMeta: summaryResult.messageMeta,
@@ -1109,7 +1449,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
             : (d.acknowledgment || "Understood — I'll get this raised urgently.");
 
           if (personName && personEmail) {
-            const summaryResult = this.buildSummaryCard(meta);
+            const summaryResult = await this.buildSummaryCard(meta);
             return {
               response: `${ack}\n\n${summaryResult.response}`,
               messageMeta: summaryResult.messageMeta,
@@ -1129,7 +1469,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           const missing = this.getAccountMissingFields(meta.collectedFields, meta.subcategory);
           if (missing.length === 0) {
             const ack = d.acknowledgment || 'Thanks for providing all those details.';
-            const summaryResult = this.buildSummaryCard(meta);
+            const summaryResult = await this.buildSummaryCard(meta);
             return {
               response: `${ack}\n\n${summaryResult.response}`,
               messageMeta: summaryResult.messageMeta,
@@ -1159,7 +1499,71 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         return { response: `${ack}\n\nCould you tell me a bit more about what you need?` };
       }
 
+      // Deterministic template detection — email template requests route to NTPJ
+      if (detectEmailTemplateFromKeywords(content).likely) {
+        meta.category = 'email_marketing';
+        meta.subcategory = 'email_template';
+        meta.conversational = true;
+        meta.stage = 'detail';
+        const config = CATEGORY_FIELD_CONFIG['email_template']!;
+        const missing = this.getMissingFields(meta.collectedFields, config);
+        if (missing.length === 0) {
+          const ack = d.acknowledgment || "Thanks — I'll get your template request raised with our production team.";
+          const summaryResult = await this.buildSummaryCard(meta);
+          return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
+        }
+        const ack = d.acknowledgment || "Thanks — I'll get your template request raised with our production team.";
+        const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
+        return { response: `${ack}\n\n${question}` };
+      }
+
+      // (Letters detection moved above website check for precedence — see lettersBeforeWebsite)
+
+      // Complaint / escalation intent — checked BEFORE disambiguation so mixed-domain
+      // complaint messages stay on the complaint path rather than hitting domain clarification.
+      if (COMPLAINT_INTENT_PATTERNS.test(content)) {
+        meta.conversational = true;
+        meta.stage = 'detail';
+        meta.category = 'complaint';
+        meta.complaintDetected = true;
+        meta.collectedFields.urgency = 'High';
+
+        // Preserve whatever detail they included alongside the complaint
+        if (!meta.collectedFields.description) {
+          meta.collectedFields.description = content;
+        }
+        extractAccountFieldsFromText(content, meta.collectedFields);
+
+        // Try to infer subcategory from language
+        if (/\b(escalat|needs? escalat|want.* escalat|please escalat)\b/i.test(content)) {
+          meta.subcategory = 'complaint_escalate';
+        } else if (/\b(waiting|response|replied|got back|no reply|haven'?t heard)\b/i.test(content)) {
+          meta.subcategory = 'complaint_response';
+        } else {
+          meta.subcategory = 'complaint_service';
+        }
+
+        const ack = d.acknowledgment || "I'm sorry to hear that — I want to make sure your complaint is properly recorded and dealt with.";
+        const hasAccount = !!meta.collectedFields.account;
+        const hasDetail = content.length > 80;
+
+        if (hasAccount && hasDetail) {
+          const summaryResult = await this.buildSummaryCard(meta);
+          return {
+            response: `${ack}\n\n${summaryResult.response}`,
+            messageMeta: summaryResult.messageMeta,
+          };
+        }
+
+        const followUp = !hasDetail
+          ? "Could you tell me what happened and what outcome you're looking for?"
+          : "Could you let me know which account this relates to?";
+
+        return { response: `${ack}\n\n${followUp}` };
+      }
+
       // Cross-domain disambiguation check — only when no single domain won above
+      // (runs after complaint check so complaint+domain messages stay complaint-aware)
       const ambiguity = detectCrossDomainAmbiguity(content);
       if (ambiguity.ambiguous && ambiguity.clarificationQuestion && !meta.disambiguationAsked) {
         meta.disambiguationAsked = true;
@@ -1168,6 +1572,48 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         meta.conversational = true;
         const ack = d.acknowledgment || "Thanks for getting in touch.";
         return { response: `${ack}\n\n${ambiguity.clarificationQuestion}` };
+      }
+
+      // F5: Escalation/chase detection — messages referencing prior tickets/requests
+      // should trigger conversational follow-up, never the category picker.
+      // Checked BEFORE vague domain signals so follow-up language isn't swallowed
+      // by coincidental domain keywords in the complaint.
+      if (ESCALATION_CHASE_PATTERNS.test(content)) {
+        meta.conversational = true;
+        meta.stage = 'detail';
+        meta.escalationDetected = true;
+        meta.category = 'followup';
+        meta.subcategory = 'followup_not_resolved';
+
+        const refMatch = content.match(/\b(NT|NTPJ)-\d+\b/i);
+        if (refMatch) {
+          const refKey = refMatch[0].toUpperCase();
+          meta.followUpTicketKey = refKey;
+          const domain = await this.portalJira.getOrgEmailDomain(context.orgId);
+          if (domain) {
+            try {
+              const refTicket = await queryOne<{ issue_key: string; summary: string; status: string }>(
+                `SELECT issue_key, summary, status FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
+                [refKey, `%@${domain}`],
+              );
+              if (refTicket) {
+                meta.followUpTicketKey = refTicket.issue_key;
+                meta.followUpTicketSummary = refTicket.summary;
+                const statusLower = refTicket.status.toLowerCase();
+                if (statusLower === 'resolved' || statusLower === 'closed') {
+                  meta.subcategory = 'followup_reopen';
+                }
+                const ack = d.acknowledgment || `I can see your original request **${refTicket.issue_key}** — "${refTicket.summary}" (currently **${refTicket.status}**).`;
+                return { response: `${ack}\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?` };
+              }
+            } catch { /* fall through to generic chase with key still set */ }
+          }
+          const ack = d.acknowledgment || `I can see you're following up on **${refKey}**.`;
+          return { response: `${ack}\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?` };
+        }
+
+        const ack = d.acknowledgment || "I can see you've been in touch about this before — sorry it's not been resolved yet.";
+        return { response: `${ack}\n\nCould you tell me a bit more about the issue you originally raised so I can get this picked up?` };
       }
 
       // H2: Vague-but-domain-signalled fallback — if ANY domain signal is present,
@@ -1188,7 +1634,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           meta.collectedFields.urgency = 'High';
           const personName = meta.collectedFields.affectedPersonName;
           if (personName && meta.collectedFields.affectedPersonEmail) {
-            const summaryResult = this.buildSummaryCard(meta);
+            const summaryResult = await this.buildSummaryCard(meta);
             return {
               response: `Understood — I'll get ${personName}'s access removed urgently.\n\n${summaryResult.response}`,
               messageMeta: summaryResult.messageMeta,
@@ -1222,41 +1668,95 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         return { response: `${ack}\n\nCould you tell me which property is affected and where you're seeing the issue?` };
       }
 
-      // F5: Escalation/chase detection — messages referencing prior tickets/requests
-      // should trigger conversational follow-up, never the category picker.
-      if (ESCALATION_CHASE_PATTERNS.test(content)) {
-        meta.conversational = true;
-        meta.stage = 'detail';
-        meta.escalationDetected = true;
-        const ack = d.acknowledgment || "I can see you've been in touch about this before — sorry it's not been resolved yet.";
-        return { response: `${ack}\n\nCould you tell me a bit more about the issue you originally raised so I can get this picked up?` };
-      }
-
-      // Genuinely unclassifiable — no domain signal detected at all. Category picker is appropriate.
-      meta.stage = 'category';
+      // Genuinely unclassifiable — stay conversational, ask a broad clarifying question
+      // instead of dropping to the category picker grid.
+      meta.stage = 'detail';
+      meta.conversational = true;
+      meta.category = 'other';
+      meta.subcategory = 'other_general';
       const prefix = d.intent === 'change'
         ? "Thanks — I'll help you get that change request submitted."
         : d.intent === 'question'
           ? "I couldn't find a direct answer in our knowledge base, but let me help you get in touch with the right team."
           : "Sorry to hear you're having trouble — let me help you get this sorted.";
 
-      const q = this.buildCategoryQuestion();
-      return { response: `${prefix}\n\n${q.text}`, messageMeta: q.messageMeta };
+      return { response: `${prefix}\n\nCould you tell me a bit more about what's going on so I can point this in the right direction?` };
     } catch (err) {
       console.warn('[portal-chat] Conversational intake LLM call failed:', err instanceof Error ? err.message : err);
-      return this.handleIntentWithoutLlm(meta, content);
+      return await this.handleIntentWithoutLlm(meta, content);
     }
   }
 
-  private handleIntentWithoutLlm(
+  private async handleIntentWithoutLlm(
     meta: IntakeSessionMetadata,
     content: string,
-  ): { response: string; messageMeta?: ChatMessageMetadata } {
+  ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
+    // F5: Escalation/chase detection — checked first so follow-up language
+    // isn't swallowed by coincidental domain keywords.
+    if (ESCALATION_CHASE_PATTERNS.test(content)) {
+      meta.conversational = true;
+      meta.stage = 'detail';
+      meta.escalationDetected = true;
+      meta.category = 'followup';
+      meta.subcategory = 'followup_not_resolved';
+
+      const refMatch = content.match(/\b(NT|NTPJ)-\d+\b/i);
+      if (refMatch) {
+        meta.followUpTicketKey = refMatch[0].toUpperCase();
+        return { response: `I can see you're following up on **${meta.followUpTicketKey}** — sorry it's not been resolved yet.\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?` };
+      }
+      return { response: "I can see you've been in touch about this before — sorry it's not been resolved yet.\n\nCould you tell me a bit more about the issue you originally raised so I can get this picked up?" };
+    }
+
+    // Complaint / escalation intent — no-LLM fallback
+    if (COMPLAINT_INTENT_PATTERNS.test(content)) {
+      meta.conversational = true;
+      meta.stage = 'detail';
+      meta.category = 'complaint';
+      meta.complaintDetected = true;
+      meta.collectedFields.urgency = 'High';
+      if (!meta.collectedFields.description) {
+        meta.collectedFields.description = content;
+      }
+      extractAccountFieldsFromText(content, meta.collectedFields);
+
+      if (/\b(escalat|needs? escalat|want.* escalat|please escalat)\b/i.test(content)) {
+        meta.subcategory = 'complaint_escalate';
+      } else if (/\b(waiting|response|replied|got back|no reply|haven'?t heard)\b/i.test(content)) {
+        meta.subcategory = 'complaint_response';
+      } else {
+        meta.subcategory = 'complaint_service';
+      }
+
+      return { response: "I'm sorry to hear that — I want to make sure your complaint is properly recorded and dealt with.\n\nCould you tell me what happened and what outcome you're looking for?" };
+    }
+
+    // Deterministic template detection (no-LLM fallback)
+    if (detectEmailTemplateFromKeywords(content).likely) {
+      meta.category = 'email_marketing';
+      meta.subcategory = 'email_template';
+      meta.conversational = true;
+      meta.stage = 'detail';
+      return { response: "Thanks — I'll get your template request raised with our production team.\n\nWhich template is this for, and what changes do you need?" };
+    }
+
+    // Deterministic letters detection (no-LLM fallback)
+    // Guard: skip when explicit website signals dominate (letters mention is incidental)
+    const lettersSignalNoLlm = detectLettersFromKeywords(content);
+    const noLlmWebsiteWords = /\b(website|web site|our site|my site|the site|homepage|home page|web page|webpage)\b/i.test(content);
+    if (lettersSignalNoLlm.likely && !noLlmWebsiteWords) {
+      meta.category = 'letters';
+      meta.subcategory = lettersSignalNoLlm.subcategory || 'letters_general';
+      meta.conversational = true;
+      meta.stage = 'detail';
+      return { response: "Thanks — I'll get your correspondence request raised with our production team.\n\nCould you let me know which account this is for and any details about what you need?" };
+    }
+
     // Check property first when portal indicators are present — avoids
     // website detection winning on messages like "not showing on Zoopla or our website"
     const propertyDetection = detectPropertyFromKeywords(content);
     if (propertyDetection.likely) {
-      return this.handlePropertyFallback(meta, content, propertyDetection);
+      return await this.handlePropertyFallback(meta, content, propertyDetection);
     }
 
     // Account / access / office change detection (before website, to catch login/access)
@@ -1267,7 +1767,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       if (websiteCheck.likely && /\b(website|web site|our site|the site|page|display|showing)\b/i.test(content) && /\b(wrong|incorrect|outdated|old|shows?|update|change)\b/i.test(content)) {
         // Website display complaint takes priority — fall through to website detection below
       } else {
-        return this.handleAccountFallback(meta, content, accountDetection);
+        return await this.handleAccountFallback(meta, content, accountDetection);
       }
     }
 
@@ -1286,7 +1786,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         const missing = this.getMissingFields(meta.collectedFields, config);
 
         if (missing.length === 0) {
-          return this.buildSummaryCard(meta);
+          return await this.buildSummaryCard(meta);
         }
 
         const nextMissing = missing.find(f => f !== 'description') || missing[0];
@@ -1303,26 +1803,20 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       return { response: `${ack} Could you tell me a bit more — is something not displaying correctly, or do you need some content updated?${fileNote}` };
     }
 
-    // F5: Escalation/chase detection — before picker fallback
-    if (ESCALATION_CHASE_PATTERNS.test(content)) {
-      meta.conversational = true;
-      meta.stage = 'detail';
-      meta.escalationDetected = true;
-      return { response: "I can see you've been in touch about this before — sorry it's not been resolved yet.\n\nCould you tell me a bit more about the issue you originally raised so I can get this picked up?" };
-    }
-
-    // Not recognisably a website or property request — fall through to category picker
+    // Not recognisably a website or property request — stay conversational
     meta.intent = 'problem';
-    meta.stage = 'category';
-    const q = this.buildCategoryQuestion();
-    return { response: q.text, messageMeta: q.messageMeta };
+    meta.stage = 'detail';
+    meta.conversational = true;
+    meta.category = 'other';
+    meta.subcategory = 'other_general';
+    return { response: "Thanks for getting in touch. Could you tell me a bit more about what's going on so I can get this to the right team?" };
   }
 
-  private handlePropertyFallback(
+  private async handlePropertyFallback(
     meta: IntakeSessionMetadata,
     content: string,
     detection: { likely: boolean; subcategory: string | null },
-  ): { response: string; messageMeta?: ChatMessageMetadata } {
+  ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
     meta.intent = 'problem';
     meta.category = 'property';
     meta.conversational = true;
@@ -1334,7 +1828,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       const missing = this.getPropertyMissingFields(meta.collectedFields, meta.subcategory);
 
       if (missing.length === 0) {
-        return this.buildSummaryCard(meta);
+        return await this.buildSummaryCard(meta);
       }
 
       const question = this.buildPropertyFollowUp(missing[0], meta);
@@ -1349,11 +1843,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
     return { response: `${propAck} Could you tell me which property is affected and where you're seeing the issue?${fileNote}` };
   }
 
-  private handleAccountFallback(
+  private async handleAccountFallback(
     meta: IntakeSessionMetadata,
     content: string,
     detection: { likely: boolean; subcategory: string | null; securitySensitive: boolean },
-  ): { response: string; messageMeta?: ChatMessageMetadata } {
+  ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
     meta.intent = 'change';
     meta.category = 'account';
     meta.conversational = true;
@@ -1369,7 +1863,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       const personEmail = meta.collectedFields.affectedPersonEmail;
 
       if (personName && personEmail) {
-        const summaryResult = this.buildSummaryCard(meta);
+        const summaryResult = await this.buildSummaryCard(meta);
         return {
           response: `Understood — I'll get ${personName}'s access removed urgently.\n\n${summaryResult.response}`,
           messageMeta: summaryResult.messageMeta,
@@ -1387,7 +1881,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       const missing = this.getAccountMissingFields(meta.collectedFields, meta.subcategory);
 
       if (missing.length === 0) {
-        return this.buildSummaryCard(meta);
+        return await this.buildSummaryCard(meta);
       }
 
       const ack = this.buildAccountAcknowledgement(meta);
@@ -1410,9 +1904,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
     // Try to find tickets for this user's org
     const domain = await this.portalJira.getOrgEmailDomain(context.orgId);
     if (!domain) {
-      meta.stage = 'category';
-      const q = this.buildCategoryQuestion();
-      return { response: "I couldn't find your organisation's tickets. Would you like to raise a new request instead?\n\n" + q.text, messageMeta: q.messageMeta };
+      meta.stage = 'detail';
+      meta.conversational = true;
+      meta.category = 'other';
+      meta.subcategory = 'other_general';
+      return { response: "I couldn't find your organisation's tickets. Would you like to raise a new request instead? If so, just describe what you need and I'll get it sorted." };
     }
 
     // Look for a ticket reference in the message
@@ -1426,12 +1922,55 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           [ticketKey, `%@${domain}`],
         );
         if (ticket) {
+          const isFollowUp = ESCALATION_CHASE_PATTERNS.test(content);
+          if (isFollowUp) {
+            meta.followUpTicketKey = ticket.issue_key;
+            meta.followUpTicketSummary = ticket.summary;
+            meta.category = 'followup';
+            meta.conversational = true;
+            meta.stage = 'detail';
+
+            const statusLower = ticket.status.toLowerCase();
+            if (statusLower === 'resolved' || statusLower === 'closed') {
+              meta.subcategory = 'followup_reopen';
+            } else {
+              meta.subcategory = 'followup_not_resolved';
+            }
+
+            return {
+              response: `I can see your original request **${ticket.issue_key}** — "${ticket.summary}" (currently **${ticket.status}**).\n\nI'll raise a follow-up linked to that ticket so the team has full context. Could you let me know what still needs attention or what's changed since the original request?`,
+            };
+          }
+
           meta.stage = 'confirmed';
           return {
             response: `Here's the status of **${ticket.issue_key}**:\n\n- **Summary:** ${ticket.summary}\n- **Status:** ${ticket.status}\n- **Assignee:** ${ticket.assignee_display || 'Unassigned'}\n- **Last updated:** ${new Date(ticket.updated_at).toLocaleDateString()}\n\nYou can view full details in the "My Tickets" section. Is there anything else I can help with?`,
           };
         }
       } catch { /* fall through */ }
+
+      // Cache miss but ticket ref present + chase language — still enter follow-up path
+      if (ESCALATION_CHASE_PATTERNS.test(content)) {
+        meta.followUpTicketKey = ticketKey;
+        meta.category = 'followup';
+        meta.conversational = true;
+        meta.stage = 'detail';
+        meta.subcategory = 'followup_not_resolved';
+        meta.escalationDetected = true;
+        return {
+          response: `I can see you're following up on **${ticketKey}** — sorry it's not been resolved yet.\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?`,
+        };
+      }
+    }
+
+    // Follow-up without a ticket reference — enter follow-up path if chase language detected
+    if (ESCALATION_CHASE_PATTERNS.test(content)) {
+      meta.conversational = true;
+      meta.stage = 'detail';
+      meta.escalationDetected = true;
+      meta.category = 'followup';
+      meta.subcategory = 'followup_not_resolved';
+      return { response: "I can see you've been in touch about this before — sorry it's not been resolved yet.\n\nCould you let me know the ticket reference or describe the original issue so I can link this follow-up?" };
     }
 
     // Show recent tickets
@@ -1448,9 +1987,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       };
     }
 
-    meta.stage = 'category';
-    const q = this.buildCategoryQuestion();
-    return { response: "I couldn't find any recent tickets for your organisation. Would you like to raise a new request?\n\n" + q.text, messageMeta: q.messageMeta };
+    meta.stage = 'detail';
+    meta.conversational = true;
+    meta.category = 'other';
+    meta.subcategory = 'other_general';
+    return { response: "I couldn't find any recent tickets for your organisation. Would you like to raise a new request? Just describe what you need and I'll take it from there." };
   }
 
   // ── Stage 2: Category Selection ──
@@ -1515,7 +2056,12 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
       }
     }
 
-    // Fallback: re-ask
+    // Fallback: if conversational, stay conversational rather than re-showing the picker
+    if (meta.conversational) {
+      meta.stage = 'detail';
+      meta.subcategory = meta.subcategory || 'other_general';
+      return { response: "No problem — could you describe what's happening in a bit more detail? That'll help me make sure it gets to the right team." };
+    }
     const q = this.buildCategoryQuestion();
     return { response: `I didn't quite catch that. ${q.text}`, messageMeta: q.messageMeta };
   }
@@ -1549,6 +2095,13 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
       return { response: this.buildFirstDetailQuestion(meta) };
     }
 
+    // In conversational mode, ask naturally instead of showing a picker grid
+    if (meta.conversational) {
+      meta.subcategory = subs[0]?.[0] || `${catId}_general`;
+      meta.stage = 'detail';
+      return { response: 'Could you tell me a bit more about what you need so I can make sure this gets to the right person?' };
+    }
+
     const categories = subs.map(([id, name]) => ({ id, name, description: '' }));
     return {
       response: 'Can you be more specific?',
@@ -1565,6 +2118,19 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     context: ChatContext,
     sessionId: number,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
+    // Early ticket-request interception: if the customer asks to create/raise a ticket
+    // before summary has been shown, extract any new fields then show the summary
+    // for review instead of bypassing straight to submission.
+    const TICKET_REQUEST = /\b(raise|create|submit|log|open|just\s+(raise|create|log))\s+(a\s+)?(support\s+)?(ticket|request|case|issue)\b/i;
+    if (TICKET_REQUEST.test(content) && meta.stage !== 'summary') {
+      // Extract any details bundled in the same message
+      await this.extractFields(meta, content);
+      const url = extractUrlFromText(content);
+      if (url && !meta.collectedFields.url) meta.collectedFields.url = url;
+      await this.synthesizeSummaryFields(meta);
+      return await this.buildSummaryCard(meta);
+    }
+
     // Handle disambiguation response — route based on the customer's clarifying answer
     if (meta.disambiguationAsked && !meta.category) {
       meta.disambiguationAsked = false; // consume the flag — never ask a second time
@@ -1582,7 +2148,7 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
           : this.getMissingFields(meta.collectedFields, CATEGORY_FIELD_CONFIG[meta.subcategory || ''] || CATEGORY_FIELD_CONFIG['other_general']!);
 
       if (missing.length === 0) {
-        return this.buildSummaryCard(meta);
+        return await this.buildSummaryCard(meta);
       }
 
       const question = meta.category === 'account'
@@ -1599,6 +2165,7 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
       const threshold = parseInt(this.settings.get('portal_chat_handoff_threshold') || '3', 10);
       meta.otherExchangeCount = (meta.otherExchangeCount || 0) + 1;
       if (meta.otherExchangeCount >= threshold) {
+        meta.offeredTicketCreation = true;
         return {
           response: "I'm not sure I'm able to resolve this through chat. Would you like me to **create a support ticket** so a team member can help?",
         };
@@ -1614,8 +2181,163 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
       ? "Noted — you'll be able to upload files when we get to the summary step.\n\n"
       : '';
 
+    // Silent reclassification: when initially unclassifiable (category=other),
+    // use the follow-up message to refine the category without exposing taxonomy.
+    if (meta.category === 'other' && meta.conversational) {
+      const fullText = meta.openingMessage ? `${meta.openingMessage} ${content}` : content;
+      const propSig = detectPropertyFromKeywords(fullText);
+      const accSig = detectAccountFromKeywords(fullText);
+      const webSig = detectWebsiteFromKeywords(fullText);
+
+      if (propSig.likely) {
+        meta.category = 'property';
+        meta.subcategory = propSig.subcategory || 'property_visibility';
+        extractPropertyFieldsFromText(content, meta.collectedFields);
+      } else if (accSig.likely) {
+        meta.category = 'account';
+        meta.subcategory = accSig.subcategory || 'account_login';
+        extractAccountFieldsFromText(content, meta.collectedFields);
+        if (accSig.securitySensitive) {
+          meta.securitySensitive = true;
+          meta.collectedFields.urgency = 'High';
+        }
+      } else if (webSig.likely) {
+        meta.category = 'website';
+        meta.subcategory = webSig.subcategory || 'website_content';
+      }
+    }
+
+    // Correction detection: if the user is correcting previously provided details,
+    // overwrite stale structured fields before normal extraction runs
+    if (containsCorrection(content)) {
+      refreshStructuredFieldsFromCorrection(content, meta.collectedFields);
+      // Force description re-synthesis so the summary reflects corrections
+      meta.synthesisDone = false;
+      meta.synthesizedDescription = undefined;
+    }
+
     // Extract fields from the user's message
     await this.extractFields(meta, content);
+
+    // Multi-turn recovery: if key fields are still missing, re-extract from the full
+    // accumulated description which contains all user messages so far.
+    const fullDesc = meta.collectedFields.description;
+    if (fullDesc && fullDesc !== content) {
+      if (!meta.collectedFields.account) this.extractFieldsRegex(meta, fullDesc);
+      if (meta.category === 'property') extractPropertyFieldsFromText(fullDesc, meta.collectedFields);
+      if (meta.category === 'account') extractAccountFieldsFromText(fullDesc, meta.collectedFields);
+    }
+
+    // Short-answer fallback: if account is still missing and the response is a short
+    // direct answer (likely replying to "which account?"), treat it as the account name.
+    // Reject text that looks like a complaint/description rather than an account name.
+    // Guards: don't capture when the vague gate is active (user is describing their
+    // problem), and don't capture text that matches already-extracted field values.
+    const justAskedVagueGate = meta.vagueGateAsked && !meta.vagueGateVerified;
+    const f = meta.collectedFields;
+    if (!f.account && content.length <= 60 && !justAskedVagueGate) {
+      const trimmed = content.replace(/^(it'?s\s+|the\s+|we'?re\s+|i'?m\s+(with|at|from)\s+)/i, '').trim();
+      const isConversational = /\b(something|wrong|broken|not working|can'?t|won'?t|issue|problem|help|need|please|trouble|having|showing|display|error|missing|page|update|change|fix|login|password|access|photo|image|listing|website|rightmove|zoopla|onthemarket|on the market|primelocation|prime location|portal|portals|our site|the site|my site|both|all of them|everywhere)\b/i.test(trimmed);
+      const matchesOtherField = !!(
+        (f.affectedPortals && f.affectedPortals.toLowerCase().includes(trimmed.toLowerCase())) ||
+        (f.propertyAddress && f.propertyAddress.toLowerCase() === trimmed.toLowerCase()) ||
+        (f.officeBranch && f.officeBranch.toLowerCase() === trimmed.toLowerCase()) ||
+        (f.affectedPersonName && f.affectedPersonName.toLowerCase() === trimmed.toLowerCase())
+      );
+      if (trimmed.length >= 2 && !isConversational && !matchesOtherField && isLikelyAccountName(trimmed) && !/^(yes|no|yeah|nope|ok|sure|please|thanks?|hi|hello)\b/i.test(trimmed)) {
+        const cleaned = cleanAccountName(trimmed);
+        if (cleaned) f.account = cleaned;
+      }
+    }
+
+    // Explicit account mention in longer messages — "the account is X", "account name is X", "we're X"
+    if (!f.account && content.length > 60 && !justAskedVagueGate) {
+      const explicitAccountPatterns = [
+        /\b(?:the\s+)?account\s+(?:name\s+)?(?:is|for)\s+["']?([A-Za-z][A-Za-z0-9 &'.-]{2,40})["']?/i,
+        /\b(?:we(?:'re| are)|i(?:'m| am) (?:with|at|from))\s+([A-Za-z][A-Za-z0-9 &'.-]{2,40})\b/i,
+        /\b(?:it'?s|this is)\s+(?:for\s+)?([A-Za-z][A-Za-z0-9 &'.-]{2,40})\s+(?:account|branch|office)\b/i,
+      ];
+      for (const pat of explicitAccountPatterns) {
+        const m = content.match(pat);
+        if (m) {
+          const candidate = m[1].trim();
+          if (isLikelyAccountName(candidate)) {
+            const cleaned = cleanAccountName(candidate);
+            if (cleaned) { f.account = cleaned; break; }
+          }
+        }
+      }
+    }
+
+    // Follow-up ticket reference hydration: if the session is in follow-up mode
+    // and the user just provided a ticket reference, hydrate it now.
+    if (meta.category === 'followup' && !meta.followUpTicketKey) {
+      const refMatch = content.match(/\b(NT|NTPJ)-\d+\b/i);
+      if (refMatch) {
+        const refKey = refMatch[0].toUpperCase();
+        meta.followUpTicketKey = refKey;
+        const domain = await this.portalJira.getOrgEmailDomain(context.orgId);
+        if (domain) {
+          try {
+            const refTicket = await queryOne<{ issue_key: string; summary: string; status: string }>(
+              `SELECT issue_key, summary, status FROM jira_issue_cache WHERE issue_key = ? AND reporter_email LIKE ?`,
+              [refKey, `%@${domain}`],
+            );
+            if (refTicket) {
+              meta.followUpTicketKey = refTicket.issue_key;
+              meta.followUpTicketSummary = refTicket.summary;
+              const statusLower = refTicket.status.toLowerCase();
+              if (statusLower === 'resolved' || statusLower === 'closed') {
+                meta.subcategory = 'followup_reopen';
+              }
+              return {
+                response: `I've found your original request **${refTicket.issue_key}** — "${refTicket.summary}" (currently **${refTicket.status}**).\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?`,
+              };
+            }
+          } catch { /* fall through — key is still set */ }
+        }
+        return {
+          response: `I've noted your reference **${refKey}**. I'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?`,
+        };
+      }
+    }
+
+    // Vague-journey problem gate: if description exists but lacks actionable detail,
+    // ask what's actually wrong before gathering account/URL/etc.
+    // Phase 1: initial gate. Phase 2: re-check the follow-up itself.
+    // Complaint sessions skip the vague gate — the complaint intent itself is the
+    // actionable detail, and generic "what specifically?" wording undermines the
+    // complaint-aware path the customer is already on.
+    if (meta.conversational && !meta.complaintDetected) {
+      if (!meta.vagueGateAsked) {
+        if (descriptionLacksActionableDetail(meta.collectedFields.description)) {
+          meta.vagueGateAsked = true;
+          return {
+            response: "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+          };
+        }
+      } else if (!meta.vagueGateVerified) {
+        // The vague gate was asked — now verify the follow-up contains a concrete problem.
+        // Stricter than the initial check: require an actual problem/action indicator,
+        // not just a domain noun. "it's about our website" is not enough;
+        // "the phone number on our website is wrong" is.
+        if (followUpLacksConcreteProblem(content)) {
+          meta.vagueGateVerified = true;
+          meta.vagueGateSecondAsked = true;
+          return {
+            response: "I want to make sure I get this right — could you tell me what's actually going wrong, or what you need changed? For example, is something not displaying, not working, or do you need something updated?",
+          };
+        }
+        meta.vagueGateVerified = true;
+      } else if (meta.vagueGateSecondAsked) {
+        meta.vagueGateSecondAsked = false;
+        // Verify the response to the second question actually contains a concrete problem.
+        // If still vague, append what they said but continue — three questions would be frustrating.
+        if (followUpLacksConcreteProblem(content)) {
+          console.log(`[portal-chat] Vague gate: response to second question still lacks concrete problem, continuing with what we have`);
+        }
+      }
+    }
 
     // Use domain-specific field checks
     const missing = meta.category === 'property'
@@ -1627,6 +2349,42 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     if (missing.length === 0) {
       // All required fields collected — move to KB check
       return this.tryKbDeflection(meta, context, sessionId);
+    }
+
+    // Track clarification rounds — if extraction isn't making progress, stop looping
+    const prevMissing = meta.lastMissingCount ?? missing.length + 1;
+    meta.detailRounds = (meta.detailRounds || 0) + 1;
+    meta.lastMissingCount = missing.length;
+
+    const maxDetailRounds = 3;
+    if (meta.detailRounds >= maxDetailRounds && missing.length >= prevMissing) {
+      // Extraction stalled — progress to summary with what we have
+      console.log(`[portal-chat] Detail stage stalled after ${meta.detailRounds} rounds with ${missing.length} fields still missing — progressing to summary`);
+      return this.tryKbDeflection(meta, context, sessionId);
+    }
+
+    // Reset round counter when extraction makes progress
+    if (missing.length < prevMissing) {
+      meta.detailRounds = 0;
+    }
+
+    // Portal/channel clarification loop prevention: if we've already asked about
+    // affectedPortals once and the customer's response didn't resolve it, don't
+    // block progress — default to 'Website' if a URL exists, otherwise skip the field.
+    if (missing[0] === 'affectedPortals' && meta.portalClarificationAsked) {
+      console.log(`[portal-chat] Portal clarification already asked — defaulting and progressing`);
+      meta.collectedFields.affectedPortals = 'Website';
+      const remainingMissing = missing.filter(f => f !== 'affectedPortals');
+      if (remainingMissing.length === 0) {
+        return this.tryKbDeflection(meta, context, sessionId);
+      }
+      // Continue with next missing field below using remainingMissing[0]
+      missing.splice(0, 1);
+    }
+
+    // Track portal clarification — set flag when we're about to ask
+    if (missing[0] === 'affectedPortals') {
+      meta.portalClarificationAsked = true;
     }
 
     // Ask for the next missing field — conversational or generic
@@ -1674,7 +2432,7 @@ Return JSON with only the fields present in the message.`,
 
       const data = result.data;
       if (data.subject && !meta.collectedFields.subject) meta.collectedFields.subject = data.subject;
-      if (data.account && !meta.collectedFields.account) meta.collectedFields.account = data.account;
+      if (data.account && !meta.collectedFields.account && isLikelyAccountName(data.account)) { const cleaned = cleanAccountName(data.account); if (cleaned) meta.collectedFields.account = cleaned; }
       if (data.url && !meta.collectedFields.url) meta.collectedFields.url = data.url;
       if (data.errorMessage && !meta.collectedFields.errorMessage) meta.collectedFields.errorMessage = data.errorMessage;
       if (data.browser && !meta.collectedFields.browser) meta.collectedFields.browser = data.browser;
@@ -1688,6 +2446,11 @@ Return JSON with only the fields present in the message.`,
       } else if (content !== meta.openingMessage) {
         // Multi-turn: append this follow-up message verbatim
         meta.collectedFields.description = `${meta.collectedFields.description}\n${content}`;
+        // Description grew — force re-synthesis so new detail is reflected in summary
+        if (meta.synthesisDone) {
+          meta.synthesisDone = false;
+          meta.synthesizedDescription = undefined;
+        }
       }
     } catch (err) {
       console.warn('[portal-chat] Field extraction failed:', err instanceof Error ? err.message : err);
@@ -1725,10 +2488,44 @@ Return JSON with only the fields present in the message.`,
       if (osMatch) f.os = osMatch[1];
     }
 
-    // Account/brand name — look for "for [Name]" or "[Name] account" patterns
+    // Account/brand name — multiple patterns for natural phrasing
+    // Use non-greedy match and stop before common problem/conversational words
     if (!f.account) {
-      const accountMatch = content.match(/\b(?:for|account(?:\s+name)?[:：]?\s+)([A-Z][A-Za-z0-9 &'-]{2,40})\b/);
-      if (accountMatch) f.account = accountMatch[1].trim();
+      // High-confidence: company names with estate agent suffixes
+      // Each word must be capitalized to avoid matching whole sentences
+      const companyRe = /\b((?:[A-Z][a-z]+|[A-Z]&[A-Z]|[A-Z]{2,})(?:\s+(?:&\s+)?(?:[A-Z][a-z]+|[A-Z]&[A-Z]|[A-Z]{2,})){0,4}\s+(?:Estate\s+Agents?|Estates?|Properties|Lettings|Homes?|Realty|Group|Ltd|Limited|Associates|Partners))\b/;
+      const companyMatch = content.match(companyRe);
+      if (companyMatch) {
+        const candidate = companyMatch[1].trim();
+        if (isLikelyAccountName(candidate)) {
+          const cleaned = cleanAccountName(candidate);
+          if (cleaned) f.account = cleaned;
+        }
+      }
+    }
+    if (!f.account) {
+      const ACCOUNT_STOP = /\s+(?:is|are|has|have|was|were|not|but|and|who|which|where|that|having|isn'?t|aren'?t|can'?t|won'?t|doesn'?t|don'?t|need|broken|down|website|site|page|portal|system|platform|the|photos?|images?|listings?|login|password|access|keeps?|shows?|display|error|problem|issue|when|because|since|however|also|their|our|my|its?)\b/i;
+      const accountPatterns = [
+        /\b(?:for|account(?:\s+name)?[:：]?\s+)([A-Za-z][A-Za-z0-9 &'.-]{2,40})\b/i,
+        /\b([A-Za-z][A-Za-z0-9 &'.-]{2,40})\s+account\b/i,
+        /\b(?:it'?s|this is|we'?re|i'?m (?:with|at|from))\s+([A-Za-z][A-Za-z0-9 &'.-]{2,40})\b/i,
+        /\baccount\s+(?:is|called)\s+([A-Za-z0-9 &'.-]{2,40})\b/i,
+      ];
+      for (const pat of accountPatterns) {
+        const m = content.match(pat);
+        if (m && !/\b(the|this|that|my|our|a|an|it)\b/i.test(m[1].trim())) {
+          let captured = m[1].trim();
+          const stopMatch = captured.match(ACCOUNT_STOP);
+          if (stopMatch) captured = captured.slice(0, stopMatch.index!).trim();
+          // Stop at URL boundaries — don't let domain names leak into account name
+          const urlBoundary = captured.match(/\s+(https?:\/\/|www\.|\S+\.(?:co\.uk|com|org|net|agency|io|uk))/i);
+          if (urlBoundary) captured = captured.slice(0, urlBoundary.index!).trim();
+          if (captured.length >= 2) {
+            const cleaned = cleanAccountName(captured);
+            if (cleaned) { f.account = cleaned; break; }
+          }
+        }
+      }
     }
   }
 
@@ -1764,10 +2561,20 @@ Return JSON with only the fields present in the message.`,
 
   private buildFirstDetailQuestion(meta: IntakeSessionMetadata): string {
     const config = CATEGORY_FIELD_CONFIG[meta.subcategory || ''] || CATEGORY_FIELD_CONFIG['other_general']!;
+
+    const missing = this.getMissingFields(meta.collectedFields, config);
+
+    if (meta.conversational) {
+      if (missing.length === 0) {
+        return "Thanks — I think I have everything I need. Let me put together a summary for you.";
+      }
+      const firstQ = this.buildConversationalQuestion(missing[0], meta);
+      return `Thanks for that. ${firstQ}`;
+    }
+
     const catName = CATEGORY_NAMES[meta.category || ''] || meta.category;
     const subName = SUBCATEGORY_NAMES[meta.subcategory || ''] || meta.subcategory;
 
-    const missing = this.getMissingFields(meta.collectedFields, config);
     if (missing.length === 0) {
       return `Got it — **${catName}** > **${subName}**. I think I have everything I need. Let me put together a summary for you.`;
     }
@@ -1784,7 +2591,7 @@ Return JSON with only the fields present in the message.`,
     sessionId: number,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
     if (meta.kbSuggested) {
-      return this.buildSummaryCard(meta);
+      return await this.buildSummaryCard(meta);
     }
 
     try {
@@ -1812,7 +2619,8 @@ Return JSON with only the fields present in the message.`,
       console.warn('[portal-chat] KB deflection search failed:', err instanceof Error ? err.message : err);
     }
 
-    return this.buildSummaryCard(meta);
+    await this.synthesizeSummaryFields(meta);
+    return await this.buildSummaryCard(meta);
   }
 
   private async handleKbCheckResponse(
@@ -1841,22 +2649,63 @@ Return JSON with only the fields present in the message.`,
     }
 
     // User said no — continue to summary
-    return this.buildSummaryCard(meta);
+    await this.synthesizeSummaryFields(meta);
+    return await this.buildSummaryCard(meta);
   }
 
   // ── Stage 5: Summary Card ──
 
-  private buildSummaryCard(meta: IntakeSessionMetadata): { response: string; messageMeta: ChatMessageMetadata } {
+  private async buildSummaryCard(meta: IntakeSessionMetadata): Promise<{ response: string; messageMeta: ChatMessageMetadata }> {
     meta.stage = 'summary';
+
+    await this.synthesizeSummaryFields(meta);
 
     // Auto-generate subject if missing
     if (!meta.collectedFields.subject) {
-      const catName = CATEGORY_NAMES[meta.category || ''] || 'Support';
-      const subName = SUBCATEGORY_NAMES[meta.subcategory || ''];
-      const desc = meta.collectedFields.description?.slice(0, 80) || '';
-      meta.collectedFields.subject = subName
-        ? `[Portal] ${catName} — ${subName}: ${desc}`.slice(0, 250)
-        : `[Portal] ${catName}: ${desc}`.slice(0, 250);
+      if (meta.synthesizedSubject) {
+        // Prefer LLM-synthesized subject
+        const subName = SUBCATEGORY_NAMES[meta.subcategory || ''];
+        if (subName) {
+          meta.collectedFields.subject = `[Portal] ${subName} — ${meta.synthesizedSubject}`.slice(0, 250);
+        } else {
+          meta.collectedFields.subject = `[Portal] ${meta.synthesizedSubject}`.slice(0, 250);
+        }
+      } else {
+        const rawDesc = meta.collectedFields.description || '';
+        const cleanedDesc = stripGreeting(rawDesc);
+        if (meta.conversational && cleanedDesc) {
+          const sentences = cleanedDesc.split(/[\n]/).map(s => s.trim()).filter(s => s.length > 10);
+          const VAGUE_OPENER = /^(i('m|\s+am)\s+(having|experiencing)|we('re|\s+are)\s+(having|experiencing)|there('s|\s+is)\s+(an?|some)|i\s+have\s+(an?|some)|we\s+have\s+(an?|some)|i'?ve\s+got|we'?ve\s+got|something\s+is|i\s+need\s+help|can\s+you\s+help|i\s+need\s+some\s+help|hi\s+i\s+need)\b/i;
+          const CONVERSATIONAL_FRAG = /^(yes|no|yeah|yep|nope|ok|okay|sure|thanks?|thank you|please|hi|hello|hey|cheers|great|perfect|that'?s?\s+(it|correct|right|the one))[\s.,!]*$/i;
+          const issueSentence = sentences.find(s =>
+            !VAGUE_OPENER.test(s) &&
+            !CONVERSATIONAL_FRAG.test(s) &&
+            s.length > 15 &&
+            (s.length > 40 || /\b(error|broken|not working|missing|wrong|incorrect|can'?t|won'?t|update|change|remove|add|showing|display|page|photo|image|listing|property|login|password)\b/i.test(s))
+          ) || sentences.find(s => !VAGUE_OPENER.test(s) && s.length > 15) || sentences[0] || cleanedDesc.slice(0, 120);
+          let subjectBody = issueSentence;
+          const clauseBreak = subjectBody.match(/^(.{20,80}?)[.,;!?\-—]\s/);
+          if (clauseBreak && subjectBody.length > 100) {
+            subjectBody = clauseBreak[1];
+          }
+          if (subjectBody.length > 100) subjectBody = subjectBody.slice(0, 97) + '...';
+          const subName = SUBCATEGORY_NAMES[meta.subcategory || ''];
+          if (subName) {
+            const maxBodyLen = 250 - `[Portal] ${subName} — `.length;
+            const truncBody = subjectBody.length > maxBodyLen ? subjectBody.slice(0, maxBodyLen - 3) + '...' : subjectBody;
+            meta.collectedFields.subject = `[Portal] ${subName} — ${truncBody}`;
+          } else {
+            meta.collectedFields.subject = `[Portal] ${subjectBody}`.slice(0, 250);
+          }
+        } else {
+          const catName = CATEGORY_NAMES[meta.category || ''] || 'Support';
+          const subName = SUBCATEGORY_NAMES[meta.subcategory || ''];
+          const descSnippet = cleanedDesc.slice(0, 120);
+          meta.collectedFields.subject = subName
+            ? `[Portal] ${catName} — ${subName}: ${descSnippet}`.slice(0, 250)
+            : `[Portal] ${catName}: ${descSnippet}`.slice(0, 250);
+        }
+      }
     }
 
     const f = meta.collectedFields;
@@ -1864,8 +2713,11 @@ Return JSON with only the fields present in the message.`,
       type: 'summary_card',
       fields: {
         ...f,
+        description: meta.synthesizedDescription || f.description,
         category: meta.category,
         subcategory: meta.subcategory,
+        followUpTicketKey: meta.followUpTicketKey || undefined,
+        followUpTicketSummary: meta.followUpTicketSummary || undefined,
       },
     };
 
@@ -1877,6 +2729,7 @@ Return JSON with only the fields present in the message.`,
     } else {
       lines.push(`**Category:** ${CATEGORY_NAMES[meta.category || ''] || meta.category || 'General'}${meta.subcategory ? ` > ${SUBCATEGORY_NAMES[meta.subcategory] || meta.subcategory}` : ''}`);
     }
+    if (meta.followUpTicketKey) lines.push(`**Related ticket:** ${meta.followUpTicketKey}${meta.followUpTicketSummary ? ` — ${meta.followUpTicketSummary}` : ''}`);
     if (f.account) lines.push(`**Account:** ${f.account}`);
     if (f.propertyAddress) lines.push(`**Property:** ${f.propertyAddress}`);
     if (f.listingId) lines.push(`**Listing ref:** ${f.listingId}`);
@@ -1884,7 +2737,41 @@ Return JSON with only the fields present in the message.`,
     if (f.affectedPersonName) lines.push(`**Person:** ${f.affectedPersonName}`);
     if (f.affectedPersonEmail) lines.push(`**Person's email:** ${f.affectedPersonEmail}`);
     if (f.officeBranch) lines.push(`**Office/branch:** ${f.officeBranch}`);
-    if (f.description) lines.push(`**Description:** ${f.description}`);
+    if (f.description) {
+      if (meta.synthesizedDescription) {
+        lines.push(`**Description:** ${meta.synthesizedDescription}`);
+      } else {
+        // Fallback: clean up multi-turn transcript noise
+        const descLines = stripGreeting(f.description).split('\n').filter(line => {
+          const t = line.trim();
+          if (t.length < 3) return false;
+          if (/^(yes|no|yeah|yep|nope|ok|okay|sure|thanks?|thank you|that'?s? (it|correct|right|the one)|please|hi|hello|hey|cheers|great|perfect)[\s.,!]*$/i.test(t)) return false;
+          const tLower = t.toLowerCase();
+          if (f.account && (tLower === f.account.toLowerCase() || tLower === `the account is ${f.account.toLowerCase()}` || tLower === f.account.toLowerCase() + '.')) return false;
+          if (f.affectedPersonEmail && tLower.includes(f.affectedPersonEmail.toLowerCase()) && t.length < f.affectedPersonEmail.length + 20) return false;
+          if (f.browser && tLower === f.browser.toLowerCase()) return false;
+          if (f.url && (t === f.url || tLower === f.url.toLowerCase())) return false;
+          if (f.affectedPersonName && (tLower === f.affectedPersonName.toLowerCase() || tLower === f.affectedPersonName.toLowerCase() + '.')) return false;
+          if (f.officeBranch && (tLower === f.officeBranch.toLowerCase() || tLower === `the ${f.officeBranch.toLowerCase()} office`)) return false;
+          if (t.length < 20 && !/\b(error|broken|wrong|missing|not|can'?t|won'?t|need|update|change|issue|problem|showing|display|locked|expired)\b/i.test(t)) return false;
+          return true;
+        });
+        const seen = new Set<string>();
+        const dedupedLines = descLines.filter(line => {
+          const key = line.trim().toLowerCase().replace(/[.,!?\s]+/g, ' ');
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        // Join filtered lines into prose instead of preserving transcript line breaks
+        const cleanDesc = dedupedLines.map(l => {
+          const t = l.trim();
+          // Ensure each segment ends with punctuation for readability
+          return /[.!?]$/.test(t) ? t : `${t}.`;
+        }).join(' ').replace(/\.\s*\./g, '.').replace(/\s{2,}/g, ' ').trim();
+        if (cleanDesc) lines.push(`**Description:** ${cleanDesc}`);
+      }
+    }
     if (f.url) lines.push(`**URL:** ${f.url}`);
     if (f.errorMessage) lines.push(`**Error:** ${f.errorMessage}`);
     if (f.browser) lines.push(`**Browser:** ${f.browser}`);
@@ -1902,6 +2789,65 @@ Return JSON with only the fields present in the message.`,
     };
   }
 
+  // ── Summary Synthesis ──
+
+  private async synthesizeSummaryFields(meta: IntakeSessionMetadata): Promise<void> {
+    if (meta.synthesisDone) return;
+    if (!this.llm) return;
+    const rawDesc = meta.collectedFields.description;
+    if (!rawDesc) return;
+
+    const isMultiTurn = rawDesc.includes('\n');
+    const isLong = rawDesc.length > 80;
+    const hasConversationalNoise = meta.conversational && /\b(yes|yeah|no|ok|sure|thanks|hi|hello|hey)\b/i.test(rawDesc);
+    const hasGreeting = meta.conversational && /^(hi|hello|hey|howdy|good (morning|afternoon|evening))[\s,.!\-]/i.test(rawDesc);
+    if (!isMultiTurn && !isLong && !hasConversationalNoise && !hasGreeting) { meta.synthesisDone = true; return; }
+
+    try {
+      const subName = SUBCATEGORY_NAMES[meta.subcategory || ''] || CATEGORY_NAMES[meta.category || ''] || 'Support';
+      const contextParts: string[] = [`Request type: ${subName}`];
+      if (meta.collectedFields.account) contextParts.push(`Account: ${meta.collectedFields.account}`);
+      if (meta.collectedFields.propertyAddress) contextParts.push(`Property: ${meta.collectedFields.propertyAddress}`);
+      if (meta.collectedFields.listingId) contextParts.push(`Listing ref: ${meta.collectedFields.listingId}`);
+      if (meta.collectedFields.url) contextParts.push(`URL: ${meta.collectedFields.url}`);
+      if (meta.collectedFields.errorMessage) contextParts.push(`Error: ${meta.collectedFields.errorMessage}`);
+      if (meta.collectedFields.affectedPersonName) contextParts.push(`Person: ${meta.collectedFields.affectedPersonName}`);
+      if (meta.collectedFields.affectedPersonEmail) contextParts.push(`Email: ${meta.collectedFields.affectedPersonEmail}`);
+
+      const complaintNote = meta.complaintDetected
+        ? '\n\nThis is a COMPLAINT. The subject should reflect the complaint nature (e.g. "Complaint: repeated login failures not resolved"). The description should preserve the customer\'s dissatisfaction context and desired outcome.'
+        : '';
+
+      const result = await this.llm.call(
+        `Summarise a customer support conversation into a clean ticket.
+
+Generate:
+1. SUBJECT: Concise ticket subject (max 80 chars). Describe the specific issue, not the emotion or greeting. Bad: "Having trouble with website". Good: "Phone number incorrect on contact page". Do NOT include any prefix like "[Portal]".
+2. DESCRIPTION: 1-3 sentence prose summary for a support agent. State what is wrong, what is affected, and include specific details (addresses, phone numbers, names, URLs, error messages) verbatim. No greetings, pleasantries, conversational filler, or "the customer said" framing. Write as a direct problem statement.${complaintNote}
+
+${contextParts.join('\n')}`,
+        rawDesc,
+        SummarySynthesisSchema,
+        { callType: 'portal_chat', tier: 'standard', maxTokens: 300, temperature: 0.2 },
+      );
+
+      if (result.data.subject && result.data.subject.length > 5) {
+        meta.synthesizedSubject = result.data.subject;
+      }
+      if (result.data.description && result.data.description.length > 10) {
+        meta.synthesizedDescription = result.data.description;
+      }
+      meta.synthesisDone = true;
+    } catch (err) {
+      console.warn('[portal-chat] Summary synthesis failed:', err instanceof Error ? err.message : err);
+      if (!meta.synthesisRetried) {
+        meta.synthesisRetried = true;
+      } else {
+        meta.synthesisDone = true;
+      }
+    }
+  }
+
   // ── Stage 5b: Summary Edit ──
 
   private async handleSummaryEdit(
@@ -1909,10 +2855,97 @@ Return JSON with only the fields present in the message.`,
     content: string,
     context: ChatContext,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
-    // User is chatting from the summary stage — they want to edit something
-    await this.extractFields(meta, content);
-    // Re-show summary card with updated fields
-    return this.buildSummaryCard(meta);
+    const f = meta.collectedFields;
+    let anyApplied = false;
+
+    // Correction detection: overwrite stale structured fields when correction language is present
+    if (containsCorrection(content)) {
+      refreshStructuredFieldsFromCorrection(content, f);
+      meta.synthesisDone = false;
+      meta.synthesizedDescription = undefined;
+    }
+
+    // Split multi-field edit messages into segments so each field is processed independently.
+    // "change the subject to X and the account to Y" → ["change the subject to X", "the account to Y"]
+    const EDIT_SPLIT = /\s*(?:,\s*(?:and\s+)?|\s+and\s+)(?=(?:(?:(?:change|update|set|correct|make)\s+)?(?:the\s+)?|also\s+)(?:subject|account|description|urgency|person|name|email|url|contact)\b|(?:mark\s+(?:it|this)\s+(?:as\s+)?|(?:this|it)\s+(?:is|should\s+be)\s+)(?:urgent|high|critical|normal)\b)/i;
+    const segments = content.split(EDIT_SPLIT).map(s => s.replace(/^(and\s+)?(also,?\s+)?/i, '').trim()).filter(s => s.length > 0);
+
+    for (const segment of segments) {
+      let segmentApplied = false;
+
+      const subjectMatch = segment.match(/(?:change|update|set|correct)\s+(?:the\s+)?subject\s+(?:to|should be)\s+["']?(.+?)["']?\s*$/i)
+        || segment.match(/(?:the\s+)?subject\s+(?:should|needs to)\s+(?:be|say)\s+["']?(.+?)["']?\s*$/i);
+      if (subjectMatch) { f.subject = cleanEditValue(cleanFieldBoundary(subjectMatch[1].trim())); meta.synthesizedSubject = undefined; segmentApplied = true; }
+
+      if (!segmentApplied) {
+        const accountMatch = segment.match(/(?:change|update|set|correct)\s+(?:the\s+)?account\s+(?:to|should be)\s+["']?(.+?)["']?\s*$/i)
+          || segment.match(/(?:the\s+)?account\s+(?:should|needs to|is actually)\s+(?:be|say)?\s*["']?(.+?)["']?\s*$/i)
+          || segment.match(/(?:actually,?\s+)?(?:the\s+)?account\s+(?:is|name is)\s+["']?(.+?)["']?\s*$/i);
+        if (accountMatch) { const cleaned = cleanAccountName(cleanFieldBoundary(accountMatch[1].trim())); if (cleaned) { f.account = cleaned; segmentApplied = true; } }
+      }
+
+      if (!segmentApplied) {
+        const descMatch = segment.match(/(?:change|update|set|correct)\s+(?:the\s+)?description\s+(?:to\s+(?:say\s+)?|should\s+(?:be|say)\s+)["']?(.+?)["']?\s*$/i)
+          || segment.match(/(?:the\s+)?description\s+(?:should|needs to)\s+(?:be|say)\s+["']?(.+?)["']?\s*$/i);
+        if (descMatch) { f.description = cleanEditValue(cleanFieldBoundary(descMatch[1].trim())); meta.synthesizedDescription = undefined; meta.synthesisDone = false; segmentApplied = true; }
+      }
+
+      if (!segmentApplied) {
+        const urgencyMatch = segment.match(/(?:change|set|update|make)\s+(?:the\s+)?urgency\s+(?:to\s+)?(normal|high|critical)/i)
+          || segment.match(/(?:this\s+is|it'?s|mark(?:\s+(?:it|this))?(?:\s+as)?)\s+(urgent|high|critical)/i);
+        if (urgencyMatch) {
+          const val = urgencyMatch[1].toLowerCase();
+          f.urgency = val === 'critical' ? 'Critical' : val === 'high' || val === 'urgent' ? 'High' : 'Normal';
+          segmentApplied = true;
+        }
+      }
+
+      if (!segmentApplied) {
+        const personNameMatch = segment.match(/(?:change|update|correct)\s+(?:the\s+)?(?:person|name)\s+(?:to|should be)\s+["']?(.+?)["']?\s*$/i)
+          || segment.match(/(?:the\s+)?(?:person'?s?\s+)?name\s+(?:should|is actually|is)\s+["']?(.+?)["']?\s*$/i);
+        if (personNameMatch) { f.affectedPersonName = cleanFieldBoundary(personNameMatch[1].trim()); segmentApplied = true; }
+      }
+
+      if (!segmentApplied) {
+        const personEmailMatch = segment.match(/(?:change|update|correct)\s+(?:the\s+)?(?:person'?s?\s+)?email\s+(?:to|should be)\s+["']?(.+?)["']?\s*$/i)
+          || segment.match(/(?:the\s+)?email\s+(?:should|is actually|is)\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})/i);
+        if (personEmailMatch) { f.affectedPersonEmail = personEmailMatch[1].trim(); segmentApplied = true; }
+      }
+
+      if (segmentApplied) anyApplied = true;
+    }
+
+    // If no regex matched any segment, try LLM extraction with multi-field awareness
+    if (!anyApplied) {
+      if (this.llm) {
+        try {
+          const result = await this.llm.call(
+            `The customer is editing their support request summary. They may be changing ONE or MULTIPLE fields at once. Extract ALL field values they want to change. Only include fields they explicitly mention updating.\nStrip filler words from values — e.g. "just be", "should be", "needs to be", "simply" — return only the actual content.\nReturn JSON with only the changed fields.`,
+            content,
+            FieldExtractSchema,
+            { callType: 'portal_chat', tier: 'standard', maxTokens: 400, temperature: 0.1 },
+          );
+          const d = result.data;
+          if (d.subject) { f.subject = cleanEditValue(d.subject); meta.synthesizedSubject = undefined; }
+          if (d.account) { const cleaned = cleanAccountName(d.account); if (cleaned) f.account = cleaned; }
+          if (d.description) { f.description = cleanEditValue(d.description); meta.synthesizedDescription = undefined; meta.synthesisDone = false; }
+          if (d.url) f.url = d.url;
+          if (d.errorMessage) f.errorMessage = d.errorMessage;
+          if (d.browser) f.browser = d.browser;
+          if (d.os) f.os = d.os;
+          if (d.urgency) f.urgency = d.urgency;
+          if (d.contactPreference) f.contactPreference = d.contactPreference;
+        } catch (err) {
+          console.warn('[portal-chat] Summary edit extraction failed:', err instanceof Error ? err.message : err);
+        }
+      }
+      const url = extractUrlFromText(content);
+      if (url) f.url = url;
+      extractAccountFieldsFromText(content, f);
+      extractPropertyFieldsFromText(content, f);
+    }
+
+    return await this.buildSummaryCard(meta);
   }
 
   // ── Stage 6: Confirmation (called from route, not from sendMessage) ──
@@ -1921,6 +2954,7 @@ Return JSON with only the fields present in the message.`,
     sessionId: number,
     fields: Partial<IntakeCollectedFields> & { category?: string; subcategory?: string },
     context: ChatContext,
+    options?: { skipMessage?: boolean },
   ): Promise<{ ticketKey: string }> {
     const session = await queryOne<{ metadata: string | null }>(
       `SELECT metadata FROM portal_chat_sessions WHERE id = ?`,
@@ -1930,8 +2964,12 @@ Return JSON with only the fields present in the message.`,
 
     // Merge any edits from the summary card
     if (fields.subject !== undefined) meta.collectedFields.subject = fields.subject;
-    if (fields.account !== undefined) meta.collectedFields.account = fields.account;
-    if (fields.description !== undefined) meta.collectedFields.description = fields.description;
+    if (fields.account !== undefined) meta.collectedFields.account = fields.account ? cleanAccountName(fields.account) : fields.account;
+    if (fields.description !== undefined) {
+      meta.collectedFields.description = fields.description;
+      // Customer explicitly edited description — their version is canonical
+      meta.synthesizedDescription = undefined;
+    }
     if (fields.url !== undefined) meta.collectedFields.url = fields.url;
     if (fields.errorMessage !== undefined) meta.collectedFields.errorMessage = fields.errorMessage;
     if (fields.browser !== undefined) meta.collectedFields.browser = fields.browser;
@@ -1950,6 +2988,12 @@ Return JSON with only the fields present in the message.`,
     );
     const transcript = history.map(m => `[${m.role}]: ${m.content}`).join('\n\n');
 
+    // Prepend follow-up reference to description so agents see the link
+    let baseDescription = meta.synthesizedDescription || f.description || 'See chat transcript';
+    if (meta.followUpTicketKey) {
+      baseDescription = `Follow-up to ${meta.followUpTicketKey}${meta.followUpTicketSummary ? ` ("${meta.followUpTicketSummary}")` : ''}.\n\n${baseDescription}`;
+    }
+
     // Use intake service if available, otherwise create directly
     let ticketKey: string;
 
@@ -1959,7 +3003,7 @@ Return JSON with only the fields present in the message.`,
           subject: f.subject || `[Portal] Support request from ${context.userName}`,
           category: meta.category || 'other',
           subcategory: meta.subcategory || undefined,
-          description: f.description || 'See chat transcript',
+          description: baseDescription,
           account: f.account || undefined,
           url: f.url || undefined,
           errorMessage: f.errorMessage || undefined,
@@ -1982,11 +3026,20 @@ Return JSON with only the fields present in the message.`,
       ticketKey = await this.portalJira.createTicket({
         projectKey,
         summary: f.subject || `[Portal] Support request from ${context.userName}`,
-        description: f.description || 'See chat transcript',
+        description: baseDescription,
         priority: urgencyHint[f.urgency] || 'Medium',
         reporterEmail: context.userEmail,
-        internalNote: `*Chat intake — ${meta.category || 'General'}*${meta.ambiguityNote ? `\n\n⚠️ ${meta.ambiguityNote}` : ''}${meta.securitySensitive ? '\n\n🔒 Security-sensitive: user removal / access revocation — treat as urgent' : ''}\n\n${transcript}`,
+        internalNote: `*Chat intake — ${meta.category || 'General'}*${meta.ambiguityNote ? `\n\n⚠️ ${meta.ambiguityNote}` : ''}${meta.securitySensitive ? '\n\n🔒 Security-sensitive: user removal / access revocation — treat as urgent' : ''}${meta.complaintDetected ? '\n\n⚠️ COMPLAINT / ESCALATION — customer expressed dissatisfaction. Treat as complaint case.' : ''}\n\n${transcript}`,
       });
+    }
+
+    // Link follow-up ticket to original if applicable
+    if (meta.followUpTicketKey) {
+      try {
+        await this.portalJira.linkIssues(ticketKey, meta.followUpTicketKey);
+      } catch (err) {
+        console.warn('[portal-chat] Failed to link follow-up ticket:', err instanceof Error ? err.message : err);
+      }
     }
 
     // Update session
@@ -1997,13 +3050,16 @@ Return JSON with only the fields present in the message.`,
       [ticketKey, JSON.stringify(meta), sessionId],
     );
 
-    // Store confirmation message
-    const confirmMsg = `I've created ticket **${ticketKey}**. You can track its progress in your tickets page.`;
-    await execute(
-      `INSERT INTO portal_chat_messages (session_id, role, content)
-       VALUES (?, 'assistant', ?)`,
-      [sessionId, confirmMsg],
-    );
+    // Store confirmation message (skip when called from natural-language confirmation
+    // in processStage — sendMessage will insert the message with metadata instead)
+    if (!options?.skipMessage) {
+      const confirmMsg = `I've created ticket **${ticketKey}**. You can track its progress in your tickets page.`;
+      await execute(
+        `INSERT INTO portal_chat_messages (session_id, role, content)
+         VALUES (?, 'assistant', ?)`,
+        [sessionId, confirmMsg],
+      );
+    }
 
     await trackEvent('intake_confirmed', context.portalUserId, context.orgId, {
       session_id: sessionId,
@@ -2026,9 +3082,20 @@ Return JSON with only the fields present in the message.`,
   private getPropertyMissingFields(fields: IntakeCollectedFields, subcategory: string): string[] {
     const missing: string[] = [];
     if (!fields.description) missing.push('description');
-    if (!fields.propertyAddress && !fields.listingId) missing.push('propertyIdentifier');
+    // Property identifier is not needed for feed-sync issues (often system-wide)
+    // or when the customer has already indicated a site-wide scope
+    const siteWideSubcategories = ['property_feed_sync'];
+    const isSiteWide = fields.propertyAddress?.toLowerCase().includes('site-wide') ||
+      fields.propertyAddress?.toLowerCase().includes('all properties');
+    if (!fields.propertyAddress && !fields.listingId && !isSiteWide && !siteWideSubcategories.includes(subcategory)) {
+      missing.push('propertyIdentifier');
+    }
     if (!fields.affectedPortals && ['property_missing_listing', 'property_feed_sync', 'property_visibility', 'property_incorrect_details'].includes(subcategory)) {
-      missing.push('affectedPortals');
+      // Don't ask for portal when a website URL already makes the answer obvious
+      const urlImpliesWebsite = fields.url && !/\b(rightmove|zoopla|onthemarket|primelocation)\b/i.test(fields.url);
+      if (!urlImpliesWebsite) {
+        missing.push('affectedPortals');
+      }
     }
     if (!fields.account) missing.push('account');
     return missing;
@@ -2182,6 +3249,7 @@ Rules:
         if (meta.subcategory === 'website_broken') return "Could you describe what's happening and what you'd expect to see instead?";
         if (meta.subcategory === 'website_new_page') return 'Could you describe what the new page should contain and where it should sit in the navigation?';
         if (meta.subcategory === 'website_design') return 'Could you describe the design changes you have in mind?';
+        if (meta.category === 'complaint') return "Could you tell me what happened and what outcome you're looking for?";
         return 'Could you describe what you need in a bit more detail?';
       case 'account':
         return 'Which account or website is this for?';

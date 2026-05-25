@@ -541,14 +541,29 @@ export class PortalJiraService {
     });
   }
 
+  private textToAdf(text: string): Record<string, unknown> {
+    const paragraphs = text.split(/\n{2,}/).map(block => {
+      const lines = block.split('\n');
+      const inlineContent: Array<Record<string, unknown>> = [];
+      lines.forEach((line, i) => {
+        if (i > 0) inlineContent.push({ type: 'hardBreak' });
+        if (line) inlineContent.push({ type: 'text', text: line });
+      });
+      return { type: 'paragraph', content: inlineContent.length > 0 ? inlineContent : [{ type: 'text', text: ' ' }] };
+    });
+    return { type: 'doc', version: 1, content: paragraphs };
+  }
+
   async createTicket(params: {
     projectKey: string;
     summary: string;
     description: string;
     priority?: string;
     components?: string[];
+    labels?: string[];
     reporterEmail?: string;
     internalNote?: string;
+    issueTypeName?: string;
   }): Promise<string> {
     if (!this.jiraClient) throw new Error('Jira client not configured');
 
@@ -556,11 +571,17 @@ export class PortalJiraService {
       ? await this.resolveJiraPriority(params.priority)
       : null;
 
+    // Issue type: explicit param > per-project setting > global setting > project-specific defaults
+    const issueTypeName = params.issueTypeName
+      || this.settings.get(`portal_jira_issue_type_${params.projectKey.toLowerCase()}`)
+      || this.settings.get('portal_jira_issue_type')
+      || (params.projectKey === 'NTPJ' ? 'Support' : 'Service Request');
+
     const fields: Record<string, unknown> = {
       project: { key: params.projectKey },
       summary: params.summary,
-      description: params.description,
-      issuetype: { name: 'Service Request' },
+      description: this.textToAdf(params.description),
+      issuetype: { name: issueTypeName },
     };
 
     if (resolvedPriority) {
@@ -569,6 +590,10 @@ export class PortalJiraService {
 
     if (params.components && params.components.length > 0) {
       fields.components = params.components.map(c => ({ name: c }));
+    }
+
+    if (params.labels && params.labels.length > 0) {
+      fields.labels = params.labels;
     }
 
     let issue: { key: string };
@@ -594,6 +619,16 @@ export class PortalJiraService {
     }
 
     return issue.key;
+  }
+
+  async linkIssues(newKey: string, originalKey: string): Promise<void> {
+    if (!this.jiraClient) return;
+    const linkTypeName = this.settings.get('jira_link_type_name') || 'Relates';
+    await this.jiraClient.createIssueLink({
+      type: { name: linkTypeName },
+      inwardIssue: { key: originalKey },
+      outwardIssue: { key: newKey },
+    });
   }
 
   async uploadAttachment(

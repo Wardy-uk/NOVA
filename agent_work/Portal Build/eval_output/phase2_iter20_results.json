@@ -1,0 +1,482 @@
+[
+  {
+    "name": "Phone number in property issue",
+    "sessionId": 552,
+    "sessionMeta": {},
+    "transcript": [
+      {
+        "role": "user",
+        "content": "Hi, I'm having a problem with a property listing for Acme Estates. The phone number shown on the listing is wrong - it says 01onal234 5678 but should be 07700 900123. The property is at 42 High Street."
+      },
+      {
+        "role": "assistant",
+        "content": "Thanks for those details about the issue with Acme Estates on 42 High Street (07700 900123). You mentioned hi, I'm having a problem with a property listing for Acme Estates — is this affecting your website, property portals like Rightmove or Zoopla, or both?",
+        "meta": {
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "The listing is on their main website at acmeestates.co.uk"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Incorrect property details — Incorrect phone number on 42 High Street listing\n**Request type:** Incorrect property details\n**Account:** Acme Estates\n**Property:** 42 High Street\n**Listing ref:** 07700\n**Affected:** Website\n**Person:** Acme Estates\n**Description:** The property listing for 42 High Street (listing ref: 07700) on acmeestates.co.uk displays the phone number as 01onal234 5678 instead of the correct number 07700 900123.\n**URL:** acmeestates.co.uk\n**Urgency:** Normal\n**Contact preference:** portal",
+        "meta": {
+          "type": "summary_card",
+          "fields": {
+            "subject": "[Portal] Incorrect property details — Incorrect phone number on 42 High Street listing",
+            "account": "Acme Estates",
+            "description": "The property listing for 42 High Street (listing ref: 07700) on acmeestates.co.uk displays the phone number as 01onal234 5678 instead of the correct number 07700 900123.",
+            "url": "acmeestates.co.uk",
+            "errorMessage": null,
+            "browser": null,
+            "os": null,
+            "urgency": "Normal",
+            "contactPreference": "portal",
+            "propertyAddress": "42 High Street",
+            "listingId": "07700",
+            "affectedPortals": "Website",
+            "propertyStatus": null,
+            "affectedPersonName": "Acme Estates",
+            "affectedPersonEmail": null,
+            "officeBranch": null,
+            "category": "property",
+            "subcategory": "property_incorrect_details"
+          },
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "No that's everything thanks"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Incorrect property details — Incorrect phone number on 42 High Street listing\n**Request type:** Incorrect property details\n**Account:** Acme Estates\n**Property:** 42 High Street\n**Listing ref:** 07700\n**Affected:** Website\n**Person:** Acme Estates\n**Description:** The property listing for 42 High Street (listing ref: 07700) on acmeestates.co.uk displays the phone number as 01onal234 5678 instead of the correct number 07700 900123.\n**URL:** acmeestates.co.uk\n**Urgency:** Normal\n**Contact preference:** portal",
+        "meta": {
+          "type": "summary_card",
+          "fields": {
+            "subject": "[Portal] Incorrect property details — Incorrect phone number on 42 High Street listing",
+            "account": "Acme Estates",
+            "description": "The property listing for 42 High Street (listing ref: 07700) on acmeestates.co.uk displays the phone number as 01onal234 5678 instead of the correct number 07700 900123.",
+            "url": "acmeestates.co.uk",
+            "errorMessage": null,
+            "browser": null,
+            "os": null,
+            "urgency": "Normal",
+            "contactPreference": "portal",
+            "propertyAddress": "42 High Street",
+            "listingId": "07700",
+            "affectedPortals": "Website",
+            "propertyStatus": null,
+            "affectedPersonName": "Acme Estates",
+            "affectedPersonEmail": null,
+            "officeBranch": null,
+            "category": "property",
+            "subcategory": "property_incorrect_details"
+          },
+          "intent": "problem"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Phone + listing ref coexistence",
+    "sessionId": 553,
+    "sessionMeta": {},
+    "transcript": [
+      {
+        "role": "user",
+        "content": "We have a property listing ABC-12345 for Greenwood Estates that's showing the wrong contact numbers. The office number 0161 234 5678 and the mobile 0161 987 6543 are both out of date."
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Incorrect property details — Incorrect contact numbers on listing ABC-12345\n**Request type:** Incorrect property details\n**Account:** Greenwood Estates\n**Listing ref:** ABC-12345\n**Affected:** Website, Property portals\n**Person:** Greenwood Estates\n**Description:** Listing ABC-12345 for Greenwood Estates displays outdated office and mobile contact numbers. Both numbers need to be updated to reflect the current contact information.\n**Urgency:** Normal\n**Contact preference:** portal",
+        "meta": {
+          "type": "summary_card",
+          "fields": {
+            "subject": "[Portal] Incorrect property details — Incorrect contact numbers on listing ABC-12345",
+            "account": "Greenwood Estates",
+            "description": "Listing ABC-12345 for Greenwood Estates displays outdated office and mobile contact numbers. Both numbers need to be updated to reflect the current contact information.",
+            "url": null,
+            "errorMessage": null,
+            "browser": null,
+            "os": null,
+            "urgency": "Normal",
+            "contactPreference": "portal",
+            "propertyAddress": null,
+            "listingId": "ABC-12345",
+            "affectedPortals": "Website, Property portals",
+            "propertyStatus": null,
+            "affectedPersonName": "Greenwood Estates",
+            "affectedPersonEmail": null,
+            "officeBranch": null,
+            "category": "property",
+            "subcategory": "property_incorrect_details"
+          },
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "It's the Greenwood Estates Manchester branch, and the listing is on their main site"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Incorrect property details — Incorrect contact numbers on listing ABC-12345\n**Request type:** Incorrect property details\n**Account:** Greenwood Estates\n**Listing ref:** ABC-12345\n**Affected:** Website, Property portals\n**Person:** Greenwood Estates\n**Office/branch:** Estates Manchester\n**Description:** Listing ABC-12345 for Greenwood Estates displays outdated office and mobile contact numbers. Both numbers need to be updated to reflect the current contact information.\n**Urgency:** Normal\n**Contact preference:** portal",
+        "meta": {
+          "type": "summary_card",
+          "fields": {
+            "subject": "[Portal] Incorrect property details — Incorrect contact numbers on listing ABC-12345",
+            "account": "Greenwood Estates",
+            "description": "Listing ABC-12345 for Greenwood Estates displays outdated office and mobile contact numbers. Both numbers need to be updated to reflect the current contact information.",
+            "url": null,
+            "errorMessage": null,
+            "browser": null,
+            "os": null,
+            "urgency": "Normal",
+            "contactPreference": "portal",
+            "propertyAddress": null,
+            "listingId": "ABC-12345",
+            "affectedPortals": "Website, Property portals",
+            "propertyStatus": null,
+            "affectedPersonName": "Greenwood Estates",
+            "affectedPersonEmail": null,
+            "officeBranch": "Estates Manchester",
+            "category": "property",
+            "subcategory": "property_incorrect_details"
+          },
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "That looks right, yes"
+      },
+      {
+        "role": "assistant",
+        "content": "I'm sorry — I wasn't able to create the ticket right now. Please contact us directly at **support@nurtur.tech** and we'll get this sorted for you. You can include the details from this conversation in your email.",
+        "meta": {
+          "intent": "problem"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Account name carry-through",
+    "sessionId": 554,
+    "sessionMeta": {},
+    "transcript": [
+      {
+        "role": "user",
+        "content": "Hi, I need help with Henderson & Sons Lettings. Their website is loading really slowly, takes about 30 seconds to show any page. The URL is hendersonlettings.co.uk"
+      },
+      {
+        "role": "assistant",
+        "content": "You mentioned that the Henderson & Sons Lettings website at hendersonlettings.co.uk is loading really slowly and takes about 30 seconds to show any page.\n\nAre there any error messages showing when this happens?",
+        "meta": {
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "It started about two days ago, no changes were made on our end"
+      },
+      {
+        "role": "assistant",
+        "content": "Since it started about two days ago, do you see any error message when the pages take so long to load?",
+        "meta": {
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes that covers it"
+      },
+      {
+        "role": "assistant",
+        "content": "Thanks for letting me know—when the website is loading slowly, do you see any specific error message on the screen, or does it just eventually load after a long wait?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "meta": {
+          "intent": "problem"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Late correction before summary",
+    "sessionId": 555,
+    "sessionMeta": {},
+    "transcript": [
+      {
+        "role": "user",
+        "content": "I need to update a property listing for Baxter Properties. The address is wrong - it shows 14 Elm Lane but should be 14 Elm Close"
+      },
+      {
+        "role": "assistant",
+        "content": "Thanks for those details about the issue with Baxter Properties on 14 Elm Lane. You mentioned I need to update a property listing for Baxter Properties — is this affecting your website, property portals like Rightmove or Zoopla, or both?",
+        "meta": {
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "The listing ID is BP-2024-001 on their website baxterprops.co.uk"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Incorrect property details — Incorrect address on listing BP-2024-001 for 14 Elm Lane\n**Request type:** Incorrect property details\n**Account:** Baxter Properties\n**Property:** 14 Elm Lane\n**Listing ref:** BP-2024-001\n**Affected:** Website\n**Person:** Baxter Properties\n**Description:** The property listing BP-2024-001 on baxterprops.co.uk currently displays the address as 14 Elm Lane, but it should be 14 Elm Close. Please update the address on the listing to reflect the correct information.\n**URL:** baxterprops.co.uk\n**Urgency:** Normal\n**Contact preference:** portal",
+        "meta": {
+          "type": "summary_card",
+          "fields": {
+            "subject": "[Portal] Incorrect property details — Incorrect address on listing BP-2024-001 for 14 Elm Lane",
+            "account": "Baxter Properties",
+            "description": "The property listing BP-2024-001 on baxterprops.co.uk currently displays the address as 14 Elm Lane, but it should be 14 Elm Close. Please update the address on the listing to reflect the correct information.",
+            "url": "baxterprops.co.uk",
+            "errorMessage": null,
+            "browser": null,
+            "os": null,
+            "urgency": "Normal",
+            "contactPreference": "portal",
+            "propertyAddress": "14 Elm Lane",
+            "listingId": "BP-2024-001",
+            "affectedPortals": "Website",
+            "propertyStatus": null,
+            "affectedPersonName": "Baxter Properties",
+            "affectedPersonEmail": null,
+            "officeBranch": null,
+            "category": "property",
+            "subcategory": "property_incorrect_details"
+          },
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "Actually sorry, it should be 14 Elm Crescent, not Elm Close"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Incorrect property details — Incorrect address on listing BP-2024-001 for 14 Elm Lane\n**Request type:** Incorrect property details\n**Account:** Baxter Properties\n**Property:** 14 Elm Crescent\n**Listing ref:** BP-2024-001\n**Affected:** Website\n**Person:** Baxter Properties\n**Description:** I need to update a property listing for Baxter Properties. The address is wrong - it shows 14 Elm Lane but should be 14 Elm Close. The listing ID is BP-2024-001 on their website baxterprops.co.uk.\n**URL:** baxterprops.co.uk\n**Urgency:** Normal\n**Contact preference:** portal",
+        "meta": {
+          "type": "summary_card",
+          "fields": {
+            "subject": "[Portal] Incorrect property details — Incorrect address on listing BP-2024-001 for 14 Elm Lane",
+            "account": "Baxter Properties",
+            "description": "I need to update a property listing for Baxter Properties. The address is wrong - it shows 14 Elm Lane but should be 14 Elm Close\nThe listing ID is BP-2024-001 on their website baxterprops.co.uk",
+            "url": "baxterprops.co.uk",
+            "errorMessage": null,
+            "browser": null,
+            "os": null,
+            "urgency": "Normal",
+            "contactPreference": "portal",
+            "propertyAddress": "14 Elm Crescent",
+            "listingId": "BP-2024-001",
+            "affectedPortals": "Website",
+            "propertyStatus": null,
+            "affectedPersonName": "Baxter Properties",
+            "affectedPersonEmail": null,
+            "officeBranch": null,
+            "category": "property",
+            "subcategory": "property_incorrect_details"
+          },
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes that's correct, submit it"
+      },
+      {
+        "role": "assistant",
+        "content": "I'm sorry — I wasn't able to create the ticket right now. Please contact us directly at **support@nurtur.tech** and we'll get this sorted for you. You can include the details from this conversation in your email.",
+        "meta": {
+          "intent": "problem"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Post-summary correction",
+    "sessionId": 556,
+    "sessionMeta": {},
+    "transcript": [
+      {
+        "role": "user",
+        "content": "Photos aren't loading on a listing for Maple Homes. The listing ref is ML-9876 and it's on their site maplehomes.co.uk"
+      },
+      {
+        "role": "assistant",
+        "content": "Thanks for those details about the issue with Maple Homes on listing ML-9876. Could you tell me which property is affected and where you're seeing the issue?",
+        "meta": {
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "It's the London branch"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Property visibility issue — Photos not loading on listing ML-9876 for London branch\n**Request type:** Property visibility issue\n**Account:** Maple Homes\n**Listing ref:** ML-9876\n**Affected:** Website\n**Person:** Maple Homes\n**Description:** Photos are not displaying on listing ML-9876 for the London branch on maplehomes.co.uk. The issue affects property visibility for this specific listing.\n**URL:** maplehomes.co.uk\n**Urgency:** Normal\n**Contact preference:** portal",
+        "meta": {
+          "type": "summary_card",
+          "fields": {
+            "subject": "[Portal] Property visibility issue — Photos not loading on listing ML-9876 for London branch",
+            "account": "Maple Homes",
+            "description": "Photos are not displaying on listing ML-9876 for the London branch on maplehomes.co.uk. The issue affects property visibility for this specific listing.",
+            "url": "maplehomes.co.uk",
+            "errorMessage": null,
+            "browser": null,
+            "os": null,
+            "urgency": "Normal",
+            "contactPreference": "portal",
+            "propertyAddress": null,
+            "listingId": "ML-9876",
+            "affectedPortals": "Website",
+            "propertyStatus": null,
+            "affectedPersonName": "Maple Homes",
+            "affectedPersonEmail": null,
+            "officeBranch": null,
+            "category": "property",
+            "subcategory": "property_visibility"
+          },
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "Actually the URL is wrong, it should be maple-homes.co.uk not maplehomes.co.uk, and the listing ref is ML-9877 not 9876"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Property visibility issue — Photos not loading on listing ML-9876 for London branch\n**Request type:** Property visibility issue\n**Account:** Maple Homes\n**Listing ref:** ML-9877\n**Affected:** Website\n**Person:** Maple Homes\n**Description:** Photos fail to load on listing ML-9876 for the London branch on maplehomes.co.uk. The issue affects property visibility for Maple Homes.\n**URL:** maple-homes.co.uk\n**Urgency:** Normal\n**Contact preference:** portal",
+        "meta": {
+          "type": "summary_card",
+          "fields": {
+            "subject": "[Portal] Property visibility issue — Photos not loading on listing ML-9876 for London branch",
+            "account": "Maple Homes",
+            "description": "Photos fail to load on listing ML-9876 for the London branch on maplehomes.co.uk. The issue affects property visibility for Maple Homes.",
+            "url": "maple-homes.co.uk",
+            "errorMessage": null,
+            "browser": null,
+            "os": null,
+            "urgency": "Normal",
+            "contactPreference": "portal",
+            "propertyAddress": null,
+            "listingId": "ML-9877",
+            "affectedPortals": "Website",
+            "propertyStatus": null,
+            "affectedPersonName": "Maple Homes",
+            "affectedPersonEmail": null,
+            "officeBranch": null,
+            "category": "property",
+            "subcategory": "property_visibility"
+          },
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes that's all correct now, go ahead"
+      },
+      {
+        "role": "assistant",
+        "content": "I'm sorry — I wasn't able to create the ticket right now. Please contact us directly at **support@nurtur.tech** and we'll get this sorted for you. You can include the details from this conversation in your email.",
+        "meta": {
+          "intent": "problem"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Non-property email issue",
+    "sessionId": 557,
+    "sessionMeta": {},
+    "transcript": [
+      {
+        "role": "user",
+        "content": "We're getting bounce-backs on emails sent from BriefYourMarket for Sunrise Properties. About 40% of the last campaign bounced."
+      },
+      {
+        "role": "assistant",
+        "content": "You are experiencing bounce-backs on emails sent from BriefYourMarket for Sunrise Properties, with about 40% of the last campaign bouncing.\n\nCould you tell me which property is affected and where you're seeing the issue?",
+        "meta": {
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "The campaign was sent yesterday, campaign name was 'Spring Newsletter 2026'"
+      },
+      {
+        "role": "assistant",
+        "content": "Can you please provide the address or reference of the property affected by the bounce-backs in the 'Spring Newsletter 2026' campaign?",
+        "meta": {
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "That's everything"
+      },
+      {
+        "role": "assistant",
+        "content": "Where exactly are you seeing these bounce-backs from the 'Spring Newsletter 2026' campaign—on your website, Rightmove, Zoopla, or somewhere else?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "meta": {
+          "intent": "problem"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Rich initial + natural confirmation",
+    "sessionId": 558,
+    "sessionMeta": {},
+    "transcript": [
+      {
+        "role": "user",
+        "content": "Hi, the website for Wilson & Co Estate Agents at wilsonco.co.uk is showing a 502 error on their property search page. This started about an hour ago and affects all search results. They're a key account so this is quite urgent."
+      },
+      {
+        "role": "assistant",
+        "content": "Thanks for those details about All properties (site-wide) on Website. Could you tell me which property is affected and where you're seeing the issue?",
+        "meta": {
+          "intent": "problem"
+        }
+      },
+      {
+        "role": "user",
+        "content": "that's the badger, go ahead and raise it"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Property visibility issue — 502 error on property search page affecting all listings\n**Request type:** Property visibility issue\n**Account:** Wilson & Co Estate Agents\n**Property:** All properties (site-wide)\n**Affected:** Website\n**Description:** The property search page at wilsonco.co.uk is returning a 502 error, preventing all property listings from displaying. Issue began approximately one hour ago and affects all properties site-wide.\n**URL:** wilsonco.co.uk\n**Urgency:** High\n**Contact preference:** portal",
+        "meta": {
+          "type": "summary_card",
+          "fields": {
+            "subject": "[Portal] Property visibility issue — 502 error on property search page affecting all listings",
+            "account": "Wilson & Co Estate Agents",
+            "description": "The property search page at wilsonco.co.uk is returning a 502 error, preventing all property listings from displaying. Issue began approximately one hour ago and affects all properties site-wide.",
+            "url": "wilsonco.co.uk",
+            "errorMessage": null,
+            "browser": null,
+            "os": null,
+            "urgency": "High",
+            "contactPreference": "portal",
+            "propertyAddress": "All properties (site-wide)",
+            "listingId": null,
+            "affectedPortals": "Website",
+            "propertyStatus": null,
+            "affectedPersonName": null,
+            "affectedPersonEmail": null,
+            "officeBranch": null,
+            "category": "property",
+            "subcategory": "property_visibility"
+          },
+          "intent": "problem"
+        }
+      }
+    ]
+  }
+]

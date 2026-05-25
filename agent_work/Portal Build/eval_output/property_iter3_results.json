@@ -1,0 +1,126 @@
+{
+  "pass": 22,
+  "fail": 0,
+  "details": [
+    {
+      "section": "Frustration",
+      "name": "Adverb-separated: absolutely furious",
+      "passed": true
+    },
+    {
+      "section": "Frustration",
+      "name": "Adverb-separated: completely furious",
+      "passed": true
+    },
+    {
+      "section": "Frustration",
+      "name": "Adverb-separated: completely ridiculous",
+      "passed": true
+    },
+    {
+      "section": "Frustration",
+      "name": "Sarcasm: great service",
+      "passed": true
+    },
+    {
+      "section": "Frustration",
+      "name": "Passive frustration: wonder if anyone reads",
+      "passed": true
+    },
+    {
+      "section": "Frustration",
+      "name": "Existing: been broken for days",
+      "passed": true
+    },
+    {
+      "section": "Frustration",
+      "name": "Existing: utterly useless",
+      "passed": true
+    },
+    {
+      "section": "Frustration",
+      "name": "Thanks for nothing",
+      "passed": true
+    },
+    {
+      "section": "Detail",
+      "name": "Property address preserved",
+      "passed": true,
+      "reason": "14 Church Lane"
+    },
+    {
+      "section": "Detail",
+      "name": "Affected portals preserved",
+      "passed": true,
+      "reason": "Rightmove"
+    },
+    {
+      "section": "Detail",
+      "name": "Description preserved",
+      "passed": true,
+      "reason": "captured"
+    },
+    {
+      "section": "Detail",
+      "name": "Category set to property",
+      "passed": true,
+      "reason": "category=property"
+    },
+    {
+      "section": "Detail",
+      "name": "Pure frustration (no property) still gets empathy",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "Detail",
+      "name": "Empathy references property details",
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "section": "WebRegression",
+      "name": "Simple content change routes to website",
+      "passed": true
+    },
+    {
+      "section": "WebRegression",
+      "name": "Website design request routes correctly",
+      "passed": true
+    },
+    {
+      "section": "WebRegression",
+      "name": "Property request does NOT route to website",
+      "passed": true
+    },
+    {
+      "section": "WebRegression",
+      "name": "Website-with-portal routes to property",
+      "passed": true
+    },
+    {
+      "section": "Routing",
+      "name": "Rightmove missing listing → property",
+      "passed": true,
+      "reason": "got=property"
+    },
+    {
+      "section": "Routing",
+      "name": "Vague property → property",
+      "passed": true,
+      "reason": "got=property"
+    },
+    {
+      "section": "Routing",
+      "name": "Website content update → website",
+      "passed": true,
+      "reason": "got=website"
+    },
+    {
+      "section": "Routing",
+      "name": "Zoopla + website → property",
+      "passed": true,
+      "reason": "got=property"
+    }
+  ]
+}

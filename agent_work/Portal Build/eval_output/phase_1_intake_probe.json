@@ -1,0 +1,42 @@
+{
+  "send": {
+    "x": 689,
+    "y": 362,
+    "text": "",
+    "ariaLabel": "Send message"
+  },
+  "after1": {
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nSupport Assistant\nEnd conversation\nThe branch mailbox is not receiving password reset emails. Please help restore access before tomorrow morning.\n18:23\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n18:23\nPowered by Nurtur\nNeed help? Contact us",
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_intake_probe_after_1.png"
+  },
+  "account": {
+    "x": 430.203125,
+    "y": 182,
+    "text": "My Account\nLogin, passwords, users, permissions",
+    "tag": "BUTTON"
+  },
+  "afterCategory": {
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nSupport Assistant\nEnd conversation\nThe branch mailbox is not receiving password reset emails. Please help restore access before tomorrow morning.\n18:23\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n18:23\nPowered by Nurtur\nNeed help? Contact us",
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_intake_probe_after_category.png"
+  },
+  "send2": {
+    "x": 689,
+    "y": 362,
+    "text": "",
+    "ariaLabel": "Send message"
+  },
+  "after2": {
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nSupport Assistant\nEnd conversation\nThe branch mailbox is not receiving password reset emails. Please help restore access before tomorrow morning.\n18:23\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n18:23\nThe user clicks Forgot password on the login page, but the reset email never arrives in branch.mailbox@example.com. No error is shown after submit.\n18:23\nGot it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see.\n18:23\nPowered by Nurtur\nNeed help? Contact us",
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_intake_probe_after_2.png"
+  },
+  "submit": null,
+  "afterSubmit": {
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nSupport Assistant\nEnd conversation\nThe branch mailbox is not receiving password reset emails. Please help restore access before tomorrow morning.\n18:23\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n18:23\nThe user clicks Forgot password on the login page, but the reset email never arrives in branch.mailbox@example.com. No error is shown after submit.\n18:23\nGot it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see.\n18:23\nPowered by Nurtur\nNeed help? Contact us",
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_intake_probe_after_submit.png"
+  },
+  "viewTicket": null,
+  "finalTicket": {
+    "text": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nSupport Assistant\nEnd conversation\nThe branch mailbox is not receiving password reset emails. Please help restore access before tomorrow morning.\n18:23\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n18:23\nThe user clicks Forgot password on the login page, but the reset email never arrives in branch.mailbox@example.com. No error is shown after submit.\n18:23\nGot it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see.\n18:23\nPowered by Nurtur\nNeed help? Contact us",
+    "screenshot": "C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\agent_work\\eval_output\\phase_1_intake_probe_final_ticket.png"
+  }
+}

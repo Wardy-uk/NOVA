@@ -3,6 +3,8 @@ import type { PortalJiraService } from './portal-jira.js';
 import type { PortalTicketCreateInput } from '../../shared/portal-types.js';
 import { execute, queryOne } from './database.js';
 import { trackEvent } from './portal-analytics.js';
+import { EscalationLogService } from './escalation-log-service.js';
+import { broadcastPortalEvent } from '../routes/portal-events.js';
 
 const URGENCY_TO_PRIORITY_HINT: Record<string, string> = {
   Normal: 'Medium',
@@ -16,14 +18,67 @@ const CATEGORY_TO_PROJECT: Record<string, string> = {
   website_broken: 'NTPJ',
   website_new_page: 'NTPJ',
   website_design: 'NTPJ',
+  property: 'NT',
+  property_missing_listing: 'NT',
+  property_incorrect_details: 'NT',
+  property_media: 'NT',
+  property_feed_sync: 'NT',
+  property_status: 'NT',
+  property_visibility: 'NT',
   account: 'NT',
+  account_login: 'NT',
+  account_new_user: 'NT',
+  account_permissions: 'NT',
+  account_details: 'NT',
+  account_office_change: 'NT',
+  account_remove_user: 'NT',
   email_marketing: 'NT',
+  email_campaign: 'NT',
+  email_triggers: 'NT',
+  email_template: 'NTPJ',
   leadpro: 'NT',
+  leadpro_missing: 'NT',
+  leadpro_setup: 'NT',
+  leadpro_access: 'NT',
   data_feeds: 'NT',
+  feeds_property: 'NT',
+  feeds_integration: 'NT',
+  feeds_reporting: 'NT',
   listings: 'NT',
+  listings_tours: 'NT',
+  listings_media: 'NT',
+  listings_management: 'NT',
   onboarding: 'NT',
+  onboarding_branch: 'NT',
+  onboarding_product: 'NT',
+  onboarding_training: 'NT',
   billing: 'NT',
+  billing_cancel: 'NT',
+  billing_change: 'NT',
+  billing_query: 'NT',
+  security: 'NTPJ',
+  security_vulnerability: 'NTPJ',
+  security_ssl: 'NTPJ',
+  security_access: 'NTPJ',
+  letters: 'NTPJ',
+  letters_market_appraisal: 'NTPJ',
+  letters_mailshot: 'NTPJ',
+  letters_general: 'NTPJ',
+  general_request: 'NT',
+  general_request_change: 'NT',
+  general_request_info: 'NT',
+  general_request_other: 'NT',
+  followup: 'NT',
+  followup_reopen: 'NT',
+  followup_update: 'NT',
+  followup_not_resolved: 'NT',
+  complaint: 'NT',
+  complaint_service: 'NT',
+  complaint_response: 'NT',
+  complaint_escalate: 'NT',
   other: 'NT',
+  other_general: 'NT',
+  other_feedback: 'NT',
 };
 
 interface CategoryDef {
@@ -117,6 +172,56 @@ const DEFAULT_CATEGORIES: CategoryDef[] = [
     ],
   },
   {
+    id: 'letters',
+    name: 'Letters & Correspondence',
+    description: 'Market appraisals, property mailshots, or printed correspondence',
+    children: [
+      { id: 'letters_market_appraisal', name: 'Market appraisal letter' },
+      { id: 'letters_mailshot', name: 'Property mailshot or marketing letter' },
+      { id: 'letters_general', name: 'Other printed correspondence' },
+    ],
+  },
+  {
+    id: 'security',
+    name: 'Website Security',
+    description: 'SSL certificates, suspicious activity, or vulnerability concerns',
+    children: [
+      { id: 'security_vulnerability', name: 'Suspicious activity or vulnerability' },
+      { id: 'security_ssl', name: 'SSL or certificate issue' },
+      { id: 'security_access', name: 'Unauthorised access concern' },
+    ],
+  },
+  {
+    id: 'general_request',
+    name: 'General Service Request',
+    description: 'A change, information request, or something that doesn\'t fit elsewhere',
+    children: [
+      { id: 'general_request_change', name: 'Request a change' },
+      { id: 'general_request_info', name: 'Request information' },
+      { id: 'general_request_other', name: 'Other service request' },
+    ],
+  },
+  {
+    id: 'followup',
+    name: 'Reopened / Follow-up',
+    description: 'Chase or reopen a previous request',
+    children: [
+      { id: 'followup_reopen', name: 'Reopen a resolved request' },
+      { id: 'followup_update', name: 'Chase an open request' },
+      { id: 'followup_not_resolved', name: 'Issue not fully resolved' },
+    ],
+  },
+  {
+    id: 'complaint',
+    name: 'Complaint / Escalation',
+    description: 'Raise a complaint or escalate an issue',
+    children: [
+      { id: 'complaint_service', name: 'Service complaint' },
+      { id: 'complaint_response', name: 'Response time concern' },
+      { id: 'complaint_escalate', name: 'Escalate an existing issue' },
+    ],
+  },
+  {
     id: 'other',
     name: 'Something Else',
     description: 'General enquiry',
@@ -142,8 +247,10 @@ export class PortalIntakeService {
   ): Promise<{ ticketKey: string }> {
     await trackEvent('form_completed', portalUserId, orgId, { category: input.category });
 
-    const projectKey = this.getProjectForCategory(input.category);
-    const priorityHint = URGENCY_TO_PRIORITY_HINT[input.urgency] || 'Medium';
+    const projectKey = this.getProjectForCategory(input.category, input.subcategory);
+    const isComplaint = input.category.startsWith('complaint');
+    const effectiveUrgency = isComplaint && input.urgency === 'Normal' ? 'High' : input.urgency;
+    const priorityHint = URGENCY_TO_PRIORITY_HINT[effectiveUrgency] || 'Medium';
     const priority = await this.portalJira.resolveJiraPriority(priorityHint);
 
     const descParts = [input.description];
@@ -156,10 +263,15 @@ export class PortalIntakeService {
       `*Account:* ${input.account || 'Not specified'}`,
       `*Contact preference:* ${input.contactPreference}`,
     ];
+    if (input.category.startsWith('complaint')) {
+      internalParts.push('⚠️ *COMPLAINT / ESCALATION — customer expressed dissatisfaction. Treat as complaint case.*');
+    }
     if (input.url) internalParts.push(`*URL:* ${input.url}`);
     if (input.errorMessage) internalParts.push(`*Error:* ${input.errorMessage}`);
     if (input.browser) internalParts.push(`*Browser:* ${input.browser}`);
     if (input.os) internalParts.push(`*OS:* ${input.os}`);
+
+    const labels = isComplaint ? ['complaint'] : [];
 
     let ticketKey: string;
     try {
@@ -168,6 +280,7 @@ export class PortalIntakeService {
         summary: input.subject,
         description: descParts.join('\n'),
         priority: priority || undefined,
+        labels: labels.length > 0 ? labels : undefined,
         reporterEmail: userEmail,
         internalNote: internalParts.join('\n'),
       });
@@ -187,10 +300,45 @@ export class PortalIntakeService {
       category: input.category,
     });
 
+    if (isComplaint) {
+      const escalationLog = new EscalationLogService();
+      try {
+        await escalationLog.log({
+          ticket_key: ticketKey,
+          escalation_type: 'complaint_portal',
+          reason_code: 'customer_complaint',
+          reason_label: `Portal complaint: ${input.subcategory || input.category}`,
+          escalated_by: userName,
+          notes: `Customer complaint submitted via portal. Category: ${input.category}${input.subcategory ? ` > ${input.subcategory}` : ''}. Account: ${input.account || 'Not specified'}.`,
+          source: 'portal',
+        });
+      } catch (err) {
+        console.warn('[portal-intake] Failed to log complaint escalation for', ticketKey, ':', err instanceof Error ? err.message : err);
+      }
+
+      broadcastPortalEvent(orgId, {
+        type: 'ticket:complaint_alert',
+        ticketKey,
+        data: {
+          category: input.category,
+          subcategory: input.subcategory || null,
+          account: input.account || null,
+          priority: effectiveUrgency,
+          submittedBy: userName,
+        },
+      });
+    }
+
     return { ticketKey };
   }
 
-  getProjectForCategory(category: string): string {
+  getProjectForCategory(category: string, subcategory?: string): string {
+    if (subcategory) {
+      const subKey = subcategory.toLowerCase();
+      const subSettings = this.settings.get(`portal_category_project_${subKey}`);
+      if (subSettings) return subSettings;
+      if (CATEGORY_TO_PROJECT[subKey]) return CATEGORY_TO_PROJECT[subKey];
+    }
     const settingsProject = this.settings.get(`portal_category_project_${category.toLowerCase()}`);
     if (settingsProject) return settingsProject;
     return CATEGORY_TO_PROJECT[category.toLowerCase()] || this.settings.get('portal_jira_project_nt') || 'NT';

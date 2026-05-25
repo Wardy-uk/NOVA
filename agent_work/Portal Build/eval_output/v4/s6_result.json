@@ -1,0 +1,21 @@
+{
+  "id": 6,
+  "name": "Ambiguous Website Problem",
+  "hasCatPicker": false,
+  "hasConversational": true,
+  "hasError": false,
+  "hasNoResponse": false,
+  "taxLeaks": [],
+  "netLog": [
+    {
+      "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+      "status": 500
+    },
+    {
+      "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+      "status": 500
+    }
+  ],
+  "assistantResponse": "",
+  "hasSummary": false
+}

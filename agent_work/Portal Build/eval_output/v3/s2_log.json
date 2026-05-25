@@ -1,0 +1,56 @@
+{
+  "scenario": {
+    "id": 2,
+    "name": "Information-Rich Request",
+    "message": "Our website nurturtest.com has the wrong phone number on the contact page. It currently says 01234 111111 but should be 01234 567890. Can this be changed today?"
+  },
+  "steps": [
+    {
+      "t": "12:19:55",
+      "label": "chat_opened",
+      "hasInput": true
+    },
+    {
+      "t": "12:19:57",
+      "label": "message_sent",
+      "sent": true,
+      "message": "Our website nurturtest.com has the wrong phone number on the contact page. It currently says 01234 111111 but should be 01234 567890. Can this be changed today?"
+    },
+    {
+      "t": "12:20:02",
+      "label": "first_response",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": true,
+      "hasDirectSummary": false,
+      "assistantResponse": "13:19 | Which area does this relate to? | My Website | Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 13:19"
+    },
+    {
+      "t": "12:20:02",
+      "label": "taxonomy_check",
+      "leaks": "CLEAN"
+    },
+    {
+      "t": "12:20:02",
+      "label": "category_clicked",
+      "target": "My Website",
+      "result": "Which area does this relate to?\nMy Website\nContent updates or something not work"
+    },
+    {
+      "t": "12:20:07",
+      "label": "after_category",
+      "asksReDescribe": false,
+      "excerpt": "Cancellations, service changes, queries | Something Else | General support requests and questions | 13:19 | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "t": "12:20:09",
+      "label": "summary_check",
+      "hasSummary": false
+    },
+    {
+      "t": "12:20:09",
+      "label": "final",
+      "taxonomyLeaks": "CLEAN",
+      "consoleErrors": 5
+    }
+  ]
+}

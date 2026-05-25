@@ -1,0 +1,680 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/@fs/C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\src\\client\\components\\LoginView.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=62de665b"; const Fragment = __vite__cjsImport0_react_jsxDevRuntime["Fragment"]; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react.js?v=62de665b"; const useState = __vite__cjsImport3_react["useState"]; const useEffect = __vite__cjsImport3_react["useEffect"];
+const inputCls = "bg-[#272C33] text-neutral-200 text-sm rounded-lg px-4 py-2.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-full placeholder:text-neutral-600";
+export function LoginView({ onLogin, onRegister, onSsoLogin, error, loading }) {
+  _s();
+  const [mode, setMode] = useState("login");
+  const [firstRun, setFirstRun] = useState(false);
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+  const [resetToken, setResetToken] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  useEffect(() => {
+    fetch("/api/auth/status").then((r) => r.json()).then((json) => {
+      if (json.ok && !json.data.hasUsers) {
+        setMode("register");
+        setFirstRun(true);
+      }
+    }).catch(() => {
+    });
+    fetch("/api/auth/sso/status").then((r) => r.json()).then((json) => {
+      if (json.ok && json.data.enabled) setSsoEnabled(true);
+    }).catch(() => {
+    });
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("reset_token");
+    if (token) {
+      setResetToken(token);
+      setMode("reset");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
+  const [localError, setLocalError] = useState("");
+  const [ssoPopupError, setSsoPopupError] = useState(null);
+  useEffect(() => {
+    if (error && error.startsWith("Microsoft sign-in failed:")) {
+      setSsoPopupError(error);
+    }
+  }, [error]);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLocalError("");
+    if (mode === "forgot") {
+      if (!email.trim()) {
+        setLocalError("Email address is required");
+        return;
+      }
+      setResetLoading(true);
+      try {
+        const res = await fetch("/api/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email.trim() })
+        });
+        const json = await res.json();
+        if (!json.ok) {
+          setLocalError(json.error || "Failed to send reset email");
+        } else {
+          setForgotSent(true);
+        }
+      } catch {
+        setLocalError("Network error. Please try again.");
+      } finally {
+        setResetLoading(false);
+      }
+      return;
+    }
+    if (mode === "reset") {
+      if (!password || password.length < 6) {
+        setLocalError("Password must be at least 6 characters");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setLocalError("Passwords do not match");
+        return;
+      }
+      setResetLoading(true);
+      try {
+        const res = await fetch("/api/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: resetToken, password })
+        });
+        const json = await res.json();
+        if (!json.ok) {
+          setLocalError(json.error || "Failed to reset password");
+        } else {
+          setResetDone(true);
+        }
+      } catch {
+        setLocalError("Network error. Please try again.");
+      } finally {
+        setResetLoading(false);
+      }
+      return;
+    }
+    if (!username.trim() || !password) {
+      setLocalError("Username and password are required");
+      return;
+    }
+    if (mode === "register") {
+      if (password.length < 6) {
+        setLocalError("Password must be at least 6 characters");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setLocalError("Passwords do not match");
+        return;
+      }
+      await onRegister(username.trim(), password, displayName.trim() || void 0);
+    } else {
+      await onLogin(username.trim(), password, rememberMe);
+    }
+  };
+  const displayError = localError || error;
+  return /* @__PURE__ */ jsxDEV("div", { className: "min-h-screen bg-[#272C33] flex items-center justify-center px-4", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "w-full max-w-sm", children: [
+      /* @__PURE__ */ jsxDEV("div", { className: "text-center mb-8", children: [
+        /* @__PURE__ */ jsxDEV("h1", { className: "text-2xl font-bold tracking-tight font-[var(--font-heading)]", children: /* @__PURE__ */ jsxDEV("span", { className: "text-[#5ec1ca]", children: "N.O.V.A" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 175,
+          columnNumber: 13
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 174,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("p", { className: "text-[11px] text-neutral-500 uppercase tracking-widest mt-1", children: "Nurtur Operational Virtual Assistant" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 177,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+        lineNumber: 173,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "bg-[#2f353d] border border-[#3a424d] rounded-xl p-6", children: [
+        /* @__PURE__ */ jsxDEV("h2", { className: "text-sm font-semibold text-neutral-200 mb-4", children: mode === "login" ? "Sign in" : mode === "register" ? "Create account" : mode === "forgot" ? "Forgot password" : "Reset password" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 184,
+          columnNumber: 11
+        }, this),
+        firstRun && mode === "register" && /* @__PURE__ */ jsxDEV("div", { className: "mb-4 px-3 py-2 bg-[#5ec1ca]/10 border border-[#5ec1ca]/30 rounded-lg text-[#5ec1ca] text-xs", children: "Welcome! Create your admin account to get started." }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 189,
+          columnNumber: 11
+        }, this),
+        displayError && /* @__PURE__ */ jsxDEV("div", { className: "mb-4 px-3 py-2 bg-red-950/50 border border-red-900/50 rounded-lg text-red-400 text-xs", children: displayError }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 195,
+          columnNumber: 11
+        }, this),
+        ssoEnabled && onSsoLogin && mode === "login" && /* @__PURE__ */ jsxDEV(Fragment, { children: [
+          /* @__PURE__ */ jsxDEV(
+            "button",
+            {
+              type: "button",
+              onClick: onSsoLogin,
+              disabled: loading,
+              className: "w-full px-4 py-2.5 text-sm rounded-lg bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50 transition-colors flex items-center justify-center gap-2",
+              children: [
+                /* @__PURE__ */ jsxDEV("svg", { className: "w-4 h-4", viewBox: "0 0 21 21", fill: "none", children: [
+                  /* @__PURE__ */ jsxDEV("rect", { x: "1", y: "1", width: "9", height: "9", fill: "#f25022" }, void 0, false, {
+                    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                    lineNumber: 209,
+                    columnNumber: 19
+                  }, this),
+                  /* @__PURE__ */ jsxDEV("rect", { x: "11", y: "1", width: "9", height: "9", fill: "#7fba00" }, void 0, false, {
+                    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                    lineNumber: 210,
+                    columnNumber: 19
+                  }, this),
+                  /* @__PURE__ */ jsxDEV("rect", { x: "1", y: "11", width: "9", height: "9", fill: "#00a4ef" }, void 0, false, {
+                    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                    lineNumber: 211,
+                    columnNumber: 19
+                  }, this),
+                  /* @__PURE__ */ jsxDEV("rect", { x: "11", y: "11", width: "9", height: "9", fill: "#ffb900" }, void 0, false, {
+                    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                    lineNumber: 212,
+                    columnNumber: 19
+                  }, this)
+                ] }, void 0, true, {
+                  fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                  lineNumber: 208,
+                  columnNumber: 17
+                }, this),
+                "Sign in with Microsoft"
+              ]
+            },
+            void 0,
+            true,
+            {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 202,
+              columnNumber: 15
+            },
+            this
+          ),
+          /* @__PURE__ */ jsxDEV("div", { className: "relative my-4", children: [
+            /* @__PURE__ */ jsxDEV("div", { className: "absolute inset-0 flex items-center", children: /* @__PURE__ */ jsxDEV("div", { className: "w-full border-t border-[#3a424d]" }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 218,
+              columnNumber: 19
+            }, this) }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 217,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { className: "relative flex justify-center", children: /* @__PURE__ */ jsxDEV("span", { className: "bg-[#2f353d] px-3 text-[10px] text-neutral-500 uppercase", children: "or sign in with password" }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 221,
+              columnNumber: 19
+            }, this) }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 220,
+              columnNumber: 17
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 216,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 201,
+          columnNumber: 11
+        }, this),
+        mode === "forgot" && forgotSent ? /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "px-3 py-2 bg-[#5ec1ca]/10 border border-[#5ec1ca]/30 rounded-lg text-[#5ec1ca] text-xs", children: "If an account exists with that email, a reset link has been sent. Check your inbox." }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 230,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(
+            "button",
+            {
+              onClick: () => {
+                setMode("login");
+                setForgotSent(false);
+                setLocalError("");
+              },
+              className: "w-full px-4 py-2.5 text-sm rounded-lg bg-[#2f353d] border border-[#3a424d] text-neutral-200 font-medium hover:bg-[#363d47] transition-colors",
+              children: "Back to Sign In"
+            },
+            void 0,
+            false,
+            {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 233,
+              columnNumber: 15
+            },
+            this
+          )
+        ] }, void 0, true, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 229,
+          columnNumber: 11
+        }, this) : mode === "reset" && resetDone ? /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "px-3 py-2 bg-[#5ec1ca]/10 border border-[#5ec1ca]/30 rounded-lg text-[#5ec1ca] text-xs", children: "Your password has been reset. You can now sign in." }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 242,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(
+            "button",
+            {
+              onClick: () => {
+                setMode("login");
+                setResetDone(false);
+                setLocalError("");
+                setPassword("");
+                setConfirmPassword("");
+              },
+              className: "w-full px-4 py-2.5 text-sm rounded-lg bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors",
+              children: "Sign In"
+            },
+            void 0,
+            false,
+            {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 245,
+              columnNumber: 15
+            },
+            this
+          )
+        ] }, void 0, true, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 241,
+          columnNumber: 11
+        }, this) : /* @__PURE__ */ jsxDEV("form", { onSubmit: handleSubmit, className: "space-y-3", children: [
+          (mode === "login" || mode === "register") && /* @__PURE__ */ jsxDEV("div", { children: [
+            /* @__PURE__ */ jsxDEV("label", { className: "text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block", children: "Username" }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 257,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                className: inputCls,
+                value: username,
+                onChange: (e) => setUsername(e.target.value),
+                placeholder: "Enter username",
+                autoFocus: !ssoEnabled,
+                autoComplete: "username"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                lineNumber: 258,
+                columnNumber: 15
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 256,
+            columnNumber: 13
+          }, this),
+          mode === "forgot" && /* @__PURE__ */ jsxDEV("div", { children: [
+            /* @__PURE__ */ jsxDEV("label", { className: "text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block", children: "Email Address" }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 272,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                className: inputCls,
+                type: "email",
+                value: email,
+                onChange: (e) => setEmail(e.target.value),
+                placeholder: "Enter your account email",
+                autoFocus: true,
+                autoComplete: "email"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                lineNumber: 273,
+                columnNumber: 17
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV("p", { className: "text-[10px] text-neutral-500 mt-1", children: "We'll send a reset link to this address." }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 282,
+              columnNumber: 17
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 271,
+            columnNumber: 13
+          }, this),
+          mode === "register" && /* @__PURE__ */ jsxDEV("div", { children: [
+            /* @__PURE__ */ jsxDEV("label", { className: "text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block", children: "Display Name" }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 288,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                className: inputCls,
+                value: displayName,
+                onChange: (e) => setDisplayName(e.target.value),
+                placeholder: "Your name (optional)",
+                autoComplete: "name"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                lineNumber: 289,
+                columnNumber: 17
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 287,
+            columnNumber: 13
+          }, this),
+          (mode === "login" || mode === "register" || mode === "reset") && /* @__PURE__ */ jsxDEV("div", { children: [
+            /* @__PURE__ */ jsxDEV("label", { className: "text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block", children: mode === "reset" ? "New Password" : "Password" }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 302,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                className: inputCls,
+                type: "password",
+                value: password,
+                onChange: (e) => setPassword(e.target.value),
+                placeholder: mode === "register" || mode === "reset" ? "Min 6 characters" : "Enter password",
+                autoComplete: mode === "login" ? "current-password" : "new-password",
+                autoFocus: mode === "reset"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                lineNumber: 305,
+                columnNumber: 15
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 301,
+            columnNumber: 13
+          }, this),
+          (mode === "register" || mode === "reset") && /* @__PURE__ */ jsxDEV("div", { children: [
+            /* @__PURE__ */ jsxDEV("label", { className: "text-[10px] text-neutral-500 uppercase tracking-wider mb-1 block", children: "Confirm Password" }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 320,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                className: inputCls,
+                type: "password",
+                value: confirmPassword,
+                onChange: (e) => setConfirmPassword(e.target.value),
+                placeholder: "Re-enter password",
+                autoComplete: "new-password"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                lineNumber: 321,
+                columnNumber: 17
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 319,
+            columnNumber: 13
+          }, this),
+          mode === "login" && /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-between", children: [
+            /* @__PURE__ */ jsxDEV("label", { className: "flex items-center gap-2 cursor-pointer select-none", children: [
+              /* @__PURE__ */ jsxDEV(
+                "input",
+                {
+                  type: "checkbox",
+                  checked: rememberMe,
+                  onChange: (e) => setRememberMe(e.target.checked),
+                  className: "w-3.5 h-3.5 rounded border-[#3a424d] bg-[#272C33] accent-[#5ec1ca]"
+                },
+                void 0,
+                false,
+                {
+                  fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                  lineNumber: 335,
+                  columnNumber: 19
+                },
+                this
+              ),
+              /* @__PURE__ */ jsxDEV("span", { className: "text-xs text-neutral-400", children: "Remember me" }, void 0, false, {
+                fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                lineNumber: 341,
+                columnNumber: 19
+              }, this)
+            ] }, void 0, true, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 334,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "button",
+              {
+                type: "button",
+                onClick: () => {
+                  setMode("forgot");
+                  setLocalError("");
+                  setForgotSent(false);
+                },
+                className: "text-[10px] text-neutral-500 hover:text-[#5ec1ca] transition-colors",
+                children: "Forgot password?"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+                lineNumber: 343,
+                columnNumber: 17
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 333,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(
+            "button",
+            {
+              type: "submit",
+              disabled: loading || resetLoading,
+              className: "w-full px-4 py-2.5 text-sm rounded-lg bg-[#2f353d] border border-[#3a424d] text-neutral-200 font-medium hover:bg-[#363d47] disabled:opacity-50 transition-colors mt-2",
+              children: loading || resetLoading ? "Please wait..." : mode === "login" ? "Sign In" : mode === "register" ? "Create Account" : mode === "forgot" ? "Send Reset Link" : "Reset Password"
+            },
+            void 0,
+            false,
+            {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+              lineNumber: 353,
+              columnNumber: 13
+            },
+            this
+          )
+        ] }, void 0, true, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 253,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "mt-4 text-center", children: mode === "login" ? /* @__PURE__ */ jsxDEV(
+          "button",
+          {
+            onClick: () => {
+              setMode("register");
+              setLocalError("");
+            },
+            className: "text-[11px] text-[#5ec1ca] hover:text-[#4db0b9] transition-colors",
+            children: "First time? Create an account"
+          },
+          void 0,
+          false,
+          {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 365,
+            columnNumber: 13
+          },
+          this
+        ) : /* @__PURE__ */ jsxDEV(
+          "button",
+          {
+            onClick: () => {
+              setMode("login");
+              setLocalError("");
+              setForgotSent(false);
+              setResetDone(false);
+              setPassword("");
+              setConfirmPassword("");
+            },
+            className: "text-[11px] text-[#5ec1ca] hover:text-[#4db0b9] transition-colors",
+            children: "Back to sign in"
+          },
+          void 0,
+          false,
+          {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+            lineNumber: 372,
+            columnNumber: 13
+          },
+          this
+        ) }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 363,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+        lineNumber: 183,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("p", { className: "text-[10px] text-neutral-600 text-center mt-4", children: "Nurtur Limited" }, void 0, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+        lineNumber: 382,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+      lineNumber: 171,
+      columnNumber: 7
+    }, this),
+    ssoPopupError && /* @__PURE__ */ jsxDEV("div", { className: "fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4", children: /* @__PURE__ */ jsxDEV("div", { className: "bg-[#2f353d] border border-red-900/60 rounded-xl p-6 max-w-md w-full shadow-2xl", children: [
+      /* @__PURE__ */ jsxDEV("h3", { className: "text-sm font-semibold text-red-400 mb-3 flex items-center gap-2", children: [
+        /* @__PURE__ */ jsxDEV("svg", { className: "w-5 h-5 shrink-0", fill: "none", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 2, children: /* @__PURE__ */ jsxDEV("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 393,
+          columnNumber: 17
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 392,
+          columnNumber: 15
+        }, this),
+        "Microsoft Sign-In Failed"
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+        lineNumber: 391,
+        columnNumber: 13
+      }, this),
+      /* @__PURE__ */ jsxDEV("p", { className: "text-xs text-neutral-300 leading-relaxed whitespace-pre-wrap break-words mb-4", children: ssoPopupError.replace("Microsoft sign-in failed: ", "") }, void 0, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+        lineNumber: 397,
+        columnNumber: 13
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        "button",
+        {
+          onClick: () => setSsoPopupError(null),
+          className: "w-full px-4 py-2 text-sm rounded-lg bg-[#272C33] border border-[#3a424d] text-neutral-200 font-medium hover:bg-[#363d47] transition-colors",
+          children: "Dismiss"
+        },
+        void 0,
+        false,
+        {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+          lineNumber: 400,
+          columnNumber: 13
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+      lineNumber: 390,
+      columnNumber: 11
+    }, this) }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+      lineNumber: 389,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx",
+    lineNumber: 170,
+    columnNumber: 5
+  }, this);
+}
+_s(LoginView, "w2FexteUa4QnAWzdQSbuk9dFRs0=");
+_c = LoginView;
+var _c;
+$RefreshReg$(_c, "LoginView");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/LoginView.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUFDLE9BQUUsV0FBVSxpREFBZ0QsOEJBQTdEO0FBQUE7QUFBQTtBQUFBO0FBQUEsYUFFQTtBQUFBLFNBck5GO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0FzTkE7QUFBQSxJQUdDTyxpQkFDQyx1QkFBQyxTQUFJLFdBQVUsd0VBQ2IsaUNBQUMsU0FBSSxXQUFVLG1GQUNiO0FBQUEsNkJBQUMsUUFBRyxXQUFVLG1FQUNaO0FBQUEsK0JBQUMsU0FBSSxXQUFVLG9CQUFtQixNQUFLLFFBQU8sU0FBUSxhQUFZLFFBQU8sZ0JBQWUsYUFBYSxHQUNuRyxpQ0FBQyxVQUFLLGVBQWMsU0FBUSxnQkFBZSxTQUFRLEdBQUUsdURBQXJEO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFBd0csS0FEMUc7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUVBO0FBQUEsUUFBTTtBQUFBLFdBSFI7QUFBQTtBQUFBO0FBQUE7QUFBQSxhQUtBO0FBQUEsTUFDQSx1QkFBQyxPQUFFLFdBQVUsaUZBQ1ZBLHdCQUFjbUIsUUFBUSw4QkFBOEIsRUFBRSxLQUR6RDtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBRUE7QUFBQSxNQUNBO0FBQUEsUUFBQztBQUFBO0FBQUEsVUFDQyxTQUFTLE1BQU1sQixpQkFBaUIsSUFBSTtBQUFBLFVBQ3BDLFdBQVU7QUFBQSxVQUE0STtBQUFBO0FBQUEsUUFGeEo7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLE1BS0E7QUFBQSxTQWZGO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0FnQkEsS0FqQkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxXQWtCQTtBQUFBLE9BN09KO0FBQUE7QUFBQTtBQUFBO0FBQUEsU0ErT0E7QUFFSjtBQUFDakQsR0EzWGVOLFdBQVM7QUFBQSxLQUFUQTtBQUFTLElBQUEwRTtBQUFBLGFBQUFBLElBQUEiLCJuYW1lcyI6WyJ1c2VTdGF0ZSIsInVzZUVmZmVjdCIsImlucHV0Q2xzIiwiTG9naW5WaWV3Iiwib25Mb2dpbiIsIm9uUmVnaXN0ZXIiLCJvblNzb0xvZ2luIiwiZXJyb3IiLCJsb2FkaW5nIiwiX3MiLCJtb2RlIiwic2V0TW9kZSIsImZpcnN0UnVuIiwic2V0Rmlyc3RSdW4iLCJzc29FbmFibGVkIiwic2V0U3NvRW5hYmxlZCIsInJlc2V0VG9rZW4iLCJzZXRSZXNldFRva2VuIiwiZm9yZ290U2VudCIsInNldEZvcmdvdFNlbnQiLCJyZXNldERvbmUiLCJzZXRSZXNldERvbmUiLCJyZXNldExvYWRpbmciLCJzZXRSZXNldExvYWRpbmciLCJmZXRjaCIsInRoZW4iLCJyIiwianNvbiIsIm9rIiwiZGF0YSIsImhhc1VzZXJzIiwiY2F0Y2giLCJlbmFibGVkIiwicGFyYW1zIiwiVVJMU2VhcmNoUGFyYW1zIiwid2luZG93IiwibG9jYXRpb24iLCJzZWFyY2giLCJ0b2tlbiIsImdldCIsImhpc3RvcnkiLCJyZXBsYWNlU3RhdGUiLCJwYXRobmFtZSIsInVzZXJuYW1lIiwic2V0VXNlcm5hbWUiLCJlbWFpbCIsInNldEVtYWlsIiwicGFzc3dvcmQiLCJzZXRQYXNzd29yZCIsImNvbmZpcm1QYXNzd29yZCIsInNldENvbmZpcm1QYXNzd29yZCIsImRpc3BsYXlOYW1lIiwic2V0RGlzcGxheU5hbWUiLCJyZW1lbWJlck1lIiwic2V0UmVtZW1iZXJNZSIsImxvY2FsRXJyb3IiLCJzZXRMb2NhbEVycm9yIiwic3NvUG9wdXBFcnJvciIsInNldFNzb1BvcHVwRXJyb3IiLCJzdGFydHNXaXRoIiwiaGFuZGxlU3VibWl0IiwiZSIsInByZXZlbnREZWZhdWx0IiwidHJpbSIsInJlcyIsIm1ldGhvZCIsImhlYWRlcnMiLCJib2R5IiwiSlNPTiIsInN0cmluZ2lmeSIsImxlbmd0aCIsInVuZGVmaW5lZCIsImRpc3BsYXlFcnJvciIsInRhcmdldCIsInZhbHVlIiwiY2hlY2tlZCIsInJlcGxhY2UiLCJfYyJdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJMb2dpblZpZXcudHN4Il0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IHVzZVN0YXRlLCB1c2VFZmZlY3QgfSBmcm9tICdyZWFjdCc7XHJcblxyXG5pbnRlcmZhY2UgTG9naW5WaWV3UHJvcHMge1xyXG4gIG9uTG9naW46ICh1c2VybmFtZTogc3RyaW5nLCBwYXNzd29yZDogc3RyaW5nLCByZW1lbWJlck1lPzogYm9vbGVhbikgPT4gUHJvbWlzZTxib29sZWFuPjtcclxuICBvblJlZ2lzdGVyOiAodXNlcm5hbWU6IHN0cmluZywgcGFzc3dvcmQ6IHN0cmluZywgZGlzcGxheU5hbWU/OiBzdHJpbmcpID0+IFByb21pc2U8Ym9vbGVhbj47XHJcbiAgb25Tc29Mb2dpbj86ICgpID0+IFByb21pc2U8dm9pZD47XHJcbiAgZXJyb3I6IHN0cmluZyB8IG51bGw7XHJcbiAgbG9hZGluZzogYm9vbGVhbjtcclxufVxyXG5cclxuY29uc3QgaW5wdXRDbHMgPSAnYmctWyMyNzJDMzNdIHRleHQtbmV1dHJhbC0yMDAgdGV4dC1zbSByb3VuZGVkLWxnIHB4LTQgcHktMi41IGJvcmRlciBib3JkZXItWyMzYTQyNGRdIG91dGxpbmUtbm9uZSBmb2N1czpib3JkZXItWyM1ZWMxY2FdIHRyYW5zaXRpb24tY29sb3JzIHctZnVsbCBwbGFjZWhvbGRlcjp0ZXh0LW5ldXRyYWwtNjAwJztcclxuXHJcbmV4cG9ydCBmdW5jdGlvbiBMb2dpblZpZXcoeyBvbkxvZ2luLCBvblJlZ2lzdGVyLCBvblNzb0xvZ2luLCBlcnJvciwgbG9hZGluZyB9OiBMb2dpblZpZXdQcm9wcykge1xyXG4gIGNvbnN0IFttb2RlLCBzZXRNb2RlXSA9IHVzZVN0YXRlPCdsb2dpbicgfCAncmVnaXN0ZXInIHwgJ2ZvcmdvdCcgfCAncmVzZXQnPignbG9naW4nKTtcclxuICBjb25zdCBbZmlyc3RSdW4sIHNldEZpcnN0UnVuXSA9IHVzZVN0YXRlKGZhbHNlKTtcclxuICBjb25zdCBbc3NvRW5hYmxlZCwgc2V0U3NvRW5hYmxlZF0gPSB1c2VTdGF0ZShmYWxzZSk7XHJcbiAgY29uc3QgW3Jlc2V0VG9rZW4sIHNldFJlc2V0VG9rZW5dID0gdXNlU3RhdGUoJycpO1xyXG4gIGNvbnN0IFtmb3Jnb3RTZW50LCBzZXRGb3Jnb3RTZW50XSA9IHVzZVN0YXRlKGZhbHNlKTtcclxuICBjb25zdCBbcmVzZXREb25lLCBzZXRSZXNldERvbmVdID0gdXNlU3RhdGUoZmFsc2UpO1xyXG4gIGNvbnN0IFtyZXNldExvYWRpbmcsIHNldFJlc2V0TG9hZGluZ10gPSB1c2VTdGF0ZShmYWxzZSk7XHJcblxyXG4gIC8vIENoZWNrIGlmIGFueSB1c2VycyBleGlzdCDigJQgaWYgbm90LCBkZWZhdWx0IHRvIHJlZ2lzdGVyIG1vZGVcclxuICAvLyBBbHNvIGNoZWNrIFNTTyBzdGF0dXNcclxuICAvLyBBbHNvIGNoZWNrIGZvciA/cmVzZXRfdG9rZW49IGluIFVSTFxyXG4gIHVzZUVmZmVjdCgoKSA9PiB7XHJcbiAgICBmZXRjaCgnL2FwaS9hdXRoL3N0YXR1cycpXHJcbiAgICAgIC50aGVuKHIgPT4gci5qc29uKCkpXHJcbiAgICAgIC50aGVuKGpzb24gPT4ge1xyXG4gICAgICAgIGlmIChqc29uLm9rICYmICFqc29uLmRhdGEuaGFzVXNlcnMpIHtcclxuICAgICAgICAgIHNldE1vZGUoJ3JlZ2lzdGVyJyk7XHJcbiAgICAgICAgICBzZXRGaXJzdFJ1bih0cnVlKTtcclxuICAgICAgICB9XHJcbiAgICAgIH0pXHJcbiAgICAgIC5jYXRjaCgoKSA9PiB7fSk7XHJcbiAgICBmZXRjaCgnL2FwaS9hdXRoL3Nzby9zdGF0dXMnKVxyXG4gICAgICAudGhlbihyID0+IHIuanNvbigpKVxyXG4gICAgICAudGhlbihqc29uID0+IHtcclxuICAgICAgICBpZiAoanNvbi5vayAmJiBqc29uLmRhdGEuZW5hYmxlZCkgc2V0U3NvRW5hYmxlZCh0cnVlKTtcclxuICAgICAgfSlcclxuICAgICAgLmNhdGNoKCgpID0+IHt9KTtcclxuXHJcbiAgICAvLyBDaGVjayBmb3IgcGFzc3dvcmQgcmVzZXQgdG9rZW4gaW4gVVJMXHJcbiAgICBjb25zdCBwYXJhbXMgPSBuZXcgVVJMU2VhcmNoUGFyYW1zKHdpbmRvdy5sb2NhdGlvbi5zZWFyY2gpO1xyXG4gICAgY29uc3QgdG9rZW4gPSBwYXJhbXMuZ2V0KCdyZXNldF90b2tlbicpO1xyXG4gICAgaWYgKHRva2VuKSB7XHJcbiAgICAgIHNldFJlc2V0VG9rZW4odG9rZW4pO1xyXG4gICAgICBzZXRNb2RlKCdyZXNldCcpO1xyXG4gICAgICAvLyBDbGVhbiB0aGUgVVJMXHJcbiAgICAgIHdpbmRvdy5oaXN0b3J5LnJlcGxhY2VTdGF0ZSh7fSwgJycsIHdpbmRvdy5sb2NhdGlvbi5wYXRobmFtZSk7XHJcbiAgICB9XHJcbiAgfSwgW10pO1xyXG4gIGNvbnN0IFt1c2VybmFtZSwgc2V0VXNlcm5hbWVdID0gdXNlU3RhdGUoJycpO1xyXG4gIGNvbnN0IFtlbWFpbCwgc2V0RW1haWxdID0gdXNlU3RhdGUoJycpO1xyXG4gIGNvbnN0IFtwYXNzd29yZCwgc2V0UGFzc3dvcmRdID0gdXNlU3RhdGUoJycpO1xyXG4gIGNvbnN0IFtjb25maXJtUGFzc3dvcmQsIHNldENvbmZpcm1QYXNzd29yZF0gPSB1c2VTdGF0ZSgnJyk7XHJcbiAgY29uc3QgW2Rpc3BsYXlOYW1lLCBzZXREaXNwbGF5TmFtZV0gPSB1c2VTdGF0ZSgnJyk7XHJcbiAgY29uc3QgW3JlbWVtYmVyTWUsIHNldFJlbWVtYmVyTWVdID0gdXNlU3RhdGUodHJ1ZSk7XHJcbiAgY29uc3QgW2xvY2FsRXJyb3IsIHNldExvY2FsRXJyb3JdID0gdXNlU3RhdGUoJycpO1xyXG4gIGNvbnN0IFtzc29Qb3B1cEVycm9yLCBzZXRTc29Qb3B1cEVycm9yXSA9IHVzZVN0YXRlPHN0cmluZyB8IG51bGw+KG51bGwpO1xyXG5cclxuICAvLyBTaG93IFNTTyBlcnJvcnMgaW4gYSBwcm9taW5lbnQgcG9wdXBcclxuICB1c2VFZmZlY3QoKCkgPT4ge1xyXG4gICAgaWYgKGVycm9yICYmIGVycm9yLnN0YXJ0c1dpdGgoJ01pY3Jvc29mdCBzaWduLWluIGZhaWxlZDonKSkge1xyXG4gICAgICBzZXRTc29Qb3B1cEVycm9yKGVycm9yKTtcclxuICAgIH1cclxuICB9LCBbZXJyb3JdKTtcclxuXHJcbiAgY29uc3QgaGFuZGxlU3VibWl0ID0gYXN5bmMgKGU6IFJlYWN0LkZvcm1FdmVudCkgPT4ge1xyXG4gICAgZS5wcmV2ZW50RGVmYXVsdCgpO1xyXG4gICAgc2V0TG9jYWxFcnJvcignJyk7XHJcblxyXG4gICAgaWYgKG1vZGUgPT09ICdmb3Jnb3QnKSB7XHJcbiAgICAgIGlmICghZW1haWwudHJpbSgpKSB7XHJcbiAgICAgICAgc2V0TG9jYWxFcnJvcignRW1haWwgYWRkcmVzcyBpcyByZXF1aXJlZCcpO1xyXG4gICAgICAgIHJldHVybjtcclxuICAgICAgfVxyXG4gICAgICBzZXRSZXNldExvYWRpbmcodHJ1ZSk7XHJcbiAgICAgIHRyeSB7XHJcbiAgICAgICAgY29uc3QgcmVzID0gYXdhaXQgZmV0Y2goJy9hcGkvYXV0aC9mb3Jnb3QtcGFzc3dvcmQnLCB7XHJcbiAgICAgICAgICBtZXRob2Q6ICdQT1NUJyxcclxuICAgICAgICAgIGhlYWRlcnM6IHsgJ0NvbnRlbnQtVHlwZSc6ICdhcHBsaWNhdGlvbi9qc29uJyB9LFxyXG4gICAgICAgICAgYm9keTogSlNPTi5zdHJpbmdpZnkoeyBlbWFpbDogZW1haWwudHJpbSgpIH0pLFxyXG4gICAgICAgIH0pO1xyXG4gICAgICAgIGNvbnN0IGpzb24gPSBhd2FpdCByZXMuanNvbigpO1xyXG4gICAgICAgIGlmICghanNvbi5vaykge1xyXG4gICAgICAgICAgc2V0TG9jYWxFcnJvcihqc29uLmVycm9yIHx8ICdGYWlsZWQgdG8gc2VuZCByZXNldCBlbWFpbCcpO1xyXG4gICAgICAgIH0gZWxzZSB7XHJcbiAgICAgICAgICBzZXRGb3Jnb3RTZW50KHRydWUpO1xyXG4gICAgICAgIH1cclxuICAgICAgfSBjYXRjaCB7XHJcbiAgICAgICAgc2V0TG9jYWxFcnJvcignTmV0d29yayBlcnJvci4gUGxlYXNlIHRyeSBhZ2Fpbi4nKTtcclxuICAgICAgfSBmaW5hbGx5IHtcclxuICAgICAgICBzZXRSZXNldExvYWRpbmcoZmFsc2UpO1xyXG4gICAgICB9XHJcbiAgICAgIHJldHVybjtcclxuICAgIH1cclxuXHJcbiAgICBpZiAobW9kZSA9PT0gJ3Jlc2V0Jykge1xyXG4gICAgICBpZiAoIXBhc3N3b3JkIHx8IHBhc3N3b3JkLmxlbmd0aCA8IDYpIHtcclxuICAgICAgICBzZXRMb2NhbEVycm9yKCdQYXNzd29yZCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycycpO1xyXG4gICAgICAgIHJldHVybjtcclxuICAgICAgfVxyXG4gICAgICBpZiAocGFzc3dvcmQgIT09IGNvbmZpcm1QYXNzd29yZCkge1xyXG4gICAgICAgIHNldExvY2FsRXJyb3IoJ1Bhc3N3b3JkcyBkbyBub3QgbWF0Y2gnKTtcclxuICAgICAgICByZXR1cm47XHJcbiAgICAgIH1cclxuICAgICAgc2V0UmVzZXRMb2FkaW5nKHRydWUpO1xyXG4gICAgICB0cnkge1xyXG4gICAgICAgIGNvbnN0IHJlcyA9IGF3YWl0IGZldGNoKCcvYXBpL2F1dGgvcmVzZXQtcGFzc3dvcmQnLCB7XHJcbiAgICAgICAgICBtZXRob2Q6ICdQT1NUJyxcclxuICAgICAgICAgIGhlYWRlcnM6IHsgJ0NvbnRlbnQtVHlwZSc6ICdhcHBsaWNhdGlvbi9qc29uJyB9LFxyXG4gICAgICAgICAgYm9keTogSlNPTi5zdHJpbmdpZnkoeyB0b2tlbjogcmVzZXRUb2tlbiwgcGFzc3dvcmQgfSksXHJcbiAgICAgICAgfSk7XHJcbiAgICAgICAgY29uc3QganNvbiA9IGF3YWl0IHJlcy5qc29uKCk7XHJcbiAgICAgICAgaWYgKCFqc29uLm9rKSB7XHJcbiAgICAgICAgICBzZXRMb2NhbEVycm9yKGpzb24uZXJyb3IgfHwgJ0ZhaWxlZCB0byByZXNldCBwYXNzd29yZCcpO1xyXG4gICAgICAgIH0gZWxzZSB7XHJcbiAgICAgICAgICBzZXRSZXNldERvbmUodHJ1ZSk7XHJcbiAgICAgICAgfVxyXG4gICAgICB9IGNhdGNoIHtcclxuICAgICAgICBzZXRMb2NhbEVycm9yKCdOZXR3b3JrIGVycm9yLiBQbGVhc2UgdHJ5IGFnYWluLicpO1xyXG4gICAgICB9IGZpbmFsbHkge1xyXG4gICAgICAgIHNldFJlc2V0TG9hZGluZyhmYWxzZSk7XHJcbiAgICAgIH1cclxuICAgICAgcmV0dXJuO1xyXG4gICAgfVxyXG5cclxuICAgIGlmICghdXNlcm5hbWUudHJpbSgpIHx8ICFwYXNzd29yZCkge1xyXG4gICAgICBzZXRMb2NhbEVycm9yKCdVc2VybmFtZSBhbmQgcGFzc3dvcmQgYXJlIHJlcXVpcmVkJyk7XHJcbiAgICAgIHJldHVybjtcclxuICAgIH1cclxuXHJcbiAgICBpZiAobW9kZSA9PT0gJ3JlZ2lzdGVyJykge1xyXG4gICAgICBpZiAocGFzc3dvcmQubGVuZ3RoIDwgNikge1xyXG4gICAgICAgIHNldExvY2FsRXJyb3IoJ1Bhc3N3b3JkIG11c3QgYmUgYXQgbGVhc3QgNiBjaGFyYWN0ZXJzJyk7XHJcbiAgICAgICAgcmV0dXJuO1xyXG4gICAgICB9XHJcbiAgICAgIGlmIChwYXNzd29yZCAhPT0gY29uZmlybVBhc3N3b3JkKSB7XHJcbiAgICAgICAgc2V0TG9jYWxFcnJvcignUGFzc3dvcmRzIGRvIG5vdCBtYXRjaCcpO1xyXG4gICAgICAgIHJldHVybjtcclxuICAgICAgfVxyXG4gICAgICBhd2FpdCBvblJlZ2lzdGVyKHVzZXJuYW1lLnRyaW0oKSwgcGFzc3dvcmQsIGRpc3BsYXlOYW1lLnRyaW0oKSB8fCB1bmRlZmluZWQpO1xyXG4gICAgfSBlbHNlIHtcclxuICAgICAgYXdhaXQgb25Mb2dpbih1c2VybmFtZS50cmltKCksIHBhc3N3b3JkLCByZW1lbWJlck1lKTtcclxuICAgIH1cclxuICB9O1xyXG5cclxuICBjb25zdCBkaXNwbGF5RXJyb3IgPSBsb2NhbEVycm9yIHx8IGVycm9yO1xyXG5cclxuICByZXR1cm4gKFxyXG4gICAgPGRpdiBjbGFzc05hbWU9XCJtaW4taC1zY3JlZW4gYmctWyMyNzJDMzNdIGZsZXggaXRlbXMtY2VudGVyIGp1c3RpZnktY2VudGVyIHB4LTRcIj5cclxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJ3LWZ1bGwgbWF4LXctc21cIj5cclxuICAgICAgICB7LyogTG9nbyAqL31cclxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInRleHQtY2VudGVyIG1iLThcIj5cclxuICAgICAgICAgIDxoMSBjbGFzc05hbWU9XCJ0ZXh0LTJ4bCBmb250LWJvbGQgdHJhY2tpbmctdGlnaHQgZm9udC1bdmFyKC0tZm9udC1oZWFkaW5nKV1cIj5cclxuICAgICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwidGV4dC1bIzVlYzFjYV1cIj5OLk8uVi5BPC9zcGFuPlxyXG4gICAgICAgICAgPC9oMT5cclxuICAgICAgICAgIDxwIGNsYXNzTmFtZT1cInRleHQtWzExcHhdIHRleHQtbmV1dHJhbC01MDAgdXBwZXJjYXNlIHRyYWNraW5nLXdpZGVzdCBtdC0xXCI+XHJcbiAgICAgICAgICAgIE51cnR1ciBPcGVyYXRpb25hbCBWaXJ0dWFsIEFzc2lzdGFudFxyXG4gICAgICAgICAgPC9wPlxyXG4gICAgICAgIDwvZGl2PlxyXG5cclxuICAgICAgICB7LyogQ2FyZCAqL31cclxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImJnLVsjMmYzNTNkXSBib3JkZXIgYm9yZGVyLVsjM2E0MjRkXSByb3VuZGVkLXhsIHAtNlwiPlxyXG4gICAgICAgICAgPGgyIGNsYXNzTmFtZT1cInRleHQtc20gZm9udC1zZW1pYm9sZCB0ZXh0LW5ldXRyYWwtMjAwIG1iLTRcIj5cclxuICAgICAgICAgICAge21vZGUgPT09ICdsb2dpbicgPyAnU2lnbiBpbicgOiBtb2RlID09PSAncmVnaXN0ZXInID8gJ0NyZWF0ZSBhY2NvdW50JyA6IG1vZGUgPT09ICdmb3Jnb3QnID8gJ0ZvcmdvdCBwYXNzd29yZCcgOiAnUmVzZXQgcGFzc3dvcmQnfVxyXG4gICAgICAgICAgPC9oMj5cclxuXHJcbiAgICAgICAgICB7Zmlyc3RSdW4gJiYgbW9kZSA9PT0gJ3JlZ2lzdGVyJyAmJiAoXHJcbiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwibWItNCBweC0zIHB5LTIgYmctWyM1ZWMxY2FdLzEwIGJvcmRlciBib3JkZXItWyM1ZWMxY2FdLzMwIHJvdW5kZWQtbGcgdGV4dC1bIzVlYzFjYV0gdGV4dC14c1wiPlxyXG4gICAgICAgICAgICAgIFdlbGNvbWUhIENyZWF0ZSB5b3VyIGFkbWluIGFjY291bnQgdG8gZ2V0IHN0YXJ0ZWQuXHJcbiAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgKX1cclxuXHJcbiAgICAgICAgICB7ZGlzcGxheUVycm9yICYmIChcclxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJtYi00IHB4LTMgcHktMiBiZy1yZWQtOTUwLzUwIGJvcmRlciBib3JkZXItcmVkLTkwMC81MCByb3VuZGVkLWxnIHRleHQtcmVkLTQwMCB0ZXh0LXhzXCI+XHJcbiAgICAgICAgICAgICAge2Rpc3BsYXlFcnJvcn1cclxuICAgICAgICAgICAgPC9kaXY+XHJcbiAgICAgICAgICApfVxyXG5cclxuICAgICAgICAgIHtzc29FbmFibGVkICYmIG9uU3NvTG9naW4gJiYgbW9kZSA9PT0gJ2xvZ2luJyAmJiAoXHJcbiAgICAgICAgICAgIDw+XHJcbiAgICAgICAgICAgICAgPGJ1dHRvblxyXG4gICAgICAgICAgICAgICAgdHlwZT1cImJ1dHRvblwiXHJcbiAgICAgICAgICAgICAgICBvbkNsaWNrPXtvblNzb0xvZ2lufVxyXG4gICAgICAgICAgICAgICAgZGlzYWJsZWQ9e2xvYWRpbmd9XHJcbiAgICAgICAgICAgICAgICBjbGFzc05hbWU9XCJ3LWZ1bGwgcHgtNCBweS0yLjUgdGV4dC1zbSByb3VuZGVkLWxnIGJnLVsjNWVjMWNhXSB0ZXh0LVsjMjcyQzMzXSBmb250LXNlbWlib2xkIGhvdmVyOmJnLVsjNGRiMGI5XSBkaXNhYmxlZDpvcGFjaXR5LTUwIHRyYW5zaXRpb24tY29sb3JzIGZsZXggaXRlbXMtY2VudGVyIGp1c3RpZnktY2VudGVyIGdhcC0yXCJcclxuICAgICAgICAgICAgICA+XHJcbiAgICAgICAgICAgICAgICA8c3ZnIGNsYXNzTmFtZT1cInctNCBoLTRcIiB2aWV3Qm94PVwiMCAwIDIxIDIxXCIgZmlsbD1cIm5vbmVcIj5cclxuICAgICAgICAgICAgICAgICAgPHJlY3QgeD1cIjFcIiB5PVwiMVwiIHdpZHRoPVwiOVwiIGhlaWdodD1cIjlcIiBmaWxsPVwiI2YyNTAyMlwiLz5cclxuICAgICAgICAgICAgICAgICAgPHJlY3QgeD1cIjExXCIgeT1cIjFcIiB3aWR0aD1cIjlcIiBoZWlnaHQ9XCI5XCIgZmlsbD1cIiM3ZmJhMDBcIi8+XHJcbiAgICAgICAgICAgICAgICAgIDxyZWN0IHg9XCIxXCIgeT1cIjExXCIgd2lkdGg9XCI5XCIgaGVpZ2h0PVwiOVwiIGZpbGw9XCIjMDBhNGVmXCIvPlxyXG4gICAgICAgICAgICAgICAgICA8cmVjdCB4PVwiMTFcIiB5PVwiMTFcIiB3aWR0aD1cIjlcIiBoZWlnaHQ9XCI5XCIgZmlsbD1cIiNmZmI5MDBcIi8+XHJcbiAgICAgICAgICAgICAgICA8L3N2Zz5cclxuICAgICAgICAgICAgICAgIFNpZ24gaW4gd2l0aCBNaWNyb3NvZnRcclxuICAgICAgICAgICAgICA8L2J1dHRvbj5cclxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInJlbGF0aXZlIG15LTRcIj5cclxuICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiYWJzb2x1dGUgaW5zZXQtMCBmbGV4IGl0ZW1zLWNlbnRlclwiPlxyXG4gICAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInctZnVsbCBib3JkZXItdCBib3JkZXItWyMzYTQyNGRdXCIgLz5cclxuICAgICAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJyZWxhdGl2ZSBmbGV4IGp1c3RpZnktY2VudGVyXCI+XHJcbiAgICAgICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cImJnLVsjMmYzNTNkXSBweC0zIHRleHQtWzEwcHhdIHRleHQtbmV1dHJhbC01MDAgdXBwZXJjYXNlXCI+b3Igc2lnbiBpbiB3aXRoIHBhc3N3b3JkPC9zcGFuPlxyXG4gICAgICAgICAgICAgICAgPC9kaXY+XHJcbiAgICAgICAgICAgICAgPC9kaXY+XHJcbiAgICAgICAgICAgIDwvPlxyXG4gICAgICAgICAgKX1cclxuXHJcbiAgICAgICAgICB7LyogRm9yZ290IHBhc3N3b3JkIOKAlCBzdWNjZXNzIG1lc3NhZ2UgKi99XHJcbiAgICAgICAgICB7bW9kZSA9PT0gJ2ZvcmdvdCcgJiYgZm9yZ290U2VudCA/IChcclxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJzcGFjZS15LTRcIj5cclxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInB4LTMgcHktMiBiZy1bIzVlYzFjYV0vMTAgYm9yZGVyIGJvcmRlci1bIzVlYzFjYV0vMzAgcm91bmRlZC1sZyB0ZXh0LVsjNWVjMWNhXSB0ZXh0LXhzXCI+XHJcbiAgICAgICAgICAgICAgICBJZiBhbiBhY2NvdW50IGV4aXN0cyB3aXRoIHRoYXQgZW1haWwsIGEgcmVzZXQgbGluayBoYXMgYmVlbiBzZW50LiBDaGVjayB5b3VyIGluYm94LlxyXG4gICAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgICAgIDxidXR0b25cclxuICAgICAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IHsgc2V0TW9kZSgnbG9naW4nKTsgc2V0Rm9yZ290U2VudChmYWxzZSk7IHNldExvY2FsRXJyb3IoJycpOyB9fVxyXG4gICAgICAgICAgICAgICAgY2xhc3NOYW1lPVwidy1mdWxsIHB4LTQgcHktMi41IHRleHQtc20gcm91bmRlZC1sZyBiZy1bIzJmMzUzZF0gYm9yZGVyIGJvcmRlci1bIzNhNDI0ZF0gdGV4dC1uZXV0cmFsLTIwMCBmb250LW1lZGl1bSBob3ZlcjpiZy1bIzM2M2Q0N10gdHJhbnNpdGlvbi1jb2xvcnNcIlxyXG4gICAgICAgICAgICAgID5cclxuICAgICAgICAgICAgICAgIEJhY2sgdG8gU2lnbiBJblxyXG4gICAgICAgICAgICAgIDwvYnV0dG9uPlxyXG4gICAgICAgICAgICA8L2Rpdj5cclxuICAgICAgICAgICkgOiBtb2RlID09PSAncmVzZXQnICYmIHJlc2V0RG9uZSA/IChcclxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJzcGFjZS15LTRcIj5cclxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInB4LTMgcHktMiBiZy1bIzVlYzFjYV0vMTAgYm9yZGVyIGJvcmRlci1bIzVlYzFjYV0vMzAgcm91bmRlZC1sZyB0ZXh0LVsjNWVjMWNhXSB0ZXh0LXhzXCI+XHJcbiAgICAgICAgICAgICAgICBZb3VyIHBhc3N3b3JkIGhhcyBiZWVuIHJlc2V0LiBZb3UgY2FuIG5vdyBzaWduIGluLlxyXG4gICAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgICAgIDxidXR0b25cclxuICAgICAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IHsgc2V0TW9kZSgnbG9naW4nKTsgc2V0UmVzZXREb25lKGZhbHNlKTsgc2V0TG9jYWxFcnJvcignJyk7IHNldFBhc3N3b3JkKCcnKTsgc2V0Q29uZmlybVBhc3N3b3JkKCcnKTsgfX1cclxuICAgICAgICAgICAgICAgIGNsYXNzTmFtZT1cInctZnVsbCBweC00IHB5LTIuNSB0ZXh0LXNtIHJvdW5kZWQtbGcgYmctWyM1ZWMxY2FdIHRleHQtWyMyNzJDMzNdIGZvbnQtc2VtaWJvbGQgaG92ZXI6YmctWyM0ZGIwYjldIHRyYW5zaXRpb24tY29sb3JzXCJcclxuICAgICAgICAgICAgICA+XHJcbiAgICAgICAgICAgICAgICBTaWduIEluXHJcbiAgICAgICAgICAgICAgPC9idXR0b24+XHJcbiAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgKSA6IChcclxuICAgICAgICAgIDxmb3JtIG9uU3VibWl0PXtoYW5kbGVTdWJtaXR9IGNsYXNzTmFtZT1cInNwYWNlLXktM1wiPlxyXG4gICAgICAgICAgICB7LyogTG9naW4gKyBSZWdpc3RlcjogdXNlcm5hbWUgKi99XHJcbiAgICAgICAgICAgIHsobW9kZSA9PT0gJ2xvZ2luJyB8fCBtb2RlID09PSAncmVnaXN0ZXInKSAmJiAoXHJcbiAgICAgICAgICAgIDxkaXY+XHJcbiAgICAgICAgICAgICAgPGxhYmVsIGNsYXNzTmFtZT1cInRleHQtWzEwcHhdIHRleHQtbmV1dHJhbC01MDAgdXBwZXJjYXNlIHRyYWNraW5nLXdpZGVyIG1iLTEgYmxvY2tcIj5Vc2VybmFtZTwvbGFiZWw+XHJcbiAgICAgICAgICAgICAgPGlucHV0XHJcbiAgICAgICAgICAgICAgICBjbGFzc05hbWU9e2lucHV0Q2xzfVxyXG4gICAgICAgICAgICAgICAgdmFsdWU9e3VzZXJuYW1lfVxyXG4gICAgICAgICAgICAgICAgb25DaGFuZ2U9e2UgPT4gc2V0VXNlcm5hbWUoZS50YXJnZXQudmFsdWUpfVxyXG4gICAgICAgICAgICAgICAgcGxhY2Vob2xkZXI9XCJFbnRlciB1c2VybmFtZVwiXHJcbiAgICAgICAgICAgICAgICBhdXRvRm9jdXM9eyFzc29FbmFibGVkfVxyXG4gICAgICAgICAgICAgICAgYXV0b0NvbXBsZXRlPVwidXNlcm5hbWVcIlxyXG4gICAgICAgICAgICAgIC8+XHJcbiAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgICApfVxyXG5cclxuICAgICAgICAgICAgey8qIEZvcmdvdDogZW1haWwgKi99XHJcbiAgICAgICAgICAgIHttb2RlID09PSAnZm9yZ290JyAmJiAoXHJcbiAgICAgICAgICAgICAgPGRpdj5cclxuICAgICAgICAgICAgICAgIDxsYWJlbCBjbGFzc05hbWU9XCJ0ZXh0LVsxMHB4XSB0ZXh0LW5ldXRyYWwtNTAwIHVwcGVyY2FzZSB0cmFja2luZy13aWRlciBtYi0xIGJsb2NrXCI+RW1haWwgQWRkcmVzczwvbGFiZWw+XHJcbiAgICAgICAgICAgICAgICA8aW5wdXRcclxuICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPXtpbnB1dENsc31cclxuICAgICAgICAgICAgICAgICAgdHlwZT1cImVtYWlsXCJcclxuICAgICAgICAgICAgICAgICAgdmFsdWU9e2VtYWlsfVxyXG4gICAgICAgICAgICAgICAgICBvbkNoYW5nZT17ZSA9PiBzZXRFbWFpbChlLnRhcmdldC52YWx1ZSl9XHJcbiAgICAgICAgICAgICAgICAgIHBsYWNlaG9sZGVyPVwiRW50ZXIgeW91ciBhY2NvdW50IGVtYWlsXCJcclxuICAgICAgICAgICAgICAgICAgYXV0b0ZvY3VzXHJcbiAgICAgICAgICAgICAgICAgIGF1dG9Db21wbGV0ZT1cImVtYWlsXCJcclxuICAgICAgICAgICAgICAgIC8+XHJcbiAgICAgICAgICAgICAgICA8cCBjbGFzc05hbWU9XCJ0ZXh0LVsxMHB4XSB0ZXh0LW5ldXRyYWwtNTAwIG10LTFcIj5XZSdsbCBzZW5kIGEgcmVzZXQgbGluayB0byB0aGlzIGFkZHJlc3MuPC9wPlxyXG4gICAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgICApfVxyXG5cclxuICAgICAgICAgICAge21vZGUgPT09ICdyZWdpc3RlcicgJiYgKFxyXG4gICAgICAgICAgICAgIDxkaXY+XHJcbiAgICAgICAgICAgICAgICA8bGFiZWwgY2xhc3NOYW1lPVwidGV4dC1bMTBweF0gdGV4dC1uZXV0cmFsLTUwMCB1cHBlcmNhc2UgdHJhY2tpbmctd2lkZXIgbWItMSBibG9ja1wiPkRpc3BsYXkgTmFtZTwvbGFiZWw+XHJcbiAgICAgICAgICAgICAgICA8aW5wdXRcclxuICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPXtpbnB1dENsc31cclxuICAgICAgICAgICAgICAgICAgdmFsdWU9e2Rpc3BsYXlOYW1lfVxyXG4gICAgICAgICAgICAgICAgICBvbkNoYW5nZT17ZSA9PiBzZXREaXNwbGF5TmFtZShlLnRhcmdldC52YWx1ZSl9XHJcbiAgICAgICAgICAgICAgICAgIHBsYWNlaG9sZGVyPVwiWW91ciBuYW1lIChvcHRpb25hbClcIlxyXG4gICAgICAgICAgICAgICAgICBhdXRvQ29tcGxldGU9XCJuYW1lXCJcclxuICAgICAgICAgICAgICAgIC8+XHJcbiAgICAgICAgICAgICAgPC9kaXY+XHJcbiAgICAgICAgICAgICl9XHJcblxyXG4gICAgICAgICAgICB7LyogTG9naW4gKyBSZWdpc3RlciArIFJlc2V0OiBwYXNzd29yZCAqL31cclxuICAgICAgICAgICAgeyhtb2RlID09PSAnbG9naW4nIHx8IG1vZGUgPT09ICdyZWdpc3RlcicgfHwgbW9kZSA9PT0gJ3Jlc2V0JykgJiYgKFxyXG4gICAgICAgICAgICA8ZGl2PlxyXG4gICAgICAgICAgICAgIDxsYWJlbCBjbGFzc05hbWU9XCJ0ZXh0LVsxMHB4XSB0ZXh0LW5ldXRyYWwtNTAwIHVwcGVyY2FzZSB0cmFja2luZy13aWRlciBtYi0xIGJsb2NrXCI+XHJcbiAgICAgICAgICAgICAgICB7bW9kZSA9PT0gJ3Jlc2V0JyA/ICdOZXcgUGFzc3dvcmQnIDogJ1Bhc3N3b3JkJ31cclxuICAgICAgICAgICAgICA8L2xhYmVsPlxyXG4gICAgICAgICAgICAgIDxpbnB1dFxyXG4gICAgICAgICAgICAgICAgY2xhc3NOYW1lPXtpbnB1dENsc31cclxuICAgICAgICAgICAgICAgIHR5cGU9XCJwYXNzd29yZFwiXHJcbiAgICAgICAgICAgICAgICB2YWx1ZT17cGFzc3dvcmR9XHJcbiAgICAgICAgICAgICAgICBvbkNoYW5nZT17ZSA9PiBzZXRQYXNzd29yZChlLnRhcmdldC52YWx1ZSl9XHJcbiAgICAgICAgICAgICAgICBwbGFjZWhvbGRlcj17bW9kZSA9PT0gJ3JlZ2lzdGVyJyB8fCBtb2RlID09PSAncmVzZXQnID8gJ01pbiA2IGNoYXJhY3RlcnMnIDogJ0VudGVyIHBhc3N3b3JkJ31cclxuICAgICAgICAgICAgICAgIGF1dG9Db21wbGV0ZT17bW9kZSA9PT0gJ2xvZ2luJyA/ICdjdXJyZW50LXBhc3N3b3JkJyA6ICduZXctcGFzc3dvcmQnfVxyXG4gICAgICAgICAgICAgICAgYXV0b0ZvY3VzPXttb2RlID09PSAncmVzZXQnfVxyXG4gICAgICAgICAgICAgIC8+XHJcbiAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgICApfVxyXG5cclxuICAgICAgICAgICAgey8qIFJlZ2lzdGVyICsgUmVzZXQ6IGNvbmZpcm0gcGFzc3dvcmQgKi99XHJcbiAgICAgICAgICAgIHsobW9kZSA9PT0gJ3JlZ2lzdGVyJyB8fCBtb2RlID09PSAncmVzZXQnKSAmJiAoXHJcbiAgICAgICAgICAgICAgPGRpdj5cclxuICAgICAgICAgICAgICAgIDxsYWJlbCBjbGFzc05hbWU9XCJ0ZXh0LVsxMHB4XSB0ZXh0LW5ldXRyYWwtNTAwIHVwcGVyY2FzZSB0cmFja2luZy13aWRlciBtYi0xIGJsb2NrXCI+Q29uZmlybSBQYXNzd29yZDwvbGFiZWw+XHJcbiAgICAgICAgICAgICAgICA8aW5wdXRcclxuICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPXtpbnB1dENsc31cclxuICAgICAgICAgICAgICAgICAgdHlwZT1cInBhc3N3b3JkXCJcclxuICAgICAgICAgICAgICAgICAgdmFsdWU9e2NvbmZpcm1QYXNzd29yZH1cclxuICAgICAgICAgICAgICAgICAgb25DaGFuZ2U9e2UgPT4gc2V0Q29uZmlybVBhc3N3b3JkKGUudGFyZ2V0LnZhbHVlKX1cclxuICAgICAgICAgICAgICAgICAgcGxhY2Vob2xkZXI9XCJSZS1lbnRlciBwYXNzd29yZFwiXHJcbiAgICAgICAgICAgICAgICAgIGF1dG9Db21wbGV0ZT1cIm5ldy1wYXNzd29yZFwiXHJcbiAgICAgICAgICAgICAgICAvPlxyXG4gICAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgICApfVxyXG5cclxuICAgICAgICAgICAge21vZGUgPT09ICdsb2dpbicgJiYgKFxyXG4gICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZmxleCBpdGVtcy1jZW50ZXIganVzdGlmeS1iZXR3ZWVuXCI+XHJcbiAgICAgICAgICAgICAgICA8bGFiZWwgY2xhc3NOYW1lPVwiZmxleCBpdGVtcy1jZW50ZXIgZ2FwLTIgY3Vyc29yLXBvaW50ZXIgc2VsZWN0LW5vbmVcIj5cclxuICAgICAgICAgICAgICAgICAgPGlucHV0XHJcbiAgICAgICAgICAgICAgICAgICAgdHlwZT1cImNoZWNrYm94XCJcclxuICAgICAgICAgICAgICAgICAgICBjaGVja2VkPXtyZW1lbWJlck1lfVxyXG4gICAgICAgICAgICAgICAgICAgIG9uQ2hhbmdlPXsoZSkgPT4gc2V0UmVtZW1iZXJNZShlLnRhcmdldC5jaGVja2VkKX1cclxuICAgICAgICAgICAgICAgICAgICBjbGFzc05hbWU9XCJ3LTMuNSBoLTMuNSByb3VuZGVkIGJvcmRlci1bIzNhNDI0ZF0gYmctWyMyNzJDMzNdIGFjY2VudC1bIzVlYzFjYV1cIlxyXG4gICAgICAgICAgICAgICAgICAvPlxyXG4gICAgICAgICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9XCJ0ZXh0LXhzIHRleHQtbmV1dHJhbC00MDBcIj5SZW1lbWJlciBtZTwvc3Bhbj5cclxuICAgICAgICAgICAgICAgIDwvbGFiZWw+XHJcbiAgICAgICAgICAgICAgICA8YnV0dG9uXHJcbiAgICAgICAgICAgICAgICAgIHR5cGU9XCJidXR0b25cIlxyXG4gICAgICAgICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiB7IHNldE1vZGUoJ2ZvcmdvdCcpOyBzZXRMb2NhbEVycm9yKCcnKTsgc2V0Rm9yZ290U2VudChmYWxzZSk7IH19XHJcbiAgICAgICAgICAgICAgICAgIGNsYXNzTmFtZT1cInRleHQtWzEwcHhdIHRleHQtbmV1dHJhbC01MDAgaG92ZXI6dGV4dC1bIzVlYzFjYV0gdHJhbnNpdGlvbi1jb2xvcnNcIlxyXG4gICAgICAgICAgICAgICAgPlxyXG4gICAgICAgICAgICAgICAgICBGb3Jnb3QgcGFzc3dvcmQ/XHJcbiAgICAgICAgICAgICAgICA8L2J1dHRvbj5cclxuICAgICAgICAgICAgICA8L2Rpdj5cclxuICAgICAgICAgICAgKX1cclxuXHJcbiAgICAgICAgICAgIDxidXR0b25cclxuICAgICAgICAgICAgICB0eXBlPVwic3VibWl0XCJcclxuICAgICAgICAgICAgICBkaXNhYmxlZD17bG9hZGluZyB8fCByZXNldExvYWRpbmd9XHJcbiAgICAgICAgICAgICAgY2xhc3NOYW1lPVwidy1mdWxsIHB4LTQgcHktMi41IHRleHQtc20gcm91bmRlZC1sZyBiZy1bIzJmMzUzZF0gYm9yZGVyIGJvcmRlci1bIzNhNDI0ZF0gdGV4dC1uZXV0cmFsLTIwMCBmb250LW1lZGl1bSBob3ZlcjpiZy1bIzM2M2Q0N10gZGlzYWJsZWQ6b3BhY2l0eS01MCB0cmFuc2l0aW9uLWNvbG9ycyBtdC0yXCJcclxuICAgICAgICAgICAgPlxyXG4gICAgICAgICAgICAgIHsobG9hZGluZyB8fCByZXNldExvYWRpbmcpID8gJ1BsZWFzZSB3YWl0Li4uJyA6IG1vZGUgPT09ICdsb2dpbicgPyAnU2lnbiBJbicgOiBtb2RlID09PSAncmVnaXN0ZXInID8gJ0NyZWF0ZSBBY2NvdW50JyA6IG1vZGUgPT09ICdmb3Jnb3QnID8gJ1NlbmQgUmVzZXQgTGluaycgOiAnUmVzZXQgUGFzc3dvcmQnfVxyXG4gICAgICAgICAgICA8L2J1dHRvbj5cclxuICAgICAgICAgIDwvZm9ybT5cclxuICAgICAgICAgICl9XHJcblxyXG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJtdC00IHRleHQtY2VudGVyXCI+XHJcbiAgICAgICAgICAgIHttb2RlID09PSAnbG9naW4nID8gKFxyXG4gICAgICAgICAgICAgIDxidXR0b25cclxuICAgICAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IHsgc2V0TW9kZSgncmVnaXN0ZXInKTsgc2V0TG9jYWxFcnJvcignJyk7IH19XHJcbiAgICAgICAgICAgICAgICBjbGFzc05hbWU9XCJ0ZXh0LVsxMXB4XSB0ZXh0LVsjNWVjMWNhXSBob3Zlcjp0ZXh0LVsjNGRiMGI5XSB0cmFuc2l0aW9uLWNvbG9yc1wiXHJcbiAgICAgICAgICAgICAgPlxyXG4gICAgICAgICAgICAgICAgRmlyc3QgdGltZT8gQ3JlYXRlIGFuIGFjY291bnRcclxuICAgICAgICAgICAgICA8L2J1dHRvbj5cclxuICAgICAgICAgICAgKSA6IChcclxuICAgICAgICAgICAgICA8YnV0dG9uXHJcbiAgICAgICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiB7IHNldE1vZGUoJ2xvZ2luJyk7IHNldExvY2FsRXJyb3IoJycpOyBzZXRGb3Jnb3RTZW50KGZhbHNlKTsgc2V0UmVzZXREb25lKGZhbHNlKTsgc2V0UGFzc3dvcmQoJycpOyBzZXRDb25maXJtUGFzc3dvcmQoJycpOyB9fVxyXG4gICAgICAgICAgICAgICAgY2xhc3NOYW1lPVwidGV4dC1bMTFweF0gdGV4dC1bIzVlYzFjYV0gaG92ZXI6dGV4dC1bIzRkYjBiOV0gdHJhbnNpdGlvbi1jb2xvcnNcIlxyXG4gICAgICAgICAgICAgID5cclxuICAgICAgICAgICAgICAgIEJhY2sgdG8gc2lnbiBpblxyXG4gICAgICAgICAgICAgIDwvYnV0dG9uPlxyXG4gICAgICAgICAgICApfVxyXG4gICAgICAgICAgPC9kaXY+XHJcbiAgICAgICAgPC9kaXY+XHJcblxyXG4gICAgICAgIDxwIGNsYXNzTmFtZT1cInRleHQtWzEwcHhdIHRleHQtbmV1dHJhbC02MDAgdGV4dC1jZW50ZXIgbXQtNFwiPlxyXG4gICAgICAgICAgTnVydHVyIExpbWl0ZWRcclxuICAgICAgICA8L3A+XHJcbiAgICAgIDwvZGl2PlxyXG5cclxuICAgICAgey8qIFNTTyBlcnJvciBwb3B1cCAqL31cclxuICAgICAge3Nzb1BvcHVwRXJyb3IgJiYgKFxyXG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZml4ZWQgaW5zZXQtMCB6LTUwIGZsZXggaXRlbXMtY2VudGVyIGp1c3RpZnktY2VudGVyIGJnLWJsYWNrLzYwIHB4LTRcIj5cclxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiYmctWyMyZjM1M2RdIGJvcmRlciBib3JkZXItcmVkLTkwMC82MCByb3VuZGVkLXhsIHAtNiBtYXgtdy1tZCB3LWZ1bGwgc2hhZG93LTJ4bFwiPlxyXG4gICAgICAgICAgICA8aDMgY2xhc3NOYW1lPVwidGV4dC1zbSBmb250LXNlbWlib2xkIHRleHQtcmVkLTQwMCBtYi0zIGZsZXggaXRlbXMtY2VudGVyIGdhcC0yXCI+XHJcbiAgICAgICAgICAgICAgPHN2ZyBjbGFzc05hbWU9XCJ3LTUgaC01IHNocmluay0wXCIgZmlsbD1cIm5vbmVcIiB2aWV3Qm94PVwiMCAwIDI0IDI0XCIgc3Ryb2tlPVwiY3VycmVudENvbG9yXCIgc3Ryb2tlV2lkdGg9ezJ9PlxyXG4gICAgICAgICAgICAgICAgPHBhdGggc3Ryb2tlTGluZWNhcD1cInJvdW5kXCIgc3Ryb2tlTGluZWpvaW49XCJyb3VuZFwiIGQ9XCJNMTIgOXYybTAgNGguMDFNMjEgMTJhOSA5IDAgMTEtMTggMCA5IDkgMCAwMTE4IDB6XCIgLz5cclxuICAgICAgICAgICAgICA8L3N2Zz5cclxuICAgICAgICAgICAgICBNaWNyb3NvZnQgU2lnbi1JbiBGYWlsZWRcclxuICAgICAgICAgICAgPC9oMz5cclxuICAgICAgICAgICAgPHAgY2xhc3NOYW1lPVwidGV4dC14cyB0ZXh0LW5ldXRyYWwtMzAwIGxlYWRpbmctcmVsYXhlZCB3aGl0ZXNwYWNlLXByZS13cmFwIGJyZWFrLXdvcmRzIG1iLTRcIj5cclxuICAgICAgICAgICAgICB7c3NvUG9wdXBFcnJvci5yZXBsYWNlKCdNaWNyb3NvZnQgc2lnbi1pbiBmYWlsZWQ6ICcsICcnKX1cclxuICAgICAgICAgICAgPC9wPlxyXG4gICAgICAgICAgICA8YnV0dG9uXHJcbiAgICAgICAgICAgICAgb25DbGljaz17KCkgPT4gc2V0U3NvUG9wdXBFcnJvcihudWxsKX1cclxuICAgICAgICAgICAgICBjbGFzc05hbWU9XCJ3LWZ1bGwgcHgtNCBweS0yIHRleHQtc20gcm91bmRlZC1sZyBiZy1bIzI3MkMzM10gYm9yZGVyIGJvcmRlci1bIzNhNDI0ZF0gdGV4dC1uZXV0cmFsLTIwMCBmb250LW1lZGl1bSBob3ZlcjpiZy1bIzM2M2Q0N10gdHJhbnNpdGlvbi1jb2xvcnNcIlxyXG4gICAgICAgICAgICA+XHJcbiAgICAgICAgICAgICAgRGlzbWlzc1xyXG4gICAgICAgICAgICA8L2J1dHRvbj5cclxuICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgIDwvZGl2PlxyXG4gICAgICApfVxyXG4gICAgPC9kaXY+XHJcbiAgKTtcclxufVxyXG4iXSwiZmlsZSI6IkM6L1VzZXJzL05pY2tXL0NsYXVkZS93aW5kb3dzIGF1dG9tYXRpb24vZGF5cGlsb3Qvc3JjL2NsaWVudC9jb21wb25lbnRzL0xvZ2luVmlldy50c3gifQ==

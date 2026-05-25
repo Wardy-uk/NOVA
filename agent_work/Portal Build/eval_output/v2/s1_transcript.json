@@ -1,0 +1,72 @@
+{
+  "scenario": {
+    "id": 1,
+    "name": "Simple Content Change",
+    "message": "Our homepage phone number is wrong. It should be 01234 567890."
+  },
+  "log": [
+    {
+      "step": "home_loaded",
+      "textLength": 751,
+      "hasGetHelp": true
+    },
+    {
+      "step": "get_help_clicked",
+      "result": "Get help\nReport an issue, ask a question, or request a change"
+    },
+    {
+      "step": "message_sent",
+      "message": "Our homepage phone number is wrong. It should be 01234 567890."
+    },
+    {
+      "step": "first_response",
+      "hasCategoryPicker": true,
+      "hasDirectConversation": false,
+      "taxonomyLeaks": "CLEAN",
+      "responseExcerpt": "Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 12:38 | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "step": "chat_buttons",
+      "count": 4,
+      "labels": [
+        "My Website",
+        "My Account",
+        "Billing & Contracts",
+        "Something Else"
+      ]
+    },
+    {
+      "step": "category_selected",
+      "target": "My Website",
+      "result": "My Website\nContent updates or something not working"
+    },
+    {
+      "step": "after_category",
+      "responseExcerpt": "General support requests and questions | 12:38 | My Website | 12:38 | Got it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see. | 12:38 | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "step": "re_description_requested",
+      "note": "Portal asked customer to re-describe after category selection"
+    },
+    {
+      "step": "after_description",
+      "responseExcerpt": "Email | Phone callback | Drop files here or click to attach screenshots | Submit request | Edit in chat | 12:39 | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "step": "confirmation_check",
+      "hasConfirmation": true
+    },
+    {
+      "step": "confirm_clicked",
+      "result": "Submit request"
+    },
+    {
+      "step": "after_submit",
+      "responseExcerpt": "Request Submitted | Your ticket COD-104 has been created. Our team will review it shortly. | View Ticket | Start a new conversation | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "step": "final_state",
+      "taxonomyLeaks": "CLEAN"
+    }
+  ]
+}

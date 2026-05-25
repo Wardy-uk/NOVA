@@ -1,0 +1,56 @@
+{
+  "scenario": {
+    "id": 5,
+    "name": "Non-Website Request",
+    "message": "My property isn't showing on Rightmove."
+  },
+  "steps": [
+    {
+      "t": "12:20:49",
+      "label": "chat_opened",
+      "hasInput": true
+    },
+    {
+      "t": "12:20:49",
+      "label": "message_sent",
+      "sent": true,
+      "message": "My property isn't showing on Rightmove."
+    },
+    {
+      "t": "12:20:54",
+      "label": "first_response",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": false,
+      "hasDirectSummary": false,
+      "assistantResponse": "13:20 | Which area does this relate to? | My Website | Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 13:20"
+    },
+    {
+      "t": "12:20:54",
+      "label": "taxonomy_check",
+      "leaks": "CLEAN"
+    },
+    {
+      "t": "12:20:54",
+      "label": "category_clicked",
+      "target": "Something Else",
+      "result": "Which area does this relate to?\nMy Website\nContent updates or something not work"
+    },
+    {
+      "t": "12:20:58",
+      "label": "after_category",
+      "asksReDescribe": false,
+      "excerpt": "Cancellations, service changes, queries | Something Else | General support requests and questions | 13:20 | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "t": "12:21:00",
+      "label": "summary_check",
+      "hasSummary": false
+    },
+    {
+      "t": "12:21:00",
+      "label": "final",
+      "taxonomyLeaks": "CLEAN",
+      "consoleErrors": 5
+    }
+  ]
+}

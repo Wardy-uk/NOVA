@@ -18,7 +18,7 @@ export interface EscalationLogEntry {
 
 export interface LogEscalationInput {
   ticket_key: string;
-  escalation_type: 'manual' | 'ai_agent' | 'jira_transition' | 'sla_risk';
+  escalation_type: 'manual' | 'ai_agent' | 'jira_transition' | 'sla_risk' | 'complaint_portal';
   from_tier?: string;
   to_tier?: string;
   reason_code?: string;

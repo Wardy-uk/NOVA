@@ -271,14 +271,31 @@ export interface IntakeSessionMetadata {
   securitySensitive?: boolean;
   ambiguityNote?: string;
   escalationDetected?: boolean;
+  detailRounds?: number;
+  lastMissingCount?: number;
+  submissionFailed?: boolean;
+  vagueGateAsked?: boolean;
+  vagueGateVerified?: boolean;
+  vagueGateSecondAsked?: boolean;
+  portalClarificationAsked?: boolean;
+  synthesizedSubject?: string;
+  synthesizedDescription?: string;
+  synthesisDone?: boolean;
+  synthesisRetried?: boolean;
+  followUpTicketKey?: string;
+  followUpTicketSummary?: string;
+  complaintDetected?: boolean;
 }
 
 export interface ChatMessageMetadata {
-  type?: 'summary_card' | 'kb_suggestions' | 'category_picker' | 'subcategory_picker';
+  type?: 'summary_card' | 'kb_suggestions' | 'category_picker' | 'subcategory_picker' | 'confirmed';
+  ticketKey?: string;
   intent?: IntakeIntent | null;
   fields?: IntakeCollectedFields & {
     category: string | null;
     subcategory: string | null;
+    followUpTicketKey?: string;
+    followUpTicketSummary?: string;
   };
   articles?: Array<{ id: number; title: string; excerpt: string }>;
   categories?: Array<{ id: string; name: string; description: string }>;

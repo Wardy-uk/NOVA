@@ -1,0 +1,287 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/@fs/C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\src\\client\\components\\OverdueDeliveriesView.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=62de665b"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react.js?v=62de665b"; const useState = __vite__cjsImport3_react["useState"]; const useEffect = __vite__cjsImport3_react["useEffect"]; const useCallback = __vite__cjsImport3_react["useCallback"];
+function daysLate(dateStr) {
+  const target = /* @__PURE__ */ new Date(dateStr + "T00:00:00");
+  const now = /* @__PURE__ */ new Date();
+  now.setHours(0, 0, 0, 0);
+  return Math.floor((now.getTime() - target.getTime()) / (1e3 * 60 * 60 * 24));
+}
+export function OverdueDeliveriesView() {
+  _s();
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const loadData = useCallback(() => {
+    setLoading(true);
+    fetch("/api/milestones/overdue-deliveries").then((r) => r.json()).then((json) => {
+      if (json.ok) setData(json.data);
+      else
+        setError(json.error ?? "Failed to load overdue deliveries");
+    }).catch((err) => setError(err.message)).finally(() => setLoading(false));
+  }, []);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+  useEffect(() => {
+    const handler = () => {
+      loadData();
+    };
+    window.addEventListener("nova-refresh", handler);
+    return () => window.removeEventListener("nova-refresh", handler);
+  }, [loadData]);
+  if (loading) {
+    return /* @__PURE__ */ jsxDEV("div", { className: "text-sm text-neutral-500 py-8 text-center", children: "Loading overdue deliveries..." }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+      lineNumber: 70,
+      columnNumber: 12
+    }, this);
+  }
+  if (error) {
+    return /* @__PURE__ */ jsxDEV("div", { className: "text-sm text-red-400 py-8 text-center", children: error }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+      lineNumber: 73,
+      columnNumber: 12
+    }, this);
+  }
+  const totalOverdueMilestones = data.reduce((sum, d) => sum + d.overdue_count, 0);
+  return /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "grid grid-cols-2 sm:grid-cols-4 gap-3", children: [
+      /* @__PURE__ */ jsxDEV("div", { className: "bg-[#2f353d] rounded-lg border border-[#3a424d] p-3", children: [
+        /* @__PURE__ */ jsxDEV("div", { className: "text-[10px] text-neutral-500 uppercase tracking-wider mb-1", children: "Deliveries With Overdue" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 83,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "text-xl font-bold text-red-400", children: data.length }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 84,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+        lineNumber: 82,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "bg-[#2f353d] rounded-lg border border-[#3a424d] p-3", children: [
+        /* @__PURE__ */ jsxDEV("div", { className: "text-[10px] text-neutral-500 uppercase tracking-wider mb-1", children: "Total Overdue Milestones" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 87,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "text-xl font-bold text-red-400", children: totalOverdueMilestones }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 88,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+        lineNumber: 86,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+      lineNumber: 81,
+      columnNumber: 7
+    }, this),
+    data.length === 0 ? /* @__PURE__ */ jsxDEV("div", { className: "text-sm text-neutral-500 py-8 text-center", children: "No overdue milestones — all on track." }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+      lineNumber: 93,
+      columnNumber: 7
+    }, this) : /* @__PURE__ */ jsxDEV("div", { className: "border border-[#3a424d] rounded-lg overflow-hidden", children: /* @__PURE__ */ jsxDEV("table", { className: "w-full text-xs", children: [
+      /* @__PURE__ */ jsxDEV("thead", { children: /* @__PURE__ */ jsxDEV("tr", { className: "bg-[#272C33] text-neutral-500 uppercase tracking-wider text-[10px]", children: [
+        /* @__PURE__ */ jsxDEV("th", { className: "text-left px-3 py-2", children: "ID" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 99,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { className: "text-left px-3 py-2", children: "Account" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 100,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { className: "text-left px-3 py-2", children: "Product" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 101,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { className: "text-left px-3 py-2", children: "Onboarder" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 102,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { className: "text-left px-3 py-2", children: "Status" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 103,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { className: "text-center px-3 py-2", children: "Overdue" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 104,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { className: "text-center px-3 py-2", children: "Progress" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 105,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { className: "text-left px-3 py-2", children: "Oldest Overdue Milestone" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 106,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { className: "text-right px-3 py-2", children: "Days Late" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 107,
+          columnNumber: 17
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+        lineNumber: 98,
+        columnNumber: 15
+      }, this) }, void 0, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+        lineNumber: 97,
+        columnNumber: 13
+      }, this),
+      /* @__PURE__ */ jsxDEV("tbody", { className: "divide-y divide-[#3a424d]", children: data.map((d) => {
+        const late = d.oldest_overdue_date ? daysLate(d.oldest_overdue_date) : 0;
+        return /* @__PURE__ */ jsxDEV("tr", { className: "bg-[#2f353d] hover:bg-[#363d47] transition-colors", children: [
+          /* @__PURE__ */ jsxDEV("td", { className: "px-3 py-2 text-neutral-400 font-mono", children: d.onboarding_id ?? "-" }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 115,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { className: "px-3 py-2 text-neutral-200 font-medium", children: d.account }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 116,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { className: "px-3 py-2 text-neutral-400", children: d.product }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 117,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { className: "px-3 py-2 text-neutral-400", children: d.onboarder ?? "-" }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 118,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { className: "px-3 py-2", children: /* @__PURE__ */ jsxDEV("span", { className: "px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#272C33] text-neutral-400", children: d.status || "-" }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 120,
+            columnNumber: 23
+          }, this) }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 119,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { className: "px-3 py-2 text-center", children: /* @__PURE__ */ jsxDEV("span", { className: "inline-flex items-center justify-center min-w-[1.5rem] px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-900/50 text-red-400", children: d.overdue_count }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 125,
+            columnNumber: 23
+          }, this) }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 124,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { className: "px-3 py-2 text-center text-neutral-500", children: [
+            d.complete_count,
+            "/",
+            d.total_count
+          ] }, void 0, true, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 129,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { className: "px-3 py-2 text-neutral-300", children: [
+            /* @__PURE__ */ jsxDEV("div", { children: d.oldest_overdue_name }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+              lineNumber: 133,
+              columnNumber: 23
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { className: "text-[10px] text-neutral-600", children: [
+              "due ",
+              d.oldest_overdue_date
+            ] }, void 0, true, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+              lineNumber: 134,
+              columnNumber: 23
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 132,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { className: "px-3 py-2 text-right", children: /* @__PURE__ */ jsxDEV("span", { className: `font-bold ${late >= 14 ? "text-red-400" : late >= 7 ? "text-amber-400" : "text-yellow-500"}`, children: [
+            late,
+            "d"
+          ] }, void 0, true, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 139,
+            columnNumber: 23
+          }, this) }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+            lineNumber: 138,
+            columnNumber: 21
+          }, this)
+        ] }, d.delivery_id, true, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+          lineNumber: 114,
+          columnNumber: 17
+        }, this);
+      }) }, void 0, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+        lineNumber: 110,
+        columnNumber: 13
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+      lineNumber: 96,
+      columnNumber: 11
+    }, this) }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+      lineNumber: 95,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx",
+    lineNumber: 79,
+    columnNumber: 5
+  }, this);
+}
+_s(OverdueDeliveriesView, "76XKUjdzW58IvdAzNPkZrAMhTUY=");
+_c = OverdueDeliveriesView;
+var _c;
+$RefreshReg$(_c, "OverdueDeliveriesView");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OverdueDeliveriesView.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUpGO0FBQUE7QUFBQTtBQUFBO0FBQUEsaUJBS0E7QUFBQSxVQUNBLHVCQUFDLFFBQUcsV0FBVSx3QkFDWixpQ0FBQyxVQUFLLFdBQVcsYUFBYUQsUUFBUSxLQUFLLGlCQUFpQkEsUUFBUSxJQUFJLG1CQUFtQixpQkFBaUIsSUFDekdBO0FBQUFBO0FBQUFBLFlBQUs7QUFBQSxlQURSO0FBQUE7QUFBQTtBQUFBO0FBQUEsaUJBRUEsS0FIRjtBQUFBO0FBQUE7QUFBQTtBQUFBLGlCQUlBO0FBQUEsYUE1Qk9KLEVBQUVjLGFBQVg7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQTZCQTtBQUFBLE1BRUosQ0FBQyxLQW5DSDtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBb0NBO0FBQUEsU0FsREY7QUFBQTtBQUFBO0FBQUE7QUFBQSxXQW1EQSxLQXBERjtBQUFBO0FBQUE7QUFBQTtBQUFBLFdBcURBO0FBQUEsT0FyRUo7QUFBQTtBQUFBO0FBQUE7QUFBQSxTQXVFQTtBQUVKO0FBQUN0QyxHQTVHZUQsdUJBQXFCO0FBQUEsS0FBckJBO0FBQXFCLElBQUF3QztBQUFBLGFBQUFBLElBQUEiLCJuYW1lcyI6WyJ1c2VTdGF0ZSIsInVzZUVmZmVjdCIsInVzZUNhbGxiYWNrIiwiZGF5c0xhdGUiLCJkYXRlU3RyIiwidGFyZ2V0IiwiRGF0ZSIsIm5vdyIsInNldEhvdXJzIiwiTWF0aCIsImZsb29yIiwiZ2V0VGltZSIsIk92ZXJkdWVEZWxpdmVyaWVzVmlldyIsIl9zIiwiZGF0YSIsInNldERhdGEiLCJsb2FkaW5nIiwic2V0TG9hZGluZyIsImVycm9yIiwic2V0RXJyb3IiLCJsb2FkRGF0YSIsImZldGNoIiwidGhlbiIsInIiLCJqc29uIiwib2siLCJjYXRjaCIsImVyciIsIm1lc3NhZ2UiLCJmaW5hbGx5IiwiaGFuZGxlciIsIndpbmRvdyIsImFkZEV2ZW50TGlzdGVuZXIiLCJyZW1vdmVFdmVudExpc3RlbmVyIiwidG90YWxPdmVyZHVlTWlsZXN0b25lcyIsInJlZHVjZSIsInN1bSIsImQiLCJvdmVyZHVlX2NvdW50IiwibGVuZ3RoIiwibWFwIiwibGF0ZSIsIm9sZGVzdF9vdmVyZHVlX2RhdGUiLCJvbmJvYXJkaW5nX2lkIiwiYWNjb3VudCIsInByb2R1Y3QiLCJvbmJvYXJkZXIiLCJzdGF0dXMiLCJjb21wbGV0ZV9jb3VudCIsInRvdGFsX2NvdW50Iiwib2xkZXN0X292ZXJkdWVfbmFtZSIsImRlbGl2ZXJ5X2lkIiwiX2MiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiT3ZlcmR1ZURlbGl2ZXJpZXNWaWV3LnRzeCJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgeyB1c2VTdGF0ZSwgdXNlRWZmZWN0LCB1c2VDYWxsYmFjayB9IGZyb20gJ3JlYWN0JztcclxuXHJcbmludGVyZmFjZSBPdmVyZHVlRGVsaXZlcnkge1xyXG4gIGRlbGl2ZXJ5X2lkOiBudW1iZXI7XHJcbiAgb25ib2FyZGluZ19pZDogc3RyaW5nIHwgbnVsbDtcclxuICBhY2NvdW50OiBzdHJpbmc7XHJcbiAgcHJvZHVjdDogc3RyaW5nO1xyXG4gIG9uYm9hcmRlcjogc3RyaW5nIHwgbnVsbDtcclxuICBzdGF0dXM6IHN0cmluZztcclxuICBnb19saXZlX2RhdGU6IHN0cmluZyB8IG51bGw7XHJcbiAgb3ZlcmR1ZV9jb3VudDogbnVtYmVyO1xyXG4gIHRvdGFsX2NvdW50OiBudW1iZXI7XHJcbiAgY29tcGxldGVfY291bnQ6IG51bWJlcjtcclxuICBvbGRlc3Rfb3ZlcmR1ZV9uYW1lOiBzdHJpbmc7XHJcbiAgb2xkZXN0X292ZXJkdWVfZGF0ZTogc3RyaW5nO1xyXG59XHJcblxyXG5mdW5jdGlvbiBkYXlzTGF0ZShkYXRlU3RyOiBzdHJpbmcpOiBudW1iZXIge1xyXG4gIGNvbnN0IHRhcmdldCA9IG5ldyBEYXRlKGRhdGVTdHIgKyAnVDAwOjAwOjAwJyk7XHJcbiAgY29uc3Qgbm93ID0gbmV3IERhdGUoKTtcclxuICBub3cuc2V0SG91cnMoMCwgMCwgMCwgMCk7XHJcbiAgcmV0dXJuIE1hdGguZmxvb3IoKG5vdy5nZXRUaW1lKCkgLSB0YXJnZXQuZ2V0VGltZSgpKSAvICgxMDAwICogNjAgKiA2MCAqIDI0KSk7XHJcbn1cclxuXHJcbmV4cG9ydCBmdW5jdGlvbiBPdmVyZHVlRGVsaXZlcmllc1ZpZXcoKSB7XHJcbiAgY29uc3QgW2RhdGEsIHNldERhdGFdID0gdXNlU3RhdGU8T3ZlcmR1ZURlbGl2ZXJ5W10+KFtdKTtcclxuICBjb25zdCBbbG9hZGluZywgc2V0TG9hZGluZ10gPSB1c2VTdGF0ZSh0cnVlKTtcclxuICBjb25zdCBbZXJyb3IsIHNldEVycm9yXSA9IHVzZVN0YXRlPHN0cmluZyB8IG51bGw+KG51bGwpO1xyXG5cclxuICBjb25zdCBsb2FkRGF0YSA9IHVzZUNhbGxiYWNrKCgpID0+IHtcclxuICAgIHNldExvYWRpbmcodHJ1ZSk7XHJcbiAgICBmZXRjaCgnL2FwaS9taWxlc3RvbmVzL292ZXJkdWUtZGVsaXZlcmllcycpXHJcbiAgICAgIC50aGVuKHIgPT4gci5qc29uKCkpXHJcbiAgICAgIC50aGVuKGpzb24gPT4ge1xyXG4gICAgICAgIGlmIChqc29uLm9rKSBzZXREYXRhKGpzb24uZGF0YSk7XHJcbiAgICAgICAgZWxzZSBzZXRFcnJvcihqc29uLmVycm9yID8/ICdGYWlsZWQgdG8gbG9hZCBvdmVyZHVlIGRlbGl2ZXJpZXMnKTtcclxuICAgICAgfSlcclxuICAgICAgLmNhdGNoKGVyciA9PiBzZXRFcnJvcihlcnIubWVzc2FnZSkpXHJcbiAgICAgIC5maW5hbGx5KCgpID0+IHNldExvYWRpbmcoZmFsc2UpKTtcclxuICB9LCBbXSk7XHJcblxyXG4gIHVzZUVmZmVjdCgoKSA9PiB7IGxvYWREYXRhKCk7IH0sIFtsb2FkRGF0YV0pO1xyXG5cclxuICB1c2VFZmZlY3QoKCkgPT4ge1xyXG4gICAgY29uc3QgaGFuZGxlciA9ICgpID0+IHsgbG9hZERhdGEoKTsgfTtcclxuICAgIHdpbmRvdy5hZGRFdmVudExpc3RlbmVyKCdub3ZhLXJlZnJlc2gnLCBoYW5kbGVyKTtcclxuICAgIHJldHVybiAoKSA9PiB3aW5kb3cucmVtb3ZlRXZlbnRMaXN0ZW5lcignbm92YS1yZWZyZXNoJywgaGFuZGxlcik7XHJcbiAgfSwgW2xvYWREYXRhXSk7XHJcblxyXG4gIGlmIChsb2FkaW5nKSB7XHJcbiAgICByZXR1cm4gPGRpdiBjbGFzc05hbWU9XCJ0ZXh0LXNtIHRleHQtbmV1dHJhbC01MDAgcHktOCB0ZXh0LWNlbnRlclwiPkxvYWRpbmcgb3ZlcmR1ZSBkZWxpdmVyaWVzLi4uPC9kaXY+O1xyXG4gIH1cclxuICBpZiAoZXJyb3IpIHtcclxuICAgIHJldHVybiA8ZGl2IGNsYXNzTmFtZT1cInRleHQtc20gdGV4dC1yZWQtNDAwIHB5LTggdGV4dC1jZW50ZXJcIj57ZXJyb3J9PC9kaXY+O1xyXG4gIH1cclxuXHJcbiAgY29uc3QgdG90YWxPdmVyZHVlTWlsZXN0b25lcyA9IGRhdGEucmVkdWNlKChzdW0sIGQpID0+IHN1bSArIGQub3ZlcmR1ZV9jb3VudCwgMCk7XHJcblxyXG4gIHJldHVybiAoXHJcbiAgICA8ZGl2IGNsYXNzTmFtZT1cInNwYWNlLXktNFwiPlxyXG4gICAgICB7LyogS1BJIHJvdyAqL31cclxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJncmlkIGdyaWQtY29scy0yIHNtOmdyaWQtY29scy00IGdhcC0zXCI+XHJcbiAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJiZy1bIzJmMzUzZF0gcm91bmRlZC1sZyBib3JkZXIgYm9yZGVyLVsjM2E0MjRkXSBwLTNcIj5cclxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwidGV4dC1bMTBweF0gdGV4dC1uZXV0cmFsLTUwMCB1cHBlcmNhc2UgdHJhY2tpbmctd2lkZXIgbWItMVwiPkRlbGl2ZXJpZXMgV2l0aCBPdmVyZHVlPC9kaXY+XHJcbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInRleHQteGwgZm9udC1ib2xkIHRleHQtcmVkLTQwMFwiPntkYXRhLmxlbmd0aH08L2Rpdj5cclxuICAgICAgICA8L2Rpdj5cclxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImJnLVsjMmYzNTNkXSByb3VuZGVkLWxnIGJvcmRlciBib3JkZXItWyMzYTQyNGRdIHAtM1wiPlxyXG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJ0ZXh0LVsxMHB4XSB0ZXh0LW5ldXRyYWwtNTAwIHVwcGVyY2FzZSB0cmFja2luZy13aWRlciBtYi0xXCI+VG90YWwgT3ZlcmR1ZSBNaWxlc3RvbmVzPC9kaXY+XHJcbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInRleHQteGwgZm9udC1ib2xkIHRleHQtcmVkLTQwMFwiPnt0b3RhbE92ZXJkdWVNaWxlc3RvbmVzfTwvZGl2PlxyXG4gICAgICAgIDwvZGl2PlxyXG4gICAgICA8L2Rpdj5cclxuXHJcbiAgICAgIHtkYXRhLmxlbmd0aCA9PT0gMCA/IChcclxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInRleHQtc20gdGV4dC1uZXV0cmFsLTUwMCBweS04IHRleHQtY2VudGVyXCI+Tm8gb3ZlcmR1ZSBtaWxlc3RvbmVzIOKAlCBhbGwgb24gdHJhY2suPC9kaXY+XHJcbiAgICAgICkgOiAoXHJcbiAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJib3JkZXIgYm9yZGVyLVsjM2E0MjRkXSByb3VuZGVkLWxnIG92ZXJmbG93LWhpZGRlblwiPlxyXG4gICAgICAgICAgPHRhYmxlIGNsYXNzTmFtZT1cInctZnVsbCB0ZXh0LXhzXCI+XHJcbiAgICAgICAgICAgIDx0aGVhZD5cclxuICAgICAgICAgICAgICA8dHIgY2xhc3NOYW1lPVwiYmctWyMyNzJDMzNdIHRleHQtbmV1dHJhbC01MDAgdXBwZXJjYXNlIHRyYWNraW5nLXdpZGVyIHRleHQtWzEwcHhdXCI+XHJcbiAgICAgICAgICAgICAgICA8dGggY2xhc3NOYW1lPVwidGV4dC1sZWZ0IHB4LTMgcHktMlwiPklEPC90aD5cclxuICAgICAgICAgICAgICAgIDx0aCBjbGFzc05hbWU9XCJ0ZXh0LWxlZnQgcHgtMyBweS0yXCI+QWNjb3VudDwvdGg+XHJcbiAgICAgICAgICAgICAgICA8dGggY2xhc3NOYW1lPVwidGV4dC1sZWZ0IHB4LTMgcHktMlwiPlByb2R1Y3Q8L3RoPlxyXG4gICAgICAgICAgICAgICAgPHRoIGNsYXNzTmFtZT1cInRleHQtbGVmdCBweC0zIHB5LTJcIj5PbmJvYXJkZXI8L3RoPlxyXG4gICAgICAgICAgICAgICAgPHRoIGNsYXNzTmFtZT1cInRleHQtbGVmdCBweC0zIHB5LTJcIj5TdGF0dXM8L3RoPlxyXG4gICAgICAgICAgICAgICAgPHRoIGNsYXNzTmFtZT1cInRleHQtY2VudGVyIHB4LTMgcHktMlwiPk92ZXJkdWU8L3RoPlxyXG4gICAgICAgICAgICAgICAgPHRoIGNsYXNzTmFtZT1cInRleHQtY2VudGVyIHB4LTMgcHktMlwiPlByb2dyZXNzPC90aD5cclxuICAgICAgICAgICAgICAgIDx0aCBjbGFzc05hbWU9XCJ0ZXh0LWxlZnQgcHgtMyBweS0yXCI+T2xkZXN0IE92ZXJkdWUgTWlsZXN0b25lPC90aD5cclxuICAgICAgICAgICAgICAgIDx0aCBjbGFzc05hbWU9XCJ0ZXh0LXJpZ2h0IHB4LTMgcHktMlwiPkRheXMgTGF0ZTwvdGg+XHJcbiAgICAgICAgICAgICAgPC90cj5cclxuICAgICAgICAgICAgPC90aGVhZD5cclxuICAgICAgICAgICAgPHRib2R5IGNsYXNzTmFtZT1cImRpdmlkZS15IGRpdmlkZS1bIzNhNDI0ZF1cIj5cclxuICAgICAgICAgICAgICB7ZGF0YS5tYXAoKGQpID0+IHtcclxuICAgICAgICAgICAgICAgIGNvbnN0IGxhdGUgPSBkLm9sZGVzdF9vdmVyZHVlX2RhdGUgPyBkYXlzTGF0ZShkLm9sZGVzdF9vdmVyZHVlX2RhdGUpIDogMDtcclxuICAgICAgICAgICAgICAgIHJldHVybiAoXHJcbiAgICAgICAgICAgICAgICAgIDx0ciBrZXk9e2QuZGVsaXZlcnlfaWR9IGNsYXNzTmFtZT1cImJnLVsjMmYzNTNkXSBob3ZlcjpiZy1bIzM2M2Q0N10gdHJhbnNpdGlvbi1jb2xvcnNcIj5cclxuICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yIHRleHQtbmV1dHJhbC00MDAgZm9udC1tb25vXCI+e2Qub25ib2FyZGluZ19pZCA/PyAnLSd9PC90ZD5cclxuICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yIHRleHQtbmV1dHJhbC0yMDAgZm9udC1tZWRpdW1cIj57ZC5hY2NvdW50fTwvdGQ+XHJcbiAgICAgICAgICAgICAgICAgICAgPHRkIGNsYXNzTmFtZT1cInB4LTMgcHktMiB0ZXh0LW5ldXRyYWwtNDAwXCI+e2QucHJvZHVjdH08L3RkPlxyXG4gICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTIgdGV4dC1uZXV0cmFsLTQwMFwiPntkLm9uYm9hcmRlciA/PyAnLSd9PC90ZD5cclxuICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+XHJcbiAgICAgICAgICAgICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9XCJweC0xLjUgcHktMC41IHJvdW5kZWQgdGV4dC1bMTBweF0gZm9udC1tZWRpdW0gYmctWyMyNzJDMzNdIHRleHQtbmV1dHJhbC00MDBcIj5cclxuICAgICAgICAgICAgICAgICAgICAgICAge2Quc3RhdHVzIHx8ICctJ31cclxuICAgICAgICAgICAgICAgICAgICAgIDwvc3Bhbj5cclxuICAgICAgICAgICAgICAgICAgICA8L3RkPlxyXG4gICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTIgdGV4dC1jZW50ZXJcIj5cclxuICAgICAgICAgICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cImlubGluZS1mbGV4IGl0ZW1zLWNlbnRlciBqdXN0aWZ5LWNlbnRlciBtaW4tdy1bMS41cmVtXSBweC0xLjUgcHktMC41IHJvdW5kZWQtZnVsbCB0ZXh0LVsxMHB4XSBmb250LWJvbGQgYmctcmVkLTkwMC81MCB0ZXh0LXJlZC00MDBcIj5cclxuICAgICAgICAgICAgICAgICAgICAgICAge2Qub3ZlcmR1ZV9jb3VudH1cclxuICAgICAgICAgICAgICAgICAgICAgIDwvc3Bhbj5cclxuICAgICAgICAgICAgICAgICAgICA8L3RkPlxyXG4gICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTIgdGV4dC1jZW50ZXIgdGV4dC1uZXV0cmFsLTUwMFwiPlxyXG4gICAgICAgICAgICAgICAgICAgICAge2QuY29tcGxldGVfY291bnR9L3tkLnRvdGFsX2NvdW50fVxyXG4gICAgICAgICAgICAgICAgICAgIDwvdGQ+XHJcbiAgICAgICAgICAgICAgICAgICAgPHRkIGNsYXNzTmFtZT1cInB4LTMgcHktMiB0ZXh0LW5ldXRyYWwtMzAwXCI+XHJcbiAgICAgICAgICAgICAgICAgICAgICA8ZGl2PntkLm9sZGVzdF9vdmVyZHVlX25hbWV9PC9kaXY+XHJcbiAgICAgICAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInRleHQtWzEwcHhdIHRleHQtbmV1dHJhbC02MDBcIj5cclxuICAgICAgICAgICAgICAgICAgICAgICAgZHVlIHtkLm9sZGVzdF9vdmVyZHVlX2RhdGV9XHJcbiAgICAgICAgICAgICAgICAgICAgICA8L2Rpdj5cclxuICAgICAgICAgICAgICAgICAgICA8L3RkPlxyXG4gICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTIgdGV4dC1yaWdodFwiPlxyXG4gICAgICAgICAgICAgICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPXtgZm9udC1ib2xkICR7bGF0ZSA+PSAxNCA/ICd0ZXh0LXJlZC00MDAnIDogbGF0ZSA+PSA3ID8gJ3RleHQtYW1iZXItNDAwJyA6ICd0ZXh0LXllbGxvdy01MDAnfWB9PlxyXG4gICAgICAgICAgICAgICAgICAgICAgICB7bGF0ZX1kXHJcbiAgICAgICAgICAgICAgICAgICAgICA8L3NwYW4+XHJcbiAgICAgICAgICAgICAgICAgICAgPC90ZD5cclxuICAgICAgICAgICAgICAgICAgPC90cj5cclxuICAgICAgICAgICAgICAgICk7XHJcbiAgICAgICAgICAgICAgfSl9XHJcbiAgICAgICAgICAgIDwvdGJvZHk+XHJcbiAgICAgICAgICA8L3RhYmxlPlxyXG4gICAgICAgIDwvZGl2PlxyXG4gICAgICApfVxyXG4gICAgPC9kaXY+XHJcbiAgKTtcclxufVxyXG4iXSwiZmlsZSI6IkM6L1VzZXJzL05pY2tXL0NsYXVkZS93aW5kb3dzIGF1dG9tYXRpb24vZGF5cGlsb3Qvc3JjL2NsaWVudC9jb21wb25lbnRzL092ZXJkdWVEZWxpdmVyaWVzVmlldy50c3gifQ==

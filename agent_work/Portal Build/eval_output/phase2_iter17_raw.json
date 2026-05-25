@@ -1,0 +1,230 @@
+[
+  {
+    "name": "URL provided upfront - should capture and not re-ask",
+    "sessionId": 514,
+    "transcript": [
+      {
+        "role": "user",
+        "content": "Hi, the homepage on https://www.exampleagent.co.uk is showing an error message when clients try to search for properties"
+      },
+      {
+        "role": "assistant",
+        "content": "Thanks for those details about https://www.exampleagent.co.uk. Could you tell me which property is affected and where you're seeing the issue?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "The error says \"No results found\" even though we have 50+ active listings"
+      },
+      {
+        "role": "assistant",
+        "content": "Can you please tell me the address or reference of a property that's not showing up in the search results?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "Yes that looks right, please submit"
+      },
+      {
+        "role": "assistant",
+        "content": "Could you please provide the address or reference of a property that's showing the 'No results found' error on your homepage?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "fields": null,
+    "phase": null
+  },
+  {
+    "name": "URL provided after being asked - should not loop",
+    "sessionId": 515,
+    "transcript": [
+      {
+        "role": "user",
+        "content": "Our website search is broken, properties are not showing up"
+      },
+      {
+        "role": "assistant",
+        "content": "Thanks for those details about Website. You mentioned our website search is broken, properties are not showing up — which property is affected? An address or listing reference would help us look into this.",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "The URL is https://www.testproperty.com/search"
+      },
+      {
+        "role": "assistant",
+        "content": "Could you please provide the address or reference of the property that's not showing up on https://www.testproperty.com/search?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "We noticed it yesterday afternoon, affects all property types"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Missing listing — No properties displaying on search results page\n**Request type:** Missing listing\n**Account:** URL is\n**Property:** All properties (site-wide)\n**Affected:** Website\n**Description:** The search functionality at https://www.testproperty.com/search is not displaying any properties for all property types since yesterday afternoon.\n**URL:** https://www.testproperty.com/search\n**Urgency:** Normal\n**Contact preference:** portal",
+        "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Missing listing — No properties displaying on search results page\",\"account\":\"URL is\",\"description\":\"The search functionality at https://www.testproperty.com/search is not displaying any properties for all property types since yesterday afternoon.\",\"url\":\"https://www.testproperty.com/search\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":\"All properties (site-wide)\",\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"property\",\"subcategory\":\"property_missing_listing\"},\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "Yes submit please"
+      },
+      {
+        "role": "assistant",
+        "content": "I'm sorry — I wasn't able to create the ticket right now. Please contact us directly at **support@nurtur.tech** and we'll get this sorted for you. You can include the details from this conversation in your email.",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "fields": null,
+    "phase": null
+  },
+  {
+    "name": "Mixed account and URL in single message",
+    "sessionId": 516,
+    "transcript": [
+      {
+        "role": "user",
+        "content": "Hi, our account is Smith & Jones Estate Agents and the website https://www.smithjones.co.uk/about page is showing old staff photos"
+      },
+      {
+        "role": "assistant",
+        "content": "You mentioned that the website https://www.smithjones.co.uk/about page is showing old staff photos.\n\nHere's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — Outdated staff photos on About page\n**Request type:** Content update\n**Account:** Smith & Jones Estate Agents\n**Affected:** Website\n**Description:** The About page at https://www.smithjones.co.uk/about is displaying old staff photos that need to be updated to reflect current team members.\n**URL:** https://www.smithjones.co.uk/about\n**Urgency:** Normal\n**Contact preference:** portal",
+        "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — Outdated staff photos on About page\",\"account\":\"Smith & Jones Estate Agents\",\"description\":\"The About page at https://www.smithjones.co.uk/about is displaying old staff photos that need to be updated to reflect current team members.\",\"url\":\"https://www.smithjones.co.uk/about\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "We need the about page updated with new team photos, I can send them over"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — Outdated staff photos on About page\n**Request type:** Content update\n**Account:** Smith & Jones Estate Agents\n**Affected:** Website\n**Description:** The About page at https://www.smithjones.co.uk/about is displaying old staff photos that need to be updated to reflect current team members.\n**URL:** https://www.smithjones.co.uk/about\n**Urgency:** Normal\n**Contact preference:** portal",
+        "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — Outdated staff photos on About page\",\"account\":\"Smith & Jones Estate Agents\",\"description\":\"The About page at https://www.smithjones.co.uk/about is displaying old staff photos that need to be updated to reflect current team members.\",\"url\":\"https://www.smithjones.co.uk/about\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "Yes that is correct, go ahead"
+      },
+      {
+        "role": "assistant",
+        "content": "I'm sorry — I wasn't able to create the ticket right now. Please contact us directly at **support@nurtur.tech** and we'll get this sorted for you. You can include the details from this conversation in your email.",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "fields": null,
+    "phase": null
+  },
+  {
+    "name": "Phone number must not contaminate listing/reference field",
+    "sessionId": 517,
+    "transcript": [
+      {
+        "role": "user",
+        "content": "A property listing at 14 High Street is showing the wrong phone number 01onal 555 0123 instead of 01234 555 0456"
+      },
+      {
+        "role": "assistant",
+        "content": "Thanks for those details about 14 High Street (01234 555 0456). You mentioned a property listing at 14 High Street is showing the wrong phone number 01onal... — is this affecting your website, property portals like Rightmove or Zoopla, or both?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "The property reference is ABC-12345 and its on https://www.ouragency.com/property/abc-12345"
+      },
+      {
+        "role": "assistant",
+        "content": "Is the wrong phone number showing on your website, Rightmove, Zoopla, or somewhere else?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "Yes please go ahead and raise that"
+      },
+      {
+        "role": "assistant",
+        "content": "Is the wrong phone number showing on your website, Rightmove, Zoopla, or somewhere else?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "fields": null,
+    "phase": null
+  },
+  {
+    "name": "Complex URL with path preserved correctly",
+    "sessionId": 518,
+    "transcript": [
+      {
+        "role": "user",
+        "content": "The property details page at https://www.myagent.com/properties/for-sale/12345/main-street-anytown is showing the wrong price"
+      },
+      {
+        "role": "assistant",
+        "content": "Thanks for those details about listing 12345 on https://www.myagent.com/properties/for-sale/12345/main-street-anytown. You mentioned the property details page at https://www — is this affecting your website, property portals like Rightmove or Zoopla, or both?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "It should say 325000 but its showing 225000. The feed data is correct so it seems like a display issue."
+      },
+      {
+        "role": "assistant",
+        "content": "Is the wrong price showing only on your website or also on places like Rightmove or Zoopla?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "role": "user",
+        "content": "That covers it, submit"
+      },
+      {
+        "role": "assistant",
+        "content": "Is the wrong price showing only on your website or also on places like Rightmove or Zoopla?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "fields": null,
+    "phase": null
+  },
+  {
+    "name": "Natural greeting regression check",
+    "sessionId": 519,
+    "transcript": [
+      {
+        "role": "user",
+        "content": "Hello, I need some help please"
+      },
+      {
+        "role": "assistant",
+        "content": "I couldn't find a direct answer in our knowledge base, but let me help you get in touch with the right team.\n\nCould you tell me a bit more about what's going on so I can point this in the right direction?",
+        "metadata": "{\"intent\":\"question\"}"
+      },
+      {
+        "role": "user",
+        "content": "We have got an issue with our website - the contact form is not sending emails to us anymore"
+      },
+      {
+        "role": "assistant",
+        "content": "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+        "metadata": "{\"intent\":\"question\"}"
+      },
+      {
+        "role": "user",
+        "content": "https://www.gregsestates.co.uk/contact and it stopped working about 2 days ago"
+      },
+      {
+        "role": "assistant",
+        "content": "I want to make sure I get this right — could you tell me what's actually going wrong, or what you need changed? For example, is something not displaying, not working, or do you need something updated?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"question\"}"
+      },
+      {
+        "role": "user",
+        "content": "Looks good, yes"
+      },
+      {
+        "role": "assistant",
+        "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — Contact form not sending emails on contact page\n**Request type:** Content update\n**Description:** The contact form at https://www.gregsestates.co.uk/contact has stopped sending emails to the business. The issue began approximately 2 days ago and no form submissions are being received.\n**URL:** https://www.gregsestates.co.uk/contact\n**Urgency:** Normal\n**Contact preference:** portal",
+        "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — Contact form not sending emails on contact page\",\"account\":null,\"description\":\"The contact form at https://www.gregsestates.co.uk/contact has stopped sending emails to the business. The issue began approximately 2 days ago and no form submissions are being received.\",\"url\":\"https://www.gregsestates.co.uk/contact\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":null,\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"question\"}"
+      }
+    ],
+    "fields": null,
+    "phase": null
+  }
+]

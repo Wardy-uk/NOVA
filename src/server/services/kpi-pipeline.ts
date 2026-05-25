@@ -735,7 +735,7 @@ export class KpiPipeline {
       const today = new Date().toISOString().slice(0, 10);
       console.log(`[kpi-pipeline] Derived KPIs: starting collection for ${today}`);
 
-      // 1st Line Resolution Rate: CC-tier resolved / total resolved today
+      // 1st Line Resolution Rate: resolved at Customer Care tier / total resolved today
       const pf = this.projectInClause();
       const resolvedRows = await localQuery<{ request_type: string | null; current_tier: string | null }>(`
         SELECT request_type, current_tier FROM jira_issue_cache
@@ -746,9 +746,9 @@ export class KpiPipeline {
 
       const ccRequestTypes = ['incident', 'chat', 'ai request', 'emailed request', 'gdpr', 'service request', 'tpj request'];
       const totalResolved = resolvedRows.length;
-      const ccResolved = resolvedRows.filter(r => ccRequestTypes.includes((r.request_type || '').toLowerCase())).length;
-      const firstLineRate = totalResolved > 0 ? Math.round((ccResolved / totalResolved) * 100) : 0;
-      console.log(`[kpi-pipeline] Derived KPIs: ${totalResolved} resolved-today tickets found (${ccResolved} CC-tier), 1st Line Rate = ${firstLineRate}%`);
+      const firstLineResolved = resolvedRows.filter(r => classifyTier(r.current_tier) === 'Customer Care').length;
+      const firstLineRate = totalResolved > 0 ? Math.round((firstLineResolved / totalResolved) * 100) : 0;
+      console.log(`[kpi-pipeline] Derived KPIs: ${totalResolved} resolved-today tickets found (${firstLineResolved} resolved at Customer Care tier), 1st Line Rate = ${firstLineRate}%`);
 
       // CSAT % (derived) — same as snapshot CSAT but with different RAG
       const csatRows = await localQuery<{ fields_json: string | null }>(`

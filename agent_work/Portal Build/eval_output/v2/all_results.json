@@ -1,0 +1,588 @@
+{
+  "results": [
+    {
+      "scenario": {
+        "id": 1,
+        "name": "Simple Content Change",
+        "message": "Our homepage phone number is wrong. It should be 01234 567890."
+      },
+      "log": [
+        {
+          "step": "home_loaded",
+          "textLength": 751,
+          "hasGetHelp": true
+        },
+        {
+          "step": "get_help_clicked",
+          "result": "Get help\nReport an issue, ask a question, or request a change"
+        },
+        {
+          "step": "message_sent",
+          "message": "Our homepage phone number is wrong. It should be 01234 567890."
+        },
+        {
+          "step": "first_response",
+          "hasCategoryPicker": true,
+          "hasDirectConversation": false,
+          "taxonomyLeaks": "CLEAN",
+          "responseExcerpt": "Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 12:38 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "chat_buttons",
+          "count": 4,
+          "labels": [
+            "My Website",
+            "My Account",
+            "Billing & Contracts",
+            "Something Else"
+          ]
+        },
+        {
+          "step": "category_selected",
+          "target": "My Website",
+          "result": "My Website\nContent updates or something not working"
+        },
+        {
+          "step": "after_category",
+          "responseExcerpt": "General support requests and questions | 12:38 | My Website | 12:38 | Got it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see. | 12:38 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "re_description_requested",
+          "note": "Portal asked customer to re-describe after category selection"
+        },
+        {
+          "step": "after_description",
+          "responseExcerpt": "Email | Phone callback | Drop files here or click to attach screenshots | Submit request | Edit in chat | 12:39 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "confirmation_check",
+          "hasConfirmation": true
+        },
+        {
+          "step": "confirm_clicked",
+          "result": "Submit request"
+        },
+        {
+          "step": "after_submit",
+          "responseExcerpt": "Request Submitted | Your ticket COD-104 has been created. Our team will review it shortly. | View Ticket | Start a new conversation | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "final_state",
+          "taxonomyLeaks": "CLEAN"
+        }
+      ],
+      "blocked": false,
+      "hasCategoryPicker": true,
+      "categoryClicked": "My Website\nContent updates or something not working",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+      ]
+    },
+    {
+      "scenario": {
+        "id": 2,
+        "name": "Information-Rich Request",
+        "message": "Our website nurturtest.com has the wrong phone number on the contact page. It currently says 01234 111111 but should be 01234 567890. Can this be changed today?"
+      },
+      "log": [
+        {
+          "step": "home_loaded",
+          "textLength": 859,
+          "hasGetHelp": true
+        },
+        {
+          "step": "get_help_clicked",
+          "result": "Get help\nReport an issue, ask a question, or request a change"
+        },
+        {
+          "step": "message_sent",
+          "message": "Our website nurturtest.com has the wrong phone number on the contact page. It currently says 01234 111111 but should be 01234 567890. Can this be changed today?"
+        },
+        {
+          "step": "first_response",
+          "hasCategoryPicker": true,
+          "hasDirectConversation": false,
+          "taxonomyLeaks": "CLEAN",
+          "responseExcerpt": "Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 12:39 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "chat_buttons",
+          "count": 5,
+          "labels": [
+            "18/05/2026",
+            "My Website",
+            "My Account",
+            "Billing & Contracts",
+            "Something Else"
+          ]
+        },
+        {
+          "step": "category_selected",
+          "target": "My Website",
+          "result": "My Website\nContent updates or something not working"
+        },
+        {
+          "step": "after_category",
+          "responseExcerpt": "General support requests and questions | 12:39 | My Website | 12:39 | Got it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see. | 12:39 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "re_description_requested",
+          "note": "Portal asked customer to re-describe after category selection"
+        },
+        {
+          "step": "after_description",
+          "responseExcerpt": "Email | Phone callback | Drop files here or click to attach screenshots | Submit request | Edit in chat | 12:39 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "confirmation_check",
+          "hasConfirmation": true
+        },
+        {
+          "step": "confirm_clicked",
+          "result": "18/05/2026\nSubmitted\nCOD-104"
+        },
+        {
+          "step": "after_submit",
+          "responseExcerpt": "Request Submitted | Your ticket COD-104 has been created. Our team will review it shortly. | View Ticket | Start a new conversation | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "final_state",
+          "taxonomyLeaks": "CLEAN"
+        }
+      ],
+      "blocked": false,
+      "hasCategoryPicker": true,
+      "categoryClicked": "My Website\nContent updates or something not working",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+      ]
+    },
+    {
+      "scenario": {
+        "id": 3,
+        "name": "Vague Website Request",
+        "message": "I need something changed on our website."
+      },
+      "log": [
+        {
+          "step": "home_loaded",
+          "textLength": 859,
+          "hasGetHelp": true
+        },
+        {
+          "step": "get_help_clicked",
+          "result": "Get help\nReport an issue, ask a question, or request a change"
+        },
+        {
+          "step": "message_sent",
+          "message": "I need something changed on our website."
+        },
+        {
+          "step": "first_response",
+          "hasCategoryPicker": true,
+          "hasDirectConversation": false,
+          "taxonomyLeaks": "CLEAN",
+          "responseExcerpt": "Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 12:39 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "chat_buttons",
+          "count": 5,
+          "labels": [
+            "18/05/2026",
+            "My Website",
+            "My Account",
+            "Billing & Contracts",
+            "Something Else"
+          ]
+        },
+        {
+          "step": "category_selected",
+          "target": "My Website",
+          "result": "My Website\nContent updates or something not working"
+        },
+        {
+          "step": "after_category",
+          "responseExcerpt": "General support requests and questions | 12:39 | My Website | 12:39 | Got it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see. | 12:39 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "re_description_requested",
+          "note": "Portal asked customer to re-describe after category selection"
+        },
+        {
+          "step": "after_description",
+          "responseExcerpt": "Email | Phone callback | Drop files here or click to attach screenshots | Submit request | Edit in chat | 12:39 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "confirmation_check",
+          "hasConfirmation": true
+        },
+        {
+          "step": "confirm_clicked",
+          "result": "18/05/2026\nSubmitted\nCOD-104"
+        },
+        {
+          "step": "after_submit",
+          "responseExcerpt": "Request Submitted | Your ticket COD-104 has been created. Our team will review it shortly. | View Ticket | Start a new conversation | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "final_state",
+          "taxonomyLeaks": "CLEAN"
+        }
+      ],
+      "blocked": false,
+      "hasCategoryPicker": true,
+      "categoryClicked": "My Website\nContent updates or something not working",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+      ]
+    },
+    {
+      "scenario": {
+        "id": 4,
+        "name": "Multiple Changes",
+        "message": "We need the staff photo changed on the team page and the opening hours updated on the contact page."
+      },
+      "log": [
+        {
+          "step": "home_loaded",
+          "textLength": 859,
+          "hasGetHelp": true
+        },
+        {
+          "step": "get_help_clicked",
+          "result": "Get help\nReport an issue, ask a question, or request a change"
+        },
+        {
+          "step": "message_sent",
+          "message": "We need the staff photo changed on the team page and the opening hours updated on the contact page."
+        },
+        {
+          "step": "first_response",
+          "hasCategoryPicker": true,
+          "hasDirectConversation": false,
+          "taxonomyLeaks": "CLEAN",
+          "responseExcerpt": "Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 12:40 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "chat_buttons",
+          "count": 5,
+          "labels": [
+            "18/05/2026",
+            "My Website",
+            "My Account",
+            "Billing & Contracts",
+            "Something Else"
+          ]
+        },
+        {
+          "step": "category_selected",
+          "target": "My Website",
+          "result": "My Website\nContent updates or something not working"
+        },
+        {
+          "step": "after_category",
+          "responseExcerpt": "General support requests and questions | 12:40 | My Website | 12:40 | Got it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see. | 12:40 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "re_description_requested",
+          "note": "Portal asked customer to re-describe after category selection"
+        },
+        {
+          "step": "after_description",
+          "responseExcerpt": "Email | Phone callback | Drop files here or click to attach screenshots | Submit request | Edit in chat | 12:40 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "confirmation_check",
+          "hasConfirmation": true
+        },
+        {
+          "step": "confirm_clicked",
+          "result": "18/05/2026\nSubmitted\nCOD-104"
+        },
+        {
+          "step": "after_submit",
+          "responseExcerpt": "Request Submitted | Your ticket COD-104 has been created. Our team will review it shortly. | View Ticket | Start a new conversation | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "final_state",
+          "taxonomyLeaks": "CLEAN"
+        }
+      ],
+      "blocked": false,
+      "hasCategoryPicker": true,
+      "categoryClicked": "My Website\nContent updates or something not working",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+      ]
+    },
+    {
+      "scenario": {
+        "id": 5,
+        "name": "Non-Website Request",
+        "message": "My property isn't showing on Rightmove."
+      },
+      "log": [
+        {
+          "step": "home_loaded",
+          "textLength": 859,
+          "hasGetHelp": true
+        },
+        {
+          "step": "get_help_clicked",
+          "result": "Get help\nReport an issue, ask a question, or request a change"
+        },
+        {
+          "step": "message_sent",
+          "message": "My property isn't showing on Rightmove."
+        },
+        {
+          "step": "first_response",
+          "hasCategoryPicker": true,
+          "hasDirectConversation": false,
+          "taxonomyLeaks": "CLEAN",
+          "responseExcerpt": "Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 12:40 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "chat_buttons",
+          "count": 5,
+          "labels": [
+            "18/05/2026",
+            "My Website",
+            "My Account",
+            "Billing & Contracts",
+            "Something Else"
+          ]
+        },
+        {
+          "step": "category_selected",
+          "target": "Something Else",
+          "result": "Something Else\nGeneral support requests and questions"
+        },
+        {
+          "step": "after_category",
+          "responseExcerpt": "General support requests and questions | 12:40 | Something Else | 12:40 | Got it — Something Else. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see. | 12:40 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "re_description_requested",
+          "note": "Portal asked customer to re-describe after category selection"
+        },
+        {
+          "step": "after_description",
+          "responseExcerpt": "Email | Phone callback | Drop files here or click to attach screenshots | Submit request | Edit in chat | 12:40 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "confirmation_check",
+          "hasConfirmation": true
+        },
+        {
+          "step": "confirm_clicked",
+          "result": "18/05/2026\nSubmitted\nCOD-104"
+        },
+        {
+          "step": "after_submit",
+          "responseExcerpt": "Request Submitted | Your ticket COD-104 has been created. Our team will review it shortly. | View Ticket | Start a new conversation | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "final_state",
+          "taxonomyLeaks": "CLEAN"
+        }
+      ],
+      "blocked": false,
+      "hasCategoryPicker": true,
+      "categoryClicked": "Something Else\nGeneral support requests and questions",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+      ]
+    },
+    {
+      "scenario": {
+        "id": 6,
+        "name": "Ambiguous Website Problem",
+        "message": "Something is wrong with our website."
+      },
+      "log": [
+        {
+          "step": "home_loaded",
+          "textLength": 859,
+          "hasGetHelp": true
+        },
+        {
+          "step": "get_help_clicked",
+          "result": "Get help\nReport an issue, ask a question, or request a change"
+        },
+        {
+          "step": "message_sent",
+          "message": "Something is wrong with our website."
+        },
+        {
+          "step": "first_response",
+          "hasCategoryPicker": true,
+          "hasDirectConversation": false,
+          "taxonomyLeaks": "CLEAN",
+          "responseExcerpt": "Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 12:40 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "chat_buttons",
+          "count": 5,
+          "labels": [
+            "18/05/2026",
+            "My Website",
+            "My Account",
+            "Billing & Contracts",
+            "Something Else"
+          ]
+        },
+        {
+          "step": "category_selected",
+          "target": "My Website",
+          "result": "My Website\nContent updates or something not working"
+        },
+        {
+          "step": "after_category",
+          "responseExcerpt": "General support requests and questions | 12:40 | My Website | 12:40 | Got it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see. | 12:40 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "re_description_requested",
+          "note": "Portal asked customer to re-describe after category selection"
+        },
+        {
+          "step": "after_description",
+          "responseExcerpt": "Email | Phone callback | Drop files here or click to attach screenshots | Submit request | Edit in chat | 12:40 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "confirmation_check",
+          "hasConfirmation": true
+        },
+        {
+          "step": "confirm_clicked",
+          "result": "18/05/2026\nSubmitted\nCOD-104"
+        },
+        {
+          "step": "after_submit",
+          "responseExcerpt": "Request Submitted | Your ticket COD-104 has been created. Our team will review it shortly. | View Ticket | Start a new conversation | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "final_state",
+          "taxonomyLeaks": "CLEAN"
+        }
+      ],
+      "blocked": false,
+      "hasCategoryPicker": true,
+      "categoryClicked": "My Website\nContent updates or something not working",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+      ]
+    },
+    {
+      "scenario": {
+        "id": 7,
+        "name": "Human Escalation Preference",
+        "message": "I don't want to use the bot, I just need someone to update our homepage."
+      },
+      "log": [
+        {
+          "step": "home_loaded",
+          "textLength": 859,
+          "hasGetHelp": true
+        },
+        {
+          "step": "get_help_clicked",
+          "result": "Get help\nReport an issue, ask a question, or request a change"
+        },
+        {
+          "step": "message_sent",
+          "message": "I don't want to use the bot, I just need someone to update our homepage."
+        },
+        {
+          "step": "first_response",
+          "hasCategoryPicker": true,
+          "hasDirectConversation": false,
+          "taxonomyLeaks": "CLEAN",
+          "responseExcerpt": "Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 12:41 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "chat_buttons",
+          "count": 5,
+          "labels": [
+            "18/05/2026",
+            "My Website",
+            "My Account",
+            "Billing & Contracts",
+            "Something Else"
+          ]
+        },
+        {
+          "step": "category_selected",
+          "target": "My Website",
+          "result": "My Website\nContent updates or something not working"
+        },
+        {
+          "step": "after_category",
+          "responseExcerpt": "General support requests and questions | 12:41 | My Website | 12:41 | Got it — My Website. Please describe what should be happening and what is happening instead. If relevant, include the page URL or any error message you can see. | 12:41 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "re_description_requested",
+          "note": "Portal asked customer to re-describe after category selection"
+        },
+        {
+          "step": "after_description",
+          "responseExcerpt": "Email | Phone callback | Drop files here or click to attach screenshots | Submit request | Edit in chat | 12:41 | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "confirmation_check",
+          "hasConfirmation": true
+        },
+        {
+          "step": "confirm_clicked",
+          "result": "18/05/2026\nSubmitted\nCOD-104"
+        },
+        {
+          "step": "after_submit",
+          "responseExcerpt": "Request Submitted | Your ticket COD-104 has been created. Our team will review it shortly. | View Ticket | Start a new conversation | Powered by Nurtur | Need help? Contact us"
+        },
+        {
+          "step": "final_state",
+          "taxonomyLeaks": "CLEAN"
+        }
+      ],
+      "blocked": false,
+      "hasCategoryPicker": true,
+      "categoryClicked": "My Website\nContent updates or something not working",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+        "Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+      ]
+    }
+  ],
+  "mobile": {
+    "homeText": "nurtur\n|\nSupport Portal\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 3 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin reset email is not arriving for the branch mailbox\nCOD-104\nSubmitted\n[Portal] website request: The phone number on the homepage needs changing to 01234 567890\nPopular Articles\nBrowse all\nCheck portal ticket progress\nSupport Portal\nWebsite change request checklist\nWebsite\nReset account access and browser cache\nAccounts\nPowered by Nurtur\nNeed help? Contact us",
+    "chatText": "nurtur\n|\nSupport Portal\nSign out\nHome\nMy Tickets\nKnowledge Base\nSupport Assistant\nEnd conversation\nI need to update our website phone number\n12:41\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:41\nPowered by Nurtur\nNeed help? Contact us"
+  }
+}

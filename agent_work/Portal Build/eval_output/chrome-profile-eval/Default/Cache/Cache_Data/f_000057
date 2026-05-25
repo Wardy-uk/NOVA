@@ -1,0 +1,227 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/@fs/C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\src\\client\\components\\OnboardingCalendar.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=62de665b"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react.js?v=62de665b"; const useState = __vite__cjsImport3_react["useState"]; const useMemo = __vite__cjsImport3_react["useMemo"]; const useEffect = __vite__cjsImport3_react["useEffect"]; const useCallback = __vite__cjsImport3_react["useCallback"];
+export function OnboardingCalendar() {
+  _s();
+  const [saleTypes, setSaleTypes] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [offsets, setOffsets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const fetchData = useCallback(async () => {
+    try {
+      const [stRes, tmplRes, matrixRes] = await Promise.all(
+        [
+          fetch("/api/onboarding/config/sale-types"),
+          fetch("/api/milestones/templates?active=1"),
+          fetch("/api/milestones/matrix")
+        ]
+      );
+      const [stJson, tmplJson, matrixJson] = await Promise.all(
+        [
+          stRes.json(),
+          tmplRes.json(),
+          matrixRes.json()
+        ]
+      );
+      if (stJson.ok) setSaleTypes(stJson.data);
+      if (tmplJson.ok) setTemplates(tmplJson.data);
+      if (matrixJson.ok) setOffsets(matrixJson.data);
+    } catch {
+    }
+    setLoading(false);
+  }, []);
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+  const sortedTemplates = useMemo(
+    () => [...templates].sort((a, b) => a.sort_order - b.sort_order || a.day_offset - b.day_offset),
+    [templates]
+  );
+  const matrixSaleTypeIds = useMemo(() => new Set(offsets.map((o) => o.sale_type_id)), [offsets]);
+  const matrixSaleTypes = useMemo(
+    () => saleTypes.filter((st) => matrixSaleTypeIds.has(st.id) && st.active).sort((a, b) => a.sort_order - b.sort_order),
+    [saleTypes, matrixSaleTypeIds]
+  );
+  const getValue = (saleTypeId, templateId) => {
+    const offset = offsets.find((o) => o.sale_type_id === saleTypeId && o.template_id === templateId);
+    return offset ? offset.day_offset : null;
+  };
+  if (loading) {
+    return /* @__PURE__ */ jsxDEV("div", { className: "text-center py-16 text-sm text-neutral-500", children: "Loading milestone matrix..." }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+      lineNumber: 86,
+      columnNumber: 12
+    }, this);
+  }
+  if (sortedTemplates.length === 0) {
+    return /* @__PURE__ */ jsxDEV("div", { className: "text-center py-16 text-sm text-neutral-500", children: "No milestone templates configured. Set up templates in Admin → Milestones." }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+      lineNumber: 91,
+      columnNumber: 7
+    }, this);
+  }
+  return /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-between", children: [
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        /* @__PURE__ */ jsxDEV("h2", { className: "text-lg font-bold font-[var(--font-heading)] text-neutral-100", children: "Milestone Timelines" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+          lineNumber: 101,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("p", { className: "text-xs text-neutral-500 mt-0.5", children: "Day offsets from order date by sale type. Edit in Admin → Milestones." }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+          lineNumber: 104,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+        lineNumber: 100,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "text-xs text-neutral-500", children: [
+        matrixSaleTypes.length,
+        " sale type",
+        matrixSaleTypes.length !== 1 ? "s" : "",
+        " · ",
+        sortedTemplates.length,
+        " milestones"
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+        lineNumber: 108,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+      lineNumber: 99,
+      columnNumber: 7
+    }, this),
+    matrixSaleTypes.length === 0 ? /* @__PURE__ */ jsxDEV("div", { className: "border border-[#3a424d] rounded-lg bg-[#2f353d] p-8 text-center text-sm text-neutral-500", children: "No sale types configured in the milestone matrix yet. Add them in Admin → Milestones." }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+      lineNumber: 114,
+      columnNumber: 7
+    }, this) : /* @__PURE__ */ jsxDEV("div", { className: "border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-auto max-h-[70vh]", children: /* @__PURE__ */ jsxDEV("table", { className: "text-[11px] border-collapse", children: [
+      /* @__PURE__ */ jsxDEV("thead", { className: "sticky top-0 z-10", children: /* @__PURE__ */ jsxDEV("tr", { className: "bg-[#2f353d]", children: [
+        /* @__PURE__ */ jsxDEV("th", { className: "sticky left-0 z-20 bg-[#2f353d] text-left px-2 py-1.5 text-neutral-500 min-w-[160px] border-b border-r border-[#3a424d]", children: "Sale Type" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+          lineNumber: 122,
+          columnNumber: 17
+        }, this),
+        sortedTemplates.map((tmpl, idx) => {
+          const groupColors = [
+            "bg-purple-900/20 border-purple-800/30",
+            "bg-blue-900/20 border-blue-800/30",
+            "bg-teal-900/20 border-teal-800/30",
+            "bg-indigo-900/20 border-indigo-800/30",
+            "bg-cyan-900/20 border-cyan-800/30",
+            "bg-violet-900/20 border-violet-800/30"
+          ];
+          return /* @__PURE__ */ jsxDEV(
+            "th",
+            {
+              className: `px-2 py-1.5 text-purple-300 font-semibold border-b border-x border-[#3a424d] min-w-[80px] text-center ${groupColors[idx % groupColors.length]}`,
+              title: `${tmpl.name} (default: Day ${tmpl.day_offset})`,
+              children: /* @__PURE__ */ jsxDEV("div", { className: "leading-tight", children: tmpl.name }, void 0, false, {
+                fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+                lineNumber: 140,
+                columnNumber: 23
+              }, this)
+            },
+            tmpl.id,
+            false,
+            {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+              lineNumber: 135,
+              columnNumber: 19
+            },
+            this
+          );
+        })
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+        lineNumber: 121,
+        columnNumber: 15
+      }, this) }, void 0, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+        lineNumber: 120,
+        columnNumber: 13
+      }, this),
+      /* @__PURE__ */ jsxDEV("tbody", { children: matrixSaleTypes.map(
+        (st) => /* @__PURE__ */ jsxDEV("tr", { className: "hover:bg-[#363d47]/50", children: [
+          /* @__PURE__ */ jsxDEV("td", { className: "sticky left-0 bg-[#2f353d] px-2 py-1 text-neutral-200 border-r border-[#3a424d] whitespace-nowrap", children: st.name }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+            lineNumber: 149,
+            columnNumber: 19
+          }, this),
+          sortedTemplates.map((tmpl) => {
+            const val = getValue(st.id, tmpl.id);
+            const displayVal = val ?? tmpl.day_offset;
+            return /* @__PURE__ */ jsxDEV("td", { className: "text-center border border-[#3a424d]/30 bg-[#5ec1ca]/20", children: /* @__PURE__ */ jsxDEV("span", { className: "font-mono text-xs text-[#5ec1ca]", children: displayVal }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+              lineNumber: 157,
+              columnNumber: 25
+            }, this) }, tmpl.id, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+              lineNumber: 156,
+              columnNumber: 19
+            }, this);
+          })
+        ] }, st.id, true, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+          lineNumber: 148,
+          columnNumber: 13
+        }, this)
+      ) }, void 0, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+        lineNumber: 146,
+        columnNumber: 13
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+      lineNumber: 119,
+      columnNumber: 11
+    }, this) }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+      lineNumber: 118,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx",
+    lineNumber: 98,
+    columnNumber: 5
+  }, this);
+}
+_s(OnboardingCalendar, "BolzhaOGM1f9F0AEu8n4bY0SY1E=");
+_c = OnboardingCalendar;
+var _c;
+$RefreshReg$(_c, "OnboardingCalendar");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/OnboardingCalendar.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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Y3QiLCJ1c2VDYWxsYmFjayIsIk9uYm9hcmRpbmdDYWxlbmRhciIsIl9zIiwic2FsZVR5cGVzIiwic2V0U2FsZVR5cGVzIiwidGVtcGxhdGVzIiwic2V0VGVtcGxhdGVzIiwib2Zmc2V0cyIsInNldE9mZnNldHMiLCJsb2FkaW5nIiwic2V0TG9hZGluZyIsImZldGNoRGF0YSIsInN0UmVzIiwidG1wbFJlcyIsIm1hdHJpeFJlcyIsIlByb21pc2UiLCJhbGwiLCJmZXRjaCIsInN0SnNvbiIsInRtcGxKc29uIiwibWF0cml4SnNvbiIsImpzb24iLCJvayIsImRhdGEiLCJzb3J0ZWRUZW1wbGF0ZXMiLCJzb3J0IiwiYSIsImIiLCJzb3J0X29yZGVyIiwiZGF5X29mZnNldCIsIm1hdHJpeFNhbGVUeXBlSWRzIiwiU2V0IiwibWFwIiwibyIsInNhbGVfdHlwZV9pZCIsIm1hdHJpeFNhbGVUeXBlcyIsImZpbHRlciIsInN0IiwiaGFzIiwiaWQiLCJhY3RpdmUiLCJnZXRWYWx1ZSIsInNhbGVUeXBlSWQiLCJ0ZW1wbGF0ZUlkIiwib2Zmc2V0IiwiZmluZCIsInRlbXBsYXRlX2lkIiwibGVuZ3RoIiwidG1wbCIsImlkeCIsImdyb3VwQ29sb3JzIiwibmFtZSIsInZhbCIsImRpc3BsYXlWYWwiLCJfYyJdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJPbmJvYXJkaW5nQ2FsZW5kYXIudHN4Il0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IHVzZVN0YXRlLCB1c2VNZW1vLCB1c2VFZmZlY3QsIHVzZUNhbGxiYWNrIH0gZnJvbSAncmVhY3QnO1xyXG5cclxuaW50ZXJmYWNlIFNhbGVUeXBlIHtcclxuICBpZDogbnVtYmVyO1xyXG4gIG5hbWU6IHN0cmluZztcclxuICBzb3J0X29yZGVyOiBudW1iZXI7XHJcbiAgYWN0aXZlOiBudW1iZXI7XHJcbn1cclxuXHJcbmludGVyZmFjZSBNaWxlc3RvbmVUZW1wbGF0ZSB7XHJcbiAgaWQ6IG51bWJlcjtcclxuICBuYW1lOiBzdHJpbmc7XHJcbiAgZGF5X29mZnNldDogbnVtYmVyO1xyXG4gIHNvcnRfb3JkZXI6IG51bWJlcjtcclxuICBhY3RpdmU6IG51bWJlcjtcclxufVxyXG5cclxuaW50ZXJmYWNlIE1hdHJpeE9mZnNldCB7XHJcbiAgc2FsZV90eXBlX2lkOiBudW1iZXI7XHJcbiAgdGVtcGxhdGVfaWQ6IG51bWJlcjtcclxuICBkYXlfb2Zmc2V0OiBudW1iZXI7XHJcbn1cclxuXHJcbmV4cG9ydCBmdW5jdGlvbiBPbmJvYXJkaW5nQ2FsZW5kYXIoKSB7XHJcbiAgY29uc3QgW3NhbGVUeXBlcywgc2V0U2FsZVR5cGVzXSA9IHVzZVN0YXRlPFNhbGVUeXBlW10+KFtdKTtcclxuICBjb25zdCBbdGVtcGxhdGVzLCBzZXRUZW1wbGF0ZXNdID0gdXNlU3RhdGU8TWlsZXN0b25lVGVtcGxhdGVbXT4oW10pO1xyXG4gIGNvbnN0IFtvZmZzZXRzLCBzZXRPZmZzZXRzXSA9IHVzZVN0YXRlPE1hdHJpeE9mZnNldFtdPihbXSk7XHJcbiAgY29uc3QgW2xvYWRpbmcsIHNldExvYWRpbmddID0gdXNlU3RhdGUodHJ1ZSk7XHJcblxyXG4gIGNvbnN0IGZldGNoRGF0YSA9IHVzZUNhbGxiYWNrKGFzeW5jICgpID0+IHtcclxuICAgIHRyeSB7XHJcbiAgICAgIGNvbnN0IFtzdFJlcywgdG1wbFJlcywgbWF0cml4UmVzXSA9IGF3YWl0IFByb21pc2UuYWxsKFtcclxuICAgICAgICBmZXRjaCgnL2FwaS9vbmJvYXJkaW5nL2NvbmZpZy9zYWxlLXR5cGVzJyksXHJcbiAgICAgICAgZmV0Y2goJy9hcGkvbWlsZXN0b25lcy90ZW1wbGF0ZXM/YWN0aXZlPTEnKSxcclxuICAgICAgICBmZXRjaCgnL2FwaS9taWxlc3RvbmVzL21hdHJpeCcpLFxyXG4gICAgICBdKTtcclxuICAgICAgY29uc3QgW3N0SnNvbiwgdG1wbEpzb24sIG1hdHJpeEpzb25dID0gYXdhaXQgUHJvbWlzZS5hbGwoW1xyXG4gICAgICAgIHN0UmVzLmpzb24oKSwgdG1wbFJlcy5qc29uKCksIG1hdHJpeFJlcy5qc29uKCksXHJcbiAgICAgIF0pO1xyXG4gICAgICBpZiAoc3RKc29uLm9rKSBzZXRTYWxlVHlwZXMoc3RKc29uLmRhdGEpO1xyXG4gICAgICBpZiAodG1wbEpzb24ub2spIHNldFRlbXBsYXRlcyh0bXBsSnNvbi5kYXRhKTtcclxuICAgICAgaWYgKG1hdHJpeEpzb24ub2spIHNldE9mZnNldHMobWF0cml4SnNvbi5kYXRhKTtcclxuICAgIH0gY2F0Y2ggeyAvKiBpZ25vcmUgKi8gfVxyXG4gICAgc2V0TG9hZGluZyhmYWxzZSk7XHJcbiAgfSwgW10pO1xyXG5cclxuICB1c2VFZmZlY3QoKCkgPT4geyBmZXRjaERhdGEoKTsgfSwgW2ZldGNoRGF0YV0pO1xyXG5cclxuICBjb25zdCBzb3J0ZWRUZW1wbGF0ZXMgPSB1c2VNZW1vKFxyXG4gICAgKCkgPT4gWy4uLnRlbXBsYXRlc10uc29ydCgoYSwgYikgPT4gYS5zb3J0X29yZGVyIC0gYi5zb3J0X29yZGVyIHx8IGEuZGF5X29mZnNldCAtIGIuZGF5X29mZnNldCksXHJcbiAgICBbdGVtcGxhdGVzXSxcclxuICApO1xyXG5cclxuICAvLyBTYWxlIHR5cGVzIHRoYXQgaGF2ZSByb3dzIGluIHRoZSBtYXRyaXhcclxuICBjb25zdCBtYXRyaXhTYWxlVHlwZUlkcyA9IHVzZU1lbW8oKCkgPT4gbmV3IFNldChvZmZzZXRzLm1hcChvID0+IG8uc2FsZV90eXBlX2lkKSksIFtvZmZzZXRzXSk7XHJcbiAgY29uc3QgbWF0cml4U2FsZVR5cGVzID0gdXNlTWVtbyhcclxuICAgICgpID0+IHNhbGVUeXBlcy5maWx0ZXIoc3QgPT4gbWF0cml4U2FsZVR5cGVJZHMuaGFzKHN0LmlkKSAmJiBzdC5hY3RpdmUpLnNvcnQoKGEsIGIpID0+IGEuc29ydF9vcmRlciAtIGIuc29ydF9vcmRlciksXHJcbiAgICBbc2FsZVR5cGVzLCBtYXRyaXhTYWxlVHlwZUlkc10sXHJcbiAgKTtcclxuXHJcbiAgY29uc3QgZ2V0VmFsdWUgPSAoc2FsZVR5cGVJZDogbnVtYmVyLCB0ZW1wbGF0ZUlkOiBudW1iZXIpOiBudW1iZXIgfCBudWxsID0+IHtcclxuICAgIGNvbnN0IG9mZnNldCA9IG9mZnNldHMuZmluZChvID0+IG8uc2FsZV90eXBlX2lkID09PSBzYWxlVHlwZUlkICYmIG8udGVtcGxhdGVfaWQgPT09IHRlbXBsYXRlSWQpO1xyXG4gICAgcmV0dXJuIG9mZnNldCA/IG9mZnNldC5kYXlfb2Zmc2V0IDogbnVsbDtcclxuICB9O1xyXG5cclxuICBpZiAobG9hZGluZykge1xyXG4gICAgcmV0dXJuIDxkaXYgY2xhc3NOYW1lPVwidGV4dC1jZW50ZXIgcHktMTYgdGV4dC1zbSB0ZXh0LW5ldXRyYWwtNTAwXCI+TG9hZGluZyBtaWxlc3RvbmUgbWF0cml4Li4uPC9kaXY+O1xyXG4gIH1cclxuXHJcbiAgaWYgKHNvcnRlZFRlbXBsYXRlcy5sZW5ndGggPT09IDApIHtcclxuICAgIHJldHVybiAoXHJcbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwidGV4dC1jZW50ZXIgcHktMTYgdGV4dC1zbSB0ZXh0LW5ldXRyYWwtNTAwXCI+XHJcbiAgICAgICAgTm8gbWlsZXN0b25lIHRlbXBsYXRlcyBjb25maWd1cmVkLiBTZXQgdXAgdGVtcGxhdGVzIGluIEFkbWluICZyYXJyOyBNaWxlc3RvbmVzLlxyXG4gICAgICA8L2Rpdj5cclxuICAgICk7XHJcbiAgfVxyXG5cclxuICByZXR1cm4gKFxyXG4gICAgPGRpdiBjbGFzc05hbWU9XCJzcGFjZS15LTRcIj5cclxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLWNlbnRlciBqdXN0aWZ5LWJldHdlZW5cIj5cclxuICAgICAgICA8ZGl2PlxyXG4gICAgICAgICAgPGgyIGNsYXNzTmFtZT1cInRleHQtbGcgZm9udC1ib2xkIGZvbnQtW3ZhcigtLWZvbnQtaGVhZGluZyldIHRleHQtbmV1dHJhbC0xMDBcIj5cclxuICAgICAgICAgICAgTWlsZXN0b25lIFRpbWVsaW5lc1xyXG4gICAgICAgICAgPC9oMj5cclxuICAgICAgICAgIDxwIGNsYXNzTmFtZT1cInRleHQteHMgdGV4dC1uZXV0cmFsLTUwMCBtdC0wLjVcIj5cclxuICAgICAgICAgICAgRGF5IG9mZnNldHMgZnJvbSBvcmRlciBkYXRlIGJ5IHNhbGUgdHlwZS4gRWRpdCBpbiBBZG1pbiAmcmFycjsgTWlsZXN0b25lcy5cclxuICAgICAgICAgIDwvcD5cclxuICAgICAgICA8L2Rpdj5cclxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInRleHQteHMgdGV4dC1uZXV0cmFsLTUwMFwiPlxyXG4gICAgICAgICAge21hdHJpeFNhbGVUeXBlcy5sZW5ndGh9IHNhbGUgdHlwZXttYXRyaXhTYWxlVHlwZXMubGVuZ3RoICE9PSAxID8gJ3MnIDogJyd9ICZtaWRkb3Q7IHtzb3J0ZWRUZW1wbGF0ZXMubGVuZ3RofSBtaWxlc3RvbmVzXHJcbiAgICAgICAgPC9kaXY+XHJcbiAgICAgIDwvZGl2PlxyXG5cclxuICAgICAge21hdHJpeFNhbGVUeXBlcy5sZW5ndGggPT09IDAgPyAoXHJcbiAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJib3JkZXIgYm9yZGVyLVsjM2E0MjRkXSByb3VuZGVkLWxnIGJnLVsjMmYzNTNkXSBwLTggdGV4dC1jZW50ZXIgdGV4dC1zbSB0ZXh0LW5ldXRyYWwtNTAwXCI+XHJcbiAgICAgICAgICBObyBzYWxlIHR5cGVzIGNvbmZpZ3VyZWQgaW4gdGhlIG1pbGVzdG9uZSBtYXRyaXggeWV0LiBBZGQgdGhlbSBpbiBBZG1pbiAmcmFycjsgTWlsZXN0b25lcy5cclxuICAgICAgICA8L2Rpdj5cclxuICAgICAgKSA6IChcclxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImJvcmRlciBib3JkZXItWyMzYTQyNGRdIHJvdW5kZWQtbGcgYmctWyMyZjM1M2RdIG92ZXJmbG93LWF1dG8gbWF4LWgtWzcwdmhdXCI+XHJcbiAgICAgICAgICA8dGFibGUgY2xhc3NOYW1lPVwidGV4dC1bMTFweF0gYm9yZGVyLWNvbGxhcHNlXCI+XHJcbiAgICAgICAgICAgIDx0aGVhZCBjbGFzc05hbWU9XCJzdGlja3kgdG9wLTAgei0xMFwiPlxyXG4gICAgICAgICAgICAgIDx0ciBjbGFzc05hbWU9XCJiZy1bIzJmMzUzZF1cIj5cclxuICAgICAgICAgICAgICAgIDx0aCBjbGFzc05hbWU9XCJzdGlja3kgbGVmdC0wIHotMjAgYmctWyMyZjM1M2RdIHRleHQtbGVmdCBweC0yIHB5LTEuNSB0ZXh0LW5ldXRyYWwtNTAwIG1pbi13LVsxNjBweF0gYm9yZGVyLWIgYm9yZGVyLXIgYm9yZGVyLVsjM2E0MjRkXVwiPlxyXG4gICAgICAgICAgICAgICAgICBTYWxlIFR5cGVcclxuICAgICAgICAgICAgICAgIDwvdGg+XHJcbiAgICAgICAgICAgICAgICB7c29ydGVkVGVtcGxhdGVzLm1hcCgodG1wbCwgaWR4KSA9PiB7XHJcbiAgICAgICAgICAgICAgICAgIGNvbnN0IGdyb3VwQ29sb3JzID0gW1xyXG4gICAgICAgICAgICAgICAgICAgICdiZy1wdXJwbGUtOTAwLzIwIGJvcmRlci1wdXJwbGUtODAwLzMwJyxcclxuICAgICAgICAgICAgICAgICAgICAnYmctYmx1ZS05MDAvMjAgYm9yZGVyLWJsdWUtODAwLzMwJyxcclxuICAgICAgICAgICAgICAgICAgICAnYmctdGVhbC05MDAvMjAgYm9yZGVyLXRlYWwtODAwLzMwJyxcclxuICAgICAgICAgICAgICAgICAgICAnYmctaW5kaWdvLTkwMC8yMCBib3JkZXItaW5kaWdvLTgwMC8zMCcsXHJcbiAgICAgICAgICAgICAgICAgICAgJ2JnLWN5YW4tOTAwLzIwIGJvcmRlci1jeWFuLTgwMC8zMCcsXHJcbiAgICAgICAgICAgICAgICAgICAgJ2JnLXZpb2xldC05MDAvMjAgYm9yZGVyLXZpb2xldC04MDAvMzAnLFxyXG4gICAgICAgICAgICAgICAgICBdO1xyXG4gICAgICAgICAgICAgICAgICByZXR1cm4gKFxyXG4gICAgICAgICAgICAgICAgICAgIDx0aFxyXG4gICAgICAgICAgICAgICAgICAgICAga2V5PXt0bXBsLmlkfVxyXG4gICAgICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPXtgcHgtMiBweS0xLjUgdGV4dC1wdXJwbGUtMzAwIGZvbnQtc2VtaWJvbGQgYm9yZGVyLWIgYm9yZGVyLXggYm9yZGVyLVsjM2E0MjRkXSBtaW4tdy1bODBweF0gdGV4dC1jZW50ZXIgJHtncm91cENvbG9yc1tpZHggJSBncm91cENvbG9ycy5sZW5ndGhdfWB9XHJcbiAgICAgICAgICAgICAgICAgICAgICB0aXRsZT17YCR7dG1wbC5uYW1lfSAoZGVmYXVsdDogRGF5ICR7dG1wbC5kYXlfb2Zmc2V0fSlgfVxyXG4gICAgICAgICAgICAgICAgICAgID5cclxuICAgICAgICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwibGVhZGluZy10aWdodFwiPnt0bXBsLm5hbWV9PC9kaXY+XHJcbiAgICAgICAgICAgICAgICAgICAgPC90aD5cclxuICAgICAgICAgICAgICAgICAgKTtcclxuICAgICAgICAgICAgICAgIH0pfVxyXG4gICAgICAgICAgICAgIDwvdHI+XHJcbiAgICAgICAgICAgIDwvdGhlYWQ+XHJcbiAgICAgICAgICAgIDx0Ym9keT5cclxuICAgICAgICAgICAgICB7bWF0cml4U2FsZVR5cGVzLm1hcChzdCA9PiAoXHJcbiAgICAgICAgICAgICAgICA8dHIga2V5PXtzdC5pZH0gY2xhc3NOYW1lPVwiaG92ZXI6YmctWyMzNjNkNDddLzUwXCI+XHJcbiAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJzdGlja3kgbGVmdC0wIGJnLVsjMmYzNTNkXSBweC0yIHB5LTEgdGV4dC1uZXV0cmFsLTIwMCBib3JkZXItciBib3JkZXItWyMzYTQyNGRdIHdoaXRlc3BhY2Utbm93cmFwXCI+XHJcbiAgICAgICAgICAgICAgICAgICAge3N0Lm5hbWV9XHJcbiAgICAgICAgICAgICAgICAgIDwvdGQ+XHJcbiAgICAgICAgICAgICAgICAgIHtzb3J0ZWRUZW1wbGF0ZXMubWFwKHRtcGwgPT4ge1xyXG4gICAgICAgICAgICAgICAgICAgIGNvbnN0IHZhbCA9IGdldFZhbHVlKHN0LmlkLCB0bXBsLmlkKTtcclxuICAgICAgICAgICAgICAgICAgICBjb25zdCBkaXNwbGF5VmFsID0gdmFsID8/IHRtcGwuZGF5X29mZnNldDtcclxuICAgICAgICAgICAgICAgICAgICByZXR1cm4gKFxyXG4gICAgICAgICAgICAgICAgICAgICAgPHRkIGtleT17dG1wbC5pZH0gY2xhc3NOYW1lPVwidGV4dC1jZW50ZXIgYm9yZGVyIGJvcmRlci1bIzNhNDI0ZF0vMzAgYmctWyM1ZWMxY2FdLzIwXCI+XHJcbiAgICAgICAgICAgICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cImZvbnQtbW9ubyB0ZXh0LXhzIHRleHQtWyM1ZWMxY2FdXCI+XHJcbiAgICAgICAgICAgICAgICAgICAgICAgICAge2Rpc3BsYXlWYWx9XHJcbiAgICAgICAgICAgICAgICAgICAgICAgIDwvc3Bhbj5cclxuICAgICAgICAgICAgICAgICAgICAgIDwvdGQ+XHJcbiAgICAgICAgICAgICAgICAgICAgKTtcclxuICAgICAgICAgICAgICAgICAgfSl9XHJcbiAgICAgICAgICAgICAgICA8L3RyPlxyXG4gICAgICAgICAgICAgICkpfVxyXG4gICAgICAgICAgICA8L3Rib2R5PlxyXG4gICAgICAgICAgPC90YWJsZT5cclxuICAgICAgICA8L2Rpdj5cclxuICAgICAgKX1cclxuICAgIDwvZGl2PlxyXG4gICk7XHJcbn1cclxuIl0sImZpbGUiOiJDOi9Vc2Vycy9OaWNrVy9DbGF1ZGUvd2luZG93cyBhdXRvbWF0aW9uL2RheXBpbG90L3NyYy9jbGllbnQvY29tcG9uZW50cy9PbmJvYXJkaW5nQ2FsZW5kYXIudHN4In0=

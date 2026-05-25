@@ -1,0 +1,32 @@
+nurtur
+|
+Support Portal
+Sign out
+Home
+My Tickets
+Knowledge Base
+Codex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.
+Welcome back, codex.portal.test
+
+Your organisation has 2 open tickets
+
+Get help
+Report an issue, ask a question, or request a change
+Recent Tickets
+View all
+COD-101
+Reviewed
+Homepage hero banner is showing the wrong Spring offer
+COD-102
+Awaiting Your Response
+Login reset email is not arriving for the branch mailbox
+Popular Articles
+Browse all
+Check portal ticket progress
+Support Portal
+Website change request checklist
+Website
+Reset account access and browser cache
+Accounts
+Powered by Nurtur
+Need help? Contact us

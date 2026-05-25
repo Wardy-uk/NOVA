@@ -1,0 +1,322 @@
+{
+  "s1": {
+    "session": 559,
+    "state": {
+      "session": {
+        "id": 559,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-24T07:43:25.930Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":\"Greenfield Lettings\",\"description\":\"Hi, we need to update the phone number on our website. The account is Greenfield Lettings, account number GF-2847.\\nThe current number is 01onal 234 5678 and it should be 0191 555 9012. It's on the contact page.\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":\"GF-2847\",\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Hi, we need to update the phone number on our website. The account is Greenfield Lettings, account number GF-2847.\",\"conversational\":true,\"detailRounds\":0,\"lastMissingCount\":1}"
+      },
+      "messages": [
+        {
+          "id": 1996,
+          "session_id": 559,
+          "role": "user",
+          "content": "Hi, we need to update the phone number on our website. The account is Greenfield Lettings, account number GF-2847.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:43:26.306Z"
+        },
+        {
+          "id": 1997,
+          "session_id": 559,
+          "role": "assistant",
+          "content": "Thanks for those details about listing GF-2847 on Website. Which page is this on? A URL would be ideal if you have it.",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-24T07:43:36.916Z"
+        },
+        {
+          "id": 1998,
+          "session_id": 559,
+          "role": "user",
+          "content": "The current number is 01onal 234 5678 and it should be 0191 555 9012. It's on the contact page.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:43:38.686Z"
+        },
+        {
+          "id": 1999,
+          "session_id": 559,
+          "role": "assistant",
+          "content": "Could you please provide the URL of the contact page where the phone number needs to be updated?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-24T07:43:40.306Z"
+        }
+      ]
+    }
+  },
+  "s2": {
+    "session": 560,
+    "state": {
+      "session": {
+        "id": 560,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-24T07:43:41.993Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"website\",\"subcategory\":\"website_broken\",\"collectedFields\":{\"subject\":null,\"account\":\"Premier Properties\",\"description\":\"I need to report a problem with our website. The site is https://www.wrongurl.com and it's showing a 500 error on the home page.\\nSorry, I gave you the wrong URL. The actual website is https://www.correctsite.co.uk\\nOh and the account name is actually Premier Properties, not whatever I said before.\",\"url\":\"https://www.correctsite.co.uk\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"I need to report a problem with our website. The site is https://www.wrongurl.com and it's showing a 500 error on the home page.\",\"conversational\":true,\"synthesisDone\":false,\"detailRounds\":0,\"lastMissingCount\":2,\"offeredTicketCreation\":true}"
+      },
+      "messages": [
+        {
+          "id": 2000,
+          "session_id": 560,
+          "role": "user",
+          "content": "I need to report a problem with our website. The site is https://www.wrongurl.com and it's showing a 500 error on the home page.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:43:42.180Z"
+        },
+        {
+          "id": 2001,
+          "session_id": 560,
+          "role": "assistant",
+          "content": "Thanks for those details about Website on https://www.wrongurl.com. Which account or website is this for?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-24T07:43:51.846Z"
+        },
+        {
+          "id": 2002,
+          "session_id": 560,
+          "role": "user",
+          "content": "Sorry, I gave you the wrong URL. The actual website is https://www.correctsite.co.uk",
+          "metadata": null,
+          "created_at": "2026-05-24T07:43:53.596Z"
+        },
+        {
+          "id": 2003,
+          "session_id": 560,
+          "role": "assistant",
+          "content": "Could you please provide the account name associated with https://www.correctsite.co.uk so I can help report the 500 error?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-24T07:43:55.460Z"
+        },
+        {
+          "id": 2004,
+          "session_id": 560,
+          "role": "user",
+          "content": "Oh and the account name is actually Premier Properties, not whatever I said before.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:43:57.343Z"
+        },
+        {
+          "id": 2005,
+          "session_id": 560,
+          "role": "assistant",
+          "content": "Can you please share the exact error message you see on the home page of https://www.correctsite.co.uk?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-24T07:43:58.933Z"
+        }
+      ]
+    }
+  },
+  "s3": {
+    "session": 561,
+    "state": {
+      "session": {
+        "id": 561,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-24T07:44:00.610Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"summary\",\"intent\":\"problem\",\"category\":\"property\",\"subcategory\":\"property_visibility\",\"collectedFields\":{\"subject\":\"[Portal] Property visibility issue — 14 Orchard Lane listing RM-45821-A not visible on Rightmove\",\"account\":\"Yorkshire Homes\",\"description\":\"One of our property listings isn't appearing on Rightmove. The listing reference is RM-45821-A and the property is 14 Orchard Lane, Leeds, LS6 3PQ.\\nThe account is Yorkshire Homes, and the portal reference is YH-2024-Q3-117.\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":\"14 Orchard Lane\",\"listingId\":\"RM-45821\",\"affectedPortals\":\"Rightmove\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"One of our property listings isn't appearing on Rightmove. The listing reference is RM-45821-A and the property is 14 Orchard Lane, Leeds, LS6 3PQ.\",\"conversational\":true,\"synthesizedSubject\":\"14 Orchard Lane listing RM-45821-A not visible on Rightmove\",\"synthesizedDescription\":\"The property listing for 14 Orchard Lane, Leeds, LS6 3PQ (listing reference RM-45821-A, portal reference YH-2024-Q3-117) under the Yorkshire Homes account is not appearing on Rightmove.\",\"synthesisDone\":true}"
+      },
+      "messages": [
+        {
+          "id": 2006,
+          "session_id": 561,
+          "role": "user",
+          "content": "One of our property listings isn't appearing on Rightmove. The listing reference is RM-45821-A and the property is 14 Orchard Lane, Leeds, LS6 3PQ.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:44:00.790Z"
+        },
+        {
+          "id": 2007,
+          "session_id": 561,
+          "role": "assistant",
+          "content": "Thanks for those details about 14 Orchard Lane on Rightmove. Could you tell me which property is affected and where you're seeing the issue?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-24T07:44:10.706Z"
+        },
+        {
+          "id": 2008,
+          "session_id": 561,
+          "role": "user",
+          "content": "The account is Yorkshire Homes, and the portal reference is YH-2024-Q3-117.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:44:12.436Z"
+        },
+        {
+          "id": 2009,
+          "session_id": 561,
+          "role": "assistant",
+          "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Property visibility issue — 14 Orchard Lane listing RM-45821-A not visible on Rightmove\n**Request type:** Property visibility issue\n**Account:** Yorkshire Homes\n**Property:** 14 Orchard Lane\n**Listing ref:** RM-45821\n**Affected:** Rightmove\n**Description:** The property listing for 14 Orchard Lane, Leeds, LS6 3PQ (listing reference RM-45821-A, portal reference YH-2024-Q3-117) under the Yorkshire Homes account is not appearing on Rightmove.\n**Urgency:** Normal\n**Contact preference:** portal",
+          "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Property visibility issue — 14 Orchard Lane listing RM-45821-A not visible on Rightmove\",\"account\":\"Yorkshire Homes\",\"description\":\"The property listing for 14 Orchard Lane, Leeds, LS6 3PQ (listing reference RM-45821-A, portal reference YH-2024-Q3-117) under the Yorkshire Homes account is not appearing on Rightmove.\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":\"14 Orchard Lane\",\"listingId\":\"RM-45821\",\"affectedPortals\":\"Rightmove\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"property\",\"subcategory\":\"property_visibility\"},\"intent\":\"problem\"}",
+          "created_at": "2026-05-24T07:44:17.433Z"
+        }
+      ]
+    }
+  },
+  "s4": {
+    "session": 562,
+    "state": {
+      "session": {
+        "id": 562,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-24T07:44:19.116Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"summary\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":\"[Portal] Content update — Incorrect phone number on contact page\",\"account\":\"Northside Estates\",\"description\":\"Hi, our website contact page has the wrong phone number. It shows 0161 234 5678 but it should be 0161 987 6543. Our account is Northside Estates. Call me on 07700 900123 if you need more info.\\nThe website is https://www.northsideestates.co.uk/contact\",\"url\":\"https://www.northsideestates.co.uk/contact\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"phone\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Hi, our website contact page has the wrong phone number. It shows 0161 234 5678 but it should be 0161 987 6543. Our account is Northside Estates. Call me on 07700 900123 if you need more info.\",\"conversational\":true,\"synthesizedSubject\":\"Incorrect phone number on contact page\",\"synthesizedDescription\":\"The contact page at https://www.northsideestates.co.uk/contact displays the wrong phone number ([REDACTED-PHONE]). It should be updated to [REDACTED-PHONE].\",\"synthesisDone\":true}"
+      },
+      "messages": [
+        {
+          "id": 2010,
+          "session_id": 562,
+          "role": "user",
+          "content": "Hi, our website contact page has the wrong phone number. It shows 0161 234 5678 but it should be 0161 987 6543. Our account is Northside Estates. Call me on 07700 900123 if you need more info.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:44:19.296Z"
+        },
+        {
+          "id": 2011,
+          "session_id": 562,
+          "role": "assistant",
+          "content": "I can see that your website contact page has the wrong phone number. It shows [REDACTED-PHONE] but it should be [REDACTED-PHONE]. Your account is Northside Estates.\n\nWhich page is this on? A URL would be ideal if you have it.",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-24T07:44:21.533Z"
+        },
+        {
+          "id": 2012,
+          "session_id": 562,
+          "role": "user",
+          "content": "The website is https://www.northsideestates.co.uk/contact",
+          "metadata": null,
+          "created_at": "2026-05-24T07:44:23.270Z"
+        },
+        {
+          "id": 2013,
+          "session_id": 562,
+          "role": "assistant",
+          "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — Incorrect phone number on contact page\n**Request type:** Content update\n**Account:** Northside Estates\n**Affected:** Website\n**Description:** The contact page at https://www.northsideestates.co.uk/contact displays the wrong phone number ([REDACTED-PHONE]). It should be updated to [REDACTED-PHONE].\n**URL:** https://www.northsideestates.co.uk/contact\n**Urgency:** Normal\n**Contact preference:** phone",
+          "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — Incorrect phone number on contact page\",\"account\":\"Northside Estates\",\"description\":\"The contact page at https://www.northsideestates.co.uk/contact displays the wrong phone number ([REDACTED-PHONE]). It should be updated to [REDACTED-PHONE].\",\"url\":\"https://www.northsideestates.co.uk/contact\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"phone\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"change\"}",
+          "created_at": "2026-05-24T07:44:27.820Z"
+        }
+      ]
+    }
+  },
+  "s5": {
+    "session": 563,
+    "state": {
+      "session": {
+        "id": 563,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-24T07:44:29.513Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"website\",\"subcategory\":\"website_broken\",\"collectedFields\":{\"subject\":null,\"account\":\"Premier Properties\",\"description\":\"Something weird is happening with our website search. When people search for properties the results are all jumbled up.\\nIt's our main client site, Premier Properties at premierprops.co.uk\\nYes, that sounds right. Please go ahead and log it.\",\"url\":\"premierprops.co.uk\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Something weird is happening with our website search. When people search for properties the results are all jumbled up.\",\"conversational\":true,\"vagueGateAsked\":true,\"vagueGateVerified\":true,\"vagueGateSecondAsked\":true,\"offeredTicketCreation\":true}"
+      },
+      "messages": [
+        {
+          "id": 2014,
+          "session_id": 563,
+          "role": "user",
+          "content": "Something weird is happening with our website search. When people search for properties the results are all jumbled up.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:44:29.696Z"
+        },
+        {
+          "id": 2015,
+          "session_id": 563,
+          "role": "assistant",
+          "content": "You mentioned that something weird is happening with your website search and when people search for properties the results are all jumbled up.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-24T07:44:31.723Z"
+        },
+        {
+          "id": 2016,
+          "session_id": 563,
+          "role": "user",
+          "content": "It's our main client site, Premier Properties at premierprops.co.uk",
+          "metadata": null,
+          "created_at": "2026-05-24T07:44:33.363Z"
+        },
+        {
+          "id": 2017,
+          "session_id": 563,
+          "role": "assistant",
+          "content": "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-24T07:44:34.096Z"
+        },
+        {
+          "id": 2018,
+          "session_id": 563,
+          "role": "user",
+          "content": "Yes, that sounds right. Please go ahead and log it.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:44:35.736Z"
+        },
+        {
+          "id": 2019,
+          "session_id": 563,
+          "role": "assistant",
+          "content": "I want to make sure I get this right — could you tell me what's actually going wrong, or what you need changed? For example, is something not displaying, not working, or do you need something updated?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-24T07:44:36.323Z"
+        }
+      ]
+    }
+  },
+  "s6": {
+    "session": 564,
+    "state": {
+      "session": {
+        "id": 564,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-24T07:44:38.026Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"website\",\"subcategory\":\"website_broken\",\"collectedFields\":{\"subject\":null,\"account\":\"Test Account Ltd\",\"description\":\"Our website www.testaccount.co.uk has a broken image on the About Us page. Account name is Test Account Ltd, reference TA-001.\\nYes, please create the ticket.\",\"url\":\"www.testaccount.co.uk\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":\"TA-001\",\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Our website www.testaccount.co.uk has a broken image on the About Us page. Account name is Test Account Ltd, reference TA-001.\",\"conversational\":true,\"detailRounds\":0,\"lastMissingCount\":2}"
+      },
+      "messages": [
+        {
+          "id": 2020,
+          "session_id": 564,
+          "role": "user",
+          "content": "Our website www.testaccount.co.uk has a broken image on the About Us page. Account name is Test Account Ltd, reference TA-001.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:44:38.210Z"
+        },
+        {
+          "id": 2021,
+          "session_id": 564,
+          "role": "assistant",
+          "content": "Thanks for those details about listing TA-001 on Website. Are there any error messages showing when this happens?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-24T07:44:47.130Z"
+        },
+        {
+          "id": 2022,
+          "session_id": 564,
+          "role": "user",
+          "content": "Yes, please create the ticket.",
+          "metadata": null,
+          "created_at": "2026-05-24T07:44:48.786Z"
+        },
+        {
+          "id": 2023,
+          "session_id": 564,
+          "role": "assistant",
+          "content": "Could you please tell me the exact error message you see when the broken image appears on the About Us page?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-24T07:44:50.153Z"
+        }
+      ]
+    }
+  }
+}

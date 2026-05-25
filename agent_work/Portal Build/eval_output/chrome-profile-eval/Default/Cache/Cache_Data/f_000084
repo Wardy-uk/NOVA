@@ -1,0 +1,201 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/@fs/C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\src\\client\\components\\ticket-detail\\CommentComposer.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=62de665b"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react.js?v=62de665b"; const useState = __vite__cjsImport3_react["useState"]; const useRef = __vite__cjsImport3_react["useRef"]; const useImperativeHandle = __vite__cjsImport3_react["useImperativeHandle"]; const forwardRef = __vite__cjsImport3_react["forwardRef"];
+import { GlassCard } from "/components/queue/index.ts";
+export const CommentComposer = _s(forwardRef(_c = _s(function CommentComposer2({ ticketKey, onCommentPosted, internalOnly, aiDraftSupport, taggedAuthor, initialDraft, initialType }, ref) {
+  _s();
+  const [draft, setDraft] = useState(initialDraft ?? "");
+  const [commentType, setCommentType] = useState(internalOnly ? "internal" : initialType ?? "internal");
+  const [busy, setBusy] = useState(false);
+  const [aiDraftUsed, setAiDraftUsed] = useState(false);
+  const textareaRef = useRef(null);
+  useImperativeHandle(ref, () => ({
+    setDraft: (text) => {
+      setDraft(text);
+      if (aiDraftSupport) setAiDraftUsed(true);
+      setTimeout(() => {
+        textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        textareaRef.current?.focus();
+      }, 100);
+    },
+    setType: (type) => {
+      if (!internalOnly) setCommentType(type);
+    }
+  }));
+  const handlePost = async () => {
+    if (!draft.trim()) return;
+    setBusy(true);
+    try {
+      const body = taggedAuthor ? `[${taggedAuthor}] ${draft.trim()}` : draft.trim();
+      const res = await fetch(`/api/jira/issues/${encodeURIComponent(ticketKey)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: body, commentVisibility: commentType })
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error ?? "Failed to post comment");
+      setDraft("");
+      setAiDraftUsed(false);
+      onCommentPosted?.();
+    } catch {
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /* @__PURE__ */ jsxDEV(GlassCard, { className: "p-4", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-2 mb-2", children: [
+      /* @__PURE__ */ jsxDEV("div", { className: "text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold", children: "Add Comment" }, void 0, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+        lineNumber: 85,
+        columnNumber: 9
+      }, this),
+      aiDraftSupport && aiDraftUsed && /* @__PURE__ */ jsxDEV("span", { className: "text-[9px] px-1.5 py-0.5 rounded bg-[#5ec1ca]/15 text-[#5ec1ca] border border-[#5ec1ca]/30", children: "AI draft" }, void 0, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+        lineNumber: 87,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+      lineNumber: 84,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV(
+      "textarea",
+      {
+        ref: textareaRef,
+        value: draft,
+        onChange: (e) => {
+          setDraft(e.target.value);
+          if (aiDraftUsed) setAiDraftUsed(false);
+        },
+        placeholder: "Write a comment...",
+        rows: 3,
+        className: "w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600 mb-2",
+        style: { background: "rgba(255,255,255,0.03)" }
+      },
+      void 0,
+      false,
+      {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+        lineNumber: 90,
+        columnNumber: 7
+      },
+      this
+    ),
+    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-between", children: [
+      !internalOnly ? /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsxDEV(
+          "button",
+          {
+            onClick: () => setCommentType("internal"),
+            className: "px-2.5 py-1 text-[10px] font-semibold rounded-full transition-all",
+            style: {
+              background: commentType === "internal" ? "rgba(245,158,11,0.15)" : "transparent",
+              color: commentType === "internal" ? "#f59e0b" : "#64748b",
+              border: `1px solid ${commentType === "internal" ? "rgba(245,158,11,0.4)" : "rgba(255,255,255,0.05)"}`
+            },
+            children: "Internal"
+          },
+          void 0,
+          false,
+          {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+            lineNumber: 102,
+            columnNumber: 13
+          },
+          this
+        ),
+        /* @__PURE__ */ jsxDEV(
+          "button",
+          {
+            onClick: () => setCommentType("public"),
+            className: "px-2.5 py-1 text-[10px] font-semibold rounded-full transition-all",
+            style: {
+              background: commentType === "public" ? "rgba(16,185,129,0.15)" : "transparent",
+              color: commentType === "public" ? "#10b981" : "#64748b",
+              border: `1px solid ${commentType === "public" ? "rgba(16,185,129,0.4)" : "rgba(255,255,255,0.05)"}`
+            },
+            children: "Public"
+          },
+          void 0,
+          false,
+          {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+            lineNumber: 113,
+            columnNumber: 13
+          },
+          this
+        )
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+        lineNumber: 101,
+        columnNumber: 9
+      }, this) : /* @__PURE__ */ jsxDEV("span", { className: "px-2.5 py-1 text-[10px] font-semibold rounded-full bg-amber-900/50 text-amber-400", children: "Internal only" }, void 0, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+        lineNumber: 126,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        "button",
+        {
+          onClick: handlePost,
+          disabled: busy || !draft.trim(),
+          className: "px-4 py-1.5 text-[11px] font-bold rounded-lg text-[#0f172a] disabled:opacity-40",
+          style: { background: "linear-gradient(135deg, #10b981, #5ec1ca)" },
+          children: busy ? "Posting..." : "Post Comment"
+        },
+        void 0,
+        false,
+        {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+          lineNumber: 128,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+      lineNumber: 99,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx",
+    lineNumber: 83,
+    columnNumber: 5
+  }, this);
+}, "HvysFfn/4yjF78qsoq0zvDEypQQ=")), "HvysFfn/4yjF78qsoq0zvDEypQQ=");
+_c2 = CommentComposer;
+var _c, _c2;
+$RefreshReg$(_c, "CommentComposer$forwardRef");
+$RefreshReg$(_c2, "CommentComposer");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/ticket-detail/CommentComposer.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUEsVUFDVCxVQUFVZCxRQUFRLENBQUNKLE1BQU1tQixLQUFLO0FBQUEsVUFDOUIsV0FBVTtBQUFBLFVBQ1YsT0FBTyxFQUFFa0IsWUFBWSw0Q0FBNEM7QUFBQSxVQUVoRWpDLGlCQUFPLGVBQWU7QUFBQTtBQUFBLFFBTnpCO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQSxNQU9BO0FBQUEsU0FwQ0Y7QUFBQTtBQUFBO0FBQUE7QUFBQSxXQXFDQTtBQUFBLE9BckRGO0FBQUE7QUFBQTtBQUFBO0FBQUEsU0FzREE7QUFFSixHQUFDLGtDQUFDO0FBQUNvQyxNQXJHVW5EO0FBQWUsSUFBQUUsSUFBQWlEO0FBQUEsYUFBQWpELElBQUE7QUFBQSxhQUFBaUQsS0FBQSIsIm5hbWVzIjpbInVzZVN0YXRlIiwidXNlUmVmIiwidXNlSW1wZXJhdGl2ZUhhbmRsZSIsImZvcndhcmRSZWYiLCJHbGFzc0NhcmQiLCJDb21tZW50Q29tcG9zZXIiLCJfcyIsIl9jIiwidGlja2V0S2V5Iiwib25Db21tZW50UG9zdGVkIiwiaW50ZXJuYWxPbmx5IiwiYWlEcmFmdFN1cHBvcnQiLCJ0YWdnZWRBdXRob3IiLCJpbml0aWFsRHJhZnQiLCJpbml0aWFsVHlwZSIsInJlZiIsImRyYWZ0Iiwic2V0RHJhZnQiLCJjb21tZW50VHlwZSIsInNldENvbW1lbnRUeXBlIiwiYnVzeSIsInNldEJ1c3kiLCJhaURyYWZ0VXNlZCIsInNldEFpRHJhZnRVc2VkIiwidGV4dGFyZWFSZWYiLCJ0ZXh0Iiwic2V0VGltZW91dCIsImN1cnJlbnQiLCJzY3JvbGxJbnRvVmlldyIsImJlaGF2aW9yIiwiYmxvY2siLCJmb2N1cyIsInNldFR5cGUiLCJ0eXBlIiwiaGFuZGxlUG9zdCIsInRyaW0iLCJib2R5IiwicmVzIiwiZmV0Y2giLCJlbmNvZGVVUklDb21wb25lbnQiLCJtZXRob2QiLCJoZWFkZXJzIiwiSlNPTiIsInN0cmluZ2lmeSIsImNvbW1lbnQiLCJjb21tZW50VmlzaWJpbGl0eSIsImpzb24iLCJvayIsIkVycm9yIiwiZXJyb3IiLCJlIiwidGFyZ2V0IiwidmFsdWUiLCJiYWNrZ3JvdW5kIiwiY29sb3IiLCJib3JkZXIiLCJfYzIiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiQ29tbWVudENvbXBvc2VyLnRzeCJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgeyB1c2VTdGF0ZSwgdXNlUmVmLCB1c2VJbXBlcmF0aXZlSGFuZGxlLCBmb3J3YXJkUmVmIH0gZnJvbSAncmVhY3QnO1xuaW1wb3J0IHsgR2xhc3NDYXJkIH0gZnJvbSAnLi4vcXVldWUvaW5kZXguanMnO1xuXG5leHBvcnQgaW50ZXJmYWNlIENvbW1lbnRDb21wb3NlclByb3BzIHtcbiAgdGlja2V0S2V5OiBzdHJpbmc7XG4gIG9uQ29tbWVudFBvc3RlZD86ICgpID0+IHZvaWQ7XG4gIGludGVybmFsT25seT86IGJvb2xlYW47XG4gIGFpRHJhZnRTdXBwb3J0PzogYm9vbGVhbjtcbiAgdGFnZ2VkQXV0aG9yPzogc3RyaW5nO1xuICBpbml0aWFsRHJhZnQ/OiBzdHJpbmc7XG4gIGluaXRpYWxUeXBlPzogJ2ludGVybmFsJyB8ICdwdWJsaWMnO1xufVxuXG5leHBvcnQgaW50ZXJmYWNlIENvbW1lbnRDb21wb3NlckhhbmRsZSB7XG4gIHNldERyYWZ0OiAodGV4dDogc3RyaW5nKSA9PiB2b2lkO1xuICBzZXRUeXBlOiAodHlwZTogJ2ludGVybmFsJyB8ICdwdWJsaWMnKSA9PiB2b2lkO1xufVxuXG5leHBvcnQgY29uc3QgQ29tbWVudENvbXBvc2VyID0gZm9yd2FyZFJlZjxDb21tZW50Q29tcG9zZXJIYW5kbGUsIENvbW1lbnRDb21wb3NlclByb3BzPihmdW5jdGlvbiBDb21tZW50Q29tcG9zZXIoXG4gIHsgdGlja2V0S2V5LCBvbkNvbW1lbnRQb3N0ZWQsIGludGVybmFsT25seSwgYWlEcmFmdFN1cHBvcnQsIHRhZ2dlZEF1dGhvciwgaW5pdGlhbERyYWZ0LCBpbml0aWFsVHlwZSB9LFxuICByZWYsXG4pIHtcbiAgY29uc3QgW2RyYWZ0LCBzZXREcmFmdF0gPSB1c2VTdGF0ZShpbml0aWFsRHJhZnQgPz8gJycpO1xuICBjb25zdCBbY29tbWVudFR5cGUsIHNldENvbW1lbnRUeXBlXSA9IHVzZVN0YXRlPCdpbnRlcm5hbCcgfCAncHVibGljJz4oaW50ZXJuYWxPbmx5ID8gJ2ludGVybmFsJyA6IChpbml0aWFsVHlwZSA/PyAnaW50ZXJuYWwnKSk7XG4gIGNvbnN0IFtidXN5LCBzZXRCdXN5XSA9IHVzZVN0YXRlKGZhbHNlKTtcbiAgY29uc3QgW2FpRHJhZnRVc2VkLCBzZXRBaURyYWZ0VXNlZF0gPSB1c2VTdGF0ZShmYWxzZSk7XG4gIGNvbnN0IHRleHRhcmVhUmVmID0gdXNlUmVmPEhUTUxUZXh0QXJlYUVsZW1lbnQ+KG51bGwpO1xuXG4gIHVzZUltcGVyYXRpdmVIYW5kbGUocmVmLCAoKSA9PiAoe1xuICAgIHNldERyYWZ0OiAodGV4dDogc3RyaW5nKSA9PiB7XG4gICAgICBzZXREcmFmdCh0ZXh0KTtcbiAgICAgIGlmIChhaURyYWZ0U3VwcG9ydCkgc2V0QWlEcmFmdFVzZWQodHJ1ZSk7XG4gICAgICBzZXRUaW1lb3V0KCgpID0+IHtcbiAgICAgICAgdGV4dGFyZWFSZWYuY3VycmVudD8uc2Nyb2xsSW50b1ZpZXcoeyBiZWhhdmlvcjogJ3Ntb290aCcsIGJsb2NrOiAnY2VudGVyJyB9KTtcbiAgICAgICAgdGV4dGFyZWFSZWYuY3VycmVudD8uZm9jdXMoKTtcbiAgICAgIH0sIDEwMCk7XG4gICAgfSxcbiAgICBzZXRUeXBlOiAodHlwZTogJ2ludGVybmFsJyB8ICdwdWJsaWMnKSA9PiB7XG4gICAgICBpZiAoIWludGVybmFsT25seSkgc2V0Q29tbWVudFR5cGUodHlwZSk7XG4gICAgfSxcbiAgfSkpO1xuXG4gIGNvbnN0IGhhbmRsZVBvc3QgPSBhc3luYyAoKSA9PiB7XG4gICAgaWYgKCFkcmFmdC50cmltKCkpIHJldHVybjtcbiAgICBzZXRCdXN5KHRydWUpO1xuICAgIHRyeSB7XG4gICAgICBjb25zdCBib2R5ID0gdGFnZ2VkQXV0aG9yID8gYFske3RhZ2dlZEF1dGhvcn1dICR7ZHJhZnQudHJpbSgpfWAgOiBkcmFmdC50cmltKCk7XG4gICAgICBjb25zdCByZXMgPSBhd2FpdCBmZXRjaChgL2FwaS9qaXJhL2lzc3Vlcy8ke2VuY29kZVVSSUNvbXBvbmVudCh0aWNrZXRLZXkpfWAsIHtcbiAgICAgICAgbWV0aG9kOiAnUEFUQ0gnLFxuICAgICAgICBoZWFkZXJzOiB7ICdDb250ZW50LVR5cGUnOiAnYXBwbGljYXRpb24vanNvbicgfSxcbiAgICAgICAgYm9keTogSlNPTi5zdHJpbmdpZnkoeyBjb21tZW50OiBib2R5LCBjb21tZW50VmlzaWJpbGl0eTogY29tbWVudFR5cGUgfSksXG4gICAgICB9KTtcbiAgICAgIGNvbnN0IGpzb24gPSBhd2FpdCByZXMuanNvbigpO1xuICAgICAgaWYgKCFqc29uLm9rKSB0aHJvdyBuZXcgRXJyb3IoanNvbi5lcnJvciA/PyAnRmFpbGVkIHRvIHBvc3QgY29tbWVudCcpO1xuICAgICAgc2V0RHJhZnQoJycpO1xuICAgICAgc2V0QWlEcmFmdFVzZWQoZmFsc2UpO1xuICAgICAgb25Db21tZW50UG9zdGVkPy4oKTtcbiAgICB9IGNhdGNoIHsgLyogc2lsZW50ICovIH0gZmluYWxseSB7XG4gICAgICBzZXRCdXN5KGZhbHNlKTtcbiAgICB9XG4gIH07XG5cbiAgcmV0dXJuIChcbiAgICA8R2xhc3NDYXJkIGNsYXNzTmFtZT1cInAtNFwiPlxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLWNlbnRlciBnYXAtMiBtYi0yXCI+XG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPVwidGV4dC1bMTBweF0gdXBwZXJjYXNlIHRyYWNraW5nLXdpZGVyIHRleHQtWyM5NGEzYjhdIGZvbnQtYm9sZFwiPkFkZCBDb21tZW50PC9kaXY+XG4gICAgICAgIHthaURyYWZ0U3VwcG9ydCAmJiBhaURyYWZ0VXNlZCAmJiAoXG4gICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwidGV4dC1bOXB4XSBweC0xLjUgcHktMC41IHJvdW5kZWQgYmctWyM1ZWMxY2FdLzE1IHRleHQtWyM1ZWMxY2FdIGJvcmRlciBib3JkZXItWyM1ZWMxY2FdLzMwXCI+QUkgZHJhZnQ8L3NwYW4+XG4gICAgICAgICl9XG4gICAgICA8L2Rpdj5cbiAgICAgIDx0ZXh0YXJlYVxuICAgICAgICByZWY9e3RleHRhcmVhUmVmfVxuICAgICAgICB2YWx1ZT17ZHJhZnR9XG4gICAgICAgIG9uQ2hhbmdlPXsoZSkgPT4geyBzZXREcmFmdChlLnRhcmdldC52YWx1ZSk7IGlmIChhaURyYWZ0VXNlZCkgc2V0QWlEcmFmdFVzZWQoZmFsc2UpOyB9fVxuICAgICAgICBwbGFjZWhvbGRlcj1cIldyaXRlIGEgY29tbWVudC4uLlwiXG4gICAgICAgIHJvd3M9ezN9XG4gICAgICAgIGNsYXNzTmFtZT1cInctZnVsbCBweC0zIHB5LTIgdGV4dC1bMTNweF0gcm91bmRlZC1sZyBib3JkZXIgYm9yZGVyLXdoaXRlLzEwIHRleHQtbmV1dHJhbC01MCBwbGFjZWhvbGRlci1uZXV0cmFsLTYwMCBtYi0yXCJcbiAgICAgICAgc3R5bGU9e3sgYmFja2dyb3VuZDogJ3JnYmEoMjU1LDI1NSwyNTUsMC4wMyknIH19XG4gICAgICAvPlxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLWNlbnRlciBqdXN0aWZ5LWJldHdlZW5cIj5cbiAgICAgICAgeyFpbnRlcm5hbE9ubHkgPyAoXG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLWNlbnRlciBnYXAtMlwiPlxuICAgICAgICAgICAgPGJ1dHRvblxuICAgICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiBzZXRDb21tZW50VHlwZSgnaW50ZXJuYWwnKX1cbiAgICAgICAgICAgICAgY2xhc3NOYW1lPVwicHgtMi41IHB5LTEgdGV4dC1bMTBweF0gZm9udC1zZW1pYm9sZCByb3VuZGVkLWZ1bGwgdHJhbnNpdGlvbi1hbGxcIlxuICAgICAgICAgICAgICBzdHlsZT17e1xuICAgICAgICAgICAgICAgIGJhY2tncm91bmQ6IGNvbW1lbnRUeXBlID09PSAnaW50ZXJuYWwnID8gJ3JnYmEoMjQ1LDE1OCwxMSwwLjE1KScgOiAndHJhbnNwYXJlbnQnLFxuICAgICAgICAgICAgICAgIGNvbG9yOiBjb21tZW50VHlwZSA9PT0gJ2ludGVybmFsJyA/ICcjZjU5ZTBiJyA6ICcjNjQ3NDhiJyxcbiAgICAgICAgICAgICAgICBib3JkZXI6IGAxcHggc29saWQgJHtjb21tZW50VHlwZSA9PT0gJ2ludGVybmFsJyA/ICdyZ2JhKDI0NSwxNTgsMTEsMC40KScgOiAncmdiYSgyNTUsMjU1LDI1NSwwLjA1KSd9YCxcbiAgICAgICAgICAgICAgfX1cbiAgICAgICAgICAgID5cbiAgICAgICAgICAgICAgSW50ZXJuYWxcbiAgICAgICAgICAgIDwvYnV0dG9uPlxuICAgICAgICAgICAgPGJ1dHRvblxuICAgICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiBzZXRDb21tZW50VHlwZSgncHVibGljJyl9XG4gICAgICAgICAgICAgIGNsYXNzTmFtZT1cInB4LTIuNSBweS0xIHRleHQtWzEwcHhdIGZvbnQtc2VtaWJvbGQgcm91bmRlZC1mdWxsIHRyYW5zaXRpb24tYWxsXCJcbiAgICAgICAgICAgICAgc3R5bGU9e3tcbiAgICAgICAgICAgICAgICBiYWNrZ3JvdW5kOiBjb21tZW50VHlwZSA9PT0gJ3B1YmxpYycgPyAncmdiYSgxNiwxODUsMTI5LDAuMTUpJyA6ICd0cmFuc3BhcmVudCcsXG4gICAgICAgICAgICAgICAgY29sb3I6IGNvbW1lbnRUeXBlID09PSAncHVibGljJyA/ICcjMTBiOTgxJyA6ICcjNjQ3NDhiJyxcbiAgICAgICAgICAgICAgICBib3JkZXI6IGAxcHggc29saWQgJHtjb21tZW50VHlwZSA9PT0gJ3B1YmxpYycgPyAncmdiYSgxNiwxODUsMTI5LDAuNCknIDogJ3JnYmEoMjU1LDI1NSwyNTUsMC4wNSknfWAsXG4gICAgICAgICAgICAgIH19XG4gICAgICAgICAgICA+XG4gICAgICAgICAgICAgIFB1YmxpY1xuICAgICAgICAgICAgPC9idXR0b24+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgICkgOiAoXG4gICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwicHgtMi41IHB5LTEgdGV4dC1bMTBweF0gZm9udC1zZW1pYm9sZCByb3VuZGVkLWZ1bGwgYmctYW1iZXItOTAwLzUwIHRleHQtYW1iZXItNDAwXCI+SW50ZXJuYWwgb25seTwvc3Bhbj5cbiAgICAgICAgKX1cbiAgICAgICAgPGJ1dHRvblxuICAgICAgICAgIG9uQ2xpY2s9e2hhbmRsZVBvc3R9XG4gICAgICAgICAgZGlzYWJsZWQ9e2J1c3kgfHwgIWRyYWZ0LnRyaW0oKX1cbiAgICAgICAgICBjbGFzc05hbWU9XCJweC00IHB5LTEuNSB0ZXh0LVsxMXB4XSBmb250LWJvbGQgcm91bmRlZC1sZyB0ZXh0LVsjMGYxNzJhXSBkaXNhYmxlZDpvcGFjaXR5LTQwXCJcbiAgICAgICAgICBzdHlsZT17eyBiYWNrZ3JvdW5kOiAnbGluZWFyLWdyYWRpZW50KDEzNWRlZywgIzEwYjk4MSwgIzVlYzFjYSknIH19XG4gICAgICAgID5cbiAgICAgICAgICB7YnVzeSA/ICdQb3N0aW5nLi4uJyA6ICdQb3N0IENvbW1lbnQnfVxuICAgICAgICA8L2J1dHRvbj5cbiAgICAgIDwvZGl2PlxuICAgIDwvR2xhc3NDYXJkPlxuICApO1xufSk7XG4iXSwiZmlsZSI6IkM6L1VzZXJzL05pY2tXL0NsYXVkZS93aW5kb3dzIGF1dG9tYXRpb24vZGF5cGlsb3Qvc3JjL2NsaWVudC9jb21wb25lbnRzL3RpY2tldC1kZXRhaWwvQ29tbWVudENvbXBvc2VyLnRzeCJ9

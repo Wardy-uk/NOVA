@@ -1,0 +1,56 @@
+{
+  "scenario": {
+    "id": 6,
+    "name": "Ambiguous Website Problem",
+    "message": "Something is wrong with our website."
+  },
+  "steps": [
+    {
+      "t": "12:21:05",
+      "label": "chat_opened",
+      "hasInput": true
+    },
+    {
+      "t": "12:21:06",
+      "label": "message_sent",
+      "sent": true,
+      "message": "Something is wrong with our website."
+    },
+    {
+      "t": "12:21:11",
+      "label": "first_response",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": false,
+      "hasDirectSummary": false,
+      "assistantResponse": "13:21 | Which area does this relate to? | My Website | Content updates or something not working | My Account | Login, passwords, users, permissions | Billing & Contracts | Cancellations, service changes, queries | Something Else | General support requests and questions | 13:21"
+    },
+    {
+      "t": "12:21:11",
+      "label": "taxonomy_check",
+      "leaks": "CLEAN"
+    },
+    {
+      "t": "12:21:11",
+      "label": "category_clicked",
+      "target": "My Website",
+      "result": "Which area does this relate to?\nMy Website\nContent updates or something not work"
+    },
+    {
+      "t": "12:21:15",
+      "label": "after_category",
+      "asksReDescribe": false,
+      "excerpt": "Cancellations, service changes, queries | Something Else | General support requests and questions | 13:21 | Powered by Nurtur | Need help? Contact us"
+    },
+    {
+      "t": "12:21:17",
+      "label": "summary_check",
+      "hasSummary": false
+    },
+    {
+      "t": "12:21:17",
+      "label": "final",
+      "taxonomyLeaks": "CLEAN",
+      "consoleErrors": 5
+    }
+  ]
+}

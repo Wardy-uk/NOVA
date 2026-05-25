@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-05-18T12:21:44.338Z",
+  "results": [
+    {
+      "id": 1,
+      "name": "Simple Content Change",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": true,
+      "hasDirectSummary": false
+    },
+    {
+      "id": 2,
+      "name": "Information-Rich Request",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": true,
+      "hasDirectSummary": false
+    },
+    {
+      "id": 3,
+      "name": "Vague Website Request",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": false,
+      "hasDirectSummary": false
+    },
+    {
+      "id": 4,
+      "name": "Multiple Changes",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": false,
+      "hasDirectSummary": false
+    },
+    {
+      "id": 5,
+      "name": "Non-Website Request",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": false,
+      "hasDirectSummary": false
+    },
+    {
+      "id": 6,
+      "name": "Ambiguous Website Problem",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": false,
+      "hasDirectSummary": false
+    },
+    {
+      "id": 7,
+      "name": "Human Escalation Preference",
+      "hasCategoryPicker": true,
+      "hasConversationalResponse": false,
+      "hasDirectSummary": false
+    }
+  ],
+  "mobile": {
+    "sent": false
+  }
+}

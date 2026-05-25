@@ -1,0 +1,368 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/@fs/C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\src\\client\\components\\HelpView.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=62de665b"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$(), _s2 = $RefreshSig$();
+import __vite__cjsImport3_react from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react.js?v=62de665b"; const useState = __vite__cjsImport3_react["useState"];
+const SECTIONS = [
+  {
+    title: "Getting Started",
+    content: [
+      "N.O.V.A (Nurtur Operational Virtual Assistant) is a personal productivity dashboard that aggregates your tasks, calendar, email, and delivery tracking into one place.",
+      "On first launch, create an admin account. After logging in, head to My Settings to connect your personal integrations (Jira, Dynamics 365).",
+      "Once connected, N.O.V.A will automatically sync tasks from all your sources on a configurable interval.",
+      "N.O.V.A uses role-based access: Admins can manage users, teams, and system settings. Editors can modify settings and data. Viewers have read-only access across the app."
+    ]
+  },
+  {
+    title: "Tasks",
+    content: [
+      "The full task list aggregated from all connected sources: Jira and Onboarding milestones. Tasks are grouped by source with collapsible sections.",
+      'Filter by source using the chips at the top. Toggle "Overdue only" to narrow down. Sort by due date, priority, or recently updated.',
+      "Click Edit on any task to open the Task Drawer — a side panel with full details.",
+      "Jira tasks show transitions (e.g. In Progress → Done) with optional comments, plus assignee reassignment via the user search picker.",
+      "Task badges show source, status, priority, age, and due date. Overdue tasks are highlighted in red."
+    ]
+  },
+  {
+    title: "Standup",
+    content: [
+      "Three ritual modes accessed via tabs for structured daily workflow:",
+      "Morning Standup — N.O.V.A analyses all your tasks and produces a prioritised briefing with key actions, blockers, and recommendations. Auto-triggers on first visit each day.",
+      "Replan — Mid-day re-assessment. N.O.V.A reviews what's changed since the morning and suggests priority adjustments.",
+      "End of Day — Review what you accomplished and what's rolling over to tomorrow.",
+      "Each standup result is saved and persists until midnight. Use the Re-run button to regenerate if your situation has changed. Past results remain accessible in the standup history."
+    ]
+  },
+  {
+    title: "KPIs",
+    content: [
+      "Detailed analytics and metrics across all your task sources.",
+      "Key metrics: completion rate, tasks by status, overdue breakdown, average age, SLA tracking, source distribution, and high-priority open count.",
+      "Use this page to identify bottlenecks — which sources have the most overdue tasks, which are aging, and where your focus should be."
+    ]
+  },
+  {
+    title: "Delivery",
+    content: [
+      "Customer delivery tracking, combining data from the master Excel spreadsheet with local database entries.",
+      "Brand Filter — switch between product tabs (BYM, KYM, Yomdel, etc.) to see accounts for each brand.",
+      'Status Filter — multi-select status chips to show or hide entries. By default, "complete" entries are hidden. Available statuses: Not Started, WIP, In Progress, On Hold, Complete, Dead, Back to Sales.',
+      'Starring — star important accounts for quick access. Stars appear in the panel at the top. Toggle between "My Stars" (personal) and "Team Stars" (shared with all users).',
+      "Onboarding IDs — each delivery entry is auto-assigned a unique ID (e.g. BYM0001) based on the product brand prefix. IDs are visible in the table and drawer.",
+      "Click any row to open the Delivery Drawer for editing. Spreadsheet rows will pre-fill the form fields (account, status, dates, MRR, notes, etc.) when creating a new database entry.",
+      "CRM Autocomplete — the Account field in the Delivery Drawer suggests matching customer names from Dynamics 365 CRM as you type. Select a suggestion to fill the field, or continue typing freely.",
+      'Linked Tickets — saved delivery entries show a "Linked Tickets" section in the drawer. This displays onboarding tickets (parent + children) and related Service Desk tickets matched by account name, with clickable links to Jira.',
+      'Change History — an expandable "History" section at the bottom of the drawer shows the audit trail for each entry: who changed what and when.',
+      'SharePoint Sync — "Pull from SP" downloads the latest delivery sheet from SharePoint. "Push to SP" uploads local DB entries back to SharePoint as an xlsx file.',
+      'Import xlsx to DB — the amber "Import xlsx to DB" button converts all rows from the local xlsx file into database entries with auto-assigned onboarding IDs. Existing entries are skipped (matched by product and account name).',
+      "Column Sorting — click any column header to sort the table ascending or descending. Works across both database entries and spreadsheet rows. Click again to reverse the sort order.",
+      "Inline Editing — click any cell on a database entry row to edit it in place. Status fields show a dropdown, date fields show a date picker, and number fields show a number input. Changes are saved automatically when you click away or press Enter."
+    ]
+  },
+  {
+    title: "CRM",
+    content: [
+      "Customer Relationship Management page for tracking customer health and business reviews.",
+      "Customer health uses a RAG (Red/Amber/Green) system. Set health status, add notes, and track review dates.",
+      "Business reviews can be scheduled and tracked with outcomes and follow-up actions.",
+      'Dynamics 365 Integration — click "Sync from D365" to pull accounts from Dynamics 365 CRM into NOVA. Synced customers show a blue "D365" badge. The sync summary shows how many accounts were created, updated, and total synced.',
+      "All CRM data is stored locally in the database. D365 sync is optional and uses the Dataverse Web API with MSAL authentication. Configure D365 credentials in My Settings."
+    ]
+  },
+  {
+    title: "Onboarding",
+    content: [
+      "The Onboarding page (admin/editor only) manages the onboarding matrix and Jira ticket automation for new customer onboardings.",
+      "Matrix Grid tab — a visual grid of sale types (rows) vs capabilities (columns). Click a cell to toggle whether a capability applies to a sale type. Amber cells have notes.",
+      "Sale Types tab — manage product/sale types (e.g. BYM, Guild Enhanced, Ewemove). Add, edit, reorder, or deactivate sale types.",
+      "Capabilities tab — manage delivery capabilities (e.g. Data Warehouse, Build, Leadpro). Each capability can have a short code and items associated with it.",
+      "Items tab — select a capability from the dropdown, then manage the deliverable items for it. Items can be standard or bolt-on (optional add-ons). These items appear as checklists in the Jira ticket descriptions.",
+      'Import from xlsx — the "Import from xlsx" button re-imports the entire onboarding matrix from OnboardingMatix.xlsx. This replaces all existing config data. Use this for initial setup or full resets.',
+      'Ticket Creation — when ready to onboard a customer, the system creates Jira tickets in project NT: one parent "Quality Assurance" ticket and N child "Support Onboarding" tickets (one per capability). Each child ticket blocks the parent. The system is idempotent — retrying with the same onboarding reference will not create duplicates.',
+      "Dry Run — test ticket creation without actually creating Jira tickets. The dry-run preview shows exactly what would be created."
+    ]
+  },
+  {
+    title: "Admin",
+    content: [
+      "The Admin page is accessible to admin users only, via the user menu in the top-right corner.",
+      'Users tab — view all registered users, change roles (admin/editor/viewer), assign users to teams, reset passwords, delete accounts, and send invite emails. The "Invite" button next to each user sends a branded email with their login details and sign-in link.',
+      'Import Users — click "Import Users" in the Users tab to bulk-create accounts from an Excel (.xlsx) or CSV file. Upload the file, preview parsed users (username, display name, email, role), optionally send invite emails, then import. Duplicate usernames are skipped.',
+      "Teams tab — create and manage teams. Assign users to teams for future team-scoped features.",
+      "AI Keys tab — manage the global OpenAI API key used by all users. Individual users can set a personal API key override in My Settings > AI Preferences, which takes priority over the global key.",
+      "Integrations tab — configure global/service-account integrations: Jira (Onboarding) service account for automated ticket creation, Entra ID SSO for Microsoft single sign-on, Jira OAuth app credentials for personal Jira connections, and Email (built-in SMTP for invites and password resets). Personal integrations (Jira, M365, D365) are managed by each user in My Settings.",
+      "Milestones tab — configure delivery milestone templates (day offsets, checklists) used when onboarding new customers.",
+      "Onboarding tab — manage the onboarding matrix, sale types, ticket groups, capabilities, and items for Jira ticket automation.",
+      "Permissions tab — create custom roles with per-area access levels (hidden/view/edit) for My NOVA, Service Desk, Onboarding, and Account Management.",
+      "Audit Log tab — a searchable log of all changes across the system. Filter by entity type, user, or time period to see who changed what and when.",
+      "Feedback tab — view all feedback submitted by users (bugs, questions, feature requests). Update the status of each item or delete resolved entries."
+    ]
+  },
+  {
+    title: "Feedback",
+    content: [
+      "Use the envelope icon in the header bar to send feedback at any time.",
+      "Choose a type: Report a Bug, Ask a Question, or Suggest a Feature. Add a title and optional description, then submit.",
+      "Feedback is stored in the database and visible to admins in the Admin page. Use this to report issues or request new features without leaving the app."
+    ]
+  },
+  {
+    title: "My Settings",
+    content: [
+      "Manage your personal integrations, sync preferences, and AI settings. Accessible via the user menu in the top-right corner.",
+      "Integration Cards — each personal source (Jira, Dynamics 365) has its own card. Toggle enabled/disabled, enter your credentials, configure sync options, and sign in.",
+      "Jira — enter your Jira URL, email address, and personal API token (generate one at id.atlassian.com/manage-profile/security/api-tokens). This connects your personal Jira account to sync your assigned issues.",
+      'Jira Account (OAuth) — if your admin has configured Jira OAuth, a "Connect Jira" card appears. Click to sign in with your Atlassian account via OAuth 3LO. This grants personal ticket access without sharing API tokens. You can disconnect at any time.',
+      "Dynamics 365 — sign in with your Microsoft account. Client ID and Tenant ID are configured here for the device code authentication flow.",
+      'Sync Frequency — set a per-integration sync interval (1, 2, 5, 10, 15, or 30 minutes) or use the global default. Every integration also has a "Sync Now" button for immediate refresh.',
+      "AI Preferences — choose your AI provider (OpenAI or Claude), set the number of suggestions, and configure the default sync frequency. You can also set a personal API key override that takes priority over the global key set by your admin.",
+      "Remember Me — when unchecked on the login page, your session is stored in sessionStorage (cleared when the browser closes). When checked, it uses localStorage for persistent sessions."
+    ]
+  },
+  {
+    title: "Roles & Permissions",
+    content: [
+      "N.O.V.A uses three roles to control access across the application:",
+      "Admin — full access to all features. Can manage users, teams, global AI keys, service-account integrations (Jira Onboarding, SSO), milestones, onboarding config, and custom permissions via the Admin page.",
+      "Editor — can modify settings, edit delivery entries, manage CRM data, and use all task features. Cannot access the Admin page.",
+      "Viewer — read-only access. Can view tasks, dashboards, deliveries, and CRM data but cannot modify settings or edit entries.",
+      "Per-user data — each user has their own focused tasks and standup history. Focusing a task only affects your view, not other users. Standups are generated per-user so each team member gets their own morning briefing."
+    ]
+  },
+  {
+    title: "Service Desk Dashboard",
+    content: [
+      "The Dashboard tab in the Service Desk area provides a real-time overview of your Jira service desk tickets.",
+      "KPI Cards — four summary cards at the top: Total Open tickets, SLA Breached count, Overdue Updates (tickets where the agent hasn't responded in time), and Distinct Customers with active tickets.",
+      "Priority Breakdown — shows how many open tickets exist at each priority level (Highest, High, Medium, Low, Lowest).",
+      "Status Breakdown — shows ticket counts grouped by Jira status (e.g. Open, In Progress, Waiting for Customer).",
+      "Assignee Breakdown — shows how tickets are distributed across team members, helping identify overloaded agents.",
+      "Data is refreshed each time you navigate to the Dashboard tab. All metrics respect the project and tier filters configured in Admin > Service Desk Config."
+    ]
+  },
+  {
+    title: "Notifications",
+    content: [
+      "The bell icon in the top header bar shows your unread notification count. Click it to open the notification dropdown.",
+      "Notifications are generated automatically when: a delivery milestone becomes overdue, a delivery go-live date is within 7 days, or a Jira SLA is breached.",
+      'Each notification shows the type, title, message, and timestamp. Click a notification to mark it as read. Use "Mark all read" to clear all unread items.',
+      "Notifications are de-duplicated — the same alert won't fire again for the same entity within 24 hours.",
+      "The notification check runs automatically on login and can be triggered manually via the API."
+    ]
+  },
+  {
+    title: "Audit Log",
+    content: [
+      "Every create, update, and delete action in NOVA is recorded in the audit log with the user, timestamp, and what changed.",
+      'Delivery Drawer — each saved entry has an expandable "History" section at the bottom showing the recent audit trail for that entry.',
+      "Admin > Audit Log — a filterable table showing all audit events system-wide. Filter by entity type (delivery, milestone, ticket run, user, settings) or search for specific changes.",
+      'The audit log helps answer "who changed this?" and "when was this updated?" for compliance and debugging.'
+    ]
+  },
+  {
+    title: "Jira OAuth",
+    content: [
+      "Jira OAuth 3LO allows users to connect their personal Jira account using secure OAuth instead of API tokens.",
+      "Admin Setup — configure the OAuth Client ID and Client Secret in Admin > Integrations > Jira OAuth. These credentials come from the Atlassian developer console (developer.atlassian.com).",
+      'User Connection — once configured by the admin, each user sees a "Jira Account" card in My Settings. Click "Connect Jira" to sign in with your Atlassian account. After authorising, your Jira account is linked.',
+      "The OAuth connection uses PKCE (Proof Key for Code Exchange) for security. Tokens are refreshed automatically when they expire.",
+      "Basic auth (email + API token) continues to work as a fallback. Users who prefer API tokens can keep using the existing Jira integration card."
+    ]
+  },
+  {
+    title: "Password Reset",
+    content: [
+      'Self-service password reset is available on the login page. Click "Forgot password?" to enter your email address. A reset link is sent to your inbox (valid for 1 hour).',
+      "The reset email contains a branded link that takes you directly to the password reset form. Enter a new password (min 6 characters) and confirm it to complete the reset.",
+      'For security, the "Forgot password" form always shows a success message regardless of whether the email exists. This prevents attackers from discovering which emails are registered.',
+      "Password reset requires the Email integration to be configured in Admin > Integrations > Email. At minimum, a From address must be set. The built-in email service sends directly to the recipient's mail server — no external SMTP provider is needed.",
+      "Admins can also reset any user's password manually from Admin > Users using the Reset Password button."
+    ]
+  },
+  {
+    title: "Email Service",
+    content: [
+      "N.O.V.A includes a built-in email service for sending invite emails and password reset links. Configure it in Admin > Integrations > Email.",
+      `The only required field is "From Address" (e.g. noreply@nurtur.tech). Emails are sent directly to the recipient's mail server by resolving MX DNS records — no external SMTP provider or Microsoft 365 is needed.`,
+      "Optionally, configure an SMTP relay (host, port, username, password) if your network requires outbound email to go through a specific server.",
+      'Use the "Send Test Email" button in Admin > Integrations > Email to verify your configuration is working.'
+    ]
+  },
+  {
+    title: "Tips & Shortcuts",
+    content: [
+      'Star scoping — when starring delivery entries, "Team Stars" are visible to all users while "My Stars" are personal. Use team stars for shared priorities.',
+      "Standup persistence — standup results save automatically and persist until midnight. No need to re-run unless your priorities change.",
+      "Sync frequency — for fast-moving sources like Jira, set a lower sync interval (1–2 min).",
+      "Inline editing — for quick changes to delivery entries, click directly on a cell value in the table instead of opening the full drawer. Press Escape to cancel an edit.",
+      'Import workflow — for new deployments, pull the delivery sheet from SharePoint first, then use "Import xlsx to DB" to bulk-create database entries with auto-assigned onboarding IDs.',
+      "MCP auto-reconnect — if a connection to Jira drops unexpectedly, N.O.V.A will automatically reconnect on the next operation."
+    ]
+  }
+];
+function CollapsibleSection({ section, defaultOpen }) {
+  _s();
+  const [open, setOpen] = useState(defaultOpen ?? false);
+  return /* @__PURE__ */ jsxDEV("div", { className: "border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-hidden", children: [
+    /* @__PURE__ */ jsxDEV(
+      "button",
+      {
+        onClick: () => setOpen(!open),
+        className: "w-full flex items-center justify-between px-5 py-4 text-left hover:bg-[#363d47] transition-colors",
+        children: [
+          /* @__PURE__ */ jsxDEV("h3", { className: "text-xs text-[#5ec1ca] uppercase tracking-widest font-semibold", children: section.title }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+            lineNumber: 234,
+            columnNumber: 9
+          }, this),
+          /* @__PURE__ */ jsxDEV("span", { className: "text-neutral-500 text-sm font-mono", children: open ? "−" : "+" }, void 0, false, {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+            lineNumber: 237,
+            columnNumber: 9
+          }, this)
+        ]
+      },
+      void 0,
+      true,
+      {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+        lineNumber: 230,
+        columnNumber: 7
+      },
+      this
+    ),
+    open && /* @__PURE__ */ jsxDEV("div", { className: "px-5 pb-4 space-y-2.5", children: section.content.map(
+      (paragraph, i) => /* @__PURE__ */ jsxDEV("p", { className: "text-sm text-neutral-300 leading-relaxed", children: paragraph }, i, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+        lineNumber: 242,
+        columnNumber: 9
+      }, this)
+    ) }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+      lineNumber: 240,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+    lineNumber: 229,
+    columnNumber: 5
+  }, this);
+}
+_s(CollapsibleSection, "TsQ81KWQI84vt5h9UMwHgpqt9jM=");
+_c = CollapsibleSection;
+export function HelpView() {
+  _s2();
+  const [allOpen, setAllOpen] = useState(false);
+  const [key, setKey] = useState(0);
+  return /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-between mb-2", children: [
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        /* @__PURE__ */ jsxDEV("h2", { className: "text-lg font-bold font-[var(--font-heading)] text-neutral-100", children: "Help & User Guide" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+          lineNumber: 260,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("p", { className: "text-xs text-neutral-500 mt-1", children: "Everything you need to know about N.O.V.A" }, void 0, false, {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+          lineNumber: 263,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+        lineNumber: 259,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        "button",
+        {
+          onClick: () => {
+            setAllOpen(!allOpen);
+            setKey((k) => k + 1);
+          },
+          className: "px-3 py-1.5 text-xs rounded transition-colors bg-[#2f353d] text-neutral-400 hover:bg-[#363d47] hover:text-neutral-200 border border-[#3a424d]",
+          children: allOpen ? "Collapse All" : "Expand All"
+        },
+        void 0,
+        false,
+        {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+          lineNumber: 267,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+      lineNumber: 258,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "space-y-3", children: SECTIONS.map(
+      (section) => /* @__PURE__ */ jsxDEV(
+        CollapsibleSection,
+        {
+          section,
+          defaultOpen: allOpen
+        },
+        section.title,
+        false,
+        {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+          lineNumber: 280,
+          columnNumber: 9
+        },
+        this
+      )
+    ) }, key, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+      lineNumber: 278,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "border border-[#3a424d] rounded-lg px-5 py-4 bg-[#2f353d] mt-6", children: /* @__PURE__ */ jsxDEV("p", { className: "text-xs text-neutral-500 text-center", children: "N.O.V.A — Nurtur Operational Virtual Assistant" }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+      lineNumber: 289,
+      columnNumber: 9
+    }, this) }, void 0, false, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+      lineNumber: 288,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx",
+    lineNumber: 257,
+    columnNumber: 5
+  }, this);
+}
+_s2(HelpView, "QWW0NABifIWgrzuJ3kXSpnvIthE=");
+_c2 = HelpView;
+var _c, _c2;
+$RefreshReg$(_c, "CollapsibleSection");
+$RefreshReg$(_c2, "HelpView");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/HelpView.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUFjLFdBQVUsYUFDdEJkLG1CQUFTUztBQUFBQSxNQUFJLENBQUNMLFlBQ2I7QUFBQSxRQUFDO0FBQUE7QUFBQSxVQUVDO0FBQUEsVUFDQSxhQUFhVTtBQUFBQTtBQUFBQSxRQUZSVixRQUFRSDtBQUFBQSxRQURmO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsTUFHdUI7QUFBQSxJQUV4QixLQVBPZSxLQUFWO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0FRQTtBQUFBLElBRUEsdUJBQUMsU0FBSSxXQUFVLGtFQUNiLGlDQUFDLE9BQUUsV0FBVSx3Q0FBc0MsOERBQW5EO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0FFQSxLQUhGO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0FJQTtBQUFBLE9BbkNGO0FBQUE7QUFBQTtBQUFBO0FBQUEsU0FvQ0E7QUFFSjtBQUFDSCxJQTNDZUQsVUFBUTtBQUFBLE1BQVJBO0FBQVEsSUFBQU8sSUFBQUM7QUFBQSxhQUFBRCxJQUFBO0FBQUEsYUFBQUMsS0FBQSIsIm5hbWVzIjpbInVzZVN0YXRlIiwiU0VDVElPTlMiLCJ0aXRsZSIsImNvbnRlbnQiLCJDb2xsYXBzaWJsZVNlY3Rpb24iLCJzZWN0aW9uIiwiZGVmYXVsdE9wZW4iLCJfcyIsIm9wZW4iLCJzZXRPcGVuIiwibWFwIiwicGFyYWdyYXBoIiwiaSIsIkhlbHBWaWV3IiwiX3MyIiwiYWxsT3BlbiIsInNldEFsbE9wZW4iLCJrZXkiLCJzZXRLZXkiLCJrIiwiX2MiLCJfYzIiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiSGVscFZpZXcudHN4Il0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IHVzZVN0YXRlIH0gZnJvbSAncmVhY3QnO1xuXG5pbnRlcmZhY2UgU2VjdGlvbiB7XG4gIHRpdGxlOiBzdHJpbmc7XG4gIGNvbnRlbnQ6IHN0cmluZ1tdO1xufVxuXG5jb25zdCBTRUNUSU9OUzogU2VjdGlvbltdID0gW1xuICB7XG4gICAgdGl0bGU6ICdHZXR0aW5nIFN0YXJ0ZWQnLFxuICAgIGNvbnRlbnQ6IFtcbiAgICAgICdOLk8uVi5BIChOdXJ0dXIgT3BlcmF0aW9uYWwgVmlydHVhbCBBc3Npc3RhbnQpIGlzIGEgcGVyc29uYWwgcHJvZHVjdGl2aXR5IGRhc2hib2FyZCB0aGF0IGFnZ3JlZ2F0ZXMgeW91ciB0YXNrcywgY2FsZW5kYXIsIGVtYWlsLCBhbmQgZGVsaXZlcnkgdHJhY2tpbmcgaW50byBvbmUgcGxhY2UuJyxcbiAgICAgICdPbiBmaXJzdCBsYXVuY2gsIGNyZWF0ZSBhbiBhZG1pbiBhY2NvdW50LiBBZnRlciBsb2dnaW5nIGluLCBoZWFkIHRvIE15IFNldHRpbmdzIHRvIGNvbm5lY3QgeW91ciBwZXJzb25hbCBpbnRlZ3JhdGlvbnMgKEppcmEsIER5bmFtaWNzIDM2NSkuJyxcbiAgICAgICdPbmNlIGNvbm5lY3RlZCwgTi5PLlYuQSB3aWxsIGF1dG9tYXRpY2FsbHkgc3luYyB0YXNrcyBmcm9tIGFsbCB5b3VyIHNvdXJjZXMgb24gYSBjb25maWd1cmFibGUgaW50ZXJ2YWwuJyxcbiAgICAgICdOLk8uVi5BIHVzZXMgcm9sZS1iYXNlZCBhY2Nlc3M6IEFkbWlucyBjYW4gbWFuYWdlIHVzZXJzLCB0ZWFtcywgYW5kIHN5c3RlbSBzZXR0aW5ncy4gRWRpdG9ycyBjYW4gbW9kaWZ5IHNldHRpbmdzIGFuZCBkYXRhLiBWaWV3ZXJzIGhhdmUgcmVhZC1vbmx5IGFjY2VzcyBhY3Jvc3MgdGhlIGFwcC4nLFxuICAgIF0sXG4gIH0sXG4gIHtcbiAgICB0aXRsZTogJ1Rhc2tzJyxcbiAgICBjb250ZW50OiBbXG4gICAgICAnVGhlIGZ1bGwgdGFzayBsaXN0IGFnZ3JlZ2F0ZWQgZnJvbSBhbGwgY29ubmVjdGVkIHNvdXJjZXM6IEppcmEgYW5kIE9uYm9hcmRpbmcgbWlsZXN0b25lcy4gVGFza3MgYXJlIGdyb3VwZWQgYnkgc291cmNlIHdpdGggY29sbGFwc2libGUgc2VjdGlvbnMuJyxcbiAgICAgICdGaWx0ZXIgYnkgc291cmNlIHVzaW5nIHRoZSBjaGlwcyBhdCB0aGUgdG9wLiBUb2dnbGUgXCJPdmVyZHVlIG9ubHlcIiB0byBuYXJyb3cgZG93bi4gU29ydCBieSBkdWUgZGF0ZSwgcHJpb3JpdHksIG9yIHJlY2VudGx5IHVwZGF0ZWQuJyxcbiAgICAgICdDbGljayBFZGl0IG9uIGFueSB0YXNrIHRvIG9wZW4gdGhlIFRhc2sgRHJhd2VyIOKAlCBhIHNpZGUgcGFuZWwgd2l0aCBmdWxsIGRldGFpbHMuJyxcbiAgICAgICdKaXJhIHRhc2tzIHNob3cgdHJhbnNpdGlvbnMgKGUuZy4gSW4gUHJvZ3Jlc3Mg4oaSIERvbmUpIHdpdGggb3B0aW9uYWwgY29tbWVudHMsIHBsdXMgYXNzaWduZWUgcmVhc3NpZ25tZW50IHZpYSB0aGUgdXNlciBzZWFyY2ggcGlja2VyLicsXG4gICAgICAnVGFzayBiYWRnZXMgc2hvdyBzb3VyY2UsIHN0YXR1cywgcHJpb3JpdHksIGFnZSwgYW5kIGR1ZSBkYXRlLiBPdmVyZHVlIHRhc2tzIGFyZSBoaWdobGlnaHRlZCBpbiByZWQuJyxcbiAgICBdLFxuICB9LFxuICB7XG4gICAgdGl0bGU6ICdTdGFuZHVwJyxcbiAgICBjb250ZW50OiBbXG4gICAgICAnVGhyZWUgcml0dWFsIG1vZGVzIGFjY2Vzc2VkIHZpYSB0YWJzIGZvciBzdHJ1Y3R1cmVkIGRhaWx5IHdvcmtmbG93OicsXG4gICAgICAnTW9ybmluZyBTdGFuZHVwIOKAlCBOLk8uVi5BIGFuYWx5c2VzIGFsbCB5b3VyIHRhc2tzIGFuZCBwcm9kdWNlcyBhIHByaW9yaXRpc2VkIGJyaWVmaW5nIHdpdGgga2V5IGFjdGlvbnMsIGJsb2NrZXJzLCBhbmQgcmVjb21tZW5kYXRpb25zLiBBdXRvLXRyaWdnZXJzIG9uIGZpcnN0IHZpc2l0IGVhY2ggZGF5LicsXG4gICAgICAnUmVwbGFuIOKAlCBNaWQtZGF5IHJlLWFzc2Vzc21lbnQuIE4uTy5WLkEgcmV2aWV3cyB3aGF0XFwncyBjaGFuZ2VkIHNpbmNlIHRoZSBtb3JuaW5nIGFuZCBzdWdnZXN0cyBwcmlvcml0eSBhZGp1c3RtZW50cy4nLFxuICAgICAgJ0VuZCBvZiBEYXkg4oCUIFJldmlldyB3aGF0IHlvdSBhY2NvbXBsaXNoZWQgYW5kIHdoYXRcXCdzIHJvbGxpbmcgb3ZlciB0byB0b21vcnJvdy4nLFxuICAgICAgJ0VhY2ggc3RhbmR1cCByZXN1bHQgaXMgc2F2ZWQgYW5kIHBlcnNpc3RzIHVudGlsIG1pZG5pZ2h0LiBVc2UgdGhlIFJlLXJ1biBidXR0b24gdG8gcmVnZW5lcmF0ZSBpZiB5b3VyIHNpdHVhdGlvbiBoYXMgY2hhbmdlZC4gUGFzdCByZXN1bHRzIHJlbWFpbiBhY2Nlc3NpYmxlIGluIHRoZSBzdGFuZHVwIGhpc3RvcnkuJyxcbiAgICBdLFxuICB9LFxuICB7XG4gICAgdGl0bGU6ICdLUElzJyxcbiAgICBjb250ZW50OiBbXG4gICAgICAnRGV0YWlsZWQgYW5hbHl0aWNzIGFuZCBtZXRyaWNzIGFjcm9zcyBhbGwgeW91ciB0YXNrIHNvdXJjZXMuJyxcbiAgICAgICdLZXkgbWV0cmljczogY29tcGxldGlvbiByYXRlLCB0YXNrcyBieSBzdGF0dXMsIG92ZXJkdWUgYnJlYWtkb3duLCBhdmVyYWdlIGFnZSwgU0xBIHRyYWNraW5nLCBzb3VyY2UgZGlzdHJpYnV0aW9uLCBhbmQgaGlnaC1wcmlvcml0eSBvcGVuIGNvdW50LicsXG4gICAgICAnVXNlIHRoaXMgcGFnZSB0byBpZGVudGlmeSBib3R0bGVuZWNrcyDigJQgd2hpY2ggc291cmNlcyBoYXZlIHRoZSBtb3N0IG92ZXJkdWUgdGFza3MsIHdoaWNoIGFyZSBhZ2luZywgYW5kIHdoZXJlIHlvdXIgZm9jdXMgc2hvdWxkIGJlLicsXG4gICAgXSxcbiAgfSxcbiAge1xuICAgIHRpdGxlOiAnRGVsaXZlcnknLFxuICAgIGNvbnRlbnQ6IFtcbiAgICAgICdDdXN0b21lciBkZWxpdmVyeSB0cmFja2luZywgY29tYmluaW5nIGRhdGEgZnJvbSB0aGUgbWFzdGVyIEV4Y2VsIHNwcmVhZHNoZWV0IHdpdGggbG9jYWwgZGF0YWJhc2UgZW50cmllcy4nLFxuICAgICAgJ0JyYW5kIEZpbHRlciDigJQgc3dpdGNoIGJldHdlZW4gcHJvZHVjdCB0YWJzIChCWU0sIEtZTSwgWW9tZGVsLCBldGMuKSB0byBzZWUgYWNjb3VudHMgZm9yIGVhY2ggYnJhbmQuJyxcbiAgICAgICdTdGF0dXMgRmlsdGVyIOKAlCBtdWx0aS1zZWxlY3Qgc3RhdHVzIGNoaXBzIHRvIHNob3cgb3IgaGlkZSBlbnRyaWVzLiBCeSBkZWZhdWx0LCBcImNvbXBsZXRlXCIgZW50cmllcyBhcmUgaGlkZGVuLiBBdmFpbGFibGUgc3RhdHVzZXM6IE5vdCBTdGFydGVkLCBXSVAsIEluIFByb2dyZXNzLCBPbiBIb2xkLCBDb21wbGV0ZSwgRGVhZCwgQmFjayB0byBTYWxlcy4nLFxuICAgICAgJ1N0YXJyaW5nIOKAlCBzdGFyIGltcG9ydGFudCBhY2NvdW50cyBmb3IgcXVpY2sgYWNjZXNzLiBTdGFycyBhcHBlYXIgaW4gdGhlIHBhbmVsIGF0IHRoZSB0b3AuIFRvZ2dsZSBiZXR3ZWVuIFwiTXkgU3RhcnNcIiAocGVyc29uYWwpIGFuZCBcIlRlYW0gU3RhcnNcIiAoc2hhcmVkIHdpdGggYWxsIHVzZXJzKS4nLFxuICAgICAgJ09uYm9hcmRpbmcgSURzIOKAlCBlYWNoIGRlbGl2ZXJ5IGVudHJ5IGlzIGF1dG8tYXNzaWduZWQgYSB1bmlxdWUgSUQgKGUuZy4gQllNMDAwMSkgYmFzZWQgb24gdGhlIHByb2R1Y3QgYnJhbmQgcHJlZml4LiBJRHMgYXJlIHZpc2libGUgaW4gdGhlIHRhYmxlIGFuZCBkcmF3ZXIuJyxcbiAgICAgICdDbGljayBhbnkgcm93IHRvIG9wZW4gdGhlIERlbGl2ZXJ5IERyYXdlciBmb3IgZWRpdGluZy4gU3ByZWFkc2hlZXQgcm93cyB3aWxsIHByZS1maWxsIHRoZSBmb3JtIGZpZWxkcyAoYWNjb3VudCwgc3RhdHVzLCBkYXRlcywgTVJSLCBub3RlcywgZXRjLikgd2hlbiBjcmVhdGluZyBhIG5ldyBkYXRhYmFzZSBlbnRyeS4nLFxuICAgICAgJ0NSTSBBdXRvY29tcGxldGUg4oCUIHRoZSBBY2NvdW50IGZpZWxkIGluIHRoZSBEZWxpdmVyeSBEcmF3ZXIgc3VnZ2VzdHMgbWF0Y2hpbmcgY3VzdG9tZXIgbmFtZXMgZnJvbSBEeW5hbWljcyAzNjUgQ1JNIGFzIHlvdSB0eXBlLiBTZWxlY3QgYSBzdWdnZXN0aW9uIHRvIGZpbGwgdGhlIGZpZWxkLCBvciBjb250aW51ZSB0eXBpbmcgZnJlZWx5LicsXG4gICAgICAnTGlua2VkIFRpY2tldHMg4oCUIHNhdmVkIGRlbGl2ZXJ5IGVudHJpZXMgc2hvdyBhIFwiTGlua2VkIFRpY2tldHNcIiBzZWN0aW9uIGluIHRoZSBkcmF3ZXIuIFRoaXMgZGlzcGxheXMgb25ib2FyZGluZyB0aWNrZXRzIChwYXJlbnQgKyBjaGlsZHJlbikgYW5kIHJlbGF0ZWQgU2VydmljZSBEZXNrIHRpY2tldHMgbWF0Y2hlZCBieSBhY2NvdW50IG5hbWUsIHdpdGggY2xpY2thYmxlIGxpbmtzIHRvIEppcmEuJyxcbiAgICAgICdDaGFuZ2UgSGlzdG9yeSDigJQgYW4gZXhwYW5kYWJsZSBcIkhpc3RvcnlcIiBzZWN0aW9uIGF0IHRoZSBib3R0b20gb2YgdGhlIGRyYXdlciBzaG93cyB0aGUgYXVkaXQgdHJhaWwgZm9yIGVhY2ggZW50cnk6IHdobyBjaGFuZ2VkIHdoYXQgYW5kIHdoZW4uJyxcbiAgICAgICdTaGFyZVBvaW50IFN5bmMg4oCUIFwiUHVsbCBmcm9tIFNQXCIgZG93bmxvYWRzIHRoZSBsYXRlc3QgZGVsaXZlcnkgc2hlZXQgZnJvbSBTaGFyZVBvaW50LiBcIlB1c2ggdG8gU1BcIiB1cGxvYWRzIGxvY2FsIERCIGVudHJpZXMgYmFjayB0byBTaGFyZVBvaW50IGFzIGFuIHhsc3ggZmlsZS4nLFxuICAgICAgJ0ltcG9ydCB4bHN4IHRvIERCIOKAlCB0aGUgYW1iZXIgXCJJbXBvcnQgeGxzeCB0byBEQlwiIGJ1dHRvbiBjb252ZXJ0cyBhbGwgcm93cyBmcm9tIHRoZSBsb2NhbCB4bHN4IGZpbGUgaW50byBkYXRhYmFzZSBlbnRyaWVzIHdpdGggYXV0by1hc3NpZ25lZCBvbmJvYXJkaW5nIElEcy4gRXhpc3RpbmcgZW50cmllcyBhcmUgc2tpcHBlZCAobWF0Y2hlZCBieSBwcm9kdWN0IGFuZCBhY2NvdW50IG5hbWUpLicsXG4gICAgICAnQ29sdW1uIFNvcnRpbmcg4oCUIGNsaWNrIGFueSBjb2x1bW4gaGVhZGVyIHRvIHNvcnQgdGhlIHRhYmxlIGFzY2VuZGluZyBvciBkZXNjZW5kaW5nLiBXb3JrcyBhY3Jvc3MgYm90aCBkYXRhYmFzZSBlbnRyaWVzIGFuZCBzcHJlYWRzaGVldCByb3dzLiBDbGljayBhZ2FpbiB0byByZXZlcnNlIHRoZSBzb3J0IG9yZGVyLicsXG4gICAgICAnSW5saW5lIEVkaXRpbmcg4oCUIGNsaWNrIGFueSBjZWxsIG9uIGEgZGF0YWJhc2UgZW50cnkgcm93IHRvIGVkaXQgaXQgaW4gcGxhY2UuIFN0YXR1cyBmaWVsZHMgc2hvdyBhIGRyb3Bkb3duLCBkYXRlIGZpZWxkcyBzaG93IGEgZGF0ZSBwaWNrZXIsIGFuZCBudW1iZXIgZmllbGRzIHNob3cgYSBudW1iZXIgaW5wdXQuIENoYW5nZXMgYXJlIHNhdmVkIGF1dG9tYXRpY2FsbHkgd2hlbiB5b3UgY2xpY2sgYXdheSBvciBwcmVzcyBFbnRlci4nLFxuICAgIF0sXG4gIH0sXG4gIHtcbiAgICB0aXRsZTogJ0NSTScsXG4gICAgY29udGVudDogW1xuICAgICAgJ0N1c3RvbWVyIFJlbGF0aW9uc2hpcCBNYW5hZ2VtZW50IHBhZ2UgZm9yIHRyYWNraW5nIGN1c3RvbWVyIGhlYWx0aCBhbmQgYnVzaW5lc3MgcmV2aWV3cy4nLFxuICAgICAgJ0N1c3RvbWVyIGhlYWx0aCB1c2VzIGEgUkFHIChSZWQvQW1iZXIvR3JlZW4pIHN5c3RlbS4gU2V0IGhlYWx0aCBzdGF0dXMsIGFkZCBub3RlcywgYW5kIHRyYWNrIHJldmlldyBkYXRlcy4nLFxuICAgICAgJ0J1c2luZXNzIHJldmlld3MgY2FuIGJlIHNjaGVkdWxlZCBhbmQgdHJhY2tlZCB3aXRoIG91dGNvbWVzIGFuZCBmb2xsb3ctdXAgYWN0aW9ucy4nLFxuICAgICAgJ0R5bmFtaWNzIDM2NSBJbnRlZ3JhdGlvbiDigJQgY2xpY2sgXCJTeW5jIGZyb20gRDM2NVwiIHRvIHB1bGwgYWNjb3VudHMgZnJvbSBEeW5hbWljcyAzNjUgQ1JNIGludG8gTk9WQS4gU3luY2VkIGN1c3RvbWVycyBzaG93IGEgYmx1ZSBcIkQzNjVcIiBiYWRnZS4gVGhlIHN5bmMgc3VtbWFyeSBzaG93cyBob3cgbWFueSBhY2NvdW50cyB3ZXJlIGNyZWF0ZWQsIHVwZGF0ZWQsIGFuZCB0b3RhbCBzeW5jZWQuJyxcbiAgICAgICdBbGwgQ1JNIGRhdGEgaXMgc3RvcmVkIGxvY2FsbHkgaW4gdGhlIGRhdGFiYXNlLiBEMzY1IHN5bmMgaXMgb3B0aW9uYWwgYW5kIHVzZXMgdGhlIERhdGF2ZXJzZSBXZWIgQVBJIHdpdGggTVNBTCBhdXRoZW50aWNhdGlvbi4gQ29uZmlndXJlIEQzNjUgY3JlZGVudGlhbHMgaW4gTXkgU2V0dGluZ3MuJyxcbiAgICBdLFxuICB9LFxuICB7XG4gICAgdGl0bGU6ICdPbmJvYXJkaW5nJyxcbiAgICBjb250ZW50OiBbXG4gICAgICAnVGhlIE9uYm9hcmRpbmcgcGFnZSAoYWRtaW4vZWRpdG9yIG9ubHkpIG1hbmFnZXMgdGhlIG9uYm9hcmRpbmcgbWF0cml4IGFuZCBKaXJhIHRpY2tldCBhdXRvbWF0aW9uIGZvciBuZXcgY3VzdG9tZXIgb25ib2FyZGluZ3MuJyxcbiAgICAgICdNYXRyaXggR3JpZCB0YWIg4oCUIGEgdmlzdWFsIGdyaWQgb2Ygc2FsZSB0eXBlcyAocm93cykgdnMgY2FwYWJpbGl0aWVzIChjb2x1bW5zKS4gQ2xpY2sgYSBjZWxsIHRvIHRvZ2dsZSB3aGV0aGVyIGEgY2FwYWJpbGl0eSBhcHBsaWVzIHRvIGEgc2FsZSB0eXBlLiBBbWJlciBjZWxscyBoYXZlIG5vdGVzLicsXG4gICAgICAnU2FsZSBUeXBlcyB0YWIg4oCUIG1hbmFnZSBwcm9kdWN0L3NhbGUgdHlwZXMgKGUuZy4gQllNLCBHdWlsZCBFbmhhbmNlZCwgRXdlbW92ZSkuIEFkZCwgZWRpdCwgcmVvcmRlciwgb3IgZGVhY3RpdmF0ZSBzYWxlIHR5cGVzLicsXG4gICAgICAnQ2FwYWJpbGl0aWVzIHRhYiDigJQgbWFuYWdlIGRlbGl2ZXJ5IGNhcGFiaWxpdGllcyAoZS5nLiBEYXRhIFdhcmVob3VzZSwgQnVpbGQsIExlYWRwcm8pLiBFYWNoIGNhcGFiaWxpdHkgY2FuIGhhdmUgYSBzaG9ydCBjb2RlIGFuZCBpdGVtcyBhc3NvY2lhdGVkIHdpdGggaXQuJyxcbiAgICAgICdJdGVtcyB0YWIg4oCUIHNlbGVjdCBhIGNhcGFiaWxpdHkgZnJvbSB0aGUgZHJvcGRvd24sIHRoZW4gbWFuYWdlIHRoZSBkZWxpdmVyYWJsZSBpdGVtcyBmb3IgaXQuIEl0ZW1zIGNhbiBiZSBzdGFuZGFyZCBvciBib2x0LW9uIChvcHRpb25hbCBhZGQtb25zKS4gVGhlc2UgaXRlbXMgYXBwZWFyIGFzIGNoZWNrbGlzdHMgaW4gdGhlIEppcmEgdGlja2V0IGRlc2NyaXB0aW9ucy4nLFxuICAgICAgJ0ltcG9ydCBmcm9tIHhsc3gg4oCUIHRoZSBcIkltcG9ydCBmcm9tIHhsc3hcIiBidXR0b24gcmUtaW1wb3J0cyB0aGUgZW50aXJlIG9uYm9hcmRpbmcgbWF0cml4IGZyb20gT25ib2FyZGluZ01hdGl4Lnhsc3guIFRoaXMgcmVwbGFjZXMgYWxsIGV4aXN0aW5nIGNvbmZpZyBkYXRhLiBVc2UgdGhpcyBmb3IgaW5pdGlhbCBzZXR1cCBvciBmdWxsIHJlc2V0cy4nLFxuICAgICAgJ1RpY2tldCBDcmVhdGlvbiDigJQgd2hlbiByZWFkeSB0byBvbmJvYXJkIGEgY3VzdG9tZXIsIHRoZSBzeXN0ZW0gY3JlYXRlcyBKaXJhIHRpY2tldHMgaW4gcHJvamVjdCBOVDogb25lIHBhcmVudCBcIlF1YWxpdHkgQXNzdXJhbmNlXCIgdGlja2V0IGFuZCBOIGNoaWxkIFwiU3VwcG9ydCBPbmJvYXJkaW5nXCIgdGlja2V0cyAob25lIHBlciBjYXBhYmlsaXR5KS4gRWFjaCBjaGlsZCB0aWNrZXQgYmxvY2tzIHRoZSBwYXJlbnQuIFRoZSBzeXN0ZW0gaXMgaWRlbXBvdGVudCDigJQgcmV0cnlpbmcgd2l0aCB0aGUgc2FtZSBvbmJvYXJkaW5nIHJlZmVyZW5jZSB3aWxsIG5vdCBjcmVhdGUgZHVwbGljYXRlcy4nLFxuICAgICAgJ0RyeSBSdW4g4oCUIHRlc3QgdGlja2V0IGNyZWF0aW9uIHdpdGhvdXQgYWN0dWFsbHkgY3JlYXRpbmcgSmlyYSB0aWNrZXRzLiBUaGUgZHJ5LXJ1biBwcmV2aWV3IHNob3dzIGV4YWN0bHkgd2hhdCB3b3VsZCBiZSBjcmVhdGVkLicsXG4gICAgXSxcbiAgfSxcbiAge1xuICAgIHRpdGxlOiAnQWRtaW4nLFxuICAgIGNvbnRlbnQ6IFtcbiAgICAgICdUaGUgQWRtaW4gcGFnZSBpcyBhY2Nlc3NpYmxlIHRvIGFkbWluIHVzZXJzIG9ubHksIHZpYSB0aGUgdXNlciBtZW51IGluIHRoZSB0b3AtcmlnaHQgY29ybmVyLicsXG4gICAgICAnVXNlcnMgdGFiIOKAlCB2aWV3IGFsbCByZWdpc3RlcmVkIHVzZXJzLCBjaGFuZ2Ugcm9sZXMgKGFkbWluL2VkaXRvci92aWV3ZXIpLCBhc3NpZ24gdXNlcnMgdG8gdGVhbXMsIHJlc2V0IHBhc3N3b3JkcywgZGVsZXRlIGFjY291bnRzLCBhbmQgc2VuZCBpbnZpdGUgZW1haWxzLiBUaGUgXCJJbnZpdGVcIiBidXR0b24gbmV4dCB0byBlYWNoIHVzZXIgc2VuZHMgYSBicmFuZGVkIGVtYWlsIHdpdGggdGhlaXIgbG9naW4gZGV0YWlscyBhbmQgc2lnbi1pbiBsaW5rLicsXG4gICAgICAnSW1wb3J0IFVzZXJzIOKAlCBjbGljayBcIkltcG9ydCBVc2Vyc1wiIGluIHRoZSBVc2VycyB0YWIgdG8gYnVsay1jcmVhdGUgYWNjb3VudHMgZnJvbSBhbiBFeGNlbCAoLnhsc3gpIG9yIENTViBmaWxlLiBVcGxvYWQgdGhlIGZpbGUsIHByZXZpZXcgcGFyc2VkIHVzZXJzICh1c2VybmFtZSwgZGlzcGxheSBuYW1lLCBlbWFpbCwgcm9sZSksIG9wdGlvbmFsbHkgc2VuZCBpbnZpdGUgZW1haWxzLCB0aGVuIGltcG9ydC4gRHVwbGljYXRlIHVzZXJuYW1lcyBhcmUgc2tpcHBlZC4nLFxuICAgICAgJ1RlYW1zIHRhYiDigJQgY3JlYXRlIGFuZCBtYW5hZ2UgdGVhbXMuIEFzc2lnbiB1c2VycyB0byB0ZWFtcyBmb3IgZnV0dXJlIHRlYW0tc2NvcGVkIGZlYXR1cmVzLicsXG4gICAgICAnQUkgS2V5cyB0YWIg4oCUIG1hbmFnZSB0aGUgZ2xvYmFsIE9wZW5BSSBBUEkga2V5IHVzZWQgYnkgYWxsIHVzZXJzLiBJbmRpdmlkdWFsIHVzZXJzIGNhbiBzZXQgYSBwZXJzb25hbCBBUEkga2V5IG92ZXJyaWRlIGluIE15IFNldHRpbmdzID4gQUkgUHJlZmVyZW5jZXMsIHdoaWNoIHRha2VzIHByaW9yaXR5IG92ZXIgdGhlIGdsb2JhbCBrZXkuJyxcbiAgICAgICdJbnRlZ3JhdGlvbnMgdGFiIOKAlCBjb25maWd1cmUgZ2xvYmFsL3NlcnZpY2UtYWNjb3VudCBpbnRlZ3JhdGlvbnM6IEppcmEgKE9uYm9hcmRpbmcpIHNlcnZpY2UgYWNjb3VudCBmb3IgYXV0b21hdGVkIHRpY2tldCBjcmVhdGlvbiwgRW50cmEgSUQgU1NPIGZvciBNaWNyb3NvZnQgc2luZ2xlIHNpZ24tb24sIEppcmEgT0F1dGggYXBwIGNyZWRlbnRpYWxzIGZvciBwZXJzb25hbCBKaXJhIGNvbm5lY3Rpb25zLCBhbmQgRW1haWwgKGJ1aWx0LWluIFNNVFAgZm9yIGludml0ZXMgYW5kIHBhc3N3b3JkIHJlc2V0cykuIFBlcnNvbmFsIGludGVncmF0aW9ucyAoSmlyYSwgTTM2NSwgRDM2NSkgYXJlIG1hbmFnZWQgYnkgZWFjaCB1c2VyIGluIE15IFNldHRpbmdzLicsXG4gICAgICAnTWlsZXN0b25lcyB0YWIg4oCUIGNvbmZpZ3VyZSBkZWxpdmVyeSBtaWxlc3RvbmUgdGVtcGxhdGVzIChkYXkgb2Zmc2V0cywgY2hlY2tsaXN0cykgdXNlZCB3aGVuIG9uYm9hcmRpbmcgbmV3IGN1c3RvbWVycy4nLFxuICAgICAgJ09uYm9hcmRpbmcgdGFiIOKAlCBtYW5hZ2UgdGhlIG9uYm9hcmRpbmcgbWF0cml4LCBzYWxlIHR5cGVzLCB0aWNrZXQgZ3JvdXBzLCBjYXBhYmlsaXRpZXMsIGFuZCBpdGVtcyBmb3IgSmlyYSB0aWNrZXQgYXV0b21hdGlvbi4nLFxuICAgICAgJ1Blcm1pc3Npb25zIHRhYiDigJQgY3JlYXRlIGN1c3RvbSByb2xlcyB3aXRoIHBlci1hcmVhIGFjY2VzcyBsZXZlbHMgKGhpZGRlbi92aWV3L2VkaXQpIGZvciBNeSBOT1ZBLCBTZXJ2aWNlIERlc2ssIE9uYm9hcmRpbmcsIGFuZCBBY2NvdW50IE1hbmFnZW1lbnQuJyxcbiAgICAgICdBdWRpdCBMb2cgdGFiIOKAlCBhIHNlYXJjaGFibGUgbG9nIG9mIGFsbCBjaGFuZ2VzIGFjcm9zcyB0aGUgc3lzdGVtLiBGaWx0ZXIgYnkgZW50aXR5IHR5cGUsIHVzZXIsIG9yIHRpbWUgcGVyaW9kIHRvIHNlZSB3aG8gY2hhbmdlZCB3aGF0IGFuZCB3aGVuLicsXG4gICAgICAnRmVlZGJhY2sgdGFiIOKAlCB2aWV3IGFsbCBmZWVkYmFjayBzdWJtaXR0ZWQgYnkgdXNlcnMgKGJ1Z3MsIHF1ZXN0aW9ucywgZmVhdHVyZSByZXF1ZXN0cykuIFVwZGF0ZSB0aGUgc3RhdHVzIG9mIGVhY2ggaXRlbSBvciBkZWxldGUgcmVzb2x2ZWQgZW50cmllcy4nLFxuICAgIF0sXG4gIH0sXG4gIHtcbiAgICB0aXRsZTogJ0ZlZWRiYWNrJyxcbiAgICBjb250ZW50OiBbXG4gICAgICAnVXNlIHRoZSBlbnZlbG9wZSBpY29uIGluIHRoZSBoZWFkZXIgYmFyIHRvIHNlbmQgZmVlZGJhY2sgYXQgYW55IHRpbWUuJyxcbiAgICAgICdDaG9vc2UgYSB0eXBlOiBSZXBvcnQgYSBCdWcsIEFzayBhIFF1ZXN0aW9uLCBvciBTdWdnZXN0IGEgRmVhdHVyZS4gQWRkIGEgdGl0bGUgYW5kIG9wdGlvbmFsIGRlc2NyaXB0aW9uLCB0aGVuIHN1Ym1pdC4nLFxuICAgICAgJ0ZlZWRiYWNrIGlzIHN0b3JlZCBpbiB0aGUgZGF0YWJhc2UgYW5kIHZpc2libGUgdG8gYWRtaW5zIGluIHRoZSBBZG1pbiBwYWdlLiBVc2UgdGhpcyB0byByZXBvcnQgaXNzdWVzIG9yIHJlcXVlc3QgbmV3IGZlYXR1cmVzIHdpdGhvdXQgbGVhdmluZyB0aGUgYXBwLicsXG4gICAgXSxcbiAgfSxcbiAge1xuICAgIHRpdGxlOiAnTXkgU2V0dGluZ3MnLFxuICAgIGNvbnRlbnQ6IFtcbiAgICAgICdNYW5hZ2UgeW91ciBwZXJzb25hbCBpbnRlZ3JhdGlvbnMsIHN5bmMgcHJlZmVyZW5jZXMsIGFuZCBBSSBzZXR0aW5ncy4gQWNjZXNzaWJsZSB2aWEgdGhlIHVzZXIgbWVudSBpbiB0aGUgdG9wLXJpZ2h0IGNvcm5lci4nLFxuICAgICAgJ0ludGVncmF0aW9uIENhcmRzIOKAlCBlYWNoIHBlcnNvbmFsIHNvdXJjZSAoSmlyYSwgRHluYW1pY3MgMzY1KSBoYXMgaXRzIG93biBjYXJkLiBUb2dnbGUgZW5hYmxlZC9kaXNhYmxlZCwgZW50ZXIgeW91ciBjcmVkZW50aWFscywgY29uZmlndXJlIHN5bmMgb3B0aW9ucywgYW5kIHNpZ24gaW4uJyxcbiAgICAgICdKaXJhIOKAlCBlbnRlciB5b3VyIEppcmEgVVJMLCBlbWFpbCBhZGRyZXNzLCBhbmQgcGVyc29uYWwgQVBJIHRva2VuIChnZW5lcmF0ZSBvbmUgYXQgaWQuYXRsYXNzaWFuLmNvbS9tYW5hZ2UtcHJvZmlsZS9zZWN1cml0eS9hcGktdG9rZW5zKS4gVGhpcyBjb25uZWN0cyB5b3VyIHBlcnNvbmFsIEppcmEgYWNjb3VudCB0byBzeW5jIHlvdXIgYXNzaWduZWQgaXNzdWVzLicsXG4gICAgICAnSmlyYSBBY2NvdW50IChPQXV0aCkg4oCUIGlmIHlvdXIgYWRtaW4gaGFzIGNvbmZpZ3VyZWQgSmlyYSBPQXV0aCwgYSBcIkNvbm5lY3QgSmlyYVwiIGNhcmQgYXBwZWFycy4gQ2xpY2sgdG8gc2lnbiBpbiB3aXRoIHlvdXIgQXRsYXNzaWFuIGFjY291bnQgdmlhIE9BdXRoIDNMTy4gVGhpcyBncmFudHMgcGVyc29uYWwgdGlja2V0IGFjY2VzcyB3aXRob3V0IHNoYXJpbmcgQVBJIHRva2Vucy4gWW91IGNhbiBkaXNjb25uZWN0IGF0IGFueSB0aW1lLicsXG4gICAgICAnRHluYW1pY3MgMzY1IOKAlCBzaWduIGluIHdpdGggeW91ciBNaWNyb3NvZnQgYWNjb3VudC4gQ2xpZW50IElEIGFuZCBUZW5hbnQgSUQgYXJlIGNvbmZpZ3VyZWQgaGVyZSBmb3IgdGhlIGRldmljZSBjb2RlIGF1dGhlbnRpY2F0aW9uIGZsb3cuJyxcbiAgICAgICdTeW5jIEZyZXF1ZW5jeSDigJQgc2V0IGEgcGVyLWludGVncmF0aW9uIHN5bmMgaW50ZXJ2YWwgKDEsIDIsIDUsIDEwLCAxNSwgb3IgMzAgbWludXRlcykgb3IgdXNlIHRoZSBnbG9iYWwgZGVmYXVsdC4gRXZlcnkgaW50ZWdyYXRpb24gYWxzbyBoYXMgYSBcIlN5bmMgTm93XCIgYnV0dG9uIGZvciBpbW1lZGlhdGUgcmVmcmVzaC4nLFxuICAgICAgJ0FJIFByZWZlcmVuY2VzIOKAlCBjaG9vc2UgeW91ciBBSSBwcm92aWRlciAoT3BlbkFJIG9yIENsYXVkZSksIHNldCB0aGUgbnVtYmVyIG9mIHN1Z2dlc3Rpb25zLCBhbmQgY29uZmlndXJlIHRoZSBkZWZhdWx0IHN5bmMgZnJlcXVlbmN5LiBZb3UgY2FuIGFsc28gc2V0IGEgcGVyc29uYWwgQVBJIGtleSBvdmVycmlkZSB0aGF0IHRha2VzIHByaW9yaXR5IG92ZXIgdGhlIGdsb2JhbCBrZXkgc2V0IGJ5IHlvdXIgYWRtaW4uJyxcbiAgICAgICdSZW1lbWJlciBNZSDigJQgd2hlbiB1bmNoZWNrZWQgb24gdGhlIGxvZ2luIHBhZ2UsIHlvdXIgc2Vzc2lvbiBpcyBzdG9yZWQgaW4gc2Vzc2lvblN0b3JhZ2UgKGNsZWFyZWQgd2hlbiB0aGUgYnJvd3NlciBjbG9zZXMpLiBXaGVuIGNoZWNrZWQsIGl0IHVzZXMgbG9jYWxTdG9yYWdlIGZvciBwZXJzaXN0ZW50IHNlc3Npb25zLicsXG4gICAgXSxcbiAgfSxcbiAge1xuICAgIHRpdGxlOiAnUm9sZXMgJiBQZXJtaXNzaW9ucycsXG4gICAgY29udGVudDogW1xuICAgICAgJ04uTy5WLkEgdXNlcyB0aHJlZSByb2xlcyB0byBjb250cm9sIGFjY2VzcyBhY3Jvc3MgdGhlIGFwcGxpY2F0aW9uOicsXG4gICAgICAnQWRtaW4g4oCUIGZ1bGwgYWNjZXNzIHRvIGFsbCBmZWF0dXJlcy4gQ2FuIG1hbmFnZSB1c2VycywgdGVhbXMsIGdsb2JhbCBBSSBrZXlzLCBzZXJ2aWNlLWFjY291bnQgaW50ZWdyYXRpb25zIChKaXJhIE9uYm9hcmRpbmcsIFNTTyksIG1pbGVzdG9uZXMsIG9uYm9hcmRpbmcgY29uZmlnLCBhbmQgY3VzdG9tIHBlcm1pc3Npb25zIHZpYSB0aGUgQWRtaW4gcGFnZS4nLFxuICAgICAgJ0VkaXRvciDigJQgY2FuIG1vZGlmeSBzZXR0aW5ncywgZWRpdCBkZWxpdmVyeSBlbnRyaWVzLCBtYW5hZ2UgQ1JNIGRhdGEsIGFuZCB1c2UgYWxsIHRhc2sgZmVhdHVyZXMuIENhbm5vdCBhY2Nlc3MgdGhlIEFkbWluIHBhZ2UuJyxcbiAgICAgICdWaWV3ZXIg4oCUIHJlYWQtb25seSBhY2Nlc3MuIENhbiB2aWV3IHRhc2tzLCBkYXNoYm9hcmRzLCBkZWxpdmVyaWVzLCBhbmQgQ1JNIGRhdGEgYnV0IGNhbm5vdCBtb2RpZnkgc2V0dGluZ3Mgb3IgZWRpdCBlbnRyaWVzLicsXG4gICAgICAnUGVyLXVzZXIgZGF0YSDigJQgZWFjaCB1c2VyIGhhcyB0aGVpciBvd24gZm9jdXNlZCB0YXNrcyBhbmQgc3RhbmR1cCBoaXN0b3J5LiBGb2N1c2luZyBhIHRhc2sgb25seSBhZmZlY3RzIHlvdXIgdmlldywgbm90IG90aGVyIHVzZXJzLiBTdGFuZHVwcyBhcmUgZ2VuZXJhdGVkIHBlci11c2VyIHNvIGVhY2ggdGVhbSBtZW1iZXIgZ2V0cyB0aGVpciBvd24gbW9ybmluZyBicmllZmluZy4nLFxuICAgIF0sXG4gIH0sXG4gIHtcbiAgICB0aXRsZTogJ1NlcnZpY2UgRGVzayBEYXNoYm9hcmQnLFxuICAgIGNvbnRlbnQ6IFtcbiAgICAgICdUaGUgRGFzaGJvYXJkIHRhYiBpbiB0aGUgU2VydmljZSBEZXNrIGFyZWEgcHJvdmlkZXMgYSByZWFsLXRpbWUgb3ZlcnZpZXcgb2YgeW91ciBKaXJhIHNlcnZpY2UgZGVzayB0aWNrZXRzLicsXG4gICAgICAnS1BJIENhcmRzIOKAlCBmb3VyIHN1bW1hcnkgY2FyZHMgYXQgdGhlIHRvcDogVG90YWwgT3BlbiB0aWNrZXRzLCBTTEEgQnJlYWNoZWQgY291bnQsIE92ZXJkdWUgVXBkYXRlcyAodGlja2V0cyB3aGVyZSB0aGUgYWdlbnQgaGFzblxcJ3QgcmVzcG9uZGVkIGluIHRpbWUpLCBhbmQgRGlzdGluY3QgQ3VzdG9tZXJzIHdpdGggYWN0aXZlIHRpY2tldHMuJyxcbiAgICAgICdQcmlvcml0eSBCcmVha2Rvd24g4oCUIHNob3dzIGhvdyBtYW55IG9wZW4gdGlja2V0cyBleGlzdCBhdCBlYWNoIHByaW9yaXR5IGxldmVsIChIaWdoZXN0LCBIaWdoLCBNZWRpdW0sIExvdywgTG93ZXN0KS4nLFxuICAgICAgJ1N0YXR1cyBCcmVha2Rvd24g4oCUIHNob3dzIHRpY2tldCBjb3VudHMgZ3JvdXBlZCBieSBKaXJhIHN0YXR1cyAoZS5nLiBPcGVuLCBJbiBQcm9ncmVzcywgV2FpdGluZyBmb3IgQ3VzdG9tZXIpLicsXG4gICAgICAnQXNzaWduZWUgQnJlYWtkb3duIOKAlCBzaG93cyBob3cgdGlja2V0cyBhcmUgZGlzdHJpYnV0ZWQgYWNyb3NzIHRlYW0gbWVtYmVycywgaGVscGluZyBpZGVudGlmeSBvdmVybG9hZGVkIGFnZW50cy4nLFxuICAgICAgJ0RhdGEgaXMgcmVmcmVzaGVkIGVhY2ggdGltZSB5b3UgbmF2aWdhdGUgdG8gdGhlIERhc2hib2FyZCB0YWIuIEFsbCBtZXRyaWNzIHJlc3BlY3QgdGhlIHByb2plY3QgYW5kIHRpZXIgZmlsdGVycyBjb25maWd1cmVkIGluIEFkbWluID4gU2VydmljZSBEZXNrIENvbmZpZy4nLFxuICAgIF0sXG4gIH0sXG4gIHtcbiAgICB0aXRsZTogJ05vdGlmaWNhdGlvbnMnLFxuICAgIGNvbnRlbnQ6IFtcbiAgICAgICdUaGUgYmVsbCBpY29uIGluIHRoZSB0b3AgaGVhZGVyIGJhciBzaG93cyB5b3VyIHVucmVhZCBub3RpZmljYXRpb24gY291bnQuIENsaWNrIGl0IHRvIG9wZW4gdGhlIG5vdGlmaWNhdGlvbiBkcm9wZG93bi4nLFxuICAgICAgJ05vdGlmaWNhdGlvbnMgYXJlIGdlbmVyYXRlZCBhdXRvbWF0aWNhbGx5IHdoZW46IGEgZGVsaXZlcnkgbWlsZXN0b25lIGJlY29tZXMgb3ZlcmR1ZSwgYSBkZWxpdmVyeSBnby1saXZlIGRhdGUgaXMgd2l0aGluIDcgZGF5cywgb3IgYSBKaXJhIFNMQSBpcyBicmVhY2hlZC4nLFxuICAgICAgJ0VhY2ggbm90aWZpY2F0aW9uIHNob3dzIHRoZSB0eXBlLCB0aXRsZSwgbWVzc2FnZSwgYW5kIHRpbWVzdGFtcC4gQ2xpY2sgYSBub3RpZmljYXRpb24gdG8gbWFyayBpdCBhcyByZWFkLiBVc2UgXCJNYXJrIGFsbCByZWFkXCIgdG8gY2xlYXIgYWxsIHVucmVhZCBpdGVtcy4nLFxuICAgICAgJ05vdGlmaWNhdGlvbnMgYXJlIGRlLWR1cGxpY2F0ZWQg4oCUIHRoZSBzYW1lIGFsZXJ0IHdvblxcJ3QgZmlyZSBhZ2FpbiBmb3IgdGhlIHNhbWUgZW50aXR5IHdpdGhpbiAyNCBob3Vycy4nLFxuICAgICAgJ1RoZSBub3RpZmljYXRpb24gY2hlY2sgcnVucyBhdXRvbWF0aWNhbGx5IG9uIGxvZ2luIGFuZCBjYW4gYmUgdHJpZ2dlcmVkIG1hbnVhbGx5IHZpYSB0aGUgQVBJLicsXG4gICAgXSxcbiAgfSxcbiAge1xuICAgIHRpdGxlOiAnQXVkaXQgTG9nJyxcbiAgICBjb250ZW50OiBbXG4gICAgICAnRXZlcnkgY3JlYXRlLCB1cGRhdGUsIGFuZCBkZWxldGUgYWN0aW9uIGluIE5PVkEgaXMgcmVjb3JkZWQgaW4gdGhlIGF1ZGl0IGxvZyB3aXRoIHRoZSB1c2VyLCB0aW1lc3RhbXAsIGFuZCB3aGF0IGNoYW5nZWQuJyxcbiAgICAgICdEZWxpdmVyeSBEcmF3ZXIg4oCUIGVhY2ggc2F2ZWQgZW50cnkgaGFzIGFuIGV4cGFuZGFibGUgXCJIaXN0b3J5XCIgc2VjdGlvbiBhdCB0aGUgYm90dG9tIHNob3dpbmcgdGhlIHJlY2VudCBhdWRpdCB0cmFpbCBmb3IgdGhhdCBlbnRyeS4nLFxuICAgICAgJ0FkbWluID4gQXVkaXQgTG9nIOKAlCBhIGZpbHRlcmFibGUgdGFibGUgc2hvd2luZyBhbGwgYXVkaXQgZXZlbnRzIHN5c3RlbS13aWRlLiBGaWx0ZXIgYnkgZW50aXR5IHR5cGUgKGRlbGl2ZXJ5LCBtaWxlc3RvbmUsIHRpY2tldCBydW4sIHVzZXIsIHNldHRpbmdzKSBvciBzZWFyY2ggZm9yIHNwZWNpZmljIGNoYW5nZXMuJyxcbiAgICAgICdUaGUgYXVkaXQgbG9nIGhlbHBzIGFuc3dlciBcIndobyBjaGFuZ2VkIHRoaXM/XCIgYW5kIFwid2hlbiB3YXMgdGhpcyB1cGRhdGVkP1wiIGZvciBjb21wbGlhbmNlIGFuZCBkZWJ1Z2dpbmcuJyxcbiAgICBdLFxuICB9LFxuICB7XG4gICAgdGl0bGU6ICdKaXJhIE9BdXRoJyxcbiAgICBjb250ZW50OiBbXG4gICAgICAnSmlyYSBPQXV0aCAzTE8gYWxsb3dzIHVzZXJzIHRvIGNvbm5lY3QgdGhlaXIgcGVyc29uYWwgSmlyYSBhY2NvdW50IHVzaW5nIHNlY3VyZSBPQXV0aCBpbnN0ZWFkIG9mIEFQSSB0b2tlbnMuJyxcbiAgICAgICdBZG1pbiBTZXR1cCDigJQgY29uZmlndXJlIHRoZSBPQXV0aCBDbGllbnQgSUQgYW5kIENsaWVudCBTZWNyZXQgaW4gQWRtaW4gPiBJbnRlZ3JhdGlvbnMgPiBKaXJhIE9BdXRoLiBUaGVzZSBjcmVkZW50aWFscyBjb21lIGZyb20gdGhlIEF0bGFzc2lhbiBkZXZlbG9wZXIgY29uc29sZSAoZGV2ZWxvcGVyLmF0bGFzc2lhbi5jb20pLicsXG4gICAgICAnVXNlciBDb25uZWN0aW9uIOKAlCBvbmNlIGNvbmZpZ3VyZWQgYnkgdGhlIGFkbWluLCBlYWNoIHVzZXIgc2VlcyBhIFwiSmlyYSBBY2NvdW50XCIgY2FyZCBpbiBNeSBTZXR0aW5ncy4gQ2xpY2sgXCJDb25uZWN0IEppcmFcIiB0byBzaWduIGluIHdpdGggeW91ciBBdGxhc3NpYW4gYWNjb3VudC4gQWZ0ZXIgYXV0aG9yaXNpbmcsIHlvdXIgSmlyYSBhY2NvdW50IGlzIGxpbmtlZC4nLFxuICAgICAgJ1RoZSBPQXV0aCBjb25uZWN0aW9uIHVzZXMgUEtDRSAoUHJvb2YgS2V5IGZvciBDb2RlIEV4Y2hhbmdlKSBmb3Igc2VjdXJpdHkuIFRva2VucyBhcmUgcmVmcmVzaGVkIGF1dG9tYXRpY2FsbHkgd2hlbiB0aGV5IGV4cGlyZS4nLFxuICAgICAgJ0Jhc2ljIGF1dGggKGVtYWlsICsgQVBJIHRva2VuKSBjb250aW51ZXMgdG8gd29yayBhcyBhIGZhbGxiYWNrLiBVc2VycyB3aG8gcHJlZmVyIEFQSSB0b2tlbnMgY2FuIGtlZXAgdXNpbmcgdGhlIGV4aXN0aW5nIEppcmEgaW50ZWdyYXRpb24gY2FyZC4nLFxuICAgIF0sXG4gIH0sXG4gIHtcbiAgICB0aXRsZTogJ1Bhc3N3b3JkIFJlc2V0JyxcbiAgICBjb250ZW50OiBbXG4gICAgICAnU2VsZi1zZXJ2aWNlIHBhc3N3b3JkIHJlc2V0IGlzIGF2YWlsYWJsZSBvbiB0aGUgbG9naW4gcGFnZS4gQ2xpY2sgXCJGb3Jnb3QgcGFzc3dvcmQ/XCIgdG8gZW50ZXIgeW91ciBlbWFpbCBhZGRyZXNzLiBBIHJlc2V0IGxpbmsgaXMgc2VudCB0byB5b3VyIGluYm94ICh2YWxpZCBmb3IgMSBob3VyKS4nLFxuICAgICAgJ1RoZSByZXNldCBlbWFpbCBjb250YWlucyBhIGJyYW5kZWQgbGluayB0aGF0IHRha2VzIHlvdSBkaXJlY3RseSB0byB0aGUgcGFzc3dvcmQgcmVzZXQgZm9ybS4gRW50ZXIgYSBuZXcgcGFzc3dvcmQgKG1pbiA2IGNoYXJhY3RlcnMpIGFuZCBjb25maXJtIGl0IHRvIGNvbXBsZXRlIHRoZSByZXNldC4nLFxuICAgICAgJ0ZvciBzZWN1cml0eSwgdGhlIFwiRm9yZ290IHBhc3N3b3JkXCIgZm9ybSBhbHdheXMgc2hvd3MgYSBzdWNjZXNzIG1lc3NhZ2UgcmVnYXJkbGVzcyBvZiB3aGV0aGVyIHRoZSBlbWFpbCBleGlzdHMuIFRoaXMgcHJldmVudHMgYXR0YWNrZXJzIGZyb20gZGlzY292ZXJpbmcgd2hpY2ggZW1haWxzIGFyZSByZWdpc3RlcmVkLicsXG4gICAgICAnUGFzc3dvcmQgcmVzZXQgcmVxdWlyZXMgdGhlIEVtYWlsIGludGVncmF0aW9uIHRvIGJlIGNvbmZpZ3VyZWQgaW4gQWRtaW4gPiBJbnRlZ3JhdGlvbnMgPiBFbWFpbC4gQXQgbWluaW11bSwgYSBGcm9tIGFkZHJlc3MgbXVzdCBiZSBzZXQuIFRoZSBidWlsdC1pbiBlbWFpbCBzZXJ2aWNlIHNlbmRzIGRpcmVjdGx5IHRvIHRoZSByZWNpcGllbnRcXCdzIG1haWwgc2VydmVyIOKAlCBubyBleHRlcm5hbCBTTVRQIHByb3ZpZGVyIGlzIG5lZWRlZC4nLFxuICAgICAgJ0FkbWlucyBjYW4gYWxzbyByZXNldCBhbnkgdXNlclxcJ3MgcGFzc3dvcmQgbWFudWFsbHkgZnJvbSBBZG1pbiA+IFVzZXJzIHVzaW5nIHRoZSBSZXNldCBQYXNzd29yZCBidXR0b24uJyxcbiAgICBdLFxuICB9LFxuICB7XG4gICAgdGl0bGU6ICdFbWFpbCBTZXJ2aWNlJyxcbiAgICBjb250ZW50OiBbXG4gICAgICAnTi5PLlYuQSBpbmNsdWRlcyBhIGJ1aWx0LWluIGVtYWlsIHNlcnZpY2UgZm9yIHNlbmRpbmcgaW52aXRlIGVtYWlscyBhbmQgcGFzc3dvcmQgcmVzZXQgbGlua3MuIENvbmZpZ3VyZSBpdCBpbiBBZG1pbiA+IEludGVncmF0aW9ucyA+IEVtYWlsLicsXG4gICAgICAnVGhlIG9ubHkgcmVxdWlyZWQgZmllbGQgaXMgXCJGcm9tIEFkZHJlc3NcIiAoZS5nLiBub3JlcGx5QG51cnR1ci50ZWNoKS4gRW1haWxzIGFyZSBzZW50IGRpcmVjdGx5IHRvIHRoZSByZWNpcGllbnRcXCdzIG1haWwgc2VydmVyIGJ5IHJlc29sdmluZyBNWCBETlMgcmVjb3JkcyDigJQgbm8gZXh0ZXJuYWwgU01UUCBwcm92aWRlciBvciBNaWNyb3NvZnQgMzY1IGlzIG5lZWRlZC4nLFxuICAgICAgJ09wdGlvbmFsbHksIGNvbmZpZ3VyZSBhbiBTTVRQIHJlbGF5IChob3N0LCBwb3J0LCB1c2VybmFtZSwgcGFzc3dvcmQpIGlmIHlvdXIgbmV0d29yayByZXF1aXJlcyBvdXRib3VuZCBlbWFpbCB0byBnbyB0aHJvdWdoIGEgc3BlY2lmaWMgc2VydmVyLicsXG4gICAgICAnVXNlIHRoZSBcIlNlbmQgVGVzdCBFbWFpbFwiIGJ1dHRvbiBpbiBBZG1pbiA+IEludGVncmF0aW9ucyA+IEVtYWlsIHRvIHZlcmlmeSB5b3VyIGNvbmZpZ3VyYXRpb24gaXMgd29ya2luZy4nLFxuICAgIF0sXG4gIH0sXG4gIHtcbiAgICB0aXRsZTogJ1RpcHMgJiBTaG9ydGN1dHMnLFxuICAgIGNvbnRlbnQ6IFtcbiAgICAgICdTdGFyIHNjb3Bpbmcg4oCUIHdoZW4gc3RhcnJpbmcgZGVsaXZlcnkgZW50cmllcywgXCJUZWFtIFN0YXJzXCIgYXJlIHZpc2libGUgdG8gYWxsIHVzZXJzIHdoaWxlIFwiTXkgU3RhcnNcIiBhcmUgcGVyc29uYWwuIFVzZSB0ZWFtIHN0YXJzIGZvciBzaGFyZWQgcHJpb3JpdGllcy4nLFxuICAgICAgJ1N0YW5kdXAgcGVyc2lzdGVuY2Ug4oCUIHN0YW5kdXAgcmVzdWx0cyBzYXZlIGF1dG9tYXRpY2FsbHkgYW5kIHBlcnNpc3QgdW50aWwgbWlkbmlnaHQuIE5vIG5lZWQgdG8gcmUtcnVuIHVubGVzcyB5b3VyIHByaW9yaXRpZXMgY2hhbmdlLicsXG4gICAgICAnU3luYyBmcmVxdWVuY3kg4oCUIGZvciBmYXN0LW1vdmluZyBzb3VyY2VzIGxpa2UgSmlyYSwgc2V0IGEgbG93ZXIgc3luYyBpbnRlcnZhbCAoMeKAkzIgbWluKS4nLFxuICAgICAgJ0lubGluZSBlZGl0aW5nIOKAlCBmb3IgcXVpY2sgY2hhbmdlcyB0byBkZWxpdmVyeSBlbnRyaWVzLCBjbGljayBkaXJlY3RseSBvbiBhIGNlbGwgdmFsdWUgaW4gdGhlIHRhYmxlIGluc3RlYWQgb2Ygb3BlbmluZyB0aGUgZnVsbCBkcmF3ZXIuIFByZXNzIEVzY2FwZSB0byBjYW5jZWwgYW4gZWRpdC4nLFxuICAgICAgJ0ltcG9ydCB3b3JrZmxvdyDigJQgZm9yIG5ldyBkZXBsb3ltZW50cywgcHVsbCB0aGUgZGVsaXZlcnkgc2hlZXQgZnJvbSBTaGFyZVBvaW50IGZpcnN0LCB0aGVuIHVzZSBcIkltcG9ydCB4bHN4IHRvIERCXCIgdG8gYnVsay1jcmVhdGUgZGF0YWJhc2UgZW50cmllcyB3aXRoIGF1dG8tYXNzaWduZWQgb25ib2FyZGluZyBJRHMuJyxcbiAgICAgICdNQ1AgYXV0by1yZWNvbm5lY3Qg4oCUIGlmIGEgY29ubmVjdGlvbiB0byBKaXJhIGRyb3BzIHVuZXhwZWN0ZWRseSwgTi5PLlYuQSB3aWxsIGF1dG9tYXRpY2FsbHkgcmVjb25uZWN0IG9uIHRoZSBuZXh0IG9wZXJhdGlvbi4nLFxuICAgIF0sXG4gIH0sXG5dO1xuXG5mdW5jdGlvbiBDb2xsYXBzaWJsZVNlY3Rpb24oeyBzZWN0aW9uLCBkZWZhdWx0T3BlbiB9OiB7IHNlY3Rpb246IFNlY3Rpb247IGRlZmF1bHRPcGVuPzogYm9vbGVhbiB9KSB7XG4gIGNvbnN0IFtvcGVuLCBzZXRPcGVuXSA9IHVzZVN0YXRlKGRlZmF1bHRPcGVuID8/IGZhbHNlKTtcblxuICByZXR1cm4gKFxuICAgIDxkaXYgY2xhc3NOYW1lPVwiYm9yZGVyIGJvcmRlci1bIzNhNDI0ZF0gcm91bmRlZC1sZyBiZy1bIzJmMzUzZF0gb3ZlcmZsb3ctaGlkZGVuXCI+XG4gICAgICA8YnV0dG9uXG4gICAgICAgIG9uQ2xpY2s9eygpID0+IHNldE9wZW4oIW9wZW4pfVxuICAgICAgICBjbGFzc05hbWU9XCJ3LWZ1bGwgZmxleCBpdGVtcy1jZW50ZXIganVzdGlmeS1iZXR3ZWVuIHB4LTUgcHktNCB0ZXh0LWxlZnQgaG92ZXI6YmctWyMzNjNkNDddIHRyYW5zaXRpb24tY29sb3JzXCJcbiAgICAgID5cbiAgICAgICAgPGgzIGNsYXNzTmFtZT1cInRleHQteHMgdGV4dC1bIzVlYzFjYV0gdXBwZXJjYXNlIHRyYWNraW5nLXdpZGVzdCBmb250LXNlbWlib2xkXCI+XG4gICAgICAgICAge3NlY3Rpb24udGl0bGV9XG4gICAgICAgIDwvaDM+XG4gICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cInRleHQtbmV1dHJhbC01MDAgdGV4dC1zbSBmb250LW1vbm9cIj57b3BlbiA/ICfiiJInIDogJysnfTwvc3Bhbj5cbiAgICAgIDwvYnV0dG9uPlxuICAgICAge29wZW4gJiYgKFxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInB4LTUgcGItNCBzcGFjZS15LTIuNVwiPlxuICAgICAgICAgIHtzZWN0aW9uLmNvbnRlbnQubWFwKChwYXJhZ3JhcGgsIGkpID0+IChcbiAgICAgICAgICAgIDxwIGtleT17aX0gY2xhc3NOYW1lPVwidGV4dC1zbSB0ZXh0LW5ldXRyYWwtMzAwIGxlYWRpbmctcmVsYXhlZFwiPlxuICAgICAgICAgICAgICB7cGFyYWdyYXBofVxuICAgICAgICAgICAgPC9wPlxuICAgICAgICAgICkpfVxuICAgICAgICA8L2Rpdj5cbiAgICAgICl9XG4gICAgPC9kaXY+XG4gICk7XG59XG5cbmV4cG9ydCBmdW5jdGlvbiBIZWxwVmlldygpIHtcbiAgY29uc3QgW2FsbE9wZW4sIHNldEFsbE9wZW5dID0gdXNlU3RhdGUoZmFsc2UpO1xuICBjb25zdCBba2V5LCBzZXRLZXldID0gdXNlU3RhdGUoMCk7XG5cbiAgcmV0dXJuIChcbiAgICA8ZGl2IGNsYXNzTmFtZT1cInNwYWNlLXktNFwiPlxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLWNlbnRlciBqdXN0aWZ5LWJldHdlZW4gbWItMlwiPlxuICAgICAgICA8ZGl2PlxuICAgICAgICAgIDxoMiBjbGFzc05hbWU9XCJ0ZXh0LWxnIGZvbnQtYm9sZCBmb250LVt2YXIoLS1mb250LWhlYWRpbmcpXSB0ZXh0LW5ldXRyYWwtMTAwXCI+XG4gICAgICAgICAgICBIZWxwICYgVXNlciBHdWlkZVxuICAgICAgICAgIDwvaDI+XG4gICAgICAgICAgPHAgY2xhc3NOYW1lPVwidGV4dC14cyB0ZXh0LW5ldXRyYWwtNTAwIG10LTFcIj5cbiAgICAgICAgICAgIEV2ZXJ5dGhpbmcgeW91IG5lZWQgdG8ga25vdyBhYm91dCBOLk8uVi5BXG4gICAgICAgICAgPC9wPlxuICAgICAgICA8L2Rpdj5cbiAgICAgICAgPGJ1dHRvblxuICAgICAgICAgIG9uQ2xpY2s9eygpID0+IHtcbiAgICAgICAgICAgIHNldEFsbE9wZW4oIWFsbE9wZW4pO1xuICAgICAgICAgICAgc2V0S2V5KChrKSA9PiBrICsgMSk7XG4gICAgICAgICAgfX1cbiAgICAgICAgICBjbGFzc05hbWU9XCJweC0zIHB5LTEuNSB0ZXh0LXhzIHJvdW5kZWQgdHJhbnNpdGlvbi1jb2xvcnMgYmctWyMyZjM1M2RdIHRleHQtbmV1dHJhbC00MDAgaG92ZXI6YmctWyMzNjNkNDddIGhvdmVyOnRleHQtbmV1dHJhbC0yMDAgYm9yZGVyIGJvcmRlci1bIzNhNDI0ZF1cIlxuICAgICAgICA+XG4gICAgICAgICAge2FsbE9wZW4gPyAnQ29sbGFwc2UgQWxsJyA6ICdFeHBhbmQgQWxsJ31cbiAgICAgICAgPC9idXR0b24+XG4gICAgICA8L2Rpdj5cblxuICAgICAgPGRpdiBrZXk9e2tleX0gY2xhc3NOYW1lPVwic3BhY2UteS0zXCI+XG4gICAgICAgIHtTRUNUSU9OUy5tYXAoKHNlY3Rpb24pID0+IChcbiAgICAgICAgICA8Q29sbGFwc2libGVTZWN0aW9uXG4gICAgICAgICAgICBrZXk9e3NlY3Rpb24udGl0bGV9XG4gICAgICAgICAgICBzZWN0aW9uPXtzZWN0aW9ufVxuICAgICAgICAgICAgZGVmYXVsdE9wZW49e2FsbE9wZW59XG4gICAgICAgICAgLz5cbiAgICAgICAgKSl9XG4gICAgICA8L2Rpdj5cblxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJib3JkZXIgYm9yZGVyLVsjM2E0MjRkXSByb3VuZGVkLWxnIHB4LTUgcHktNCBiZy1bIzJmMzUzZF0gbXQtNlwiPlxuICAgICAgICA8cCBjbGFzc05hbWU9XCJ0ZXh0LXhzIHRleHQtbmV1dHJhbC01MDAgdGV4dC1jZW50ZXJcIj5cbiAgICAgICAgICBOLk8uVi5BIOKAlCBOdXJ0dXIgT3BlcmF0aW9uYWwgVmlydHVhbCBBc3Npc3RhbnRcbiAgICAgICAgPC9wPlxuICAgICAgPC9kaXY+XG4gICAgPC9kaXY+XG4gICk7XG59XG4iXSwiZmlsZSI6IkM6L1VzZXJzL05pY2tXL0NsYXVkZS93aW5kb3dzIGF1dG9tYXRpb24vZGF5cGlsb3Qvc3JjL2NsaWVudC9jb21wb25lbnRzL0hlbHBWaWV3LnRzeCJ9

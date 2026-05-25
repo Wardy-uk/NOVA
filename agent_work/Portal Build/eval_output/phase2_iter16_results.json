@@ -1,0 +1,572 @@
+[
+  {
+    "name": "Inline Account Extraction - Trailing Text",
+    "sessionId": 494,
+    "transcript": [
+      {
+        "user": "Hi, I need to update the phone number on our website for Acme Properties please, it's showing the wrong one",
+        "bot": "You need to update the phone number on your website for Acme Properties because it's showing the wrong one.\n\nWhich page is this on? A URL would be ideal if you have it.",
+        "metadata": "{\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 494,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:27:36.090Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":\"Acme Properties\",\"description\":\"Hi, I need to update the phone number on our website for Acme Properties please, it's showing the wrong one\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":\"Acme Properties\",\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Hi, I need to update the phone number on our website for Acme Properties please, it's showing the wrong one\",\"conversational\":true}"
+      },
+      "messages": [
+        {
+          "id": 1608,
+          "session_id": 494,
+          "role": "user",
+          "content": "Hi, I need to update the phone number on our website for Acme Properties please, it's showing the wrong one",
+          "metadata": null,
+          "created_at": "2026-05-23T16:27:36.276Z"
+        },
+        {
+          "id": 1609,
+          "session_id": 494,
+          "role": "assistant",
+          "content": "You need to update the phone number on your website for Acme Properties because it's showing the wrong one.\n\nWhich page is this on? A URL would be ideal if you have it.",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:27:39.290Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Inline Account Extraction - Mid-sentence",
+    "sessionId": 495,
+    "transcript": [
+      {
+        "user": "The website for Thompson & Sons Estate Agents has an error on the contact page",
+        "bot": "You mentioned that the website for Thompson & Sons Estate Agents has an error on the contact page.\n\nWhich account or website is this for?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 495,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:27:40.300Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"website\",\"subcategory\":\"website_broken\",\"collectedFields\":{\"subject\":null,\"account\":null,\"description\":\"The website for Thompson & Sons Estate Agents has an error on the contact page\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"The website for Thompson & Sons Estate Agents has an error on the contact page\",\"conversational\":true}"
+      },
+      "messages": [
+        {
+          "id": 1610,
+          "session_id": 495,
+          "role": "user",
+          "content": "The website for Thompson & Sons Estate Agents has an error on the contact page",
+          "metadata": null,
+          "created_at": "2026-05-23T16:27:40.480Z"
+        },
+        {
+          "id": 1611,
+          "session_id": 495,
+          "role": "assistant",
+          "content": "You mentioned that the website for Thompson & Sons Estate Agents has an error on the contact page.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:27:42.216Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Inline Account Extraction - With URL Suffix",
+    "sessionId": 496,
+    "transcript": [
+      {
+        "user": "Our site acmeproperties.co.uk for Acme Properties Ltd needs the opening hours changed",
+        "bot": "Thanks for those details about the issue with Acme Properties Ltd. Could you tell me which property is affected and where you're seeing the issue?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 496,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:27:43.213Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"property\",\"subcategory\":\"property_visibility\",\"collectedFields\":{\"subject\":null,\"account\":null,\"description\":\"Our site acmeproperties.co.uk for Acme Properties Ltd needs the opening hours changed\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":null,\"propertyStatus\":null,\"affectedPersonName\":\"Acme Properties Ltd\",\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Our site acmeproperties.co.uk for Acme Properties Ltd needs the opening hours changed\",\"conversational\":true}"
+      },
+      "messages": [
+        {
+          "id": 1612,
+          "session_id": 496,
+          "role": "user",
+          "content": "Our site acmeproperties.co.uk for Acme Properties Ltd needs the opening hours changed",
+          "metadata": null,
+          "created_at": "2026-05-23T16:27:43.400Z"
+        },
+        {
+          "id": 1613,
+          "session_id": 496,
+          "role": "assistant",
+          "content": "Thanks for those details about the issue with Acme Properties Ltd. Could you tell me which property is affected and where you're seeing the issue?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:27:52.460Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Edit-Derived Filler Stripping",
+    "sessionId": 497,
+    "transcript": [
+      {
+        "user": "I need to change the phone number on our homepage",
+        "bot": "You need to change the phone number on your homepage.\n\nWhich account or website is this for?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "It's for Smith & Co Lettings",
+        "bot": "Could you please provide the URL of the Smith & Co Lettings homepage where you want the phone number changed?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "The number should be 01onal 234 5678",
+        "bot": "Could you please share the URL of the Smith & Co Lettings homepage where the phone number should be updated?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 497,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:27:53.463Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":\"Smith & Co Lettings\",\"description\":\"I need to change the phone number on our homepage\\nIt's for Smith & Co Lettings\\nThe number should be 01onal 234 5678\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":null,\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"I need to change the phone number on our homepage\",\"conversational\":true,\"detailRounds\":1,\"lastMissingCount\":1,\"offeredTicketCreation\":true}"
+      },
+      "messages": [
+        {
+          "id": 1614,
+          "session_id": 497,
+          "role": "user",
+          "content": "I need to change the phone number on our homepage",
+          "metadata": null,
+          "created_at": "2026-05-23T16:27:53.650Z"
+        },
+        {
+          "id": 1615,
+          "session_id": 497,
+          "role": "assistant",
+          "content": "You need to change the phone number on your homepage.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:27:55.856Z"
+        },
+        {
+          "id": 1616,
+          "session_id": 497,
+          "role": "user",
+          "content": "It's for Smith & Co Lettings",
+          "metadata": null,
+          "created_at": "2026-05-23T16:27:56.823Z"
+        },
+        {
+          "id": 1617,
+          "session_id": 497,
+          "role": "assistant",
+          "content": "Could you please provide the URL of the Smith & Co Lettings homepage where you want the phone number changed?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:27:58.570Z"
+        },
+        {
+          "id": 1618,
+          "session_id": 497,
+          "role": "user",
+          "content": "The number should be 01onal 234 5678",
+          "metadata": null,
+          "created_at": "2026-05-23T16:27:59.516Z"
+        },
+        {
+          "id": 1619,
+          "session_id": 497,
+          "role": "assistant",
+          "content": "Could you please share the URL of the Smith & Co Lettings homepage where the phone number should be updated?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:28:02.493Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Edit With Filler - Priority Change",
+    "sessionId": 498,
+    "transcript": [
+      {
+        "user": "I need to update the office address on our website",
+        "bot": "You need to update the office address on your website.\n\nWhich account or website is this for?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "It's for Johnson Estates",
+        "bot": "Could you please provide the website URL for Johnson Estates where the office address needs to be updated?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "The current address is wrong, needs changing to 42 High Street",
+        "bot": "Could you please share the website URL for Johnson Estates where the address needs updating to 42 High Street?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "the priority should just be high",
+        "bot": "Could you please provide the website URL for Johnson Estates where the office address needs to be updated to 42 High Street?",
+        "metadata": "{\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 498,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:28:03.480Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":\"Johnson Estates\",\"description\":\"I need to update the office address on our website\\nIt's for Johnson Estates\\nThe current address is wrong, needs changing to 42 High Street\\nthe priority should just be high\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"I need to update the office address on our website\",\"conversational\":true,\"detailRounds\":2,\"lastMissingCount\":1,\"offeredTicketCreation\":true}"
+      },
+      "messages": [
+        {
+          "id": 1620,
+          "session_id": 498,
+          "role": "user",
+          "content": "I need to update the office address on our website",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:03.786Z"
+        },
+        {
+          "id": 1621,
+          "session_id": 498,
+          "role": "assistant",
+          "content": "You need to update the office address on your website.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:28:05.603Z"
+        },
+        {
+          "id": 1622,
+          "session_id": 498,
+          "role": "user",
+          "content": "It's for Johnson Estates",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:06.543Z"
+        },
+        {
+          "id": 1623,
+          "session_id": 498,
+          "role": "assistant",
+          "content": "Could you please provide the website URL for Johnson Estates where the office address needs to be updated?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:28:08.056Z"
+        },
+        {
+          "id": 1624,
+          "session_id": 498,
+          "role": "user",
+          "content": "The current address is wrong, needs changing to 42 High Street",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:09.013Z"
+        },
+        {
+          "id": 1625,
+          "session_id": 498,
+          "role": "assistant",
+          "content": "Could you please share the website URL for Johnson Estates where the address needs updating to 42 High Street?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:28:11.623Z"
+        },
+        {
+          "id": 1626,
+          "session_id": 498,
+          "role": "user",
+          "content": "the priority should just be high",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:12.566Z"
+        },
+        {
+          "id": 1627,
+          "session_id": 498,
+          "role": "assistant",
+          "content": "Could you please provide the website URL for Johnson Estates where the office address needs to be updated to 42 High Street?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:28:14.060Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Three-Field Simultaneous Edit",
+    "sessionId": 499,
+    "transcript": [
+      {
+        "user": "I need some changes on our website please",
+        "bot": "You need some changes on your website.\n\nWhich account or website is this for?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "It's for Premier Homes Realty",
+        "bot": "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "Change the phone number on the contact page to 0800 123 456",
+        "bot": "Could you please provide the URL of the Premier Homes Realty website where you'd like the phone number changed?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "Actually change the account to Belmont Properties, the priority to urgent, and the summary to Fix broken contact form",
+        "bot": "Could you please provide the URL of the Belmont Properties website where you'd like us to fix the broken contact form and update the phone number?",
+        "metadata": "{\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 499,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:28:15.063Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":\"Premier Homes Realty\",\"description\":\"I need some changes on our website please\\nIt's for Premier Homes Realty\\nChange the phone number on the contact page to 0800 123 456\\nActually change the account to Belmont Properties, the priority to urgent, and the summary to Fix broken contact form\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"I need some changes on our website please\",\"conversational\":true,\"vagueGateAsked\":true,\"vagueGateVerified\":true,\"detailRounds\":1,\"lastMissingCount\":1,\"offeredTicketCreation\":true}"
+      },
+      "messages": [
+        {
+          "id": 1628,
+          "session_id": 499,
+          "role": "user",
+          "content": "I need some changes on our website please",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:15.263Z"
+        },
+        {
+          "id": 1629,
+          "session_id": 499,
+          "role": "assistant",
+          "content": "You need some changes on your website.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:28:17.293Z"
+        },
+        {
+          "id": 1630,
+          "session_id": 499,
+          "role": "user",
+          "content": "It's for Premier Homes Realty",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:18.233Z"
+        },
+        {
+          "id": 1631,
+          "session_id": 499,
+          "role": "assistant",
+          "content": "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:28:18.960Z"
+        },
+        {
+          "id": 1632,
+          "session_id": 499,
+          "role": "user",
+          "content": "Change the phone number on the contact page to 0800 123 456",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:19.910Z"
+        },
+        {
+          "id": 1633,
+          "session_id": 499,
+          "role": "assistant",
+          "content": "Could you please provide the URL of the Premier Homes Realty website where you'd like the phone number changed?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:28:21.536Z"
+        },
+        {
+          "id": 1634,
+          "session_id": 499,
+          "role": "user",
+          "content": "Actually change the account to Belmont Properties, the priority to urgent, and the summary to Fix broken contact form",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:22.470Z"
+        },
+        {
+          "id": 1635,
+          "session_id": 499,
+          "role": "assistant",
+          "content": "Could you please provide the URL of the Belmont Properties website where you'd like us to fix the broken contact form and update the phone number?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:28:24.060Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Conversational Activation - Natural Entry",
+    "sessionId": 500,
+    "transcript": [
+      {
+        "user": "hey, our website has the wrong email address on it",
+        "bot": "You mentioned that your website has the wrong email address on it.\n\nWhich account or website is this for?",
+        "metadata": "{\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 500,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:28:25.060Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":null,\"description\":\"hey, our website has the wrong email address on it\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"hey, our website has the wrong email address on it\",\"conversational\":true}"
+      },
+      "messages": [
+        {
+          "id": 1636,
+          "session_id": 500,
+          "role": "user",
+          "content": "hey, our website has the wrong email address on it",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:25.240Z"
+        },
+        {
+          "id": 1637,
+          "session_id": 500,
+          "role": "assistant",
+          "content": "You mentioned that your website has the wrong email address on it.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:28:26.870Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Vague Request Clarification",
+    "sessionId": 501,
+    "transcript": [
+      {
+        "user": "Something needs changing",
+        "bot": "Thanks for getting in touch. Could you tell me a bit more about what's going on so I can get this to the right team?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "user": "on our website",
+        "bot": "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "user": "the phone number is wrong on the contact page for Greenfield Lettings",
+        "bot": "Could you please provide the URL of the website where the phone number for Greenfield Lettings needs to be updated?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 501,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:28:27.863Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":\"on our website\",\"description\":\"Something needs changing\\non our website\\nthe phone number is wrong on the contact page for Greenfield Lettings\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":null,\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Something needs changing\",\"conversational\":true,\"vagueGateAsked\":true,\"vagueGateVerified\":true,\"detailRounds\":0,\"lastMissingCount\":1,\"offeredTicketCreation\":true}"
+      },
+      "messages": [
+        {
+          "id": 1638,
+          "session_id": 501,
+          "role": "user",
+          "content": "Something needs changing",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:28.040Z"
+        },
+        {
+          "id": 1639,
+          "session_id": 501,
+          "role": "assistant",
+          "content": "Thanks for getting in touch. Could you tell me a bit more about what's going on so I can get this to the right team?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:28:37.326Z"
+        },
+        {
+          "id": 1640,
+          "session_id": 501,
+          "role": "user",
+          "content": "on our website",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:38.280Z"
+        },
+        {
+          "id": 1641,
+          "session_id": 501,
+          "role": "assistant",
+          "content": "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:28:39.156Z"
+        },
+        {
+          "id": 1642,
+          "session_id": 501,
+          "role": "user",
+          "content": "the phone number is wrong on the contact page for Greenfield Lettings",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:40.103Z"
+        },
+        {
+          "id": 1643,
+          "session_id": 501,
+          "role": "assistant",
+          "content": "Could you please provide the URL of the website where the phone number for Greenfield Lettings needs to be updated?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:28:42.290Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Non-Website Routing",
+    "sessionId": 502,
+    "transcript": [
+      {
+        "user": "My property isn't showing up on Rightmove",
+        "bot": "Thanks for those details about Rightmove. Could you tell me which property is affected and where you're seeing the issue?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 502,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:28:43.373Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"property\",\"subcategory\":\"property_visibility\",\"collectedFields\":{\"subject\":null,\"account\":null,\"description\":\"My property isn't showing up on Rightmove\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Rightmove\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"My property isn't showing up on Rightmove\",\"conversational\":true}"
+      },
+      "messages": [
+        {
+          "id": 1644,
+          "session_id": 502,
+          "role": "user",
+          "content": "My property isn't showing up on Rightmove",
+          "metadata": null,
+          "created_at": "2026-05-23T16:28:43.553Z"
+        },
+        {
+          "id": 1645,
+          "session_id": 502,
+          "role": "assistant",
+          "content": "Thanks for those details about Rightmove. Could you tell me which property is affected and where you're seeing the issue?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:28:53.530Z"
+        }
+      ]
+    }
+  }
+]

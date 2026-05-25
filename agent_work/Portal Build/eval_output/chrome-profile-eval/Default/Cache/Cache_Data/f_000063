@@ -1,0 +1,240 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/@fs/C:\\Users\\NickW\\Claude\\windows automation\\daypilot\\src\\client\\components\\StatusBar.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=62de665b"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/@fs/C:/Users/NickW/Claude/windows automation/daypilot/node_modules/.vite/deps/react.js?v=62de665b"; const useEffect = __vite__cjsImport3_react["useEffect"]; const useState = __vite__cjsImport3_react["useState"];
+const STATUS_DOTS = {
+  connected: "bg-green-400",
+  connecting: "bg-yellow-400 animate-pulse",
+  disconnected: "bg-neutral-600",
+  unavailable: "bg-red-500",
+  error: "bg-red-500"
+};
+export function StatusBar({ health }) {
+  _s();
+  const [oneDrive, setOneDrive] = useState(null);
+  const [syncStatus, setSyncStatus] = useState(null);
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const [odRes, syncRes] = await Promise.all(
+          [
+            fetch("/api/onedrive/status"),
+            fetch("/api/sync/status")
+          ]
+        );
+        const odJson = await odRes.json();
+        if (odJson.ok && odJson.data) setOneDrive(odJson.data);
+        const syncJson = await syncRes.json();
+        if (syncJson.ok && syncJson.data) setSyncStatus(syncJson.data);
+      } catch {
+      }
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 3e4);
+    return () => clearInterval(interval);
+  }, []);
+  const formatSince = (iso) => {
+    if (!iso) return "never";
+    const diff = Date.now() - new Date(iso).getTime();
+    if (Number.isNaN(diff)) return "unknown";
+    const mins = Math.floor(diff / 6e4);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    return `${hours}h ago`;
+  };
+  return /* @__PURE__ */ jsxDEV("footer", { className: "border-t border-[#3a424d] px-6 py-2 flex items-center justify-between text-xs text-neutral-500", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-4", children: [
+      health?.servers ? health.servers.map(
+        (server) => /* @__PURE__ */ jsxDEV(
+          "div",
+          {
+            className: "flex items-center gap-1.5",
+            title: server.lastError ?? `${server.toolCount} tools`,
+            children: [
+              /* @__PURE__ */ jsxDEV(
+                "div",
+                {
+                  className: `w-2 h-2 rounded-full ${STATUS_DOTS[server.status] ?? "bg-neutral-600"}`
+                },
+                void 0,
+                false,
+                {
+                  fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+                  lineNumber: 95,
+                  columnNumber: 15
+                },
+                this
+              ),
+              /* @__PURE__ */ jsxDEV("span", { className: "capitalize", children: server.name }, void 0, false, {
+                fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+                lineNumber: 98,
+                columnNumber: 15
+              }, this),
+              server.status !== "connected" && server.lastError && /* @__PURE__ */ jsxDEV("span", { className: "text-red-500 max-w-[200px] truncate", children: [
+                "(",
+                server.lastError,
+                ")"
+              ] }, void 0, true, {
+                fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+                lineNumber: 100,
+                columnNumber: 11
+              }, this)
+            ]
+          },
+          server.name,
+          true,
+          {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+            lineNumber: 90,
+            columnNumber: 9
+          },
+          this
+        )
+      ) : /* @__PURE__ */ jsxDEV("span", { children: "Connecting..." }, void 0, false, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+        lineNumber: 107,
+        columnNumber: 9
+      }, this),
+      oneDrive && /* @__PURE__ */ jsxDEV(
+        "div",
+        {
+          className: "flex items-center gap-1.5",
+          title: oneDrive.watchDir,
+          children: [
+            /* @__PURE__ */ jsxDEV("div", { className: `w-2 h-2 rounded-full ${oneDrive.lastError ? "bg-red-500" : "bg-green-400"}` }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+              lineNumber: 114,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV("span", { children: "onedrive" }, void 0, false, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+              lineNumber: 115,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV("span", { className: "text-neutral-400", children: [
+              "last: ",
+              formatSince(oneDrive.lastIngestAt),
+              oneDrive.lastIngestFile ? ` (${oneDrive.lastIngestFile})` : ""
+            ] }, void 0, true, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+              lineNumber: 116,
+              columnNumber: 13
+            }, this),
+            oneDrive.lastError && /* @__PURE__ */ jsxDEV("span", { className: "text-red-500 max-w-[200px] truncate", children: [
+              "(",
+              oneDrive.lastError,
+              ")"
+            ] }, void 0, true, {
+              fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+              lineNumber: 121,
+              columnNumber: 11
+            }, this)
+          ]
+        },
+        void 0,
+        true,
+        {
+          fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+          lineNumber: 110,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+      lineNumber: 87,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-4", children: [
+      syncStatus && /* @__PURE__ */ jsxDEV("span", { children: [
+        "Synced: ",
+        formatSince(syncStatus.lastAutoSync),
+        " | Every ",
+        syncStatus.intervalMinutes,
+        "m"
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+        lineNumber: 130,
+        columnNumber: 9
+      }, this),
+      health && /* @__PURE__ */ jsxDEV("span", { children: [
+        "Uptime: ",
+        Math.floor(health.uptime / 60),
+        "m | ",
+        health.status,
+        " |",
+        " ",
+        /* @__PURE__ */ jsxDEV(
+          "button",
+          {
+            onClick: () => window.dispatchEvent(new CustomEvent("nova-show-release-notes")),
+            className: "hover:text-[#5ec1ca] transition-colors cursor-pointer",
+            title: "View release notes",
+            children: [
+              "v",
+              __APP_VERSION__,
+              " (",
+              __GIT_HASH__,
+              ")"
+            ]
+          },
+          void 0,
+          true,
+          {
+            fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+            lineNumber: 137,
+            columnNumber: 13
+          },
+          this
+        )
+      ] }, void 0, true, {
+        fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+        lineNumber: 135,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+      lineNumber: 128,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx",
+    lineNumber: 86,
+    columnNumber: 5
+  }, this);
+}
+_s(StatusBar, "pQ9QFXLGseA3QuZtj/iU9FjYcO8=");
+_c = StatusBar;
+var _c;
+$RefreshReg$(_c, "StatusBar");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/NickW/Claude/windows automation/daypilot/src/client/components/StatusBar.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6IkFBMkVjOzs7Ozs7Ozs7Ozs7Ozs7OztBQTNFZCxTQUFTQSxXQUFXQyxnQkFBZ0I7QUFlcEMsTUFBTUMsY0FBc0M7QUFBQSxFQUMxQ0MsV0FBVztBQUFBLEVBQ1hDLFlBQVk7QUFBQSxFQUNaQyxjQUFjO0FBQUEsRUFDZEMsYUFBYTtBQUFBLEVBQ2JDLE9BQU87QUFDVDtBQUVPLGdCQUFTQyxVQUFVLEVBQUVDLE9BQWMsR0FBRztBQUFBQyxLQUFBO0FBQzNDLFFBQU0sQ0FBQ0MsVUFBVUMsV0FBVyxJQUFJWCxTQU90QixJQUFJO0FBQ2QsUUFBTSxDQUFDWSxZQUFZQyxhQUFhLElBQUliLFNBQTRCLElBQUk7QUFFcEVELFlBQVUsTUFBTTtBQUNkLFVBQU1lLGNBQWMsWUFBWTtBQUM5QixVQUFJO0FBQ0YsY0FBTSxDQUFDQyxPQUFPQyxPQUFPLElBQUksTUFBTUMsUUFBUUM7QUFBQUEsVUFBSTtBQUFBLFlBQ3pDQyxNQUFNLHNCQUFzQjtBQUFBLFlBQzVCQSxNQUFNLGtCQUFrQjtBQUFBLFVBQUM7QUFBQSxRQUMxQjtBQUNELGNBQU1DLFNBQVMsTUFBTUwsTUFBTU0sS0FBSztBQUNoQyxZQUFJRCxPQUFPRSxNQUFNRixPQUFPRyxLQUFNWixhQUFZUyxPQUFPRyxJQUFJO0FBQ3JELGNBQU1DLFdBQVcsTUFBTVIsUUFBUUssS0FBSztBQUNwQyxZQUFJRyxTQUFTRixNQUFNRSxTQUFTRCxLQUFNVixlQUFjVyxTQUFTRCxJQUFJO0FBQUEsTUFDL0QsUUFBUTtBQUFBLE1BQ047QUFBQSxJQUVKO0FBQ0FULGdCQUFZO0FBQ1osVUFBTVcsV0FBV0MsWUFBWVosYUFBYSxHQUFLO0FBQy9DLFdBQU8sTUFBTWEsY0FBY0YsUUFBUTtBQUFBLEVBQ3JDLEdBQUcsRUFBRTtBQUVMLFFBQU1HLGNBQWNBLENBQUNDLFFBQXVCO0FBQzFDLFFBQUksQ0FBQ0EsSUFBSyxRQUFPO0FBQ2pCLFVBQU1DLE9BQU9DLEtBQUtDLElBQUksSUFBSSxJQUFJRCxLQUFLRixHQUFHLEVBQUVJLFFBQVE7QUFDaEQsUUFBSUMsT0FBT0MsTUFBTUwsSUFBSSxFQUFHLFFBQU87QUFDL0IsVUFBTU0sT0FBT0MsS0FBS0MsTUFBTVIsT0FBTyxHQUFLO0FBQ3BDLFFBQUlNLE9BQU8sRUFBRyxRQUFPO0FBQ3JCLFFBQUlBLE9BQU8sR0FBSSxRQUFPLEdBQUdBLElBQUk7QUFDN0IsVUFBTUcsUUFBUUYsS0FBS0MsTUFBTUYsT0FBTyxFQUFFO0FBQ2xDLFdBQU8sR0FBR0csS0FBSztBQUFBLEVBQ2pCO0FBRUEsU0FDRSx1QkFBQyxZQUFPLFdBQVUsa0dBQ2hCO0FBQUEsMkJBQUMsU0FBSSxXQUFVLDJCQUNaL0I7QUFBQUEsY0FBUWdDLFVBQ1BoQyxPQUFPZ0MsUUFBUUM7QUFBQUEsUUFBSSxDQUFDQyxXQUNsQjtBQUFBLFVBQUM7QUFBQTtBQUFBLFlBRUMsV0FBVTtBQUFBLFlBQ1YsT0FBT0EsT0FBT0MsYUFBYSxHQUFHRCxPQUFPRSxTQUFTO0FBQUEsWUFFOUM7QUFBQTtBQUFBLGdCQUFDO0FBQUE7QUFBQSxrQkFDQyxXQUFXLHdCQUF3QjNDLFlBQVl5QyxPQUFPRyxNQUFNLEtBQUssZ0JBQWdCO0FBQUE7QUFBQSxnQkFEbkY7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLGNBQ3NGO0FBQUEsY0FFdEYsdUJBQUMsVUFBSyxXQUFVLGNBQWNILGlCQUFPSSxRQUFyQztBQUFBO0FBQUE7QUFBQTtBQUFBLHFCQUEwQztBQUFBLGNBQ3pDSixPQUFPRyxXQUFXLGVBQWVILE9BQU9DLGFBQ3ZDLHVCQUFDLFVBQUssV0FBVSx1Q0FBc0M7QUFBQTtBQUFBLGdCQUNsREQsT0FBT0M7QUFBQUEsZ0JBQVU7QUFBQSxtQkFEckI7QUFBQTtBQUFBO0FBQUE7QUFBQSxxQkFFQTtBQUFBO0FBQUE7QUFBQSxVQVhHRCxPQUFPSTtBQUFBQSxVQURkO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsUUFjQTtBQUFBLE1BQ0QsSUFFRCx1QkFBQyxVQUFLLDZCQUFOO0FBQUE7QUFBQTtBQUFBO0FBQUEsYUFBbUI7QUFBQSxNQUVwQnBDLFlBQ0M7QUFBQSxRQUFDO0FBQUE7QUFBQSxVQUNDLFdBQVU7QUFBQSxVQUNWLE9BQU9BLFNBQVNxQztBQUFBQSxVQUVoQjtBQUFBLG1DQUFDLFNBQUksV0FBVyx3QkFBd0JyQyxTQUFTaUMsWUFBWSxlQUFlLGNBQWMsTUFBMUY7QUFBQTtBQUFBO0FBQUE7QUFBQSxtQkFBNkY7QUFBQSxZQUM3Rix1QkFBQyxVQUFLLHdCQUFOO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQWM7QUFBQSxZQUNkLHVCQUFDLFVBQUssV0FBVSxvQkFBbUI7QUFBQTtBQUFBLGNBQzFCZixZQUFZbEIsU0FBU3NDLFlBQVk7QUFBQSxjQUN2Q3RDLFNBQVN1QyxpQkFBaUIsS0FBS3ZDLFNBQVN1QyxjQUFjLE1BQU07QUFBQSxpQkFGL0Q7QUFBQTtBQUFBO0FBQUE7QUFBQSxtQkFHQTtBQUFBLFlBQ0N2QyxTQUFTaUMsYUFDUix1QkFBQyxVQUFLLFdBQVUsdUNBQXNDO0FBQUE7QUFBQSxjQUNsRGpDLFNBQVNpQztBQUFBQSxjQUFVO0FBQUEsaUJBRHZCO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBRUE7QUFBQTtBQUFBO0FBQUEsUUFiSjtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsTUFlQTtBQUFBLFNBdENKO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0F3Q0E7QUFBQSxJQUNBLHVCQUFDLFNBQUksV0FBVSwyQkFDWi9CO0FBQUFBLG9CQUNDLHVCQUFDLFVBQUs7QUFBQTtBQUFBLFFBQ0tnQixZQUFZaEIsV0FBV3NDLFlBQVk7QUFBQSxRQUFFO0FBQUEsUUFBVXRDLFdBQVd1QztBQUFBQSxRQUFnQjtBQUFBLFdBRHJGO0FBQUE7QUFBQTtBQUFBO0FBQUEsYUFFQTtBQUFBLE1BRUQzQyxVQUNDLHVCQUFDLFVBQUs7QUFBQTtBQUFBLFFBQ0s2QixLQUFLQyxNQUFNOUIsT0FBTzRDLFNBQVMsRUFBRTtBQUFBLFFBQUU7QUFBQSxRQUFLNUMsT0FBT3FDO0FBQUFBLFFBQU87QUFBQSxRQUFHO0FBQUEsUUFDOUQ7QUFBQSxVQUFDO0FBQUE7QUFBQSxZQUNDLFNBQVMsTUFBTVEsT0FBT0MsY0FBYyxJQUFJQyxZQUFZLHlCQUF5QixDQUFDO0FBQUEsWUFDOUUsV0FBVTtBQUFBLFlBQ1YsT0FBTTtBQUFBLFlBQW9CO0FBQUE7QUFBQSxjQUV4QkM7QUFBQUEsY0FBZ0I7QUFBQSxjQUFHQztBQUFBQSxjQUFhO0FBQUE7QUFBQTtBQUFBLFVBTHBDO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQSxRQU1BO0FBQUEsV0FSRjtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBU0E7QUFBQSxTQWhCSjtBQUFBO0FBQUE7QUFBQTtBQUFBLFdBa0JBO0FBQUEsT0E1REY7QUFBQTtBQUFBO0FBQUE7QUFBQSxTQTZEQTtBQUVKO0FBQUNoRCxHQTFHZUYsV0FBUztBQUFBLEtBQVRBO0FBQVMsSUFBQW1EO0FBQUEsYUFBQUEsSUFBQSIsIm5hbWVzIjpbInVzZUVmZmVjdCIsInVzZVN0YXRlIiwiU1RBVFVTX0RPVFMiLCJjb25uZWN0ZWQiLCJjb25uZWN0aW5nIiwiZGlzY29ubmVjdGVkIiwidW5hdmFpbGFibGUiLCJlcnJvciIsIlN0YXR1c0JhciIsImhlYWx0aCIsIl9zIiwib25lRHJpdmUiLCJzZXRPbmVEcml2ZSIsInN5bmNTdGF0dXMiLCJzZXRTeW5jU3RhdHVzIiwiZmV0Y2hTdGF0dXMiLCJvZFJlcyIsInN5bmNSZXMiLCJQcm9taXNlIiwiYWxsIiwiZmV0Y2giLCJvZEpzb24iLCJqc29uIiwib2siLCJkYXRhIiwic3luY0pzb24iLCJpbnRlcnZhbCIsInNldEludGVydmFsIiwiY2xlYXJJbnRlcnZhbCIsImZvcm1hdFNpbmNlIiwiaXNvIiwiZGlmZiIsIkRhdGUiLCJub3ciLCJnZXRUaW1lIiwiTnVtYmVyIiwiaXNOYU4iLCJtaW5zIiwiTWF0aCIsImZsb29yIiwiaG91cnMiLCJzZXJ2ZXJzIiwibWFwIiwic2VydmVyIiwibGFzdEVycm9yIiwidG9vbENvdW50Iiwic3RhdHVzIiwibmFtZSIsIndhdGNoRGlyIiwibGFzdEluZ2VzdEF0IiwibGFzdEluZ2VzdEZpbGUiLCJsYXN0QXV0b1N5bmMiLCJpbnRlcnZhbE1pbnV0ZXMiLCJ1cHRpbWUiLCJ3aW5kb3ciLCJkaXNwYXRjaEV2ZW50IiwiQ3VzdG9tRXZlbnQiLCJfX0FQUF9WRVJTSU9OX18iLCJfX0dJVF9IQVNIX18iLCJfYyJdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJTdGF0dXNCYXIudHN4Il0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IHVzZUVmZmVjdCwgdXNlU3RhdGUgfSBmcm9tICdyZWFjdCc7XHJcbmltcG9ydCB0eXBlIHsgSGVhbHRoUmVzcG9uc2UgfSBmcm9tICcuLi8uLi9zaGFyZWQvdHlwZXMuanMnO1xyXG5cclxuZGVjbGFyZSBjb25zdCBfX0FQUF9WRVJTSU9OX186IHN0cmluZztcclxuZGVjbGFyZSBjb25zdCBfX0dJVF9IQVNIX186IHN0cmluZztcclxuXHJcbmludGVyZmFjZSBTeW5jU3RhdHVzIHtcclxuICBsYXN0QXV0b1N5bmM6IHN0cmluZyB8IG51bGw7XHJcbiAgaW50ZXJ2YWxNaW51dGVzOiBudW1iZXI7XHJcbn1cclxuXHJcbmludGVyZmFjZSBQcm9wcyB7XHJcbiAgaGVhbHRoOiBIZWFsdGhSZXNwb25zZSB8IG51bGw7XHJcbn1cclxuXHJcbmNvbnN0IFNUQVRVU19ET1RTOiBSZWNvcmQ8c3RyaW5nLCBzdHJpbmc+ID0ge1xyXG4gIGNvbm5lY3RlZDogJ2JnLWdyZWVuLTQwMCcsXHJcbiAgY29ubmVjdGluZzogJ2JnLXllbGxvdy00MDAgYW5pbWF0ZS1wdWxzZScsXHJcbiAgZGlzY29ubmVjdGVkOiAnYmctbmV1dHJhbC02MDAnLFxyXG4gIHVuYXZhaWxhYmxlOiAnYmctcmVkLTUwMCcsXHJcbiAgZXJyb3I6ICdiZy1yZWQtNTAwJyxcclxufTtcclxuXHJcbmV4cG9ydCBmdW5jdGlvbiBTdGF0dXNCYXIoeyBoZWFsdGggfTogUHJvcHMpIHtcclxuICBjb25zdCBbb25lRHJpdmUsIHNldE9uZURyaXZlXSA9IHVzZVN0YXRlPHtcclxuICAgIHdhdGNoRGlyOiBzdHJpbmc7XHJcbiAgICBsYXN0U2NhbkF0OiBzdHJpbmcgfCBudWxsO1xyXG4gICAgbGFzdEluZ2VzdEF0OiBzdHJpbmcgfCBudWxsO1xyXG4gICAgbGFzdEluZ2VzdEZpbGU6IHN0cmluZyB8IG51bGw7XHJcbiAgICBsYXN0SW5nZXN0U291cmNlOiBzdHJpbmcgfCBudWxsO1xyXG4gICAgbGFzdEVycm9yOiBzdHJpbmcgfCBudWxsO1xyXG4gIH0gfCBudWxsPihudWxsKTtcclxuICBjb25zdCBbc3luY1N0YXR1cywgc2V0U3luY1N0YXR1c10gPSB1c2VTdGF0ZTxTeW5jU3RhdHVzIHwgbnVsbD4obnVsbCk7XHJcblxyXG4gIHVzZUVmZmVjdCgoKSA9PiB7XHJcbiAgICBjb25zdCBmZXRjaFN0YXR1cyA9IGFzeW5jICgpID0+IHtcclxuICAgICAgdHJ5IHtcclxuICAgICAgICBjb25zdCBbb2RSZXMsIHN5bmNSZXNdID0gYXdhaXQgUHJvbWlzZS5hbGwoW1xyXG4gICAgICAgICAgZmV0Y2goJy9hcGkvb25lZHJpdmUvc3RhdHVzJyksXHJcbiAgICAgICAgICBmZXRjaCgnL2FwaS9zeW5jL3N0YXR1cycpLFxyXG4gICAgICAgIF0pO1xyXG4gICAgICAgIGNvbnN0IG9kSnNvbiA9IGF3YWl0IG9kUmVzLmpzb24oKTtcclxuICAgICAgICBpZiAob2RKc29uLm9rICYmIG9kSnNvbi5kYXRhKSBzZXRPbmVEcml2ZShvZEpzb24uZGF0YSk7XHJcbiAgICAgICAgY29uc3Qgc3luY0pzb24gPSBhd2FpdCBzeW5jUmVzLmpzb24oKTtcclxuICAgICAgICBpZiAoc3luY0pzb24ub2sgJiYgc3luY0pzb24uZGF0YSkgc2V0U3luY1N0YXR1cyhzeW5jSnNvbi5kYXRhKTtcclxuICAgICAgfSBjYXRjaCB7XHJcbiAgICAgICAgLyogaWdub3JlICovXHJcbiAgICAgIH1cclxuICAgIH07XHJcbiAgICBmZXRjaFN0YXR1cygpO1xyXG4gICAgY29uc3QgaW50ZXJ2YWwgPSBzZXRJbnRlcnZhbChmZXRjaFN0YXR1cywgMzAwMDApO1xyXG4gICAgcmV0dXJuICgpID0+IGNsZWFySW50ZXJ2YWwoaW50ZXJ2YWwpO1xyXG4gIH0sIFtdKTtcclxuXHJcbiAgY29uc3QgZm9ybWF0U2luY2UgPSAoaXNvOiBzdHJpbmcgfCBudWxsKSA9PiB7XHJcbiAgICBpZiAoIWlzbykgcmV0dXJuICduZXZlcic7XHJcbiAgICBjb25zdCBkaWZmID0gRGF0ZS5ub3coKSAtIG5ldyBEYXRlKGlzbykuZ2V0VGltZSgpO1xyXG4gICAgaWYgKE51bWJlci5pc05hTihkaWZmKSkgcmV0dXJuICd1bmtub3duJztcclxuICAgIGNvbnN0IG1pbnMgPSBNYXRoLmZsb29yKGRpZmYgLyA2MDAwMCk7XHJcbiAgICBpZiAobWlucyA8IDEpIHJldHVybiAnanVzdCBub3cnO1xyXG4gICAgaWYgKG1pbnMgPCA2MCkgcmV0dXJuIGAke21pbnN9bSBhZ29gO1xyXG4gICAgY29uc3QgaG91cnMgPSBNYXRoLmZsb29yKG1pbnMgLyA2MCk7XHJcbiAgICByZXR1cm4gYCR7aG91cnN9aCBhZ29gO1xyXG4gIH07XHJcblxyXG4gIHJldHVybiAoXHJcbiAgICA8Zm9vdGVyIGNsYXNzTmFtZT1cImJvcmRlci10IGJvcmRlci1bIzNhNDI0ZF0gcHgtNiBweS0yIGZsZXggaXRlbXMtY2VudGVyIGp1c3RpZnktYmV0d2VlbiB0ZXh0LXhzIHRleHQtbmV1dHJhbC01MDBcIj5cclxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLWNlbnRlciBnYXAtNFwiPlxyXG4gICAgICAgIHtoZWFsdGg/LnNlcnZlcnMgPyAoXHJcbiAgICAgICAgICBoZWFsdGguc2VydmVycy5tYXAoKHNlcnZlcikgPT4gKFxyXG4gICAgICAgICAgICA8ZGl2XHJcbiAgICAgICAgICAgICAga2V5PXtzZXJ2ZXIubmFtZX1cclxuICAgICAgICAgICAgICBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLWNlbnRlciBnYXAtMS41XCJcclxuICAgICAgICAgICAgICB0aXRsZT17c2VydmVyLmxhc3RFcnJvciA/PyBgJHtzZXJ2ZXIudG9vbENvdW50fSB0b29sc2B9XHJcbiAgICAgICAgICAgID5cclxuICAgICAgICAgICAgICA8ZGl2XHJcbiAgICAgICAgICAgICAgICBjbGFzc05hbWU9e2B3LTIgaC0yIHJvdW5kZWQtZnVsbCAke1NUQVRVU19ET1RTW3NlcnZlci5zdGF0dXNdID8/ICdiZy1uZXV0cmFsLTYwMCd9YH1cclxuICAgICAgICAgICAgICAvPlxyXG4gICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cImNhcGl0YWxpemVcIj57c2VydmVyLm5hbWV9PC9zcGFuPlxyXG4gICAgICAgICAgICAgIHtzZXJ2ZXIuc3RhdHVzICE9PSAnY29ubmVjdGVkJyAmJiBzZXJ2ZXIubGFzdEVycm9yICYmIChcclxuICAgICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cInRleHQtcmVkLTUwMCBtYXgtdy1bMjAwcHhdIHRydW5jYXRlXCI+XHJcbiAgICAgICAgICAgICAgICAgICh7c2VydmVyLmxhc3RFcnJvcn0pXHJcbiAgICAgICAgICAgICAgICA8L3NwYW4+XHJcbiAgICAgICAgICAgICAgKX1cclxuICAgICAgICAgICAgPC9kaXY+XHJcbiAgICAgICAgICApKVxyXG4gICAgICAgICkgOiAoXHJcbiAgICAgICAgICA8c3Bhbj5Db25uZWN0aW5nLi4uPC9zcGFuPlxyXG4gICAgICAgICl9XHJcbiAgICAgICAge29uZURyaXZlICYmIChcclxuICAgICAgICAgIDxkaXZcclxuICAgICAgICAgICAgY2xhc3NOYW1lPVwiZmxleCBpdGVtcy1jZW50ZXIgZ2FwLTEuNVwiXHJcbiAgICAgICAgICAgIHRpdGxlPXtvbmVEcml2ZS53YXRjaERpcn1cclxuICAgICAgICAgID5cclxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9e2B3LTIgaC0yIHJvdW5kZWQtZnVsbCAke29uZURyaXZlLmxhc3RFcnJvciA/ICdiZy1yZWQtNTAwJyA6ICdiZy1ncmVlbi00MDAnfWB9IC8+XHJcbiAgICAgICAgICAgIDxzcGFuPm9uZWRyaXZlPC9zcGFuPlxyXG4gICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9XCJ0ZXh0LW5ldXRyYWwtNDAwXCI+XHJcbiAgICAgICAgICAgICAgbGFzdDoge2Zvcm1hdFNpbmNlKG9uZURyaXZlLmxhc3RJbmdlc3RBdCl9XHJcbiAgICAgICAgICAgICAge29uZURyaXZlLmxhc3RJbmdlc3RGaWxlID8gYCAoJHtvbmVEcml2ZS5sYXN0SW5nZXN0RmlsZX0pYCA6ICcnfVxyXG4gICAgICAgICAgICA8L3NwYW4+XHJcbiAgICAgICAgICAgIHtvbmVEcml2ZS5sYXN0RXJyb3IgJiYgKFxyXG4gICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cInRleHQtcmVkLTUwMCBtYXgtdy1bMjAwcHhdIHRydW5jYXRlXCI+XHJcbiAgICAgICAgICAgICAgICAoe29uZURyaXZlLmxhc3RFcnJvcn0pXHJcbiAgICAgICAgICAgICAgPC9zcGFuPlxyXG4gICAgICAgICAgICApfVxyXG4gICAgICAgICAgPC9kaXY+XHJcbiAgICAgICAgKX1cclxuICAgICAgPC9kaXY+XHJcbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZmxleCBpdGVtcy1jZW50ZXIgZ2FwLTRcIj5cclxuICAgICAgICB7c3luY1N0YXR1cyAmJiAoXHJcbiAgICAgICAgICA8c3Bhbj5cclxuICAgICAgICAgICAgU3luY2VkOiB7Zm9ybWF0U2luY2Uoc3luY1N0YXR1cy5sYXN0QXV0b1N5bmMpfSB8IEV2ZXJ5IHtzeW5jU3RhdHVzLmludGVydmFsTWludXRlc31tXHJcbiAgICAgICAgICA8L3NwYW4+XHJcbiAgICAgICAgKX1cclxuICAgICAgICB7aGVhbHRoICYmIChcclxuICAgICAgICAgIDxzcGFuPlxyXG4gICAgICAgICAgICBVcHRpbWU6IHtNYXRoLmZsb29yKGhlYWx0aC51cHRpbWUgLyA2MCl9bSB8IHtoZWFsdGguc3RhdHVzfSB8eycgJ31cclxuICAgICAgICAgICAgPGJ1dHRvblxyXG4gICAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IHdpbmRvdy5kaXNwYXRjaEV2ZW50KG5ldyBDdXN0b21FdmVudCgnbm92YS1zaG93LXJlbGVhc2Utbm90ZXMnKSl9XHJcbiAgICAgICAgICAgICAgY2xhc3NOYW1lPVwiaG92ZXI6dGV4dC1bIzVlYzFjYV0gdHJhbnNpdGlvbi1jb2xvcnMgY3Vyc29yLXBvaW50ZXJcIlxyXG4gICAgICAgICAgICAgIHRpdGxlPVwiVmlldyByZWxlYXNlIG5vdGVzXCJcclxuICAgICAgICAgICAgPlxyXG4gICAgICAgICAgICAgIHZ7X19BUFBfVkVSU0lPTl9ffSAoe19fR0lUX0hBU0hfX30pXHJcbiAgICAgICAgICAgIDwvYnV0dG9uPlxyXG4gICAgICAgICAgPC9zcGFuPlxyXG4gICAgICAgICl9XHJcbiAgICAgIDwvZGl2PlxyXG4gICAgPC9mb290ZXI+XHJcbiAgKTtcclxufVxyXG4iXSwiZmlsZSI6IkM6L1VzZXJzL05pY2tXL0NsYXVkZS93aW5kb3dzIGF1dG9tYXRpb24vZGF5cGlsb3Qvc3JjL2NsaWVudC9jb21wb25lbnRzL1N0YXR1c0Jhci50c3gifQ==

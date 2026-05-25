@@ -37,6 +37,10 @@ const CATEGORY_LABELS: Record<string, string> = {
   listings: 'Property Listings',
   onboarding: 'Onboarding & Setup',
   billing: 'Billing & Contracts',
+  security: 'Website Security',
+  general_request: 'General Service Request',
+  followup: 'Reopened / Follow-up',
+  complaint: 'Complaint / Escalation',
   other: 'Something Else',
 };
 
@@ -119,6 +123,7 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
   const [loading, setLoading] = useState(false);
   const [confirmedTicket, setConfirmedTicket] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -212,6 +217,14 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
       const data = await res.json();
       if (data.ok) {
         setMessages(prev => [...prev, data.data]);
+        // Detect typed confirmation that created a ticket
+        const msgMeta = data.data.metadata ? (() => { try { return JSON.parse(data.data.metadata); } catch { return null; } })() : null;
+        if (msgMeta?.type === 'confirmed' && msgMeta.ticketKey) {
+          setConfirmedTicket(msgMeta.ticketKey);
+          setSessions(prev => prev.map(s =>
+            s.id === activeSessionId ? { ...s, jira_issue_key: msgMeta.ticketKey, status: 'handed_off' as const } : s
+          ));
+        }
       } else {
         setMessages(prev => [...prev, {
           id: Date.now() + 1,
@@ -280,6 +293,7 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
   const handleConfirmSubmit = async (editedFields: Record<string, unknown>) => {
     if (!activeSessionId || submitting) return;
     setSubmitting(true);
+    setSubmitError(null);
 
     try {
       const res = await pf(`/api/portal/chat/sessions/${activeSessionId}/confirm`, {
@@ -288,7 +302,11 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
       });
       const data = await res.json();
       if (data.ok) {
-        const ticketKey = data.data.ticketKey;
+        const ticketKey = data.data?.ticketKey;
+        if (!ticketKey) {
+          setSubmitError('The request was created but we could not retrieve the reference. Please check My Tickets.');
+          return;
+        }
         setConfirmedTicket(ticketKey);
         setSessions(prev => prev.map(session => (
           session.id === activeSessionId
@@ -309,9 +327,12 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
             console.warn(`Failed to upload ${file.name}`);
           }
         }
+      } else {
+        setSubmitError(data.error || 'Something went wrong creating your request. Please try again.');
       }
     } catch (err) {
       console.error('Failed to confirm:', err);
+      setSubmitError('We couldn\'t reach the server. Please check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -463,6 +484,7 @@ export default function PortalChat({ onNavigateToTicket, autoStart }: Props) {
                       onConfirm={handleConfirmSubmit}
                       onEditInChat={(text) => { setInput(text); }}
                       submitting={submitting}
+                      submitError={submitError}
                       timestamp={msg.created_at}
                     />
                   );
@@ -607,6 +629,7 @@ interface SummaryCardProps {
   onConfirm: (fields: Record<string, unknown>) => void;
   onEditInChat: (text: string) => void;
   submitting: boolean;
+  submitError: string | null;
   timestamp: string;
 }
 
@@ -621,6 +644,7 @@ function SummaryCard({
   onConfirm,
   onEditInChat,
   submitting,
+  submitError,
   timestamp,
 }: SummaryCardProps) {
   const [editField, setEditField] = useState<string | null>(null);
@@ -641,9 +665,14 @@ function SummaryCard({
     onConfirm(merged);
   };
 
-  const rows: Array<{ key: string; label: string; value: string }> = [
+  const followUpKey = getValue('followUpTicketKey');
+  const followUpSummary = getValue('followUpTicketSummary');
+  const relatedTicketValue = followUpKey ? `${followUpKey}${followUpSummary ? ` — ${followUpSummary}` : ''}` : '';
+
+  const rows: Array<{ key: string; label: string; value: string; editable?: boolean }> = [
     { key: 'subject', label: 'Subject', value: getValue('subject') },
     { key: 'category', label: 'Request type', value: CATEGORY_LABELS[getValue('category')] || getValue('category') },
+    { key: 'relatedTicket', label: 'Related ticket', value: relatedTicketValue, editable: false },
     { key: 'account', label: 'Account', value: getValue('account') },
     { key: 'description', label: 'Description', value: getValue('description') },
     { key: 'url', label: 'URL', value: getValue('url') },
@@ -661,7 +690,7 @@ function SummaryCard({
           </div>
 
           <div className="divide-y divide-gray-100">
-            {rows.map(({ key, label, value }) => (
+            {rows.map(({ key, label, value, editable }) => (
               <div key={key} className="px-4 py-2.5 flex items-start gap-3">
                 <div className="text-xs font-medium text-gray-500 w-24 flex-shrink-0 pt-0.5">{label}</div>
                 <div className="flex-1 min-w-0">
@@ -692,7 +721,7 @@ function SummaryCard({
                   ) : (
                     <div className="flex items-start gap-1 group">
                       <div className="text-sm text-gray-900 whitespace-pre-wrap flex-1">{value}</div>
-                      {key !== 'category' && (
+                      {key !== 'category' && editable !== false && (
                         <button
                           onClick={() => setEditField(key)}
                           className="p-0.5 text-gray-300 hover:text-brand transition-colors opacity-0 group-hover:opacity-100 focus-visible:ring-2 focus-visible:ring-brand outline-none rounded focus-visible:opacity-100"
@@ -795,13 +824,19 @@ function SummaryCard({
           </div>
 
           {/* Actions */}
-          <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex gap-3">
+          <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
+            {submitError && (
+              <div className="mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                {submitError}
+              </div>
+            )}
+            <div className="flex gap-3">
             <button
               onClick={handleConfirm}
               disabled={submitting}
               className="flex-1 px-4 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50 transition-colors"
             >
-              {submitting ? 'Submitting...' : 'Submit request'}
+              {submitting ? 'Submitting...' : submitError ? 'Try again' : 'Submit request'}
             </button>
             <button
               onClick={() => onEditInChat('I want to change ')}
@@ -809,6 +844,7 @@ function SummaryCard({
             >
               Edit in chat
             </button>
+            </div>
           </div>
         </div>
 

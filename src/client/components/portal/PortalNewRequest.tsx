@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { PORTAL_ALL_FIELDS, PORTAL_CATEGORY_FIELD_CONFIG, type PortalFieldConfig } from '../../../shared/portal-category-field-config.js';
 
 type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 'chat';
 
@@ -24,46 +25,8 @@ const ACCEPTED_TYPES = '.png,.jpg,.jpeg,.gif,.pdf,.doc,.docx,.xlsx,.csv,.txt,.zi
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
-interface FieldConfig {
-  url: boolean;
-  browser: boolean;
-  errorMessage: boolean;
-  account: boolean;
-  description_hint: string;
-}
-
-const ALL_FIELDS: FieldConfig = { url: true, browser: true, errorMessage: true, account: true, description_hint: 'What should be happening vs what is happening?' };
-
-const CATEGORY_FIELD_CONFIG: Record<string, FieldConfig> = {
-  website_content:  { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'What content needs changing? Please include the page URL and the exact text or image to update.' },
-  website_broken:   { url: true,  browser: true,  errorMessage: true,  account: true,  description_hint: 'What should be happening vs what is happening? Include any error messages you see.' },
-  website_new_page: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Describe the new page you need — what content should it include and where should it sit in the navigation?' },
-  website_design:   { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'What design changes do you need? Attach any reference images or mockups.' },
-  account_login:       { url: false, browser: true,  errorMessage: true,  account: true,  description_hint: 'Which login are you having trouble with? What happens when you try to log in?' },
-  account_new_user:    { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Name and email of the new user. Which systems do they need access to?' },
-  account_permissions: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which user needs permissions changed? What access do they need?' },
-  account_details:     { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What account details need updating?' },
-  email_campaign: { url: false, browser: false, errorMessage: true,  account: true,  description_hint: 'Which campaign is affected? What went wrong with the send?' },
-  email_triggers: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which trigger or automation needs attention? What should it be doing?' },
-  email_template: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which template? Attach the content or describe the changes needed.' },
-  leadpro_missing: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'When did the lead come in? Which source/portal? Include any reference numbers.' },
-  leadpro_setup:   { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What needs setting up or configuring in LeadPro?' },
-  leadpro_access:  { url: false, browser: true,  errorMessage: true,  account: true,  description_hint: 'What happens when you try to access LeadPro?' },
-  feeds_property:    { url: false, browser: false, errorMessage: true,  account: true,  description_hint: 'Which feed is affected? When did it last work? Include any error messages from your CRM.' },
-  feeds_integration: { url: false, browser: false, errorMessage: true,  account: true,  description_hint: 'Which integration? What system is it connecting to?' },
-  feeds_reporting:   { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'Which report or analytics view is affected?' },
-  listings_tours:      { url: true,  browser: true,  errorMessage: false, account: true,  description_hint: 'Which property? Include the property address or listing reference.' },
-  listings_media:      { url: true,  browser: false, errorMessage: false, account: true,  description_hint: 'Which property and what images need attention?' },
-  listings_management: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which listings are affected? What action do you need?' },
-  onboarding_branch:   { url: false, browser: false, errorMessage: false, account: false, description_hint: 'Branch name, address, and which products they need.' },
-  onboarding_product:  { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which product do you need set up?' },
-  onboarding_training: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What training do you need? How many attendees?' },
-  billing_cancel: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'Which service are you cancelling? Any specific date?' },
-  billing_change: { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What service change do you need?' },
-  billing_query:  { url: false, browser: false, errorMessage: false, account: true,  description_hint: 'What is your billing question?' },
-  other_general:  { url: false, browser: false, errorMessage: false, account: false, description_hint: 'How can we help?' },
-  other_feedback: { url: false, browser: false, errorMessage: false, account: false, description_hint: 'What feedback or suggestion do you have?' },
-};
+const ALL_FIELDS: PortalFieldConfig = PORTAL_ALL_FIELDS;
+const CATEGORY_FIELD_CONFIG: Record<string, PortalFieldConfig> = PORTAL_CATEGORY_FIELD_CONFIG;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

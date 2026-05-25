@@ -1,0 +1,149 @@
+[
+  {
+    "id": 1,
+    "name": "Simple Content Change",
+    "hasCatPicker": false,
+    "hasConversational": true,
+    "hasError": false,
+    "hasNoResponse": false,
+    "taxLeaks": [],
+    "netLog": [
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      },
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      }
+    ],
+    "assistantResponse": "",
+    "hasSummary": false
+  },
+  {
+    "id": 2,
+    "name": "Information-Rich Request",
+    "hasCatPicker": false,
+    "hasConversational": true,
+    "hasError": false,
+    "hasNoResponse": false,
+    "taxLeaks": [],
+    "netLog": [
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      },
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      }
+    ],
+    "assistantResponse": "",
+    "hasSummary": false
+  },
+  {
+    "id": 3,
+    "name": "Vague Website Request",
+    "hasCatPicker": false,
+    "hasConversational": true,
+    "hasError": false,
+    "hasNoResponse": false,
+    "taxLeaks": [],
+    "netLog": [
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      },
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      }
+    ],
+    "assistantResponse": "",
+    "hasSummary": false
+  },
+  {
+    "id": 4,
+    "name": "Multiple Changes",
+    "hasCatPicker": false,
+    "hasConversational": true,
+    "hasError": false,
+    "hasNoResponse": false,
+    "taxLeaks": [],
+    "netLog": [
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      },
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      }
+    ],
+    "assistantResponse": "",
+    "hasSummary": false
+  },
+  {
+    "id": 5,
+    "name": "Non-Website Request",
+    "hasCatPicker": false,
+    "hasConversational": true,
+    "hasError": false,
+    "hasNoResponse": false,
+    "taxLeaks": [],
+    "netLog": [
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      },
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      }
+    ],
+    "assistantResponse": "",
+    "hasSummary": false
+  },
+  {
+    "id": 6,
+    "name": "Ambiguous Website Problem",
+    "hasCatPicker": false,
+    "hasConversational": true,
+    "hasError": false,
+    "hasNoResponse": false,
+    "taxLeaks": [],
+    "netLog": [
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      },
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      }
+    ],
+    "assistantResponse": "",
+    "hasSummary": false
+  },
+  {
+    "id": 7,
+    "name": "Human Escalation Preference",
+    "hasCatPicker": false,
+    "hasConversational": true,
+    "hasError": false,
+    "hasNoResponse": false,
+    "taxLeaks": [],
+    "netLog": [
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      },
+      {
+        "url": "http://127.0.0.1:5173/api/portal/chat/sessions",
+        "status": 500
+      }
+    ],
+    "assistantResponse": "",
+    "hasSummary": false
+  }
+]

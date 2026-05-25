@@ -1,0 +1,143 @@
+[
+  {
+    "id": 1,
+    "name": "Simple Content Change",
+    "inputFound": true,
+    "inputSelector": "textarea",
+    "beforeText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin ",
+    "responseText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nOur homepage phone number is wrong. It should be 01234 567890.\n12:01\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:01\nPowered by Nurtur\nNeed help? Contact us",
+    "finalText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nOur homepage phone number is wrong. It should be 01234 567890.\n12:01\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:01\nPowered by Nurtur\nNeed help? Contact us",
+    "taxonomyLeaks": [],
+    "consoleLogs": [
+      "[debug] [vite] connecting...",
+      "[debug] [vite] connected.",
+      "[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+    ],
+    "networkErrors": []
+  },
+  {
+    "id": 2,
+    "name": "Information-Rich Request",
+    "inputFound": true,
+    "inputSelector": "textarea",
+    "beforeText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin ",
+    "responseText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nOur website nurturtest.com has the wrong phone number on the contact page. It currently says 01234 111111 but should be 01234 567890. Can this be changed today?\n12:01\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:01\nPowered by Nurtur\nNeed help? Contact us",
+    "finalText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nOur website nurturtest.com has the wrong phone number on the contact page. It currently says 01234 111111 but should be 01234 567890. Can this be changed today?\n12:01\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:01\nPowered by Nurtur\nNeed help? Contact us",
+    "taxonomyLeaks": [],
+    "consoleLogs": [
+      "[debug] [vite] connecting...",
+      "[debug] [vite] connected.",
+      "[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+    ],
+    "networkErrors": []
+  },
+  {
+    "id": 3,
+    "name": "Vague Website Request",
+    "inputFound": true,
+    "inputSelector": "textarea",
+    "beforeText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin ",
+    "responseText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nI need something changed on our website.\n12:01\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:01\nPowered by Nurtur\nNeed help? Contact us",
+    "finalText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nI need something changed on our website.\n12:01\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:01\nPowered by Nurtur\nNeed help? Contact us",
+    "taxonomyLeaks": [],
+    "consoleLogs": [
+      "[debug] [vite] connecting...",
+      "[debug] [vite] connected.",
+      "[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+    ],
+    "networkErrors": []
+  },
+  {
+    "id": 4,
+    "name": "Multiple Changes",
+    "inputFound": true,
+    "inputSelector": "textarea",
+    "beforeText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin ",
+    "responseText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nWe need the staff photo changed on the team page and the opening hours updated on the contact page.\n12:02\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:02\nPowered by Nurtur\nNeed help? Contact us",
+    "finalText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nWe need the staff photo changed on the team page and the opening hours updated on the contact page.\n12:02\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:02\nPowered by Nurtur\nNeed help? Contact us",
+    "taxonomyLeaks": [],
+    "consoleLogs": [
+      "[debug] [vite] connecting...",
+      "[debug] [vite] connected.",
+      "[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+    ],
+    "networkErrors": []
+  },
+  {
+    "id": 5,
+    "name": "Non-Website Request",
+    "inputFound": true,
+    "inputSelector": "textarea",
+    "beforeText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin ",
+    "responseText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nMy property isn't showing on Rightmove.\n12:02\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:02\nPowered by Nurtur\nNeed help? Contact us",
+    "finalText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nMy property isn't showing on Rightmove.\n12:02\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:02\nPowered by Nurtur\nNeed help? Contact us",
+    "taxonomyLeaks": [],
+    "consoleLogs": [
+      "[debug] [vite] connecting...",
+      "[debug] [vite] connected.",
+      "[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+    ],
+    "networkErrors": []
+  },
+  {
+    "id": 6,
+    "name": "Ambiguous Website Problem",
+    "inputFound": true,
+    "inputSelector": "textarea",
+    "beforeText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin ",
+    "responseText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nSomething is wrong with our website.\n12:02\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:02\nPowered by Nurtur\nNeed help? Contact us",
+    "finalText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nSomething is wrong with our website.\n12:02\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:02\nPowered by Nurtur\nNeed help? Contact us",
+    "taxonomyLeaks": [],
+    "consoleLogs": [
+      "[debug] [vite] connecting...",
+      "[debug] [vite] connected.",
+      "[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+    ],
+    "networkErrors": []
+  },
+  {
+    "id": 7,
+    "name": "Human Escalation Preference",
+    "inputFound": true,
+    "inputSelector": "textarea",
+    "beforeText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nCodex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.\nWelcome back, codex.portal.test\n\nYour organisation has 2 open tickets\n\nGet help\nReport an issue, ask a question, or request a change\nRecent Tickets\nView all\nCOD-101\nReviewed\nHomepage hero banner is showing the wrong Spring offer\nCOD-102\nAwaiting Your Response\nLogin ",
+    "responseText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nI don't want to use the bot, I just need someone to update our homepage.\n12:02\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:02\nPowered by Nurtur\nNeed help? Contact us",
+    "finalText": "nurtur\n|\nSupport Portal\ncodex.portal.test@nurtur.tech\nCodex Test Organisation\nSign out\nHome\nMy Tickets\nKnowledge Base\nNew Conversation\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\n18/05/2026\nIn Progress\nSupport Assistant\nEnd conversation\nI don't want to use the bot, I just need someone to update our homepage.\n12:02\nWhich area does this relate to?\nMy Website\nContent updates or something not working\nMy Account\nLogin, passwords, users, permissions\nBilling & Contracts\nCancellations, service changes, queries\nSomething Else\nGeneral support requests and questions\n12:02\nPowered by Nurtur\nNeed help? Contact us",
+    "taxonomyLeaks": [],
+    "consoleLogs": [
+      "[debug] [vite] connecting...",
+      "[debug] [vite] connected.",
+      "[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)",
+      "[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)"
+    ],
+    "networkErrors": []
+  }
+]

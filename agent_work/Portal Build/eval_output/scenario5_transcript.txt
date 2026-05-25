@@ -1,0 +1,153 @@
+SCENARIO 5: Non-Website Request
+INPUT: My property isn't showing on Rightmove.
+
+BEFORE TEXT:
+nurtur
+|
+Support Portal
+codex.portal.test@nurtur.tech
+Codex Test Organisation
+Sign out
+Home
+My Tickets
+Knowledge Base
+Codex test data: this portal is seeded for local validation of ticket status, history, and chat confirmation flows.
+Welcome back, codex.portal.test
+
+Your organisation has 2 open tickets
+
+Get help
+Report an issue, ask a question, or request a change
+Recent Tickets
+View all
+COD-101
+Reviewed
+Homepage hero banner is showing the wrong Spring offer
+COD-102
+Awaiting Your Response
+Login reset email is not arriving for the branch mailbox
+Popular Articles
+Browse all
+Check portal ticket progress
+Support Portal
+Website change request checklist
+Website
+Reset account access and browser cache
+Accounts
+Powered by Nurtur
+Need help? Contact us
+
+CHAT TEXT:
+nurtur
+|
+Support Portal
+codex.portal.test@nurtur.tech
+Codex Test Organisation
+Sign out
+Home
+My Tickets
+Knowledge Base
+New Conversation
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+Support Assistant
+End conversation
+How can we help you today? Describe your issue, question, or request.
+Powered by Nurtur
+Need help? Contact us
+
+RESPONSE TEXT:
+nurtur
+|
+Support Portal
+codex.portal.test@nurtur.tech
+Codex Test Organisation
+Sign out
+Home
+My Tickets
+Knowledge Base
+New Conversation
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+Support Assistant
+End conversation
+My property isn't showing on Rightmove.
+12:02
+Which area does this relate to?
+My Website
+Content updates or something not working
+My Account
+Login, passwords, users, permissions
+Billing & Contracts
+Cancellations, service changes, queries
+Something Else
+General support requests and questions
+12:02
+Powered by Nurtur
+Need help? Contact us
+
+FINAL TEXT:
+nurtur
+|
+Support Portal
+codex.portal.test@nurtur.tech
+Codex Test Organisation
+Sign out
+Home
+My Tickets
+Knowledge Base
+New Conversation
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+18/05/2026
+In Progress
+Support Assistant
+End conversation
+My property isn't showing on Rightmove.
+12:02
+Which area does this relate to?
+My Website
+Content updates or something not working
+My Account
+Login, passwords, users, permissions
+Billing & Contracts
+Cancellations, service changes, queries
+Something Else
+General support requests and questions
+12:02
+Powered by Nurtur
+Need help? Contact us
+
+TAXONOMY LEAKS: none
+CONSOLE LOGS:
+[debug] [vite] connecting...
+[debug] [vite] connected.
+[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)
+[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)
+[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)
+[error] Failed to load resource: the server responded with a status of 501 (Not Implemented)
+NETWORK ERRORS:
+

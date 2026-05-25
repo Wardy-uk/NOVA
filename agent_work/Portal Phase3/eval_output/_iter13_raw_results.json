@@ -1,0 +1,290 @@
+{
+  "tests": [
+    {
+      "id": "DET-1",
+      "domain": "DET",
+      "name": "Email template canonical",
+      "message": "I need a new email template designed for our autumn campaign",
+      "expect": "email_marketing",
+      "status": "PASS",
+      "reply": "You need a new email template designed for your autumn campaign.\n\nWhich account or website is this for?",
+      "sessionCategory": "email_marketing",
+      "metaCategory": null,
+      "inferredCategory": "website",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "DET-2",
+      "domain": "DET",
+      "name": "Email template variant (H1)",
+      "message": "Can you build us a brand new template for our email newsletters please",
+      "expect": "email_marketing",
+      "status": "PASS",
+      "reply": "Thanks — I'll get your template request raised with our production team.\n\nWhich template is this for, and what changes do you need?",
+      "sessionCategory": "email_marketing",
+      "metaCategory": null,
+      "inferredCategory": "letters",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "DET-3",
+      "domain": "DET",
+      "name": "Email template + property incidental",
+      "message": "I need a new email template for our property launch campaign, we have listings going live",
+      "expect": "email_marketing",
+      "status": "PASS",
+      "reply": "Thanks — I'll get your template request raised with our production team.\n\nWhich template is this for, and what changes do you need?",
+      "sessionCategory": "email_marketing",
+      "metaCategory": null,
+      "inferredCategory": "letters",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "DET-4",
+      "domain": "DET",
+      "name": "Letters market appraisal",
+      "message": "We need to send market appraisal letters to properties in the SE1 postcode area",
+      "expect": "letters",
+      "status": "PASS",
+      "reply": "You want to send market appraisal letters to properties in the SE1 postcode area.\n\nWhich account or website is this for?",
+      "sessionCategory": "letters",
+      "metaCategory": null,
+      "inferredCategory": "letters",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "DET-5",
+      "domain": "DET",
+      "name": "Letters mailshot",
+      "message": "I need to do a property mailshot to all vendors in our area",
+      "expect": "letters",
+      "status": "PASS",
+      "reply": "You want to do a property mailshot to all vendors in your area.\n\nWhich account or website is this for?",
+      "sessionCategory": "letters",
+      "metaCategory": null,
+      "inferredCategory": "letters",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "DET-6",
+      "domain": "DET",
+      "name": "Letters general variant (H1)",
+      "message": "Can you arrange some printed correspondence to go out to our client database",
+      "expect": "letters",
+      "status": "PASS",
+      "reply": "You would like us to arrange some printed correspondence to go out to your client database.\n\nWhich account or website is this for?",
+      "sessionCategory": "letters",
+      "metaCategory": null,
+      "inferredCategory": "letters",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "DET-7",
+      "domain": "DET",
+      "name": "Email template redesign",
+      "message": "Our email template needs a complete redesign, the current one looks dated",
+      "expect": "email_marketing",
+      "status": "PASS",
+      "reply": "You mentioned that your email template needs a complete redesign because the current one looks dated.\n\nWhich account or website is this for?",
+      "sessionCategory": "email_marketing",
+      "metaCategory": null,
+      "inferredCategory": "website",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "EDGE-1",
+      "domain": "EDGE",
+      "name": "NT-55555 is not fixed",
+      "message": "NT-55555 is not fixed",
+      "expect": "followup",
+      "status": "PASS",
+      "reply": "I can see you're following up on **NT-55555** — sorry it's not been resolved yet.\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?",
+      "sessionCategory": "followup",
+      "metaCategory": null,
+      "inferredCategory": "followup",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "EDGE-2",
+      "domain": "EDGE",
+      "name": "NT-20001 is not fixed",
+      "message": "NT-20001 is not fixed",
+      "expect": "followup",
+      "status": "PASS",
+      "reply": "I can see you're following up on **NT-20001** — sorry it's not been resolved yet.\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?",
+      "sessionCategory": "followup",
+      "metaCategory": null,
+      "inferredCategory": "followup",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "EDGE-3",
+      "domain": "EDGE",
+      "name": "NT-99999 is not resolved",
+      "message": "NT-99999 is not resolved",
+      "expect": "followup",
+      "status": "PASS",
+      "reply": "I can see you're following up on **NT-99999** — sorry it's not been resolved yet.\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?",
+      "sessionCategory": "followup",
+      "metaCategory": null,
+      "inferredCategory": "followup",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "EDGE-4",
+      "domain": "EDGE",
+      "name": "NT-77777 is not working (H2)",
+      "message": "NT-77777 is not working",
+      "expect": "followup",
+      "status": "PASS",
+      "reply": "You mentioned that NT-77777 is not working.\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?",
+      "sessionCategory": "followup",
+      "metaCategory": null,
+      "inferredCategory": "followup",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "EDGE-5",
+      "domain": "EDGE",
+      "name": "Website-primary + letters incidental",
+      "message": "Our website needs updating with new photos and branch details. We also have some letters that will need the same info eventually but the website is the priority.",
+      "expect": "website",
+      "status": "PASS",
+      "reply": "You need your website updated with new photos and branch details, and you mentioned that letters will need the same info eventually but the website is the priority.\n\nWhich account or website is this for?",
+      "sessionCategory": "website",
+      "metaCategory": null,
+      "inferredCategory": "website",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "EDGE-6",
+      "domain": "EDGE",
+      "name": "Property images on my website",
+      "message": "The property images on my website are not loading properly",
+      "expect": "website",
+      "status": "PASS",
+      "reply": "You mentioned that the property images on your website are not loading properly.\n\nWhich account or website is this for?",
+      "sessionCategory": "website",
+      "metaCategory": null,
+      "inferredCategory": "website",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "PROT-1",
+      "domain": "PROT",
+      "name": "Complaint formal",
+      "message": "I want to make a formal complaint about the service I have received, it has been terrible",
+      "expect": "complaint",
+      "status": "PASS",
+      "reply": "You want to make a formal complaint about the service you have received, which you describe as terrible.\n\nCould you let me know which account this relates to?",
+      "sessionCategory": "complaint",
+      "metaCategory": null,
+      "inferredCategory": "complaint",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "PROT-2",
+      "domain": "PROT",
+      "name": "Follow-up still not fixed",
+      "message": "NT-18592 is still not fixed",
+      "expect": "followup",
+      "status": "PASS",
+      "reply": "I can see you're following up on **NT-18592** — sorry it's not been resolved yet.\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?",
+      "sessionCategory": "followup",
+      "metaCategory": null,
+      "inferredCategory": "followup",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "PROT-3",
+      "domain": "PROT",
+      "name": "Pure website",
+      "message": "The phone number on our website is wrong, can you update it please",
+      "expect": "website",
+      "status": "PASS",
+      "reply": "You mentioned that the phone number on your website is wrong and you would like it updated.\n\nWhich account or website is this for?",
+      "sessionCategory": "website",
+      "metaCategory": null,
+      "inferredCategory": "website",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "PROT-4",
+      "domain": "PROT",
+      "name": "Property listing",
+      "message": "Our Rightmove listing at 14 Oak Lane is missing the floor plan",
+      "expect": "property",
+      "status": "PASS",
+      "reply": "Thanks for those details about 14 Oak Lane on Rightmove. You mentioned our Rightmove listing at 14 Oak Lane is missing the floor plan — which account or branch is this for?",
+      "sessionCategory": "property",
+      "metaCategory": null,
+      "inferredCategory": "property",
+      "jargon": [],
+      "failReason": null
+    },
+    {
+      "id": "PROT-5",
+      "domain": "PROT",
+      "name": "Letters pure",
+      "message": "We need to send out some market appraisal letters to our vendors",
+      "expect": "letters",
+      "status": "PASS",
+      "reply": "You need to send out some market appraisal letters to your vendors.\n\nWhich account or website is this for?",
+      "sessionCategory": "letters",
+      "metaCategory": null,
+      "inferredCategory": "letters",
+      "jargon": [],
+      "failReason": null
+    }
+  ],
+  "config": {
+    "passed": 7,
+    "failed": 0,
+    "details": [
+      {
+        "name": "website_broken",
+        "status": "PASS"
+      },
+      {
+        "name": "website_content",
+        "status": "PASS"
+      },
+      {
+        "name": "account_login",
+        "status": "PASS"
+      },
+      {
+        "name": "followup_reopen",
+        "status": "PASS"
+      },
+      {
+        "name": "complaint_service",
+        "status": "PASS"
+      },
+      {
+        "name": "letters_general",
+        "status": "PASS"
+      },
+      {
+        "name": "other_general",
+        "status": "PASS"
+      }
+    ]
+  }
+}

@@ -1,0 +1,843 @@
+[
+  {
+    "name": "T1: Inline Account Extraction Cleanliness",
+    "sessionId": 503,
+    "transcript": [
+      {
+        "user": "Hi, I need to update the phone number on the website for Acme Properties please, it's currently showing an old number",
+        "bot": "You need to update the phone number on the website for Acme Properties because it's currently showing an old number.\n\nWhich page is this on? A URL would be ideal if you have it.",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "The URL is acmeproperties.co.uk",
+        "bot": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — Update phone number on acmeproperties.co.uk\n**Request type:** Content update\n**Account:** Acme Properties\n**Affected:** Website\n**Person:** Acme Properties\n**Description:** The phone number displayed on acmeproperties.co.uk is outdated and needs to be updated to the current contact number for Acme Properties.\n**URL:** acmeproperties.co.uk\n**Urgency:** Normal\n**Contact preference:** portal",
+        "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — Update phone number on acmeproperties.co.uk\",\"account\":\"Acme Properties\",\"description\":\"The phone number displayed on acmeproperties.co.uk is outdated and needs to be updated to the current contact number for Acme Properties.\",\"url\":\"acmeproperties.co.uk\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":\"Acme Properties\",\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"change\"}"
+      },
+      {
+        "user": "The phone number on the contact page says 01onal 111 2222 but it should be 01234 567 890",
+        "bot": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — Update phone number on acmeproperties.co.uk\n**Request type:** Content update\n**Account:** Acme Properties\n**Listing ref:** 01234\n**Affected:** Website\n**Person:** Acme Properties\n**Description:** The phone number displayed on acmeproperties.co.uk is outdated and needs to be updated to the current contact number for Acme Properties.\n**URL:** acmeproperties.co.uk\n**Urgency:** Normal\n**Contact preference:** portal",
+        "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — Update phone number on acmeproperties.co.uk\",\"account\":\"Acme Properties\",\"description\":\"The phone number displayed on acmeproperties.co.uk is outdated and needs to be updated to the current contact number for Acme Properties.\",\"url\":\"acmeproperties.co.uk\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":\"01234\",\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":\"Acme Properties\",\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 503,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:29:46.516Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"summary\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":\"[Portal] Content update — Update phone number on acmeproperties.co.uk\",\"account\":\"Acme Properties\",\"description\":\"Hi, I need to update the phone number on the website for Acme Properties please, it's currently showing an old number\\nThe URL is acmeproperties.co.uk\",\"url\":\"acmeproperties.co.uk\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":\"01234\",\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":\"Acme Properties\",\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Hi, I need to update the phone number on the website for Acme Properties please, it's currently showing an old number\",\"conversational\":true,\"synthesizedSubject\":\"Update phone number on acmeproperties.co.uk\",\"synthesizedDescription\":\"The phone number displayed on acmeproperties.co.uk is outdated and needs to be updated to the current contact number for Acme Properties.\",\"synthesisDone\":true}"
+      },
+      "messages": [
+        {
+          "id": 1646,
+          "session_id": 503,
+          "role": "user",
+          "content": "Hi, I need to update the phone number on the website for Acme Properties please, it's currently showing an old number",
+          "metadata": null,
+          "created_at": "2026-05-23T16:29:46.706Z"
+        },
+        {
+          "id": 1647,
+          "session_id": 503,
+          "role": "assistant",
+          "content": "You need to update the phone number on the website for Acme Properties because it's currently showing an old number.\n\nWhich page is this on? A URL would be ideal if you have it.",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:29:49.593Z"
+        },
+        {
+          "id": 1648,
+          "session_id": 503,
+          "role": "user",
+          "content": "The URL is acmeproperties.co.uk",
+          "metadata": null,
+          "created_at": "2026-05-23T16:29:50.740Z"
+        },
+        {
+          "id": 1649,
+          "session_id": 503,
+          "role": "assistant",
+          "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — Update phone number on acmeproperties.co.uk\n**Request type:** Content update\n**Account:** Acme Properties\n**Affected:** Website\n**Person:** Acme Properties\n**Description:** The phone number displayed on acmeproperties.co.uk is outdated and needs to be updated to the current contact number for Acme Properties.\n**URL:** acmeproperties.co.uk\n**Urgency:** Normal\n**Contact preference:** portal",
+          "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — Update phone number on acmeproperties.co.uk\",\"account\":\"Acme Properties\",\"description\":\"The phone number displayed on acmeproperties.co.uk is outdated and needs to be updated to the current contact number for Acme Properties.\",\"url\":\"acmeproperties.co.uk\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":\"Acme Properties\",\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:29:54.513Z"
+        },
+        {
+          "id": 1650,
+          "session_id": 503,
+          "role": "user",
+          "content": "The phone number on the contact page says 01onal 111 2222 but it should be 01234 567 890",
+          "metadata": null,
+          "created_at": "2026-05-23T16:29:55.653Z"
+        },
+        {
+          "id": 1651,
+          "session_id": 503,
+          "role": "assistant",
+          "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — Update phone number on acmeproperties.co.uk\n**Request type:** Content update\n**Account:** Acme Properties\n**Listing ref:** 01234\n**Affected:** Website\n**Person:** Acme Properties\n**Description:** The phone number displayed on acmeproperties.co.uk is outdated and needs to be updated to the current contact number for Acme Properties.\n**URL:** acmeproperties.co.uk\n**Urgency:** Normal\n**Contact preference:** portal",
+          "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — Update phone number on acmeproperties.co.uk\",\"account\":\"Acme Properties\",\"description\":\"The phone number displayed on acmeproperties.co.uk is outdated and needs to be updated to the current contact number for Acme Properties.\",\"url\":\"acmeproperties.co.uk\",\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":\"01234\",\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":\"Acme Properties\",\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:29:56.513Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "T2: Account With Trailing Clause",
+    "sessionId": 504,
+    "transcript": [
+      {
+        "user": "The website for Thompson & Sons Estate Agents has an error on the contact page and needs fixing urgently",
+        "bot": "Thanks for those details about Website. Which account or website is this for?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "user": "www.thompsonandsons.co.uk",
+        "bot": "Could you please confirm the exact URL of the contact page on www.thompsonandsons.co.uk where the error is occurring?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "user": "The email address is wrong, it says info@old.com but should be hello@thompsonandsons.co.uk",
+        "bot": "Could you send me the full link to the contact page where the email address needs updating?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 504,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:29:57.703Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"website\",\"subcategory\":\"website_broken\",\"collectedFields\":{\"subject\":null,\"account\":\"www.thompsonandsons.co.uk\",\"description\":\"The website for Thompson & Sons Estate Agents has an error on the contact page and needs fixing urgently\\nwww.thompsonandsons.co.uk\\nThe email address is wrong, it says info@old.com but should be hello@thompsonandsons.co.uk\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"The website for Thompson & Sons Estate Agents has an error on the contact page and needs fixing urgently\",\"conversational\":true,\"detailRounds\":1,\"lastMissingCount\":3,\"offeredTicketCreation\":true}"
+      },
+      "messages": [
+        {
+          "id": 1652,
+          "session_id": 504,
+          "role": "user",
+          "content": "The website for Thompson & Sons Estate Agents has an error on the contact page and needs fixing urgently",
+          "metadata": null,
+          "created_at": "2026-05-23T16:29:57.890Z"
+        },
+        {
+          "id": 1653,
+          "session_id": 504,
+          "role": "assistant",
+          "content": "Thanks for those details about Website. Which account or website is this for?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:30:06.183Z"
+        },
+        {
+          "id": 1654,
+          "session_id": 504,
+          "role": "user",
+          "content": "www.thompsonandsons.co.uk",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:07.323Z"
+        },
+        {
+          "id": 1655,
+          "session_id": 504,
+          "role": "assistant",
+          "content": "Could you please confirm the exact URL of the contact page on www.thompsonandsons.co.uk where the error is occurring?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:30:09.270Z"
+        },
+        {
+          "id": 1656,
+          "session_id": 504,
+          "role": "user",
+          "content": "The email address is wrong, it says info@old.com but should be hello@thompsonandsons.co.uk",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:10.413Z"
+        },
+        {
+          "id": 1657,
+          "session_id": 504,
+          "role": "assistant",
+          "content": "Could you send me the full link to the contact page where the email address needs updating?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:30:13.796Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "T3: Account + URL Bundled In One Message",
+    "sessionId": 505,
+    "transcript": [
+      {
+        "user": "Our site acmeproperties.co.uk for Acme Properties Ltd needs the opening hours changed on the contact page",
+        "bot": "Thanks for those details about the issue with Acme Properties Ltd. Could you tell me which property is affected and where you're seeing the issue?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "user": "Currently says Mon-Fri 9-5 but should be Mon-Sat 9-6",
+        "bot": "Could you please provide the address or reference of the property where the contact page shows the opening hours as Mon-Fri 9-5?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 505,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:30:14.993Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"property\",\"subcategory\":\"property_visibility\",\"collectedFields\":{\"subject\":null,\"account\":\"Currently says Mon-Fri 9-5\",\"description\":\"Our site acmeproperties.co.uk for Acme Properties Ltd needs the opening hours changed on the contact page\\nCurrently says Mon-Fri 9-5 but should be Mon-Sat 9-6\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":null,\"propertyStatus\":null,\"affectedPersonName\":\"Acme Properties Ltd\",\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Our site acmeproperties.co.uk for Acme Properties Ltd needs the opening hours changed on the contact page\",\"conversational\":true,\"detailRounds\":0,\"lastMissingCount\":2}"
+      },
+      "messages": [
+        {
+          "id": 1658,
+          "session_id": 505,
+          "role": "user",
+          "content": "Our site acmeproperties.co.uk for Acme Properties Ltd needs the opening hours changed on the contact page",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:15.190Z"
+        },
+        {
+          "id": 1659,
+          "session_id": 505,
+          "role": "assistant",
+          "content": "Thanks for those details about the issue with Acme Properties Ltd. Could you tell me which property is affected and where you're seeing the issue?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:30:23.690Z"
+        },
+        {
+          "id": 1660,
+          "session_id": 505,
+          "role": "user",
+          "content": "Currently says Mon-Fri 9-5 but should be Mon-Sat 9-6",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:24.840Z"
+        },
+        {
+          "id": 1661,
+          "session_id": 505,
+          "role": "assistant",
+          "content": "Could you please provide the address or reference of the property where the contact page shows the opening hours as Mon-Fri 9-5?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:30:26.733Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "T4: Edit With Filler Wording",
+    "sessionId": 506,
+    "transcript": [
+      {
+        "user": "I need to change the phone number on our homepage",
+        "bot": "You need to change the phone number on your homepage.\n\nWhich account or website is this for?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "It's for Smith & Co Lettings",
+        "bot": "Could you please provide the URL of the Smith & Co Lettings homepage where you want the phone number changed?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "www.smithlettings.co.uk",
+        "bot": "Can you confirm the exact page URL on www.smithlettings.co.uk where the phone number needs to be changed?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "The number currently shows 0111 111 1111 but should be 0222 222 2222",
+        "bot": "Could you please confirm the exact URL on www.smithlettings.co.uk where the phone number currently shows [REDACTED-PHONE]?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "actually the priority should just be high",
+        "bot": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — I need to change the phone number on our homepage\n**Request type:** Content update\n**Account:** Smith & Co Lettings\n**Description:** I need to change the phone number on our homepage\nIt's for Smith & Co Lettings\nwww.smithlettings.co.uk\nThe number currently shows 0111 111 1111 but should be 0222 222 2222\nactually the priority should just be high\n**Urgency:** Normal\n**Contact preference:** portal",
+        "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — I need to change the phone number on our homepage\",\"account\":\"Smith & Co Lettings\",\"description\":\"I need to change the phone number on our homepage\\nIt's for Smith & Co Lettings\\nwww.smithlettings.co.uk\\nThe number currently shows 0111 111 1111 but should be 0222 222 2222\\nactually the priority should just be high\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":null,\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 506,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:30:27.913Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"summary\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":\"[Portal] Content update — I need to change the phone number on our homepage\",\"account\":\"Smith & Co Lettings\",\"description\":\"I need to change the phone number on our homepage\\nIt's for Smith & Co Lettings\\nwww.smithlettings.co.uk\\nThe number currently shows 0111 111 1111 but should be 0222 222 2222\\nactually the priority should just be high\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":null,\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"I need to change the phone number on our homepage\",\"conversational\":true,\"detailRounds\":3,\"lastMissingCount\":1,\"offeredTicketCreation\":true,\"synthesisDone\":true}"
+      },
+      "messages": [
+        {
+          "id": 1662,
+          "session_id": 506,
+          "role": "user",
+          "content": "I need to change the phone number on our homepage",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:28.093Z"
+        },
+        {
+          "id": 1663,
+          "session_id": 506,
+          "role": "assistant",
+          "content": "You need to change the phone number on your homepage.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:30:29.716Z"
+        },
+        {
+          "id": 1664,
+          "session_id": 506,
+          "role": "user",
+          "content": "It's for Smith & Co Lettings",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:30.876Z"
+        },
+        {
+          "id": 1665,
+          "session_id": 506,
+          "role": "assistant",
+          "content": "Could you please provide the URL of the Smith & Co Lettings homepage where you want the phone number changed?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:30:32.946Z"
+        },
+        {
+          "id": 1666,
+          "session_id": 506,
+          "role": "user",
+          "content": "www.smithlettings.co.uk",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:34.100Z"
+        },
+        {
+          "id": 1667,
+          "session_id": 506,
+          "role": "assistant",
+          "content": "Can you confirm the exact page URL on www.smithlettings.co.uk where the phone number needs to be changed?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:30:35.806Z"
+        },
+        {
+          "id": 1668,
+          "session_id": 506,
+          "role": "user",
+          "content": "The number currently shows 0111 111 1111 but should be 0222 222 2222",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:36.976Z"
+        },
+        {
+          "id": 1669,
+          "session_id": 506,
+          "role": "assistant",
+          "content": "Could you please confirm the exact URL on www.smithlettings.co.uk where the phone number currently shows [REDACTED-PHONE]?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:30:38.773Z"
+        },
+        {
+          "id": 1670,
+          "session_id": 506,
+          "role": "user",
+          "content": "actually the priority should just be high",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:39.926Z"
+        },
+        {
+          "id": 1671,
+          "session_id": 506,
+          "role": "assistant",
+          "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — I need to change the phone number on our homepage\n**Request type:** Content update\n**Account:** Smith & Co Lettings\n**Description:** I need to change the phone number on our homepage\nIt's for Smith & Co Lettings\nwww.smithlettings.co.uk\nThe number currently shows 0111 111 1111 but should be 0222 222 2222\nactually the priority should just be high\n**Urgency:** Normal\n**Contact preference:** portal",
+          "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — I need to change the phone number on our homepage\",\"account\":\"Smith & Co Lettings\",\"description\":\"I need to change the phone number on our homepage\\nIt's for Smith & Co Lettings\\nwww.smithlettings.co.uk\\nThe number currently shows 0111 111 1111 but should be 0222 222 2222\\nactually the priority should just be high\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":null,\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:30:45.640Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "T5: Edit With Change-To Filler",
+    "sessionId": 507,
+    "transcript": [
+      {
+        "user": "Need to update the address on our website for Premier Homes",
+        "bot": "You need to update the address on your website for Premier Homes.\n\nWhich account or website is this for?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "premierhomes.co.uk",
+        "bot": "Could you please provide the exact URL where the address needs to be updated on premierhomes.co.uk?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "The address on the about page says 10 Low Street but should be 42 High Street, London EC1A 1BB",
+        "bot": "Can you please share the exact URL of the about page on premierhomes.co.uk where the address is shown as 10 Low Street?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "change the summary to Address update needed on about page",
+        "bot": "Could you please provide the exact URL of the about page on premierhomes.co.uk where the address needs to be updated?",
+        "metadata": "{\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 507,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:30:46.953Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":\"premierhomes.co.uk\",\"description\":\"Need to update the address on our website for Premier Homes\\npremierhomes.co.uk\\nThe address on the about page says 10 Low Street but should be 42 High Street, London EC1A 1BB\\nchange the summary to Address update needed on about page\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":\"Premier Homes\",\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Need to update the address on our website for Premier Homes\",\"conversational\":true,\"detailRounds\":2,\"lastMissingCount\":1,\"offeredTicketCreation\":true}"
+      },
+      "messages": [
+        {
+          "id": 1672,
+          "session_id": 507,
+          "role": "user",
+          "content": "Need to update the address on our website for Premier Homes",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:47.326Z"
+        },
+        {
+          "id": 1673,
+          "session_id": 507,
+          "role": "assistant",
+          "content": "You need to update the address on your website for Premier Homes.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:30:49.440Z"
+        },
+        {
+          "id": 1674,
+          "session_id": 507,
+          "role": "user",
+          "content": "premierhomes.co.uk",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:50.643Z"
+        },
+        {
+          "id": 1675,
+          "session_id": 507,
+          "role": "assistant",
+          "content": "Could you please provide the exact URL where the address needs to be updated on premierhomes.co.uk?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:30:52.653Z"
+        },
+        {
+          "id": 1676,
+          "session_id": 507,
+          "role": "user",
+          "content": "The address on the about page says 10 Low Street but should be 42 High Street, London EC1A 1BB",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:53.810Z"
+        },
+        {
+          "id": 1677,
+          "session_id": 507,
+          "role": "assistant",
+          "content": "Can you please share the exact URL of the about page on premierhomes.co.uk where the address is shown as 10 Low Street?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:30:55.720Z"
+        },
+        {
+          "id": 1678,
+          "session_id": 507,
+          "role": "user",
+          "content": "change the summary to Address update needed on about page",
+          "metadata": null,
+          "created_at": "2026-05-23T16:30:56.890Z"
+        },
+        {
+          "id": 1679,
+          "session_id": 507,
+          "role": "assistant",
+          "content": "Could you please provide the exact URL of the about page on premierhomes.co.uk where the address needs to be updated?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:30:59.603Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "T6: Three-Field Simultaneous Edit",
+    "sessionId": 508,
+    "transcript": [
+      {
+        "user": "I need some changes on our website please",
+        "bot": "You need some changes on your website.\n\nWhich account or website is this for?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "It's for Premier Homes Realty",
+        "bot": "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "premierhomesrealty.co.uk",
+        "bot": "I want to make sure I get this right — could you tell me what's actually going wrong, or what you need changed? For example, is something not displaying, not working, or do you need something updated?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "The phone number on the contact page needs changing from 0800 000 000 to 0800 123 456",
+        "bot": "Could you please confirm the exact URL of the contact page where the phone number needs to be changed?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "Actually change the account to Belmont Properties, the priority to urgent, and the summary to Fix broken contact form",
+        "bot": "Could you please provide the exact URL of the contact page where the phone number needs to be changed?",
+        "metadata": "{\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 508,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:31:00.800Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":\"Premier Homes Realty\",\"description\":\"I need some changes on our website please\\nIt's for Premier Homes Realty\\npremierhomesrealty.co.uk\\nThe phone number on the contact page needs changing from 0800 000 000 to 0800 123 456\\nActually change the account to Belmont Properties, the priority to urgent, and the summary to Fix broken contact form\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"I need some changes on our website please\",\"conversational\":true,\"vagueGateAsked\":true,\"vagueGateVerified\":true,\"vagueGateSecondAsked\":false,\"offeredTicketCreation\":true,\"detailRounds\":1,\"lastMissingCount\":1}"
+      },
+      "messages": [
+        {
+          "id": 1680,
+          "session_id": 508,
+          "role": "user",
+          "content": "I need some changes on our website please",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:01.000Z"
+        },
+        {
+          "id": 1681,
+          "session_id": 508,
+          "role": "assistant",
+          "content": "You need some changes on your website.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:31:02.480Z"
+        },
+        {
+          "id": 1682,
+          "session_id": 508,
+          "role": "user",
+          "content": "It's for Premier Homes Realty",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:03.616Z"
+        },
+        {
+          "id": 1683,
+          "session_id": 508,
+          "role": "assistant",
+          "content": "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:31:04.796Z"
+        },
+        {
+          "id": 1684,
+          "session_id": 508,
+          "role": "user",
+          "content": "premierhomesrealty.co.uk",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:05.943Z"
+        },
+        {
+          "id": 1685,
+          "session_id": 508,
+          "role": "assistant",
+          "content": "I want to make sure I get this right — could you tell me what's actually going wrong, or what you need changed? For example, is something not displaying, not working, or do you need something updated?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:31:06.850Z"
+        },
+        {
+          "id": 1686,
+          "session_id": 508,
+          "role": "user",
+          "content": "The phone number on the contact page needs changing from 0800 000 000 to 0800 123 456",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:08.003Z"
+        },
+        {
+          "id": 1687,
+          "session_id": 508,
+          "role": "assistant",
+          "content": "Could you please confirm the exact URL of the contact page where the phone number needs to be changed?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:31:09.820Z"
+        },
+        {
+          "id": 1688,
+          "session_id": 508,
+          "role": "user",
+          "content": "Actually change the account to Belmont Properties, the priority to urgent, and the summary to Fix broken contact form",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:10.963Z"
+        },
+        {
+          "id": 1689,
+          "session_id": 508,
+          "role": "assistant",
+          "content": "Could you please provide the exact URL of the contact page where the phone number needs to be changed?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:31:12.960Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "T7: Conversational Activation - Natural Entry",
+    "sessionId": 509,
+    "transcript": [
+      {
+        "user": "hey, our website has the wrong email address on it",
+        "bot": "You mentioned that your website has the wrong email address on it.\n\nWhich account or website is this for?",
+        "metadata": "{\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 509,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:31:14.156Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":null,\"description\":\"hey, our website has the wrong email address on it\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"hey, our website has the wrong email address on it\",\"conversational\":true}"
+      },
+      "messages": [
+        {
+          "id": 1690,
+          "session_id": 509,
+          "role": "user",
+          "content": "hey, our website has the wrong email address on it",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:14.333Z"
+        },
+        {
+          "id": 1691,
+          "session_id": 509,
+          "role": "assistant",
+          "content": "You mentioned that your website has the wrong email address on it.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:31:16.370Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "T8: Vague Request Clarification",
+    "sessionId": 510,
+    "transcript": [
+      {
+        "user": "Something needs changing",
+        "bot": "Thanks for getting in touch. Could you tell me a bit more about what's going on so I can get this to the right team?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "user": "on our website",
+        "bot": "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+        "metadata": "{\"intent\":\"problem\"}"
+      },
+      {
+        "user": "the phone number is wrong on the contact page for Greenfield Lettings",
+        "bot": "Could you please provide the URL of the website where the phone number needs to be updated on the contact page for Greenfield Lettings?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 510,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:31:17.566Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":null,\"account\":\"on our website\",\"description\":\"Something needs changing\\non our website\\nthe phone number is wrong on the contact page for Greenfield Lettings\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":null,\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Something needs changing\",\"conversational\":true,\"vagueGateAsked\":true,\"vagueGateVerified\":true,\"detailRounds\":0,\"lastMissingCount\":1,\"offeredTicketCreation\":true}"
+      },
+      "messages": [
+        {
+          "id": 1692,
+          "session_id": 510,
+          "role": "user",
+          "content": "Something needs changing",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:17.756Z"
+        },
+        {
+          "id": 1693,
+          "session_id": 510,
+          "role": "assistant",
+          "content": "Thanks for getting in touch. Could you tell me a bit more about what's going on so I can get this to the right team?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:31:25.376Z"
+        },
+        {
+          "id": 1694,
+          "session_id": 510,
+          "role": "user",
+          "content": "on our website",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:26.520Z"
+        },
+        {
+          "id": 1695,
+          "session_id": 510,
+          "role": "assistant",
+          "content": "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:31:31.046Z"
+        },
+        {
+          "id": 1696,
+          "session_id": 510,
+          "role": "user",
+          "content": "the phone number is wrong on the contact page for Greenfield Lettings",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:32.193Z"
+        },
+        {
+          "id": 1697,
+          "session_id": 510,
+          "role": "assistant",
+          "content": "Could you please provide the URL of the website where the phone number needs to be updated on the contact page for Greenfield Lettings?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:31:34.100Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "T9: Non-Website Routing",
+    "sessionId": 511,
+    "transcript": [
+      {
+        "user": "My property isn't showing up on Rightmove",
+        "bot": "Thanks for those details about Rightmove. Could you tell me which property is affected and where you're seeing the issue?",
+        "metadata": "{\"intent\":\"problem\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 511,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:31:35.283Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"detail\",\"intent\":\"problem\",\"category\":\"property\",\"subcategory\":\"property_visibility\",\"collectedFields\":{\"subject\":null,\"account\":null,\"description\":\"My property isn't showing up on Rightmove\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Rightmove\",\"propertyStatus\":null,\"affectedPersonName\":null,\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"My property isn't showing up on Rightmove\",\"conversational\":true}"
+      },
+      "messages": [
+        {
+          "id": 1698,
+          "session_id": 511,
+          "role": "user",
+          "content": "My property isn't showing up on Rightmove",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:35.466Z"
+        },
+        {
+          "id": 1699,
+          "session_id": 511,
+          "role": "assistant",
+          "content": "Thanks for those details about Rightmove. Could you tell me which property is affected and where you're seeing the issue?",
+          "metadata": "{\"intent\":\"problem\"}",
+          "created_at": "2026-05-23T16:31:43.886Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "T10: Natural Summary Confirmation",
+    "sessionId": 512,
+    "transcript": [
+      {
+        "user": "Need to fix the email on our website for Oakwood Estates",
+        "bot": "You need to fix the email on your website for Oakwood Estates.\n\nWhich account or website is this for?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "oakwoodestates.co.uk",
+        "bot": "Can you please provide the specific URL on oakwoodestates.co.uk where the email needs to be fixed?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "The contact page email says old@oakwood.com but should be info@oakwoodestates.co.uk",
+        "bot": "Could you please share the exact URL of the contact page where the email needs to be updated?\n\nWould you like me to create a ticket so a team member can assist directly?",
+        "metadata": "{\"intent\":\"change\"}"
+      },
+      {
+        "user": "yes that looks right",
+        "bot": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — Update contact page email to info@oakwoodestates.co.uk\n**Request type:** Content update\n**Account:** oakwoodestates.co.uk\n**Affected:** Website\n**Person:** Oakwood Estates\n**Description:** The contact page on oakwoodestates.co.uk currently displays the email old@oakwood.com. This should be updated to info@oakwoodestates.co.uk.\n**Urgency:** Normal\n**Contact preference:** portal",
+        "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — Update contact page email to info@oakwoodestates.co.uk\",\"account\":\"oakwoodestates.co.uk\",\"description\":\"The contact page on oakwoodestates.co.uk currently displays the email old@oakwood.com. This should be updated to info@oakwoodestates.co.uk.\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":\"Oakwood Estates\",\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"change\"}"
+      }
+    ],
+    "session": {
+      "session": {
+        "id": 512,
+        "portal_user_id": 3,
+        "jira_issue_key": null,
+        "status": "active",
+        "started_at": "2026-05-23T16:31:45.080Z",
+        "ended_at": null,
+        "metadata": "{\"stage\":\"summary\",\"intent\":\"change\",\"category\":\"website\",\"subcategory\":\"website_content\",\"collectedFields\":{\"subject\":\"[Portal] Content update — Update contact page email to info@oakwoodestates.co.uk\",\"account\":\"oakwoodestates.co.uk\",\"description\":\"Need to fix the email on our website for Oakwood Estates\\noakwoodestates.co.uk\\nThe contact page email says old@oakwood.com but should be info@oakwoodestates.co.uk\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":\"Oakwood Estates\",\"affectedPersonEmail\":null,\"officeBranch\":null},\"kbSuggested\":false,\"deflected\":false,\"openingMessage\":\"Need to fix the email on our website for Oakwood Estates\",\"conversational\":true,\"detailRounds\":1,\"lastMissingCount\":1,\"offeredTicketCreation\":false,\"synthesizedSubject\":\"Update contact page email to info@oakwoodestates.co.uk\",\"synthesizedDescription\":\"The contact page on oakwoodestates.co.uk currently displays the email old@oakwood.com. This should be updated to info@oakwoodestates.co.uk.\",\"synthesisDone\":true}"
+      },
+      "messages": [
+        {
+          "id": 1700,
+          "session_id": 512,
+          "role": "user",
+          "content": "Need to fix the email on our website for Oakwood Estates",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:45.270Z"
+        },
+        {
+          "id": 1701,
+          "session_id": 512,
+          "role": "assistant",
+          "content": "You need to fix the email on your website for Oakwood Estates.\n\nWhich account or website is this for?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:31:47.030Z"
+        },
+        {
+          "id": 1702,
+          "session_id": 512,
+          "role": "user",
+          "content": "oakwoodestates.co.uk",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:48.180Z"
+        },
+        {
+          "id": 1703,
+          "session_id": 512,
+          "role": "assistant",
+          "content": "Can you please provide the specific URL on oakwoodestates.co.uk where the email needs to be fixed?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:31:49.696Z"
+        },
+        {
+          "id": 1704,
+          "session_id": 512,
+          "role": "user",
+          "content": "The contact page email says old@oakwood.com but should be info@oakwoodestates.co.uk",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:50.836Z"
+        },
+        {
+          "id": 1705,
+          "session_id": 512,
+          "role": "assistant",
+          "content": "Could you please share the exact URL of the contact page where the email needs to be updated?\n\nWould you like me to create a ticket so a team member can assist directly?",
+          "metadata": "{\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:31:52.533Z"
+        },
+        {
+          "id": 1706,
+          "session_id": 512,
+          "role": "user",
+          "content": "yes that looks right",
+          "metadata": null,
+          "created_at": "2026-05-23T16:31:53.680Z"
+        },
+        {
+          "id": 1707,
+          "session_id": 512,
+          "role": "assistant",
+          "content": "Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n**Subject:** [Portal] Content update — Update contact page email to info@oakwoodestates.co.uk\n**Request type:** Content update\n**Account:** oakwoodestates.co.uk\n**Affected:** Website\n**Person:** Oakwood Estates\n**Description:** The contact page on oakwoodestates.co.uk currently displays the email old@oakwood.com. This should be updated to info@oakwoodestates.co.uk.\n**Urgency:** Normal\n**Contact preference:** portal",
+          "metadata": "{\"type\":\"summary_card\",\"fields\":{\"subject\":\"[Portal] Content update — Update contact page email to info@oakwoodestates.co.uk\",\"account\":\"oakwoodestates.co.uk\",\"description\":\"The contact page on oakwoodestates.co.uk currently displays the email old@oakwood.com. This should be updated to info@oakwoodestates.co.uk.\",\"url\":null,\"errorMessage\":null,\"browser\":null,\"os\":null,\"urgency\":\"Normal\",\"contactPreference\":\"portal\",\"propertyAddress\":null,\"listingId\":null,\"affectedPortals\":\"Website\",\"propertyStatus\":null,\"affectedPersonName\":\"Oakwood Estates\",\"affectedPersonEmail\":null,\"officeBranch\":null,\"category\":\"website\",\"subcategory\":\"website_content\"},\"intent\":\"change\"}",
+          "created_at": "2026-05-23T16:31:56.756Z"
+        }
+      ]
+    }
+  }
+]

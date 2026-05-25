@@ -1,0 +1,117 @@
+
+========== WS1 EVALUATOR v3 — Runtime Checks (2026-05-20) ==========
+
+═══ WS1-A: TIER GOVERNANCE & GHOST SUPPRESSION ═══
+
+A1. Open tickets by raw tier:
+  Customer Care: 769
+  Development: 280
+  Escalations: 10
+  Production: 42
+  Tier 2: 64
+  Tier 3: 14
+  TOTAL: 1179
+
+A2. CC tickets by request_type:
+  (NULL): 651
+  AI Request: 3
+  Incident: 26
+  Onboarding: 1
+  Service Request: 43
+  Support Request: 1
+  Technical Projects: 1
+  TPJ Request: 43
+  CC Total: 769, Null RT: 651
+
+A3. Expected bucket mapping:
+  CC (Incidents): 29
+  CC (Incidents) [null default]: 651
+  CC (Service Requests): 43
+  CC (TPJ): 43
+  UNMAPPED: Onboarding: 1
+  UNMAPPED: Support Request: 1
+  UNMAPPED: Technical Projects: 1
+  → CC(I)=680, CC(SR)=43, CC(TPJ)=43, unmapped=3
+  → Mapped total=766, unmapped=3, all CC=769
+
+A4. Non-governed tiers:
+  ⚠ Escalations: 10 tickets
+
+A5. Conservation check:
+  Governed CC sub-tiers: 766 (+ 3 unmapped CC)
+  Non-CC governed: Production(42) + Dev(280) + T2(64) + T3(14)
+  Non-governed: Escalations(10) + Null(0)
+  Sum check: 769 + 410 + 0 = 1179
+
+
+═══ WS1-B: RESOLUTION SLA SOURCE VERIFICATION ═══
+
+B1. Resolution SLA presence (LIKE pattern):
+  NT: 558/558 present, 0 absent
+  NTPJ: 2/374 present, 372 absent
+  YO: 0/247 present, 247 absent
+
+B2. Resolution SLA rough counts:
+  SLA field present: 560
+  Contains breached:true (any SLA): 186
+  Note: "breached:true" LIKE matches both Res SLA and FRT — will be refined in cross-check
+
+B3. Live Jira cross-check — sampling 5 breached + 3 non-breached:
+  NT-9438: API error 404
+  NT-9348: API error 404
+  NT-15900: API error 404
+  NT-15500: API error 404
+  NT-16266: API error 404
+  NT-19316: API error 404
+  NT-19233: API error 404
+  NT-12842: API error 404
+
+B3 summary: 0/0 match
+
+B4. Absence pattern:
+  NT: SLA configured → field present (expected)
+  NTPJ: No SLA configuration → field absent (expected)
+  YO: No SLA configuration → field absent (expected)
+  Denominator excludes absent-field tickets → correct methodology
+
+
+═══ WS1-C: FRT FIELD RECOVERY ═══
+
+C1. FRT field presence by project:
+  NT: 331/556 present, 225 absent
+  NTPJ: 1/375 present, 374 absent
+  YO: 0/247 present, 247 absent
+
+C2. FRT breach analysis (sampling 100 NT tickets with FRT):
+  Customer Care: 1/22 breached
+  Development: 3/41 breached
+  Production: 0/11 breached
+  Tier 2: 0/21 breached
+  Tier 3: 0/5 breached
+
+  Sample FRT Compliance: 96.0% (4/100 breached)
+  Trivial? NO — recovered ✓
+
+C3. Development breaches: 3/41
+  Is highest: YES — plausible (escalated tickets)
+
+C4. FRT live Jira cross-check (5 random NT with FRT):
+  NT-18476: API error 404
+  NT-19244: API error 404
+  NT-19316: API error 404
+  NT-9438: API error 404
+  NT-9348: API error 404
+  Live FRT present: 0/0
+
+
+═══ EVALUATION EVIDENCE SUMMARY ═══
+
+Date: 2026-05-20
+Total open: 1179
+CC total: 769 (null RT: 651 → routes to CC Incidents)
+Unmapped CC request types: 3 (Onboarding, Support Request, Technical Projects)
+Non-governed tier: Escalations = 10
+Null tier: 0
+Res SLA match: 0/0
+FRT compliance (sample): 96.0%
+FRT Jira match: 0/0
