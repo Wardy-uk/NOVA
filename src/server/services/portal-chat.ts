@@ -171,6 +171,11 @@ function stripGreeting(text: string): string {
   return text.replace(/^(hi|hello|hey|howdy|good (morning|afternoon|evening))[\s,.!\-]*/i, '').trim();
 }
 
+function isPlaceholderOrgName(name: string): boolean {
+  const lower = name.toLowerCase().trim();
+  return lower === 'unknown organisation' || lower === 'unknown organization' || lower === 'unknown';
+}
+
 function cleanAccountName(raw: string): string {
   let cleaned = raw.trim();
   cleaned = cleaned
@@ -602,6 +607,8 @@ function extractPropertyFieldsFromText(content: string, fields: IntakeCollectedF
 
 const SECURITY_SENSITIVE_PATTERNS = /\b(remove.*(user|access|account|person|them|him|her|employee)|revoke.*(access|permissions?|login)|delete.*(user|account|access)|deactivate.*(user|account)|left the company|been (fired|let go|terminated|dismissed|made redundant)|no longer (works?|employed|with us)|was (fired|let go|terminated|dismissed|made redundant))\b/i;
 
+const DATA_REMOVAL_PATTERNS = /\b((?:remove|delete|erase|wipe|purge|scrub)\s+(?:the\s+)?(?:email(?:\s+address)?|data|record|contact(?:\s+details)?|information|details|subscriber|recipient|mailing\s+list\s+entry)|(?:remove|delete|erase)\s+\S+@\S+|(?:email(?:\s+address)?|data|record|contact(?:\s+details)?|information|details)\s+(?:\S+\s+){0,5}(?:be\s+)?(?:removed|deleted|erased|wiped|purged|scrubbed)|(?:\S+@\S+)\s+(?:removed|deleted|taken off)\b|take\s+(?:\S+\s+)?off\s+(?:the\s+)?(?:mailing\s+list|system|database|email\s+list|list)|opt(?:ed)?\s*(?:out|them out)|unsubscribe|gdpr\s+(?:request|removal|deletion|erasure)|right\s+to\s+(?:be\s+forgotten|erasure|deletion)|data\s+(?:subject\s+)?(?:removal|deletion|erasure)\s+request)\b/i;
+
 function detectAccountFromKeywords(content: string): { likely: boolean; subcategory: string | null; securitySensitive: boolean } {
   const lower = content.toLowerCase();
 
@@ -689,6 +696,32 @@ function extractAccountFieldsFromText(content: string, fields: IntakeCollectedFi
       if (match && !/\b(new|old|our|the|this|that|my|main|head)\b/i.test(match[1])) {
         fields.officeBranch = match[1].trim();
         break;
+      }
+    }
+  }
+}
+
+function extractDataRemovalContext(content: string, fields: IntakeCollectedFields): void {
+  if (!fields.affectedPersonEmail) {
+    const emailMatch = content.match(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})\b/);
+    if (emailMatch) fields.affectedPersonEmail = emailMatch[1];
+  }
+  if (!fields.account) {
+    const removalAccountPatterns = [
+      /\bfrom\s+(?:the\s+)?(?:our\s+)?([A-Z][A-Za-z0-9 &'.-]{2,40}?)\s+account\b/i,
+      /\bon\s+(?:the\s+)?(?:our\s+)?([A-Z][A-Za-z0-9 &'.-]{2,40}?)\s+(?:account|system|platform)\b/i,
+      /\bfrom\s+(?:our\s+)?([A-Z][A-Za-z0-9 &'.-]{2,40}?)\s+(?:mailing\s+list|email\s+(?:list|system|marketing)|system|platform|database|crm)\b/i,
+      /\bfrom\s+([A-Z][A-Za-z0-9 &'.-]{2,40}?)(?:'s)?\s+(?:data|records?|emails?|contacts?)\b/i,
+      /\b(?:for|from)\s+([A-Z][A-Za-z0-9 &'.-]{2,40}?)\s*(?:[.!?]?\s*$|,|\s+please\b)/i,
+    ];
+    for (const pat of removalAccountPatterns) {
+      const m = content.match(pat);
+      if (m) {
+        const captured = m[1].trim();
+        if (!/\b(the|this|that|my|our|a|an|it|their|your)\b/i.test(captured) && captured.length >= 2) {
+          fields.account = captured;
+          break;
+        }
       }
     }
   }
@@ -813,7 +846,8 @@ export class PortalChatService {
 
     // Auto-populate account from authenticated org — portal users already belong
     // to an org, so don't repeatedly prompt them for something we already know.
-    if (!meta.collectedFields.account && context.orgName) {
+    // Skip placeholder values so "Unknown Organisation" never leaks into customer-facing text.
+    if (!meta.collectedFields.account && context.orgName && !isPlaceholderOrgName(context.orgName)) {
       meta.collectedFields.account = context.orgName;
     }
 
@@ -858,7 +892,7 @@ export class PortalChatService {
           meta.stage = 'confirmed';
           meta.offeredTicketCreation = false;
         } else if (userMessageCount >= handoffThreshold && meta.stage !== 'kb_check' && !meta.offeredTicketCreation) {
-          responseContent += '\n\nWould you like me to create a ticket so a team member can assist directly?';
+          responseContent += '\n\nShall I raise a ticket for you? That way one of the team can pick this up directly.';
           meta.offeredTicketCreation = true;
         }
       }
@@ -871,7 +905,7 @@ export class PortalChatService {
         responseContent = "I'm sorry — I wasn't able to process that. Please contact us directly at **support@nurtur.tech** and we'll help you from there.";
         meta.stage = 'confirmed';
       } else {
-        responseContent = "I'm having trouble processing your request right now. Would you like me to create a support ticket so our team can help you directly?";
+        responseContent = "I'm having trouble processing your request right now. Shall I log a ticket so the team can pick this up?";
         meta.offeredTicketCreation = true;
       }
     }
@@ -1024,7 +1058,7 @@ export class PortalChatService {
 
       const empathy = this.buildEmpathyAcknowledgement(meta);
       return {
-        response: `${empathy} Would you like me to create a ticket right now so a member of our team can help you directly? Just say yes and I'll put one together for you.`,
+        response: `${empathy} Let me get someone on the team to look into this for you — shall I raise a ticket now?`,
       };
     }
 
@@ -1148,6 +1182,9 @@ export class PortalChatService {
       if (personName) {
         return { response: `Understood — I'll get ${personName}'s access removed urgently. Could you confirm their email address so I can get this raised?` };
       }
+      if (personEmail) {
+        return { response: `Understood — I'll get ${personEmail} removed urgently. Could you confirm the name of the person to be removed?` };
+      }
       return { response: `Understood — I'll get this raised urgently. Could you confirm their name and email address so I can get this raised?` };
     }
 
@@ -1162,6 +1199,39 @@ export class PortalChatService {
       extractAccountFieldsFromText(content, meta.collectedFields);
       const missing = !meta.collectedFields.affectedPersonEmail ? 'email address' : 'name';
       return { response: `I understand this is urgent — I'll get this raised right away. Could you confirm their ${missing}?` };
+    }
+
+    // H1c: Data-removal / privacy fast-track — explicit requests to remove an email address,
+    // data, or record from a named account. Pre-empts LLM to avoid misrouting into
+    // website-content or email-marketing paths.
+    if (DATA_REMOVAL_PATTERNS.test(content)) {
+      meta.category = 'account';
+      meta.subcategory = 'account_remove_user';
+      meta.conversational = true;
+      meta.stage = 'detail';
+      extractAccountFieldsFromText(content, meta.collectedFields);
+      extractDataRemovalContext(content, meta.collectedFields);
+
+      const email = meta.collectedFields.affectedPersonEmail;
+      const account = meta.collectedFields.account;
+      const hasDescription = !!meta.collectedFields.description;
+      if (!hasDescription) meta.collectedFields.description = content;
+
+      const ackParts: string[] = ["Understood — I'll get that removal sorted."];
+      if (email) ackParts[0] = `Understood — I'll get ${email} removed.`;
+      if (account && !isPlaceholderOrgName(account)) ackParts[0] = ackParts[0].replace(/\.$/, ` from the ${account} account.`);
+
+      const missing: string[] = [];
+      if (!email) missing.push('the email address to be removed');
+      if (!account || isPlaceholderOrgName(account)) missing.push('which account this is for');
+      if (missing.length === 0) {
+        const summaryResult = await this.buildSummaryCard(meta);
+        return {
+          response: `${ackParts[0]}\n\n${summaryResult.response}`,
+          messageMeta: summaryResult.messageMeta,
+        };
+      }
+      return { response: `${ackParts[0]}\n\nCould you confirm ${missing.join(' and ')}?` };
     }
 
     try {
@@ -1223,6 +1293,8 @@ Analyse the message and return structured JSON:
    - Account/access internal: RBAC, provisioning, deprovisioning, authentication, authorisation, authorization, access control, role-based, permission matrix, permission model, scopes, entities, service account, SSO, SAML, identity provider, access permissions, user permissions, role permissions, access rights
    - Classification: triage, categorise, classify, route, intake, subcategory
    Instead, mirror the customer's vocabulary. If they said "can't get in", say "can't get in", not "authentication issue". If they said "she can't see anything", say "she can't see anything", not "access permissions issue".
+   URGENCY RULE: If the customer uses words like "urgent", "urgently", "URGENT", "asap", "emergency", "critical", or "down", START the acknowledgement by recognising the urgency (e.g. "I can see this is urgent — " or "Understood, I'll treat this as a priority — ") before mirroring their details. Never ignore explicit urgency signals.
+   ACCOUNT/ORG RULE: If the account field is unknown or not provided, do NOT include any placeholder like "Unknown Organisation" in the acknowledgement. Simply omit the account reference.
 
 7. NEXT QUESTION — if you need more information to action this, write ONE natural follow-up question. Only ask for what's genuinely missing. If they've given enough detail, omit this field. Never ask the customer to diagnose the technical cause or identify which system is at fault. Never ask "which system" or "which platform".
 
@@ -1499,6 +1571,10 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           if (personName) {
             return { response: `${ack} Could you confirm their email address so I can get this raised?` };
           }
+          if (personEmail) {
+            const emailAck = d.acknowledgment || `Understood — I'll get ${personEmail} removed urgently.`;
+            return { response: `${emailAck} Could you confirm the name of the person to be removed?` };
+          }
           return { response: `${ack} Could you confirm their name and email address so I can get this raised?` };
         }
 
@@ -1683,6 +1759,10 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           if (personName) {
             return { response: `Understood — I'll get ${personName}'s access removed urgently. Could you confirm their email address so I can get this raised?` };
           }
+          const personEmail = meta.collectedFields.affectedPersonEmail;
+          if (personEmail) {
+            return { response: `Understood — I'll get ${personEmail} removed urgently. Could you confirm the name of the person to be removed?` };
+          }
           return { response: `Understood — I'll get this raised urgently. Could you confirm their name and email address so I can get this raised?` };
         }
         const ack = d.acknowledgment || "Thanks for getting in touch.";
@@ -1796,6 +1876,31 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       meta.conversational = true;
       meta.stage = 'detail';
       return { response: "Thanks — I'll get your correspondence request raised with our production team.\n\nCould you let me know which account this is for and any details about what you need?" };
+    }
+
+    // H1c (no-LLM): Data-removal / privacy fast-track
+    if (DATA_REMOVAL_PATTERNS.test(content)) {
+      meta.category = 'account';
+      meta.subcategory = 'account_remove_user';
+      meta.conversational = true;
+      meta.stage = 'detail';
+      extractAccountFieldsFromText(content, meta.collectedFields);
+      extractDataRemovalContext(content, meta.collectedFields);
+      if (!meta.collectedFields.description) meta.collectedFields.description = content;
+
+      const email = meta.collectedFields.affectedPersonEmail;
+      const account = meta.collectedFields.account;
+      const ackParts: string[] = ["Understood — I'll get that removal sorted."];
+      if (email) ackParts[0] = `Understood — I'll get ${email} removed.`;
+      if (account && !isPlaceholderOrgName(account)) ackParts[0] = ackParts[0].replace(/\.$/, ` from the ${account} account.`);
+
+      const missing: string[] = [];
+      if (!email) missing.push('the email address to be removed');
+      if (!account || isPlaceholderOrgName(account)) missing.push('which account this is for');
+      if (missing.length === 0) {
+        return await this.buildSummaryCard(meta);
+      }
+      return { response: `${ackParts[0]}\n\nCould you confirm ${missing.join(' and ')}?` };
     }
 
     // Check property first when portal indicators are present — avoids
@@ -1918,6 +2023,9 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
 
       if (personName) {
         return { response: `Understood — I'll get ${personName}'s access removed urgently. Could you confirm their email address so I can get this raised?` };
+      }
+      if (personEmail) {
+        return { response: `Understood — I'll get ${personEmail} removed urgently. Could you confirm the name of the person to be removed?` };
       }
       return { response: `Understood — I'll get this raised urgently. Could you confirm their name and email address so I can get this raised?` };
     }
@@ -2225,7 +2333,7 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
       if (meta.otherExchangeCount >= threshold) {
         meta.offeredTicketCreation = true;
         return {
-          response: "I'm not sure I'm able to resolve this through chat. Would you like me to **create a support ticket** so a team member can help?",
+          response: "I think this one's best handled by the team directly. Shall I raise a ticket for you?",
         };
       }
     }
@@ -2276,6 +2384,17 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
 
     // Extract fields from the user's message
     await this.extractFields(meta, content);
+
+    // Short-answer name fallback: if we just asked for a person's name and the user
+    // replied with a short proper-name answer, accept it directly.
+    if (!meta.collectedFields.affectedPersonName &&
+        (meta.subcategory === 'account_remove_user' || meta.subcategory === 'account_new_user') &&
+        content.trim().length <= 60) {
+      const nameCandidate = content.trim().replace(/^(it'?s|they'?re|his name is|her name is|the name is|name is|name:)\s+/i, '').trim();
+      if (/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}$/.test(nameCandidate)) {
+        meta.collectedFields.affectedPersonName = nameCandidate;
+      }
+    }
 
     // Multi-turn recovery: if key fields are still missing, re-extract from the full
     // accumulated description which contains all user messages so far.
@@ -2371,7 +2490,7 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
         if (descriptionLacksActionableDetail(meta.collectedFields.description)) {
           meta.vagueGateAsked = true;
           return {
-            response: "Could you describe the issue in a bit more detail — what specifically isn't working or what do you need us to do?",
+            response: "Could you give me a bit more detail on what's happening — is something not working as expected, or is there something you need changed?",
           };
         }
       } else if (!meta.vagueGateVerified) {
@@ -2383,7 +2502,7 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
           meta.vagueGateVerified = true;
           meta.vagueGateSecondAsked = true;
           return {
-            response: "I want to make sure I get this right — could you tell me what's actually going wrong, or what you need changed? For example, is something not displaying, not working, or do you need something updated?",
+            response: "No problem — to make sure I pass this on correctly, could you describe what's going wrong or what needs to change? For example, is something missing, showing incorrectly, or not working?",
           };
         }
         meta.vagueGateVerified = true;
@@ -2788,7 +2907,7 @@ Return JSON with only the fields present in the message.`,
       lines.push(`**Category:** ${CATEGORY_NAMES[meta.category || ''] || meta.category || 'General'}${meta.subcategory ? ` > ${SUBCATEGORY_NAMES[meta.subcategory] || meta.subcategory}` : ''}`);
     }
     if (meta.followUpTicketKey) lines.push(`**Related ticket:** ${meta.followUpTicketKey}${meta.followUpTicketSummary ? ` — ${meta.followUpTicketSummary}` : ''}`);
-    if (f.account) lines.push(`**Account:** ${f.account}`);
+    if (f.account && !isPlaceholderOrgName(f.account)) lines.push(`**Account:** ${f.account}`);
     if (f.propertyAddress) lines.push(`**Property:** ${f.propertyAddress}`);
     if (f.listingId) lines.push(`**Listing ref:** ${f.listingId}`);
     if (f.affectedPortals) lines.push(`**Affected:** ${f.affectedPortals}`);
@@ -3191,7 +3310,7 @@ ${contextParts.join('\n')}`,
     const missing: string[] = [];
     if (!fields.description) missing.push('description');
     if (subcategory === 'account_new_user' || subcategory === 'account_remove_user') {
-      if (!fields.affectedPersonName && !fields.affectedPersonEmail) missing.push('affectedPerson');
+      if (!fields.affectedPersonName || !fields.affectedPersonEmail) missing.push('affectedPerson');
     }
     if (subcategory === 'account_office_change') {
       if (!fields.officeBranch) missing.push('officeBranch');
@@ -3217,9 +3336,18 @@ ${contextParts.join('\n')}`,
         if (meta.subcategory === 'account_office_change') return "Could you tell me a bit more about what needs to change?";
         if (meta.subcategory === 'account_details') return "What details need updating?";
         return "Could you describe what's happening in a bit more detail?";
-      case 'affectedPerson':
-        if (meta.subcategory === 'account_remove_user') return withContext("Could you confirm their name and email address?");
+      case 'affectedPerson': {
+        const hasName = !!meta.collectedFields.affectedPersonName;
+        const hasEmail = !!meta.collectedFields.affectedPersonEmail;
+        if (meta.subcategory === 'account_remove_user') {
+          if (hasEmail && !hasName) return withContext("Could you confirm the name of the person to be removed?");
+          if (hasName && !hasEmail) return withContext("Could you confirm their email address?");
+          return withContext("Could you confirm their name and email address?");
+        }
+        if (hasEmail && !hasName) return withContext("Could you let me know the person's name?");
+        if (hasName && !hasEmail) return withContext("Could you let me know the person's email address?");
         return withContext("Could you let me know the person's name and email address?");
+      }
       case 'officeBranch':
         return withContext("Which office or branch is this for?");
       case 'account':
@@ -3263,7 +3391,12 @@ ${contextParts.join('\n')}`,
     if (this.llm && history.length >= 2) {
       try {
         const recentExchange = history.slice(-4).map(m => `${m.role}: ${m.content}`).join('\n');
-        const fieldLabel = field === 'affectedPerson' ? "the affected person's name and email"
+        const fieldLabel = field === 'affectedPerson'
+          ? (meta.collectedFields.affectedPersonEmail && !meta.collectedFields.affectedPersonName
+            ? "the person's name (their email is already provided)"
+            : meta.collectedFields.affectedPersonName && !meta.collectedFields.affectedPersonEmail
+              ? "the person's email address (their name is already provided)"
+              : "the affected person's name and email")
           : field === 'officeBranch' ? 'which office or branch'
           : field === 'account' ? 'account or company name'
           : field;
@@ -3469,26 +3602,27 @@ Rules:
 
   private buildTemplateAcknowledgement(meta: IntakeSessionMetadata): string {
     const f = meta.collectedFields;
+    const urgent = f.urgency === 'High' || f.urgency === 'Critical';
     const parts: string[] = [];
 
     if (f.affectedPersonName) parts.push(`the issue with ${f.affectedPersonName}`);
     if (f.propertyAddress) parts.push(f.propertyAddress);
     if (f.listingId && !f.propertyAddress) parts.push(`listing ${f.listingId}`);
     if (f.officeBranch) parts.push(`the ${f.officeBranch} office`);
-    if (f.affectedPortals) parts.push(f.affectedPortals);
+    // Only echo portals when specific (e.g. "Rightmove"), not bare category words
+    if (f.affectedPortals && !/^(website|listing|email|account)$/i.test(f.affectedPortals)) parts.push(f.affectedPortals);
     if (f.url) parts.push(f.url);
-    if (f.account && parts.length === 0) parts.push(f.account);
+    // Only echo account when it's a real company name, not a placeholder
+    if (f.account && parts.length === 0 && !isPlaceholderOrgName(f.account)) parts.push(f.account);
 
-    const phones = extractPhoneNumbers(f.description || '');
-    const phoneSuffix = phones.length > 0 ? ` (${phones.slice(0, 2).join(', ')})` : '';
-
+    const urgencyPrefix = urgent ? "I can see this is urgent — " : '';
     if (parts.length > 0) {
-      return `Thanks for those details about ${parts.slice(0, 2).join(' on ')}${phoneSuffix}.`;
+      const base = urgent
+        ? `thanks for letting us know about ${parts.slice(0, 2).join(' on ')}.`
+        : `Thanks for letting us know about ${parts.slice(0, 2).join(' on ')}.`;
+      return `${urgencyPrefix}${base}`;
     }
-    if (phoneSuffix) {
-      return `Thanks for letting us know about that${phoneSuffix}.`;
-    }
-    return 'Thanks for letting us know.';
+    return urgent ? "I can see this is urgent — I'll get this looked at quickly." : 'Thanks for getting in touch.';
   }
 
   // ── Helpers ──
@@ -3646,7 +3780,7 @@ Rules:
     try {
       const ticketKey = await this.portalJira.createTicket({
         projectKey,
-        summary: `[Portal] Chat support request from ${context.userName} (${context.orgName})`.slice(0, 250),
+        summary: `[Portal] Chat support request from ${context.userName}${!isPlaceholderOrgName(context.orgName) ? ` (${context.orgName})` : ''}`.slice(0, 250),
         description: `Support chat conversation - user requested human assistance.\n\nPlease review the chat transcript in the internal notes.`,
         priority: 'Medium',
         reporterEmail: context.userEmail,
