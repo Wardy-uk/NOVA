@@ -811,6 +811,12 @@ export class PortalChatService {
     );
     const meta = parseMetadata(session?.metadata ?? null);
 
+    // Auto-populate account from authenticated org — portal users already belong
+    // to an org, so don't repeatedly prompt them for something we already know.
+    if (!meta.collectedFields.account && context.orgName) {
+      meta.collectedFields.account = context.orgName;
+    }
+
     // Get conversation history
     const history = await query<{ role: string; content: string }>(
       `SELECT role, content FROM portal_chat_messages
@@ -927,11 +933,32 @@ export class PortalChatService {
       if (url) meta.collectedFields.url = url;
     }
 
+    // Recovery: if the last assistant message offered a handoff but the flag
+    // wasn't properly persisted, re-set it so the affirmative check below fires.
+    if (!meta.offeredTicketCreation && stage !== 'confirmed' && stage !== 'summary' && isAffirmativeResponse(content)) {
+      const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+      if (lastAssistant && /\bwould you like me to create a (?:support )?ticket\b/i.test(lastAssistant.content)) {
+        console.log(`[portal-chat] session=${sessionId} recovering offeredTicketCreation from history`);
+        meta.offeredTicketCreation = true;
+      }
+    }
+
     if (meta.offeredTicketCreation && stage !== 'confirmed') {
       if (isAffirmativeResponse(content)) {
         meta.offeredTicketCreation = false;
-        // Route through summary review instead of direct submission —
-        // customer should see what will be submitted before we create a ticket.
+
+        // Frustration-driven handoff: the customer explicitly asked for a human,
+        // so skip the summary card and create the ticket immediately.
+        if (meta.frustrationHandoffOffered) {
+          meta.frustrationHandoffOffered = false;
+          const ticketKey = await this.forceHandoff(meta, context, sessionId, history);
+          return {
+            response: `I've created ticket **${ticketKey}** and a team member will follow up with you directly. You can track its progress in **My Tickets**.`,
+            messageMeta: { type: 'confirmed' as const, ticketKey },
+          };
+        }
+
+        // Normal offer — route through summary review before submission
         return await this.buildSummaryCard(meta);
       }
 
@@ -950,6 +977,7 @@ export class PortalChatService {
     if (meta.frustrationDetected && stage !== 'confirmed' && stage !== 'summary') {
       meta.frustrationDetected = false; // consume the flag
       meta.offeredTicketCreation = true;
+      meta.frustrationHandoffOffered = true;
 
       // Preserve operational detail from the frustration message before empathy return
       extractPropertyFieldsFromText(content, meta.collectedFields);
@@ -2136,6 +2164,18 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     context: ChatContext,
     sessionId: number,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
+    // Bare-affirmative handoff confirmation: if the last assistant message offered
+    // a handoff and the user replied with a short "yes"/"ok"/etc., route to the
+    // summary card rather than treating it as a detail-gathering response.
+    if (isAffirmativeResponse(content) && content.trim().length < 30) {
+      const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+      if (lastAssistant && /\bwould you like me to create a (?:support )?ticket\b/i.test(lastAssistant.content)) {
+        console.log(`[portal-chat] session=${sessionId} detail-stage bare-affirmative handoff confirmation`);
+        meta.offeredTicketCreation = false;
+        return await this.buildSummaryCard(meta);
+      }
+    }
+
     // Early ticket-request interception: if the customer asks to create/raise a ticket
     // before summary has been shown, extract any new fields then show the summary
     // for review instead of bypassing straight to submission.
@@ -3570,11 +3610,11 @@ Rules:
 
     const ticketKey = await this.portalJira.createTicket({
       projectKey,
-      summary: f.subject || `[Portal] ${catName} — auto-handoff from ${context.userName}`.slice(0, 250),
-      description: f.description || 'Chat conversation exceeded exchange limit. See transcript in internal notes.',
+      summary: f.subject || `[Portal] ${catName} — handoff from ${context.userName}`.slice(0, 250),
+      description: f.description || 'Customer requested human assistance. See transcript in internal notes.',
       priority: f.urgency === 'Critical' ? 'Highest' : f.urgency === 'High' ? 'High' : 'Medium',
       reporterEmail: context.userEmail,
-      internalNote: `*Auto-handoff (max exchanges reached, session ${sessionId})*${meta.ambiguityNote ? `\n\n⚠️ ${meta.ambiguityNote}` : ''}${meta.securitySensitive ? '\n\n🔒 Security-sensitive: user removal / access revocation — treat as urgent' : ''}\n\n${transcript}`,
+      internalNote: `*${meta.frustrationHandoffOffered ? 'Customer requested human handoff' : 'Auto-handoff (max exchanges reached)'}${` (session ${sessionId})`}*${meta.ambiguityNote ? `\n\n⚠️ ${meta.ambiguityNote}` : ''}${meta.securitySensitive ? '\n\n🔒 Security-sensitive: user removal / access revocation — treat as urgent' : ''}\n\n${transcript}`,
     });
 
     meta.stage = 'confirmed';

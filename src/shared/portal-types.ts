@@ -285,6 +285,7 @@ export interface IntakeSessionMetadata {
   followUpTicketKey?: string;
   followUpTicketSummary?: string;
   complaintDetected?: boolean;
+  frustrationHandoffOffered?: boolean;
 }
 
 export interface ChatMessageMetadata {
