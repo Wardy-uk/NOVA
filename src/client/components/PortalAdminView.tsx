@@ -48,14 +48,29 @@ export default function PortalAdminView() {
   );
 }
 
+interface KbDeflectionTarget {
+  currentRate: number;
+  targetMin: number;
+  targetMax: number;
+  status: 'below_target' | 'within_target' | 'above_target';
+  sampleSize: number;
+  periodDays: number;
+}
+
+const STATUS_STYLE: Record<KbDeflectionTarget['status'], { label: string; color: string; bg: string }> = {
+  below_target: { label: 'Below Target', color: 'text-red-400', bg: 'bg-red-900/30' },
+  within_target: { label: 'Within Target', color: 'text-green-400', bg: 'bg-green-900/30' },
+  above_target: { label: 'Above Target', color: 'text-amber-400', bg: 'bg-amber-900/30' },
+};
+
 function MetricsPanel() {
   const { data: metrics, loading } = useFetch<PortalMetrics>(`${API}/metrics`);
   const { data: eventCounts } = useFetch<Record<string, number>>(`${API}/event-counts?days=30`);
+  const { data: deflTarget } = useFetch<KbDeflectionTarget>(`${API}/kb-deflection-target?days=30`);
 
   if (loading) return <div className="animate-pulse h-48 bg-gray-800 rounded-lg" />;
 
-  const cards = metrics ? [
-    { label: 'Deflection Rate', value: `${metrics.deflectionRate}%`, target: '30%' },
+  const otherCards = metrics ? [
     { label: 'Chat Resolution', value: `${metrics.chatResolutionRate}%`, target: '20%' },
     { label: 'Form Completion', value: `${metrics.formCompletionRate}%`, target: '80%' },
     { label: 'KB Search Success', value: `${metrics.kbSearchSuccessRate}%`, target: '50%' },
@@ -63,10 +78,32 @@ function MetricsPanel() {
     { label: 'Portal Adoption', value: `${metrics.portalAdoption}%`, target: 'Trending up' },
   ] : [];
 
+  const ds = deflTarget ? STATUS_STYLE[deflTarget.status] : null;
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        {cards.map(c => (
+        {deflTarget && ds ? (
+          <div className={`bg-gray-800 rounded-lg p-4 border border-gray-700 ${ds.bg}`}>
+            <div className="text-xs text-gray-400 uppercase tracking-wider">KB Deflection Rate</div>
+            <div className="text-2xl font-bold text-white mt-1">{deflTarget.currentRate}%</div>
+            <div className="text-xs text-gray-500 mt-1">
+              Target: {deflTarget.targetMin}% – {deflTarget.targetMax}%
+            </div>
+            <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded ${ds.color} ${ds.bg}`}>
+              {ds.label}
+            </span>
+            <div className="text-xs text-gray-600 mt-1">{deflTarget.sampleSize} events · {deflTarget.periodDays}d</div>
+          </div>
+        ) : metrics ? (
+          <div className="bg-gray-800 rounded-lg p-4">
+            <div className="text-xs text-gray-400 uppercase tracking-wider">Deflection Rate</div>
+            <div className="text-2xl font-bold text-white mt-1">{metrics.deflectionRate}%</div>
+            <div className="text-xs text-gray-500 mt-1">Target: 30%</div>
+          </div>
+        ) : null}
+
+        {otherCards.map(c => (
           <div key={c.label} className="bg-gray-800 rounded-lg p-4">
             <div className="text-xs text-gray-400 uppercase tracking-wider">{c.label}</div>
             <div className="text-2xl font-bold text-white mt-1">{c.value}</div>

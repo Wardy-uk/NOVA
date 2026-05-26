@@ -1313,10 +1313,22 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
 
       // Letters precedence gate — if the customer clearly wants letters/correspondence,
       // don't let incidental website mentions route to the website path.
-      // Guard: skip when explicit website signals dominate (letters mention is incidental).
+      // Guard: skip only when website signals dominate AND letters mention is incidental.
       const lettersBeforeWebsite = detectLettersFromKeywords(content);
       const hasExplicitWebsiteWords = /\b(website|web site|our site|my site|the site|homepage|home page|web page|webpage)\b/i.test(content);
-      if (lettersBeforeWebsite.likely && !hasExplicitWebsiteWords) {
+      const websiteIsIncidental = hasExplicitWebsiteWords && (() => {
+        const lower = content.toLowerCase();
+        // Website is incidental if it appears only as a reference/address context
+        // (e.g. "my website is example.com" or "include our website address on the letter")
+        // rather than as a request for website work (e.g. "update my website")
+        const websiteActionPattern = /\b(update|change|fix|edit|amend|check|look at|review|redesign|rebuild)\s+(my |our |the )?(website|web site|site|homepage|home page|web page|webpage)\b/;
+        const websiteComplaintPattern = /\b(website|web site|site|homepage|home page|web page|webpage)\s+(\w+\s+){0,3}(is|isn.?t|are|aren.?t|not|won.?t|can.?t|has|have|looks?|needs?|doesn.?t|don.?t|shows?|showing|displaying)\b/;
+        const hasWebsiteAction = websiteActionPattern.test(lower) || websiteComplaintPattern.test(lower);
+        if (hasWebsiteAction) return false;
+        // If website words appear but no action/complaint directed at the website, it's incidental
+        return true;
+      })();
+      if (lettersBeforeWebsite.likely && (!hasExplicitWebsiteWords || websiteIsIncidental)) {
         meta.category = 'letters';
         meta.subcategory = lettersBeforeWebsite.subcategory || 'letters_general';
         meta.conversational = true;
@@ -1741,10 +1753,16 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
     }
 
     // Deterministic letters detection (no-LLM fallback)
-    // Guard: skip when explicit website signals dominate (letters mention is incidental)
+    // Guard: skip only when website signals dominate AND letters mention is incidental
     const lettersSignalNoLlm = detectLettersFromKeywords(content);
     const noLlmWebsiteWords = /\b(website|web site|our site|my site|the site|homepage|home page|web page|webpage)\b/i.test(content);
-    if (lettersSignalNoLlm.likely && !noLlmWebsiteWords) {
+    const noLlmWebsiteIncidental = noLlmWebsiteWords && (() => {
+      const lower = content.toLowerCase();
+      const websiteActionPattern = /\b(update|change|fix|edit|amend|check|look at|review|redesign|rebuild)\s+(\w+\s+){0,4}(my |our |the )?(website|web site|site|homepage|home page|web page|webpage)\b/;
+      const websiteComplaintPattern = /\b(website|web site|site|homepage|home page|web page|webpage)\s+(\w+\s+){0,3}(is|isn.?t|are|aren.?t|not|won.?t|can.?t|has|have|looks?|needs?|doesn.?t|don.?t|shows?|showing|displaying)\b/;
+      return !(websiteActionPattern.test(lower) || websiteComplaintPattern.test(lower));
+    })();
+    if (lettersSignalNoLlm.likely && (!noLlmWebsiteWords || noLlmWebsiteIncidental)) {
       meta.category = 'letters';
       meta.subcategory = lettersSignalNoLlm.subcategory || 'letters_general';
       meta.conversational = true;

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { query, queryOne, execute } from '../services/database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
-import { getMetrics, getTopSearches, getEventCounts } from '../services/portal-analytics.js';
+import { getMetrics, getTopSearches, getEventCounts, getKbDeflectionTarget } from '../services/portal-analytics.js';
 
 export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
   const router = Router();
@@ -140,6 +140,19 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
       res.json({ ok: true, data: counts });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get event counts' });
+    }
+  });
+
+  // KB deflection baseline vs target
+  router.get('/kb-deflection-target', async (req: Request, res: Response) => {
+    const days = parseInt(req.query.days as string, 10) || 30;
+    const targetMin = parseInt(settings.get('portal_kb_deflection_target_min') || '20', 10);
+    const targetMax = parseInt(settings.get('portal_kb_deflection_target_max') || '30', 10);
+    try {
+      const data = await getKbDeflectionTarget(days, targetMin, targetMax);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get KB deflection target' });
     }
   });
 

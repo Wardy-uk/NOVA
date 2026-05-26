@@ -173,6 +173,44 @@ export async function getTopSearches(limit: number = 20, since?: string): Promis
   return rows.map(r => ({ query: r.search_query, count: r.cnt }));
 }
 
+export type KbDeflectionStatus = 'below_target' | 'within_target' | 'above_target';
+
+export interface KbDeflectionTarget {
+  currentRate: number;
+  targetMin: number;
+  targetMax: number;
+  status: KbDeflectionStatus;
+  sampleSize: number;
+  periodDays: number;
+}
+
+export async function getKbDeflectionTarget(
+  days: number,
+  targetMin: number,
+  targetMax: number,
+): Promise<KbDeflectionTarget> {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const result = await queryOne<{ total: number; deflected: number }>(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(CASE WHEN event_type = 'deflection' THEN 1 ELSE 0 END) AS deflected
+     FROM portal_analytics
+     WHERE event_type IN ('deflection', 'ticket_created', 'chat_started', 'form_started')
+       AND created_at >= ?`,
+    [since],
+  );
+  const total = result?.total || 0;
+  const deflected = result?.deflected || 0;
+  const currentRate = total === 0 ? 0 : Math.round((deflected / total) * 100);
+
+  let status: KbDeflectionStatus;
+  if (currentRate < targetMin) status = 'below_target';
+  else if (currentRate > targetMax) status = 'above_target';
+  else status = 'within_target';
+
+  return { currentRate, targetMin, targetMax, status, sampleSize: total, periodDays: days };
+}
+
 export async function getEventCounts(since: string): Promise<Record<string, number>> {
   const rows = await query<{ event_type: string; cnt: number }>(
     `SELECT event_type, COUNT(*) AS cnt FROM portal_analytics
