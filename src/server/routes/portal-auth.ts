@@ -118,6 +118,7 @@ export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
       ].filter(Boolean) as string[];
 
       let userId: number | null = null;
+      // Try strict verification first (valid, non-expired token)
       for (const secret of secrets) {
         try {
           const payload = jwt.default.verify(authHeader.slice(7), secret) as Record<string, unknown>;
@@ -125,8 +126,18 @@ export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
         } catch { /* try next secret */ }
       }
 
+      // If strict verify failed (e.g. expired), try signature-only verification
+      // so local users with near-expired tokens can still refresh
       if (!userId) {
-        // Token fully invalid — can't even decode userId
+        for (const secret of secrets) {
+          try {
+            const payload = jwt.default.verify(authHeader.slice(7), secret, { ignoreExpiration: true }) as Record<string, unknown>;
+            if (payload.userId) { userId = payload.userId as number; break; }
+          } catch { /* try next secret */ }
+        }
+      }
+
+      if (!userId) {
         res.status(401).json({ ok: false, error: 'Invalid token' });
         return;
       }
@@ -134,7 +145,7 @@ export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
       const result = await refreshOidcToken(userId, settings);
       res.json({ ok: true, data: { token: result.token, user: result.user } });
     } catch (err) {
-      console.error('[portal-auth] OIDC refresh failed:', err);
+      console.error('[portal-auth] Token refresh failed:', err);
       res.status(401).json({ ok: false, error: err instanceof Error ? err.message : 'Refresh failed' });
     }
   });

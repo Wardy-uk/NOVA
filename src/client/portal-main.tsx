@@ -40,6 +40,12 @@ function getTokenExpiry(token: string): number | null {
   } catch { return null; }
 }
 
+function isTokenExpired(token: string): boolean {
+  const expiry = getTokenExpiry(token);
+  if (!expiry) return false;
+  return Date.now() >= expiry;
+}
+
 async function ensureFreshToken(): Promise<string | null> {
   const portalToken = localStorage.getItem(PORTAL_TOKEN_KEY);
   const novaToken = getNovaToken();
@@ -47,6 +53,11 @@ async function ensureFreshToken(): Promise<string | null> {
   if (!token) return null;
 
   const expiry = getTokenExpiry(token);
+  // Token already expired — clear and bail (force re-login)
+  if (expiry && Date.now() >= expiry) {
+    localStorage.removeItem(PORTAL_TOKEN_KEY);
+    return null;
+  }
   if (!expiry || expiry - Date.now() > 10 * 60 * 1000) return token;
 
   // Token expires within 10 minutes — refresh it
@@ -83,7 +94,12 @@ async function ensureFreshToken(): Promise<string | null> {
 
 async function portalFetch(path: string, opts: RequestInit = {}): Promise<Response> {
   const token = await ensureFreshToken();
-  return fetch(path, {
+  if (!token && !path.includes('/auth/')) {
+    localStorage.removeItem(PORTAL_TOKEN_KEY);
+    window.location.href = '/portal';
+    return new Response(JSON.stringify({ ok: false, error: 'Session expired' }), { status: 401 });
+  }
+  const res = await fetch(path, {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
@@ -91,6 +107,11 @@ async function portalFetch(path: string, opts: RequestInit = {}): Promise<Respon
       ...opts.headers,
     },
   });
+  if (res.status === 401) {
+    localStorage.removeItem(PORTAL_TOKEN_KEY);
+    window.location.href = '/portal';
+  }
+  return res;
 }
 
 // Export for use in portal components
@@ -188,12 +209,16 @@ function PortalApp() {
         return;
       }
 
-      // Check stored portal token (OIDC mode)
+      // Check stored portal token (OIDC/local mode)
       const stored = localStorage.getItem(PORTAL_TOKEN_KEY);
       if (stored) {
-        const payload = parseJwt(stored);
-        if (payload) { setUser(payload); setChecking(false); return; }
-        localStorage.removeItem(PORTAL_TOKEN_KEY);
+        if (isTokenExpired(stored)) {
+          localStorage.removeItem(PORTAL_TOKEN_KEY);
+        } else {
+          const payload = parseJwt(stored);
+          if (payload) { setUser(payload); setChecking(false); return; }
+          localStorage.removeItem(PORTAL_TOKEN_KEY);
+        }
       }
 
       // Internal mode: try NOVA JWT — probe a portal endpoint to check access
