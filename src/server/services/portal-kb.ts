@@ -29,39 +29,60 @@ export class PortalKbService {
   }
 
   async syncFromConfluence(): Promise<{ added: number; updated: number }> {
-    const spaceKey = this.settings.get('kb_confluence_space') || 'NT';
+    const spaceKey = this.settings.get('kb_confluence_space')
+      || this.settings.get('kb_confluence_space_keys')?.split(',')[0]?.trim()
+      || 'NT';
     const parentPageId = this.settings.get('kb_confluence_parent_page_id');
-
-    if (!parentPageId) {
-      console.warn('[portal-kb] No kb_confluence_parent_page_id configured, skipping sync');
-      return { added: 0, updated: 0 };
-    }
 
     let pages: Array<{ id: string; title: string; body: { storage: { value: string } }; metadata?: { labels?: { results?: Array<{ name: string }> } }; version?: { when: string } }> = [];
 
+    // Try parent-page children first (backwards compat)
+    if (parentPageId) {
+      try {
+        if (this.mcpManager) {
+          const result = await this.mcpManager.callTool('jira', 'confluence_get_page_children', {
+            page_id: parentPageId,
+            space_key: spaceKey,
+            limit: 100,
+          });
+          if (result && Array.isArray(result)) {
+            pages = result;
+          }
+        }
+      } catch (err) {
+        console.warn('[portal-kb] Confluence MCP sync failed, trying REST:', err instanceof Error ? err.message : err);
+      }
+
+      if (pages.length === 0) {
+        try {
+          pages = await this.fetchChildPagesViaRest(spaceKey, parentPageId);
+        } catch (err) {
+          console.warn('[portal-kb] Confluence REST child-page sync failed:', err instanceof Error ? err.message : err);
+        }
+      }
+    }
+
+    // Augment with full-space CQL search to pick up articles outside the parent page tree
     try {
-      if (this.mcpManager) {
-        const result = await this.mcpManager.callTool('jira', 'confluence_get_page_children', {
-          page_id: parentPageId,
-          space_key: spaceKey,
-          limit: 100,
-        });
-        if (result && Array.isArray(result)) {
-          pages = result;
+      const spacePages = await this.fetchAllSpacePagesViaRest(spaceKey);
+      const existingIds = new Set(pages.map(p => p.id));
+      for (const p of spacePages) {
+        if (!existingIds.has(p.id)) {
+          pages.push(p);
+          existingIds.add(p.id);
         }
       }
     } catch (err) {
-      console.warn('[portal-kb] Confluence MCP sync failed, trying REST:', err instanceof Error ? err.message : err);
-    }
-
-    // If MCP didn't work or returned nothing, try direct Confluence REST
-    if (pages.length === 0) {
-      try {
-        pages = await this.fetchPagesViaRest(spaceKey, parentPageId);
-      } catch (err) {
-        console.error('[portal-kb] Confluence REST sync also failed:', err instanceof Error ? err.message : err);
+      if (pages.length === 0) {
+        console.error('[portal-kb] Confluence full-space sync failed and no child pages available:', err instanceof Error ? err.message : err);
         return { added: 0, updated: 0 };
       }
+      console.warn('[portal-kb] Full-space sync failed, continuing with child pages only:', err instanceof Error ? err.message : err);
+    }
+
+    if (pages.length === 0) {
+      console.warn('[portal-kb] No pages found in space ' + spaceKey);
+      return { added: 0, updated: 0 };
     }
 
     let added = 0, updated = 0;
@@ -100,19 +121,33 @@ export class PortalKbService {
     return { added, updated };
   }
 
-  private async fetchPagesViaRest(
-    spaceKey: string,
-    parentPageId: string,
-  ): Promise<Array<{ id: string; title: string; body: { storage: { value: string } }; metadata?: { labels?: { results?: Array<{ name: string }> } }; version?: { when: string } }>> {
-    const confluenceUrl = this.settings.get('confluence_base_url');
-    const confluenceUser = this.settings.get('confluence_user') || this.settings.get('jira_email');
-    const confluenceToken = this.settings.get('confluence_api_token') || this.settings.get('jira_api_token');
+  private getConfluenceAuth(): { url: string; auth: string } {
+    const confluenceUrl = this.settings.get('confluence_base_url')
+      || this.settings.get('confluence_site_url');
+    const confluenceUser = this.settings.get('confluence_user')
+      || this.settings.get('kb_confluence_email')
+      || this.settings.get('jira_email')
+      || this.settings.get('jira_ob_email');
+    const confluenceToken = this.settings.get('confluence_api_token')
+      || this.settings.get('kb_confluence_token')
+      || this.settings.get('jira_api_token')
+      || this.settings.get('jira_ob_token');
 
     if (!confluenceUrl || !confluenceUser || !confluenceToken) {
       throw new Error('Confluence REST credentials not configured');
     }
 
-    const auth = Buffer.from(`${confluenceUser}:${confluenceToken}`).toString('base64');
+    return {
+      url: confluenceUrl.replace(/\/$/, ''),
+      auth: Buffer.from(`${confluenceUser}:${confluenceToken}`).toString('base64'),
+    };
+  }
+
+  private async fetchChildPagesViaRest(
+    spaceKey: string,
+    parentPageId: string,
+  ): Promise<Array<{ id: string; title: string; body: { storage: { value: string } }; metadata?: { labels?: { results?: Array<{ name: string }> } }; version?: { when: string } }>> {
+    const { url: confluenceUrl, auth } = this.getConfluenceAuth();
     const url = `${confluenceUrl}/rest/api/content/${parentPageId}/child/page?expand=body.storage,metadata.labels,version&limit=100`;
 
     const res = await fetch(url, {
@@ -122,6 +157,35 @@ export class PortalKbService {
     if (!res.ok) throw new Error(`Confluence API ${res.status}: ${await res.text()}`);
     const data = await res.json();
     return data.results || [];
+  }
+
+  private async fetchAllSpacePagesViaRest(
+    spaceKey: string,
+  ): Promise<Array<{ id: string; title: string; body: { storage: { value: string } }; metadata?: { labels?: { results?: Array<{ name: string }> } }; version?: { when: string } }>> {
+    const { url: confluenceUrl, auth } = this.getConfluenceAuth();
+    const headers = { Authorization: `Basic ${auth}`, Accept: 'application/json' };
+
+    const cql = `space = "${spaceKey}" AND type = "page"`;
+    const allPages: Array<{ id: string; title: string; body: { storage: { value: string } }; metadata?: { labels?: { results?: Array<{ name: string }> } }; version?: { when: string } }> = [];
+    let start = 0;
+    const pageSize = 50;
+
+    while (true) {
+      const url = `${confluenceUrl}/rest/api/content/search?cql=${encodeURIComponent(cql)}&expand=body.storage,metadata.labels,version&limit=${pageSize}&start=${start}`;
+      const res = await fetch(url, { headers });
+      if (!res.ok) throw new Error(`Confluence CQL search ${res.status}: ${await res.text()}`);
+      const data = await res.json() as { results: any[]; size: number; _links?: { next?: string } };
+      const results = data.results || [];
+      for (const page of results) {
+        allPages.push(page);
+      }
+      if (results.length < pageSize || !data._links?.next) break;
+      start += pageSize;
+      if (allPages.length >= 500) break;
+    }
+
+    console.log(`[portal-kb] Full-space CQL found ${allPages.length} pages in space ${spaceKey}`);
+    return allPages;
   }
 
   private deriveCategoryFromLabels(labels: string): string | null {

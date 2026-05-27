@@ -3835,10 +3835,59 @@ Rules:
       params,
     );
 
-    return articles.map(a => ({
-      title: a.title,
-      excerpt: a.body_text.slice(0, 300),
-    }));
+    if (articles.length > 0) {
+      return articles.map(a => ({
+        title: a.title,
+        excerpt: a.body_text.slice(0, 300),
+      }));
+    }
+
+    // Fallback: live Confluence CQL search when local table has no match
+    return this.searchConfluenceLive(terms);
+  }
+
+  private async searchConfluenceLive(terms: string[]): Promise<Array<{ title: string; excerpt: string }>> {
+    try {
+      const siteUrl = (this.settings.get('confluence_base_url') || this.settings.get('confluence_site_url'))?.trim();
+      const email = (this.settings.get('confluence_user') || this.settings.get('kb_confluence_email') || this.settings.get('jira_email') || this.settings.get('jira_ob_email'))?.trim();
+      const token = (this.settings.get('confluence_api_token') || this.settings.get('kb_confluence_token') || this.settings.get('jira_api_token') || this.settings.get('jira_ob_token'))?.trim();
+      const spaceKey = this.settings.get('kb_confluence_space')
+        || this.settings.get('kb_confluence_space_keys')?.split(',')[0]?.trim()
+        || 'NT';
+
+      if (!siteUrl || !email || !token) return [];
+
+      const searchText = terms.join(' ');
+      const cql = `text ~ "${searchText}" AND space = "${spaceKey}" AND type = "page" ORDER BY lastmodified DESC`;
+      const url = `${siteUrl.replace(/\/$/, '')}/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=3&expand=body.view`;
+
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`,
+          Accept: 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        console.warn(`[portal-chat] Confluence live KB search failed: ${res.status}`);
+        return [];
+      }
+
+      const json = await res.json() as { results?: Array<{ title: string; body?: { view?: { value: string } } }> };
+      const results = json.results ?? [];
+
+      return results.map(r => {
+        const bodyHtml = r.body?.view?.value || '';
+        const bodyText = bodyHtml.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+        return {
+          title: r.title,
+          excerpt: bodyText.slice(0, 300),
+        };
+      });
+    } catch (err) {
+      console.warn('[portal-chat] Confluence live KB search error:', err instanceof Error ? err.message : err);
+      return [];
+    }
   }
 
   private async logKbGap(queryText: string, category: string | null, sessionId: number): Promise<void> {

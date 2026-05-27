@@ -274,18 +274,23 @@ export class Reasoner {
       const siteUrl = this.settings.get('confluence_site_url')?.trim();
       const email = this.settings.get('jira_ob_email')?.trim();
       const token = this.settings.get('jira_ob_token')?.trim();
-      const spaceKeys = this.settings.get('kb_confluence_space_keys')?.trim();
+      const spaceKeysRaw = this.settings.get('kb_confluence_space_keys')?.trim();
+      const portalSpace = this.settings.get('kb_confluence_space')?.trim();
       if (!siteUrl || !email || !token) return 'No Confluence configuration available.';
 
       const words = summary.replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2).slice(0, 4);
       if (words.length === 0) return 'No search terms derived from ticket summary.';
       const searchTerms = words.join(' ');
 
+      // Merge space keys from both NOVA and portal settings to ensure aligned retrieval
+      const allSpaces = new Set<string>();
+      if (spaceKeysRaw) spaceKeysRaw.split(',').map(s => s.trim()).filter(Boolean).forEach(s => allSpaces.add(s));
+      if (portalSpace) allSpaces.add(portalSpace);
+      if (allSpaces.size === 0) allSpaces.add('NT');
+
       let cql = `text ~ "${searchTerms}"`;
-      if (spaceKeys) {
-        const spaces = spaceKeys.split(',').map(s => `"${s.trim()}"`).join(',');
-        cql += ` AND space IN (${spaces})`;
-      }
+      const spaces = [...allSpaces].map(s => `"${s}"`).join(',');
+      cql += ` AND space IN (${spaces})`;
       cql += ' ORDER BY lastmodified DESC';
 
       const url = `${siteUrl.replace(/\/$/, '')}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=3`;
