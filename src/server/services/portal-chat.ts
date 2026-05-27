@@ -123,6 +123,9 @@ const TONE_SANITIZATIONS: Array<[RegExp, string]> = [
   [/You mentioned (?:hi|hello|hey|good (?:morning|afternoon|evening)),?\s*/gi, ''],
   // Echo-prefix phrases anywhere in the response (not just start-of-string)
   [/(?:^|(?<=\.\s)|(?<=,\s))(?:You mentioned|You said|You told us|You explained|You reported|You noted|You indicated|You stated|As you (?:mentioned|said|noted|explained))(?:\s+that)?,?\s+/gi, ''],
+  // Garbled "You mentioned" fragments left empty after stripping (e.g. "You mentioned — could you...")
+  [/^You mentioned\s*[-–—]\s*/i, ''],
+  [/\.\s*You mentioned\s*[-–—]\s*/gi, '. '],
 ];
 
 function sanitizeCustomerResponse(text: string, userMessage?: string): string {
@@ -297,8 +300,11 @@ function isPhoneLikeValue(val: string): boolean {
 function briefContext(meta: IntakeSessionMetadata): string {
   const desc = meta.collectedFields.description || meta.openingMessage;
   if (!desc) return '';
-  const firstSentence = desc.split(/[.!?\n]/)[0]?.trim() || '';
-  return firstSentence.length > 80 ? firstSentence.slice(0, 77) + '...' : firstSentence;
+  // Split into sentences, skip pure greetings, take the first substantive sentence
+  const sentences = desc.split(/[.!?\n]/).map(s => s.trim()).filter(Boolean);
+  const GREETING_ONLY = /^(hi|hello|hey|howdy|good\s+(morning|afternoon|evening|day)|dear\s+(sir|madam|sirs|team|all))s?$/i;
+  const firstSubstantive = sentences.find(s => !GREETING_ONLY.test(s) && s.length > 5) || sentences[0] || '';
+  return firstSubstantive.length > 80 ? firstSubstantive.slice(0, 77) + '...' : firstSubstantive;
 }
 
 const FRUSTRATION_PATTERNS = /\b(this is (completely |absolutely |totally |utterly |just )?ridiculous|speak to (someone|a (real )?person|a human)|talk to (someone|a (real )?person|a human)|real person|not a (chat)?bot|don'?t want.*(chat)?bot|this is useless|waste of time|you'?re useless|what a joke|fed up|sick of this|absolutely terrible|disgusting service|incompetent|get me a manager|escalate this|I('m| am) (absolutely |completely |totally |utterly |so )?furious|human (please|now|agent)|actual (person|human)|nobody is (fixing|helping|doing anything|listening|responding)|no one is (fixing|helping|doing anything|listening|responding)|been (broken|waiting|like this|an issue|a problem) for (days|weeks|ages|months|a while|over a week)|how (many|long|much longer) (times?|do I|more)|still (not|hasn'?t been|hasn'?t|isn'?t) (fixed|resolved|working|sorted|done)|completely (useless|unacceptable|ridiculous|furious)|utterly (useless|unacceptable|ridiculous|furious)|beyond (frustrated|annoyed|angry)|extremely (unhappy|frustrated|disappointed|annoyed)|so frustrated|so (angry|annoyed|disappointed|unhappy)|I('ve| have) (had enough|lost patience|been waiting)|unacceptable|appalling|disgraceful|atrocious|dreadful|(wow|oh),? (great|brilliant|fantastic|wonderful|amazing|excellent) service|thanks for nothing|I('m| am) starting to (wonder|lose|think)|does anyone (actually |even )?(read|check|look at|care|respond)|wonder(ing)? if anyone (reads|listens|cares|checks|responds))\b|[!?]{4,}/i;
@@ -471,6 +477,10 @@ function detectWebsiteFromKeywords(content: string): { likely: boolean; subcateg
     /\b\w+\.(co\.uk|com|org|net|agency)\b/.test(lower);
 
   if (!hasWebsiteSignal) {
+    // Administrative address changes (billing, registered, company, etc.) are account ops, not website
+    const isAdminAddress = /\b(billing|registered|company|business|account|postal|mailing|correspondence|head office)\s+address\b/.test(lower);
+    if (isAdminAddress) return { likely: false, subcategory: null };
+
     // Content-change language that strongly implies website even without explicit "website" word
     const impliedWebsite = /\b(phone number.*(wrong|incorrect|needs|change|update|outdated|old)|address.*(wrong|incorrect|needs|change|update|outdated|old)|opening hours.*(wrong|incorrect|needs|change|update|outdated|old)|office.*(wrong|incorrect|needs|change|update|outdated|old|details)|branch.*(wrong|incorrect|needs|change|update|outdated|old|details)|contact (details|info|information).*(wrong|incorrect|needs|change|update|outdated|old)|our (phone|number|address|hours|logo|image|photo|office|branch|contact|details).*(wrong|incorrect|outdated|old|needs|change|update))\b/.test(lower);
     if (!impliedWebsite) return { likely: false, subcategory: null };
@@ -514,11 +524,26 @@ function detectLettersFromKeywords(content: string): { likely: boolean; subcateg
 function detectPropertyFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
   const lower = content.toLowerCase();
 
+  // Company-name guard: if "property/properties" appears only as part of a company name
+  // (e.g. "Abbey Forth Property Management Ltd", "De Mel Property team", "Moss Properties"),
+  // don't treat as property-listing intent. Strip company name patterns before checking.
+  const COMPANY_PROPERTY_NAME = /\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s+Propert(?:y|ies)(?:\s+(?:Management|Group|Ltd|Limited|Services|Solutions|Team|Consultants?|Agents?|Advisors?))\b/gi;
+  const contentWithoutCompanyNames = content.replace(COMPANY_PROPERTY_NAME, '');
+  const lowerWithoutCompanyNames = contentWithoutCompanyNames.toLowerCase();
+  const hasPropertyWordOutsideCompanyName = /\bpropert(y|ies)\b/.test(lowerWithoutCompanyNames);
+
   // Website-context guard: if "property" is used as website content (e.g. "property images on my website")
   // rather than real-estate listing intent, defer to website routing.
   const hasExplicitWebsiteContext = /\b(website|web site|our site|my site|the site|homepage|home page|web page|webpage)\b/.test(lower);
   const hasPortalListingSignal = /\b(rightmove|zoopla|onthemarket|on the market|primelocation|prime location|listing|listings|feed|feeds|syndication)\b/.test(lower);
   if (hasExplicitWebsiteContext && !hasPortalListingSignal && /\bpropert(y|ies)\b/.test(lower)) {
+    return { likely: false, subcategory: null };
+  }
+
+  // If "property/properties" only appeared inside a company name and there are no other
+  // property/listing signals, this is not a property request.
+  if (!hasPropertyWordOutsideCompanyName && !hasPortalListingSignal &&
+      !/\b(listing|listings|floorplan|floor plan|epc|energy performance|virtual tour|sold|stc|under offer|withdrawn)\b/.test(lower)) {
     return { likely: false, subcategory: null };
   }
 
@@ -684,8 +709,17 @@ function detectAccountFromKeywords(content: string): { likely: boolean; subcateg
     return { likely: true, subcategory: 'account_permissions', securitySensitive: false };
   }
 
+  // Administrative address changes — billing, registered, company address (not website content)
+  const hasAdminAddressSignal =
+    /\b(billing\s+address|registered\s+address|company\s+address|business\s+address|account\s+address|postal\s+address|mailing\s+address|correspondence\s+address|head\s+office\s+address)\b/.test(lower) &&
+    !/\b(website|web site|page|our site|shows?|display)\b/.test(lower);
+
+  if (hasAdminAddressSignal) {
+    return { likely: true, subcategory: 'account_details', securitySensitive: false };
+  }
+
   const hasOfficeSignal =
-    /\b(new (office|branch)|clos(e|ed|ing).*(office|branch)|merg(e|ed|ing).*(office|branch|offices|branches)|moved? offices?|office.*(move|relocation|restructur|closing|opening|merger)|branch.*(move|relocation|restructur|closing|opening|merger|open|new|add))\b/.test(lower) &&
+    /\b(new (office|branch)|clos(e|ed|ing).*(office|branch)|merg(e|ed|ing).*(office|branch|offices|branches)|moved? offices?|offices?\s+has\s+moved|office.*(move|relocation|restructur|closing|opening|merger)|branch.*(move|relocation|restructur|closing|opening|merger|open|new|add)|(change|update|amend)\s+(our\s+|the\s+)?(office|branch)\s+address)\b/.test(lower) &&
     !/\b(website|web site|page|our site|shows?|display|address.*wrong|address.*incorrect|address.*outdated)\b/.test(lower);
 
   if (hasOfficeSignal) {
@@ -714,6 +748,77 @@ function detectAccountFromKeywords(content: string): { likely: boolean; subcateg
   return { likely: false, subcategory: null, securitySensitive: false };
 }
 
+// Internal product cancellation: admin/ops staff informing that a customer's product has been
+// cancelled. Pattern: "{Company} have cancelled their {Product}" or "Product Cancellation - {Product}"
+// or "cancellation processed" or "terminating their Guild Membership".
+function detectInternalProductCancellation(content: string): { detected: boolean; account: string | null; product: string | null } {
+  // "Product Cancellation - {Product} For {Account}" (subject-line pattern)
+  const subjectLine = content.match(/Product Cancellation\s*[-–—]\s*(.+?)\s+[Ff]or\s+(.+?)(?:\.|$)/);
+  if (subjectLine) {
+    return { detected: true, product: subjectLine[1].trim(), account: subjectLine[2].trim() };
+  }
+
+  // "{Account} have/has cancelled their {Product} [product] [effective {date}]"
+  // The "product effective" suffix is optional — matches "X have cancelled their Y" broadly
+  const cancelledTheir = content.match(/\b([A-Z][A-Za-z0-9 &'.-]{2,60}?)\s+ha(?:ve|s)\s+cancelled\s+their\s+(.+?)(?:\s+product)?(?:\s+effective\b.*)?$/im);
+  if (cancelledTheir) {
+    let product = cancelledTheir[2].trim().replace(/\s*[.,;:]+\s*$/, '');
+    if (product.length > 80) product = product.slice(0, 80);
+    return { detected: true, account: cancelledTheir[1].trim(), product };
+  }
+
+  // "I have processed a cancellation for {account}" / "cancellation processed" / "Robertsons cancellation processed"
+  const processedCancel = content.match(/\b(?:processed|confirmed)\s+a?\s*cancellation\s+(?:for\s+)?(?:the\s+)?(?:above\s+)?(?:customer\s+)?(?:(?:as\s+)?of\s+)?/i);
+  const cancelProcessedSuffix = content.match(/\b([A-Z][A-Za-z0-9 &'.-]{2,40}?)(?:'s)?\s+cancellation\s+(?:processed|confirmed)\b/i);
+  if (processedCancel || cancelProcessedSuffix) {
+    const acct = cancelProcessedSuffix ? cancelProcessedSuffix[1].trim() : null;
+    return { detected: true, account: acct, product: null };
+  }
+
+  // "terminating their Guild Membership" / "who is terminating their {Product}"
+  const terminatingMembership = content.match(/\bterminating\s+their\s+(.+?)(?:\.\s|\s*$)/i);
+  if (terminatingMembership && /\b(please\s+(?:reply|confirm|be aware)|update\s+your\s+records|receipt)\b/i.test(content)) {
+    const officeName = content.match(/Office\s+Name\s*[:：]\s*([^\n.]+)/i);
+    return {
+      detected: true,
+      account: officeName ? officeName[1].trim() : null,
+      product: terminatingMembership[1].trim(),
+    };
+  }
+
+  return { detected: false, account: null, product: null };
+}
+
+function cleanCancellationAccountName(raw: string | null): string | null {
+  if (!raw) return null;
+  let cleaned = raw.trim().replace(/[.,;:!?]+\s*$/, '').trim();
+  // Drop if it looks like a sentence fragment rather than a company name
+  if (/^(I |we |the |that |this |it |please |hi |hello |dear )/i.test(cleaned)) return null;
+  if (cleaned.split(/\s+/).length > 8) return null;
+  if (cleaned.length < 2 || cleaned.length > 80) return null;
+  return cleaned;
+}
+
+// Genuine customer termination/notice: the customer themselves wants to end services.
+// Pattern: "formally give notice", "cancel our website/services", "end our contract".
+// Must NOT match internal product cancellation patterns (handled above).
+function detectCustomerTermination(content: string): { detected: boolean; account: string | null } {
+  // Skip if this is an internal/admin cancellation
+  if (detectInternalProductCancellation(content).detected) return { detected: false, account: null };
+
+  const hasTerminationSignal =
+    /\b(formal(?:ly)?\s+(?:give|serve|submit|provide)\s+(?:my|our)?\s*notice|give\s+(?:my|our)\s+\d+\s*days?\s*notice|end\s+(?:our|my)\s+(?:website|services?|contract|agreement|subscription)\s+with)\b/i.test(content);
+
+  const hasServiceEndSignal =
+    /\b(we\s+would\s+like\s+to\s+cancel\s+our\s+website|cancel\s+our\s+(?:website|service|hosting|contract)\s+with|terminate\s+(?:our|my)\s+(?:services?|contract|agreement|website))\b/i.test(content);
+
+  if (!hasTerminationSignal && !hasServiceEndSignal) return { detected: false, account: null };
+
+  // Try to extract account from message
+  const accountMatch = content.match(/\b(?:for|account\s*[:：]?\s*)([A-Z][A-Za-z0-9 &'.-]{2,40})\b/i);
+  return { detected: true, account: accountMatch ? accountMatch[1].trim() : null };
+}
+
 function detectBillingFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
   if (!BILLING_CANCELLATION_PATTERNS.test(content)) return { likely: false, subcategory: null };
   const lower = content.toLowerCase();
@@ -734,12 +839,18 @@ function extractAccountFieldsFromText(content: string, fields: IntakeCollectedFi
 
   if (!fields.affectedPersonName) {
     const namePatterns = [
+      // Labeled: "Name: Chris Clark" or "Name - Chris Clark"
+      /\bname\s*[:：\-–—]\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
+      // Prose-form: "I'm Sarah Jones", "My name is Sarah Jones", "This is Sarah Jones calling/here"
+      /\b(?:I'?m|my name is|this is)\s+([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/,
       /\b(?:remove|set ?up|add|create|for)\s+(?:(?:the\s+)?user\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
       /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s+(?:left|was fired|was let go|has left|is leaving|joined|started|needs?)\b/,
       /\b(?:(?:their|the|her|his)\s+name\s+is|name\s*[:]\s*|called)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
       /\b(?:it'?s\s+(?:for\s+)?|this\s+is\s+(?:for\s+)?)([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/,
       /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})(?:'s)?\s+(?:email|access|account|login|password)\b/,
       /\b(?:the\s+)?(?:user|person|employee|staff\s+member)\s+(?:is\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
+      // Name immediately before email: "Lauren Walker, lauren.walker@..." or "Lauren Walker lauren.walker@..."
+      /\b([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)[,\s]+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/,
     ];
     for (const pattern of namePatterns) {
       const match = content.match(pattern);
@@ -749,8 +860,12 @@ function extractAccountFieldsFromText(content: string, fields: IntakeCollectedFi
 
   if (!fields.officeBranch) {
     const branchPatterns = [
+      // Labeled: "Branch: Washington" or "Branch - Washington"
+      /\b(?:branch|office)\s*[:：\-–—]\s*([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b/i,
       /\b(?:our |the )?(?:new |old )?(\w+(?:\s+\w+)?)\s+(?:office|branch)\b/i,
       /\b(?:office|branch)\s+(?:in|at)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/,
+      // "for {Branch} branch please" / "for {Branch} please"
+      /\bfor\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:branch|office)\b/i,
     ];
     for (const pattern of branchPatterns) {
       const match = content.match(pattern);
@@ -793,7 +908,10 @@ function detectCrossDomainAmbiguity(content: string): { ambiguous: boolean; doma
 
   const hasAccountSignals = /\b(can'?t (see|access|get|log)|permission|new (user|starter|office|branch)|locked out|password)\b/.test(lower);
   const hasWebsiteSignals = /\b(website|web site|our site|the site|page|homepage|display|showing)\b/.test(lower);
-  const hasPropertySignals = /\b(property|properties|listing|listings|rightmove|zoopla|onthemarket)\b/.test(lower);
+  // Strip company names containing "property/properties" before checking for property signals
+  const COMPANY_PROP_RE = /\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s+Propert(?:y|ies)(?:\s+(?:Management|Group|Ltd|Limited|Services|Solutions|Team|Consultants?|Agents?|Advisors?))\b/gi;
+  const contentForPropertyCheck = content.replace(COMPANY_PROP_RE, '').toLowerCase();
+  const hasPropertySignals = /\b(property|properties|listing|listings|rightmove|zoopla|onthemarket)\b/.test(contentForPropertyCheck);
   const hasDataSignals = /\b(report|data|leads?|performance|dashboard)\b/.test(lower) && !hasAccountSignals;
 
   const domains: string[] = [];
@@ -1218,6 +1336,58 @@ export class PortalChatService {
     context: ChatContext,
     sessionId: number,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
+    // H0a: Internal product cancellation fast-track — admin/ops staff notifying that a
+    // customer has cancelled a product. These are internal instructions, not customer-facing
+    // intake. Detect the pattern and route directly to billing_cancel with full detail preservation.
+    const internalCancelDetection = detectInternalProductCancellation(content);
+    if (internalCancelDetection.detected) {
+      const cleanedAccount = cleanCancellationAccountName(internalCancelDetection.account);
+      meta.category = 'billing';
+      meta.subcategory = 'billing_cancel';
+      meta.conversational = true;
+      meta.stage = 'detail';
+      if (!meta.collectedFields.description) meta.collectedFields.description = content;
+      if (cleanedAccount) meta.collectedFields.account = cleanedAccount;
+      if (internalCancelDetection.product) {
+        meta.collectedFields.subject = `Product Cancellation — ${internalCancelDetection.product}` +
+          (cleanedAccount ? ` for ${cleanedAccount}` : '');
+      }
+      const summaryResult = await this.buildSummaryCard(meta);
+      const ackParts = ['Understood — I\'ll get that cancellation raised.'];
+      if (internalCancelDetection.product && cleanedAccount) {
+        ackParts[0] = `Understood — I'll raise the cancellation of ${internalCancelDetection.product} for ${cleanedAccount}.`;
+      }
+      return {
+        response: `${ackParts[0]}\n\n${summaryResult.response}`,
+        messageMeta: summaryResult.messageMeta,
+      };
+    }
+
+    // H0b: Genuine customer cancellation / termination / notice — the customer (not admin)
+    // is requesting to end services. Acknowledge receipt, do NOT accept or confirm the
+    // termination, and route to a human agent.
+    const customerTerminationDetection = detectCustomerTermination(content);
+    if (customerTerminationDetection.detected) {
+      const cleanedTermAccount = cleanCancellationAccountName(customerTerminationDetection.account);
+      meta.category = 'billing';
+      meta.subcategory = 'billing_cancel';
+      meta.conversational = true;
+      meta.stage = 'detail';
+      if (!meta.collectedFields.description) meta.collectedFields.description = content;
+      if (cleanedTermAccount) meta.collectedFields.account = cleanedTermAccount;
+      const config = CATEGORY_FIELD_CONFIG[meta.subcategory] || CATEGORY_FIELD_CONFIG['other_general']!;
+      const missing = this.getMissingFields(meta.collectedFields, config);
+      const ack = "Thank you for letting us know — I've noted your request. A member of our team will be in touch to discuss this with you directly.";
+      if (missing.includes('account')) {
+        return { response: `${ack}\n\nCould you confirm which account this is for so I can pass it to the right person?` };
+      }
+      const summaryResult = await this.buildSummaryCard(meta);
+      return {
+        response: `${ack}\n\n${summaryResult.response}`,
+        messageMeta: summaryResult.messageMeta,
+      };
+    }
+
     // H0: Billing cancellation fast-track — pre-empt security-sensitive check so product/service
     // cancellation ("cancel our account", "deactivate the email marketing") routes to billing,
     // not user removal.
@@ -1334,7 +1504,8 @@ Analyse the message and return structured JSON:
 2. WEBSITE CLASSIFICATION — is this about their website?
    Set isWebsiteRelated=true ONLY for website content, design, or functionality issues.
    Set isWebsiteRelated=false for: email marketing, CRM/LeadPro, account/login, data feeds, billing, property portal feeds (Rightmove/Zoopla), property listings, or unclear requests.
-   IMPORTANT: Requests to correct business details (phone numbers, addresses, opening hours, office/branch details, contact information) are almost always website content updates — set isWebsiteRelated=true and websiteSubcategory=website_content for these.
+   IMPORTANT: Requests to correct business details (phone numbers, addresses, opening hours, office/branch details, contact information) that display ON THE WEBSITE are almost always website content updates — set isWebsiteRelated=true and websiteSubcategory=website_content for these.
+   EXCEPTION — ADMIN ADDRESS CHANGES: Requests to update a billing address, registered address, company address, postal address, or account address are ADMINISTRATIVE changes (not website content) — set isAccountRelated=true, accountSubcategory=account_details. "Office has moved" / "change office address" / "new office address" → isAccountRelated=true, accountSubcategory=account_office_change.
    If website-related, classify:
    - website_content: updating text, images, phone numbers, addresses, staff details, opening hours, branch/office details, contact information on an existing page
    - website_broken: something on the website is not working, displaying wrong, or erroring
@@ -1344,6 +1515,7 @@ Analyse the message and return structured JSON:
 3. PROPERTY / LISTING CLASSIFICATION — is this about a property listing?
    Set isPropertyRelated=true for issues with: property listings, Rightmove/Zoopla/OnTheMarket feeds, property photos/floorplans/EPCs, listing visibility, property sync, sold/STC status, property details being wrong on portals, missing listings, feed issues.
    Set isPropertyRelated=false for: website design/content (even if the website shows properties), account/login, email marketing, billing, or unclear requests.
+   COMPANY NAME GUARD: If "property" or "properties" appears ONLY as part of a company name (e.g. "Abbey Forth Property Management", "De Mel Property team", "Moss Properties"), do NOT treat the request as property-related. The word "property" in a company name has no bearing on whether this is a listing issue. Look for actual listing/feed/portal intent beyond the company name.
    IMPORTANT: If a customer mentions a property not showing "on the website" AND also mentions portals (Rightmove/Zoopla), prefer isPropertyRelated=true.
    If someone says "property isn't showing" without specifying where, set isPropertyRelated=true (it's more likely a listing/feed issue than a website issue).
    If property-related, classify:
@@ -1361,6 +1533,7 @@ Analyse the message and return structured JSON:
    Subcategories: account_login, account_new_user, account_permissions, account_details, account_office_change, account_remove_user.
 
 5. FIELD EXTRACTION — capture details already provided. Include subject, account, description, url, errorMessage, browser, urgency (only if explicit), propertyAddress, listingId, affectedPortals. Preserve the customer's exact words in description — do not rewrite or summarise. If they mention a phone number, include the phone number. If they mention an address, include the address verbatim.
+   NAME/EMAIL PRESERVATION: When the customer provides a person's name, email address, branch, or other structured details in their message (e.g. "Name: Chris Clark, Email: chris@example.com, Branch: Washington" or "Lauren Walker, lauren.walker@example.com"), capture ALL of these in the description field verbatim. Do NOT ask for information that has already been provided in the message.
 
 6. ACKNOWLEDGMENT — write 1-2 sentences that show you understood the customer's specific problem.
    PRIMARY RULE: Use the customer's own words to describe their problem. If they said "she can't see anything", say "she can't see anything". If they said "the number is wrong", say "the number is wrong". Do not translate their words into technical or internal vocabulary.
@@ -1450,8 +1623,12 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           if (kbResult.length > 0) {
             meta.stage = 'kb_check';
             meta.kbSuggested = true;
+            const ack = d.acknowledgment || '';
+            const kbLead = ack
+              ? `${ack}\n\nI found an article that might answer this:`
+              : 'I found some articles that might help:';
             return {
-              response: 'I found some articles that might help:',
+              response: kbLead,
               messageMeta: {
                 type: 'kb_suggestions' as const,
                 articles: kbResult.map(a => ({ id: 0, title: a.title, excerpt: a.excerpt })),
@@ -1535,6 +1712,23 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         const ack = d.acknowledgment || "Thanks — I'll get your correspondence request raised with our production team.";
         const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
         return { response: `${ack}\n\n${question}` };
+      }
+
+      // Pre-empt: admin address changes misclassified as website content → reroute to account
+      const ADMIN_ADDR_RE = /\b(billing|registered|company|business|account|postal|mailing|correspondence|head\s+office)\s+address\b/i;
+      const OFFICE_MOVE_RE = /\b(office\s+has\s+moved|change\s+(our\s+|the\s+)?(office|branch)\s+address|update\s+(our\s+|the\s+)?(office|branch)\s+address|moved?\s+offices?)\b/i;
+      if (d.isWebsiteRelated && !/\b(website|web site|page|our site|the site|display|showing)\b/i.test(content)) {
+        if (ADMIN_ADDR_RE.test(content)) {
+          d.isWebsiteRelated = false;
+          d.isAccountRelated = true;
+          if (!d.accountSubcategory) d.accountSubcategory = 'account_details';
+          if (d.confidence < 0.6) d.confidence = 0.7;
+        } else if (OFFICE_MOVE_RE.test(content)) {
+          d.isWebsiteRelated = false;
+          d.isAccountRelated = true;
+          if (!d.accountSubcategory) d.accountSubcategory = 'account_office_change';
+          if (d.confidence < 0.6) d.confidence = 0.7;
+        }
       }
 
       // Website conversational intake — the core behavioural change
@@ -2901,8 +3095,12 @@ Return JSON with only the fields present in the message.`,
       if (articles.length > 0) {
         meta.stage = 'kb_check';
         meta.kbSuggested = true;
+        const subj = meta.collectedFields.subject;
+        const kbIntro = subj
+          ? `Before I raise a ticket about "${subj}", I found an article that might help:`
+          : 'Before I create a ticket, I found an article that might help:';
         return {
-          response: 'Before I create a ticket, I found an article that might help:',
+          response: kbIntro,
           messageMeta: {
             type: 'kb_suggestions' as const,
             articles: articles.map(a => ({ id: 0, title: a.title, excerpt: a.excerpt })),
@@ -3401,9 +3599,9 @@ ${contextParts.join('\n')}`,
     const ctx = briefContext(meta);
 
     const withContext = (question: string): string => {
-      if (!ctx) return question;
+      if (!ctx || ctx.length < 8 || /^(hi|hello|hey|good\s)/i.test(ctx)) return question;
       const lc = ctx.toLowerCase().startsWith('i ') ? ctx : ctx.charAt(0).toLowerCase() + ctx.slice(1);
-      return `You mentioned ${lc} — ${question.charAt(0).toLowerCase() + question.slice(1)}`;
+      return `I can see ${lc} — ${question.charAt(0).toLowerCase() + question.slice(1)}`;
     };
 
     switch (field) {
@@ -3442,9 +3640,9 @@ ${contextParts.join('\n')}`,
     const ctx = briefContext(meta);
 
     const withContext = (question: string): string => {
-      if (!ctx) return question;
+      if (!ctx || ctx.length < 8 || /^(hi|hello|hey|good\s)/i.test(ctx)) return question;
       const lc = ctx.toLowerCase().startsWith('i ') ? ctx : ctx.charAt(0).toLowerCase() + ctx.slice(1);
-      return `You mentioned ${lc} — ${question.charAt(0).toLowerCase() + question.slice(1)}`;
+      return `I can see ${lc} — ${question.charAt(0).toLowerCase() + question.slice(1)}`;
     };
 
     switch (field) {
@@ -3483,23 +3681,24 @@ ${contextParts.join('\n')}`,
     if (f.officeBranch) parts.push(`the ${f.officeBranch} office`);
 
     const context = briefContext(meta);
+    const ctxUsable = context && context.length >= 8 && !/^(hi|hello|hey|good\s)/i.test(context);
 
-    if (parts.length > 0 && context) {
+    if (parts.length > 0 && ctxUsable) {
       return `Thanks for letting us know about ${parts.join(' and ')} — I can see ${context.toLowerCase().startsWith('i ') ? context : context.charAt(0).toLowerCase() + context.slice(1)}.`;
     }
     if (parts.length > 0) {
       return `Thanks for letting us know about ${parts.join(' and ')}.`;
     }
     if (meta.subcategory === 'account_login') {
-      return context ? `Sorry to hear you're having trouble getting in — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "Sorry to hear you're having trouble getting in.";
+      return ctxUsable ? `Sorry to hear you're having trouble getting in — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "Sorry to hear you're having trouble getting in.";
     }
     if (meta.subcategory === 'account_new_user') {
-      return context ? `I'll help you get that set up — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "I'll help you get that new user set up.";
+      return ctxUsable ? `I'll help you get that set up — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "I'll help you get that new user set up.";
     }
     if (meta.subcategory === 'account_office_change') {
-      return context ? `I'll help you with that — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "I'll help you with that office change.";
+      return ctxUsable ? `I'll help you with that — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "I'll help you with that office change.";
     }
-    return context ? `Thanks for getting in touch — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "Thanks for getting in touch.";
+    return ctxUsable ? `Thanks for getting in touch — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "Thanks for getting in touch.";
   }
 
   private async buildAccountConversationalFollowUp(
@@ -3554,6 +3753,7 @@ Rules:
   }
 
   private buildConversationalQuestion(field: string, meta: IntakeSessionMetadata): string {
+    const isAccountOrBilling = meta.category === 'account' || meta.category === 'billing';
     switch (field) {
       case 'description':
         if (meta.subcategory === 'website_content') return 'Could you tell me what needs changing and where on the page?';
@@ -3561,10 +3761,13 @@ Rules:
         if (meta.subcategory === 'website_new_page') return 'Could you describe what the new page should contain and where it should sit in the navigation?';
         if (meta.subcategory === 'website_design') return 'Could you describe the design changes you have in mind?';
         if (meta.category === 'complaint') return "Could you tell me what happened and what outcome you're looking for?";
+        if (isAccountOrBilling) return 'Could you describe what you need in a bit more detail?';
         return 'Could you describe what you need in a bit more detail?';
       case 'account':
+        if (isAccountOrBilling) return 'Which account or company is this for?';
         return 'Which account or website is this for?';
       case 'url':
+        if (isAccountOrBilling) return 'Could you share a few more details about what needs to happen?';
         return 'Which page is this on? A URL would be ideal if you have it.';
       case 'errorMessage':
         return 'Are there any error messages showing when this happens?';
@@ -3624,6 +3827,11 @@ Rules:
     meta: IntakeSessionMetadata,
     history: Array<{ role: string; content: string }>,
   ): Promise<string> {
+    // Account/billing requests should never ask for URL — redirect to a more appropriate field
+    if (field === 'url' && (meta.category === 'account' || meta.category === 'billing')) {
+      return this.buildConversationalQuestion('description', meta);
+    }
+
     // Try LLM-generated contextual question; fall back to template
     if (this.llm && history.length >= 2) {
       try {
