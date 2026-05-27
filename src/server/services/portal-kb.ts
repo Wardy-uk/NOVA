@@ -123,13 +123,16 @@ export class PortalKbService {
 
   private getConfluenceAuth(): { url: string; auth: string } {
     const confluenceUrl = this.settings.get('confluence_base_url')
-      || this.settings.get('confluence_site_url');
+      || this.settings.get('confluence_site_url')
+      || this.settings.get('jira_url');
     const confluenceUser = this.settings.get('confluence_user')
       || this.settings.get('kb_confluence_email')
+      || this.settings.get('jira_username')
       || this.settings.get('jira_email')
       || this.settings.get('jira_ob_email');
     const confluenceToken = this.settings.get('confluence_api_token')
       || this.settings.get('kb_confluence_token')
+      || this.settings.get('jira_token')
       || this.settings.get('jira_api_token')
       || this.settings.get('jira_ob_token');
 
@@ -138,7 +141,7 @@ export class PortalKbService {
     }
 
     return {
-      url: confluenceUrl.replace(/\/$/, ''),
+      url: confluenceUrl.replace(/\/wiki\/?$/, '').replace(/\/$/, ''),
       auth: Buffer.from(`${confluenceUser}:${confluenceToken}`).toString('base64'),
     };
   }
@@ -148,7 +151,7 @@ export class PortalKbService {
     parentPageId: string,
   ): Promise<Array<{ id: string; title: string; body: { storage: { value: string } }; metadata?: { labels?: { results?: Array<{ name: string }> } }; version?: { when: string } }>> {
     const { url: confluenceUrl, auth } = this.getConfluenceAuth();
-    const url = `${confluenceUrl}/rest/api/content/${parentPageId}/child/page?expand=body.storage,metadata.labels,version&limit=100`;
+    const url = `${confluenceUrl}/wiki/rest/api/content/${parentPageId}/child/page?expand=body.storage,metadata.labels,version&limit=100`;
 
     const res = await fetch(url, {
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
@@ -171,7 +174,7 @@ export class PortalKbService {
     const pageSize = 50;
 
     while (true) {
-      const url = `${confluenceUrl}/rest/api/content/search?cql=${encodeURIComponent(cql)}&expand=body.storage,metadata.labels,version&limit=${pageSize}&start=${start}`;
+      const url = `${confluenceUrl}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&expand=body.storage,metadata.labels,version&limit=${pageSize}&start=${start}`;
       const res = await fetch(url, { headers });
       if (!res.ok) throw new Error(`Confluence CQL search ${res.status}: ${await res.text()}`);
       const data = await res.json() as { results: any[]; size: number; _links?: { next?: string } };

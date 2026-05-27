@@ -3848,9 +3848,9 @@ Rules:
 
   private async searchConfluenceLive(terms: string[]): Promise<Array<{ title: string; excerpt: string }>> {
     try {
-      const siteUrl = (this.settings.get('confluence_base_url') || this.settings.get('confluence_site_url'))?.trim();
-      const email = (this.settings.get('confluence_user') || this.settings.get('kb_confluence_email') || this.settings.get('jira_email') || this.settings.get('jira_ob_email'))?.trim();
-      const token = (this.settings.get('confluence_api_token') || this.settings.get('kb_confluence_token') || this.settings.get('jira_api_token') || this.settings.get('jira_ob_token'))?.trim();
+      const siteUrl = (this.settings.get('confluence_base_url') || this.settings.get('confluence_site_url') || this.settings.get('jira_url'))?.trim();
+      const email = (this.settings.get('confluence_user') || this.settings.get('kb_confluence_email') || this.settings.get('jira_username') || this.settings.get('jira_email') || this.settings.get('jira_ob_email'))?.trim();
+      const token = (this.settings.get('confluence_api_token') || this.settings.get('kb_confluence_token') || this.settings.get('jira_token') || this.settings.get('jira_api_token') || this.settings.get('jira_ob_token'))?.trim();
       const spaceKey = this.settings.get('kb_confluence_space')
         || this.settings.get('kb_confluence_space_keys')?.split(',')[0]?.trim()
         || 'NT';
@@ -3859,7 +3859,7 @@ Rules:
 
       const searchText = terms.join(' ');
       const cql = `text ~ "${searchText}" AND space = "${spaceKey}" AND type = "page" ORDER BY lastmodified DESC`;
-      const url = `${siteUrl.replace(/\/$/, '')}/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=3&expand=body.view`;
+      const url = `${siteUrl.replace(/\/wiki\/?$/, '').replace(/\/$/, '')}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=3&expand=body.view`;
 
       const res = await fetch(url, {
         headers: {

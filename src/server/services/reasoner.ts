@@ -271,9 +271,9 @@ export class Reasoner {
   private async searchConfluence(summary: string): Promise<string> {
     try {
       if (!this.settings) return 'No Confluence configuration available.';
-      const siteUrl = this.settings.get('confluence_site_url')?.trim();
-      const email = this.settings.get('jira_ob_email')?.trim();
-      const token = this.settings.get('jira_ob_token')?.trim();
+      const siteUrl = (this.settings.get('confluence_site_url') || this.settings.get('jira_url'))?.trim();
+      const email = (this.settings.get('jira_username') || this.settings.get('jira_ob_email'))?.trim();
+      const token = (this.settings.get('jira_token') || this.settings.get('jira_ob_token'))?.trim();
       const spaceKeysRaw = this.settings.get('kb_confluence_space_keys')?.trim();
       const portalSpace = this.settings.get('kb_confluence_space')?.trim();
       if (!siteUrl || !email || !token) return 'No Confluence configuration available.';
@@ -293,7 +293,7 @@ export class Reasoner {
       cql += ` AND space IN (${spaces})`;
       cql += ' ORDER BY lastmodified DESC';
 
-      const url = `${siteUrl.replace(/\/$/, '')}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=3`;
+      const url = `${siteUrl.replace(/\/wiki\/?$/, '').replace(/\/$/, '')}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=3`;
       const res = await fetch(url, {
         headers: {
           'Authorization': `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`,
@@ -310,7 +310,7 @@ export class Reasoner {
       const results = json.results ?? [];
       if (results.length === 0) return 'No matching Confluence articles found.';
 
-      const baseUrl = siteUrl.replace(/\/$/, '');
+      const baseUrl = siteUrl.replace(/\/wiki\/?$/, '').replace(/\/$/, '');
       return results.map((r, i) => {
         const link = r._links?.webui ? `${baseUrl}/wiki${r._links.webui}` : '';
         return `${i + 1}. ${r.title}${link ? ` — ${link}` : ''}`;
