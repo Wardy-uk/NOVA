@@ -1,10 +1,52 @@
 import { Router, type Request, type Response } from 'express';
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { query, queryOne, execute } from '../services/database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import { getMetrics, getTopSearches, getEventCounts, getKbDeflectionTarget } from '../services/portal-analytics.js';
 
 export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
   const router = Router();
+
+  async function ensureOrganisation(orgId: number | null, name: string | null, domain: string | null): Promise<number> {
+    if (orgId) {
+      const existing = await queryOne<{ id: number }>(
+        `SELECT id FROM portal_organisations WHERE id = ?`,
+        [orgId],
+      );
+      if (!existing) {
+        throw new Error('Selected organisation was not found');
+      }
+      return existing.id;
+    }
+
+    const orgName = name?.trim();
+    if (!orgName) {
+      throw new Error('Organisation is required');
+    }
+    const normalizedDomain = domain?.trim().toLowerCase() || null;
+
+    if (normalizedDomain) {
+      const byDomain = await queryOne<{ id: number }>(
+        `SELECT TOP 1 id FROM portal_organisations WHERE LOWER(domain) = LOWER(?) ORDER BY id`,
+        [normalizedDomain],
+      );
+      if (byDomain) {
+        await execute(
+          `UPDATE portal_organisations SET name = ?, updated_at = GETUTCDATE() WHERE id = ?`,
+          [orgName, byDomain.id],
+        );
+        return byDomain.id;
+      }
+    }
+
+    const result = await queryOne<{ id: number }>(
+      `INSERT INTO portal_organisations (external_id, name, domain)
+       OUTPUT INSERTED.id VALUES (?, ?, ?)`,
+      [`local-org-${crypto.randomUUID()}`, orgName, normalizedDomain],
+    );
+    return result!.id;
+  }
 
   // Portal users list
   router.get('/users', async (_req: Request, res: Response) => {
@@ -13,12 +55,16 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         id: number;
         email: string;
         display_name: string;
+        org_id: number;
         org_name: string;
         last_login: string;
         role: string;
+        auth_type: string;
+        access_state: string;
         ticket_count: number;
       }>(
-        `SELECT pu.id, pu.email, pu.display_name, po.name AS org_name, pu.last_login, pu.role,
+        `SELECT pu.id, pu.email, pu.display_name, pu.org_id, po.name AS org_name, pu.last_login, pu.role,
+                pu.auth_type, pu.access_state,
                 (SELECT COUNT(*) FROM jira_issue_cache jic WHERE jic.reporter_email = pu.email) AS ticket_count
          FROM portal_users pu
          JOIN portal_organisations po ON pu.org_id = po.id
@@ -28,6 +74,130 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to list users' });
     }
+  });
+
+  router.post('/users', async (req: Request, res: Response) => {
+    const {
+      email,
+      display_name,
+      password,
+      role,
+      org_id,
+      organisation_name,
+      organisation_domain,
+    } = req.body ?? {};
+
+    if (!email?.trim() || !display_name?.trim() || !password) {
+      res.status(400).json({ ok: false, error: 'Email, display name, password, and organisation are required' });
+      return;
+    }
+    if (password.length < 8) {
+      res.status(400).json({ ok: false, error: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const existing = await queryOne<{ id: number; auth_type: string; access_state: string }>(
+      `SELECT TOP 1 id, auth_type, access_state
+       FROM portal_users
+       WHERE LOWER(email) = LOWER(?)
+         AND access_state <> 'removed'
+       ORDER BY id DESC`,
+      [normalizedEmail],
+    );
+    if (existing) {
+      res.status(409).json({ ok: false, error: `A portal user already exists for ${normalizedEmail}` });
+      return;
+    }
+
+    try {
+      const resolvedOrgId = await ensureOrganisation(
+        typeof org_id === 'number' ? org_id : null,
+        typeof organisation_name === 'string' ? organisation_name : null,
+        typeof organisation_domain === 'string' ? organisation_domain : null,
+      );
+      const passwordHash = await bcrypt.hash(password, 10);
+      const result = await queryOne<{ id: number }>(
+        `INSERT INTO portal_users
+           (external_id, org_id, email, display_name, role, password_hash, auth_type, access_state)
+         OUTPUT INSERTED.id
+         VALUES (?, ?, ?, ?, ?, ?, 'local', 'active')`,
+        [`local-user-${crypto.randomUUID()}`, resolvedOrgId, normalizedEmail, display_name.trim(), role === 'admin' ? 'admin' : role === 'org_admin' ? 'org_admin' : 'requester', passwordHash],
+      );
+      res.json({ ok: true, data: { id: result!.id } });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create portal user' });
+    }
+  });
+
+  router.post('/users/:id/access', async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string, 10);
+    const { access_state } = req.body ?? {};
+    if (!id || !['active', 'disabled'].includes(access_state)) {
+      res.status(400).json({ ok: false, error: 'Valid user ID and access_state are required' });
+      return;
+    }
+
+    const user = await queryOne<{ id: number; auth_type: string; access_state: string }>(
+      `SELECT id, auth_type, access_state FROM portal_users WHERE id = ?`,
+      [id],
+    );
+    if (!user) {
+      res.status(404).json({ ok: false, error: 'Portal user not found' });
+      return;
+    }
+    if (user.auth_type !== 'local') {
+      res.status(400).json({ ok: false, error: 'Only local portal users can be lifecycle-managed here' });
+      return;
+    }
+    if (user.access_state === 'removed') {
+      res.status(400).json({ ok: false, error: 'Removed portal users cannot be reactivated from this action' });
+      return;
+    }
+
+    await execute(
+      `UPDATE portal_users
+       SET access_state = ?,
+           disabled_at = CASE WHEN ? = 'disabled' THEN GETUTCDATE() ELSE NULL END,
+           removed_at = CASE WHEN ? = 'active' THEN NULL ELSE removed_at END
+       WHERE id = ?`,
+      [access_state, access_state, access_state, id],
+    );
+    res.json({ ok: true });
+  });
+
+  router.delete('/users/:id', async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string, 10);
+    if (!id) {
+      res.status(400).json({ ok: false, error: 'Valid user ID is required' });
+      return;
+    }
+
+    const user = await queryOne<{ id: number; auth_type: string }>(
+      `SELECT id, auth_type FROM portal_users WHERE id = ?`,
+      [id],
+    );
+    if (!user) {
+      res.status(404).json({ ok: false, error: 'Portal user not found' });
+      return;
+    }
+    if (user.auth_type !== 'local') {
+      res.status(400).json({ ok: false, error: 'Only local portal users can be removed here' });
+      return;
+    }
+
+    await execute(
+      `UPDATE portal_users
+       SET access_state = 'removed',
+           password_hash = NULL,
+           refresh_token = NULL,
+           token_expires_at = NULL,
+           disabled_at = NULL,
+           removed_at = GETUTCDATE()
+       WHERE id = ?`,
+      [id],
+    );
+    res.json({ ok: true });
   });
 
   // Portal organisations list

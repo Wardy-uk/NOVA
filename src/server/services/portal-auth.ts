@@ -1,8 +1,14 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { query, queryOne, execute } from './database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
-import type { PortalAuthPayload, PortalUserRole } from '../../shared/portal-types.js';
+import type {
+  PortalAuthPayload,
+  PortalUserAccessState,
+  PortalUserAuthType,
+  PortalUserRole,
+} from '../../shared/portal-types.js';
 
 interface OidcConfig {
   issuer: string;
@@ -137,7 +143,7 @@ export async function handleCallback(
   const orgId = await upsertOrganisation(orgExternalId, orgName, orgDomain);
 
   // Upsert user
-  const userId = await upsertUser(claims.sub, orgId, claims.email, claims.name);
+  const userId = await upsertUser(claims.sub, orgId, claims.email, claims.name, 'requester', 'oidc');
 
   // Store refresh token if provided by IdP
   if (tokens.refresh_token) {
@@ -155,6 +161,7 @@ export async function handleCallback(
     orgId,
     orgName,
     role: 'requester',
+    authType: 'oidc',
   };
 
   const token = issuePortalToken(payload);
@@ -204,6 +211,7 @@ async function upsertUser(
   email: string,
   displayName: string,
   role: PortalUserRole = 'requester',
+  authType: PortalUserAuthType = 'oidc',
 ): Promise<number> {
   const existing = await queryOne<{ id: number }>(
     `SELECT id FROM portal_users WHERE external_id = ?`,
@@ -212,16 +220,18 @@ async function upsertUser(
 
   if (existing) {
     await execute(
-      `UPDATE portal_users SET email = ?, display_name = ?, role = ?, last_login = GETUTCDATE() WHERE id = ?`,
-      [email, displayName, role, existing.id],
+      `UPDATE portal_users
+       SET org_id = ?, email = ?, display_name = ?, role = ?, auth_type = ?, last_login = GETUTCDATE()
+       WHERE id = ?`,
+      [orgId, email, displayName, role, authType, existing.id],
     );
     return existing.id;
   }
 
   const result = await queryOne<{ id: number }>(
-    `INSERT INTO portal_users (external_id, org_id, email, display_name, role)
-     OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?)`,
-    [externalId, orgId, email, displayName, role],
+    `INSERT INTO portal_users (external_id, org_id, email, display_name, role, auth_type, access_state)
+     OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?, ?, 'active')`,
+    [externalId, orgId, email, displayName, role, authType],
   );
   return result!.id;
 }
@@ -230,19 +240,28 @@ export async function refreshOidcToken(
   userId: number,
   settings: FileSettingsQueries,
 ): Promise<{ token: string; user: PortalAuthPayload }> {
+  const row = await queryOne<{
+    id: number; refresh_token: string | null; email: string; display_name: string;
+    org_id: number; role: string; auth_type: PortalUserAuthType; access_state: PortalUserAccessState;
+  }>(
+    `SELECT u.id, u.refresh_token, u.email, u.display_name, u.org_id, u.role, u.auth_type, u.access_state
+     FROM portal_users u WHERE u.id = ?`,
+    [userId],
+  );
+  if (!row) {
+    throw new Error('Portal user not found');
+  }
+  if (row.access_state !== 'active') {
+    throw new Error(row.access_state === 'disabled' ? 'This portal account is disabled' : 'This portal account has been removed');
+  }
+  if (row.auth_type !== 'oidc') {
+    return buildPortalSession(row);
+  }
+
   const config = getOidcConfig(settings);
   if (!config.issuer || !config.clientId) {
     throw new Error('OIDC not configured');
   }
-
-  const row = await queryOne<{
-    id: number; refresh_token: string | null; email: string; display_name: string;
-    org_id: number; role: string;
-  }>(
-    `SELECT u.id, u.refresh_token, u.email, u.display_name, u.org_id, u.role
-     FROM portal_users u WHERE u.id = ?`,
-    [userId],
-  );
   if (!row?.refresh_token) {
     throw new Error('No refresh token available — re-authentication required');
   }
@@ -289,6 +308,7 @@ export async function refreshOidcToken(
     orgId: row.org_id,
     orgName: org?.name || 'Unknown',
     role: (row.role as PortalAuthPayload['role']) || 'requester',
+    authType: row.auth_type,
   };
 
   const token = issuePortalToken(payload);
@@ -314,6 +334,7 @@ export async function createCodexTestSession(
     CODEX_TEST_USER_EMAIL,
     CODEX_TEST_USER_NAME,
     CODEX_TEST_USER_ROLE,
+    'oidc',
   );
 
   const payload: PortalAuthPayload = {
@@ -322,6 +343,7 @@ export async function createCodexTestSession(
     orgId,
     orgName: CODEX_TEST_ORG_NAME,
     role: CODEX_TEST_USER_ROLE,
+    authType: 'oidc',
   };
 
   return { token: issuePortalToken(payload), user: payload };
@@ -331,4 +353,63 @@ export function generateLogoutUrl(settings: FileSettingsQueries): string {
   const config = getOidcConfig(settings);
   if (!config.issuer) return '/portal';
   return `${config.issuer}/connect/endsession?post_logout_redirect_uri=${encodeURIComponent(config.redirectUri.replace('/callback', ''))}`;
+}
+
+interface PortalUserSessionRow {
+  id: number;
+  email: string;
+  display_name: string;
+  org_id: number;
+  role: string;
+  auth_type: PortalUserAuthType;
+  access_state: PortalUserAccessState;
+}
+
+async function buildPortalSession(row: PortalUserSessionRow): Promise<{ token: string; user: PortalAuthPayload }> {
+  const org = await queryOne<{ name: string }>(
+    `SELECT name FROM portal_organisations WHERE id = ?`,
+    [row.org_id],
+  );
+  const payload: PortalAuthPayload = {
+    userId: row.id,
+    email: row.email,
+    orgId: row.org_id,
+    orgName: org?.name || 'Unknown',
+    role: (row.role as PortalUserRole) || 'requester',
+    authType: row.auth_type,
+  };
+  return { token: issuePortalToken(payload), user: payload };
+}
+
+export async function loginLocalPortalUser(
+  email: string,
+  password: string,
+): Promise<{ token: string; user: PortalAuthPayload }> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const row = await queryOne<PortalUserSessionRow & { password_hash: string | null }>(
+    `SELECT TOP 1 id, email, display_name, org_id, role, auth_type, access_state, password_hash
+     FROM portal_users
+     WHERE LOWER(email) = LOWER(?)
+       AND auth_type = 'local'
+     ORDER BY CASE access_state WHEN 'active' THEN 0 WHEN 'disabled' THEN 1 ELSE 2 END, id DESC`,
+    [normalizedEmail],
+  );
+
+  if (!row || !row.password_hash) {
+    throw new Error('Invalid email or password');
+  }
+  if (row.access_state === 'disabled') {
+    throw new Error('This portal account is disabled');
+  }
+  if (row.access_state === 'removed') {
+    throw new Error('This portal account has been removed');
+  }
+
+  const valid = await bcrypt.compare(password, row.password_hash);
+  if (!valid) {
+    throw new Error('Invalid email or password');
+  }
+
+  await execute(`UPDATE portal_users SET last_login = GETUTCDATE() WHERE id = ?`, [row.id]);
+  return buildPortalSession({ ...row, access_state: 'active' });
 }

@@ -1,6 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import type { PortalAuthPayload, PortalUserRole } from '../../shared/portal-types.js';
+import type {
+  PortalAuthPayload,
+  PortalUserAccessState,
+  PortalUserAuthType,
+  PortalUserRole,
+} from '../../shared/portal-types.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { CustomRole } from './auth.js';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
@@ -46,15 +51,17 @@ async function upsertInternalPortalUser(
 
   if (existing) {
     await execute(
-      `UPDATE portal_users SET email = ?, display_name = ?, role = ?, last_login = GETUTCDATE() WHERE id = ?`,
-      [email, displayName, portalRole, existing.id],
+      `UPDATE portal_users
+       SET org_id = ?, email = ?, display_name = ?, role = ?, auth_type = 'internal', access_state = 'active', last_login = GETUTCDATE()
+       WHERE id = ?`,
+      [orgId, email, displayName, portalRole, existing.id],
     );
     return existing.id;
   }
 
   const inserted = await queryOne<{ id: number }>(
-    `INSERT INTO portal_users (external_id, org_id, email, display_name, role)
-     OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO portal_users (external_id, org_id, email, display_name, role, auth_type, access_state)
+     OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?, 'internal', 'active')`,
     [externalId, orgId, email, displayName, portalRole],
   );
   return inserted!.id;
@@ -124,6 +131,7 @@ export function portalAuthMiddleware(settingsQueries: FileSettingsQueries, getRo
           orgId,
           orgName: INTERNAL_ORG_NAME,
           role: portalRole,
+          authType: 'internal',
         };
         next();
       } catch (err) {
@@ -145,12 +153,41 @@ export function portalAuthMiddleware(settingsQueries: FileSettingsQueries, getRo
 
     try {
       const payload = jwt.verify(token, secret) as PortalAuthPayload & { iat: number; exp: number };
+      const userRow = await queryOne<{
+        email: string;
+        org_id: number;
+        role: string;
+        auth_type: PortalUserAuthType;
+        access_state: PortalUserAccessState;
+      }>(
+        `SELECT email, org_id, role, auth_type, access_state
+         FROM portal_users
+         WHERE id = ?`,
+        [payload.userId],
+      );
+      if (!userRow) {
+        res.status(401).json({ ok: false, error: 'Portal user not found' });
+        return;
+      }
+      if (userRow.access_state !== 'active') {
+        res.status(403).json({
+          ok: false,
+          error: userRow.access_state === 'disabled'
+            ? 'This portal account is disabled'
+            : 'This portal account has been removed',
+        });
+        return;
+      }
+      const org = userRow.org_id === payload.orgId
+        ? { name: payload.orgName }
+        : await queryOne<{ name: string }>(`SELECT name FROM portal_organisations WHERE id = ?`, [userRow.org_id]);
       req.portalUser = {
         userId: payload.userId,
-        email: payload.email,
-        orgId: payload.orgId,
-        orgName: payload.orgName,
-        role: payload.role,
+        email: userRow.email || payload.email,
+        orgId: userRow.org_id,
+        orgName: org?.name || payload.orgName,
+        role: (userRow.role as PortalUserRole) || payload.role,
+        authType: userRow.auth_type,
       };
       next();
     } catch {

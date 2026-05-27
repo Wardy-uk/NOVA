@@ -43,6 +43,8 @@ export interface PortalOrganisation {
 // ── Portal User ──
 
 export type PortalUserRole = 'requester' | 'org_admin' | 'admin';
+export type PortalUserAuthType = 'oidc' | 'local' | 'internal';
+export type PortalUserAccessState = 'active' | 'disabled' | 'removed';
 
 export interface PortalUser {
   id: number;
@@ -52,6 +54,8 @@ export interface PortalUser {
   display_name: string;
   avatar_url: string | null;
   role: PortalUserRole;
+  auth_type: PortalUserAuthType;
+  access_state: PortalUserAccessState;
   last_login: string;
   created_at: string;
 }
@@ -62,6 +66,7 @@ export interface PortalAuthPayload {
   orgId: number;
   orgName: string;
   role: PortalUserRole;
+  authType?: PortalUserAuthType;
 }
 
 // ── Chat ──
@@ -360,6 +365,9 @@ export interface PortalUserAdmin {
   email: string;
   display_name: string;
   org_name: string;
+  org_id: number;
+  auth_type: PortalUserAuthType;
+  access_state: PortalUserAccessState;
   last_login: string;
   ticket_count: number;
 }

@@ -1659,6 +1659,35 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_users', 'token_expires_at') IS NULL
      ALTER TABLE portal_users ADD token_expires_at DATETIME2 NULL;`,
 
+    `IF COL_LENGTH('portal_users', 'password_hash') IS NULL
+     ALTER TABLE portal_users ADD password_hash NVARCHAR(255) NULL;`,
+
+    `IF COL_LENGTH('portal_users', 'auth_type') IS NULL
+     ALTER TABLE portal_users ADD auth_type NVARCHAR(20) NOT NULL CONSTRAINT DF_portal_users_auth_type DEFAULT 'oidc';`,
+
+    `IF COL_LENGTH('portal_users', 'access_state') IS NULL
+     ALTER TABLE portal_users ADD access_state NVARCHAR(20) NOT NULL CONSTRAINT DF_portal_users_access_state DEFAULT 'active';`,
+
+    `IF COL_LENGTH('portal_users', 'disabled_at') IS NULL
+     ALTER TABLE portal_users ADD disabled_at DATETIME2 NULL;`,
+
+    `IF COL_LENGTH('portal_users', 'removed_at') IS NULL
+     ALTER TABLE portal_users ADD removed_at DATETIME2 NULL;`,
+
+    `UPDATE portal_users
+     SET auth_type = CASE
+       WHEN external_id LIKE 'nova-user-%' THEN 'internal'
+       WHEN auth_type IS NULL OR auth_type = '' THEN 'oidc'
+       ELSE auth_type
+     END
+     WHERE auth_type IS NULL
+        OR auth_type = ''
+        OR (external_id LIKE 'nova-user-%' AND auth_type <> 'internal');`,
+
+    `UPDATE portal_users
+     SET access_state = 'active'
+     WHERE access_state IS NULL OR access_state = '';`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_chat_sessions') AND type = 'U')
      CREATE TABLE portal_chat_sessions (
        id INT IDENTITY(1,1) PRIMARY KEY,
@@ -1737,6 +1766,9 @@ async function runMigrations(): Promise<void> {
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_users_org')
      CREATE INDEX IX_portal_users_org ON portal_users(org_id);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_users_email_auth')
+     CREATE INDEX IX_portal_users_email_auth ON portal_users(email, auth_type, access_state);`,
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_kb_articles_category')
      CREATE INDEX IX_portal_kb_articles_category ON portal_kb_articles(category);`,

@@ -3,11 +3,20 @@ import type { PortalMetrics } from '../../shared/portal-types.js';
 
 const API = '/api/portal/admin';
 
+function authHeaders(extra?: HeadersInit): HeadersInit {
+  const token = localStorage.getItem('nova_auth_token') || sessionStorage.getItem('nova_auth_token') || '';
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  };
+}
+
 function useFetch<T>(path: string, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    fetch(path)
+    setLoading(true);
+    fetch(path, { headers: authHeaders() })
       .then(r => r.json())
       .then(d => { if (d.ok) setData(d.data); })
       .catch(console.error)
@@ -130,39 +139,286 @@ function MetricsPanel() {
 }
 
 function UsersPanel() {
+  const [reloadKey, setReloadKey] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    email: '',
+    display_name: '',
+    password: '',
+    role: 'requester',
+    org_id: '',
+    create_org: false,
+    organisation_name: '',
+    organisation_domain: '',
+  });
   const { data: users, loading } = useFetch<Array<{
-    id: number; email: string; display_name: string; org_name: string; last_login: string; role: string;
-  }>>(`${API}/users`);
+    id: number;
+    email: string;
+    display_name: string;
+    org_id: number;
+    org_name: string;
+    last_login: string;
+    role: string;
+    auth_type: 'oidc' | 'local' | 'internal';
+    access_state: 'active' | 'disabled' | 'removed';
+  }>>(`${API}/users`, [reloadKey]);
+  const { data: orgs } = useFetch<Array<{ id: number; name: string; domain: string | null }>>(`${API}/organisations`, [reloadKey]);
 
   if (loading) return <div className="animate-pulse h-48 bg-gray-800 rounded-lg" />;
 
+  const refresh = () => setReloadKey(k => k + 1);
+
+  const submit = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const body = form.create_org
+        ? {
+            email: form.email,
+            display_name: form.display_name,
+            password: form.password,
+            role: form.role,
+            organisation_name: form.organisation_name,
+            organisation_domain: form.organisation_domain,
+          }
+        : {
+            email: form.email,
+            display_name: form.display_name,
+            password: form.password,
+            role: form.role,
+            org_id: form.org_id ? Number(form.org_id) : null,
+          };
+      const res = await fetch(`${API}/users`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Failed to create user');
+      setForm({
+        email: '',
+        display_name: '',
+        password: '',
+        role: 'requester',
+        org_id: '',
+        create_org: false,
+        organisation_name: '',
+        organisation_domain: '',
+      });
+      setCreating(false);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create user');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const changeAccess = async (id: number, access_state: 'active' | 'disabled') => {
+    setError(null);
+    try {
+      const res = await fetch(`${API}/users/${id}/access`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ access_state }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Failed to update access');
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update access');
+    }
+  };
+
+  const removeUser = async (id: number) => {
+    setError(null);
+    try {
+      const res = await fetch(`${API}/users/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Failed to remove user');
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove user');
+    }
+  };
+
   return (
-    <div className="bg-gray-800 rounded-lg overflow-hidden">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-700">
-            <th className="text-left px-4 py-2 text-gray-400">Name</th>
-            <th className="text-left px-4 py-2 text-gray-400">Email</th>
-            <th className="text-left px-4 py-2 text-gray-400">Organisation</th>
-            <th className="text-left px-4 py-2 text-gray-400">Role</th>
-            <th className="text-left px-4 py-2 text-gray-400">Last Login</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-700">
-          {(users || []).map(u => (
-            <tr key={u.id} className="text-gray-300">
-              <td className="px-4 py-2">{u.display_name}</td>
-              <td className="px-4 py-2 font-mono text-xs">{u.email}</td>
-              <td className="px-4 py-2">{u.org_name}</td>
-              <td className="px-4 py-2">{u.role}</td>
-              <td className="px-4 py-2">{u.last_login ? new Date(u.last_login).toLocaleDateString() : '-'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {(!users || users.length === 0) && (
-        <div className="px-4 py-8 text-center text-gray-500">No portal users yet</div>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-white">Portal users</h3>
+          <p className="text-xs text-gray-400 mt-1">Create and manage local portal access without changing Ecosystem or NOVA sign-in.</p>
+        </div>
+        <button
+          onClick={() => setCreating(v => !v)}
+          className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+        >
+          {creating ? 'Cancel' : 'Add User'}
+        </button>
+      </div>
+
+      {creating && (
+        <div className="bg-gray-800 rounded-lg p-4 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input
+              value={form.display_name}
+              onChange={e => setForm(prev => ({ ...prev, display_name: e.target.value }))}
+              placeholder="Display name"
+              className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100"
+            />
+            <input
+              value={form.email}
+              onChange={e => setForm(prev => ({ ...prev, email: e.target.value }))}
+              placeholder="Email address"
+              className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100"
+            />
+            <input
+              value={form.password}
+              onChange={e => setForm(prev => ({ ...prev, password: e.target.value }))}
+              placeholder="Initial password"
+              type="password"
+              className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100"
+            />
+            <select
+              value={form.role}
+              onChange={e => setForm(prev => ({ ...prev, role: e.target.value }))}
+              className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100"
+            >
+              <option value="requester">Requester</option>
+              <option value="org_admin">Organisation admin</option>
+              <option value="admin">Portal admin</option>
+            </select>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-gray-300">
+            <input
+              type="checkbox"
+              checked={form.create_org}
+              onChange={e => setForm(prev => ({ ...prev, create_org: e.target.checked }))}
+            />
+            Create a new organisation for this user
+          </label>
+
+          {form.create_org ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <input
+                value={form.organisation_name}
+                onChange={e => setForm(prev => ({ ...prev, organisation_name: e.target.value }))}
+                placeholder="Organisation name"
+                className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100"
+              />
+              <input
+                value={form.organisation_domain}
+                onChange={e => setForm(prev => ({ ...prev, organisation_domain: e.target.value }))}
+                placeholder="Organisation domain (optional)"
+                className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100"
+              />
+            </div>
+          ) : (
+            <select
+              value={form.org_id}
+              onChange={e => setForm(prev => ({ ...prev, org_id: e.target.value }))}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100"
+            >
+              <option value="">Select organisation</option>
+              {(orgs || []).map(org => (
+                <option key={org.id} value={String(org.id)}>
+                  {org.name}{org.domain ? ` (${org.domain})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-400">Local users sign in with their email address and the password set here.</p>
+            <button
+              onClick={submit}
+              disabled={saving}
+              className="px-4 py-2 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {saving ? 'Creating...' : 'Create portal user'}
+            </button>
+          </div>
+        </div>
       )}
+
+      {error && (
+        <div className="px-3 py-2 rounded bg-red-900/40 border border-red-800 text-sm text-red-200">{error}</div>
+      )}
+
+      <div className="bg-gray-800 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-700">
+              <th className="text-left px-4 py-2 text-gray-400">Name</th>
+              <th className="text-left px-4 py-2 text-gray-400">Email</th>
+              <th className="text-left px-4 py-2 text-gray-400">Organisation</th>
+              <th className="text-left px-4 py-2 text-gray-400">Auth</th>
+              <th className="text-left px-4 py-2 text-gray-400">Access</th>
+              <th className="text-left px-4 py-2 text-gray-400">Role</th>
+              <th className="text-left px-4 py-2 text-gray-400">Last Login</th>
+              <th className="text-left px-4 py-2 text-gray-400">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-700">
+            {(users || []).map(u => (
+              <tr key={u.id} className="text-gray-300">
+                <td className="px-4 py-2">{u.display_name}</td>
+                <td className="px-4 py-2 font-mono text-xs">{u.email}</td>
+                <td className="px-4 py-2">{u.org_name}</td>
+                <td className="px-4 py-2">
+                  <span className="inline-flex px-2 py-0.5 rounded-full text-xs bg-gray-700 text-gray-200 uppercase">
+                    {u.auth_type}
+                  </span>
+                </td>
+                <td className="px-4 py-2">
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs ${
+                    u.access_state === 'active'
+                      ? 'bg-emerald-900/40 text-emerald-300'
+                      : u.access_state === 'disabled'
+                        ? 'bg-amber-900/40 text-amber-300'
+                        : 'bg-red-900/40 text-red-300'
+                  }`}>
+                    {u.access_state}
+                  </span>
+                </td>
+                <td className="px-4 py-2">{u.role}</td>
+                <td className="px-4 py-2">{u.last_login ? new Date(u.last_login).toLocaleDateString() : '-'}</td>
+                <td className="px-4 py-2">
+                  {u.auth_type === 'local' && u.access_state !== 'removed' ? (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => changeAccess(u.id, u.access_state === 'disabled' ? 'active' : 'disabled')}
+                        className="px-2 py-1 rounded bg-gray-700 text-xs text-gray-100 hover:bg-gray-600"
+                      >
+                        {u.access_state === 'disabled' ? 'Re-enable' : 'Disable'}
+                      </button>
+                      <button
+                        onClick={() => removeUser(u.id)}
+                        className="px-2 py-1 rounded bg-red-900/50 text-xs text-red-200 hover:bg-red-900/70"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-500">
+                      {u.auth_type === 'local' ? 'Removed' : 'Managed by existing auth'}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {(!users || users.length === 0) && (
+          <div className="px-4 py-8 text-center text-gray-500">No portal users yet</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -281,7 +537,7 @@ function SettingsPanel() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch(`${API}/settings`)
+    fetch(`${API}/settings`, { headers: authHeaders() })
       .then(r => r.json())
       .then(d => { if (d.ok) setSettings(d.data || {}); })
       .catch(console.error)
@@ -293,7 +549,7 @@ function SettingsPanel() {
     try {
       await fetch(`${API}/settings`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(settings),
       });
     } catch { /* ignore */ }

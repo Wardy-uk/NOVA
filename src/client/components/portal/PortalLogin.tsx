@@ -7,6 +7,11 @@ interface PortalLoginProps {
 export default function PortalLogin({ onInternalAuth }: PortalLoginProps) {
   const error = new URLSearchParams(window.location.search).get('error');
   const [authMode, setAuthMode] = useState<'oidc' | 'internal' | null>(null);
+  const [localLoginEnabled, setLocalLoginEnabled] = useState(false);
+  const [localEmail, setLocalEmail] = useState('');
+  const [localPassword, setLocalPassword] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [submittingLocal, setSubmittingLocal] = useState(false);
   const [codexTestUserEnabled, setCodexTestUserEnabled] = useState(() => {
     const host = window.location.hostname;
     return host === '127.0.0.1' || host === 'localhost';
@@ -19,6 +24,7 @@ export default function PortalLogin({ onInternalAuth }: PortalLoginProps) {
         if (d.ok) {
           setAuthMode(d.data.mode);
           setCodexTestUserEnabled(d.data.codexTestUserEnabled === true);
+          setLocalLoginEnabled(d.data.localLoginEnabled === true);
         }
       })
       .catch(() => setAuthMode('oidc'));
@@ -69,6 +75,59 @@ export default function PortalLogin({ onInternalAuth }: PortalLoginProps) {
               >
                 Sign in with Nurtur
               </button>
+            )}
+
+            {authMode !== 'internal' && localLoginEnabled && (
+              <div className="pt-3 border-t border-gray-200 text-left space-y-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-900">Sign in with email</h2>
+                  <p className="mt-1 text-xs text-gray-500">For portal users created directly by an administrator.</p>
+                </div>
+                <input
+                  value={localEmail}
+                  onChange={e => setLocalEmail(e.target.value)}
+                  type="email"
+                  placeholder="Email address"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+                <input
+                  value={localPassword}
+                  onChange={e => setLocalPassword(e.target.value)}
+                  type="password"
+                  placeholder="Password"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+                {localError && (
+                  <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">{localError}</div>
+                )}
+                <button
+                  onClick={async () => {
+                    setSubmittingLocal(true);
+                    setLocalError(null);
+                    try {
+                      const res = await fetch('/api/portal/auth/local-login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: localEmail, password: localPassword }),
+                      });
+                      const data = await res.json();
+                      if (!data.ok || !data.data?.token) {
+                        throw new Error(data.error || 'Unable to sign in');
+                      }
+                      localStorage.setItem('portal_token', data.data.token);
+                      window.location.href = '/portal';
+                    } catch (err) {
+                      setLocalError(err instanceof Error ? err.message : 'Unable to sign in');
+                    } finally {
+                      setSubmittingLocal(false);
+                    }
+                  }}
+                  disabled={submittingLocal}
+                  className="inline-flex items-center justify-center w-full px-6 py-3 border border-gray-900 text-gray-900 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  {submittingLocal ? 'Signing in...' : 'Sign in with email'}
+                </button>
+              </div>
             )}
 
             {codexTestUserEnabled && (

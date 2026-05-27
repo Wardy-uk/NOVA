@@ -6,6 +6,7 @@ import {
   handleCallback,
   generateLogoutUrl,
   isCodexTestLoginEnabled,
+  loginLocalPortalUser,
   refreshOidcToken,
 } from '../services/portal-auth.js';
 import { isInternalMode } from '../middleware/portal-auth-middleware.js';
@@ -15,7 +16,28 @@ export function createPortalAuthRoutes(settings: FileSettingsQueries): Router {
 
   router.get('/mode', (_req: Request, res: Response) => {
     const mode = (settings.get('portal_auth_mode') || 'internal') === 'internal' ? 'internal' : 'oidc';
-    res.json({ ok: true, data: { mode, codexTestUserEnabled: isCodexTestLoginEnabled(settings) } });
+    res.json({ ok: true, data: { mode, codexTestUserEnabled: isCodexTestLoginEnabled(settings), localLoginEnabled: mode !== 'internal' } });
+  });
+
+  router.post('/local-login', async (req: Request, res: Response) => {
+    const { email, password } = req.body ?? {};
+    if (isInternalMode(settings)) {
+      res.status(400).json({ ok: false, error: 'Local portal login is unavailable in internal mode' });
+      return;
+    }
+    if (!email?.trim() || !password) {
+      res.status(400).json({ ok: false, error: 'Email and password are required' });
+      return;
+    }
+
+    try {
+      const result = await loginLocalPortalUser(email, password);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Invalid email or password';
+      const status = /disabled|removed/i.test(message) ? 403 : 401;
+      res.status(status).json({ ok: false, error: message });
+    }
   });
 
   router.post('/codex-test-login', async (_req: Request, res: Response) => {
