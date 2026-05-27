@@ -115,10 +115,46 @@ const VOCABULARY_REPLACEMENTS: Array<[RegExp, string]> = [
   [/\bconfidence\b/gi, 'certainty'],
 ];
 
-function sanitizeCustomerResponse(text: string): string {
+// Patterns that strip category-label echo, parroted greetings, and echo prefixes from LLM output
+const TONE_SANITIZATIONS: Array<[RegExp, string]> = [
+  // "Thanks for those details about Website" / "about Account" etc.
+  [/Thanks for those details about \*?\*?(?:Website|Account|Email|Property|Listing)\*?\*?\.?\s*/gi, 'Thanks for getting in touch. '],
+  // "You mentioned hi, ..." or "You mentioned hello, ..." — strip parroted greeting
+  [/You mentioned (?:hi|hello|hey|good (?:morning|afternoon|evening)),?\s*/gi, ''],
+  // Echo-prefix phrases anywhere in the response (not just start-of-string)
+  [/(?:^|(?<=\.\s)|(?<=,\s))(?:You mentioned|You said|You told us|You explained|You reported|You noted|You indicated|You stated|As you (?:mentioned|said|noted|explained))(?:\s+that)?,?\s+/gi, ''],
+];
+
+function sanitizeCustomerResponse(text: string, userMessage?: string): string {
   let result = text;
   for (const [pattern, replacement] of VOCABULARY_REPLACEMENTS) {
     result = result.replace(pattern, replacement);
+  }
+  for (const [pattern, replacement] of TONE_SANITIZATIONS) {
+    result = result.replace(pattern, replacement);
+  }
+  if (userMessage) {
+    result = stripVerbatimEcho(result, userMessage);
+  }
+  return result.replace(/  +/g, ' ').trim();
+}
+
+function stripVerbatimEcho(response: string, userMessage: string): string {
+  const stripped = userMessage.replace(/^(hi|hello|hey|good\s+(?:morning|afternoon|evening))[\s,.!\-]*/i, '').trim();
+  if (stripped.length < 12) return response;
+  const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+  const emailMap: string[] = [];
+  const safeStripped = stripped.replace(EMAIL_RE, (m) => { emailMap.push(m); return `__EMAIL${emailMap.length - 1}__`; });
+  const sentences = safeStripped.match(/[^.!?]+[.!?]*/g) || [safeStripped];
+  let result = response;
+  for (const raw of sentences) {
+    let sentence = raw.trim();
+    if (sentence.length < 12) continue;
+    // Preserve sentences containing email addresses — the email is valuable confirmation data
+    if (/__EMAIL\d+__/.test(sentence)) continue;
+    const escaped = sentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(escaped, 'gi');
+    result = result.replace(pattern, '');
   }
   return result;
 }
@@ -420,7 +456,9 @@ function isAffirmativeResponse(text: string): boolean {
 }
 
 function isNegativeResponse(text: string): boolean {
-  return /^(no|nope|not yet|not now|don't|do not|cancel|never mind)\b/i.test(text.trim());
+  const t = text.trim();
+  if (/^cancel\b/i.test(t) && BILLING_CANCELLATION_PATTERNS.test(t)) return false;
+  return /^(no|nope|not yet|not now|don't|do not|cancel|never mind)\b/i.test(t);
 }
 
 function detectWebsiteFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
@@ -605,12 +643,19 @@ function extractPropertyFieldsFromText(content: string, fields: IntakeCollectedF
 
 // ── Account Setup / Office Changes Detection ──
 
-const SECURITY_SENSITIVE_PATTERNS = /\b(remove.*(user|access|account|person|them|him|her|employee)|revoke.*(access|permissions?|login)|delete.*(user|account|access)|deactivate.*(user|account)|left the company|been (fired|let go|terminated|dismissed|made redundant)|no longer (works?|employed|with us)|was (fired|let go|terminated|dismissed|made redundant))\b/i;
+const SECURITY_SENSITIVE_PATTERNS = /\b(remove.*(user|access|person|them|him|her|employee)|revoke.*(access|permissions?|login)|delete.*(user|account|access)|deactivate.*(user|login)|left the company|been (fired|let go|terminated|dismissed|made redundant)|no longer (works?|employed|with us)|was (fired|let go|terminated|dismissed|made redundant))\b/i;
+
+const BILLING_CANCELLATION_PATTERNS = /\b(cancel\s+(?:a\s+|our\s+|my\s+|the\s+)?(?:product|service|subscription|contract|account|package|plan|module|add[- ]?on|licence|license|email\s+marketing|leadpro|crm)|(?:deactivate|disable|turn off|switch off|stop|end|terminate|close)\s+(?:a\s+|our\s+|my\s+|the\s+)?(?:product|service|subscription|contract|account|package|plan|module|add[- ]?on|licence|license|email\s+marketing|leadpro|crm)|(?:product|service|subscription|contract|package|plan|module|add[- ]?on|licence|license)\s+(?:cancellation|cancelled|canceled)|(?:we(?:'re| are)|i(?:'m| am)|we'?d like to|i'?d like to|want to|need to|wish to)\s+(?:cancel|deactivate|close|terminate)|(?:stop|end|terminate|close|cancel|deactivate)\s+(?:our|my)\s+(?:account|service|subscription|contract|email\s+marketing|leadpro|crm))\b/i;
 
 const DATA_REMOVAL_PATTERNS = /\b((?:remove|delete|erase|wipe|purge|scrub)\s+(?:the\s+)?(?:email(?:\s+address)?|data|record|contact(?:\s+details)?|information|details|subscriber|recipient|mailing\s+list\s+entry)|(?:remove|delete|erase)\s+\S+@\S+|(?:email(?:\s+address)?|data|record|contact(?:\s+details)?|information|details)\s+(?:\S+\s+){0,5}(?:be\s+)?(?:removed|deleted|erased|wiped|purged|scrubbed)|(?:\S+@\S+)\s+(?:removed|deleted|taken off)\b|take\s+(?:\S+\s+)?off\s+(?:the\s+)?(?:mailing\s+list|system|database|email\s+list|list)|opt(?:ed)?\s*(?:out|them out)|unsubscribe|gdpr\s+(?:request|removal|deletion|erasure)|right\s+to\s+(?:be\s+forgotten|erasure|deletion)|data\s+(?:subject\s+)?(?:removal|deletion|erasure)\s+request)\b/i;
 
 function detectAccountFromKeywords(content: string): { likely: boolean; subcategory: string | null; securitySensitive: boolean } {
   const lower = content.toLowerCase();
+
+  // Billing cancellation takes precedence — don't capture as account operation
+  if (BILLING_CANCELLATION_PATTERNS.test(content)) {
+    return { likely: false, subcategory: null, securitySensitive: false };
+  }
 
   const securitySensitive = SECURITY_SENSITIVE_PATTERNS.test(content);
   if (securitySensitive) {
@@ -669,16 +714,32 @@ function detectAccountFromKeywords(content: string): { likely: boolean; subcateg
   return { likely: false, subcategory: null, securitySensitive: false };
 }
 
+function detectBillingFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
+  if (!BILLING_CANCELLATION_PATTERNS.test(content)) return { likely: false, subcategory: null };
+  const lower = content.toLowerCase();
+  if (/\b(cancel|deactivate|disable|terminate|end|stop|close)\b/.test(lower)) {
+    return { likely: true, subcategory: 'billing_cancel' };
+  }
+  if (/\b(change|upgrade|downgrade|switch|modify|amend)\s+(?:our|my|the|a)?\s*(?:product|service|subscription|contract|package|plan)\b/.test(lower)) {
+    return { likely: true, subcategory: 'billing_change' };
+  }
+  return { likely: true, subcategory: 'billing_cancel' };
+}
+
 function extractAccountFieldsFromText(content: string, fields: IntakeCollectedFields): void {
   if (!fields.affectedPersonEmail) {
-    const emailMatch = content.match(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})\b/);
+    const emailMatch = content.match(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/);
     if (emailMatch) fields.affectedPersonEmail = emailMatch[1];
   }
 
   if (!fields.affectedPersonName) {
     const namePatterns = [
-      /\b(?:remove|set ?up|add|create|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
+      /\b(?:remove|set ?up|add|create|for)\s+(?:(?:the\s+)?user\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
       /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s+(?:left|was fired|was let go|has left|is leaving|joined|started|needs?)\b/,
+      /\b(?:(?:their|the|her|his)\s+name\s+is|name\s*[:]\s*|called)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
+      /\b(?:it'?s\s+(?:for\s+)?|this\s+is\s+(?:for\s+)?)([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/,
+      /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})(?:'s)?\s+(?:email|access|account|login|password)\b/,
+      /\b(?:the\s+)?(?:user|person|employee|staff\s+member)\s+(?:is\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
     ];
     for (const pattern of namePatterns) {
       const match = content.match(pattern);
@@ -703,7 +764,7 @@ function extractAccountFieldsFromText(content: string, fields: IntakeCollectedFi
 
 function extractDataRemovalContext(content: string, fields: IntakeCollectedFields): void {
   if (!fields.affectedPersonEmail) {
-    const emailMatch = content.match(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})\b/);
+    const emailMatch = content.match(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/);
     if (emailMatch) fields.affectedPersonEmail = emailMatch[1];
   }
   if (!fields.account) {
@@ -910,8 +971,8 @@ export class PortalChatService {
       }
     }
 
-    // Runtime vocabulary firewall — catches jargon leaks from LLM and template paths
-    responseContent = sanitizeCustomerResponse(responseContent);
+    // Runtime vocabulary firewall — catches jargon leaks from LLM and echo
+    responseContent = sanitizeCustomerResponse(responseContent, content);
 
     // Persist updated metadata (best-effort — don't let this block the response)
     try {
@@ -1157,6 +1218,30 @@ export class PortalChatService {
     context: ChatContext,
     sessionId: number,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
+    // H0: Billing cancellation fast-track — pre-empt security-sensitive check so product/service
+    // cancellation ("cancel our account", "deactivate the email marketing") routes to billing,
+    // not user removal.
+    const billingDetection = detectBillingFromKeywords(content);
+    if (billingDetection.likely) {
+      meta.category = 'billing';
+      meta.subcategory = billingDetection.subcategory || 'billing_cancel';
+      meta.conversational = true;
+      meta.stage = 'detail';
+      if (!meta.collectedFields.description) meta.collectedFields.description = content;
+      const config = CATEGORY_FIELD_CONFIG[meta.subcategory] || CATEGORY_FIELD_CONFIG['other_general']!;
+      const missing = this.getMissingFields(meta.collectedFields, config);
+      if (missing.length === 0) {
+        const summaryResult = await this.buildSummaryCard(meta);
+        return {
+          response: `Understood — I'll get your cancellation request raised.\n\n${summaryResult.response}`,
+          messageMeta: summaryResult.messageMeta,
+        };
+      }
+      const ack = "Understood — I'll get your cancellation request raised.";
+      const question = missing.includes('account') ? 'Which account is this for?' : 'Could you let me know which product or service you need cancelled?';
+      return { response: `${ack}\n\n${question}` };
+    }
+
     // H1: Security-sensitive fast-track — pre-empt LLM entirely for urgent removal/revocation.
     // These signals are unambiguous and must never reach the category picker or disambiguation.
     if (SECURITY_SENSITIVE_PATTERNS.test(content)) {
@@ -1277,8 +1362,8 @@ Analyse the message and return structured JSON:
 
 5. FIELD EXTRACTION — capture details already provided. Include subject, account, description, url, errorMessage, browser, urgency (only if explicit), propertyAddress, listingId, affectedPortals. Preserve the customer's exact words in description — do not rewrite or summarise. If they mention a phone number, include the phone number. If they mention an address, include the address verbatim.
 
-6. ACKNOWLEDGMENT — write 1-2 sentences that MIRROR the customer's specific details back to them.
-   PRIMARY RULE: Always use the customer's own words to describe their problem. If they said "she can't see anything", say "she can't see anything". If they said "the number is wrong", say "the number is wrong". Do not translate their words into technical or internal vocabulary.
+6. ACKNOWLEDGMENT — write 1-2 sentences that show you understood the customer's specific problem.
+   PRIMARY RULE: Use the customer's own words to describe their problem. If they said "she can't see anything", say "she can't see anything". If they said "the number is wrong", say "the number is wrong". Do not translate their words into technical or internal vocabulary.
    MANDATORY DETAIL INCLUSION — you MUST include these in the acknowledgement when the customer provides them:
    - Phone numbers: include the EXACT phone number(s) mentioned (e.g. "0161 555 1234"). Never drop or omit phone numbers.
    - Addresses: include the EXACT address or location mentioned. Never summarise to "your address".
@@ -1288,12 +1373,19 @@ Analyse the message and return structured JSON:
    If they said "the phone number on our contact page is wrong — it shows 0161 555 1234 but should be 0161 555 6789", your acknowledgement MUST include both numbers and "contact page".
    If they mentioned multiple issues, acknowledge ALL of them, not just the primary one.
    NEVER paraphrase away specifics. "I can help with that update" is a VIOLATION. "I can see the phone number on your contact page needs updating from 0161 555 1234 to 0161 555 6789" is correct.
+   ANTI-ECHO RULES:
+   - NEVER start with "Thanks for those details about {X}" where X is a category label like "Website", "Account", "Email", or "Property". These are internal classification labels and must never appear in customer-facing text.
+   - NEVER parrot back the customer's greeting. If they said "Hi, the phone number is wrong", acknowledge the phone number issue — do NOT include "hi" or any greeting they used.
+   - NEVER repeat the customer's full sentence verbatim as a quote. Demonstrate understanding through your own natural wording that incorporates their key details.
+   - Good: "I can see the phone number on your contact page needs updating from 0161 555 1234 to 0161 555 6789."
+   - Bad: "You mentioned hi, the phone number on our contact page is wrong."
+   - Bad: "Thanks for those details about Website."
    VOCABULARY FIREWALL (safety net) — never use ANY of these terms in the acknowledgement or any customer-facing text:
    - Technical: feed, syndication, API, integration, CRM sync, data feed, data pipeline, webhook, endpoint
    - Account/access internal: RBAC, provisioning, deprovisioning, authentication, authorisation, authorization, access control, role-based, permission matrix, permission model, scopes, entities, service account, SSO, SAML, identity provider, access permissions, user permissions, role permissions, access rights
-   - Classification: triage, categorise, classify, route, intake, subcategory
-   Instead, mirror the customer's vocabulary. If they said "can't get in", say "can't get in", not "authentication issue". If they said "she can't see anything", say "she can't see anything", not "access permissions issue".
-   URGENCY RULE: If the customer uses words like "urgent", "urgently", "URGENT", "asap", "emergency", "critical", or "down", START the acknowledgement by recognising the urgency (e.g. "I can see this is urgent — " or "Understood, I'll treat this as a priority — ") before mirroring their details. Never ignore explicit urgency signals.
+   - Classification: triage, categorise, classify, route, intake, subcategory, Website (as a noun by itself), Account (as a category label)
+   Instead, use the customer's vocabulary. If they said "can't get in", say "can't get in", not "authentication issue". If they said "she can't see anything", say "she can't see anything", not "access permissions issue".
+   URGENCY RULE: If the customer uses words like "urgent", "urgently", "URGENT", "asap", "emergency", "critical", or "down", START the acknowledgement by recognising the urgency (e.g. "I can see this is urgent — " or "Understood, I'll treat this as a priority — ") before addressing their details. Never ignore explicit urgency signals.
    ACCOUNT/ORG RULE: If the account field is unknown or not provided, do NOT include any placeholder like "Unknown Organisation" in the acknowledgement. Simply omit the account reference.
 
 7. NEXT QUESTION — if you need more information to action this, write ONE natural follow-up question. Only ask for what's genuinely missing. If they've given enough detail, omit this field. Never ask the customer to diagnose the technical cause or identify which system is at fault. Never ask "which system" or "which platform".
@@ -1475,7 +1567,9 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         // Website-related but no specific subcategory — conversational clarification
         meta.stage = 'detail';
         meta.subcategory = 'website_content'; // default, may refine later
-        const ack = d.acknowledgment || "Thanks for getting in touch about your website.";
+        const urgentWeb = /\b(urgent|urgently|asap|emergency|critical|down)\b/i.test(content);
+        if (urgentWeb) meta.collectedFields.urgency = meta.collectedFields.urgency || 'High';
+        const ack = d.acknowledgment || (urgentWeb ? "I can see this is urgent — let me get this picked up quickly." : "Thanks for getting in touch.");
         const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
         return { response: `${ack}\n\nCould you tell me a bit more — is something not displaying correctly, or do you need some content updated?${fileNote}` };
       }
@@ -1524,7 +1618,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         // Property-related but no specific subcategory — ask conversationally
         meta.stage = 'detail';
         meta.subcategory = 'property_visibility';
-        const ack = d.acknowledgment || "Thanks for getting in touch about your property listing.";
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
         const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
         return { response: `${ack}\n\nCould you tell me which property is affected and where you're seeing the issue?${fileNote}` };
       }
@@ -1686,7 +1780,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         meta.disambiguationDomain = ambiguity.domains.join(',');
         meta.stage = 'detail';
         meta.conversational = true;
-        const ack = d.acknowledgment || "Thanks for getting in touch.";
+        const isUrgentDisambig = /\b(urgent|urgently|asap|emergency|critical|down)\b/i.test(content);
+        if (isUrgentDisambig) meta.collectedFields.urgency = meta.collectedFields.urgency || 'High';
+        const ack = isUrgentDisambig
+          ? (d.acknowledgment || "I can see this is urgent — let me make sure this gets to the right team quickly.")
+          : (d.acknowledgment || "Thanks for getting in touch.");
         return { response: `${ack}\n\n${ambiguity.clarificationQuestion}` };
       }
 
@@ -1774,7 +1872,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         meta.conversational = true;
         meta.subcategory = vagueWebsiteSignal.subcategory || 'website_content';
         meta.stage = 'detail';
-        const ack = d.acknowledgment || "Thanks for getting in touch about your website.";
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
         return { response: `${ack}\n\nCould you tell me a bit more — is something not displaying correctly, or do you need some content updated?` };
       }
 
@@ -1784,7 +1882,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         meta.subcategory = vaguePropertySignal.subcategory || 'property_visibility';
         meta.stage = 'detail';
         extractPropertyFieldsFromText(content, meta.collectedFields);
-        const ack = d.acknowledgment || "Thanks for getting in touch about your property listing.";
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
         return { response: `${ack}\n\nCould you tell me which property is affected and where you're seeing the issue?` };
       }
 
@@ -1794,11 +1892,15 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       meta.conversational = true;
       meta.category = 'other';
       meta.subcategory = 'other_general';
-      const prefix = d.intent === 'change'
-        ? "Thanks — I'll help you get that change request submitted."
-        : d.intent === 'question'
-          ? "I couldn't find a direct answer in our knowledge base, but let me help you get in touch with the right team."
-          : "Sorry to hear you're having trouble — let me help you get this sorted.";
+      const isUrgentGeneral = /\b(urgent|urgently|asap|emergency|critical|down)\b/i.test(content);
+      if (isUrgentGeneral) meta.collectedFields.urgency = meta.collectedFields.urgency || 'High';
+      const prefix = isUrgentGeneral
+        ? "I can see this is urgent — let me get this picked up quickly."
+        : d.intent === 'change'
+          ? "Thanks — I'll help you get that change request submitted."
+          : d.intent === 'question'
+            ? "I couldn't find a direct answer in our knowledge base, but let me help you get in touch with the right team."
+            : "Sorry to hear you're having trouble — let me help you get this sorted.";
 
       return { response: `${prefix}\n\nCould you tell me a bit more about what's going on so I can point this in the right direction?` };
     } catch (err) {
@@ -1811,6 +1913,17 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
     meta: IntakeSessionMetadata,
     content: string,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
+    // H0 (no-LLM): Billing cancellation fast-track
+    const billingDetectionNoLlm = detectBillingFromKeywords(content);
+    if (billingDetectionNoLlm.likely) {
+      meta.category = 'billing';
+      meta.subcategory = billingDetectionNoLlm.subcategory || 'billing_cancel';
+      meta.conversational = true;
+      meta.stage = 'detail';
+      if (!meta.collectedFields.description) meta.collectedFields.description = content;
+      return { response: "Understood — I'll get your cancellation request raised.\n\nWhich account is this for, and which product or service needs cancelling?" };
+    }
+
     // F5: Escalation/chase detection — checked first so follow-up language
     // isn't swallowed by coincidental domain keywords.
     if (ESCALATION_CHASE_PATTERNS.test(content)) {
@@ -1960,7 +2073,12 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
     meta.conversational = true;
     meta.category = 'other';
     meta.subcategory = 'other_general';
-    return { response: "Thanks for getting in touch. Could you tell me a bit more about what's going on so I can get this to the right team?" };
+    const isUrgentNoLlm = /\b(urgent|urgently|asap|emergency|critical|down)\b/i.test(content);
+    if (isUrgentNoLlm) meta.collectedFields.urgency = meta.collectedFields.urgency || 'High';
+    const noLlmPrefix = isUrgentNoLlm
+      ? "I can see this is urgent — let me get this picked up quickly."
+      : "Thanks for getting in touch.";
+    return { response: `${noLlmPrefix} Could you tell me a bit more about what's going on so I can get this to the right team?` };
   }
 
   private async handlePropertyFallback(
@@ -2390,9 +2508,13 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     if (!meta.collectedFields.affectedPersonName &&
         (meta.subcategory === 'account_remove_user' || meta.subcategory === 'account_new_user') &&
         content.trim().length <= 60) {
-      const nameCandidate = content.trim().replace(/^(it'?s|they'?re|his name is|her name is|the name is|name is|name:)\s+/i, '').trim();
+      const nameCandidate = content.trim().replace(/^(it'?s|they'?re|their name is|his name is|her name is|the name is|name is|name:?|the person is|the user is|user:?|person:?|called|the employee is)\s+/i, '').replace(/[.,!?]+$/, '').trim();
       if (/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}$/.test(nameCandidate)) {
         meta.collectedFields.affectedPersonName = nameCandidate;
+      } else if (/^[a-z]{2,}(?:\s+[a-z]{2,}){1,2}$/.test(nameCandidate) &&
+                 !/\b(the|and|for|not|can|was|has|but|are|get|all|new|yes|our|you|its|his|her|who|how|why)\b/.test(nameCandidate)) {
+        const titleCased = nameCandidate.replace(/\b[a-z]/g, c => c.toUpperCase());
+        meta.collectedFields.affectedPersonName = titleCased;
       }
     }
 
@@ -2749,15 +2871,12 @@ Return JSON with only the fields present in the message.`,
       return `Thanks for that. ${firstQ}`;
     }
 
-    const catName = CATEGORY_NAMES[meta.category || ''] || meta.category;
-    const subName = SUBCATEGORY_NAMES[meta.subcategory || ''] || meta.subcategory;
-
     if (missing.length === 0) {
-      return `Got it — **${catName}** > **${subName}**. I think I have everything I need. Let me put together a summary for you.`;
+      return "Got it — I think I have everything I need. Let me put together a summary for you.";
     }
 
     const firstQ = this.buildDetailQuestion(missing[0], config);
-    return `Got it — **${catName}** > **${subName}**. ${firstQ}`;
+    return `Got it. ${firstQ}`;
   }
 
   // ── Stage 4: KB Deflection ──
@@ -3085,7 +3204,7 @@ ${contextParts.join('\n')}`,
 
       if (!segmentApplied) {
         const personEmailMatch = segment.match(/(?:change|update|correct)\s+(?:the\s+)?(?:person'?s?\s+)?email\s+(?:to|should be)\s+["']?(.+?)["']?\s*$/i)
-          || segment.match(/(?:the\s+)?email\s+(?:should|is actually|is)\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})/i);
+          || segment.match(/(?:the\s+)?email\s+(?:should|is actually|is)\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/i);
         if (personEmailMatch) { f.affectedPersonEmail = personEmailMatch[1].trim(); segmentApplied = true; }
       }
 
@@ -3412,13 +3531,14 @@ ${recentExchange}
 
 Rules:
 - Ask ONE question only
-- Reference what they've already told you where it makes sense
 - Keep it short and natural (one sentence)
 - Don't repeat information they've already provided
+- Don't start with "You mentioned..." or quote the customer's words back to them
+- Don't parrot their greeting or opening sentence
 - NEVER ask "which system" or "which platform"
 - NEVER use ANY of these terms: RBAC, provisioning, deprovisioning, authentication, authorisation, authorization, access control, role-based, permission matrix, permission model, scopes, entities, service account, SSO, SAML, identity provider, triage, categorise, classify, route, access permissions, user permissions, role permissions, access rights, user access, permission levels
 - NEVER reveal multi-system provisioning (setting up one user may affect many systems — the customer sees one request)
-- ALWAYS use the customer's own words to describe their problem. If they said "can't get in", say "can't get in". If they said "she can't see anything", say "she can't see anything". Do not rephrase into technical vocabulary.`,
+- Use the customer's vocabulary for their problem (e.g. if they said "can't get in", say "can't get in") but don't echo full sentences.`,
           `Ask for: ${fieldLabel}`,
           ConversationalFollowUpSchema,
           { callType: 'portal_chat', tier: 'standard', maxTokens: 150, temperature: 0.3 },
@@ -3479,11 +3599,12 @@ ${recentExchange}
 
 Rules:
 - Ask ONE question only
-- Reference what they've already told you where it makes sense
 - Keep it short and natural (one sentence)
 - Don't repeat information they've already provided
+- Don't start with "You mentioned..." or quote the customer's words back to them
+- Don't parrot their greeting or opening sentence
 - NEVER use technical jargon like "feed", "syndication", "API", "integration", "CRM", "data sync", "data pipeline", "portal feed", "authentication", "authorisation", "access control"
-- ALWAYS use the customer's own words — if they said "not showing on Rightmove", say "not showing on Rightmove". Mirror their vocabulary, do not translate it.`,
+- Use the customer's vocabulary for their problem (e.g. if they said "not showing on Rightmove", say "not showing on Rightmove") but don't echo full sentences.`,
           `Ask for: ${fieldLabel}`,
           ConversationalFollowUpSchema,
           { callType: 'portal_chat', tier: 'standard', maxTokens: 150, temperature: 0.3 },
@@ -3520,11 +3641,12 @@ ${recentExchange}
 
 Rules:
 - Ask ONE question only
-- Reference what they've already told you where it makes sense
 - Keep it short and natural (one sentence)
 - Don't repeat information they've already provided
+- Don't start with "You mentioned..." or quote the customer's words back to them
+- Don't parrot their greeting or opening sentence
 - Don't use internal jargon, category names, or technical terms (feed, syndication, API, CRM, RBAC, provisioning, authentication, authorisation, access control, role-based, permission)
-- ALWAYS use the customer's own words to describe their problem — mirror their vocabulary, do not translate it`,
+- Use the customer's vocabulary for their problem (e.g. if they said "not working", say "not working" — don't translate to jargon) but don't echo full sentences`,
           `Ask for: ${fieldLabel}`,
           ConversationalFollowUpSchema,
           { callType: 'portal_chat', tier: 'standard', maxTokens: 150, temperature: 0.3 },
