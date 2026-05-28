@@ -18,41 +18,24 @@ export interface CapacityForecastResult {
   staffing_recommendations: string[];
 }
 
+interface CapacityBenchmark {
+  byDow: Map<number, number>;
+  defaultCapacity: number;
+  sampleDaysByDow: Map<number, number>;
+  source: 'kpi_6_week_average' | 'fallback';
+}
+
 export class CapacityPlanner {
   constructor(private settings: SettingsQueries) {}
 
   async generateForecast(): Promise<CapacityForecastResult> {
     const project = 'NT';
 
-    // Backfill last week's actuals first
+    // Backfill recent actuals first so the forecast trains on stable captured history.
+    // If KPI history is unavailable, do not contaminate stored actuals with weak cache counts.
     await this.backfillActuals(project);
 
-    // Get 90 days of historical data by day of week
-    const historical = await query<{ day_of_week: number; avg_volume: number; stddev: number }>(
-      `SELECT
-         DATEPART(WEEKDAY, jira_created) AS day_of_week,
-         CAST(COUNT(*) AS FLOAT) / NULLIF(COUNT(DISTINCT CAST(jira_created AS DATE)), 0) AS avg_volume,
-         STDEV(sub.daily_count) AS stddev
-       FROM jira_issue_cache
-       CROSS APPLY (
-         SELECT COUNT(*) AS daily_count
-         FROM jira_issue_cache j2
-         WHERE j2.project_key = ? AND CAST(j2.jira_created AS DATE) = CAST(jira_issue_cache.jira_created AS DATE)
-       ) sub
-       WHERE project_key = ? AND jira_created >= DATEADD(day, -90, GETUTCDATE())
-       GROUP BY DATEPART(WEEKDAY, jira_created)`,
-      [project, project],
-    );
-
-    // Simpler fallback if the cross apply query is too complex
-    const dailyCounts = await query<{ dt: string; cnt: number; dow: number }>(
-      `SELECT CAST(jira_created AS DATE) AS dt, COUNT(*) AS cnt, DATEPART(WEEKDAY, jira_created) AS dow
-       FROM jira_issue_cache
-       WHERE project_key = ? AND jira_created >= DATEADD(day, -90, GETUTCDATE())
-       GROUP BY CAST(jira_created AS DATE), DATEPART(WEEKDAY, jira_created)
-       ORDER BY dt`,
-      [project],
-    );
+    const dailyCounts = await this.loadHistoricalDailyCounts(project);
 
     // Compute averages and stddev by day of week
     const dowStats = new Map<number, { sum: number; count: number; values: number[] }>();
@@ -70,33 +53,10 @@ export class CapacityPlanner {
     );
     const activeNames = new Set(activeAgents.map(a => a.display_name?.trim().toLowerCase()));
 
-    let dailyCapacity = 0;
-    try {
-      const kpiPool = await getKpiPool(this.settings);
-      const agentAverages = await kpiPool.request().query(`
-        SELECT AgentName, AVG(CAST(SolvedTickets_Today AS FLOAT)) AS avg_solved
-        FROM dbo.jira_agent_kpi_daily
-        WHERE ReportDate >= DATEADD(day, -90, GETUTCDATE())
-          AND SolvedTickets_Today IS NOT NULL
-          AND SolvedTickets_Today > 0
-        GROUP BY AgentName
-      `);
-      for (const a of agentAverages.recordset) {
-        if (activeNames.has(a.AgentName?.trim().toLowerCase())) {
-          dailyCapacity += a.avg_solved;
-        }
-      }
-      dailyCapacity = Math.round(dailyCapacity);
-      console.log(`[capacity] Team daily capacity: ${dailyCapacity} tickets (${activeAgents.length} active agents)`);
-    } catch (kpiErr) {
-      console.warn('[capacity] KPI pool unavailable for agent throughput, using fallback:', kpiErr instanceof Error ? kpiErr.message : kpiErr);
-    }
-
-    if (dailyCapacity === 0) {
-      const fallbackCount = activeAgents.length || parseInt(this.settings.get('capacity_default_agents') ?? '5', 10);
-      const fallbackRate = parseInt(this.settings.get('agent_max_capacity') ?? '12', 10);
-      dailyCapacity = fallbackCount * fallbackRate;
-    }
+    const capacityBenchmark = await this.loadCapacityBenchmark(activeNames, activeAgents.length);
+    console.log(
+      `[capacity] Team capacity benchmark source=${capacityBenchmark.source} default=${capacityBenchmark.defaultCapacity} activeAgents=${activeAgents.length}`,
+    );
 
     // Generate 14-day forecast
     const forecasts: DayForecast[] = [];
@@ -108,21 +68,6 @@ export class CapacityPlanner {
       const dow = forecastDate.getDay() + 1; // SQL Server DATEPART(WEEKDAY) is 1-based, Sunday=1
       const dateStr = forecastDate.toISOString().split('T')[0];
 
-      // Weekend — skip or minimal
-      if (dow === 1 || dow === 7) {
-        forecasts.push({
-          forecast_date: dateStr,
-          day_of_week: dow,
-          predicted_volume: 0,
-          confidence_low: 0,
-          confidence_high: 0,
-          actual_volume: null,
-          team_capacity: 0,
-          surplus_deficit: 0,
-        });
-        continue;
-      }
-
       const stats = dowStats.get(dow);
       const avg = stats ? stats.sum / stats.count : 0;
       const stddev = stats ? this.computeStddev(stats.values, avg) : 0;
@@ -131,7 +76,10 @@ export class CapacityPlanner {
       const confidenceLow = Math.max(Math.round(avg * 0.5), Math.round(avg - stddev));
       const confidenceHigh = Math.round(avg + stddev);
 
-      const surplus = dailyCapacity - predicted;
+      const isWeekend = dow === 1 || dow === 7;
+      const weekdayCapacity = capacityBenchmark.byDow.get(dow) ?? capacityBenchmark.defaultCapacity;
+      const capacityForDay = isWeekend ? 0 : weekdayCapacity;
+      const surplus = capacityForDay - predicted;
 
       forecasts.push({
         forecast_date: dateStr,
@@ -140,15 +88,15 @@ export class CapacityPlanner {
         confidence_low: confidenceLow,
         confidence_high: confidenceHigh,
         actual_volume: null,
-        team_capacity: dailyCapacity,
+        team_capacity: capacityForDay,
         surplus_deficit: surplus,
       });
 
       // Flag days where predicted exceeds 80% capacity
-      if (predicted > dailyCapacity * 0.8) {
+      if (!isWeekend && capacityForDay > 0 && predicted > capacityForDay * 0.8) {
         const dayName = ['', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dow];
         recommendations.push(
-          `${dayName} ${dateStr}: predicted ${predicted} tickets vs capacity ${dailyCapacity} (${((predicted / dailyCapacity) * 100).toFixed(0)}% utilisation)`,
+          `${dayName} ${dateStr}: predicted ${predicted} tickets vs capacity ${capacityForDay} (${((predicted / capacityForDay) * 100).toFixed(0)}% utilisation)`,
         );
       }
     }
@@ -180,15 +128,12 @@ export class CapacityPlanner {
   }
 
   private async backfillActuals(project: string): Promise<void> {
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-    const actuals = await query<{ dt: string; cnt: number }>(
-      `SELECT CAST(jira_created AS DATE) AS dt, COUNT(*) AS cnt
-       FROM jira_issue_cache
-       WHERE project_key = ? AND jira_created >= ? AND jira_created < CAST(GETUTCDATE() AS DATE)
-       GROUP BY CAST(jira_created AS DATE)`,
-      [project, sevenDaysAgo],
-    );
+    const twentyEightDaysAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const actuals = await this.loadKpiActualCounts(twentyEightDaysAgo);
+    if (actuals.length === 0) {
+      console.warn('[capacity] KPI actual history unavailable — skipping cache-based actual backfill to avoid corrupting forecast history');
+      return;
+    }
 
     for (const actual of actuals) {
       await execute(
@@ -202,6 +147,194 @@ export class CapacityPlanner {
     if (values.length < 2) return 0;
     const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / (values.length - 1);
     return Math.sqrt(variance);
+  }
+
+  private async loadCapacityBenchmark(activeNames: Set<string>, activeAgentCount: number): Promise<CapacityBenchmark> {
+    const fallbackCount = activeAgentCount || parseInt(this.settings.get('capacity_default_agents') ?? '5', 10);
+    const fallbackRate = parseInt(this.settings.get('agent_max_capacity') ?? '12', 10);
+    const fallbackCapacity = fallbackCount * fallbackRate;
+
+    if (activeNames.size === 0) {
+      return {
+        byDow: new Map(),
+        defaultCapacity: fallbackCapacity,
+        sampleDaysByDow: new Map(),
+        source: 'fallback',
+      };
+    }
+
+    try {
+      const kpiPool = await getKpiPool(this.settings);
+      const result = await kpiPool.request().query(`
+        SELECT
+          CAST(ReportDate AS DATE) AS dt,
+          DATEPART(WEEKDAY, CAST(ReportDate AS DATE)) AS dow,
+          AgentName,
+          CAST(SolvedTickets_Today AS FLOAT) AS solved
+        FROM dbo.jira_agent_kpi_daily
+        WHERE ReportDate >= DATEADD(day, -42, GETUTCDATE())
+          AND SolvedTickets_Today IS NOT NULL
+          AND SolvedTickets_Today >= 0
+      `);
+
+      const totalsByDate = new Map<string, { dow: number; total: number }>();
+      for (const row of result.recordset as Array<{ dt: string; dow: number; AgentName: string | null; solved: number | null }>) {
+        const agentName = row.AgentName?.trim().toLowerCase();
+        if (!agentName || !activeNames.has(agentName)) continue;
+        const dt = String(row.dt).slice(0, 10);
+        const solved = Number(row.solved ?? 0);
+        const existing = totalsByDate.get(dt) ?? { dow: row.dow, total: 0 };
+        existing.total += solved;
+        totalsByDate.set(dt, existing);
+      }
+
+      const grouped = new Map<number, number[]>();
+      for (const row of totalsByDate.values()) {
+        if (!Number.isFinite(row.total) || row.total <= 0) continue;
+        const values = grouped.get(row.dow) ?? [];
+        values.push(row.total);
+        grouped.set(row.dow, values);
+      }
+
+      const byDow = new Map<number, number>();
+      const sampleDaysByDow = new Map<number, number>();
+      const allWeekdayValues: number[] = [];
+      for (const dow of [2, 3, 4, 5, 6]) {
+        const values = grouped.get(dow) ?? [];
+        const cleaned = this.filterCapacityOutliers(values);
+        if (cleaned.length === 0) continue;
+        const avg = cleaned.reduce((sum, value) => sum + value, 0) / cleaned.length;
+        byDow.set(dow, Math.round(avg));
+        sampleDaysByDow.set(dow, cleaned.length);
+        allWeekdayValues.push(...cleaned);
+      }
+
+      if (allWeekdayValues.length > 0) {
+        const defaultCapacity = Math.round(
+          allWeekdayValues.reduce((sum, value) => sum + value, 0) / allWeekdayValues.length,
+        );
+        return {
+          byDow,
+          defaultCapacity,
+          sampleDaysByDow,
+          source: 'kpi_6_week_average',
+        };
+      }
+    } catch (kpiErr) {
+      console.warn('[capacity] KPI pool unavailable for agent throughput benchmark, using fallback:', kpiErr instanceof Error ? kpiErr.message : kpiErr);
+    }
+
+    return {
+      byDow: new Map(),
+      defaultCapacity: fallbackCapacity,
+      sampleDaysByDow: new Map(),
+      source: 'fallback',
+    };
+  }
+
+  private async loadHistoricalDailyCounts(project: string): Promise<Array<{ dt: string; cnt: number; dow: number }>> {
+    const kpiHistory = await this.loadKpiActualCounts();
+    if (kpiHistory.length >= 10) {
+      const cleaned = this.filterAnomalousCounts(kpiHistory);
+      console.log(`[capacity] Training forecast from KPI New Tickets Today history (${cleaned.length} daily rows)`);
+      return cleaned;
+    }
+
+    const forecastHistory = await query<{ dt: string; cnt: number; dow: number }>(
+      `SELECT CAST(forecast_date AS DATE) AS dt,
+              CAST(actual_volume AS INT) AS cnt,
+              day_of_week AS dow
+       FROM agent_capacity_forecasts
+       WHERE actual_volume IS NOT NULL
+         AND forecast_date >= DATEADD(day, -90, GETUTCDATE())
+       ORDER BY forecast_date`,
+    );
+
+    const cleanedForecastHistory = this.filterAnomalousCounts(forecastHistory);
+    const distinctDays = new Set(cleanedForecastHistory.map(r => String(r.dt).slice(0, 10)));
+    if (distinctDays.size >= 10) {
+      console.log(`[capacity] Training forecast from ${distinctDays.size} cleaned historical forecast actuals`);
+      return cleanedForecastHistory;
+    }
+
+    const cacheHistory = await query<{ dt: string; cnt: number; dow: number }>(
+      `SELECT CAST(jira_created AS DATE) AS dt, COUNT(*) AS cnt, DATEPART(WEEKDAY, jira_created) AS dow
+       FROM jira_issue_cache
+       WHERE project_key = ? AND jira_created >= DATEADD(day, -90, GETUTCDATE())
+       GROUP BY CAST(jira_created AS DATE), DATEPART(WEEKDAY, jira_created)
+       ORDER BY dt`,
+      [project],
+    );
+    const cleanedCacheHistory = this.filterAnomalousCounts(cacheHistory);
+    console.log(`[capacity] Training forecast from live jira_issue_cache fallback (${cleanedCacheHistory.length} daily rows)`);
+    return cleanedCacheHistory;
+  }
+
+  private async loadKpiActualCounts(sinceDate?: string): Promise<Array<{ dt: string; cnt: number; dow: number }>> {
+    try {
+      const kpiPool = await getKpiPool(this.settings);
+      const request = kpiPool.request();
+      if (sinceDate) request.input('sinceDate', sinceDate);
+      const result = await request.query(`
+        WITH ranked AS (
+          SELECT
+            CAST(CreatedAt AS DATE) AS dt,
+            CAST([count] AS INT) AS cnt,
+            DATEPART(WEEKDAY, CAST(CreatedAt AS DATE)) AS dow,
+            ROW_NUMBER() OVER (
+              PARTITION BY CAST(CreatedAt AS DATE)
+              ORDER BY CASE WHEN kpi = 'New Tickets Today' THEN 0 ELSE 1 END, CreatedAt DESC
+            ) AS rn
+          FROM dbo.jira_kpi_daily
+          WHERE kpi IN ('New Tickets Today', 'Created Today')
+            ${sinceDate ? 'AND CAST(CreatedAt AS DATE) >= @sinceDate' : 'AND CreatedAt >= DATEADD(day, -90, GETUTCDATE())'}
+        )
+        SELECT dt, cnt, dow
+        FROM ranked
+        WHERE rn = 1
+        ORDER BY dt
+      `);
+      return result.recordset as Array<{ dt: string; cnt: number; dow: number }>;
+    } catch (err) {
+      console.warn('[capacity] KPI ticket history unavailable:', err instanceof Error ? err.message : err);
+      return [];
+    }
+  }
+
+  private filterAnomalousCounts(rows: Array<{ dt: string; cnt: number; dow: number }>): Array<{ dt: string; cnt: number; dow: number }> {
+    const byDow = new Map<number, number[]>();
+    for (const row of rows) {
+      if (!Number.isFinite(row.cnt) || row.cnt <= 0) continue;
+      const values = byDow.get(row.dow) ?? [];
+      values.push(row.cnt);
+      byDow.set(row.dow, values);
+    }
+
+    return rows.filter(row => {
+      const values = byDow.get(row.dow) ?? [];
+      if (values.length < 4) return row.cnt > 0;
+      const median = this.computeMedian(values);
+      const lowFloor = Math.max(1, median * 0.6);
+      const highCeiling = median * 1.75;
+      return row.cnt >= lowFloor && row.cnt <= highCeiling;
+    });
+  }
+
+  private filterCapacityOutliers(values: number[]): number[] {
+    if (values.length < 4) return values.filter(v => Number.isFinite(v) && v > 0);
+    const median = this.computeMedian(values);
+    const lowFloor = Math.max(1, median * 0.5);
+    const highCeiling = median * 1.5;
+    return values.filter(v => v >= lowFloor && v <= highCeiling);
+  }
+
+  private computeMedian(values: number[]): number {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0
+      ? (sorted[mid - 1] + sorted[mid]) / 2
+      : sorted[mid];
   }
 
   async getForecast(): Promise<DayForecast[]> {

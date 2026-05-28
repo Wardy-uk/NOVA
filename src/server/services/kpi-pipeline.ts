@@ -14,11 +14,10 @@ let pool: sql.ConnectionPool | null = null;
 export async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool> {
   if (pool?.connected) return pool;
 
-  const all = settings.getAll();
-  const server = all.kpi_sql_server;
-  const database = all.kpi_sql_database;
-  const user = all.kpi_sql_user;
-  const password = all.kpi_sql_password;
+  const server = settings.get('kpi_sql_server');
+  const database = settings.get('kpi_sql_database');
+  const user = settings.get('kpi_sql_user');
+  const password = settings.get('kpi_sql_password');
 
   if (!server || !database || !user || !password) {
     throw new Error('KPI SQL Server not configured');

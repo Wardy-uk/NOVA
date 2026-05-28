@@ -90,7 +90,7 @@ export function CapacityView() {
             </button>
             <button onClick={() => setShowTab('historical')}
               className={`px-3 py-1 text-xs ${showTab === 'historical' ? 'bg-[#5ec1ca]/20 text-[#5ec1ca]' : 'bg-[#2f353d] text-neutral-400'}`}>
-              Historical
+              History
             </button>
           </div>
           <button onClick={generate} disabled={generating}
@@ -107,6 +107,16 @@ export function CapacityView() {
       )}
 
       {/* Capacity Heatmap */}
+      {showTab === 'historical' && (
+        <div className="text-xs text-neutral-500">
+          History shows previously generated forecast rows alongside the actual ticket count later recorded for those dates.
+        </div>
+      )}
+      {showTab === 'forecast' && (
+        <div className="text-xs text-neutral-500">
+          Team Capacity is benchmarked from the average solved-ticket throughput of the active roster over the past 6 weeks, by weekday.
+        </div>
+      )}
       <div className="grid grid-cols-7 gap-1">
         {data.filter(d => d.predicted_volume > 0 || d.actual_volume !== null).map(d => (
           <div key={d.forecast_date}
